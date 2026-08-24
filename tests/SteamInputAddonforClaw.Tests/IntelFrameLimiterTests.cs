@@ -82,6 +82,21 @@ public sealed class IntelFrameLimiterTests
     }
 
     [Fact]
+    public void Existing_ownership_is_released_even_when_addon_range_is_no_longer_available()
+    {
+        using var fixture = new FpsFixture();
+        Directory.CreateDirectory(fixture.DirectoryPath);
+        File.WriteAllText(fixture.Marker, "{\"fps\":60}");
+        var fake = new FakeLimiter { AvailableValue = false };
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+
+        runtime.Reconcile(0);
+
+        Assert.Equal(1, fake.DisableCalls);
+        Assert.False(File.Exists(fixture.Marker));
+    }
+
+    [Fact]
     public void Non_active_profile_reconcile_does_not_call_igcl()
     {
         using var fixture = new FpsFixture();
@@ -117,7 +132,7 @@ public sealed class IntelFrameLimiterTests
     private sealed class FakeLimiter : IIntelFrameLimiter
     {
         public void Initialize() { }
-        public bool Available => true; public string? UnavailableReason => null; public IntelFpsCapability? Capability => new(30, 300, 1, 2, 0, true); public bool LastEnable; public bool LastDisable; public int LastFps; public int EnableCalls; public int DisableCalls; public bool DisableResult = true;
+        public bool Available => AvailableValue; public bool AvailableValue = true; public string? UnavailableReason => null; public IntelFpsCapability? Capability => new(30, 300, 1, 2, 0, true); public bool LastEnable; public bool LastDisable; public int LastFps; public int EnableCalls; public int DisableCalls; public bool DisableResult = true;
         public bool Enable(int fps, FpsPowerSource source, uint appId) { EnableCalls++; LastEnable = true; LastDisable = false; LastFps = fps; return true; }
         public bool Disable(FpsPowerSource? source, uint appId) { DisableCalls++; LastDisable = true; LastEnable = false; return DisableResult; }
         public void Dispose() { }

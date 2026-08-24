@@ -88,12 +88,24 @@ public sealed class UninstallBootstrapTests
         Assert.Equal(1, limiter.DisableCalls);
     }
 
+    [Fact]
+    public void Stale_fps_marker_cleanup_does_not_require_user_facing_availability()
+    {
+        var marker = Path.Combine(Path.GetTempPath(), $"intel-fps-{Guid.NewGuid():N}.json");
+        File.WriteAllText(marker, "{\"fps\":60}");
+        var limiter = new FakeIntelFrameLimiter { AvailableValue = false };
+        Assert.True(UninstallBootstrap.TryCleanupOwnedIntelFpsForUninstall(marker, _ => limiter));
+        Assert.False(File.Exists(marker));
+        Assert.Equal(1, limiter.DisableCalls);
+    }
+
     private sealed class FakeIntelFrameLimiter : IIntelFrameLimiter
     {
         public bool DisableResult { get; init; } = true;
         public int DisableCalls { get; private set; }
         public void Initialize() { }
-        public bool Available => true;
+        public bool Available => AvailableValue;
+        public bool AvailableValue { get; init; } = true;
         public string? UnavailableReason => null;
         public IntelFpsCapability? Capability => null;
         public bool Enable(int fps, FpsPowerSource source, uint appId) => true;

@@ -49,7 +49,10 @@ internal static class UninstallBootstrap
         {
             using var limiter = (limiterFactory ?? (path => new IntelFrameLimiter(path)))(ownershipPath);
             limiter.Initialize();
-            if (!limiter.Available || !limiter.Disable(null, 0))
+            // Cleanup is intentionally independent from the 40-120 user-facing capability
+            // contract. A previously owned global limiter must still be retired after a driver
+            // update narrows that contract, as long as FRAME_LIMIT remains reachable.
+            if (!limiter.Disable(null, 0))
             {
                 AppLog.Warn("Uninstall", "Owned Intel FPS limiter cleanup failed; preserving ownership evidence.");
                 return false;

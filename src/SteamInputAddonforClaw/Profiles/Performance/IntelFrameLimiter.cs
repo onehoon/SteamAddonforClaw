@@ -65,7 +65,7 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
     internal void SetActualAppIdSource(Func<uint> source) => _app = source;
     internal void StartupRecover() { if (!File.Exists(_marker)) return; try { if (_limiter.Disable(_power(), 0)) File.Delete(_marker); else AppLog.Warn("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed; keeping marker."); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed.", e); } }
     internal void StartupReconcile(uint appId) => Reconcile(appId, "Startup");
-    internal void Reconcile(uint appId, string reason = "Reconcile") { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace || !_limiter.Available) return; ApplyPolicy(loaded.Document, appId, reason); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS reconcile failed.", e, ("RunningAppID", appId), ("Reason", reason)); } }
+    internal void Reconcile(uint appId, string reason = "Reconcile") { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace || (!_limiter.Available && !HasPendingOwnership)) return; ApplyPolicy(loaded.Document, appId, reason); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS reconcile failed.", e, ("RunningAppID", appId), ("Reason", reason)); } }
     internal bool ReconcileWithResult(uint appId) { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return false; return ApplyPolicy(loaded.Document, appId, "Mutation"); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS apply failed.", e, ("RunningAppID", appId)); return false; } }
     private bool ApplyPolicy(ProfileDocument doc, uint appId, string reason)
     {
@@ -101,7 +101,7 @@ internal sealed class WindowsIntelFpsPowerNotificationSource : IDisposable
 // this application never packages that binary and resolves it from System32 only.
 internal sealed class NativeIgcl : IDisposable
 {
-    private const int FrameLimit = 2, Int32 = 2; private readonly string _marker; private nint _library, _api, _adapter; private bool _closed, _initialized;
+    private const int FrameLimit = 2, Int32 = 2; private readonly string _marker; private nint _library, _api, _adapter, _cleanupAdapter; private IntelFpsCapability? _cleanupCapability; private bool _closed, _initialized;
     internal bool Available { get; private set; } internal string? UnavailableReason { get; private set; } internal IntelFpsCapability? Capability { get; private set; }
     private CtlInit _init = null!; private CtlClose _close = null!; private CtlEnumerate _enumerate = null!; private CtlCaps _caps = null!; private CtlGetSet _getSet = null!;
     internal NativeIgcl(string marker) => _marker = marker;
@@ -129,12 +129,33 @@ internal sealed class NativeIgcl : IDisposable
         {
             for (var offset = 0; offset < bytes; offset += stride) Marshal.StructureToPtr(default(FeatureDetails), buffer + offset, false);
             caps.Features = buffer; result = _caps(adapter, ref caps); Log("ctlGetSupported3DCapabilities", result); if (result != 0) return false;
-            for (var i = 0; i < caps.NumSupportedFeatures; i++) { var d = Marshal.PtrToStructure<FeatureDetails>(buffer + (int)i * stride); if (d.FeatureType != FrameLimit) continue; Capability = new(d.Value.IntType.Range.Min, d.Value.IntType.Range.Max, d.Value.IntType.Range.Step, d.ValueType, d.FeatureMiscSupport, d.PerAppSupport); AppLog.Debug("Profiles.IntelFps", "Intel FRAME_LIMIT capability detected.", ("Minimum", Capability.Value.Minimum), ("Maximum", Capability.Value.Maximum), ("Step", Capability.Value.Step), ("ValueType", Capability.Value.ValueType), ("FeatureMiscSupport", Capability.Value.FeatureMiscSupport), ("PerAppSupport", Capability.Value.PerAppSupport)); if (Capability.Value.SupportsAddonRange) return true; }
+            for (var i = 0; i < caps.NumSupportedFeatures; i++)
+            {
+                var d = Marshal.PtrToStructure<FeatureDetails>(buffer + (int)i * stride);
+                if (d.FeatureType != FrameLimit || d.ValueType != Int32) continue;
+                var capability = new IntelFpsCapability(d.Value.IntType.Range.Min, d.Value.IntType.Range.Max, d.Value.IntType.Range.Step, d.ValueType, d.FeatureMiscSupport, d.PerAppSupport);
+                Capability = capability;
+                _cleanupAdapter = adapter;
+                _cleanupCapability = capability;
+                AppLog.Debug("Profiles.IntelFps", "Intel FRAME_LIMIT capability detected.", ("Minimum", capability.Minimum), ("Maximum", capability.Maximum), ("Step", capability.Step), ("ValueType", capability.ValueType), ("FeatureMiscSupport", capability.FeatureMiscSupport), ("PerAppSupport", capability.PerAppSupport));
+                return capability.SupportsAddonRange;
+            }
             return false;
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
-    internal bool Set(bool enable, int fps, FpsPowerSource? source, uint appId) { if (!Available || _adapter == 0) return false; var feature = new FeatureGetSet { Size = (uint)Marshal.SizeOf<FeatureGetSet>(), Version = 0, FeatureType = FrameLimit, ApplicationName = 0, ApplicationNameLength = 0, Set = true, ValueType = Int32, Value = new Property { Int = new IntProperty { Enable = enable, Value = fps } } }; var result = _getSet(_adapter, ref feature); Log(enable ? "ctlGetSet3DFeature enable" : "ctlGetSet3DFeature disable", result, fps, source, appId); return result == 0; }
+    internal bool Set(bool enable, int fps, FpsPowerSource? source, uint appId)
+    {
+        var adapter = enable ? _adapter : _cleanupAdapter;
+        if (adapter == 0 || (enable && !Available)) return false;
+        // Cleanup only needs a valid INT32 value. Enable=false is the actual off semantic,
+        // so it remains possible after a driver update narrows the user-facing range.
+        var nativeFps = enable ? fps : _cleanupCapability?.Minimum ?? fps;
+        var feature = new FeatureGetSet { Size = (uint)Marshal.SizeOf<FeatureGetSet>(), Version = 0, FeatureType = FrameLimit, ApplicationName = 0, ApplicationNameLength = 0, Set = true, ValueType = Int32, Value = new Property { Int = new IntProperty { Enable = enable, Value = nativeFps } } };
+        var result = _getSet(adapter, ref feature);
+        Log(enable ? "ctlGetSet3DFeature enable" : "ctlGetSet3DFeature disable", result, nativeFps, source, appId);
+        return result == 0;
+    }
     private static void Log(string operation, uint result, int? fps = null, FpsPowerSource? source = null, uint? appId = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source), ("RunningAppID", appId)); }
     public void Dispose() { if (_closed) return; _closed = true; if (_api != 0) { var result = _close(_api); Log("ctlClose", result); _api = 0; } if (_library != 0) { NativeLibrary.Free(_library); _library = 0; } }
     [StructLayout(LayoutKind.Sequential)] private struct ApplicationId { public uint Data1; public ushort Data2; public ushort Data3; public byte Data4_0; public byte Data4_1; public byte Data4_2; public byte Data4_3; public byte Data4_4; public byte Data4_5; public byte Data4_6; public byte Data4_7; }
