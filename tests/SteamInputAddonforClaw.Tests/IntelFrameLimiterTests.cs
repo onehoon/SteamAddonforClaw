@@ -17,6 +17,12 @@ public sealed class IntelFrameLimiterTests
         Assert.Equal(new byte[] { 0x00, 0x00, 0x00, 0x00, 0x1E, 0x00, 0x00, 0x00 }, NativeIgcl.EncodeFrameLimitPropertyBytesForTests(false, 30));
     }
 
+    [Fact]
+    public void Frame_limit_get_property_starts_zero_initialized()
+    {
+        Assert.Equal(new byte[8], NativeIgcl.EncodeFrameLimitGetPropertyBytesForTests());
+    }
+
     [Theory]
     [InlineData(true, 60, 1u, 0u, false, 0, false)]
     [InlineData(true, 60, 0u, 1u, false, 0, false)]
@@ -27,6 +33,12 @@ public sealed class IntelFrameLimiterTests
     [InlineData(false, 30, 0u, 0u, false, 60, true)]
     public void Frame_limit_set_get_verification_requires_expected_readback(bool enable, int requestedFps, uint setResult, uint getResult, bool readbackEnabled, int readbackFps, bool expected) =>
         Assert.Equal(expected, NativeIgcl.VerifyFrameLimitReadbackForTests(enable, requestedFps, setResult, getResult, readbackEnabled, readbackFps));
+
+    [Fact]
+    public void Frame_limit_set_failure_reports_get_as_not_called()
+    {
+        Assert.False(NativeIgcl.VerifyFrameLimitReadbackForTests(true, 60, 1u, null, false, 0));
+    }
 
     [Fact]
     public void Frame_limit_without_live_change_is_not_available_for_active_profile_control()

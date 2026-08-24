@@ -207,10 +207,10 @@ internal sealed class NativeIgcl : IDisposable
         // Cleanup only needs a valid INT32 value. Enable=false is the actual off semantic,
         // so it remains possible after a driver update narrows the user-facing range.
         var nativeFps = enable ? fps : _cleanupCapability?.Minimum ?? fps;
-        var setFeature = CreateFrameLimitFeature(set: true, enable: enable, fps: nativeFps);
+        var setFeature = CreateFrameLimitSetFeature(enable, nativeFps);
         var setResult = _getSet(adapter, ref setFeature);
-        var getFeature = CreateFrameLimitFeature(set: false, enable: enable, fps: nativeFps);
-        var getResult = setResult == 0 ? _getSet(adapter, ref getFeature) : 1u;
+        var getFeature = CreateFrameLimitGetFeature();
+        uint? getResult = setResult == 0 ? _getSet(adapter, ref getFeature) : null;
         var readbackEnabled = getFeature.Value.EnableBits != 0;
         var readbackFps = getFeature.Value.IntValue;
         var failureReason = FrameLimitVerificationFailureReason(enable, setResult, getResult, readbackEnabled, readbackFps, nativeFps);
@@ -218,38 +218,52 @@ internal sealed class NativeIgcl : IDisposable
         LogFrameLimitVerification(enable, source, appId, nativeFps, setResult, getResult, readbackEnabled, readbackFps, verified, failureReason);
         return verified;
     }
-    private static FeatureGetSet CreateFrameLimitFeature(bool set, bool enable, int fps) => new()
+    private static FeatureGetSet CreateFrameLimitSetFeature(bool enable, int fps) => new()
     {
         Size = (uint)Marshal.SizeOf<FeatureGetSet>(),
         Version = 0,
         FeatureType = FrameLimit,
         ApplicationName = 0,
         ApplicationNameLength = 0,
-        Set = set,
+        Set = true,
         ValueType = Int32,
         Value = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps }
     };
-    private static string? FrameLimitVerificationFailureReason(bool enable, uint setResult, uint getResult, bool readbackEnabled, int readbackFps, int requestedFps) =>
-        setResult != 0 ? "SetFailed" : getResult != 0 ? "ReadbackFailed" : enable && !readbackEnabled ? "ReadbackEnableMismatch" : enable && readbackFps != requestedFps ? "ReadbackFpsMismatch" : !enable && readbackEnabled ? "ReadbackEnableMismatch" : null;
-    private static void LogFrameLimitVerification(bool enable, FpsPowerSource? source, uint appId, int requestedFps, uint setResult, uint getResult, bool readbackEnabled, int readbackFps, bool verified, string? failureReason)
+    private static FeatureGetSet CreateFrameLimitGetFeature() => new()
+    {
+        Size = (uint)Marshal.SizeOf<FeatureGetSet>(),
+        Version = 0,
+        FeatureType = FrameLimit,
+        ApplicationName = 0,
+        ApplicationNameLength = 0,
+        Set = false,
+        ValueType = Int32,
+        Value = default
+    };
+    private static string? FrameLimitVerificationFailureReason(bool enable, uint setResult, uint? getResult, bool readbackEnabled, int readbackFps, int requestedFps) =>
+        setResult != 0 ? "SetFailed" : getResult is null || getResult.Value != 0 ? "ReadbackFailed" : enable && !readbackEnabled ? "ReadbackEnableMismatch" : enable && readbackFps != requestedFps ? "ReadbackFpsMismatch" : !enable && readbackEnabled ? "ReadbackEnableMismatch" : null;
+    private static void LogFrameLimitVerification(bool enable, FpsPowerSource? source, uint appId, int requestedFps, uint setResult, uint? getResult, bool readbackEnabled, int readbackFps, bool verified, string? failureReason)
     {
         var fields = new (string Key, object? Value)[]
         {
             ("Operation", enable ? "Enable" : "Disable"), ("RunningAppID", appId), ("PowerSource", source),
             ("RequestedEnabled", enable), ("RequestedFps", requestedFps), ("SetResult", $"0x{setResult:X8}"),
-            ("GetResult", $"0x{getResult:X8}"), ("ReadbackEnabled", readbackEnabled), ("ReadbackFps", readbackFps),
+            ("GetResult", getResult is uint result ? $"0x{result:X8}" : "NotCalled"), ("ReadbackEnabled", readbackEnabled), ("ReadbackFps", readbackFps),
             ("Verified", verified), ("FailureReason", failureReason)
         };
         if (verified) AppLog.Info("Profiles.IntelFps", enable ? "FRAME_LIMIT apply verified." : "FRAME_LIMIT disable verified.", fields);
         else AppLog.Warn("Profiles.IntelFps", $"FRAME_LIMIT {(enable ? "apply" : "disable")} verification failed.", null, fields);
     }
-    internal static bool VerifyFrameLimitReadbackForTests(bool enable, int requestedFps, uint setResult, uint getResult, bool readbackEnabled, int readbackFps) =>
+    internal static bool VerifyFrameLimitReadbackForTests(bool enable, int requestedFps, uint setResult, uint? getResult, bool readbackEnabled, int readbackFps) =>
         FrameLimitVerificationFailureReason(enable, setResult, getResult, readbackEnabled, readbackFps, requestedFps) is null;
+    internal static byte[] EncodeFrameLimitGetPropertyBytesForTests() =>
+        EncodeFrameLimitPropertyBytes(new Property());
     internal static byte[] EncodeFrameLimitPropertyBytesForTests(bool enable, int fps)
     {
         var property = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps };
-        return MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref property, 1)).ToArray();
+        return EncodeFrameLimitPropertyBytes(property);
     }
+    private static byte[] EncodeFrameLimitPropertyBytes(Property property) => MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref property, 1)).ToArray();
     private static void Log(string operation, uint result, int? fps = null, FpsPowerSource? source = null, uint? appId = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source), ("RunningAppID", appId)); }
     public void Dispose() { if (_closed) return; _closed = true; if (_api != 0) { var result = _close(_api); Log("ctlClose", result); _api = 0; } if (_library != 0) { NativeLibrary.Free(_library); _library = 0; } }
     [StructLayout(LayoutKind.Sequential)] private struct ApplicationId { public uint Data1; public ushort Data2; public ushort Data3; public byte Data4_0; public byte Data4_1; public byte Data4_2; public byte Data4_3; public byte Data4_4; public byte Data4_5; public byte Data4_6; public byte Data4_7; }
