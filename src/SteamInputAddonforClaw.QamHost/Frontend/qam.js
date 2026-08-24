@@ -779,7 +779,8 @@
         controls.push({ key: "cpu-on-battery", node: slider("On battery", "dc", sideValue(cpu.dc, previewDc), "standard") });
       }
 
-      const powerWritable = !!powerMode?.persistenceWritable && !status?.steam?.appId && !busy;
+      const powerInitialized = powerMode?.ac?.desired != null && powerMode?.dc?.desired != null;
+      const powerWritable = !!powerMode?.persistenceWritable && powerInitialized && !status?.steam?.appId && !busy;
       const powerSlider = (label, value, onChange, disabled) => value == null ? null : React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, powerModeLabels[powerModeIndex(value)] ?? "Unknown"))), min: 0, max: 2, step: 1, value: powerModeIndex(value), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => onChange(Number(next)) });
       const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !powerWritable, onChange: value => void runPowerMutation("setDevicePowerModeEnabled", { enabled: !!value }) }) }];
       if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, value => void runPowerMutation("setDevicePowerModeAc", { mode: powerModeValue(value) }), !powerWritable) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, value => void runPowerMutation("setDevicePowerModeDc", { mode: powerModeValue(value) }), !powerWritable) }); }

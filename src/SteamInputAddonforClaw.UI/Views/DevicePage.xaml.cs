@@ -101,9 +101,9 @@ public sealed partial class DevicePage : UserControl
         try { PowerModeEnabledToggleSwitch.IsOn = snapshot.Enabled; PowerModeAcComboBox.SelectedItem = PowerModeItemFor(snapshot.Ac); PowerModeDcComboBox.SelectedItem = PowerModeItemFor(snapshot.Dc); }
         finally { _suppressSelectionEvents = false; }
         var editable = snapshot.PersistenceWritable && snapshot.Ac.Desired is not null && snapshot.Dc.Desired is not null;
-        PowerModeEnabledToggleSwitch.IsEnabled = snapshot.PersistenceWritable; PowerModeAcComboBox.IsEnabled = editable && snapshot.Enabled; PowerModeDcComboBox.IsEnabled = editable && snapshot.Enabled;
-        PowerModeInfoBar.IsOpen = !snapshot.PersistenceWritable || snapshot.LastFailure is not null;
-        PowerModeInfoBar.Message = snapshot.LastFailure ?? "Power Mode settings are unavailable.";
+        PowerModeEnabledToggleSwitch.IsEnabled = editable; PowerModeAcComboBox.IsEnabled = editable && snapshot.Enabled; PowerModeDcComboBox.IsEnabled = editable && snapshot.Enabled;
+        PowerModeInfoBar.IsOpen = !editable || snapshot.LastFailure is not null;
+        PowerModeInfoBar.Message = snapshot.LastFailure ?? (editable ? "Power Mode settings are unavailable." : "Windows Power Mode could not be initialized.");
     }
     private static PowerModeItem? PowerModeItemFor(FrontendPowerModeSideSnapshot side) => PowerModes.FirstOrDefault(x => x.Mode == (side.Desired ?? side.Current));
     private async void PowerModeAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (_suppressSelectionEvents || _frontend is null || PowerModeAcComboBox.SelectedItem is not PowerModeItem item) return; await RunPowerModeMutationAsync(() => _frontend.SetDevicePowerModeAcAsync(item.Mode)); }

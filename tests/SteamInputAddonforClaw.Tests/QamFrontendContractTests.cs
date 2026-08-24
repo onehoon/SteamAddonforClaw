@@ -354,6 +354,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
         Assert.Contains("QAM required native controls/layout unavailable", source);
         Assert.Contains("const powerWritable", source);
+        Assert.Contains("const powerInitialized = powerMode?.ac?.desired != null && powerMode?.dc?.desired != null;", source);
+        Assert.Contains("powerInitialized && !status?.steam?.appId", source);
         Assert.Contains("const runPowerMutation", source);
         Assert.Contains("Power Mode update failed", source);
         Assert.Contains("Best power efficiency", source);

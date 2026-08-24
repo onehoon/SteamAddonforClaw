@@ -46,7 +46,7 @@ internal sealed class PowerModeRuntime
     private void Bootstrap(ProfileDocument document)
     {
         var state = _policy.Read();
-        if (!state.Succeeded || state.Ac.Mode is not { } ac || state.Dc.Mode is not { } dc) { Update(state, null, true); return; }
+        if (!state.Succeeded || state.Ac.Mode is not { } ac || state.Dc.Mode is not { } dc) { Update(state, null, false); return; }
         var next = document with { Device = document.Device with { Performance = document.Device.Performance with { PowerMode = new DevicePowerModeSettings { Enabled = true, Ac = ac, Dc = dc } } } };
         try { _store.Save(next); Update(state, next.Device.Performance.PowerMode, true); }
         catch (Exception ex) { AppLog.Error("Profiles.PowerMode", "Power Mode bootstrap persistence failed.", ex); Update(state, null, true, ex.Message); }

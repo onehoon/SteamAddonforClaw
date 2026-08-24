@@ -32,6 +32,21 @@ public sealed class PowerModeTests
     }
 
     [Fact]
+    public void Windows_read_failure_leaves_power_mode_uninitialized_and_not_writable()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");
+        var policy = new FakePowerModePolicy { FailRead = true };
+        var runtime = new PowerModeRuntime(new ProfileStore(path), policy);
+
+        runtime.StartupReconcile();
+
+        Assert.False(runtime.Snapshot.PersistenceWritable);
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Null(runtime.Snapshot.DcDesired);
+        Assert.Null(policy.LastApplied);
+    }
+
+    [Fact]
     public void Existing_enabled_profile_lazily_adopts_device_power_mode_before_first_edit()
     {
         var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");
@@ -81,7 +96,10 @@ public sealed class PowerModeTests
 internal sealed class FakePowerModePolicy : IPowerModePolicy
 {
     internal bool FailApply { get; init; }
+    internal bool FailRead { get; init; }
     internal (WindowsPowerMode Ac, WindowsPowerMode Dc)? LastApplied { get; private set; }
-    public PowerModeSystemState Read() => new(true, new(PowerModeReadStatus.Known, WindowsPowerMode.Balanced), new(PowerModeReadStatus.Known, WindowsPowerMode.Balanced), null);
+    public PowerModeSystemState Read() => FailRead
+        ? new(false, PowerModeSideReading.Unavailable, PowerModeSideReading.Unavailable, "read failure")
+        : new(true, new(PowerModeReadStatus.Known, WindowsPowerMode.Balanced), new(PowerModeReadStatus.Known, WindowsPowerMode.Balanced), null);
     public PowerModeApplyResult Apply(WindowsPowerMode? ac, WindowsPowerMode? dc) { if (ac is { } || dc is { }) LastApplied = (ac ?? WindowsPowerMode.Balanced, dc ?? WindowsPowerMode.Balanced); return FailApply ? new(false, false, "native failure") : PowerModeApplyResult.NoOp; }
 }
