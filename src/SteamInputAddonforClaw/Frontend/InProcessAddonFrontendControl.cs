@@ -146,6 +146,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var outcome = _gameProfileMutations is { } mutations
             ? ac ? mutations.SetPowerModeAc(appId, mode) : mutations.SetPowerModeDc(appId, mode)
             : GameProfileMutations.MutationOutcome.Unavailable;
+        if (outcome == GameProfileMutations.MutationOutcome.Succeeded && appId == _actualRunningAppIdSource() && _powerModeRuntime is { } runtime)
+        {
+            var applied = runtime.ReconcileWithResult(appId);
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+            if (!applied.Succeeded)
+                return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.ApplyFailed, applied.FailureMessage, CaptureGameProfile(appId)));
+            return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Succeeded, null, CaptureGameProfile(appId)));
+        }
         return Task.FromResult(MutateGame(appId, outcome, cpu: false, tdp: false, power: true));
     }
 

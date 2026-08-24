@@ -353,6 +353,11 @@ public sealed class QamFrontendContractTests
         Assert.Contains("cpu.lastFailure", source);
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
         Assert.Contains("QAM required native controls/layout unavailable", source);
+        Assert.Contains("const powerWritable", source);
+        Assert.Contains("const runPowerMutation", source);
+        Assert.Contains("Power Mode update failed", source);
+        Assert.Contains("Best power efficiency", source);
+        Assert.Contains("Best performance", source);
     }
 
     [Fact]

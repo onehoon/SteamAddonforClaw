@@ -536,6 +536,10 @@
       const deferredInvalidationRef = React.useRef(false);
       const modeEditGeneration = React.useRef({ ac: 0, dc: 0 });
       const modeMutationInFlight = React.useRef({ ac: false, dc: false });
+      const powerModeLabels = ["Best power efficiency", "Balanced", "Best performance"];
+      const powerModeNames = ["BestPowerEfficiency", "Balanced", "BestPerformance"];
+      const powerModeIndex = value => typeof value === "number" ? value : powerModeNames.indexOf(value);
+      const powerModeValue = value => powerModeNames[Number(value)] ?? "Balanced";
 
       const failClosed = React.useCallback(message => {
         for (const key of ["ac", "dc"]) {
@@ -609,6 +613,12 @@
           void refresh();
         }
       }, [cancelModeTimers, refresh]);
+      const runPowerMutation = React.useCallback(async (method, payload) => {
+        if (!state.installed) return;
+        try { beginMutation(); setError(null); const result = await request(method, payload); if (!result?.succeeded) setError(result?.failureMessage || "Power Mode update failed"); await refresh(); }
+        catch (_) { failClosed("Power Mode update failed"); }
+        finally { endMutation(); }
+      }, [beginMutation, endMutation, failClosed, refresh]);
 
       React.useEffect(() => { void refresh(); return cancelModeTimers; }, [refresh, cancelModeTimers]);
 
@@ -769,9 +779,10 @@
         controls.push({ key: "cpu-on-battery", node: slider("On battery", "dc", sideValue(cpu.dc, previewDc), "standard") });
       }
 
-      const powerSlider = (label, value, onChange, disabled) => value == null ? null : React.createElement(native.SliderField, { label, min: 0, max: 2, step: 1, value: Number(value), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => onChange(Number(next)) });
-      const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !!status?.steam?.appId, onChange: value => void request("setDevicePowerModeEnabled", { enabled: !!value }).then(refresh) }) }];
-      if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, value => void request("setDevicePowerModeAc", { mode: value }).then(refresh), !!status?.steam?.appId) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, value => void request("setDevicePowerModeDc", { mode: value }).then(refresh), !!status?.steam?.appId) }); }
+      const powerWritable = !!powerMode?.persistenceWritable && !status?.steam?.appId && !busy;
+      const powerSlider = (label, value, onChange, disabled) => value == null ? null : React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, powerModeLabels[powerModeIndex(value)] ?? "Unknown"))), min: 0, max: 2, step: 1, value: powerModeIndex(value), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => onChange(Number(next)) });
+      const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !powerWritable, onChange: value => void runPowerMutation("setDevicePowerModeEnabled", { enabled: !!value }) }) }];
+      if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, value => void runPowerMutation("setDevicePowerModeAc", { mode: powerModeValue(value) }), !powerWritable) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, value => void runPowerMutation("setDevicePowerModeDc", { mode: powerModeValue(value) }), !powerWritable) }); }
 
       const tdpControls = [{ key: "tdp-toggle", node: React.createElement(native.ToggleField, {
         label: "TDP Control",
@@ -873,8 +884,8 @@
           { key: "profile-toggle", node: React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }) },
           { key: "profile-ac", node: profileSlider("Plugged in", "ac", profile.cpuBoost?.ac, previewAc, "none") },
           { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, previewDc, "standard") },
-          { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Power Mode plugged in", profile.powerMode.ac, value => void request("setActiveGamePowerModeAc", { mode: value }).then(refresh), !enabled || !writable) : null },
-          { key: "profile-power-dc", node: profile.powerMode ? powerSlider("Power Mode on battery", profile.powerMode.dc, value => void request("setActiveGamePowerModeDc", { mode: value }).then(refresh), !enabled || !writable) : null },
+          { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Power Mode plugged in", profile.powerMode.ac, value => void runPowerMutation("setActiveGamePowerModeAc", { mode: powerModeValue(value) }), !enabled || !writable) : null },
+          { key: "profile-power-dc", node: profile.powerMode ? powerSlider("Power Mode on battery", profile.powerMode.dc, value => void runPowerMutation("setActiveGamePowerModeDc", { mode: powerModeValue(value) }), !enabled || !writable) : null },
         ];
         const profileTdpControls = profile.limits ? [
           { key: "profile-tdp-ac-heading", node: React.createElement("div", null, "Plugged in") },

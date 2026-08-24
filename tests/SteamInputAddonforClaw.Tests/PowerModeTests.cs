@@ -47,6 +47,18 @@ public sealed class PowerModeTests
         Assert.Equal(WindowsPowerMode.BestPerformance, saved!.Ac);
         Assert.Equal(WindowsPowerMode.BestPowerEfficiency, saved.Dc);
     }
+
+    [Fact]
+    public void Active_profile_reconcile_returns_native_apply_failure()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");
+        var store = new ProfileStore(path);
+        store.Save(new ProfileDocument { Device = new DeviceSettings { Performance = new DevicePerformanceSettings { PowerMode = new DevicePowerModeSettings { Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.Balanced } } } });
+        var policy = new FakePowerModePolicy { FailApply = true }; var runtime = new PowerModeRuntime(store, policy); runtime.SetActualAppIdSource(() => 0);
+        var result = runtime.ReconcileWithResult(0);
+        Assert.False(result.Succeeded);
+        Assert.Contains("native failure", result.FailureMessage);
+    }
     [Theory]
     [InlineData("961cc777-2547-4f9d-8174-7d86181b8a7a", PowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency)]
     [InlineData("00000000-0000-0000-0000-000000000000", PowerModeReadStatus.Known, WindowsPowerMode.Balanced)]
@@ -68,7 +80,8 @@ public sealed class PowerModeTests
 
 internal sealed class FakePowerModePolicy : IPowerModePolicy
 {
+    internal bool FailApply { get; init; }
     internal (WindowsPowerMode Ac, WindowsPowerMode Dc)? LastApplied { get; private set; }
     public PowerModeSystemState Read() => new(true, new(PowerModeReadStatus.Known, WindowsPowerMode.Balanced), new(PowerModeReadStatus.Known, WindowsPowerMode.Balanced), null);
-    public PowerModeApplyResult Apply(WindowsPowerMode? ac, WindowsPowerMode? dc) { if (ac is { } || dc is { }) LastApplied = (ac ?? WindowsPowerMode.Balanced, dc ?? WindowsPowerMode.Balanced); return PowerModeApplyResult.NoOp; }
+    public PowerModeApplyResult Apply(WindowsPowerMode? ac, WindowsPowerMode? dc) { if (ac is { } || dc is { }) LastApplied = (ac ?? WindowsPowerMode.Balanced, dc ?? WindowsPowerMode.Balanced); return FailApply ? new(false, false, "native failure") : PowerModeApplyResult.NoOp; }
 }

@@ -20,7 +20,7 @@ public sealed record FrontendPowerModeSnapshot(FrontendPowerModeSideSnapshot Ac,
 { public static readonly FrontendPowerModeSnapshot Unavailable = new(new(FrontendPowerModeReadStatus.Unavailable, null, null), new(FrontendPowerModeReadStatus.Unavailable, null, null), false, false, null); }
 public sealed record FrontendPowerModeMutationResult(FrontendPowerModeMutationOutcome Outcome, string? FailureMessage, FrontendPowerModeSnapshot Snapshot)
 { public bool Succeeded => Outcome == FrontendPowerModeMutationOutcome.Succeeded; }
-public enum FrontendGameProfileMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
+public enum FrontendGameProfileMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, ApplyFailed, Unavailable }
 public sealed record FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome Outcome, string? FailureMessage, FrontendGameProfileSnapshot Snapshot)
 {
     public bool Succeeded => Outcome == FrontendGameProfileMutationOutcome.Succeeded;

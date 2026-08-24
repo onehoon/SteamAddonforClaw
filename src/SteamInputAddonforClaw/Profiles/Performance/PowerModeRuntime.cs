@@ -20,6 +20,18 @@ internal sealed class PowerModeRuntime
     internal void SetActualAppIdSource(Func<uint> source) => _actualAppIdSource = source ?? throw new ArgumentNullException(nameof(source));
     internal void StartupReconcile(uint appId = 0) => Reconcile(appId, true);
     internal void Reconcile(uint appId) => Reconcile(appId, false);
+    internal PowerModeApplyResult ReconcileWithResult(uint appId)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) { Update(_policy.Read(), null, false); return new(false, false, "Profile state is not safe to replace."); }
+            var device = loaded.Document.Device.Performance.PowerMode;
+            var applied = ApplyEffective(loaded.Document, device, null);
+            Update(_policy.Read(), device, true, applied.Succeeded ? null : applied.FailureMessage);
+            return applied;
+        }
+    }
     private void Reconcile(uint appId, bool startup)
     {
         lock (_gate.Sync)
