@@ -78,6 +78,8 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     public Task<FrontendClawSensorProbeSnapshot> PreviousClawSensorProbePhaseAsync(CancellationToken t = default) => SendAsync<FrontendClawSensorProbeSnapshot>(FrontendRpcMethod.PreviousClawSensorProbePhase, null, t);
     public Task<FrontendClawSensorProbeSnapshot> StopClawSensorProbeAsync(CancellationToken t = default) => SendAsync<FrontendClawSensorProbeSnapshot>(FrontendRpcMethod.StopClawSensorProbe, null, t);
     public Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken t = default) => SendAsync<FrontendClawSensorProbeSnapshot>(FrontendRpcMethod.CloseClawSensorProbe, null, t);
+    public Task<FrontendFanProbeSnapshot> OpenFanProbeAsync(CancellationToken t = default) => SendAsync<FrontendFanProbeSnapshot>(FrontendRpcMethod.OpenFanProbe, null, t);
+    public Task<FrontendFanProbeSnapshot> RunFanProbeAsync(FrontendFanProbeOperation operation, CancellationToken t = default) => SendAsync<FrontendFanProbeSnapshot>(FrontendRpcMethod.RunFanProbe, FrontendWireCodec.Payload(new RunFanProbeRequest(operation)), t);
     public Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken t = default) => SendAsync<FrontendPrerequisiteSetupResult>(FrontendRpcMethod.RunPrerequisiteSetup, null, t);
     public Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken t = default) => SendAsync<FrontendEnvironmentReportResult>(FrontendRpcMethod.GenerateEnvironmentReport, null, t);
     private async Task<T> SendAsync<T>(FrontendRpcMethod method, JsonElement? payload, CancellationToken token)

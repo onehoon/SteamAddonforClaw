@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Profiles;
@@ -35,6 +36,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private Feedback.VibrationTestSessionWriter? _vibrationSession;
     private readonly object _clawSensorProbeGate = new();
     private ClawSensorProbeSession? _clawSensorProbe;
+    private readonly object _fanProbeGate = new();
+    private FanProbeSession? _fanProbe;
 
     /// <summary>Wraps the Runtime-owned <see cref="ClawSensorProbeCoordinator"/> for one active
     /// diagnostic session, plus the device identity captured at Open time (so a stale-but-still-open
@@ -52,12 +55,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         public required string HardwareModel { get; init; }
         public required string HardwareReason { get; init; }
     }
+    private sealed class FanProbeSession(MsiFanHardwareProbe probe, string manufacturer, string model, string board)
+    { public MsiFanHardwareProbe Probe { get; } = probe; public string Manufacturer { get; } = manufacturer; public string Model { get; } = model; public string Board { get; } = board; }
     // Device/Profile CPU Boost -- a sibling capability, not a member of Routing/OEM1 (work order
     // PR277 section 1): this projection deliberately has NO dependency on _runtime/routing status
     // and must keep working when _runtime is null (no routing composition at all).
     private readonly CpuBoostRuntime? _cpuBoostRuntime;
     private readonly PowerModeRuntime? _powerModeRuntime;
     private readonly IntelFrameLimiterRuntime? _intelFpsRuntime;
+    private readonly IMsiClawTdpTransport? _fanProbeTransport;
     private readonly TdpRuntime? _tdpRuntime;
     private readonly GameProfileMutations? _gameProfileMutations;
     private readonly Func<uint> _actualRunningAppIdSource;
@@ -73,7 +79,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _cpuBoostRuntime = cpuBoostRuntime;
@@ -84,6 +90,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
         _scanProfileGames = scanProfileGames ?? (token => new ProfileGameCatalogScanner().ScanAsync(token));
         _displayResolutionRuntime = displayResolutionRuntime;
+        _fanProbeTransport = fanProbeTransport;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -507,6 +514,40 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             try { probe.Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
             catch (Exception exception) { AppLog.Warn("ClawSensorProbe", "Probe shutdown cleanup failed.", exception); }
         }
+    }
+
+    // ---- MSI Fan Probe (developer-only bounded hardware diagnostic) ----
+    public async Task<FrontendFanProbeSnapshot> OpenFanProbeAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        if (_fanProbeTransport is null) return FrontendFanProbeSnapshot.Unavailable;
+        var status = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        var board = status.Device.BaseBoardProduct;
+        var model = FanProbeModelMap.Resolve(board);
+        if (model == FanProbeModel.Unsupported) return new(false, FrontendFanProbeState.Unavailable, "Unsupported MSI board.", status.Device.Manufacturer, status.Device.Model, board, model.ToString(), null, false, "The authoritative board identity is unsupported.");
+        lock (_fanProbeGate) _fanProbe ??= new(new MsiFanHardwareProbe(_fanProbeTransport, AppLog.DirectoryPath), status.Device.Manufacturer, status.Device.Model, board);
+        return MapFanProbe(FrontendFanProbeState.Ready, "Ready", null);
+    }
+
+    public async Task<FrontendFanProbeSnapshot> RunFanProbeAsync(FrontendFanProbeOperation operation, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown(); cancellationToken.ThrowIfCancellationRequested();
+        FanProbeSession? session; lock (_fanProbeGate) session = _fanProbe;
+        if (session is null) return FrontendFanProbeSnapshot.Unavailable;
+        var result = await Task.Run(() => operation switch
+        {
+            FrontendFanProbeOperation.Capture => session.Probe.Capture(session.Model, session.Board, "Available identifiers are reported by existing startup infrastructure."),
+            FrontendFanProbeOperation.AutomaticTest => session.Probe.AutomaticTest(session.Model, session.Board, "Available identifiers are reported by existing startup infrastructure."),
+            _ => session.Probe.RestoreAuto(session.Model, session.Board, "Available identifiers are reported by existing startup infrastructure.")
+        }, CancellationToken.None).ConfigureAwait(false);
+        return MapFanProbe(result.Succeeded ? FrontendFanProbeState.Completed : FrontendFanProbeState.Failed, result.Status, result.ReportPath);
+    }
+
+    private FrontendFanProbeSnapshot MapFanProbe(FrontendFanProbeState state, string status, string? path)
+    {
+        FanProbeSession? session; lock (_fanProbeGate) session = _fanProbe;
+        if (session is null) return FrontendFanProbeSnapshot.Unavailable;
+        return new(true, state, status, session.Manufacturer, session.Model, session.Board, FanProbeModelMap.Resolve(session.Board).ToString(), path, !string.IsNullOrWhiteSpace(path), state == FrontendFanProbeState.Failed ? status : null);
     }
 
     // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
