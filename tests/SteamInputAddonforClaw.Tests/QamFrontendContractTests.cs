@@ -481,6 +481,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("schedulePowerMode", powerSlider);
         Assert.Contains("powerPreview[key] ?? pendingValue ?? value", powerSlider);
         Assert.DoesNotContain("runPowerMutation", powerSlider);
+        Assert.True(powerSchedule.IndexOf("await refresh();", StringComparison.Ordinal)
+            < powerSchedule.IndexOf("delete next[key]", StringComparison.Ordinal));
         Assert.Contains("setDevicePowerModeEnabled", source);
         Assert.Contains("setActiveGameFpsLimitEnabled", source);
         Assert.DoesNotContain("250", source);

@@ -760,9 +760,9 @@
       const schedulePowerMode = (key, method, value, appId = 0) => {
         setPowerPreview(current => ({ ...current, [key]: value }));
         scheduleQamSliderCommit(key, { value, appId }, method, { mode: powerModeValue(value) }, async (result, failure) => {
-          setPowerPreview(current => { const next = { ...current }; delete next[key]; return next; });
           if (failure) { failClosed("Power Mode update failed"); return; }
           await refresh();
+          setPowerPreview(current => { const next = { ...current }; delete next[key]; return next; });
           if (!result?.succeeded) setError(result?.failureMessage || "Power Mode update failed");
         });
       };
