@@ -43,7 +43,6 @@ internal static class AddonRuntimeCompositionFactory
     {
         ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
-        var trustedHidHideApplicationPaths = new HidHideTrustedApplicationPathResolver().Resolve();
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
@@ -84,8 +83,7 @@ internal static class AddonRuntimeCompositionFactory
             startupSettings,
             hardwareSupported,
             winGSuppressionGuard,
-            wingMappingPreference: startupSettings,
-            trustedHidHideApplicationPaths: trustedHidHideApplicationPaths);
+            wingMappingPreference: startupSettings);
 
         Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
             ? _ => Task.FromResult(false)

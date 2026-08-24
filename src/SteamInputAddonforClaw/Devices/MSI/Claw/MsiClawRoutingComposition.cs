@@ -169,8 +169,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         IOem1GestureDelay? testOnlyOem1GestureDelay = null,
         IOem1GestureClock? testOnlyOem1GestureClock = null,
         Action? testOnlyOem1LaunchBigPicture = null,
-        IMsiEventSource? testOnlyWingEventSource = null,
-        IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null)
+        IMsiEventSource? testOnlyWingEventSource = null)
     {
         _hardwareSupported = hardwareSupported;
         _testOnlyOem1EventSource = testOnlyOem1EventSource;
@@ -195,8 +194,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         var hidHideClient = new HidHideDriverClient();
         HidHideBaselineStage = new MsiClawHidHideBaselineStage(
             hidHideClient,
-            Environment.ProcessPath ?? throw new InvalidOperationException("The Addon executable path is unavailable."),
-            trustedHidHideApplicationPaths ?? []);
+            Environment.ProcessPath ?? throw new InvalidOperationException("The Addon executable path is unavailable."));
 
         PhysicalIsolationStage = new MsiClawPhysicalIsolationStage(
             PhysicalInputStage,

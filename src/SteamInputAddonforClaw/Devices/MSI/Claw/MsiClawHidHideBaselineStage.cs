@@ -10,23 +10,21 @@ internal sealed class MsiClawHidHideBaselineStage : IRoutingPipelineStage
 {
     private readonly IHidHideClient _hidHide;
     private readonly string _executablePath;
-    private readonly IReadOnlyList<string> _trustedOfficialApplicationPaths;
+    private readonly Func<IReadOnlyCollection<string>> _resolveTrustedOfficialApplications;
+    private IReadOnlyList<string> _trustedOfficialApplicationPaths = [];
     private bool _prepared;
 
     internal MsiClawHidHideBaselineStage(
         IHidHideClient hidHide,
         string executablePath,
-        IReadOnlyCollection<string> trustedOfficialApplicationPaths)
+        Func<IReadOnlyCollection<string>>? resolveTrustedOfficialApplications = null)
     {
         _hidHide = hidHide ?? throw new ArgumentNullException(nameof(hidHide));
         if (string.IsNullOrWhiteSpace(executablePath) || !Path.IsPathFullyQualified(executablePath))
             throw new ArgumentException("The Addon executable path must be fully qualified.", nameof(executablePath));
         _executablePath = Path.GetFullPath(executablePath);
-        _trustedOfficialApplicationPaths = trustedOfficialApplicationPaths
-            .Where(IsCanonicalPath)
-            .Select(Path.GetFullPath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        _resolveTrustedOfficialApplications = resolveTrustedOfficialApplications
+            ?? (() => new HidHideTrustedApplicationPathResolver().Resolve());
     }
 
     public RoutingStageKind Kind => RoutingStageKind.HidHideBaseline;
@@ -56,6 +54,7 @@ internal sealed class MsiClawHidHideBaselineStage : IRoutingPipelineStage
         if (inspection is null) return ValueTask.FromResult(Failure("HidHideInspectionUnavailable"));
         var failure = ValidateInspection(inspection);
         if (failure is not null) return ValueTask.FromResult(Failure(failure));
+        _trustedOfficialApplicationPaths = ResolveTrustedOfficialApplications();
 
         var hiddenRemoved = 0;
         var foreignApplicationsRemoved = 0;
@@ -149,6 +148,12 @@ internal sealed class MsiClawHidHideBaselineStage : IRoutingPipelineStage
     }
 
     private bool IsAllowedApplication(string path) => PathEquals(path, _executablePath) || _trustedOfficialApplicationPaths.Any(trusted => PathEquals(path, trusted));
+
+    private IReadOnlyList<string> ResolveTrustedOfficialApplications() => (_resolveTrustedOfficialApplications() ?? [])
+        .Where(IsCanonicalPath)
+        .Select(Path.GetFullPath)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 
     private static bool Try(Func<bool> operation)
     {

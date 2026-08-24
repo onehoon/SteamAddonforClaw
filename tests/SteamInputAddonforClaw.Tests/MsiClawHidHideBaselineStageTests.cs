@@ -62,6 +62,23 @@ public sealed class MsiClawHidHideBaselineStageTests
         Assert.Contains("AddApplication:" + Cli, hid.Trace);
     }
 
+    [Fact]
+    public async Task Official_paths_are_resolved_at_activation_not_composition()
+    {
+        IReadOnlyCollection<string> resolvedPaths = [];
+        var hid = new FakeHidHide { Applications = [Addon] };
+        var stage = new MsiClawHidHideBaselineStage(hid, Addon, () => resolvedPaths);
+
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        resolvedPaths = [Client, Cli];
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Contains(Client, hid.Applications);
+        Assert.Contains(Cli, hid.Applications);
+    }
+
     [Theory]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
     [InlineData((int)HidHideInspectionStatus.ConfigurationUnavailable)]
@@ -156,7 +173,7 @@ public sealed class MsiClawHidHideBaselineStageTests
         Assert.DoesNotContain("C:\\foreign.exe", hid.Applications);
     }
 
-    private static MsiClawHidHideBaselineStage Create(FakeHidHide hid) => new(hid, Addon, [Client, Cli]);
+    private static MsiClawHidHideBaselineStage Create(FakeHidHide hid) => new(hid, Addon, () => [Client, Cli]);
 
     private sealed class FakeHidHide : IHidHideClient
     {
