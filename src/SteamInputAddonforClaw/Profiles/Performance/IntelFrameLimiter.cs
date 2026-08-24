@@ -60,6 +60,7 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
     internal bool Available => _limiter.Available;
     internal string? UnavailableReason => _limiter.UnavailableReason;
     internal IntelFpsCapability? Capability => _limiter.Capability;
+    internal bool HasPendingOwnership => File.Exists(_marker);
     internal void Initialize() => _limiter.Initialize();
     internal void SetActualAppIdSource(Func<uint> source) => _app = source;
     internal void StartupRecover() { if (!File.Exists(_marker)) return; try { if (_limiter.Disable(_power(), 0)) File.Delete(_marker); else AppLog.Warn("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed; keeping marker."); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed.", e); } }

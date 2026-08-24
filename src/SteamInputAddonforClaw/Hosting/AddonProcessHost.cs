@@ -133,6 +133,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("Profiles.Display", "Display resolution startup recovery failed.", exception);
         }
 
+        // FPS ownership recovery is independent of hardware compatibility. Only initialize
+        // IGCL on this early path when the Addon left explicit ownership evidence behind;
+        // ordinary startup remains free of native driver work until the deferred profile phase.
+        try
+        {
+            if (_intelFpsRuntime.HasPendingOwnership)
+            {
+                _intelFpsRuntime.Initialize();
+                _intelFpsRuntime.StartupRecover();
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.IntelFps", "Stale Intel FPS startup recovery failed.", exception);
+        }
+
         AppLog.Info("Startup coordination started.");
         var startupComposition = AddonStartupCompositionFactory.Create(_updateRestartArguments);
         _startupComposition = startupComposition;

@@ -441,6 +441,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("${value} FPS", source);
         Assert.Contains("setActiveGameFpsLimitAc", source);
         Assert.Contains("setActiveGameFpsLimitDc", source);
+        Assert.Contains("await runFpsMutation(side === \"ac\" ? \"setActiveGameFpsLimitAc\" : \"setActiveGameFpsLimitDc\"", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("type: \"checkbox\"", source);
         Assert.DoesNotContain("type: \"range\"", source);

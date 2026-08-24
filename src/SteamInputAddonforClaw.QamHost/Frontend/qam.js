@@ -918,7 +918,7 @@
         ] : [];
         const fps = profile.fpsLimit || { enabled: false, acFps: 60, dcFps: 60, available: false, unavailableReason: "Intel FPS Limit is unavailable." };
         const runFpsMutation = async (method, payload) => {
-          if (!state.installed || !fps.available || !writable) return;
+          if (!state.installed || !fps.available || !writable || !enabled) return;
           beginMutation();
           setError(null);
           try {
@@ -937,12 +937,13 @@
           if (fpsTimers.current[side]) clearTimeout(fpsTimers.current[side]);
           fpsTimers.current[side] = setTimeout(async () => {
             fpsTimers.current[side] = null;
-            try { beginMutation(); const result = await request(side === "ac" ? "setActiveGameFpsLimitAc" : "setActiveGameFpsLimitDc", { fps: value }); if (generation === fpsGeneration.current[side]) setProfile(result.snapshot); if (!result.succeeded) setError(result.failureMessage || "Intel FPS Limit update failed"); } catch (_) { failClosed("Intel FPS Limit update failed"); } finally { endMutation(); }
+            if (generation !== fpsGeneration.current[side]) return;
+            await runFpsMutation(side === "ac" ? "setActiveGameFpsLimitAc" : "setActiveGameFpsLimitDc", { fps: value });
           }, 275);
         };
         const fpsSlider = (label, side, value) => React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, `${value} FPS`))), min: 40, max: 120, step: 1, value: fpsDraft[side] ?? value, disabled: !fps.available || !profile.persistenceWritable || !enabled || !fps.enabled || busy, onChange: next => scheduleFps(side, Number(next)) });
         const fpsControls = [
-          { key: "fps-toggle", node: React.createElement(native.ToggleField, { label: "FPS Limit", checked: !!fps.enabled, disabled: !fps.available || !writable, onChange: value => void runFpsMutation("setActiveGameFpsLimitEnabled", { enabled: !!value }) }) },
+          { key: "fps-toggle", node: React.createElement(native.ToggleField, { label: "FPS Limit", checked: !!fps.enabled, disabled: !fps.available || !writable || !enabled, onChange: value => void runFpsMutation("setActiveGameFpsLimitEnabled", { enabled: !!value }) }) },
           { key: "fps-description", node: React.createElement("div", null, fps.available ? "Uses Intel's official API. Some games may not support FPS limiting." : fps.unavailableReason) },
           { key: "fps-ac", node: fpsSlider("Plugged in", "ac", fps.acFps ?? 60) },
           { key: "fps-dc", node: fpsSlider("On battery", "dc", fps.dcFps ?? 60) },
