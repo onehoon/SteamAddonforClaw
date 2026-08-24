@@ -234,6 +234,22 @@ public sealed class MsiFanHardwareProbeTests
         Assert.Contains(t.Writes, x => x.Block == 212 && (x.Payload[0] & 0x80) == 0);
     }
 
+    [Fact]
+    public async Task Shutdown_during_arm_does_not_publish_armed_state()
+    {
+        var enteredWrite = new ManualResetEventSlim();
+        var releaseWrite = new ManualResetEventSlim();
+        var t = new FakeFanTransport { ArmSetFanEntered = enteredWrite, ArmSetFanRelease = releaseWrite };
+        var probe = NewProbe(t);
+        var operation = Task.Run(() => probe.ArmSuspendResume("EX", "MS-1T91", "test"));
+        Assert.True(enteredWrite.Wait(TimeSpan.FromSeconds(2)));
+        probe.RequestShutdownCleanup(); releaseWrite.Set();
+        Assert.True(probe.WaitForShutdownCleanup(TimeSpan.FromSeconds(2)));
+        var result = await operation;
+        Assert.False(result.Succeeded); Assert.NotEqual("ARMED", result.Status);
+        Assert.Contains(t.Writes, x => x.Block == 212 && (x.Payload[0] & 0x80) == 0);
+    }
+
     [Theory]
     [InlineData(0x80, "CUSTOM_PERSISTED")]
     [InlineData(0x00, "CURVE_PERSISTED_OWNERSHIP_LOST")]
@@ -356,7 +372,7 @@ public sealed class MsiFanHardwareProbeTests
     private sealed class FakeFanTransport : IMsiClawTdpTransport
     {
         internal readonly List<(int Block, byte[] Payload)> Writes = []; internal readonly List<string> Reads = [];
-        internal bool FailTemperature; internal bool FailFan0Read; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailOwnershipEnable; internal bool ThrowOnOriginalTableRestore; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool FailCoolerRead; internal bool HighDuty; internal bool DivergentFan2; internal bool CoupleFanWrites; internal bool RawFanResponse;
+        internal bool FailTemperature; internal bool FailFan0Read; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailOwnershipEnable; internal bool ThrowOnOriginalTableRestore; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool FailCoolerRead; internal bool HighDuty; internal bool DivergentFan2; internal bool CoupleFanWrites; internal bool RawFanResponse; internal ManualResetEventSlim? ArmSetFanEntered; internal ManualResetEventSlim? ArmSetFanRelease;
         internal byte InitialOwnership; internal byte InitialCooler;
         private readonly Dictionary<int, byte[]> _fans = new() { [1] = [70, 0, 40, 49, 58, 67, 75, 84], [2] = [71, 0, 40, 49, 58, 67, 75, 85] };
         private byte _ownership;
@@ -365,7 +381,7 @@ public sealed class MsiFanHardwareProbeTests
         public bool TryGetAp(int index, out byte[] payload) { EnsureInitialState(); Reads.Add($"AP{index}"); if (index == 1 && (FailAp212 || (FailApOnRestore && Writes.Any(x => x.Block == 1 || x.Block == 2)))) { payload = []; return false; } payload = index == 1 ? [_ownership] : [0x00, 0x01]; return true; }
         public bool TrySetData(int block, byte value) { EnsureInitialState(); Writes.Add((block, [value])); if (block == 212 && FailRestoreWrite) return false; if (block == 212 && FailOwnershipEnable && (value & 0x80) != 0) return false; if (block == 212) _ownership = value; if (block == 152) _cooler = value; return true; }
         public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); if (block == 0 && FailFan0Read) { payload = []; return false; } if (block == 0) { var duty = _fans[1][1]; var tach = duty switch { >= 70 => 100, >= 40 => 150, _ => 200 }; payload = [(byte)tach, 0, 1, 2, 0, 0, 0, 0]; return true; } if (block == 1 && FailFan1Read) { payload = []; return false; } if (_fans.TryGetValue(block, out var value)) { payload = (byte[])value.Clone(); if (block == 1 && HighDuty) payload[2] = 100; if (block == 2 && DivergentFan2) payload[3] = 50; if (RawFanResponse) payload = payload.Concat(new byte[23]).ToArray(); return true; } payload = []; return false; }
-        public bool TrySetFan(int block, byte[] payload) { if (block == 2 && FailFan2Write) return false; if (ThrowOnOriginalTableRestore && payload.Skip(1).Take(6).SequenceEqual(new byte[] { 0, 40, 49, 58, 67, 75 }) && Writes.Any(x => x.Block is 1 or 2)) throw new InvalidOperationException("Synthetic table restore failure."); Writes.Add((block, (byte[])payload.Clone())); if (!DoNotPersistFanWrites) _fans[block] = (byte[])payload.Clone(); if (CoupleFanWrites) { var other = block == 1 ? 2 : 1; var coupled = (byte[])_fans[other].Clone(); coupled[2] = (byte)(coupled[2] + 1); _fans[other] = coupled; } return true; }
+        public bool TrySetFan(int block, byte[] payload) { if (block == 1 && payload.Skip(1).Take(6).All(v => v == 75) && ArmSetFanEntered is not null) { ArmSetFanEntered.Set(); ArmSetFanRelease!.Wait(); } if (block == 2 && FailFan2Write) return false; if (ThrowOnOriginalTableRestore && payload.Skip(1).Take(6).SequenceEqual(new byte[] { 0, 40, 49, 58, 67, 75 }) && Writes.Any(x => x.Block is 1 or 2)) throw new InvalidOperationException("Synthetic table restore failure."); Writes.Add((block, (byte[])payload.Clone())); if (!DoNotPersistFanWrites) _fans[block] = (byte[])payload.Clone(); if (CoupleFanWrites) { var other = block == 1 ? 2 : 1; var coupled = (byte[])_fans[other].Clone(); coupled[2] = (byte)(coupled[2] + 1); _fans[other] = coupled; } return true; }
         public bool TryGetTemperature(int index, out byte[] payload) { Reads.Add($"Temp{index}"); payload = FailTemperature ? [] : [47, 50, 57, 64, 71, 78]; return !FailTemperature; }
         public bool TryGetThermal(int index, out byte[] payload) { Reads.Add($"Thermal{index}"); payload = [44, 54, 64, 74, 82, 82]; return true; }
         public bool TryGetData(int block, out byte[] payload) { EnsureInitialState(); Reads.Add($"Data{block}"); if (block == 152 && FailCoolerRead) { payload = []; return false; } if (block == 152) { payload = [_cooler]; return true; } payload = [0]; return true; }

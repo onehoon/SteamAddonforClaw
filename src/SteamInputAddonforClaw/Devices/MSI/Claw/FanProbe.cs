@@ -211,6 +211,22 @@ internal sealed class MsiFanHardwareProbe
             }
             WriteEnvironment(report);
             success = action(report, model);
+            if (operation == FanProbeOperation.ArmSuspendResume && success)
+            {
+                lock (_gate)
+                {
+                    if (_shutdownRequested)
+                    {
+                        report.AppendLine("ABORTED: process shutdown requested before suspend arm commit.");
+                        success = false;
+                    }
+                    else
+                    {
+                        _armedReport = report; _armedPath = path; _armedDevice = device; _armedBoard = board; _armedFirmware = firmware; _armedModel = model;
+                        _suspendArmed = true;
+                    }
+                }
+            }
             status = success ? "PASS" : "FAILED";
         }
         catch (Exception exception)
@@ -248,7 +264,6 @@ internal sealed class MsiFanHardwareProbe
             report.AppendLine("FINAL STATE: UNCHANGED (no hardware writes performed)");
         if (operation == FanProbeOperation.ArmSuspendResume && success && _suspendArmed)
         {
-            _armedReport = report; _armedPath = path; _armedDevice = device; _armedBoard = board; _armedFirmware = firmware; _armedModel = model;
             report.AppendLine("STATUS: ARMED; sleep/resume is required to complete the bounded diagnostic.");
             Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString());
             lock (_gate) { _running = true; }
@@ -443,10 +458,15 @@ internal sealed class MsiFanHardwareProbe
     private bool WriteArmSuspendResume(StringBuilder report, FanProbeModel model)
     {
         report.AppendLine("=== SUSPEND/RESUME ARM ===");
+        if (ShouldAbort(report)) return false;
         if (!CaptureBaseline(report, true) || _originalFan1 is null || _originalFan2 is null) return false;
+        if (ShouldAbort(report)) return false;
         var flat = new byte[] { 75, 75, 75, 75, 75, 75 };
         if (!ApplyCurve(report, flat, "ARM_75") || !SetOwnership(report, true)) return false;
-        WritePhysicalSnapshot(report, "ARMED"); _suspendArmed = true; return true;
+        if (ShouldAbort(report)) return false;
+        WritePhysicalSnapshot(report, "ARMED");
+        if (ShouldAbort(report)) return false;
+        return true;
     }
 
     private bool ApplyCurve(StringBuilder report, byte[] duties, string label) =>
