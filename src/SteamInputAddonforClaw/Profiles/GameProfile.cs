@@ -38,9 +38,18 @@ public sealed record GamePerformanceOverrides
     public GameCpuBoostSettings? CpuBoost { get; init; }
     public GameTdpSettings? Tdp { get; init; }
     public GamePowerModeSettings? PowerMode { get; init; }
+    public GameFpsLimitSettings? FpsLimit { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed record GameFpsLimitSettings
+{
+    public bool Enabled { get; init; }
+    public required int AcFps { get; init; }
+    public required int DcFps { get; init; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
 
 public sealed record GamePowerModeSettings

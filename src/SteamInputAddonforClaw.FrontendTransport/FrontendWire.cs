@@ -25,7 +25,10 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 8: Game Profile CPU Boost mutation changes from one combined AC/DC RPC
 // to independent AC and DC RPCs.
 // Version 10: per-game Display resolution snapshot and mutation RPC.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 12; } // v12 adds the developer-only MSI fan probe.
+// Version 11: Windows Power Mode contracts and RPCs.
+// Version 12: developer-only MSI fan probe contracts and RPCs.
+// Version 13: Intel Game Profile FPS Limit snapshot and mutation RPCs.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 13; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -51,7 +54,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SetOem1Mapping, SetWingMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, RunVibrationTest, OpenVibrationTestSession, CloseVibrationTestSession, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, OpenFanProbe, RunFanProbe }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SetOem1Mapping, SetWingMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, RunVibrationTest, OpenVibrationTestSession, CloseVibrationTestSession, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe }
 internal enum FrontendNotificationKind { StateInvalidated }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -78,6 +81,9 @@ internal sealed record SetGameProfileCpuBoostAcRequest(uint AppId, SteamInputAdd
 internal sealed record SetGameProfileCpuBoostDcRequest(uint AppId, SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetGameProfilePowerModeAcRequest(uint AppId, SteamInputAddonforClaw.Contracts.DeviceProfiles.WindowsPowerMode Mode);
 internal sealed record SetGameProfilePowerModeDcRequest(uint AppId, SteamInputAddonforClaw.Contracts.DeviceProfiles.WindowsPowerMode Mode);
+internal sealed record SetGameProfileFpsLimitEnabledRequest(uint AppId, bool Enabled);
+internal sealed record SetGameProfileFpsLimitAcRequest(uint AppId, int Fps);
+internal sealed record SetGameProfileFpsLimitDcRequest(uint AppId, int Fps);
 internal sealed record SetGameProfileTdpRequest(uint AppId, FrontendGameTdpConfiguration Configuration);
 internal sealed record SetGameProfileFavoriteRequest(uint AppId, bool Favorite, string? DisplayName);
 internal sealed record SetGameProfileResolutionRequest(uint AppId, FrontendGameResolution? Resolution, string? DisplayName);

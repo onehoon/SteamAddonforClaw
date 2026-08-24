@@ -70,6 +70,34 @@ internal sealed class GameProfileMutations
         => SetCpuBoost(appId, cpu => cpu with { Dc = mode });
     internal MutationOutcome SetPowerModeAc(uint appId, WindowsPowerMode mode) => SetPowerMode(appId, p => p with { Ac = mode });
     internal MutationOutcome SetPowerModeDc(uint appId, WindowsPowerMode mode) => SetPowerMode(appId, p => p with { Dc = mode });
+    internal MutationOutcome SetFpsLimitEnabled(uint appId, bool enabled)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile)) return MutationOutcome.Unavailable;
+            var fps = profile.Performance.FpsLimit ?? new GameFpsLimitSettings { Enabled = false, AcFps = 60, DcFps = 60 };
+            try { loaded.Document.Games[key] = profile with { Performance = profile.Performance with { FpsLimit = fps with { Enabled = enabled } } }; _store.Save(loaded.Document); return MutationOutcome.Succeeded; }
+            catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+    internal MutationOutcome SetFpsLimitAc(uint appId, int fps) => SetFpsLimitValue(appId, fps, true);
+    internal MutationOutcome SetFpsLimitDc(uint appId, int fps) => SetFpsLimitValue(appId, fps, false);
+    private MutationOutcome SetFpsLimitValue(uint appId, int fps, bool ac)
+    {
+        if (fps is < 40 or > 120) return MutationOutcome.InvalidTarget;
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile)) return MutationOutcome.Unavailable;
+            var current = profile.Performance.FpsLimit ?? new GameFpsLimitSettings { Enabled = false, AcFps = 60, DcFps = 60 };
+            var updated = ac ? current with { AcFps = fps } : current with { DcFps = fps };
+            try { loaded.Document.Games[key] = profile with { Performance = profile.Performance with { FpsLimit = updated } }; _store.Save(loaded.Document); return MutationOutcome.Succeeded; }
+            catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
 
     internal IReadOnlySet<uint> CaptureFavoriteAppIds()
     {

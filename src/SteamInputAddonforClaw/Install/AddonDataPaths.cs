@@ -19,6 +19,7 @@ internal static class AddonDataPaths
     /// persistent <c>-Data</c> root.</summary>
     internal static string ProfilesPath => ResolveProfilesPath(VelopackAppPaths.RootAppDirectory);
     internal static string DisplayResolutionRecoveryPath => Path.Combine(RootDirectory, "display-resolution-recovery.json");
+    internal static string IntelFpsLimitOwnershipPath => Path.Combine(RootDirectory, "intel-fps-limit-ownership.json");
 
     internal static string ResolveSettingsPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "settings.json");

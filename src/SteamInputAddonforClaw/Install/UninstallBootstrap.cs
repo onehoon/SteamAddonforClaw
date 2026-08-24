@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
+using SteamInputAddonforClaw.Profiles.Performance;
 
 namespace SteamInputAddonforClaw.Install;
 
@@ -28,10 +29,44 @@ internal static class UninstallBootstrap
         if (!runtimeReleased)
             return;
         var cefCleaned = Steam.SteamCefDebugBootstrap.RemoveOwnedMarker();
+        var fpsCleaned = TryCleanupOwnedIntelFpsForUninstall();
         TryDeleteDirectory(CenterM.CenterMHelperStaging.RuntimeDirectory);
         TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-        if (cefCleaned && !File.Exists(AddonDataPaths.RecoveryJournalPath))
+        if (cefCleaned && fpsCleaned && !File.Exists(AddonDataPaths.RecoveryJournalPath))
             AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
+    }
+
+    // This is deliberately a feature-local cleanup path. The marker is the only evidence that
+    // the Addon owns the global Intel limiter; without it uninstall must not touch Intel state.
+    internal static bool TryCleanupOwnedIntelFpsForUninstall(
+        string? ownershipPath = null,
+        Func<string?, IIntelFrameLimiter>? limiterFactory = null)
+    {
+        ownershipPath ??= AddonDataPaths.IntelFpsLimitOwnershipPath;
+        if (!File.Exists(ownershipPath)) return true;
+
+        try
+        {
+            using var limiter = (limiterFactory ?? (path => new IntelFrameLimiter(path)))(ownershipPath);
+            limiter.Initialize();
+            // Cleanup is intentionally independent from the 40-120 user-facing capability
+            // contract. A previously owned global limiter must still be retired after a driver
+            // update narrows that contract, as long as FRAME_LIMIT remains reachable.
+            if (!limiter.Disable(null, 0))
+            {
+                AppLog.Warn("Uninstall", "Owned Intel FPS limiter cleanup failed; preserving ownership evidence.");
+                return false;
+            }
+
+            File.Delete(ownershipPath);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Uninstall", "Intel FPS ownership cleanup failed; preserving ownership evidence.", exception,
+                ("OwnershipPath", ownershipPath));
+            return false;
+        }
     }
 
     private static void TryDeleteDirectory(string path)

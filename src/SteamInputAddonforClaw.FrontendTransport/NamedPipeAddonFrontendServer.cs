@@ -148,6 +148,12 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetGameProfilePowerModeAcAsync(FrontendWireCodec.Decode<SetGameProfilePowerModeAcRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfilePowerModeAcRequest>(p).Mode, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfilePowerModeDc
         ? FrontendWireCodec.Payload(await _inner.SetGameProfilePowerModeDcAsync(FrontendWireCodec.Decode<SetGameProfilePowerModeDcRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfilePowerModeDcRequest>(p).Mode, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileFpsLimitEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileFpsLimitEnabledAsync(FrontendWireCodec.Decode<SetGameProfileFpsLimitEnabledRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFpsLimitEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileFpsLimitAc
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileFpsLimitAcAsync(FrontendWireCodec.Decode<SetGameProfileFpsLimitAcRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFpsLimitAcRequest>(p).Fps, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileFpsLimitDc
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileFpsLimitDcAsync(FrontendWireCodec.Decode<SetGameProfileFpsLimitDcRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFpsLimitDcRequest>(p).Fps, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.OpenFanProbe
         ? FrontendWireCodec.Payload(await _inner.OpenFanProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RunFanProbe
