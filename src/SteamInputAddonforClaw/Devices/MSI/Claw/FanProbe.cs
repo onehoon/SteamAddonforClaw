@@ -53,6 +53,7 @@ internal static class FanProbeLogic
 
     internal static string ClassifyResumeState(byte[] fan1, byte[] fan2, byte ownership)
     {
+        if (fan1.Length < 8 || fan2.Length < 8) return "READ_FAILED";
         var armed = new byte[] { 75, 75, 75, 75, 75, 75 };
         var tablesPersisted = fan1.Skip(1).Take(6).SequenceEqual(armed) && fan2.Skip(1).Take(6).SequenceEqual(armed);
         var ownershipOn = (ownership & 0x80) != 0;
@@ -114,16 +115,18 @@ internal sealed class MsiFanHardwareProbe
             report.AppendLine("=== RESUME OBSERVATION ===");
             _delay(TimeSpan.FromMilliseconds(750));
             WritePhysicalSnapshot(report, "POST_RESUME");
+            string classification;
             if (TryReadFan(1, out _, out var fan1) && TryReadFan(2, out _, out var fan2) && _transport.TryGetAp(1, out var ap) && ap.Length > 0)
             {
-                var classification = FanProbeLogic.ClassifyResumeState(fan1, fan2, ap[0]);
+                classification = FanProbeLogic.ClassifyResumeState(fan1, fan2, ap[0]);
                 report.AppendLine($"Resume classification: {classification}");
                 report.AppendLine($"Resume custom table persisted: {(classification is "CUSTOM_PERSISTED" or "CURVE_PERSISTED_OWNERSHIP_LOST" ? "YES" : "NO")}");
                 report.AppendLine($"Resume ownership persisted: {(classification == "CUSTOM_PERSISTED" ? "YES" : "NO")}");
                 report.AppendLine($"Resume policy implication: {classification switch { "CUSTOM_PERSISTED" => "No reapply indicated by this observation.", "CURVE_PERSISTED_OWNERSHIP_LOST" => "Ownership reapply may be required; verify before production policy.", "FIRMWARE_AUTO_RESET" => "Firmware Auto reset observed; no automatic reapply is performed by this diagnostic.", _ => "Read state requires manual analysis." }}");
             }
-            else report.AppendLine("Resume classification: READ_FAILED");
-            observationOk = true;
+            else classification = "READ_FAILED";
+            if (classification == "READ_FAILED") report.AppendLine("Resume classification: READ_FAILED");
+            observationOk = classification != "READ_FAILED";
         }
         catch (Exception exception) { report.AppendLine($"Observation exception: {exception}"); }
         finally

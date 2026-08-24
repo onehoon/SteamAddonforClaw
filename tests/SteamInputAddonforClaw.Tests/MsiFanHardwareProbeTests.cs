@@ -206,6 +206,10 @@ public sealed class MsiFanHardwareProbeTests
     }
 
     [Fact]
+    public void Resume_state_classification_reports_malformed_read_as_failure()
+        => Assert.Equal("READ_FAILED", FanProbeLogic.ClassifyResumeState([1], [1], 0));
+
+    [Fact]
     public void Physical_response_does_not_pass_when_tach_is_unavailable()
     {
         var t = new FakeFanTransport { FailFan0Read = true };
