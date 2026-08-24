@@ -220,7 +220,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         try
         {
             if (_state != LifecycleState.Active || _canonicalSession is null || _canonicalSession.State != CanonicalSteamDeckSessionState.Active || _canonicalSession.PendingCleanupPhase != CanonicalPendingCleanupPhase.None || _busId == 0 || _deviceId == 0) return RoutingStageOperationResult.Failure("SteamDeckStructuralStateUnsafe");
-            if (!_canonicalSession.TryGetTrackedAttachmentState(out _) || _publisher is null) return RoutingStageOperationResult.Failure(_publisher is null ? "SteamDeckPublisherMissing" : "SteamDeckAttachmentNotAttached");
+            if (!_canonicalSession.TryGetTrackedAttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached) return RoutingStageOperationResult.Failure("SteamDeckAttachmentNotAttached");
+            if (_publisher is null) return RoutingStageOperationResult.Failure("SteamDeckPublisherMissing");
             if (!_presentationPaused && !_publisher.IsRunning) return RoutingStageOperationResult.Failure("SteamDeckPublisherNotRunning");
             if (_presentationPaused) return await ResumePresentationCoreAsync() ? RoutingStageOperationResult.Success("Repaired") : RoutingStageOperationResult.Failure("SteamDeckPresentationResumeFailed");
             return RoutingStageOperationResult.Success("Healthy");
