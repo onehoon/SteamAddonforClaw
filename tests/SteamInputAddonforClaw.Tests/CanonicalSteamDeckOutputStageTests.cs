@@ -1334,6 +1334,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         private readonly IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> _states;
         private readonly bool _directLookup;
         private int _index;
+        private IReadOnlyList<ControllerDeviceInfo> Current => _states[Math.Min(_index, _states.Count - 1)];
         public FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states, bool directLookup = false)
         {
             _directLookup = directLookup;
@@ -1350,12 +1351,16 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         {
             DirectLookupCalls++;
             if (!_directLookup) return null;
-            return _states.SelectMany(state => state).FirstOrDefault(device =>
+            return Current.FirstOrDefault(device =>
                 string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
         }
-        public IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId) =>
-            _states[^1].Where(device => device.Present && device.VendorId == vendorId && device.ProductId == productId)
+        public IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId)
+        {
+            var current = Current;
+            if (_index < _states.Count - 1) _index++;
+            return current.Where(device => device.Present && device.VendorId == vendorId && device.ProductId == productId)
                 .Select(device => device.InstanceId).ToArray();
+        }
 
         private static IReadOnlyList<ControllerDeviceInfo> CanonicalizeSyntheticState(IReadOnlyList<ControllerDeviceInfo> state)
         {

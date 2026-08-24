@@ -189,10 +189,10 @@ internal sealed class CanonicalViiperRuntime
         State == CanonicalViiperRuntimeState.Ready && _xbox360Created && _native.SetXbox360DeviceState(Xbox360DeviceHandle, state);
 
     /// <summary>
-    /// Staged initialization (work order section 2/26): NewUSBServer -&gt; CreateUSBBus -&gt;
+    /// Production staged initialization: NewUSBServer -&gt; CreateUSBBus -&gt;
     /// CreateSteamDeckDevice(autoAttach=false) -&gt; GetUSBDeviceIdentity -&gt;
-    /// GetUSBDeviceAttachmentState(Deck)==Detached -&gt; CreateXbox360Device(autoAttach=false) -&gt;
-    /// GetUSBDeviceIdentity -&gt; GetUSBDeviceAttachmentState(X360)==Detached. Any staged failure
+    /// GetUSBDeviceAttachmentState(Deck)==Detached -&gt; Ready. Dormant Xbox360
+    /// primitives are not part of production readiness. Any staged failure
     /// unwinds only the known-safe resources already acquired, in reverse order, and stops the
     /// moment a native result is not known-safe (no destructive cleanup past that point). Callers
     /// must fail routing closed rather than fall back to a second/legacy ownership path (work

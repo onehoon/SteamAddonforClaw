@@ -567,11 +567,12 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     {
         AppLog.Debug("RoutingTrace", "Steam Deck PnP cache lookup started.", ("Event", "PnpCacheLookupStarted"));
         var cachedIds = LoadIdentityCache();
-        if (TryResolveCachedIdentity(before, cachedIds, out var cachedResult, out var cachedSnapshot))
+        var cached = await TryResolveCachedIdentityAsync(before, cachedIds, token).ConfigureAwait(false);
+        if (cached.Success)
         {
             AppLog.Debug("RoutingTrace", "Steam Deck PnP cache hit; target-scoped enumeration skipped.",
                 ("Event", "PnpCacheHit"), ("IdentityCount", cachedIds.Count));
-            return (cachedResult, cachedSnapshot);
+            return (cached.Result, cached.Snapshot);
         }
 
         AppLog.Debug("RoutingTrace", "Steam Deck PnP cache miss; using full target-scoped discovery.",
@@ -626,19 +627,35 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             && targets.Any(device => IsHid(device) && HasMi(device, marker)));
     }
 
-    private bool TryResolveCachedIdentity(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds,
-        out ViiperVirtualDeviceResolution result, out IReadOnlyList<ControllerDeviceInfo> snapshot)
+    private async ValueTask<(bool Success, ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> TryResolveCachedIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds, CancellationToken token)
     {
-        result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "CachedIdentityUnavailable");
-        snapshot = [];
-        if (cachedIds.Count == 0) return false;
+        var result = new ViiperVirtualDeviceResolution(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "CachedIdentityUnavailable");
+        IReadOnlyList<ControllerDeviceInfo> snapshot = [];
+        if (cachedIds.Count == 0) return (false, result, snapshot);
 
         var beforeTargetIds = before
             .Where(device => device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId
                 && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId)
             .Select(device => device.InstanceId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (cachedIds.Any(beforeTargetIds.Contains)) return false;
+        if (cachedIds.Any(beforeTargetIds.Contains)) return (false, result, snapshot);
+
+        var deadline = DateTime.UtcNow + _pnPTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var currentTargetIds = _enumerator
+                .EnumeratePresentInstanceIds(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId)
+                .Where(id => !beforeTargetIds.Contains(id))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (currentTargetIds.Count == 0)
+            {
+                await Task.Delay(_pollInterval, token).ConfigureAwait(false);
+                continue;
+            }
+            if (!currentTargetIds.SetEquals(cachedIds)) return (false, result, snapshot);
+            break;
+        }
+        if (DateTime.UtcNow >= deadline) return (false, result, snapshot);
 
         var byId = new Dictionary<string, ControllerDeviceInfo>(StringComparer.OrdinalIgnoreCase);
         var pending = new Queue<string>(cachedIds);
@@ -647,7 +664,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             var id = pending.Dequeue();
             if (byId.ContainsKey(id)) continue;
             var device = _enumerator.FindPresentDevice(id);
-            if (device is null || !device.Present) return false;
+            if (device is null || !device.Present) return (false, result, snapshot);
             byId[device.InstanceId] = device;
             foreach (var ancestorId in device.AncestorInstanceIds)
                 if (!byId.ContainsKey(ancestorId)) pending.Enqueue(ancestorId);
@@ -660,19 +677,13 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         var index = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(candidateSnapshot);
         var cachedTargets = candidateSnapshot.Where(device => cachedIds.Contains(device.InstanceId)).ToArray();
         if (cachedTargets.Length != cachedIds.Count || cachedTargets.Any(device => !policy.IsMatchingCandidate(device, index)))
-            return false;
-        if (!HasCompleteCanonicalDeck(candidateSnapshot)) return false;
-
-        var currentTargetIds = _enumerator
-            .EnumeratePresentInstanceIds(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId)
-            .Where(id => !beforeTargetIds.Contains(id))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!currentTargetIds.SetEquals(cachedIds)) return false;
+            return (false, result, snapshot);
+        if (!HasCompleteCanonicalDeck(candidateSnapshot)) return (false, result, snapshot);
 
         result = _resolver.Resolve(before, candidateSnapshot);
         snapshot = candidateSnapshot;
-        return result.Succeeded && result.Devices.Select(device => device.InstanceId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(cachedIds);
+        return (result.Succeeded && result.Devices.Select(device => device.InstanceId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(cachedIds), result, snapshot);
     }
 
     internal static string? TestOnlyIdentityCachePath { get; set; }

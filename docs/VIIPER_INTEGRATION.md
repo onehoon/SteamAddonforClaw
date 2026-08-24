@@ -113,14 +113,15 @@ managed ABI binding for all of these exists in
 bool `AttachUSBDevice` / `DetachUSBDevice` surface remains available, but
 production Deck routing uses the classified attachment/query surface.
 
-`CanonicalViiperRuntime` currently creates one persistent detached-ready
-Xbox360 logical device alongside the persistent Steam Deck logical device.
-That Xbox360 handle, its mapper/publisher, and the Deck/Xbox360 presentation
-primitives are retained as dormant implementation foundation only. Production
-startup does not subscribe `GameBarForegroundWatcher`, so normal production
-routing never selects, attaches, or publishes the Xbox360 presentation. The
-same Steam Deck presentation remains authoritative for the full active Steam
-route.
+`CanonicalViiperRuntime` production initialization owns one USB server, one
+caller-owned bus, and one persistent detached-ready Steam Deck logical device.
+The typed Xbox360 ABI, mapper/publisher, and dormant presentation primitives are
+retained for possible future reuse, but production startup does not create an
+Xbox360 logical device and Steam Deck readiness/teardown does not depend on one.
+Production startup does not subscribe `GameBarForegroundWatcher`, so normal
+production routing never selects, attaches, or publishes the Xbox360
+presentation. The Steam Deck presentation remains authoritative for the full
+active Steam route.
 
 This distinction is application policy, not a VIIPER capability restriction.
 VIIPER's typed Xbox360 API remains supported and unchanged. The attachment
@@ -188,8 +189,8 @@ unknown.
 
 1. Load the pinned `libVIIPER.dll` for process lifetime.
 2. Initialize one `CanonicalViiperRuntime`: one server, one caller-owned bus,
-   one persistent detached-ready Steam Deck logical device, and one persistent
-   detached-ready Xbox360 logical device.
+   one persistent detached-ready Steam Deck logical device. Xbox360 primitives
+   remain dormant and are not part of production startup readiness.
 3. Treat the Steam Deck handle as the sole production Steam presentation. The
    Xbox360 handle remains dormant and unpublished during normal production
    routing.
@@ -199,7 +200,7 @@ unknown.
    Steam Deck input.
 6. On route exit, stop publisher/feedback, clear callback, neutralize, perform
    classified Deck detach, verify exact PnP absence, and complete recovery.
-7. Keep both logical handles and the caller-owned bus/server alive while the
+7. Keep the Deck logical handle and the caller-owned bus/server alive while the
    Runtime lives. Game Bar foreground does not attach or publish Xbox360 in
    production.
 8. Only after canonical routing shutdown succeeds, final Runtime teardown
@@ -214,10 +215,11 @@ later explicit reconciliation.
 
 **PR2a foundation / PR2b production composition:** the process/runtime-
 lifetime persistent owner described above is implemented as
-`CanonicalViiperRuntime`: one server, one caller-owned bus, one persistent
-Steam Deck logical device, and one persistent Xbox360 logical device, both
-created once as detached-ready (`autoAttachLocalhost: false`), with classified
-final teardown. `AddonRoutingRuntime` composes this owner once.
+`CanonicalViiperRuntime`: one server, one caller-owned bus, and one persistent
+Steam Deck logical device created once as detached-ready
+(`autoAttachLocalhost: false`), with classified final teardown. Xbox360
+primitives remain dormant and are not created by production startup.
+`AddonRoutingRuntime` composes this owner once.
 `CanonicalSteamDeckSession` borrows the persistent Deck handle and uses
 classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route. Final teardown is
 performed only by the runtime owner after routing shutdown succeeds; no second
@@ -226,9 +228,9 @@ not attached or published by the current production policy.
 ## PR2b production composition
 
 `AddonRoutingRuntime` owns one `CanonicalViiperRuntime` for its lifetime. That
-runtime owns one server, one caller-owned bus, one persistent detached-ready
-Steam Deck logical device, and one persistent detached-ready Xbox360 logical
-device. A Steam route creates only a short-lived session wrapper that borrows
+runtime owns one server, one caller-owned bus, and one persistent detached-ready
+Steam Deck logical device. Xbox360 primitives remain dormant. A Steam route
+creates only a short-lived session wrapper that borrows
 the Deck handle, verifies `Detached`, then uses classified
 `AttachUSBDeviceEx`. Route exit stops publisher/feedback, writes neutral state,
 and uses classified `DetachUSBDeviceEx`; it does not remove the logical device,
