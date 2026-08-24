@@ -174,7 +174,23 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetCpuBoostEnabled(appId, enabled) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: true, tdp: false));
+        var outcome = _gameProfileMutations?.SetCpuBoostEnabled(appId, enabled) ?? GameProfileMutations.MutationOutcome.Unavailable;
+        if (outcome != GameProfileMutations.MutationOutcome.Succeeded)
+            return Task.FromResult(MutateGame(appId, outcome, cpu: false, tdp: false));
+
+        if (appId == _actualRunningAppIdSource() && _cpuBoostRuntime is { } runtime)
+        {
+            var applied = runtime.ReconcileWithResult(appId);
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+            if (!applied.Succeeded)
+                return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.ApplyFailed, applied.FailureMessage ?? "CPU Boost apply failed.", CaptureGameProfile(appId)));
+        }
+        else
+        {
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+
+        return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Succeeded, null, CaptureGameProfile(appId)));
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileTdpEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default)

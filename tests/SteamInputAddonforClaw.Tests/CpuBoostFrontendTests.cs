@@ -116,6 +116,43 @@ public sealed class CpuBoostFrontendTests : IDisposable
     }
 
     [Fact]
+    public async Task Active_game_feature_toggle_reports_apply_failure_after_persistence()
+    {
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var store = new ProfileStore(profilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Disabled } } },
+            Games = new Dictionary<string, GameProfile>
+            {
+                ["12345"] = new GameProfile
+                {
+                    Enabled = true,
+                    Performance = new GamePerformanceOverrides
+                    {
+                        CpuBoost = new GameCpuBoostSettings { Enabled = false, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled },
+                        Tdp = new GameTdpSettings { Enabled = true, Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } }
+                    }
+                }
+            }
+        });
+        var runtime = new CpuBoostRuntime(store, policy);
+        runtime.SetActualAppIdSource(() => 12345);
+        runtime.StartupReconcile(12345);
+        var mutations = new GameProfileMutations(store);
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostEnabled(12345, false));
+        var control = CreateControl(runtime, mutations, () => 12345);
+        policy.FailNextApply = true;
+
+        var result = await control.SetGameProfileCpuBoostEnabledAsync(12345, true);
+
+        Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed, result.Outcome);
+        Assert.Contains("apply", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.True(store.Load().Document.Games["12345"].Performance.CpuBoost!.Enabled);
+    }
+
+    [Fact]
     public async Task Persistence_failure_remains_a_mutation_failure_and_is_never_hidden()
     {
         // No StartupReconcile() was ever called, so the runtime's persistence-writable flag is still
@@ -270,7 +307,7 @@ public sealed class CpuBoostFrontendTests : IDisposable
     private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime cpuBoostRuntime)
         => CreateControl(cpuBoostRuntime, null);
 
-    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime cpuBoostRuntime, GameProfileMutations? gameProfileMutations)
+    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime cpuBoostRuntime, GameProfileMutations? gameProfileMutations, Func<uint>? actualRunningAppIdSource = null)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -282,7 +319,7 @@ public sealed class CpuBoostFrontendTests : IDisposable
             new DeveloperTestModeState(),
             "",
             captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false),
-            cpuBoostRuntime: cpuBoostRuntime, gameProfileMutations: gameProfileMutations);
+            cpuBoostRuntime: cpuBoostRuntime, gameProfileMutations: gameProfileMutations, actualRunningAppIdSource: actualRunningAppIdSource);
     }
 
     public void Dispose()

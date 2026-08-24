@@ -84,7 +84,9 @@ internal sealed class CpuBoostRuntime
 
     /// <summary>Resolves the actual Steam AppID against the persisted Game/Device CPU policy.
     /// This path deliberately does not consume routing's effective session.</summary>
-    internal void Reconcile(uint actualAppId)
+    internal void Reconcile(uint actualAppId) => _ = ReconcileWithResult(actualAppId);
+
+    internal CpuBoostApplyResult ReconcileWithResult(uint actualAppId)
     {
         lock (_mutationGate.Sync)
         {
@@ -97,20 +99,18 @@ internal sealed class CpuBoostRuntime
             if (!loaded.CanSafelyReplace)
             {
                 UpdateSnapshot(_powerPolicy.Read(), null, null, enabled: false);
-                return;
+                return new CpuBoostApplyResult(false, false, "Profile state is not safe to replace.");
             }
 
             if (TryGetGameCpu(loaded.Document, actualAppId, out var gameAc, out var gameDc))
-            {
-                ReconcileWindows(gameAc, gameDc, loaded.Document.Device.Performance.CpuBoost, "actual AppID game reconcile");
-                return;
-            }
+                return ReconcileWindows(gameAc, gameDc, loaded.Document.Device.Performance.CpuBoost, "actual AppID game reconcile");
 
             var device = loaded.Document.Device.Performance.CpuBoost;
             if (device is { Enabled: true, Ac: { } deviceAc, Dc: { } deviceDc })
-                ReconcileWindows(deviceAc, deviceDc, device, "actual AppID device reconcile");
-            else
-                RefreshSnapshotAfterApply(device, CpuBoostApplyResult.NoOp);
+                return ReconcileWindows(deviceAc, deviceDc, device, "actual AppID device reconcile");
+
+            RefreshSnapshotAfterApply(device, CpuBoostApplyResult.NoOp);
+            return CpuBoostApplyResult.NoOp;
         }
     }
 
