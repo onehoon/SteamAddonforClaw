@@ -442,6 +442,9 @@ public sealed class QamFrontendContractTests
         Assert.Contains("profileTdpDraft?.dc?.pl2Watts", source);
         Assert.Contains("profile-fps-section", source);
         Assert.Contains("Intel FPS Limit", source);
+        Assert.Contains("label: \"Intel FPS Limit\"", source);
+        Assert.Contains("fps.unavailableReason || \"Intel FPS Limit is unavailable.\"", source);
+        Assert.DoesNotContain("key: \"profile-fps-section\", title:", source);
         Assert.Contains("min: 40, max: 120, step: 1", source);
         Assert.Contains("`${currentValue} FPS`", source);
         Assert.Contains("value: currentValue", source);
@@ -464,8 +467,11 @@ public sealed class QamFrontendContractTests
         var profileLayout = source[profileStart..tdpSection];
 
         Assert.Contains("const profilePowerControls", profileLayout);
-        Assert.Contains("key: \"profile-power-section\", title: \"Windows Power Mode\"", profileLayout);
-        Assert.Contains("key: \"profile-cpu-section\", title: \"CPU Boost\"", profileLayout);
+        Assert.Contains("key: \"profile-power-section\"", profileLayout);
+        Assert.Contains("key: \"profile-cpu-section\"", profileLayout);
+        Assert.DoesNotContain("key: \"profile-power-section\", title:", profileLayout);
+        Assert.DoesNotContain("key: \"profile-cpu-section\", title:", profileLayout);
+        Assert.DoesNotContain("key: \"profile-tdp-section\", title:", source);
         var cpuSection = profileLayout.IndexOf("key: \"profile-cpu-section\"", StringComparison.Ordinal);
         var powerSection = profileLayout.IndexOf("key: \"profile-power-section\"", StringComparison.Ordinal);
         var cpuLayout = profileLayout[cpuSection..powerSection];

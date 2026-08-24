@@ -186,7 +186,23 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetPowerModeEnabled(appId, enabled) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: false, power: true));
+        var outcome = _gameProfileMutations?.SetPowerModeEnabled(appId, enabled) ?? GameProfileMutations.MutationOutcome.Unavailable;
+        if (outcome != GameProfileMutations.MutationOutcome.Succeeded)
+            return Task.FromResult(MutateGame(appId, outcome, cpu: false, tdp: false));
+
+        if (appId == _actualRunningAppIdSource() && _powerModeRuntime is { } runtime)
+        {
+            var applied = runtime.ReconcileWithResult(appId);
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+            if (!applied.Succeeded)
+                return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.ApplyFailed, applied.FailureMessage ?? "Power Mode apply failed.", CaptureGameProfile(appId)));
+        }
+        else
+        {
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+
+        return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Succeeded, null, CaptureGameProfile(appId)));
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) =>

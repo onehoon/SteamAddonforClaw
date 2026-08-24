@@ -914,19 +914,20 @@
         };
         const fpsSlider = (label, side, value) => { const currentValue = state.qamSliderCommits?.get(`profile-fps-${side}`)?.value ?? fpsDraft[side] ?? value; return React.createElement(native.SliderField, { label: labelRow(label, `${currentValue} FPS`), min: 40, max: 120, step: 1, value: currentValue, disabled: !fps.available || !profile.persistenceWritable || !enabled || !fps.enabled || busy, onChange: next => scheduleFps(side, Number(next)) }); };
         const fpsControls = [
-          { key: "fps-toggle", node: React.createElement(native.ToggleField, { label: "FPS Limit", checked: !!fps.enabled, disabled: !fps.available || !writable || !enabled, onChange: value => { if (!value) cancelQamSliderCommits(key => key.startsWith("profile-fps-")); void runFpsMutation("setActiveGameFpsLimitEnabled", { enabled: !!value }); } }) },
-          ...(!fps.enabled ? [] : [
+          { key: "fps-toggle", node: React.createElement(native.ToggleField, { label: "Intel FPS Limit", checked: !!fps.enabled, disabled: !fps.available || !writable || !enabled, onChange: value => { if (!value) cancelQamSliderCommits(key => key.startsWith("profile-fps-")); void runFpsMutation("setActiveGameFpsLimitEnabled", { enabled: !!value }); } }) },
+          ...(!fps.available ? [{ key: "fps-unavailable", node: React.createElement("div", null, fps.unavailableReason || "Intel FPS Limit is unavailable.") }] : []),
+          ...(fps.available && fps.enabled ? [
           { key: "fps-ac", node: fpsSlider("Plugged in", "ac", fps.acFps ?? 60) },
           { key: "fps-dc", node: fpsSlider("On battery", "dc", fps.dcFps ?? 60) },
-          ]),
+          ] : []),
         ];
         return React.createElement(React.Fragment, null,
           displayError ? React.createElement("p", { key: "error" }, displayError) : null,
           React.createElement(native.PanelSection, { key: "profile-header", title: profile.displayName || `Game ${profile.appId}` }, React.createElement(native.PanelSectionRow, { key: "profile-toggle" }, React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }))),
-          React.createElement(native.PanelSection, { key: "profile-cpu-section", title: "CPU Boost" }, ...profileCpuControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
-          profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section", title: "Windows Power Mode" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null,
-          React.createElement(native.PanelSection, { key: "profile-tdp-section", title: "TDP Control" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
-          React.createElement(native.PanelSection, { key: "profile-fps-section", title: "Intel FPS Limit" }, ...fpsControls.map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))));
+          React.createElement(native.PanelSection, { key: "profile-cpu-section" }, ...profileCpuControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
+          profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null,
+          React.createElement(native.PanelSection, { key: "profile-tdp-section" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
+          React.createElement(native.PanelSection, { key: "profile-fps-section" }, ...fpsControls.map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))));
       }
 
       return React.createElement(React.Fragment, null,
