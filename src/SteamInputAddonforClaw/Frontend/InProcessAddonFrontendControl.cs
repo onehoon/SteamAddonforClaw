@@ -133,33 +133,28 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (outcome != GameProfileMutations.MutationOutcome.Succeeded)
             return Task.FromResult(MutateGame(appId, outcome, cpu: true, tdp: true));
 
-        // Keep the existing CPU/TDP reconcile behavior, then surface an active-profile
-        // Power Mode apply failure without rolling back the persisted profile toggle.
+        // Keep the existing CPU/TDP reconcile behavior, then give each active-profile
+        // sibling a chance to converge independently without rolling back persistence.
         ReconcileGame(appId, cpu: true, tdp: true);
-        if (appId == _actualRunningAppIdSource() && _powerModeRuntime is { } powerModeRuntime)
+        string? applyFailure = null;
+        if (appId == _actualRunningAppIdSource())
         {
-            var applied = powerModeRuntime.ReconcileWithResult(appId);
-            StateInvalidated?.Invoke(this, EventArgs.Empty);
-            if (!applied.Succeeded)
-                return Task.FromResult(new FrontendGameProfileMutationResult(
-                    FrontendGameProfileMutationOutcome.ApplyFailed,
-                    applied.FailureMessage,
-                    CaptureGameProfile(appId)));
+            if (_powerModeRuntime is { } powerModeRuntime)
+            {
+                var applied = powerModeRuntime.ReconcileWithResult(appId);
+                if (!applied.Succeeded) applyFailure = applied.FailureMessage ?? "Power Mode apply failed.";
+            }
+            if (_intelFpsRuntime is { } fpsRuntime)
+            {
+                var applied = fpsRuntime.ReconcileWithResult(appId);
+                if (!applied && applyFailure is null) applyFailure = "Intel FPS Limit apply failed.";
+            }
         }
-        if (appId == _actualRunningAppIdSource() && _intelFpsRuntime is { } fpsRuntime)
-        {
-            var applied = fpsRuntime.ReconcileWithResult(appId);
-            StateInvalidated?.Invoke(this, EventArgs.Empty);
-            if (!applied) return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.ApplyFailed, "Intel FPS Limit apply failed.", CaptureGameProfile(appId)));
-        }
-        else
-        {
-            StateInvalidated?.Invoke(this, EventArgs.Empty);
-        }
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
 
         return Task.FromResult(new FrontendGameProfileMutationResult(
-            FrontendGameProfileMutationOutcome.Succeeded,
-            null,
+            applyFailure is null ? FrontendGameProfileMutationOutcome.Succeeded : FrontendGameProfileMutationOutcome.ApplyFailed,
+            applyFailure,
             CaptureGameProfile(appId)));
     }
 

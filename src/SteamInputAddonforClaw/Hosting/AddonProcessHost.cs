@@ -78,7 +78,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal AddonProcessHost(string[]? updateRestartArguments,
         Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
         string? testOnlyDataRoot = null,
-        Func<string>? testFrontendPipeNameFactory = null)
+        Func<string>? testFrontendPipeNameFactory = null,
+        Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null)
     {
         _updateRestartArguments = updateRestartArguments;
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
@@ -94,7 +95,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
         _displayResolutionRuntime = new(_profileStore, _profileMutationGate, testOnlyDataRoot);
-        _intelFpsRuntime = new(_profileStore, _profileMutationGate, new IntelFrameLimiter(testOnlyDataRoot is null ? null : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json")), marker: testOnlyDataRoot is null ? null : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json"));
+        var fpsMarker = testOnlyDataRoot is null ? AddonDataPaths.IntelFpsLimitOwnershipPath : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json");
+        var fpsLimiter = testIntelFrameLimiterFactory?.Invoke(fpsMarker) ?? (testOnlyDataRoot is null ? new IntelFrameLimiter(fpsMarker) : new UnavailableIntelFrameLimiter());
+        _intelFpsRuntime = new(_profileStore, _profileMutationGate, fpsLimiter, marker: fpsMarker);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
@@ -330,6 +333,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode startup reconcile failed.", exception); }
         try
         {
+            _intelFpsRuntime.Initialize();
             _intelFpsRuntime.StartupRecover();
             _intelFpsRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0);
             _intelFpsPowerSource = new WindowsIntelFpsPowerNotificationSource();

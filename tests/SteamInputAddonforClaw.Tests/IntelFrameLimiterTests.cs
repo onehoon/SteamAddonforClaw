@@ -6,6 +6,10 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class IntelFrameLimiterTests
 {
+    [Fact]
+    public void Projected_igcl_x64_layout_matches_the_native_struct_sizes() =>
+        Assert.True(NativeIgcl.AbiLayoutIsExpectedForTests());
+
     [Theory]
     [InlineData(41, 300, 1, false)]
     [InlineData(30, 119, 1, false)]
@@ -112,6 +116,7 @@ public sealed class IntelFrameLimiterTests
 
     private sealed class FakeLimiter : IIntelFrameLimiter
     {
+        public void Initialize() { }
         public bool Available => true; public string? UnavailableReason => null; public IntelFpsCapability? Capability => new(30, 300, 1, 2, 0, true); public bool LastEnable; public bool LastDisable; public int LastFps; public int EnableCalls; public int DisableCalls; public bool DisableResult = true;
         public bool Enable(int fps, FpsPowerSource source, uint appId) { EnableCalls++; LastEnable = true; LastDisable = false; LastFps = fps; return true; }
         public bool Disable(FpsPowerSource? source, uint appId) { DisableCalls++; LastDisable = true; LastEnable = false; return DisableResult; }
