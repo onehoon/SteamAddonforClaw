@@ -116,7 +116,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_attached_without_owned_pnp_fails_without_mutation()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [], [], [], []]), new FakeHidHide());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [], [], []]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         var traceCount = session.Trace.Count;
@@ -146,7 +146,8 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_does_not_adopt_foreign_matching_pnp()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), Device("foreign")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide());
+        var foreign = DeviceWithContainer("USB\\VID_28DE&PID_1205\\foreign", Guid.NewGuid());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), foreign], [UsbIpHost(), Device("owned"), foreign], [UsbIpHost(), Device("owned"), foreign]]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -1010,7 +1011,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
-            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid], // complete composite identity
+            [UsbIpHost(), controllerLeaf], // first composite member
+            [UsbIpHost(), controllerLeaf, keyboardLeaf, keyboardHid], // growing logical group
+            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid], // complete group
             [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid],
             [], // rollback: all three verified absent after native remove
         ]), new FakeHidHide());
@@ -1098,7 +1101,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.True(result.Succeeded, result.Reason);
+        Assert.False(result.Succeeded);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 

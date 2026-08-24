@@ -582,6 +582,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         ViiperVirtualDeviceResolution result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear");
         IReadOnlyList<ControllerDeviceInfo> snapshot;
         var firstCandidateLogged = false;
+        string? pendingSignature = null;
         while (true)
         {
             snapshot = _enumerator.EnumeratePresentDevices(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId);
@@ -597,11 +598,29 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Ambiguous)
                 return (result, snapshot);
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)
-                return (result, snapshot);
+            {
+                var signature = BuildResolvedIdentitySignature(result);
+                if (StringComparer.OrdinalIgnoreCase.Equals(pendingSignature, signature))
+                    return (result, snapshot);
+                pendingSignature = signature;
+            }
+            else
+            {
+                pendingSignature = null;
+            }
             if (DateTime.UtcNow >= deadline) break;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }
         return (new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear"), snapshot);
+    }
+
+    private static string BuildResolvedIdentitySignature(ViiperVirtualDeviceResolution resolved)
+    {
+        var logicalKey = ControllerLogicalIdentity.GetLogicalKey(resolved.Devices[0]);
+        var ids = resolved.Devices.Select(device => device.InstanceId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase);
+        return $"{logicalKey}\\^_{string.Join("\\^_", ids)}";
     }
 
     private async ValueTask<(bool Success, ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> TryResolveCachedIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds, DateTime deadline, CancellationToken token)
@@ -628,7 +647,13 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 await Task.Delay(_pollInterval, token).ConfigureAwait(false);
                 continue;
             }
-            if (!currentTargetIds.SetEquals(cachedIds)) return (false, result, snapshot);
+            if (currentTargetIds.Any(id => !cachedIds.Contains(id)))
+                return (false, result, snapshot);
+            if (!currentTargetIds.SetEquals(cachedIds))
+            {
+                await Task.Delay(_pollInterval, token).ConfigureAwait(false);
+                continue;
+            }
             break;
         }
         if (DateTime.UtcNow >= deadline) return (false, result, snapshot);
