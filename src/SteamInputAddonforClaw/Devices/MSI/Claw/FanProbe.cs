@@ -90,7 +90,7 @@ internal sealed class MsiFanHardwareProbe
             return false;
         }
         var curve = (byte[])fan1Duties.Clone(); curve[2] = sharedPoint;
-        report.AppendLine("=== SHARED CURVE TEST ==="); _hardwareWritesStarted = true; var shared1 = _transport.TrySetFan(1, WithDuties(fan1, curve)) && TryReadFan(1, out var after1) && after1.Skip(1).Take(6).SequenceEqual(curve); var shared2 = shared1 && _transport.TrySetFan(2, WithDuties(fan2, curve)) && TryReadFan(2, out var after2) && after2.Skip(1).Take(6).SequenceEqual(curve);
+        report.AppendLine("=== SHARED CURVE TEST ==="); var shared1 = TryWriteDutiesRmw(1, curve, out _, out _, out _); var shared2 = shared1 && TryWriteDutiesRmw(2, curve, out _, out _, out _);
         report.AppendLine($"Fan 1/Fan 2 shared curve verification: {(shared1 && shared2 ? "PASS" : "FAIL")}"); if (!(shared1 && shared2)) return false;
         var ownership = SetOwnership(true); report.AppendLine($"Custom ownership enable: {(ownership ? "PASS" : "FAIL")}"); if (!ownership) return false;
         return true;
@@ -98,11 +98,19 @@ internal sealed class MsiFanHardwareProbe
     private bool WriteRestore(StringBuilder report, FanProbeModel model) { var restored = RestoreFirmwareAuto(); report.AppendLine($"Firmware Auto hand-back: {(restored ? "PASS" : "FAIL")}"); return restored; }
     private bool TestBlock(StringBuilder report, int block, byte[] original)
     {
-        if (original.Length < 8) { report.AppendLine($"Fan {block}: FAIL short payload"); return false; } var point = 2; if (!TryGetSafeIncrement(original[point], out var next)) { report.AppendLine($"Fan {block}: SKIPPED bounded delta; current duty {original[point]} is outside the conservative test range."); return true; }
-        var otherBlock = block == 1 ? 2 : 1; var otherBefore = TryReadFan(otherBlock, out var otherPayload) ? otherPayload : null;
-        var requested = (byte[])original.Clone(); requested[point] = next; _hardwareWritesStarted = true; var wrote = _transport.TrySetFan(block, requested); byte[] back = []; var read = wrote && TryReadFan(block, out back); var requestBoundaries = requested[0] == original[0] && requested[7] == original[7]; var dutiesVerified = read && back.Length >= 8 && back.Skip(1).Take(6).SequenceEqual(requested.Skip(1).Take(6)); report.AppendLine($"Fan {block} RMW point {point} {original[point]} -> {next}: request byte0/byte7 preserved: {requestBoundaries}; owned duty readback: {(dutiesVerified ? "PASS" : "FAIL")}");
-        var otherAfter = TryReadFan(otherBlock, out var otherPayloadAfter) ? otherPayloadAfter : null; var unexpected = otherBefore is null || otherAfter is null ? "UNKNOWN" : otherBefore.Skip(1).Take(6).SequenceEqual(otherAfter.Skip(1).Take(6)) ? "NO" : "YES"; report.AppendLine($"Fan {otherBlock} changed unexpectedly during Fan {block} write: {unexpected}");
-        var restored = _transport.TrySetFan(block, original) && TryReadFan(block, out var final) && final!.Skip(1).Take(6).SequenceEqual(original.Skip(1).Take(6)); report.AppendLine($"Fan {block} restore: {(restored ? "PASS" : "FAIL")}"); return dutiesVerified && requestBoundaries && restored;
+        if (original.Length < 8) { report.AppendLine($"Fan {block}: FAIL short payload"); return false; } var point = 2; var originalDuties = original.Skip(1).Take(6).ToArray(); if (!TryGetSafeIncrement(original[point], out var next)) { report.AppendLine($"Fan {block}: SKIPPED bounded delta; current duty {original[point]} is outside the conservative test range."); return true; }
+        var otherBlock = block == 1 ? 2 : 1; if (!TryReadFan(otherBlock, out var otherBefore)) { report.AppendLine($"Fan {otherBlock} changed unexpectedly during Fan {block} write: UNKNOWN"); return false; } var otherDutiesBefore = otherBefore.Skip(1).Take(6).ToArray();
+        var requestedDuties = (byte[])originalDuties.Clone(); requestedDuties[point - 1] = next; var wrote = TryWriteDutiesRmw(block, requestedDuties, out var back, out _, out var requestBoundaries); var dutiesVerified = wrote && back.Skip(1).Take(6).SequenceEqual(requestedDuties); report.AppendLine($"Fan {block} RMW point {point} {original[point]} -> {next}: request byte0/byte7 preserved: {requestBoundaries}; owned duty readback: {(dutiesVerified ? "PASS" : "FAIL")}");
+        var otherUnchanged = TryReadFan(otherBlock, out var otherAfter) && otherAfter.Skip(1).Take(6).SequenceEqual(otherDutiesBefore); report.AppendLine($"Fan {otherBlock} changed unexpectedly during Fan {block} write: {(otherUnchanged ? "NO" : "YES/UNKNOWN")}"); if (!otherUnchanged) { _ = TryWriteDutiesRmw(otherBlock, otherDutiesBefore, out _, out _, out _); return false; }
+        var restored = TryWriteDutiesRmw(block, originalDuties, out _, out _, out _); report.AppendLine($"Fan {block} restore: {(restored ? "PASS" : "FAIL")}"); return dutiesVerified && requestBoundaries && restored;
+    }
+
+    private bool TryWriteDutiesRmw(int block, byte[] duties, out byte[] readback, out byte[] requested, out bool requestBoundaries)
+    {
+        readback = []; requested = []; requestBoundaries = false;
+        if (duties.Length != 6 || !TryReadFan(block, out var current)) return false;
+        requested = (byte[])current.Clone(); duties.CopyTo(requested, 1); requestBoundaries = requested[0] == current[0] && requested[7] == current[7]; _hardwareWritesStarted = true;
+        return _transport.TrySetFan(block, requested) && TryReadFan(block, out readback) && readback.Skip(1).Take(6).SequenceEqual(duties);
     }
     private bool RestoreFirmwareAuto()
     {
