@@ -6,9 +6,9 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class HowToUsePage : UserControl
 {
     internal const string EnglishDocumentationUrl =
-        "https://github.com/onehoon/SteamInputAddonforClaw#readme";
+        "https://github.com/onehoon/SteamAddonforClaw#readme";
     internal const string KoreanDocumentationUrl =
-        "https://github.com/onehoon/SteamInputAddonforClaw/wiki/Korean-User-Guide";
+        "https://github.com/onehoon/SteamAddonforClaw/wiki/Korean-User-Guide";
 
     private bool _activated;
 
