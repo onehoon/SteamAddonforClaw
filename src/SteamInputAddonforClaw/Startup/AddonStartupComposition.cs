@@ -13,7 +13,6 @@ namespace SteamInputAddonforClaw.Startup;
 
 internal sealed record AddonStartupComposition(
     StartupCoordinator Coordinator,
-    AddonOwnedVirtualDeviceTracker AddonOwnedVirtualDeviceTracker,
     HandheldDeviceRegistry DeviceRegistry,
     IHandheldDeviceAdapter HandheldDeviceAdapter,
     IControllerEnvironmentAssessmentProvider ControllerEnvironmentAssessmentProvider,
@@ -26,8 +25,7 @@ internal static class AddonStartupCompositionFactory
     {
         var deviceEnumerator = new WindowsControllerDeviceEnumerator();
         var msiClawAdapter = new MsiClawDeviceAdapter(deviceEnumerator);
-        var addonOwnedVirtualDeviceTracker = new AddonOwnedVirtualDeviceTracker();
-        var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher, addonOwnedVirtualDeviceTracker);
+        var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
         var controllerSoftwareProviders = new IControllerSoftwareStatusProvider[]
         {
@@ -46,13 +44,11 @@ internal static class AddonStartupCompositionFactory
             recoveryJournalStore: recoveryJournalStore,
             stockCenterMBaseline: stockCenterMBaseline,
             hidHideRecoveryCleaner: new StartupHidHideRecoveryCleaner(new HidHideDriverClient()),
-            virtualOutputRecoveryInspector: new StartupVirtualOutputRecoveryInspector(deviceEnumerator),
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
             hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
 
         return new AddonStartupComposition(
             coordinator,
-            addonOwnedVirtualDeviceTracker,
             deviceRegistry,
             msiClawAdapter,
             controllerEnvironmentAssessmentProvider,

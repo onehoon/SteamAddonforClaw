@@ -13,8 +13,7 @@ internal sealed class SystemStatusProvider(
     IControllerEnvironmentAssessmentProvider environmentAssessmentProvider,
     IRuntimePrerequisiteInspector prerequisiteInspector,
     Func<SteamSessionState> steamStateProvider,
-    Func<bool> recoverySafeProvider,
-    Func<bool> addonOwnedOutputIdentityUncertainProvider) : ISystemStatusProvider
+    Func<bool> recoverySafeProvider) : ISystemStatusProvider
 {
     internal SystemStatusProvider(
         IDeviceInformationProvider deviceInformationProvider,
@@ -23,11 +22,10 @@ internal sealed class SystemStatusProvider(
         IReadOnlyList<IControllerSoftwareStatusProvider> softwareProviders,
         IRuntimePrerequisiteInspector prerequisiteInspector,
         Func<SteamSessionState> steamStateProvider,
-        Func<bool> recoverySafeProvider,
-        Func<bool> addonOwnedOutputIdentityUncertainProvider)
+        Func<bool> recoverySafeProvider)
         : this(deviceInformationProvider, deviceProbeContextFactory, hardwareCompatibilityEvaluator,
             new ControllerEnvironmentAssessmentProvider(softwareProviders), prerequisiteInspector, steamStateProvider,
-            recoverySafeProvider, addonOwnedOutputIdentityUncertainProvider)
+            recoverySafeProvider)
     {
     }
     public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) =>
@@ -45,14 +43,12 @@ internal sealed class SystemStatusProvider(
         var prerequisites = prerequisiteInspector.Inspect();
         var steam = TrySteamState();
         var recoverySafe = TryRecoverySafety();
-        var addonOwnedOutputIdentityUncertain = TryAddonOwnedOutputIdentityUncertain();
-        var decision = RoutingEligibilityPolicy.Evaluate(new RoutingPolicyInput(steam, hardwareCompatibility, compatibility, prerequisites, recoverySafe, addonOwnedOutputIdentityUncertain));
+        var decision = RoutingEligibilityPolicy.Evaluate(new RoutingPolicyInput(steam, hardwareCompatibility, compatibility, prerequisites, recoverySafe));
         var addon = AddonStatusEvaluator.Map(decision, compatibility);
         AppLog.Debug("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
-        return new SystemStatusSnapshot(device, hardwareCompatibility, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId, steam.Source), decision, addon, recoverySafe, addonOwnedOutputIdentityUncertain);
+        return new SystemStatusSnapshot(device, hardwareCompatibility, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId, steam.Source), decision, addon, recoverySafe);
     }
 
     private SteamSessionState TrySteamState() { try { return steamStateProvider(); } catch { return SteamSessionState.FromRunningAppId(0); } }
     private bool TryRecoverySafety() { try { return recoverySafeProvider(); } catch { return false; } }
-    private bool TryAddonOwnedOutputIdentityUncertain() { try { return addonOwnedOutputIdentityUncertainProvider(); } catch { return true; } }
 }

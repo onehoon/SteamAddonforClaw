@@ -21,7 +21,7 @@ public sealed class FrontendContractTests
         new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
         new(true, 480, FrontendSteamSource.BigPicture),
         new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.OverrideActive, true, true, true),
-        FrontendAddonOperationalStatus.Ready, "Eligible", true, false,
+        FrontendAddonOperationalStatus.Ready, "Eligible", true,
         FrontendSetupStatus.Complete, "Complete", false);
 
     [Fact]
@@ -132,13 +132,6 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
-    public void Mapper_preserves_addon_owned_output_identity_uncertain()
-    {
-        var mapped = Snapshot(addonOwnedOutputIdentityUncertain: true);
-        Assert.True(mapped.AddonOwnedOutputIdentityUncertain);
-    }
-
-    [Fact]
     public void Mapper_translates_routing_operational_state_passive() =>
         Assert.Equal(FrontendRoutingOperationalState.Passive, Snapshot(routingOperationalState: RoutingOperationalState.Passive).Routing.OperationalState);
 
@@ -176,11 +169,9 @@ public sealed class FrontendContractTests
         var mapped = Snapshot(
             hardwareStatus: HardwareCompatibilityStatus.Indeterminate,
             recoverySafe: false,
-            addonOwnedOutputIdentityUncertain: true,
             routingReason: RoutingDecisionReason.DeviceCompatibilityIndeterminate);
 
         Assert.False(mapped.RecoverySafe);
-        Assert.True(mapped.AddonOwnedOutputIdentityUncertain);
         Assert.Equal(FrontendHardwareStatus.Indeterminate, mapped.Hardware.Status);
         Assert.Equal(FrontendRoutingOperationalState.Passive, mapped.Routing.OperationalState);
         Assert.False(mapped.CanInstallRequiredComponents);
@@ -261,7 +252,6 @@ public sealed class FrontendContractTests
         uint steamAppId = 0,
         SteamSessionSource steamSource = SteamSessionSource.Actual,
         bool recoverySafe = true,
-        bool addonOwnedOutputIdentityUncertain = false,
         RoutingDecisionReason routingReason = RoutingDecisionReason.Eligible,
         RoutingOperationalState routingOperationalState = RoutingOperationalState.Passive,
         bool routingAvailable = true,
@@ -279,8 +269,7 @@ public sealed class FrontendContractTests
             new(steamActive, steamAppId, steamSource),
             new(RoutingDecisionKind.Eligible, routingReason),
             new(addonStatus, "Test"),
-            recoverySafe,
-            addonOwnedOutputIdentityUncertain);
+            recoverySafe);
 
         return FrontendSnapshotMapper.Map(runtime, new RoutingRuntimeStatusSnapshot(routingAvailable, routingOperationalState, steamOutputActive, nativeDirectInputActive));
     }

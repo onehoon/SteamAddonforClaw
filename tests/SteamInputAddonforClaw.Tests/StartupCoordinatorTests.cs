@@ -183,14 +183,13 @@ public sealed class StartupCoordinatorTests
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
-            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner,
-            virtualOutputRecoveryInspector: new UnsafeInspector());
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.False(result.RecoverySafe);
+        Assert.True(result.RecoverySafe);
         Assert.Equal(1, cleaner.CallCount);
-        Assert.Equal(0, store.DeleteCallCount);
+        Assert.Equal(1, store.DeleteCallCount);
         // The cleaner only ever receives the journal + IHidHideClient (see
         // StartupHidHideRecoveryCleaner), so it structurally cannot replay native or VIIPER
         // state -- there is no such dependency for it to call.
@@ -205,20 +204,15 @@ public sealed class StartupCoordinatorTests
                 [new(Guid.NewGuid(), "steamdeck", 0x28DE, 0x1205, [], [])]));
         var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
-        var inspector = new SequencedVirtualOutputInspector(
-            new(true, "StableSafeAbsence"),
-            new(false, "ResidualOrAmbiguousVirtualDevicePresent"));
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
-            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner,
-            virtualOutputRecoveryInspector: inspector);
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.False(result.RecoverySafe);
+        Assert.True(result.RecoverySafe);
         Assert.Equal(1, cleaner.CallCount);
-        Assert.Equal(2, inspector.CallCount);
-        Assert.Equal(0, store.DeleteCallCount);
+        Assert.Equal(1, store.DeleteCallCount);
     }
 
     [Fact]

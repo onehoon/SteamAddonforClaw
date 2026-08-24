@@ -24,13 +24,9 @@ internal sealed record SystemStatusSnapshot(
     SteamStatusSnapshot Steam,
     RoutingDecision RoutingDecision,
     AddonStatusSnapshot Addon,
-    // Both of the following are safety-boundary fields with no safe default: a snapshot-construction
+    // This is a safety-boundary field with no safe default: a snapshot-construction
     // path that forgets to pass one must fail to compile rather than silently resolve to "safe".
-    bool RecoverySafe,
-    // Raw addon-owned VIIPER output identity safety signal (AddonOwnedVirtualDeviceTracker.HasUncertainOwnership),
-    // preserved independently of RoutingDecision so it is inspectable/testable, and consumed directly by
-    // FirstTimeSetupPolicy so prerequisite (re)installation stays blocked while ownership is unverifiable.
-    bool AddonOwnedOutputIdentityUncertain);
+    bool RecoverySafe);
 
 internal interface IDeviceInformationProvider { DeviceStatusSnapshot Capture(DeviceProbeContext context); }
 internal interface ISystemStatusProvider { Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default); }

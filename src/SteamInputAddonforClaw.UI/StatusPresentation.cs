@@ -52,13 +52,12 @@ internal static class StatusPresentation
     };
 
     /// <summary>
-    /// True only when recovery/ownership/compatibility state is trustworthy enough to report an
+    /// True only when recovery/compatibility state is trustworthy enough to report an
     /// actual controller status. RoutingEligibilityPolicy checks these same conditions first and
     /// fails routing safe on them, so Status must not guess a controller state past this point.
     /// </summary>
     internal static bool IsControllerStateTrusted(FrontendStatusSnapshot snapshot) =>
         snapshot.RecoverySafe
-        && !snapshot.AddonOwnedOutputIdentityUncertain
         && snapshot.Hardware.Status == FrontendHardwareStatus.Supported
         && snapshot.ControllerEnvironmentStatus == FrontendControllerEnvironmentStatus.Supported
         && snapshot.Routing.EligibilityReason is not (FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate
@@ -100,9 +99,6 @@ internal static class StatusPresentation
     /// </summary>
     internal static bool IsWarning(FrontendStatusSnapshot snapshot)
     {
-        if (snapshot.AddonOwnedOutputIdentityUncertain)
-            return true;
-
         if (snapshot.Hardware.Status == FrontendHardwareStatus.Unsupported)
             return false;
 

@@ -29,7 +29,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 12: developer-only MSI fan probe contracts and RPCs.
 // Version 13: Intel Game Profile FPS Limit snapshot and mutation RPCs.
 // Version 14: SetSteamInputRoutingEnabled returns a typed mutation result instead of a settings snapshot.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 14; }
+// Version 15: virtual output identity uncertainty is removed from frontend status and routing contracts.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 15; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

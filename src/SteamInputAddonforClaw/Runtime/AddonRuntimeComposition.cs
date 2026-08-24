@@ -33,7 +33,6 @@ internal static class AddonRuntimeCompositionFactory
         IHandheldDeviceAdapter handheldDeviceAdapter,
         HandheldDeviceRegistry deviceRegistry,
         IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider,
-        AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker,
         RecoveryManager recoveryManager,
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
@@ -74,12 +73,10 @@ internal static class AddonRuntimeCompositionFactory
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
                 new ViiperRuntimeInspector()),
             () => steamRuntime.State,
-            () => recoverySafetyState.Current == RecoverySafety.Safe,
-            () => addonOwnedVirtualDeviceTracker.HasUncertainOwnership);
+            () => recoverySafetyState.Current == RecoverySafety.Safe);
         var routingRuntime = AddonRoutingRuntime.Create(
             handheldDeviceAdapter,
             statusProvider,
-            addonOwnedVirtualDeviceTracker,
             recoveryManager,
             powerGate,
             recoverySafetyState,

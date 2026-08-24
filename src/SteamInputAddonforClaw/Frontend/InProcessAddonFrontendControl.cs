@@ -474,7 +474,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             ("CompatibilityReason", current.Compatibility.Reason),
             ("SteamActive", current.Steam.IsActive),
             ("RecoverySafe", current.RecoverySafe),
-            ("AddonOwnedOutputIdentityUncertain", current.AddonOwnedOutputIdentityUncertain),
             ("SetupStatus", setup.Status));
         var mapped = FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(current, _captureRoutingStatus()), setup);
         if (!PrerequisiteSetupPromptPolicy.IsInstallable(setup))

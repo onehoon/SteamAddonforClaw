@@ -72,37 +72,17 @@ public sealed class RoutingEligibilityPolicyTests
         Assert.Equal(RoutingDecisionKind.Eligible, RoutingEligibilityPolicy.Evaluate(input).Kind);
     }
 
-    // Regression: addon-owned VIIPER output identity uncertainty must still fail safe, independent
-    // of external-controller detection (which no longer exists as a concept in this policy at all).
-    [Fact]
-    public void AddonOwnedOutputIdentityUncertain_FailsSafeEvenWhenOtherwiseEligible()
-    {
-        var decision = RoutingEligibilityPolicy.Evaluate(Input(addonOwnedOutputIdentityUncertain: true));
-
-        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.AddonOwnedOutputIdentityUncertain), decision);
-    }
-
-    [Fact]
-    public void AddonOwnedOutputIdentityUncertain_TakesPriorityOverUnsupportedEnvironment()
-    {
-        var decision = RoutingEligibilityPolicy.Evaluate(Input(addonOwnedOutputIdentityUncertain: true));
-
-        Assert.Equal(RoutingDecisionReason.AddonOwnedOutputIdentityUncertain, decision.Reason);
-    }
-
     private static RoutingPolicyInput Input(
         uint appId = 1,
         bool recoverySafe = true,
         HardwareCompatibilityAssessment? hardware = null,
         PrerequisiteStatus prerequisiteStatus = PrerequisiteStatus.Ready,
-        RuntimePrerequisiteAssessment? prerequisites = null,
-        bool addonOwnedOutputIdentityUncertain = false) => new(
+        RuntimePrerequisiteAssessment? prerequisites = null) => new(
             SteamSessionState.FromRunningAppId(appId),
             hardware ?? SupportedHardware(),
             new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate([Software(ControllerSoftwareKind.MsiCenterM, SoftwareRuntimeStatus.Running, SoftwareInstallationStatus.Installed)]),
             prerequisites ?? Prerequisites(PrerequisiteKind.HidHide, prerequisiteStatus),
-            recoverySafe,
-            addonOwnedOutputIdentityUncertain);
+            recoverySafe);
 
     private static HardwareCompatibilityAssessment SupportedHardware() => new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test");
 

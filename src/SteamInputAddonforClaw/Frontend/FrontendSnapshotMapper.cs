@@ -17,7 +17,7 @@ internal static class FrontendSnapshotMapper
         new(MapPrerequisite(snapshot.Prerequisites.HidHide.Status), snapshot.Prerequisites.HidHide.Reason, MapPrerequisite(snapshot.Prerequisites.UsbIpWin2.Status), snapshot.Prerequisites.UsbIpWin2.Reason, MapPrerequisite(snapshot.Prerequisites.Viiper.Status), snapshot.Prerequisites.Viiper.Reason),
         new(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, MapSteamSource(snapshot.Steam.Source)),
         new(MapRoutingReason(snapshot.RoutingDecision.Reason), MapOperationalState(routing.OperationalState), routing.Available, routing.SteamOutputActive, routing.NativeDirectInputActive),
-        MapAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason, snapshot.RecoverySafe, snapshot.AddonOwnedOutputIdentityUncertain,
+        MapAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason, snapshot.RecoverySafe,
         FrontendSetupStatus.Indeterminate, "Status must be refreshed before setup evaluation.", false);
 
     internal static FrontendStatusSnapshot ApplySetup(FrontendStatusSnapshot snapshot, FirstTimeSetupAssessment setup) => snapshot with
@@ -52,7 +52,6 @@ internal static class FrontendSnapshotMapper
     private static FrontendRoutingEligibilityReason MapRoutingReason(RoutingDecisionReason reason) => reason switch
     {
         RoutingDecisionReason.SteamInactive => FrontendRoutingEligibilityReason.SteamInactive,
-        RoutingDecisionReason.AddonOwnedOutputIdentityUncertain => FrontendRoutingEligibilityReason.AddonOwnedOutputIdentityUncertain,
         RoutingDecisionReason.RecoveryUnsafe => FrontendRoutingEligibilityReason.RecoveryUnsafe,
         RoutingDecisionReason.UnsupportedDevice => FrontendRoutingEligibilityReason.UnsupportedDevice,
         RoutingDecisionReason.DeviceCompatibilityIndeterminate => FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate,

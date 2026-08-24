@@ -158,10 +158,6 @@ public sealed class StatusPresentationTests
         Assert.False(StatusPresentation.IsControllerStateTrusted(Snapshot(recoverySafe: false)));
 
     [Fact]
-    public void IsControllerStateTrusted_AddonOwnedOutputIdentityUncertain_IsFalse() =>
-        Assert.False(StatusPresentation.IsControllerStateTrusted(Snapshot(addonOwnedOutputIdentityUncertain: true)));
-
-    [Fact]
     public void IsControllerStateTrusted_DeviceCompatibilityIndeterminate_IsFalse() =>
         Assert.False(StatusPresentation.IsControllerStateTrusted(Snapshot(routingReason: FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate)));
 
@@ -217,16 +213,6 @@ public sealed class StatusPresentationTests
             hardwareStatus: FrontendHardwareStatus.Unsupported)));
 
     [Fact]
-    public void IsWarning_UnsupportedHardware_WithUncertainAddonOutput_RemainsWarning() =>
-        Assert.True(StatusPresentation.IsWarning(Snapshot(
-            addonOwnedOutputIdentityUncertain: true,
-            hardwareStatus: FrontendHardwareStatus.Unsupported)));
-
-    [Fact]
-    public void IsWarning_AddonOwnedOutputIdentityUncertain_RemainsWarning() =>
-        Assert.True(StatusPresentation.IsWarning(Snapshot(addonOwnedOutputIdentityUncertain: true)));
-
-    [Fact]
     public void IsWarning_CompatibilityIndeterminate_RemainsVisible() =>
         Assert.True(StatusPresentation.IsWarning(Snapshot(routingReason: FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate)));
 
@@ -259,7 +245,6 @@ public sealed class StatusPresentationTests
 
     private static FrontendStatusSnapshot Snapshot(
         bool recoverySafe = true,
-        bool addonOwnedOutputIdentityUncertain = false,
         FrontendRoutingEligibilityReason routingReason = FrontendRoutingEligibilityReason.Eligible,
         FrontendAddonOperationalStatus addonStatus = FrontendAddonOperationalStatus.Ready,
         FrontendHardwareStatus hardwareStatus = FrontendHardwareStatus.Supported,
@@ -273,6 +258,6 @@ public sealed class StatusPresentationTests
             new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
             new(false, 0, FrontendSteamSource.Actual),
             new(routingReason, FrontendRoutingOperationalState.Passive, true, false, false),
-            addonStatus, "Test", recoverySafe, addonOwnedOutputIdentityUncertain,
+            addonStatus, "Test", recoverySafe,
             FrontendSetupStatus.Indeterminate, "", false);
 }
