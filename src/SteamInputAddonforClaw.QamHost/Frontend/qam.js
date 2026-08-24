@@ -615,7 +615,19 @@
       }, [cancelModeTimers, refresh]);
       const runPowerMutation = React.useCallback(async (method, payload) => {
         if (!state.installed) return;
-        try { beginMutation(); setError(null); const result = await request(method, payload); if (!result?.succeeded) setError(result?.failureMessage || "Power Mode update failed"); await refresh(); }
+        try {
+          beginMutation();
+          setError(null);
+          const result = await request(method, payload);
+          const failure = !result?.succeeded
+            ? (result?.failureMessage || "Power Mode update failed")
+            : null;
+          await refresh();
+          // The explicit refresh consumed the mutation's invalidation. Preserve
+          // the operation failure after refreshing Runtime authority.
+          deferredInvalidationRef.current = false;
+          if (failure) setError(failure);
+        }
         catch (_) { failClosed("Power Mode update failed"); }
         finally { endMutation(); }
       }, [beginMutation, endMutation, failClosed, refresh]);

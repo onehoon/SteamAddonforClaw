@@ -458,6 +458,22 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_power_mutation_refresh_preserves_explicit_failure()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var mutationStart = source.IndexOf("const runPowerMutation", StringComparison.Ordinal);
+        var mutation = source[mutationStart..source.IndexOf("React.useEffect", mutationStart, StringComparison.Ordinal)];
+
+        Assert.Contains("const failure = !result?.succeeded", mutation);
+        Assert.Contains("await refresh();", mutation);
+        Assert.Contains("deferredInvalidationRef.current = false;", mutation);
+        Assert.Contains("if (failure) setError(failure);", mutation);
+        Assert.True(mutation.IndexOf("await refresh();", StringComparison.Ordinal)
+            < mutation.IndexOf("if (failure) setError(failure);", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Qam_cpu_boost_panel_reuses_its_descriptor_and_retires_settled_mode_work()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
