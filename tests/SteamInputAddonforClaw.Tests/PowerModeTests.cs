@@ -13,7 +13,7 @@ public sealed class PowerModeTests
     {
         var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");
         var store = new ProfileStore(path);
-        var gamePower = new GamePowerModeSettings { Ac = WindowsPowerMode.BestPerformance, Dc = WindowsPowerMode.BestPowerEfficiency };
+        var gamePower = new GamePowerModeSettings { Enabled = true, Ac = WindowsPowerMode.BestPerformance, Dc = WindowsPowerMode.BestPowerEfficiency };
         store.Save(new ProfileDocument
         {
             Device = new DeviceSettings { Performance = new DevicePerformanceSettings { PowerMode = new DevicePowerModeSettings { Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.Balanced } } },

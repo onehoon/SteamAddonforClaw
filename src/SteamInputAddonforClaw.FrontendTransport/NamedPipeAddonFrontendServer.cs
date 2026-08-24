@@ -134,6 +134,10 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileFavoriteAsync(FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).Favorite, FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).DisplayName, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileResolution
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileResolutionAsync(FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileCpuBoostEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileCpuBoostEnabledAsync(FrontendWireCodec.Decode<SetGameProfileCpuBoostEnabledRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileCpuBoostEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileTdpEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileTdpEnabledAsync(FrontendWireCodec.Decode<SetGameProfileTdpEnabledRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileTdpEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetWingMapping
         ? FrontendWireCodec.Payload(await _inner.SetWingMappingAsync(FrontendWireCodec.Decode<SetWingMappingRequest>(p).Mapping, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CapturePowerMode
@@ -144,6 +148,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetDevicePowerModeDcAsync(FrontendWireCodec.Decode<SetDevicePowerModeDcRequest>(p).Mode, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetDevicePowerModeEnabled
         ? FrontendWireCodec.Payload(await _inner.SetDevicePowerModeEnabledAsync(FrontendWireCodec.Decode<SetDevicePowerModeEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfilePowerModeEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfilePowerModeEnabledAsync(FrontendWireCodec.Decode<SetGameProfilePowerModeEnabledRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfilePowerModeEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfilePowerModeAc
         ? FrontendWireCodec.Payload(await _inner.SetGameProfilePowerModeAcAsync(FrontendWireCodec.Decode<SetGameProfilePowerModeAcRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfilePowerModeAcRequest>(p).Mode, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfilePowerModeDc

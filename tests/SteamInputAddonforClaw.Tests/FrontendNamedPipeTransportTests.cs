@@ -1185,8 +1185,8 @@ public sealed class FrontendNamedPipeTransportTests
         public CpuBoostMode? LastDcMode { get; private set; }
         public bool? LastEnabled { get; private set; }
         public FrontendGameProfileSnapshot GameProfile { get; private set; } = new(12345, "Test Game", true, true,
-            new(CpuBoostMode.Enabled, CpuBoostMode.Disabled), new(new(20, 22), new(18, 20)), true, new(8, 30, 8, 40));
-        public FrontendGameTdpConfiguration GameTdp { get; } = new(new(21, 31), new(11, 21));
+            new(true, CpuBoostMode.Enabled, CpuBoostMode.Disabled), new(true, new(20, 22), new(18, 20)), true, new(8, 30, 8, 40));
+        public FrontendGameTdpConfiguration GameTdp { get; } = new(true, new(21, 31), new(11, 21));
         public FrontendGameProfileMutationResult GameMutationResult { get; private set; }
         public uint? LastGameProfileAppId { get; private set; }
         public (CpuBoostMode Ac, CpuBoostMode Dc)? LastGameCpu { get; private set; }

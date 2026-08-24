@@ -511,7 +511,7 @@ internal sealed class CpuBoostRuntime
         if (actualAppId == 0
             || !document.Games.TryGetValue(actualAppId.ToString(System.Globalization.CultureInfo.InvariantCulture), out var game)
             || !game.Enabled
-            || game.Performance.CpuBoost is not { } cpu)
+            || game.Performance.CpuBoost is not { Enabled: true } cpu)
             return false;
 
         ac = cpu.Ac;

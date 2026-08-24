@@ -649,6 +649,7 @@
       const displayError = error || snapshotMessage;
       const sideValue = (side, preview) => preview ?? side?.desired ?? (side?.currentStatus === 0 ? side.current : null);
       const labelFor = value => modes.find(item => item[0] === value)?.[1] || "Unknown / unset";
+      const labelRow = (label, value) => React.createElement("div", { className: native.FieldLabelRowClass, style: { display: "flex", width: "100%", justifyContent: "space-between" } }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, value));
       const scheduleMode = (side, value) => {
         if (!state.installed || !modeWritableRef.current) return;
         const key = side === "ac" ? "ac" : "dc";
@@ -708,7 +709,7 @@
         finally { endMutation(); setBusy(false); }
       };
       const tdpSlider = (label, source, limit, value, separator) => value == null || !limit ? null : React.createElement(native.SliderField, {
-        label,
+        label: `${source === "ac" ? "Plugged in" : "On battery"} · ${label}`,
         min: label === "PL1" ? limit.pl1MinimumWatts : limit.pl2MinimumWatts,
         max: label === "PL1" ? limit.pl2MaximumWatts : limit.pl2MaximumWatts,
         step: 1,
@@ -728,10 +729,7 @@
         },
       });
       const slider = (title, side, value, bottomSeparator) => value == null ? null : React.createElement(native.SliderField, {
-        label: React.createElement(React.Fragment, null,
-          React.createElement("div", { className: native.FieldLabelRowClass },
-            React.createElement("span", { className: native.FieldLabelClass }, title),
-            React.createElement("span", { className: native.FieldLabelValueClass }, labelFor(value)))),
+        label: labelRow(title, labelFor(value)),
         min: 0,
         max: 6,
         step: 1,
@@ -770,7 +768,7 @@
         if (value == null) return null;
         const pendingValue = state.qamSliderCommits?.get(key)?.value;
         const currentValue = powerPreview[key] ?? pendingValue ?? value;
-        return React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, powerModeLabels[powerModeIndex(currentValue)] ?? "Unknown"))), min: 0, max: 2, step: 1, value: powerModeIndex(currentValue), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => schedulePowerMode(key, method, Number(next), activeProfile ? Number(profile?.appId || 0) : 0) });
+        return React.createElement(native.SliderField, { label: labelRow(label, powerModeLabels[powerModeIndex(currentValue)] ?? "Unknown"), min: 0, max: 2, step: 1, value: powerModeIndex(currentValue), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => schedulePowerMode(key, method, Number(next), activeProfile ? Number(profile?.appId || 0) : 0) });
       };
       const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !powerWritable, onChange: value => void runPowerMutation("setDevicePowerModeEnabled", { enabled: !!value }) }) }];
       if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, "device-power-ac", "setDevicePowerModeAc", !powerWritable) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, "device-power-dc", "setDevicePowerModeDc", !powerWritable) }); }
@@ -782,12 +780,10 @@
         onChange: value => void setTdpEnabled(!!value),
       }) }];
       if (tdpDraft?.enabled && tdpLimits) {
-        tdpControls.push({ key: "tdp-ac-heading", node: React.createElement("div", null, "Plugged in") });
         tdpControls.push({ key: "tdp-ac-pl1", node: tdpSlider("PL1", "ac", tdpLimits, tdpDraft.ac?.pl1Watts, "none") });
-        tdpControls.push({ key: "tdp-ac-pl2", compact: true, node: tdpSlider("PL2", "ac", tdpLimits, tdpDraft.ac?.pl2Watts, "none") });
-        tdpControls.push({ key: "tdp-dc-heading", node: React.createElement("div", null, "On battery") });
+        tdpControls.push({ key: "tdp-ac-pl2", node: tdpSlider("PL2", "ac", tdpLimits, tdpDraft.ac?.pl2Watts, "none") });
         tdpControls.push({ key: "tdp-dc-pl1", node: tdpSlider("PL1", "dc", tdpLimits, tdpDraft.dc?.pl1Watts, "none") });
-        tdpControls.push({ key: "tdp-dc-pl2", compact: true, node: tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard") });
+        tdpControls.push({ key: "tdp-dc-pl2", node: tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard") });
       }
 
       if (activeProfile) {
@@ -821,6 +817,21 @@
           } catch (_) { failClosed("Profile update failed"); }
           finally { endMutation(); setBusy(false); }
         };
+        const toggleProfileFeature = async (feature, value, method, pendingPredicate) => {
+          if (!state.installed || !writable || !enabled) return;
+          if (!value) {
+            cancelQamSliderCommits(pendingPredicate);
+            if (feature === "cpu") { setPreviewAc(null); setPreviewDc(null); }
+            if (feature === "power") setPowerPreview(current => Object.fromEntries(Object.entries(current).filter(([key]) => !pendingPredicate(key))));
+          }
+          setBusy(true); setError(null);
+          try {
+            const result = await request(method, { enabled: !!value });
+            setProfile(result.snapshot);
+            if (!result.succeeded) setError(result.failureMessage || `${feature} update failed`);
+          } catch (_) { failClosed(`${feature} update failed`); }
+          finally { setBusy(false); }
+        };
         const scheduleProfileTdp = draft => {
           if (!state.installed || !profile.persistenceWritable || !enabled || !profile.limits) return;
           profileTdpDraftRef.current = draft;
@@ -833,42 +844,46 @@
           });
         };
         const profileSlider = (label, side, value, preview, separator) => value == null ? null : React.createElement(native.SliderField, {
-          label: React.createElement(React.Fragment, null,
-            React.createElement("div", { className: native.FieldLabelRowClass },
-              React.createElement("span", { className: native.FieldLabelClass }, label),
-              React.createElement("span", { className: native.FieldLabelValueClass }, labelFor(preview ?? value)))),
+          label: labelRow(label, labelFor(preview ?? value)),
           min: 0, max: 6, step: 1, value: preview ?? value, notchCount: modes.length,
           disabled: !profile.persistenceWritable || !enabled || busy, notchTicksVisible: true, bottomSeparator: separator,
           onChange: next => scheduleProfileMode(side, Number(next)),
         });
         const profileTdpSlider = (label, side, value, separator) => value == null || !profile.limits ? null : React.createElement(native.SliderField, {
-          label, min: label === "PL1" ? profile.limits.pl1MinimumWatts : profile.limits.pl2MinimumWatts,
+          label, min: label.includes("PL1") ? profile.limits.pl1MinimumWatts : profile.limits.pl2MinimumWatts,
           max: profile.limits.pl2MaximumWatts,
-          step: 1, value: state.qamSliderCommits?.get("profile-tdp")?.draft?.[side]?.[label === "PL1" ? "pl1Watts" : "pl2Watts"] ?? value, showValue: true, disabled: !profile.persistenceWritable || !enabled || busy, bottomSeparator: separator,
+          step: 1, value: state.qamSliderCommits?.get("profile-tdp")?.draft?.[side]?.[label.includes("PL1") ? "pl1Watts" : "pl2Watts"] ?? value, showValue: true, disabled: !profile.persistenceWritable || !enabled || busy, bottomSeparator: separator,
           onChange: next => {
             const draft = profileTdpDraftRef.current || profileTdpDraft || { ac: { ...profile.tdp.ac }, dc: { ...profile.tdp.dc } };
             const pair = { ...draft[side] }; let numeric = Number(next);
-            if (label === "PL1") numeric = Math.min(numeric, profile.limits.pl1MaximumWatts);
-            pair[label === "PL1" ? "pl1Watts" : "pl2Watts"] = numeric;
-            const adjusted = adjustTdpPair(label === "PL1", pair.pl1Watts, pair.pl2Watts, profile.limits);
+            if (label.includes("PL1")) numeric = Math.min(numeric, profile.limits.pl1MaximumWatts);
+            pair[label.includes("PL1") ? "pl1Watts" : "pl2Watts"] = numeric;
+            const adjusted = adjustTdpPair(label.includes("PL1"), pair.pl1Watts, pair.pl2Watts, profile.limits);
             scheduleProfileTdp({ ...draft, [side]: adjusted });
           },
         });
         const profileCpuControls = [
+          { key: "profile-cpu-toggle", node: React.createElement(native.ToggleField, { label: "CPU Boost", checked: !!profile.cpuBoost?.enabled, disabled: !writable, onChange: value => void toggleProfileFeature("CPU Boost", !!value, "setActiveGameCpuBoostEnabled", key => key.startsWith("profile-cpu-")) }) },
+          ...(!profile.cpuBoost?.enabled ? [] : [
           { key: "profile-ac", node: profileSlider("Plugged in", "ac", profile.cpuBoost?.ac, previewAc, "none") },
           { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, previewDc, "standard") },
+          ]),
         ];
         const profilePowerControls = [
-          { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Power Mode plugged in", profile.powerMode.ac, "profile-power-ac", "setActiveGamePowerModeAc", !enabled || !writable) : null },
-          { key: "profile-power-dc", node: profile.powerMode ? powerSlider("Power Mode on battery", profile.powerMode.dc, "profile-power-dc", "setActiveGamePowerModeDc", !enabled || !writable) : null },
+          { key: "profile-power-toggle", node: profile.powerMode ? React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!profile.powerMode.enabled, disabled: !writable, onChange: value => void toggleProfileFeature("Power Mode", !!value, "setActiveGamePowerModeEnabled", key => key.startsWith("profile-power-")) }) : null },
+          ...(!profile.powerMode?.enabled ? [] : [
+          { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Plugged in", profile.powerMode.ac, "profile-power-ac", "setActiveGamePowerModeAc", !enabled || !writable) : null },
+          { key: "profile-power-dc", node: profile.powerMode ? powerSlider("On battery", profile.powerMode.dc, "profile-power-dc", "setActiveGamePowerModeDc", !enabled || !writable) : null },
+          ]),
         ];
         const profileTdpControls = profile.limits ? [
-          { key: "profile-tdp-ac-heading", node: React.createElement("div", null, "Plugged in") },
-          { key: "profile-tdp-ac-pl1", node: profileTdpSlider("PL1", "ac", profileTdpDraft?.ac?.pl1Watts, "none") },
-          { key: "profile-tdp-ac-pl2", compact: true, node: profileTdpSlider("PL2", "ac", profileTdpDraft?.ac?.pl2Watts, "none") },
-          { key: "profile-tdp-dc-heading", node: React.createElement("div", null, "On battery") },
-          { key: "profile-tdp-dc-pl1", node: profileTdpSlider("PL1", "dc", profileTdpDraft?.dc?.pl1Watts, "none") },
-          { key: "profile-tdp-dc-pl2", compact: true, node: profileTdpSlider("PL2", "dc", profileTdpDraft?.dc?.pl2Watts, "standard") },
+          { key: "profile-tdp-toggle", node: React.createElement(native.ToggleField, { label: "TDP Control", checked: !!profile.tdp?.enabled, disabled: !writable, onChange: value => void toggleProfileFeature("TDP", !!value, "setActiveGameTdpEnabled", key => key === "profile-tdp") }) },
+          ...(!profile.tdp?.enabled ? [] : [
+          { key: "profile-tdp-ac-pl1", node: profileTdpSlider("Plugged in · PL1", "ac", profileTdpDraft?.ac?.pl1Watts, "none") },
+          { key: "profile-tdp-ac-pl2", node: profileTdpSlider("Plugged in · PL2", "ac", profileTdpDraft?.ac?.pl2Watts, "none") },
+          { key: "profile-tdp-dc-pl1", node: profileTdpSlider("On battery · PL1", "dc", profileTdpDraft?.dc?.pl1Watts, "none") },
+          { key: "profile-tdp-dc-pl2", node: profileTdpSlider("On battery · PL2", "dc", profileTdpDraft?.dc?.pl2Watts, "standard") },
+          ]),
         ] : [];
         const fps = profile.fpsLimit || { enabled: false, acFps: 60, dcFps: 60, available: false, unavailableReason: "Intel FPS Limit is unavailable." };
         const runFpsMutation = async (method, payload) => {
@@ -893,23 +908,25 @@
             await refresh();
           });
         };
-        const fpsSlider = (label, side, value) => { const currentValue = state.qamSliderCommits?.get(`profile-fps-${side}`)?.value ?? fpsDraft[side] ?? value; return React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, `${currentValue} FPS`))), min: 40, max: 120, step: 1, value: currentValue, disabled: !fps.available || !profile.persistenceWritable || !enabled || !fps.enabled || busy, onChange: next => scheduleFps(side, Number(next)) }); };
+        const fpsSlider = (label, side, value) => { const currentValue = state.qamSliderCommits?.get(`profile-fps-${side}`)?.value ?? fpsDraft[side] ?? value; return React.createElement(native.SliderField, { label: labelRow(label, `${currentValue} FPS`), min: 40, max: 120, step: 1, value: currentValue, disabled: !fps.available || !profile.persistenceWritable || !enabled || !fps.enabled || busy, onChange: next => scheduleFps(side, Number(next)) }); };
         const fpsControls = [
           { key: "fps-toggle", node: React.createElement(native.ToggleField, { label: "FPS Limit", checked: !!fps.enabled, disabled: !fps.available || !writable || !enabled, onChange: value => { if (!value) cancelQamSliderCommits(key => key.startsWith("profile-fps-")); void runFpsMutation("setActiveGameFpsLimitEnabled", { enabled: !!value }); } }) },
-          { key: "fps-description", node: React.createElement("div", null, fps.available ? "Uses Intel's official API. Some games may not support FPS limiting." : fps.unavailableReason) },
+          ...(!fps.enabled ? [] : [
           { key: "fps-ac", node: fpsSlider("Plugged in", "ac", fps.acFps ?? 60) },
           { key: "fps-dc", node: fpsSlider("On battery", "dc", fps.dcFps ?? 60) },
+          ]),
         ];
         return React.createElement(React.Fragment, null,
           displayError ? React.createElement("p", { key: "error" }, displayError) : null,
           React.createElement(native.PanelSection, { key: "profile-header", title: profile.displayName || `Game ${profile.appId}` }, React.createElement(native.PanelSectionRow, { key: "profile-toggle" }, React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }))),
           React.createElement(native.PanelSection, { key: "profile-cpu-section", title: "CPU Boost" }, ...profileCpuControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
           profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section", title: "Windows Power Mode" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null,
-          React.createElement(native.PanelSection, { key: "profile-tdp-section", title: "TDP Control" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key, style: x.compact ? { marginTop: "-4px" } : undefined }, x.node))),
+          React.createElement(native.PanelSection, { key: "profile-tdp-section", title: "TDP Control" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
           React.createElement(native.PanelSection, { key: "profile-fps-section", title: "Intel FPS Limit" }, ...fpsControls.map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))));
       }
 
       return React.createElement(React.Fragment, null,
+        React.createElement("div", { className: native.QamTitleClass }, "Steam Addon for Claw"),
         unavailable ? React.createElement("p", { key: "unavailable" }, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
         displayError ? React.createElement("p", { key: "error" }, displayError) : null,
         React.createElement(native.PanelSection, { key: "cpu-section" },
@@ -917,7 +934,7 @@
         React.createElement(native.PanelSection, { key: "power-section", title: "Windows Power Mode" },
           ...powerControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
         React.createElement(native.PanelSection, { key: "tdp-section" },
-          ...tdpControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key, style: control.compact ? { marginTop: "-4px" } : undefined }, control.node))));
+          ...tdpControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))));
     }
 
     state.addonTabDescriptor = {
@@ -926,7 +943,6 @@
       title: null,
       tab: icon,
       panel: React.createElement(React.Fragment, null,
-        React.createElement("div", { className: native.QamTitleClass }, "Steam Addon for Claw"),
         React.createElement("div", { style: { paddingTop: "16px" } },
           React.createElement(CpuBoostPanel))),
     };

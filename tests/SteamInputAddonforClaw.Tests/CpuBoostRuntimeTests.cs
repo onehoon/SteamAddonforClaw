@@ -1008,9 +1008,9 @@ public sealed class CpuBoostRuntimeTests : IDisposable
     {
         var games = new Dictionary<string, GameProfile>();
         if (gameAppId is { } appId)
-            games[appId.ToString()] = new GameProfile { Enabled = gameEnabled, Performance = new() { CpuBoost = new() { Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } } } };
+            games[appId.ToString()] = new GameProfile { Enabled = gameEnabled, Performance = new() { CpuBoost = new() { Enabled = true, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } } } };
         if (secondGameAppId is { } second)
-            games[second.ToString()] = new GameProfile { Enabled = true, Performance = new() { CpuBoost = new() { Ac = CpuBoostMode.Disabled, Dc = CpuBoostMode.EfficientAggressive }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } } } };
+            games[second.ToString()] = new GameProfile { Enabled = true, Performance = new() { CpuBoost = new() { Enabled = true, Ac = CpuBoostMode.Disabled, Dc = CpuBoostMode.EfficientAggressive }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } } } };
         new ProfileStore(ProfilesPath).Save(new ProfileDocument
         {
             Device = new() { Performance = new() { CpuBoost = new() { Enabled = deviceEnabled, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Disabled } } },

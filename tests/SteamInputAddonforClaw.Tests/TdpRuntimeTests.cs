@@ -393,7 +393,7 @@ public sealed class TdpRuntimeTests : IDisposable
         var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
         uint appId = 12345;
         SaveProfile(new DeviceTdpSettings { Enabled = false, Ac = Pair(20, 30), Dc = Pair(10, 20) },
-            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
+            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
         await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, actualAppIdSource: () => appId);
 
         runtime.ReconcileCurrent(true, false, "GameStart");
@@ -408,7 +408,7 @@ public sealed class TdpRuntimeTests : IDisposable
         var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
         uint appId = 12345;
         SaveProfile(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) },
-            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
+            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
         await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, actualAppIdSource: () => appId);
 
         runtime.ReconcileCurrent(true, false, "GameStart");
@@ -431,7 +431,7 @@ public sealed class TdpRuntimeTests : IDisposable
     {
         var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
         SaveProfile(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) },
-            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = Pair(31, 8), Dc = Pair(10, 20) } } });
+            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(31, 8), Dc = Pair(10, 20) } } });
         await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, actualAppIdSource: () => 12345);
 
         runtime.ReconcileCurrent(true, false, "InvalidGame");
@@ -446,7 +446,7 @@ public sealed class TdpRuntimeTests : IDisposable
         var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4], BlockFirstApply = true };
         uint appId = 12345;
         SaveProfile(new DeviceTdpSettings { Enabled = false, Ac = Pair(20, 30), Dc = Pair(10, 20) },
-            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
+            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
         await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, actualAppIdSource: () => appId);
 
         runtime.ReconcileCurrent(true, false, "GameStart");

@@ -54,6 +54,7 @@ public sealed record GameFpsLimitSettings
 
 public sealed record GamePowerModeSettings
 {
+    public bool Enabled { get; init; }
     public required WindowsPowerMode Ac { get; init; }
     public required WindowsPowerMode Dc { get; init; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? ExtensionData { get; init; }
@@ -61,6 +62,7 @@ public sealed record GamePowerModeSettings
 
 public sealed record GameCpuBoostSettings
 {
+    public bool Enabled { get; init; }
     public required CpuBoostMode Ac { get; init; }
     public required CpuBoostMode Dc { get; init; }
 
@@ -70,6 +72,7 @@ public sealed record GameCpuBoostSettings
 
 public sealed record GameTdpSettings
 {
+    public bool Enabled { get; init; }
     public required TdpPowerPair Ac { get; init; }
     public required TdpPowerPair Dc { get; init; }
 

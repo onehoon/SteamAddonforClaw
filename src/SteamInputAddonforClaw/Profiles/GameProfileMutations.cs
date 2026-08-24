@@ -66,10 +66,14 @@ internal sealed class GameProfileMutations
     internal MutationOutcome SetCpuBoostAc(uint appId, CpuBoostMode mode)
         => SetCpuBoost(appId, cpu => cpu with { Ac = mode });
 
+    internal MutationOutcome SetCpuBoostEnabled(uint appId, bool enabled)
+        => SetCpuBoost(appId, cpu => cpu with { Enabled = enabled });
+
     internal MutationOutcome SetCpuBoostDc(uint appId, CpuBoostMode mode)
         => SetCpuBoost(appId, cpu => cpu with { Dc = mode });
     internal MutationOutcome SetPowerModeAc(uint appId, WindowsPowerMode mode) => SetPowerMode(appId, p => p with { Ac = mode });
     internal MutationOutcome SetPowerModeDc(uint appId, WindowsPowerMode mode) => SetPowerMode(appId, p => p with { Dc = mode });
+    internal MutationOutcome SetPowerModeEnabled(uint appId, bool enabled) => SetPowerMode(appId, p => p with { Enabled = enabled });
     internal MutationOutcome SetFpsLimitEnabled(uint appId, bool enabled)
     {
         lock (_gate.Sync)
@@ -185,6 +189,18 @@ internal sealed class GameProfileMutations
         }
     }
 
+    internal MutationOutcome SetTdpEnabled(uint appId, bool enabled)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile) || profile.Performance.Tdp is not { } current) return MutationOutcome.Unavailable;
+            loaded.Document.Games[key] = profile with { Performance = profile.Performance with { Tdp = current with { Enabled = enabled } } };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+
     internal bool Enable(uint appId, string? displayName)
         => SetEnabled(appId, true, displayName) == MutationOutcome.Succeeded;
 
@@ -194,13 +210,14 @@ internal sealed class GameProfileMutations
     private static GameProfile Complete(GameProfile profile, DeviceSettings device)
     {
         var cpu = device.Performance.CpuBoost is { Ac: { } ac, Dc: { } dc }
-            ? new GameCpuBoostSettings { Ac = ac, Dc = dc }
-            : new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled };
+            ? new GameCpuBoostSettings { Enabled = true, Ac = ac, Dc = dc }
+            : new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled };
 
         var tdp = device.Performance.Tdp is { Ac: { } tdpAc, Dc: { } tdpDc }
-            ? new GameTdpSettings { Ac = tdpAc, Dc = tdpDc }
+            ? new GameTdpSettings { Enabled = true, Ac = tdpAc, Dc = tdpDc }
             : new GameTdpSettings
             {
+                Enabled = true,
                 Ac = new TdpPowerPair { Pl1Watts = FallbackPl1Watts, Pl2Watts = FallbackPl2Watts },
                 Dc = new TdpPowerPair { Pl1Watts = FallbackPl1Watts, Pl2Watts = FallbackPl2Watts }
             };
@@ -209,7 +226,7 @@ internal sealed class GameProfileMutations
             ? existing
             : tdp;
         var power = device.Performance.PowerMode is { Ac: { } powerAc, Dc: { } powerDc }
-            ? new GamePowerModeSettings { Ac = powerAc, Dc = powerDc }
+            ? new GamePowerModeSettings { Enabled = true, Ac = powerAc, Dc = powerDc }
             : null;
         return profile with { Performance = profile.Performance with { CpuBoost = profile.Performance.CpuBoost ?? cpu, Tdp = existingTdp, PowerMode = profile.Performance.PowerMode ?? power } };
     }
