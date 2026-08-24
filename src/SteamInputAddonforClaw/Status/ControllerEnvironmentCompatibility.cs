@@ -23,8 +23,8 @@ internal sealed record ControllerEnvironmentCompatibilityAssessment(ControllerEn
 
 internal sealed record ControllerSoftwareSnapshot(
     ControllerSoftwareStatus MsiCenterM,
-    ControllerSoftwareStatus ClawTweaks,
-    ControllerSoftwareStatus HandheldCompanion,
+    ControllerSoftwareStatus? ClawTweaks = null,
+    ControllerSoftwareStatus? HandheldCompanion = null,
     ControllerSoftwareStatus? Winhanced = null)
 {
     public static bool TryCreate(IReadOnlyList<ControllerSoftwareStatus> statuses, out ControllerSoftwareSnapshot? snapshot)
@@ -32,14 +32,16 @@ internal sealed record ControllerSoftwareSnapshot(
         snapshot = null;
         if (statuses is null) return false;
         var grouped = statuses.GroupBy(status => status.Kind).ToDictionary(group => group.Key, group => group.ToArray());
-        if (!grouped.TryGetValue(ControllerSoftwareKind.MsiCenterM, out var centerM) || centerM.Length != 1
-            || !grouped.TryGetValue(ControllerSoftwareKind.ClawTweaks, out var clawTweaks) || clawTweaks.Length != 1
-            || !grouped.TryGetValue(ControllerSoftwareKind.HandheldCompanion, out var handheldCompanion) || handheldCompanion.Length != 1)
+        if (!grouped.TryGetValue(ControllerSoftwareKind.MsiCenterM, out var centerM) || centerM.Length != 1)
             return false;
         if (grouped.Keys.Any(kind => kind is not (ControllerSoftwareKind.MsiCenterM or ControllerSoftwareKind.ClawTweaks or ControllerSoftwareKind.HandheldCompanion or ControllerSoftwareKind.Winhanced))
             || (grouped.TryGetValue(ControllerSoftwareKind.Winhanced, out var winhanced) && winhanced.Length > 1))
             return false;
-        snapshot = new(centerM[0], clawTweaks[0], handheldCompanion[0], winhanced?[0]);
+        snapshot = new(
+            centerM[0],
+            grouped.TryGetValue(ControllerSoftwareKind.ClawTweaks, out var clawTweaks) ? clawTweaks.SingleOrDefault() : null,
+            grouped.TryGetValue(ControllerSoftwareKind.HandheldCompanion, out var handheldCompanion) ? handheldCompanion.SingleOrDefault() : null,
+            winhanced?[0]);
         return true;
     }
 }
@@ -53,9 +55,10 @@ internal sealed class CurrentControllerEnvironmentCompatibilityPolicy : IControl
 {
     public ControllerEnvironmentCompatibilityAssessment Evaluate(IReadOnlyList<ControllerSoftwareStatus> software)
     {
-        var result = !ControllerSoftwareSnapshot.TryCreate(software, out var snapshot)
+        var centerM = software?.Where(status => status.Kind == ControllerSoftwareKind.MsiCenterM).ToArray();
+        var result = centerM is null || centerM.Length != 1
             ? new(ControllerEnvironmentCompatibilityStatus.Indeterminate, ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate)
-            : Evaluate(snapshot!);
+            : EvaluateStockCenterM(centerM[0]);
         AppLog.Info("Compatibility", "Controller environment compatibility assessed.", ("Status", result.Status), ("Reason", result.Reason), ("AllowsMutation", result.AllowsMutation));
         return result;
     }

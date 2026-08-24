@@ -730,20 +730,6 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
-    public async Task InvalidSoftwareSnapshotFailsClosedWithoutMutation()
-    {
-        var executor = new FakeExecutor();
-        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software().Where(status => status.Kind != ControllerSoftwareKind.HandheldCompanion).ToArray()));
-        var bridge = Create(provider, executor);
-
-        var result = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
-
-        Assert.False(result.Succeeded);
-        Assert.Empty(executor.ExecutedPlans);
-        Assert.Null(bridge.Session.ActiveSession);
-    }
-
-    [Fact]
     public async Task RepeatedEligibleDoesNotRebuildActiveSession()
     {
         var executor = new FakeExecutor();

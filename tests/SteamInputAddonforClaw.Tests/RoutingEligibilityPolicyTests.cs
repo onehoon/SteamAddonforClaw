@@ -27,28 +27,6 @@ public sealed class RoutingEligibilityPolicyTests
     }
 
     [Theory]
-    [InlineData((int)SoftwareRuntimeStatus.Running, (int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported)]
-    [InlineData((int)SoftwareRuntimeStatus.Starting, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ControllerEnvironmentIndeterminate)]
-    [InlineData((int)SoftwareRuntimeStatus.Indeterminate, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ControllerEnvironmentIndeterminate)]
-    public void HandheldCompanion_UsesFailClosedPolicy(int runtimeValue, int kindValue, int reasonValue)
-    {
-        var decision = RoutingEligibilityPolicy.Evaluate(Input(hhc: (SoftwareRuntimeStatus)runtimeValue));
-
-        Assert.Equal(new RoutingDecision((RoutingDecisionKind)kindValue, (RoutingDecisionReason)reasonValue), decision);
-    }
-
-    [Theory]
-    [InlineData((int)SoftwareRuntimeStatus.Running, (int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported)]
-    [InlineData((int)SoftwareRuntimeStatus.Starting, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ControllerEnvironmentIndeterminate)]
-    [InlineData((int)SoftwareRuntimeStatus.Indeterminate, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ControllerEnvironmentIndeterminate)]
-    public void ClawTweaks_UsesFailClosedPolicy(int runtimeValue, int kindValue, int reasonValue)
-    {
-        var decision = RoutingEligibilityPolicy.Evaluate(Input(clawTweaks: (SoftwareRuntimeStatus)runtimeValue));
-
-        Assert.Equal(new RoutingDecision((RoutingDecisionKind)kindValue, (RoutingDecisionReason)reasonValue), decision);
-    }
-
-    [Theory]
     [InlineData((int)PrerequisiteKind.HidHide, (int)PrerequisiteStatus.Missing)]
     [InlineData((int)PrerequisiteKind.UsbIpWin2, (int)PrerequisiteStatus.Missing)]
     [InlineData((int)PrerequisiteKind.UsbIpWin2, (int)PrerequisiteStatus.Incompatible)]
@@ -107,7 +85,7 @@ public sealed class RoutingEligibilityPolicyTests
     [Fact]
     public void AddonOwnedOutputIdentityUncertain_TakesPriorityOverUnsupportedEnvironment()
     {
-        var decision = RoutingEligibilityPolicy.Evaluate(Input(addonOwnedOutputIdentityUncertain: true, hhc: SoftwareRuntimeStatus.Running));
+        var decision = RoutingEligibilityPolicy.Evaluate(Input(addonOwnedOutputIdentityUncertain: true));
 
         Assert.Equal(RoutingDecisionReason.AddonOwnedOutputIdentityUncertain, decision.Reason);
     }
@@ -116,14 +94,12 @@ public sealed class RoutingEligibilityPolicyTests
         uint appId = 1,
         bool recoverySafe = true,
         HardwareCompatibilityAssessment? hardware = null,
-        SoftwareRuntimeStatus hhc = SoftwareRuntimeStatus.NotRunning,
-        SoftwareRuntimeStatus clawTweaks = SoftwareRuntimeStatus.NotRunning,
         PrerequisiteStatus prerequisiteStatus = PrerequisiteStatus.Ready,
         RuntimePrerequisiteAssessment? prerequisites = null,
         bool addonOwnedOutputIdentityUncertain = false) => new(
             SteamSessionState.FromRunningAppId(appId),
             hardware ?? SupportedHardware(),
-            new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate([Software(ControllerSoftwareKind.MsiCenterM, SoftwareRuntimeStatus.Running, SoftwareInstallationStatus.Installed), Software(ControllerSoftwareKind.ClawTweaks, clawTweaks), Software(ControllerSoftwareKind.HandheldCompanion, hhc)]),
+            new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate([Software(ControllerSoftwareKind.MsiCenterM, SoftwareRuntimeStatus.Running, SoftwareInstallationStatus.Installed)]),
             prerequisites ?? Prerequisites(PrerequisiteKind.HidHide, prerequisiteStatus),
             recoverySafe,
             addonOwnedOutputIdentityUncertain);

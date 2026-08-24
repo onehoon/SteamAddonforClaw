@@ -49,7 +49,6 @@ internal sealed class EnvironmentDiscoveryReportWriter
             text.AppendLine($"{software.DisplayName}: Installation={software.Installation}; Runtime={software.Runtime}; Reason={software.Reason}");
         }
         text.AppendLine($"ControllerEnvironmentMode: {current.Environment.Mode}");
-        text.AppendLine($"ClawTweaksState: {current.Environment.ClawTweaksState}");
         text.AppendLine($"EnvironmentReadiness: {current.EnvironmentReadiness}");
     }
 

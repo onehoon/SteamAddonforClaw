@@ -98,9 +98,7 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         // one during startup must not reset the stable-poll counter or push readiness into
         // Indeterminate. Uses the narrow IsInternalHandheld predicate ("is this the MSI Claw?") rather
         // than the general classifier, so non-Claw devices are never classified at all here.
-        var relevantDevices = mode == ControllerEnvironmentMode.ClawTweaks
-            ? devices.Where(device => _classifier.IsClawTweaksVirtualControllerCandidate(device, topology)).ToArray()
-            : devices.Where(device => _classifier.IsInternalHandheld(device, topology)).ToArray();
+        var relevantDevices = devices.Where(device => _classifier.IsInternalHandheld(device, topology)).ToArray();
         var snapshot = string.Join('\n', relevantDevices
             .Select(device => string.Join('|',
                 device.InstanceId,
@@ -114,7 +112,6 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             // MsiClawModeTopology/MsiClawControlHidResolver), not just "some MSI device". If that control
             // HID hasn't enumerated yet, readiness must not settle on the gamepad-usage interface alone.
             ControllerEnvironmentMode.StockCenterM => relevantDevices.Length > 0 && HasResolvableControlHid(relevantDevices),
-            ControllerEnvironmentMode.ClawTweaks => relevantDevices.Length > 0,
             _ => false
         };
         return (snapshot, ready);

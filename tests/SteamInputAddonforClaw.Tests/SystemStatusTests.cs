@@ -40,12 +40,10 @@ public sealed class SystemStatusTests
     {
         var sorted = ControllerSoftwareStatusSorter.Sort(
         [
-            Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning),
-            Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running),
             Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)
         ]);
 
-        Assert.Equal([ControllerSoftwareKind.MsiCenterM, ControllerSoftwareKind.ClawTweaks, ControllerSoftwareKind.HandheldCompanion], sorted.Select(item => item.Kind));
+        Assert.Equal([ControllerSoftwareKind.MsiCenterM], sorted.Select(item => item.Kind));
     }
 
     [Theory]
@@ -86,12 +84,12 @@ public sealed class SystemStatusTests
     public async Task SystemStatusProvider_ReusesPrerequisiteAssessmentAndBuildsOneSnapshot()
     {
         var prerequisites = Prerequisites(PrerequisiteStatus.Missing);
-        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => true, () => false);
+        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => true, () => false);
 
         var snapshot = await provider.CaptureAsync();
 
         Assert.Same(prerequisites, snapshot.Prerequisites);
-        Assert.Equal([ControllerSoftwareKind.MsiCenterM, ControllerSoftwareKind.ClawTweaks, ControllerSoftwareKind.HandheldCompanion], snapshot.ControllerSoftware.Select(item => item.Kind));
+        Assert.Equal([ControllerSoftwareKind.MsiCenterM], snapshot.ControllerSoftware.Select(item => item.Kind));
         Assert.Equal(RoutingDecisionKind.SetupRequired, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
         Assert.True(snapshot.RecoverySafe);
@@ -106,9 +104,7 @@ public sealed class SystemStatusTests
             SupportedProbeFactory(),
             SupportedHardware(),
             [
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)),
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => SteamSessionState.FromRunningAppId(1),
@@ -131,9 +127,7 @@ public sealed class SystemStatusTests
             SupportedProbeFactory(),
             SupportedHardware(),
             [
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)),
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => SteamSessionState.FromRunningAppId(1),
@@ -159,9 +153,7 @@ public sealed class SystemStatusTests
             SupportedProbeFactory(),
             SupportedHardware(),
             [
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)),
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => SteamSessionState.FromRunningAppId(1),
@@ -175,49 +167,6 @@ public sealed class SystemStatusTests
         // The raw signal must also be independently inspectable on the snapshot, not just folded into
         // the routing decision.
         Assert.True(snapshot.AddonOwnedOutputIdentityUncertain);
-    }
-
-    [Fact]
-    public async Task SystemStatusProvider_UnsupportedControllerEnvironmentRemainsPassive()
-    {
-        var provider = new SystemStatusProvider(
-            new FakeDeviceProvider(),
-            SupportedProbeFactory(),
-            SupportedHardware(),
-            [
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning)),
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))
-            ],
-            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
-            () => SteamSessionState.FromRunningAppId(1),
-            () => true,
-            () => false);
-
-        var snapshot = await provider.CaptureAsync();
-
-        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, snapshot.Compatibility.Status);
-        Assert.Equal(ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion, snapshot.Compatibility.Reason);
-        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported), snapshot.RoutingDecision);
-        Assert.Equal(AddonOperationalStatus.Unsupported, snapshot.Addon.Status);
-    }
-
-    [Fact]
-    public void HandheldCompanion_InstalledButStoppedIsPreserved()
-    {
-        var status = new HandheldCompanionSoftwareStatusProvider(new FakeHhcRuntime(false), new FakeInstallationProbe(true)).Capture();
-
-        Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
-        Assert.Equal(SoftwareRuntimeStatus.NotRunning, status.Runtime);
-    }
-
-    [Fact]
-    public void HandheldCompanion_RunningPromotesInstalledWhenTheInstallationProbeIsAbsent()
-    {
-        var status = new HandheldCompanionSoftwareStatusProvider(new FakeHhcRuntime(true), new FakeInstallationProbe(false)).Capture();
-
-        Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
-        Assert.Equal(SoftwareRuntimeStatus.Running, status.Runtime);
     }
 
     [Fact]
@@ -334,7 +283,7 @@ public sealed class SystemStatusTests
     public void QuickSettingsWidgetOwnership_RequiresPackageChildBoundaryAndExactFilename(string root, string executable, bool expected) =>
         Assert.Equal(expected, WindowsMsiCenterMRuntimeSignalSource.IsPackageOwnedWidget(root, executable));
 
-    private static ControllerSoftwareStatus[] SoftwareStates() => [Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)];
+    private static ControllerSoftwareStatus[] SoftwareStates() => [Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning)];
     private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareInstallationStatus installation, SoftwareRuntimeStatus runtime) => new(kind, kind.ToString(), installation, runtime, "test");
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteStatus status) => new(new(PrerequisiteKind.HidHide, status, "test"), new(PrerequisiteKind.UsbIpWin2, status, "test"), new(PrerequisiteKind.Viiper, status, "test"));
     private static ControllerEnvironmentCompatibilityAssessment Compatibility(ControllerEnvironmentCompatibilityStatus status) => new(status, status == ControllerEnvironmentCompatibilityStatus.Supported ? ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported : ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate);
@@ -345,9 +294,8 @@ public sealed class SystemStatusTests
     private sealed class FakeProbeFactory(DeviceProbeContextCapture capture) : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => capture; }
     private sealed class FakeHardwareEvaluator(HardwareCompatibilityAssessment assessment) : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture capture) => assessment; }
     private sealed class FakeSoftwareProvider(ControllerSoftwareStatus status) : IControllerSoftwareStatusProvider { public ControllerSoftwareStatus Capture() => status; }
-    private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }
-    private sealed class FakeHhcRuntime(bool running) : SteamInputAddonforClaw.Startup.IHandheldCompanionRuntimeDetector { public bool IsRunning() => running; }
     private sealed class FakeInstallationProbe(bool installed) : IApplicationInstallationProbe { public ApplicationInstallationInfo Detect() => new(installed, "test"); }
+    private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }
     private sealed class FakeMsiRuntimeSignals(MsiCenterMRuntimeSignals signals) : IMsiCenterMRuntimeSignalSource { public MsiCenterMRuntimeSignals Capture() => signals; }
     private sealed class ThrowingMsiRuntimeSignals : IMsiCenterMRuntimeSignalSource { public MsiCenterMRuntimeSignals Capture() => throw new InvalidOperationException(); }
     private sealed class TestUninstallProbe(IUninstallRegistrationSource source) : UninstallRegistrationInstallationProbe(MsiCenterMIdentity.InstallationDisplayNames, [], source) { }
