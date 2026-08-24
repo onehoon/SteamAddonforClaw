@@ -567,12 +567,14 @@
           } : null;
           setStatus(nextStatus); setCpu(nextCpu); setPowerMode(nextPowerMode); setTdp(nextTdp); setProfile(nextProfile);
           setFpsDraft({ ac: state.qamSliderCommits?.get("profile-fps-ac")?.value ?? nextProfile?.fpsLimit?.acFps ?? 60, dc: state.qamSliderCommits?.get("profile-fps-dc")?.value ?? nextProfile?.fpsLimit?.dcFps ?? 60 });
-          if (nextProfile?.tdp && !state.qamSliderCommits?.has("profile-tdp")) {
-            const nextProfileDraft = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
-            profileTdpDraftRef.current = nextProfileDraft;
-            setProfileTdpDraft(nextProfileDraft);
+          if (nextProfile?.tdp) {
+            const authoritativeProfileDraft = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
+            const effectiveProfileDraft = state.qamSliderCommits?.get("profile-tdp")?.draft ?? authoritativeProfileDraft;
+            profileTdpDraftRef.current = effectiveProfileDraft;
+            setProfileTdpDraft(effectiveProfileDraft);
           }
-          if (!state.qamSliderCommits?.has("device-tdp")) { setTdpDraft(nextDraft); tdpDraftRef.current = nextDraft; }
+          const effectiveDeviceDraft = state.qamSliderCommits?.get("device-tdp")?.draft ?? nextDraft;
+          setTdpDraft(effectiveDeviceDraft); tdpDraftRef.current = effectiveDeviceDraft;
           setPreviewAc(state.qamSliderCommits?.get("device-cpu-ac")?.value ?? state.qamSliderCommits?.get("profile-cpu-ac")?.value ?? null);
           setPreviewDc(state.qamSliderCommits?.get("device-cpu-dc")?.value ?? state.qamSliderCommits?.get("profile-cpu-dc")?.value ?? null);
           setError(null);
@@ -945,21 +947,29 @@
       const entry = { ...pending, method, payload, token, timer: null };
       entry.timer = setTimeout(async () => {
         if (state.qamSliderCommits.get(key)?.token !== token) return;
-        state.qamSliderCommits.delete(key);
+        entry.timer = null;
         if (!state.installed) return;
         try {
           if (entry.appId) {
             const activeProfile = await request("captureActiveGameProfile");
             if (Number(activeProfile?.appId || 0) !== entry.appId) {
-              state.onStateInvalidated?.();
+              if (state.qamSliderCommits.get(key)?.token === token) {
+                state.qamSliderCommits.delete(key);
+                state.onStateInvalidated?.();
+              }
               return;
             }
           }
+          if (state.qamSliderCommits.get(key)?.token !== token) return;
           const result = await request(method, payload);
-        await onSettled(result, null, entry);
-      } catch (error) {
-        await onSettled(null, error, entry);
-      }
+          if (state.qamSliderCommits.get(key)?.token !== token) return;
+          state.qamSliderCommits.delete(key);
+          await onSettled(result, null, entry);
+        } catch (error) {
+          if (state.qamSliderCommits.get(key)?.token !== token) return;
+          state.qamSliderCommits.delete(key);
+          await onSettled(null, error, entry);
+        }
     }, QAM_SLIDER_COMMIT_DELAY_MS);
     state.qamSliderCommits.set(key, entry);
   }

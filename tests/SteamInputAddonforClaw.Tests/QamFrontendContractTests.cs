@@ -484,6 +484,23 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_pending_tdp_drafts_restore_after_remount_and_old_commit_responses_cannot_rewind_new_edits()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("const effectiveDeviceDraft = state.qamSliderCommits?.get(\"device-tdp\")?.draft ?? nextDraft", source);
+        Assert.Contains("const effectiveProfileDraft = state.qamSliderCommits?.get(\"profile-tdp\")?.draft ?? authoritativeProfileDraft", source);
+        Assert.Contains("tdpDraftRef.current = effectiveDeviceDraft", source);
+        Assert.Contains("profileTdpDraftRef.current = effectiveProfileDraft", source);
+
+        var scheduler = source[source.IndexOf("function scheduleQamSliderCommit", StringComparison.Ordinal)..source.IndexOf("function receiveBridgeResponse", StringComparison.Ordinal)];
+        Assert.Contains("if (state.qamSliderCommits.get(key)?.token !== token) return;", scheduler);
+        Assert.Contains("state.qamSliderCommits.delete(key);", scheduler);
+        Assert.True(scheduler.IndexOf("const result = await request(method, payload)", StringComparison.Ordinal)
+            < scheduler.IndexOf("state.qamSliderCommits.delete(key);", scheduler.IndexOf("const result = await request(method, payload)", StringComparison.Ordinal), StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Qam_power_mutation_refresh_preserves_explicit_failure()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
