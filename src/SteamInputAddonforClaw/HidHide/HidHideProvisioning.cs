@@ -120,7 +120,7 @@ internal sealed class WindowsHidHidePackageProbe : IHidHidePackageProbe
     internal static string NormalizeVersion(Version version) => new Version(version.Major, Math.Max(version.Minor, 0), Math.Max(version.Build, 0), Math.Max(version.Revision, 0)).ToString(4);
 }
 
-internal sealed class HidHideClientPathResolver(
+internal sealed class HidHideTrustedApplicationPathResolver(
     IHidHideUninstallRegistry? uninstallRegistry = null,
     Func<string, bool>? fileExists = null)
 {
@@ -145,7 +145,7 @@ internal sealed class HidHideClientPathResolver(
         }
         catch (Exception exception)
         {
-            AppLog.Warn("HidHide", "Official HidHide Configuration Client path resolution failed.", exception,
+            AppLog.Warn("HidHide", "Official HidHide application path resolution failed.", exception,
                 ("Action", "DoNotTrustWhitelistEntry"));
             return [];
         }
@@ -157,6 +157,8 @@ internal sealed class HidHideClientPathResolver(
         var root = installLocation.Trim().Trim('"');
         yield return Path.Combine(root, "HidHideClient.exe");
         yield return Path.Combine(root, "x64", "HidHideClient.exe");
+        yield return Path.Combine(root, "HidHideCLI.exe");
+        yield return Path.Combine(root, "x64", "HidHideCLI.exe");
     }
 
     private static string? Canonicalize(string path)

@@ -46,10 +46,6 @@ public sealed partial class ControllerPage : UserControl
             var result = await _frontend.SetSteamInputRoutingEnabledAsync(SteamInputRoutingToggleSwitch.IsOn);
             _lastKnownSteamInputRoutingEnabled = result.Settings.SteamInputRoutingEnabled;
             SetRouteToggle(_lastKnownSteamInputRoutingEnabled);
-            if (result.Outcome == FrontendSteamInputRoutingMutationOutcome.HidHideConflict)
-                await ShowRoutingErrorAsync("HidHide Conflict Detected", "Steam Input routing requires exclusive use of HidHide.\n\nAnother application's HidHide configuration was detected, so routing cannot be enabled.\n\nTo use Steam Input routing, uninstall the other controller/remapping application and remove its HidHide configuration.");
-            else if (result.Outcome == FrontendSteamInputRoutingMutationOutcome.HidHideInspectionUnavailable)
-                await ShowRoutingErrorAsync("HidHide Check Failed", "Steam Input routing could not verify the current HidHide configuration, so routing was not enabled.");
         }
         catch (Exception exception)
         {

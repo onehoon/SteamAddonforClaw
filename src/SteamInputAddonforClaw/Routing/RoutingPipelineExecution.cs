@@ -26,11 +26,11 @@ internal static class RoutingPipelineStageOrder
     internal static IReadOnlyList<RoutingStageKind> Forward { get; } =
     [
         RoutingStageKind.WinGProtection,
+        RoutingStageKind.HidHideBaseline,
         RoutingStageKind.CenterMGuard,
         RoutingStageKind.NativeMode,
         RoutingStageKind.PhysicalInput,
         RoutingStageKind.PhysicalIsolation,
-        RoutingStageKind.ThirdPartyIsolation,
         RoutingStageKind.SteamOutput,
         RoutingStageKind.XboxOutput,
         RoutingStageKind.GameBarRouting
@@ -41,12 +41,12 @@ internal static class RoutingPipelineStageOrder
         RoutingStageKind.GameBarRouting,
         RoutingStageKind.XboxOutput,
         RoutingStageKind.SteamOutput,
-        RoutingStageKind.ThirdPartyIsolation,
         RoutingStageKind.PhysicalInput,
         RoutingStageKind.NativeMode,
         RoutingStageKind.PhysicalIsolation,
         RoutingStageKind.CenterMGuard,
-        RoutingStageKind.WinGProtection
+        RoutingStageKind.HidHideBaseline,
+        RoutingStageKind.WinGProtection,
     ];
 
     internal static bool IsRollbackFailureBarrier(RoutingStageKind kind) =>

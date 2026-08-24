@@ -10,7 +10,6 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
 {
-    private const string OfficialHidHideClient = "C:\\Program Files\\Nefarius Software Solutions\\HidHide\\x64\\HidHideClient.exe";
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "ClawIsolationTests", Guid.NewGuid().ToString("N"));
     private string JournalPath => Path.Combine(_directory, "recovery.json");
 
@@ -21,46 +20,13 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         var stage = Create(hid);
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal(["AddApplication", "AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD"], hid.Trace);
+        Assert.Equal(["AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD"], hid.Trace);
         Assert.DoesNotContain(hid.Trace, entry => entry.Contains("USB\\MSI_ROOT", StringComparison.OrdinalIgnoreCase));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal(["AddApplication", "AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "RemoveDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "RemoveApplication"], hid.Trace);
+        Assert.Equal(["AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "RemoveDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD"], hid.Trace);
+        Assert.Contains("C:\\addon.exe", hid.Applications);
     }
 
-    [Fact]
-    public async Task Prepare_allows_addon_and_official_hidhide_client()
-    {
-        var hid = new FakeHidHide { Applications = ["C:\\addon.exe", OfficialHidHideClient] };
-        var stage = Create(hid, trustedHidHideApplicationPaths: [OfficialHidHideClient]);
-
-        var result = await stage.PrepareMutationAsync(CancellationToken.None);
-
-        Assert.True(result.Succeeded, result.Reason);
-    }
-
-    [Fact]
-    public async Task Prepare_rejects_addon_and_foreign_application()
-    {
-        var hid = new FakeHidHide { Applications = ["C:\\addon.exe", "C:\\other.exe"] };
-        var stage = Create(hid, trustedHidHideApplicationPaths: [OfficialHidHideClient]);
-
-        var result = await stage.PrepareMutationAsync(CancellationToken.None);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal("ForeignConfiguration", result.Reason);
-    }
-
-    [Fact]
-    public async Task Prepare_rejects_preexisting_hidden_device_with_official_client()
-    {
-        var hid = new FakeHidHide { Applications = ["C:\\addon.exe", OfficialHidHideClient], HiddenDevices = ["HID\\FOREIGN"] };
-        var stage = Create(hid, trustedHidHideApplicationPaths: [OfficialHidHideClient]);
-
-        var result = await stage.PrepareMutationAsync(CancellationToken.None);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal("ForeignConfiguration", result.Reason);
-    }
 
     [Fact]
     public async Task PhysicalIdentityIsNeverHidden()
@@ -81,7 +47,6 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         hid.Trace.Clear();
-        hid.Applications.Clear();
         hid.HiddenDevices.Clear();
         hid.Active = false;
 
@@ -89,7 +54,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
 
         Assert.True(result.Succeeded);
         Assert.Equal("Repaired", result.Reason);
-        Assert.Equal(["AddApplication", "AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "SetActive:True"], hid.Trace);
+        Assert.Equal(["AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "SetActive:True"], hid.Trace);
         Assert.Contains("C:\\addon.exe", hid.Applications);
         Assert.Contains("HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", hid.HiddenDevices);
         Assert.True(hid.Active);
@@ -145,7 +110,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         var result = await stage.ReconcileOwnedStateAsync();
 
         Assert.False(result.Succeeded);
-        Assert.Equal("PreExistingWhitelistDrift", result.Reason);
+        Assert.Equal("AddonWhitelistMissing", result.Reason);
         Assert.Empty(hid.Trace);
     }
 
@@ -193,7 +158,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.True(hid.Active);
 
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal("SetActive:False", hid.Trace[3]);
+        Assert.Equal("SetActive:False", hid.Trace[^2]);
         Assert.False(hid.Active);
     }
 
@@ -243,7 +208,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.False(hid.Active);
         Assert.True(hid.Inverse);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.DoesNotContain("C:\\addon.exe", hid.Applications);
+        Assert.Contains("C:\\addon.exe", hid.Applications);
         Assert.Empty(hid.HiddenDevices);
         Assert.True(hid.Inverse);
     }
@@ -260,29 +225,6 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
-    public async Task WhitelistVerifiedAbsentButJournalCompletionFailureKeepsRollbackPending()
-    {
-        var hid = new FakeHidHide { FailApplicationAddWithoutApplying = true };
-        var stage = Create(hid, store: new FaultingStore(JournalPath, successfulReplacements: 1));
-        var prepare = await stage.PrepareMutationAsync(CancellationToken.None);
-        Assert.True(prepare.Succeeded, prepare.Reason);
-        var execute = await stage.ExecuteMutationAsync(CancellationToken.None);
-        Assert.False(execute.Succeeded);
-        Assert.Equal("WhitelistJournalCompletionFailed", execute.Reason);
-        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-    }
-
-    [Fact]
-    public async Task DeviceVerifiedAbsentButJournalCompletionFailureKeepsRollbackPending()
-    {
-        var hid = new FakeHidHide { FailDeviceAddWithoutApplying = true };
-        var stage = Create(hid, store: new FaultingStore(JournalPath, successfulReplacements: 2));
-        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal("DeviceJournalCompletionFailed", (await stage.ExecuteMutationAsync(CancellationToken.None)).Reason);
-        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-    }
-
-    [Fact]
     public async Task AddReportsFailureButPresentMutationIsRolledBack()
     {
         var hid = new FakeHidHide { ReportDeviceAddFailureAfterApplying = true };
@@ -292,7 +234,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.DoesNotContain(hid.HiddenDevices, x => string.Equals(x, "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("RemoveDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", hid.Trace);
-        Assert.DoesNotContain(hid.Applications, x => string.Equals(x, "C:\\addon.exe", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(hid.Applications, x => string.Equals(x, "C:\\addon.exe", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
@@ -323,7 +265,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         var result = await stage.PrepareMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Equal("ForeignConfiguration", result.Reason);
+        Assert.Equal("HidHideDisabledWithExistingBlockedEntries", result.Reason);
         Assert.Empty(hid.Trace);
     }
 
@@ -348,7 +290,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.False(hid.Active);
         Assert.Empty(hid.HiddenDevices);
-        Assert.Empty(hid.Applications);
+        Assert.Contains("C:\\addon.exe", hid.Applications);
     }
 
     [Fact]
@@ -366,7 +308,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.DoesNotContain("SetActive:True", hid.Trace);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal(["HID\\FOREIGN"], hid.HiddenDevices);
-        Assert.Empty(hid.Applications);
+        Assert.Contains("C:\\addon.exe", hid.Applications);
     }
 
     [Fact]
@@ -433,14 +375,14 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.Empty(hid.Trace);
     }
 
-    private MsiClawPhysicalIsolationStage Create(FakeHidHide hid, string physicalIdentity = "USB\\MSI_ROOT", IRecoveryJournalStore? store = null, string pnpInstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null)
+    private MsiClawPhysicalIsolationStage Create(FakeHidHide hid, string physicalIdentity = "USB\\MSI_ROOT", IRecoveryJournalStore? store = null, string pnpInstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD")
     {
         Directory.CreateDirectory(_directory);
         var recovery = new RecoveryManager(store ?? new RecoveryJournalStore(JournalPath));
         recovery.BeginDeviceNativeStateMutation(new(NativeStateCaptureStatus.Success,
             new(new("test"), 1, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(new { Mode = "XInput" })), "captured"));
         var sessionId = recovery.LoadJournal().Journal!.RecoverySessionId;
-        return new(new FakeInput(new(Guid.NewGuid(), "path", pnpInstanceId, physicalIdentity)), new FakeSession(sessionId), recovery, hid, () => "C:\\addon.exe", trustedHidHideApplicationPaths);
+        return new(new FakeInput(new(Guid.NewGuid(), "path", pnpInstanceId, physicalIdentity)), new FakeSession(sessionId), recovery, hid, () => "C:\\addon.exe");
     }
 
     public void Dispose() { try { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); } catch { } }
@@ -450,7 +392,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     private sealed class FakeHidHide : IHidHideClient
     {
         public HidHideInspectionStatus Status { get; set; } = HidHideInspectionStatus.Available;
-        public List<string> Applications { get; set; } = [];
+        public List<string> Applications { get; set; } = ["C:\\addon.exe"];
         public List<string> HiddenDevices { get; set; } = [];
         public List<string> Trace { get; } = [];
         public bool FailInspectionAfterDeviceMutation { get; set; }

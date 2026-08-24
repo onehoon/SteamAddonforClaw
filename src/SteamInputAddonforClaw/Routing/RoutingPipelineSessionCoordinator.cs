@@ -259,7 +259,7 @@ internal sealed class RoutingPipelineSessionCoordinator
         AppLog.Info("Routing.Session", message,
             ("Action", action), ("Classification", classification.Kind), ("NativeMode", plan.NativeMode),
             ("PhysicalInput", plan.PhysicalInput), ("PhysicalIsolation", plan.PhysicalIsolation),
-            ("ThirdPartyIsolation", plan.ThirdPartyIsolation), ("SteamOutput", plan.SteamOutput),
+            ("HidHideBaseline", plan.HidHideBaseline), ("SteamOutput", plan.SteamOutput),
             ("XboxOutput", plan.XboxOutput), ("GameBarRouting", plan.GameBarRouting));
     }
 }
