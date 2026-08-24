@@ -65,7 +65,7 @@ static WmiResult Invoke(string method, int block, byte value, bool responseRequi
         using (data)
         {
             if (input is null || data is null) return Failure("InputDataUnavailable", null, usedFallback);
-            try { data["Bytes"] = requestedPayload ?? BuildPackage(block, value); input["Data"] = data; }
+            try { data["Bytes"] = TdpHelperProtocol.BuildPackage(block, value, requestedPayload); input["Data"] = data; }
             catch (Exception exception) when (IsExpectedWmiException(exception)) { return Failure("InputSetup", exception, usedFallback); }
             using var output = obj.InvokeMethod(method, input, null);
             if (!responseRequired) return Success(null, fallbackCause, usedFallback);
@@ -83,7 +83,6 @@ static WmiResult Failure(string stage, Exception? exception, bool usedFallback =
 static WmiResult Success(byte[]? payload, Exception? fallbackCause, bool usedFallback) => new(true, payload,
     fallbackCause is null ? null : "GetMethodParameters", fallbackCause?.GetType().Name, fallbackCause?.HResult,
     fallbackCause is ManagementException management ? (int)management.ErrorCode : null, usedFallback);
-static byte[] BuildPackage(int block, byte value) { var p = new byte[32]; p[0] = (byte)block; p[1] = value; return p; }
 record Request(string Operation, int Index, byte Value, string? Payload = null);
 record Response(bool Ok, string? Payload, string? Stage = null, string? ExceptionType = null, int? HResult = null, int? ManagementStatus = null, bool UsedFallback = false);
 record WmiResult(bool Ok, byte[]? Payload, string? Stage, string? ExceptionType, int? HResult, int? ManagementStatus, bool UsedFallback);
