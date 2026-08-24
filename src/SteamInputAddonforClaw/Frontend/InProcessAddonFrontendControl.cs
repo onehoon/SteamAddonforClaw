@@ -57,6 +57,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // and must keep working when _runtime is null (no routing composition at all).
     private readonly CpuBoostRuntime? _cpuBoostRuntime;
     private readonly PowerModeRuntime? _powerModeRuntime;
+    private readonly IntelFrameLimiterRuntime? _intelFpsRuntime;
     private readonly TdpRuntime? _tdpRuntime;
     private readonly GameProfileMutations? _gameProfileMutations;
     private readonly Func<uint> _actualRunningAppIdSource;
@@ -72,11 +73,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _cpuBoostRuntime = cpuBoostRuntime;
         _powerModeRuntime = powerModeRuntime;
+        _intelFpsRuntime = intelFpsRuntime;
         _tdpRuntime = tdpRuntime;
         _gameProfileMutations = gameProfileMutations;
         _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
@@ -144,6 +146,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                     applied.FailureMessage,
                     CaptureGameProfile(appId)));
         }
+        if (appId == _actualRunningAppIdSource() && _intelFpsRuntime is { } fpsRuntime)
+        {
+            var applied = fpsRuntime.ReconcileWithResult(appId);
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+            if (!applied) return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.ApplyFailed, "Intel FPS Limit apply failed.", CaptureGameProfile(appId)));
+        }
         else
         {
             StateInvalidated?.Invoke(this, EventArgs.Empty);
@@ -164,6 +172,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         MutatePowerModeAfterShutdownCheck(appId, mode, ac: true);
     public Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeDcAsync(uint appId, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
         MutatePowerModeAfterShutdownCheck(appId, mode, ac: false);
+    public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) => MutateFps(appId, m => m.SetFpsLimitEnabled(appId, enabled));
+    public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitAcAsync(uint appId, int fps, CancellationToken cancellationToken = default) => MutateFps(appId, m => m.SetFpsLimitAc(appId, fps));
+    public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitDcAsync(uint appId, int fps, CancellationToken cancellationToken = default) => MutateFps(appId, m => m.SetFpsLimitDc(appId, fps));
+    private Task<FrontendGameProfileMutationResult> MutateFps(uint appId, Func<GameProfileMutations, GameProfileMutations.MutationOutcome> mutation)
+    {
+        ThrowIfShuttingDown(); var outcome = _gameProfileMutations is { } m ? mutation(m) : GameProfileMutations.MutationOutcome.Unavailable;
+        if (outcome != GameProfileMutations.MutationOutcome.Succeeded) return Task.FromResult(MutateGame(appId, outcome, false, false));
+        if (appId == _actualRunningAppIdSource() && _intelFpsRuntime is { } runtime)
+        { var applied = runtime.ReconcileWithResult(appId); StateInvalidated?.Invoke(this, EventArgs.Empty); if (!applied) return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.ApplyFailed, "Intel FPS Limit apply failed.", CaptureGameProfile(appId))); }
+        else StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Succeeded, null, CaptureGameProfile(appId)));
+    }
     private Task<FrontendGameProfileMutationResult> MutatePowerModeAfterShutdownCheck(uint appId, WindowsPowerMode mode, bool ac)
     {
         ThrowIfShuttingDown();
@@ -213,7 +233,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             new(profile.Performance.CpuBoost!.Ac, profile.Performance.CpuBoost.Dc),
             new(new(profile.Performance.Tdp!.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits,
             profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
-            profile.Performance.PowerMode is { } power ? new(power.Ac, power.Dc) : null);
+            profile.Performance.PowerMode is { } power ? new(power.Ac, power.Dc) : null,
+            new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60, profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason));
     }
 
     private FrontendGameProfileMutationResult MutateGame(uint appId, GameProfileMutations.MutationOutcome outcome, bool cpu, bool tdp, bool display = false, bool power = false)
@@ -235,7 +256,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (power) try { _powerModeRuntime?.Reconcile(appId); } catch (Exception ex) { AppLog.Error("Profiles.PowerMode", "Game Profile Power Mode reconcile failed.", ex); }
     }
 
-    private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null);
+    private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
     private FrontendGameProfileMutationResult UnavailableMutation(uint appId, string message) => new(FrontendGameProfileMutationOutcome.Unavailable, message, CaptureGameProfile(appId));
 
     public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), _registrationMessage, new(_developer.IsEnabled), AppLog.DirectoryPath, _oem1MappingAvailable, _oem1MappingAvailable));

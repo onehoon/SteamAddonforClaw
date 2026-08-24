@@ -402,6 +402,9 @@ public sealed class QamFrontendContractTests
         Assert.Contains("setActiveGameCpuBoostAc", source);
         Assert.Contains("setActiveGameCpuBoostDc", source);
         Assert.Contains("setActiveGameTdp", source);
+        Assert.Contains("setActiveGameFpsLimitEnabled", source);
+        Assert.Contains("setActiveGameFpsLimitAc", source);
+        Assert.Contains("setActiveGameFpsLimitDc", source);
         var activePath = source[source.IndexOf("private async Task<object> ActiveMutationAsync", StringComparison.Ordinal)..];
         Assert.Contains("CaptureActiveGameProfileAsync", activePath);
         Assert.DoesNotContain("CaptureStatusAsync", activePath);
@@ -432,6 +435,12 @@ public sealed class QamFrontendContractTests
         Assert.Contains("disabled: !profile.persistenceWritable || !enabled", source);
         Assert.Contains("profile.cpuBoost?.ac", source);
         Assert.Contains("profileTdpDraft?.dc?.pl2Watts", source);
+        Assert.Contains("profile-fps-section", source);
+        Assert.Contains("Intel FPS Limit", source);
+        Assert.Contains("min: 40, max: 120, step: 1", source);
+        Assert.Contains("${value} FPS", source);
+        Assert.Contains("setActiveGameFpsLimitAc", source);
+        Assert.Contains("setActiveGameFpsLimitDc", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("type: \"checkbox\"", source);
         Assert.DoesNotContain("type: \"range\"", source);

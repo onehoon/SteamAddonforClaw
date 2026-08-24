@@ -64,6 +64,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly PowerModeRuntime _powerModeRuntime;
     private readonly GameProfileMutations _gameProfileMutations;
     private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
+    private readonly IntelFrameLimiterRuntime _intelFpsRuntime;
+    private WindowsIntelFpsPowerNotificationSource? _intelFpsPowerSource;
     private TdpRuntime? _tdpRuntime;
     private HelperMsiClawTdpTransport? _tdpTransport;
     private TdpPowerLifecycleWatcher? _tdpPowerLifecycleWatcher;
@@ -92,6 +94,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
         _displayResolutionRuntime = new(_profileStore, _profileMutationGate, testOnlyDataRoot);
+        _intelFpsRuntime = new(_profileStore, _profileMutationGate, new IntelFrameLimiter(testOnlyDataRoot is null ? null : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json")), marker: testOnlyDataRoot is null ? null : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json"));
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
@@ -208,6 +211,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _runtimeHost = composition.RuntimeHost;
         _cpuBoostRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _powerModeRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
+        _intelFpsRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
         if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
             && startupResult.HardwareDeviceModel is { } tdpModel
@@ -230,7 +234,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
-            actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime);
+            actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime, intelFpsRuntime: _intelFpsRuntime);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
@@ -324,6 +328,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         try { _powerModeRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0); }
         catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode startup reconcile failed.", exception); }
+        try
+        {
+            _intelFpsRuntime.StartupRecover();
+            _intelFpsRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0);
+            _intelFpsPowerSource = new WindowsIntelFpsPowerNotificationSource();
+            if (!_intelFpsPowerSource.TryRegister()) AppLog.Warn("Profiles.IntelFps", "AC/DC power notification registration failed.");
+            _intelFpsPowerSource.Changed += OnIntelFpsPowerSourceChanged;
+        }
+        catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "Intel FPS startup reconcile failed.", exception); }
 
         try
         {
@@ -375,6 +388,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _tdpCenterMRegistryWatcher = null;
         _tdpPowerLifecycleWatcher?.Dispose();
         _tdpPowerLifecycleWatcher = null;
+        _intelFpsPowerSource?.Dispose(); _intelFpsPowerSource = null;
+        _intelFpsRuntime.BeginShutdown();
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
     }
@@ -428,6 +443,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             await _tdpTransport.DisposeAsync().ConfigureAwait(false);
             _tdpTransport = null;
         }
+        _intelFpsRuntime.Dispose();
         await _qamHostController.DisposeAsync().ConfigureAwait(false);
         _startupComposition = null;
     }
@@ -487,7 +503,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("Profiles.Tdp", "TDP game-profile reconcile failed after Actual RunningAppID changed.", exception,
                 ("RunningAppID", appId));
         }
+        try { _intelFpsRuntime.Reconcile(appId, "ActualRunningAppIdChanged"); }
+        catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "FPS game-profile reconcile failed after Actual RunningAppID changed.", exception, ("RunningAppID", appId)); }
     }
+
+    private void OnIntelFpsPowerSourceChanged() => _ = Task.Run(() => _intelFpsRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0, "PowerSourceChanged"));
 
     private void OnGameBarForegroundChanged(object? sender, EventArgs args) =>
         _gameBarDelivery.Request(_gameBarForegroundWatcher.IsForeground);

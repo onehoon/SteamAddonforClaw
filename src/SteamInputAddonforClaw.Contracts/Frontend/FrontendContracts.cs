@@ -11,8 +11,9 @@ public sealed record FrontendGameCpuBoostConfiguration(CpuBoostMode Ac, CpuBoost
 public sealed record FrontendGameTdpConfiguration(FrontendTdpPowerPair Ac, FrontendTdpPowerPair Dc);
 public sealed record FrontendGamePowerModeConfiguration(WindowsPowerMode Ac, WindowsPowerMode Dc);
 public sealed record FrontendGameResolution(int Width, int Height);
+public sealed record FrontendGameFpsLimitConfiguration(bool Enabled, int AcFps, int DcFps, bool Available, string? UnavailableReason = null);
 public sealed record FrontendGameProfileSnapshot(uint AppId, string? DisplayName, bool Exists, bool Enabled,
-    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null);
+    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null);
 public enum FrontendPowerModeReadStatus { Known, Unknown, Unavailable }
 public enum FrontendPowerModeMutationOutcome { Succeeded, PersistenceFailed, ApplyFailed }
 public sealed record FrontendPowerModeSideSnapshot(FrontendPowerModeReadStatus CurrentStatus, WindowsPowerMode? Current, WindowsPowerMode? Desired);
@@ -286,6 +287,9 @@ public interface IAddonFrontendControl
     Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostDcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeAcAsync(uint appId, WindowsPowerMode mode, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeDcAsync(uint appId, WindowsPowerMode mode, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Intel FPS Limit is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitAcAsync(uint appId, int fps, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Intel FPS Limit is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitDcAsync(uint appId, int fps, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Intel FPS Limit is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileFavoriteAsync(uint appId, bool favorite, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Favorites are unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileResolutionAsync(uint appId, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Display resolution is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
@@ -316,5 +320,5 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
 
     private static FrontendGameProfileSnapshot FrontendGameProfileSnapshotUnavailable(uint appId) => new(appId, null, false, false,
-        new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null);
+        new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
 }

@@ -514,6 +514,9 @@
       const [powerMode, setPowerMode] = React.useState(null);
       const [tdp, setTdp] = React.useState(null);
       const [profile, setProfile] = React.useState(null);
+      const [fpsDraft, setFpsDraft] = React.useState({ ac: 60, dc: 60 });
+      const fpsTimers = React.useRef({ ac: null, dc: null });
+      const fpsGeneration = React.useRef({ ac: 0, dc: 0 });
       const [profileTdpDraft, setProfileTdpDraft] = React.useState(null);
       const profileTdpDraftRef = React.useRef(null);
       const profileTdpTimer = React.useRef(null);
@@ -552,8 +555,10 @@
         if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
         profileTdpTimer.current = null;
         profileTdpGeneration.current = 0;
+        for (const key of ["ac", "dc"]) { if (fpsTimers.current[key]) clearTimeout(fpsTimers.current[key]); fpsTimers.current[key] = null; fpsGeneration.current[key] = 0; }
         activeProfileAppIdRef.current = 0;
           setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
+          setFpsDraft({ ac: 60, dc: 60 });
       }, []);
 
       const refresh = React.useCallback(async () => {
@@ -569,6 +574,7 @@
             profileTdpGeneration.current = 0;
             profileTdpDraftRef.current = null;
             setProfileTdpDraft(null);
+            for (const key of ["ac", "dc"]) { if (fpsTimers.current[key]) clearTimeout(fpsTimers.current[key]); fpsTimers.current[key] = null; fpsGeneration.current[key] = 0; }
           }
           activeProfileAppIdRef.current = nextAppId;
           const activeGame = nextAppId > 0;
@@ -581,6 +587,7 @@
             dc: { ...nextTdp.configuration.dc },
           } : null;
           setStatus(nextStatus); setCpu(nextCpu); setPowerMode(nextPowerMode); setTdp(nextTdp); setProfile(nextProfile);
+          setFpsDraft({ ac: nextProfile?.fpsLimit?.acFps ?? 60, dc: nextProfile?.fpsLimit?.dcFps ?? 60 });
           if (nextProfile?.tdp && profileTdpGeneration.current === 0) {
             const nextProfileDraft = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
             profileTdpDraftRef.current = nextProfileDraft;
@@ -909,12 +916,44 @@
           { key: "profile-tdp-dc-pl1", node: profileTdpSlider("PL1", "dc", profileTdpDraft?.dc?.pl1Watts, "none") },
           { key: "profile-tdp-dc-pl2", compact: true, node: profileTdpSlider("PL2", "dc", profileTdpDraft?.dc?.pl2Watts, "standard") },
         ] : [];
+        const fps = profile.fpsLimit || { enabled: false, acFps: 60, dcFps: 60, available: false, unavailableReason: "Intel FPS Limit is unavailable." };
+        const runFpsMutation = async (method, payload) => {
+          if (!state.installed || !fps.available || !writable) return;
+          beginMutation();
+          setError(null);
+          try {
+            const result = await request(method, payload);
+            const failure = !result?.succeeded ? (result.failureMessage || "Intel FPS Limit update failed") : null;
+            await refresh();
+            deferredInvalidationRef.current = false;
+            if (failure) setError(failure);
+          } catch (_) { failClosed("Intel FPS Limit update failed"); }
+          finally { endMutation(); }
+        };
+        const scheduleFps = (side, value) => {
+          if (!fps.available || !profile.persistenceWritable || !enabled || busy) return;
+          setFpsDraft(current => ({ ...current, [side]: value }));
+          const generation = ++fpsGeneration.current[side];
+          if (fpsTimers.current[side]) clearTimeout(fpsTimers.current[side]);
+          fpsTimers.current[side] = setTimeout(async () => {
+            fpsTimers.current[side] = null;
+            try { beginMutation(); const result = await request(side === "ac" ? "setActiveGameFpsLimitAc" : "setActiveGameFpsLimitDc", { fps: value }); if (generation === fpsGeneration.current[side]) setProfile(result.snapshot); if (!result.succeeded) setError(result.failureMessage || "Intel FPS Limit update failed"); } catch (_) { failClosed("Intel FPS Limit update failed"); } finally { endMutation(); }
+          }, 275);
+        };
+        const fpsSlider = (label, side, value) => React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, `${value} FPS`))), min: 40, max: 120, step: 1, value: fpsDraft[side] ?? value, disabled: !fps.available || !profile.persistenceWritable || !enabled || busy, onChange: next => scheduleFps(side, Number(next)) });
+        const fpsControls = [
+          { key: "fps-toggle", node: React.createElement(native.ToggleField, { label: "FPS Limit", checked: !!fps.enabled, disabled: !fps.available || !writable, onChange: value => void runFpsMutation("setActiveGameFpsLimitEnabled", { enabled: !!value }) }) },
+          { key: "fps-description", node: React.createElement("div", null, fps.available ? "Uses Intel's official API. Some games may not support FPS limiting." : fps.unavailableReason) },
+          { key: "fps-ac", node: fpsSlider("Plugged in", "ac", fps.acFps ?? 60) },
+          { key: "fps-dc", node: fpsSlider("On battery", "dc", fps.dcFps ?? 60) },
+        ];
         return React.createElement(React.Fragment, null,
           displayError ? React.createElement("p", { key: "error" }, displayError) : null,
           React.createElement(native.PanelSection, { key: "profile-header", title: profile.displayName || `Game ${profile.appId}` }, React.createElement(native.PanelSectionRow, { key: "profile-toggle" }, React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }))),
           React.createElement(native.PanelSection, { key: "profile-cpu-section", title: "CPU Boost" }, ...profileCpuControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
           profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section", title: "Windows Power Mode" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null,
-          React.createElement(native.PanelSection, { key: "profile-tdp-section", title: "TDP Control" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key, style: x.compact ? { marginTop: "-4px" } : undefined }, x.node))));
+          React.createElement(native.PanelSection, { key: "profile-tdp-section", title: "TDP Control" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key, style: x.compact ? { marginTop: "-4px" } : undefined }, x.node))),
+          React.createElement(native.PanelSection, { key: "profile-fps-section", title: "Intel FPS Limit" }, ...fpsControls.map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))));
       }
 
       return React.createElement(React.Fragment, null,
