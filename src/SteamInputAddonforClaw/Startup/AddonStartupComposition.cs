@@ -31,9 +31,8 @@ internal static class AddonStartupCompositionFactory
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
         var controllerSoftwareProviders = new IControllerSoftwareStatusProvider[]
         {
-            new MsiCenterMSoftwareStatusProvider(),
-            new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
-            new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
+            // HHC/ClawTweaks coexistence detection is intentionally not part of the supported production controller environment.
+            new MsiCenterMSoftwareStatusProvider()
         };
         var controllerEnvironmentAssessmentProvider = new ControllerEnvironmentAssessmentProvider(controllerSoftwareProviders);
         var recoveryJournalStore = new RecoveryJournalStore(AddonDataPaths.RecoveryJournalPath);

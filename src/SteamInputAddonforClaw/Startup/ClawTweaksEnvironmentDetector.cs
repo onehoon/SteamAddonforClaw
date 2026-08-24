@@ -15,16 +15,9 @@ internal enum ClawTweaksState
     Indeterminate
 }
 
-internal enum ControllerEnvironmentMode
-{
-    Unsupported,
-    StockCenterM,
-    ClawTweaks,
-    HHCManaged,
-    Indeterminate
-}
+internal enum ControllerEnvironmentMode { Unsupported, StockCenterM, ClawTweaks, HHCManaged, Indeterminate }
 
-internal sealed record ControllerEnvironment(ControllerEnvironmentMode Mode, ClawTweaksState ClawTweaksState);
+internal sealed record ControllerEnvironment(ControllerEnvironmentMode Mode, ClawTweaksState ClawTweaksState = ClawTweaksState.Indeterminate);
 
 internal interface IHandheldCompanionRuntimeDetector
 {

@@ -84,9 +84,7 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
     {
         var assessment = new ControllerEnvironmentAssessmentProvider(
         [
-            new MsiCenterMSoftwareStatusProvider(),
-            new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
-            new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
+            new MsiCenterMSoftwareStatusProvider()
         ]).Capture();
         return new CurrentDetectionDiscoveryInfo(assessment.Software, StartupControllerEnvironmentMapper.Map(assessment), "NotEvaluated");
     }

@@ -222,23 +222,6 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
-    public async Task ConflictingManagerDetected_DoesNotInvokeHidHideCleaner()
-    {
-        var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: true);
-        var cleaner = new FakeStartupHidHideRecoveryCleaner();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FixedEnvironmentDetector(events, new(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled)), new ThrowingEnvironmentWaiter(),
-            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.False(result.RecoverySafe);
-        Assert.Equal(0, cleaner.CallCount);
-        Assert.Equal(0, store.DeleteCallCount);
-    }
-
-    [Fact]
     public async Task JournalDeletionThrows_DoesNotCrashAndBlocksRouting()
     {
         var events = new List<string>();
@@ -315,23 +298,6 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
-    public async Task NonStockEnvironment_DoesNotRunBaselineOrJournalDiscard()
-    {
-        var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: true);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events, ClawTweaksState.InstalledInactive), new ThrowingEnvironmentWaiter(), new FakeProbeFactory(), new FakeHardwareEvaluator(),
-            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.True(result.ShouldStartRuntime);
-        Assert.DoesNotContain("Baseline", events);
-        Assert.DoesNotContain("Discard", events);
-        Assert.Equal(0, store.DeleteCallCount);
-    }
-
-    [Fact]
     public async Task CancellationDuringBaseline_Propagates()
     {
         var events = new List<string>();
@@ -381,85 +347,6 @@ public sealed class StartupCoordinatorTests
         Assert.False(result.ShouldStartRuntime);
         Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
         Assert.Equal(["UpdateGate"], events);
-        Assert.Equal(0, store.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task RunAsync_WhenClawTweaksIsStarting_DoesNotPollOrWaitForStabilization()
-    {
-        var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: false);
-        var coordinator = new StartupCoordinator(
-            new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events, ClawTweaksState.Starting),
-            new FakeEnvironmentWaiter(events),
-            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store);
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, result.EnvironmentReadiness);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
-        Assert.False(result.RecoverySafe);
-        Assert.Equal(["UpdateGate", "EnvironmentDetector"], events);
-        Assert.Equal(0, store.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task RunAsync_WhenClawTweaksIsInstalledOrRunning_ReturnsPassiveWithoutReadinessWait()
-    {
-        var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: true);
-        var coordinator = new StartupCoordinator(
-            new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events, ClawTweaksState.InstalledInactive),
-            new FakeEnvironmentWaiter(events),
-            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store);
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.True(result.ShouldStartRuntime);
-        Assert.Equal(ControllerEnvironmentReadiness.NotApplicable, result.EnvironmentReadiness);
-        Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
-        Assert.False(result.RecoverySafe);
-        Assert.DoesNotContain("EnvironmentWaiter", events);
-        Assert.Equal(0, store.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task RunAsync_WhenClawTweaksIsInstalledInactive_IsUnsupportedAndPassive()
-    {
-        var events = new List<string>();
-        var waiter = new FakeEnvironmentWaiter(events);
-        var store = new FakeRecoveryJournalStore(events, exists: true);
-        var coordinator = new StartupCoordinator(
-            new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events, ClawTweaksState.InstalledInactive),
-            waiter, new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store);
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
-        Assert.False(result.RecoverySafe);
-        Assert.Empty(waiter.Modes);
-        Assert.Equal(0, store.DeleteCallCount);
-    }
-
-    [Fact]
-    public async Task RunAsync_WhenClawTweaksStateIsIndeterminate_SkipsReadinessChecks()
-    {
-        var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: true);
-        var coordinator = new StartupCoordinator(
-            new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events, ClawTweaksState.Indeterminate),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store);
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
-        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, result.EnvironmentReadiness);
-        Assert.False(result.RecoverySafe);
-        Assert.DoesNotContain("EnvironmentWaiter", events);
         Assert.Equal(0, store.DeleteCallCount);
     }
 
@@ -528,24 +415,6 @@ public sealed class StartupCoordinatorTests
         }
     }
 
-    [Fact]
-    public async Task ClawTweaksMode_DoesNotRunStockBaselineOrJournalDiscard()
-    {
-        var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: true);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FixedEnvironmentDetector(events, new(ControllerEnvironmentMode.ClawTweaks, ClawTweaksState.Active)), new ThrowingEnvironmentWaiter(),
-            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
-        Assert.False(result.RecoverySafe);
-        Assert.DoesNotContain("Baseline", events);
-        Assert.DoesNotContain("Discard", events);
-        Assert.Equal(0, store.DeleteCallCount);
-    }
-
     [Theory]
     [InlineData((int)HardwareCompatibilityStatus.Unsupported)]
     [InlineData((int)HardwareCompatibilityStatus.Indeterminate)]
@@ -608,24 +477,6 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(ControllerEnvironmentReadiness.Stable, result.EnvironmentReadiness);
         Assert.Contains("Baseline", events);
         Assert.True(result.RecoverySafe);
-    }
-
-    [Fact]
-    public async Task HandheldCompanionDetected_DoesNotRunStockBaselineOrJournalDiscard()
-    {
-        var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: true);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FixedEnvironmentDetector(events, new(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled)), new ThrowingEnvironmentWaiter(),
-            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.Equal(ControllerEnvironmentMode.HHCManaged, result.EnvironmentMode);
-        Assert.False(result.RecoverySafe);
-        Assert.DoesNotContain("Baseline", events);
-        Assert.DoesNotContain("Discard", events);
-        Assert.Equal(0, store.DeleteCallCount);
     }
 
     private sealed class FixedCompatibilityEnvironmentDetector(List<string> events, ControllerEnvironmentCompatibilityStatus status, ControllerEnvironmentCompatibilityReason reason) : IControllerEnvironmentAssessmentProvider

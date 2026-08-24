@@ -357,9 +357,7 @@ internal static class ElevatedPrerequisiteSetup
             if (!hardware.AllowsMutation) return (false, "Hardware" + hardware.Status);
             var software = new IControllerSoftwareStatusProvider[]
             {
-                new MsiCenterMSoftwareStatusProvider(),
-                new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
-                new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
+                new MsiCenterMSoftwareStatusProvider()
             };
             var compatibility = new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate(software.Select(provider => provider.Capture()).ToArray());
             if (!compatibility.AllowsMutation) return (false, "Compatibility" + compatibility.Reason);

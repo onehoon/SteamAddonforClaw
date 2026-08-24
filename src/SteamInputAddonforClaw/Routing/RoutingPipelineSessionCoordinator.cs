@@ -105,8 +105,7 @@ internal sealed class RoutingPipelineSessionCoordinator
         if (ActiveSession is not null)
             return Failure(RoutingActionKind.EnterOverride, "ActiveSessionAlreadyExists");
 
-        if (!TrySelectEnvironmentPlan(classification, out var plan))
-            return Failure(RoutingActionKind.EnterOverride, "UnsupportedEnvironmentStrategy");
+        var plan = RoutingPipelinePlan.StockCenterM;
 
         var candidate = new ActiveRoutingPipelineSession(plan);
         SetEnteringSession(candidate);
@@ -228,24 +227,6 @@ internal sealed class RoutingPipelineSessionCoordinator
 
     private RoutingPipelineSessionReconcileResult Failure(RoutingActionKind action, string reason) =>
         new(false, CurrentState, action, reason);
-
-    private static bool TrySelectEnvironmentPlan(
-        ControllerManagerClassification classification,
-        out RoutingPipelinePlan plan)
-    {
-        switch (classification.Kind)
-        {
-            case ControllerManagerKind.None:
-                plan = RoutingPipelinePlan.StockCenterM;
-                return true;
-            case ControllerManagerKind.ClawTweaks:
-                plan = RoutingPipelinePlan.AllDisabled;
-                return true;
-            default:
-                plan = RoutingPipelinePlan.AllDisabled;
-                return false;
-        }
-    }
 
     private static void LogAction(RoutingActionKind action, RoutingDecision decision)
     {

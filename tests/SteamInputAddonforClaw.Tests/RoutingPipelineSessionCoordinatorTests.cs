@@ -239,44 +239,6 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task UnsupportedStrategiesFailClosed()
-    {
-        foreach (var kind in new[]
-                 {
-                     ControllerManagerKind.HandheldCompanion,
-                     ControllerManagerKind.Winhanced,
-                     ControllerManagerKind.Multiple,
-                     ControllerManagerKind.Indeterminate,
-                     (ControllerManagerKind)999
-                 })
-        {
-            var executor = new FakeExecutor();
-            var coordinator = Create(executor);
-            var result = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(kind), CancellationToken.None);
-
-            Assert.False(result.Succeeded);
-            Assert.Equal("UnsupportedEnvironmentStrategy", result.Reason);
-            Assert.Empty(executor.ExecutedPlans);
-            Assert.Null(coordinator.ActiveSession);
-        }
-    }
-
-    [Fact]
-    public async Task ClawTweaksEligibleUsesAllDisabledFrameworkPlan()
-    {
-        var executor = new FakeExecutor();
-        var coordinator = Create(executor);
-
-        var result = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.ClawTweaks), CancellationToken.None);
-
-        Assert.True(result.Succeeded);
-        var session = coordinator.ActiveSession;
-        Assert.NotNull(session);
-        Assert.Equal(RoutingPipelinePlan.AllDisabled, executor.ExecutedPlans.Single());
-        Assert.Equal(RoutingPipelinePlan.AllDisabled, session.Plan);
-    }
-
-    [Fact]
     public async Task CancellationDuringEnterDoesNotPublishSession()
     {
         var executor = new FakeExecutor { ThrowCancellation = true };

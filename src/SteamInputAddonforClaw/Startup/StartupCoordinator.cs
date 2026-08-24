@@ -84,16 +84,11 @@ internal sealed class StartupCoordinator
         AppLog.Info("Environment", "Initial environment detection started.");
         var assessment = _environmentAssessmentProvider.Capture();
         var environment = StartupControllerEnvironmentMapper.Map(assessment);
-        AppLog.Info("Environment", "Environment detection completed.", ("Mode", environment.Mode), ("ClawTweaksState", environment.ClawTweaksState));
+        AppLog.Info("Environment", "Environment detection completed.", ("Mode", environment.Mode));
         if (environment.Mode == ControllerEnvironmentMode.Indeterminate)
         {
             AppLog.Warn("Environment", "Environment decision is indeterminate.", null, ("Action", "Passive"), ("Reason", "EnvironmentDetectionIndeterminate"));
             return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
-        }
-        if (environment.Mode is ControllerEnvironmentMode.HHCManaged or ControllerEnvironmentMode.Unsupported)
-        {
-            AppLog.Info("Environment", "Unsupported controller manager detected.", ("Manager", environment.Mode), ("Action", "Passive"), ("Reason", environment.Mode == ControllerEnvironmentMode.HHCManaged ? "HandheldCompanionNotSupportedByCurrentVersion" : "ClawTweaksNotSupportedByCurrentVersion"));
-            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
         }
         if (environment.Mode != ControllerEnvironmentMode.StockCenterM)
         {

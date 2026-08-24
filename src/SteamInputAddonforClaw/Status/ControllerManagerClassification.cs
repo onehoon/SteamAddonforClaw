@@ -19,8 +19,8 @@ internal static class ControllerManagerClassifier
     public static ControllerManagerClassification Classify(ControllerSoftwareSnapshot snapshot)
     {
         var present = new List<ControllerManagerKind>();
-        if (IsPresent(snapshot.ClawTweaks)) present.Add(ControllerManagerKind.ClawTweaks);
-        if (IsPresent(snapshot.HandheldCompanion)) present.Add(ControllerManagerKind.HandheldCompanion);
+        if (snapshot.ClawTweaks is not null && IsPresent(snapshot.ClawTweaks)) present.Add(ControllerManagerKind.ClawTweaks);
+        if (snapshot.HandheldCompanion is not null && IsPresent(snapshot.HandheldCompanion)) present.Add(ControllerManagerKind.HandheldCompanion);
         if (snapshot.Winhanced is not null && IsPresent(snapshot.Winhanced)) present.Add(ControllerManagerKind.Winhanced);
         if (present.Count >= 2) return new(ControllerManagerKind.Multiple, ControllerManagerClassificationReason.MultipleThirdPartyControllerManagersDetected);
         if (present.Count == 1) return present[0] switch
@@ -30,7 +30,9 @@ internal static class ControllerManagerClassifier
             ControllerManagerKind.Winhanced => new(ControllerManagerKind.Winhanced, ControllerManagerClassificationReason.WinhancedDetected),
             _ => new(ControllerManagerKind.Indeterminate, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate)
         };
-        if (IsUnresolved(snapshot.ClawTweaks) || IsUnresolved(snapshot.HandheldCompanion) || (snapshot.Winhanced is not null && IsUnresolved(snapshot.Winhanced)))
+        if ((snapshot.ClawTweaks is not null && IsUnresolved(snapshot.ClawTweaks))
+            || (snapshot.HandheldCompanion is not null && IsUnresolved(snapshot.HandheldCompanion))
+            || (snapshot.Winhanced is not null && IsUnresolved(snapshot.Winhanced)))
             return new(ControllerManagerKind.Indeterminate, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate);
         return new(ControllerManagerKind.None, ControllerManagerClassificationReason.NoThirdPartyControllerManager);
     }
