@@ -13,9 +13,27 @@ public sealed class UninstallDependencyOwnershipPolicyTests
     [InlineData(1603)]
     public void Final_absent_package_probe_is_authoritative_over_uninstaller_exit_code(int exitCode)
     {
-        Assert.True(UninstallPackageRemovalPolicy.IsVerifiedRemoved(exitCode, packageStillPresent: false));
-        Assert.False(UninstallPackageRemovalPolicy.IsVerifiedRemoved(exitCode, packageStillPresent: true));
+        Assert.True(UninstallPackageRemovalPolicy.IsVerifiedRemoved(true, packageStillPresent: false));
+        Assert.False(UninstallPackageRemovalPolicy.IsVerifiedRemoved(true, packageStillPresent: true));
     }
+
+    [Fact]
+    public void Failed_final_probe_is_not_verified_removed()
+        => Assert.False(UninstallPackageRemovalPolicy.IsVerifiedRemoved(false, packageStillPresent: false));
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void Interrupted_hidhide_receipts_do_not_admit_removal(int state)
+        => Assert.False(UninstallDependencyOwnershipPolicy.CanRemoveHidHide(HidReceipt() with { State = (HidHideProvisioningReceiptState)state }, new(true, "1.5.230.0", true)));
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void Interrupted_usbip_receipts_do_not_admit_removal(int state)
+        => Assert.False(UninstallDependencyOwnershipPolicy.CanRemoveUsbIp(UsbReceipt() with { State = (UsbIpWin2ProvisioningReceiptState)state }, new(true, "0.9.7.7", true, true)));
 
     [Theory]
     [InlineData(false, false, false)]

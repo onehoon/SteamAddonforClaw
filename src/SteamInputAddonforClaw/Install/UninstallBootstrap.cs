@@ -42,7 +42,10 @@ internal static class UninstallBootstrap
         TryDeleteDirectory(CenterM.CenterMHelperStaging.RuntimeDirectory);
         SteamCefDebugBootstrap.RemoveOwnedMarker();
         TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-        AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
+        if (File.Exists(AddonDataPaths.RecoveryJournalPath))
+            AppLog.Warn("Uninstall", "Recovery evidence remains; Addon data root was preserved.", null, ("Action", "PreserveRecoveryEvidence"));
+        else
+            AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
         AppLog.Info("Uninstall", "User-level Addon cleanup completed.");
     }
 
@@ -118,7 +121,7 @@ internal static class UninstallBootstrap
 
         RunUninstaller(matches[0].QuietUninstallString, "HidHide");
         var after = new WindowsHidHidePackageProbe().Inspect();
-        AppLog.Info("Uninstall", "HidHide package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version), ("VerifiedRemoved", UninstallPackageRemovalPolicy.IsVerifiedRemoved(null, after.Installed)));
+        AppLog.Info("Uninstall", "HidHide package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version), ("VerifiedRemoved", UninstallPackageRemovalPolicy.IsVerifiedRemoved(after.InspectionSucceeded, after.Installed)));
     }
 
     private static void RemoveUsbIfExact(UsbIpWin2ProvisioningReceipt receipt)
@@ -128,7 +131,7 @@ internal static class UninstallBootstrap
         if (key is null || !UninstallDependencyOwnershipPolicy.CanRemoveUsbIp(receipt, new(true, key.GetValue("DisplayVersion") as string, true, true, key.GetValue("QuietUninstallString") as string))) return;
         RunUninstaller(key.GetValue("QuietUninstallString") as string, "usbip-win2");
         var after = new WindowsUsbIpWin2PackageProbe().Inspect();
-        AppLog.Info("Uninstall", "usbip-win2 package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version), ("VerifiedRemoved", UninstallPackageRemovalPolicy.IsVerifiedRemoved(null, after.Installed)));
+        AppLog.Info("Uninstall", "usbip-win2 package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version), ("VerifiedRemoved", UninstallPackageRemovalPolicy.IsVerifiedRemoved(after.InspectionSucceeded, after.Installed)));
     }
 
     private static void RunUninstaller(string? command, string package)
@@ -148,7 +151,7 @@ internal static class UninstallBootstrap
 
 internal static class UninstallPackageRemovalPolicy
 {
-    internal static bool IsVerifiedRemoved(int? exitCode, bool packageStillPresent) => !packageStillPresent;
+    internal static bool IsVerifiedRemoved(bool inspectionSucceeded, bool packageStillPresent) => inspectionSucceeded && !packageStillPresent;
 }
 
 internal static class UninstallRuntimeReleasePolicy
@@ -242,12 +245,12 @@ internal static class UninstallSafetyEnvironmentPolicy
 internal static class UninstallDependencyOwnershipPolicy
 {
     internal static bool CanRemoveHidHide(HidHideProvisioningReceipt? receipt, HidHidePackageState package) =>
-        receipt is { IsValid: true, PreProvisioningStatus: PrerequisiteStatus.Missing } &&
+        receipt is { IsValid: true, State: HidHideProvisioningReceiptState.Provisioned or HidHideProvisioningReceiptState.InstalledPendingReboot } &&
         package.InspectionSucceeded && package.Installed &&
         HidHidePackageVersionPolicy.AreEquivalent(package.Version, receipt.InstallerVersion);
 
     internal static bool CanRemoveUsbIp(UsbIpWin2ProvisioningReceipt? receipt, UsbIpWin2PackageState package) =>
-        receipt is { IsValid: true, PreProvisioningStatus: PrerequisiteStatus.Missing } &&
+        receipt is { IsValid: true, State: UsbIpWin2ProvisioningReceiptState.Provisioned or UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot } &&
         package.InspectionSucceeded && package.Installed &&
         Version.TryParse(package.Version, out var current) && Version.TryParse(receipt.InstallerVersion, out var expected) && current == expected;
 }

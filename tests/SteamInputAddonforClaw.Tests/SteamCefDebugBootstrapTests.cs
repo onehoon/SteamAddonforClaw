@@ -56,6 +56,16 @@ public sealed class SteamCefDebugBootstrapTests
         Assert.False(SteamCefDebugBootstrap.EnsureForSteamDirectory("   "));
     }
 
+    [Fact]
+    public void Ownership_persistence_failure_rolls_back_new_marker()
+    {
+        using var scope = new SteamDirectoryScope();
+        Directory.CreateDirectory(scope.OwnershipPath);
+
+        Assert.False(SteamCefDebugBootstrap.EnsureForSteamDirectory(scope.Path));
+        Assert.False(File.Exists(System.IO.Path.Combine(scope.Path, SteamCefDebugBootstrap.MarkerFileName)));
+    }
+
     private sealed class SteamDirectoryScope : IDisposable
     {
         internal SteamDirectoryScope()

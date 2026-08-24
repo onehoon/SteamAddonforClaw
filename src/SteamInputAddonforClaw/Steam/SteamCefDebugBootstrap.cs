@@ -69,6 +69,8 @@ internal static class SteamCefDebugBootstrap
             try
             {
                 using var marker = new FileStream(markerPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                Directory.CreateDirectory(Path.GetDirectoryName(OwnershipPath)!);
+                File.WriteAllText(OwnershipPath, JsonSerializer.Serialize(new CefMarkerOwnership(normalizedDirectory)));
             }
             catch (IOException) when (File.Exists(markerPath))
             {
@@ -76,9 +78,6 @@ internal static class SteamCefDebugBootstrap
                 AppLog.Info("QAM.Bootstrap", "Steam CEF remote-debugging marker already present.", ("Path", markerPath));
                 return true;
             }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(OwnershipPath)!);
-            File.WriteAllText(OwnershipPath, JsonSerializer.Serialize(new CefMarkerOwnership(normalizedDirectory)));
 
             AppLog.Info(
                 "QAM.Bootstrap",
@@ -88,6 +87,12 @@ internal static class SteamCefDebugBootstrap
         }
         catch (Exception exception)
         {
+            try
+            {
+                var markerPath = Path.Combine(Path.GetFullPath(steamDirectory.Trim().Trim('\"')), MarkerFileName);
+                if (File.Exists(markerPath) && !File.Exists(OwnershipPath)) File.Delete(markerPath);
+            }
+            catch { }
             AppLog.Warn(
                 "QAM.Bootstrap",
                 "Steam CEF remote-debugging marker could not be prepared; Runtime remains available.",
