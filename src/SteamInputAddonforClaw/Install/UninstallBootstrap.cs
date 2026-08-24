@@ -171,6 +171,16 @@ internal static class UninstallSafetyCoordinator
         }
 
         var devices = new WindowsControllerDeviceEnumerator();
+
+        var needsNativeBaseline = journal.OriginalDeviceState is not null || journal.Mutations.DeviceNativeStateChanged;
+        if (needsNativeBaseline)
+        {
+            var adapter = new MsiClawDeviceAdapter(devices);
+            if (adapter.NativeState is not MsiClawNativeStateManager nativeState) return false;
+            var baseline = new StockCenterMStartupBaseline(nativeState).EstablishAsync(CancellationToken.None).GetAwaiter().GetResult();
+            if (!baseline.Succeeded) return false;
+        }
+
         var virtualOutputSafe = true;
         if (journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } virtualEntries)
         {
@@ -191,14 +201,6 @@ internal static class UninstallSafetyCoordinator
         {
             var finalAssessment = new StartupVirtualOutputRecoveryInspector(devices).AssessAsync(finalVirtualEntries, CancellationToken.None).GetAwaiter().GetResult();
             if (!finalAssessment.SafeToRetire) return false;
-        }
-
-        if (journal.OriginalDeviceState is not null || journal.Mutations.DeviceNativeStateChanged)
-        {
-            var adapter = new MsiClawDeviceAdapter(devices);
-            if (adapter.NativeState is not MsiClawNativeStateManager nativeState) return false;
-            var baseline = new StockCenterMStartupBaseline(nativeState).EstablishAsync(CancellationToken.None).GetAwaiter().GetResult();
-            if (!baseline.Succeeded) return false;
         }
 
         journalStore.Delete();
