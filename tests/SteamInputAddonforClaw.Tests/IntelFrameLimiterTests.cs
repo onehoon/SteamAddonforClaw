@@ -23,6 +23,13 @@ public sealed class IntelFrameLimiterTests
         Assert.Equal(new byte[8], NativeIgcl.EncodeFrameLimitGetPropertyBytesForTests());
     }
 
+    [Fact]
+    public void Frame_limit_readback_decodes_only_the_low_enable_bit()
+    {
+        Assert.True(NativeIgcl.DecodeFrameLimitEnabledForTests(0x1u));
+        Assert.False(NativeIgcl.DecodeFrameLimitEnabledForTests(0x100u));
+    }
+
     [Theory]
     [InlineData(true, 60, 1u, 0u, false, 0, false)]
     [InlineData(true, 60, 0u, 1u, false, 0, false)]

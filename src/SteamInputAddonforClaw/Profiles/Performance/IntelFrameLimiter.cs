@@ -240,7 +240,7 @@ internal sealed class NativeIgcl : IDisposable
         var setResult = _getSet(adapter, ref setFeature);
         var getFeature = CreateFrameLimitGetFeature();
         uint? getResult = setResult == 0 ? _getSet(adapter, ref getFeature) : null;
-        var readbackEnabled = getFeature.Value.EnableBits != 0;
+        var readbackEnabled = DecodeFrameLimitEnabled(getFeature.Value);
         var readbackFps = getFeature.Value.IntValue;
         var failureReason = FrameLimitVerificationFailureReason(enable, setResult, getResult, readbackEnabled, readbackFps, nativeFps);
         var verified = failureReason is null;
@@ -269,6 +269,7 @@ internal sealed class NativeIgcl : IDisposable
         ValueType = Int32,
         Value = default
     };
+    private static bool DecodeFrameLimitEnabled(Property value) => (value.EnableBits & 0x1u) != 0;
     private static string? FrameLimitVerificationFailureReason(bool enable, uint setResult, uint? getResult, bool readbackEnabled, int readbackFps, int requestedFps) =>
         setResult != 0 ? "SetFailed" : getResult is null || getResult.Value != 0 ? "ReadbackFailed" : enable && !readbackEnabled ? "ReadbackEnableMismatch" : enable && readbackFps != requestedFps ? "ReadbackFpsMismatch" : !enable && readbackEnabled ? "ReadbackEnableMismatch" : null;
     private static void LogFrameLimitVerification(bool enable, FpsPowerSource? source, uint appId, int requestedFps, uint setResult, uint? getResult, bool readbackEnabled, int readbackFps, bool verified, string? failureReason)
@@ -286,7 +287,9 @@ internal sealed class NativeIgcl : IDisposable
     internal static bool VerifyFrameLimitReadbackForTests(bool enable, int requestedFps, uint setResult, uint? getResult, bool readbackEnabled, int readbackFps) =>
         FrameLimitVerificationFailureReason(enable, setResult, getResult, readbackEnabled, readbackFps, requestedFps) is null;
     internal static byte[] EncodeFrameLimitGetPropertyBytesForTests() =>
-        EncodeFrameLimitPropertyBytes(new Property());
+        EncodeFrameLimitPropertyBytes(CreateFrameLimitGetFeature().Value);
+    internal static bool DecodeFrameLimitEnabledForTests(uint enableBits) =>
+        DecodeFrameLimitEnabled(new Property { EnableBits = enableBits });
     internal static byte[] EncodeFrameLimitPropertyBytesForTests(bool enable, int fps)
     {
         var property = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps };
