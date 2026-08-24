@@ -821,13 +821,17 @@
           if (!state.installed || !writable || !enabled) return;
           if (!value) {
             cancelQamSliderCommits(pendingPredicate);
-            if (feature === "cpu") { setPreviewAc(null); setPreviewDc(null); }
-            if (feature === "power") setPowerPreview(current => Object.fromEntries(Object.entries(current).filter(([key]) => !pendingPredicate(key))));
+            if (feature === "CPU Boost") { setPreviewAc(null); setPreviewDc(null); }
+            if (feature === "Power Mode") setPowerPreview(current => Object.fromEntries(Object.entries(current).filter(([key]) => !pendingPredicate(key))));
           }
           setBusy(true); setError(null);
           try {
             const result = await request(method, { enabled: !!value });
             setProfile(result.snapshot);
+            if (feature === "TDP" && result.snapshot?.tdp) {
+              const nextDraft = { ac: { ...result.snapshot.tdp.ac }, dc: { ...result.snapshot.tdp.dc } };
+              profileTdpDraftRef.current = nextDraft; setProfileTdpDraft(nextDraft);
+            }
             if (!result.succeeded) setError(result.failureMessage || `${feature} update failed`);
           } catch (_) { failClosed(`${feature} update failed`); }
           finally { setBusy(false); }
@@ -863,21 +867,21 @@
           },
         });
         const profileCpuControls = [
-          { key: "profile-cpu-toggle", node: React.createElement(native.ToggleField, { label: "CPU Boost", checked: !!profile.cpuBoost?.enabled, disabled: !writable, onChange: value => void toggleProfileFeature("CPU Boost", !!value, "setActiveGameCpuBoostEnabled", key => key.startsWith("profile-cpu-")) }) },
+          { key: "profile-cpu-toggle", node: React.createElement(native.ToggleField, { label: "CPU Boost", checked: !!profile.cpuBoost?.enabled, disabled: !writable || !enabled, onChange: value => void toggleProfileFeature("CPU Boost", !!value, "setActiveGameCpuBoostEnabled", key => key.startsWith("profile-cpu-")) }) },
           ...(!profile.cpuBoost?.enabled ? [] : [
           { key: "profile-ac", node: profileSlider("Plugged in", "ac", profile.cpuBoost?.ac, previewAc, "none") },
           { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, previewDc, "standard") },
           ]),
         ];
         const profilePowerControls = [
-          { key: "profile-power-toggle", node: profile.powerMode ? React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!profile.powerMode.enabled, disabled: !writable, onChange: value => void toggleProfileFeature("Power Mode", !!value, "setActiveGamePowerModeEnabled", key => key.startsWith("profile-power-")) }) : null },
+          { key: "profile-power-toggle", node: profile.powerMode ? React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!profile.powerMode.enabled, disabled: !writable || !enabled, onChange: value => void toggleProfileFeature("Power Mode", !!value, "setActiveGamePowerModeEnabled", key => key.startsWith("profile-power-")) }) : null },
           ...(!profile.powerMode?.enabled ? [] : [
           { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Plugged in", profile.powerMode.ac, "profile-power-ac", "setActiveGamePowerModeAc", !enabled || !writable) : null },
           { key: "profile-power-dc", node: profile.powerMode ? powerSlider("On battery", profile.powerMode.dc, "profile-power-dc", "setActiveGamePowerModeDc", !enabled || !writable) : null },
           ]),
         ];
         const profileTdpControls = profile.limits ? [
-          { key: "profile-tdp-toggle", node: React.createElement(native.ToggleField, { label: "TDP Control", checked: !!profile.tdp?.enabled, disabled: !writable, onChange: value => void toggleProfileFeature("TDP", !!value, "setActiveGameTdpEnabled", key => key === "profile-tdp") }) },
+          { key: "profile-tdp-toggle", node: React.createElement(native.ToggleField, { label: "TDP Control", checked: !!profile.tdp?.enabled, disabled: !writable || !enabled, onChange: value => void toggleProfileFeature("TDP", !!value, "setActiveGameTdpEnabled", key => key === "profile-tdp") }) },
           ...(!profile.tdp?.enabled ? [] : [
           { key: "profile-tdp-ac-pl1", node: profileTdpSlider("Plugged in · PL1", "ac", profileTdpDraft?.ac?.pl1Watts, "none") },
           { key: "profile-tdp-ac-pl2", node: profileTdpSlider("Plugged in · PL2", "ac", profileTdpDraft?.ac?.pl2Watts, "none") },

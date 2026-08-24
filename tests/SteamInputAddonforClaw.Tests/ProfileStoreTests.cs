@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -233,6 +234,23 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.False(game.Performance.Tdp!.Enabled);
         Assert.Equal(CpuBoostMode.Enabled, game.Performance.CpuBoost.Ac);
         Assert.Equal(20, game.Performance.Tdp.Ac.Pl1Watts);
+    }
+
+    [Fact]
+    public void TdpValueMutation_PreservesFeatureOwnershipState()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var mutations = new GameProfileMutations(store, modelId: new HandheldDeviceModelId("msi.claw.a2vm.7"));
+        Assert.True(mutations.Enable(123, "Game"));
+
+        var ac = new TdpPowerPair { Pl1Watts = 21, Pl2Watts = 30 };
+        var dc = new TdpPowerPair { Pl1Watts = 12, Pl2Watts = 20 };
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetTdp(123, ac, dc));
+        Assert.True(store.Load().Document.Games["123"].Performance.Tdp!.Enabled);
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetTdpEnabled(123, false));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetTdp(123, ac, dc));
+        Assert.False(store.Load().Document.Games["123"].Performance.Tdp!.Enabled);
     }
 
     [Fact]

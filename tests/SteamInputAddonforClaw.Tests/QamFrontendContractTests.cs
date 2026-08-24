@@ -432,6 +432,11 @@ public sealed class QamFrontendContractTests
         Assert.Contains("setActiveGamePowerModeEnabled", source);
         Assert.Contains("Plugged in · PL1", source);
         Assert.Contains("On battery · PL2", source);
+        Assert.Contains("if (feature === \"CPU Boost\")", source);
+        Assert.Contains("if (feature === \"Power Mode\")", source);
+        Assert.Contains("if (feature === \"TDP\" && result.snapshot?.tdp)", source);
+        Assert.Contains("profileTdpDraftRef.current = nextDraft; setProfileTdpDraft(nextDraft);", source);
+        Assert.Contains("disabled: !writable || !enabled", source);
         Assert.Contains("disabled: !profile.persistenceWritable || !enabled", source);
         Assert.Contains("profile.cpuBoost?.ac", source);
         Assert.Contains("profileTdpDraft?.dc?.pl2Watts", source);
