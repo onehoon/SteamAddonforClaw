@@ -115,10 +115,12 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         if (sessionId is not { } id) return ValueTask.FromResult(Failure("RecoverySessionMissing"));
         var path = _executablePathProvider();
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)) return ValueTask.FromResult(Failure("ExecutablePathInvalid"));
+        var executablePath = Path.GetFullPath(path);
         var inspection = _hidHide.Inspect();
+        var admission = HidHideRoutingAdmissionPolicy.Evaluate(inspection, executablePath);
+        if (admission != HidHideRoutingAdmissionOutcome.Allowed) return ValueTask.FromResult(Failure(admission.ToString()));
         if (!CanPrepareIsolation(inspection, out var admissionFailure)) return ValueTask.FromResult(Failure(admissionFailure));
 
-        var executablePath = Path.GetFullPath(path);
         var values = new[]
         {
             new EntryState(identity.PnpInstanceId.Trim(), (inspection.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, identity.PnpInstanceId, StringComparison.OrdinalIgnoreCase)))

@@ -25,7 +25,7 @@ public sealed class SettingsStoreTests : IDisposable
 
         var settings = store.Load();
 
-        Assert.True(settings.SteamInputRoutingEnabled);
+        Assert.False(settings.SteamInputRoutingEnabled);
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public sealed class SettingsStoreTests : IDisposable
 
         var settings = new SettingsStore(path).Load();
 
-        Assert.True(settings.SteamInputRoutingEnabled);
+        Assert.False(settings.SteamInputRoutingEnabled);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
+using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
@@ -43,9 +44,35 @@ public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
 
         var result = await control.SetSteamInputRoutingEnabledAsync(false);
 
-        Assert.False(result.SteamInputRoutingEnabled);
+        Assert.True(result.Succeeded);
+        Assert.False(result.Settings.SteamInputRoutingEnabled);
         Assert.False(store.Load().SteamInputRoutingEnabled);
         Assert.False((await control.GetBootstrapAsync()).Settings.SteamInputRoutingEnabled);
+    }
+
+    [Fact]
+    public async Task Enabling_with_foreign_hidhide_configuration_does_not_mutate_settings()
+    {
+        var control = CreateControl(new AppSettings(SteamInputRoutingEnabled: false), out var store,
+            new FakeHidHide(new(HidHideInspectionStatus.Available, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "C:\\other.exe" })));
+
+        var result = await control.SetSteamInputRoutingEnabledAsync(true);
+
+        Assert.Equal(FrontendSteamInputRoutingMutationOutcome.HidHideConflict, result.Outcome);
+        Assert.False(result.Settings.SteamInputRoutingEnabled);
+        Assert.False(store.Load().SteamInputRoutingEnabled);
+    }
+
+    [Fact]
+    public async Task Disabling_does_not_inspect_hidhide()
+    {
+        var hid = new FakeHidHide(null) { ThrowOnInspect = true };
+        var control = CreateControl(new AppSettings(SteamInputRoutingEnabled: true), out _, hid);
+
+        var result = await control.SetSteamInputRoutingEnabledAsync(false);
+
+        Assert.True(result.Succeeded);
+        Assert.False(result.Settings.SteamInputRoutingEnabled);
     }
 
     [Fact]
@@ -60,7 +87,7 @@ public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
         Assert.Contains(names, name => name == nameof(FrontendSettingsSnapshot.SteamInputRoutingEnabled));
     }
 
-    private InProcessAddonFrontendControl CreateControl(AppSettings settings, out SettingsStore store)
+    private InProcessAddonFrontendControl CreateControl(AppSettings settings, out SettingsStore store, IHidHideClient? hidHide = null)
     {
         // The bootstrap snapshot reports the log directory, which otherwise resolves through the
         // Velopack locator that only exists in an installed app.
@@ -73,7 +100,8 @@ public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
             null,
             new DeveloperTestModeState(),
             "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
+            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false),
+            hidHide: hidHide);
     }
 
     public void Dispose()
@@ -91,5 +119,15 @@ public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
     {
         public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException("Status capture is not part of these tests.");
+    }
+
+    private sealed class FakeHidHide(HidHideInspection? inspection) : IHidHideClient
+    {
+        public bool ThrowOnInspect { get; init; }
+        public HidHideInspection Inspect() => ThrowOnInspect ? throw new InvalidOperationException() : inspection ?? new(HidHideInspectionStatus.NotInstalled, new HashSet<string>());
+        public bool AddApplication(string executablePath) => true;
+        public bool RemoveApplication(string executablePath) => true;
+        public bool AddHiddenDevice(string deviceEntry) => true;
+        public bool RemoveHiddenDevice(string deviceEntry) => true;
     }
 }
