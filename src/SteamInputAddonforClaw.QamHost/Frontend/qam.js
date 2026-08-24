@@ -25,6 +25,7 @@
   const TAB_MARKER = "steamInputAddonQam";
   const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
+  const QAM_SLIDER_COMMIT_DELAY_MS = 2000;
 
   function log(message) {
     console.log("[SteamInputAddon:QAM] " + message);
@@ -515,12 +516,8 @@
       const [tdp, setTdp] = React.useState(null);
       const [profile, setProfile] = React.useState(null);
       const [fpsDraft, setFpsDraft] = React.useState({ ac: 60, dc: 60 });
-      const fpsTimers = React.useRef({ ac: null, dc: null });
-      const fpsGeneration = React.useRef({ ac: 0, dc: 0 });
       const [profileTdpDraft, setProfileTdpDraft] = React.useState(null);
       const profileTdpDraftRef = React.useRef(null);
-      const profileTdpTimer = React.useRef(null);
-      const profileTdpGeneration = React.useRef(0);
       const activeProfileAppIdRef = React.useRef(0);
       const [tdpDraft, setTdpDraft] = React.useState(null);
       const [previewAc, setPreviewAc] = React.useState(null);
@@ -529,33 +526,18 @@
       const [error, setError] = React.useState(null);
       const refreshInFlight = React.useRef(false);
       const refreshDirty = React.useRef(false);
-      const settleTimers = React.useRef({ ac: null, dc: null });
-      const tdpTimer = React.useRef(null);
       const tdpDraftRef = React.useRef(null);
       const tdpWritableRef = React.useRef(false);
-      const tdpEditGeneration = React.useRef(0);
       const modeWritableRef = React.useRef(false);
       const mutationDepthRef = React.useRef(0);
       const deferredInvalidationRef = React.useRef(false);
-      const modeEditGeneration = React.useRef({ ac: 0, dc: 0 });
-      const modeMutationInFlight = React.useRef({ ac: false, dc: false });
       const powerModeLabels = ["Best power efficiency", "Balanced", "Best performance"];
       const powerModeNames = ["BestPowerEfficiency", "Balanced", "BestPerformance"];
       const powerModeIndex = value => typeof value === "number" ? value : powerModeNames.indexOf(value);
       const powerModeValue = value => Number(value);
 
       const failClosed = React.useCallback(message => {
-        for (const key of ["ac", "dc"]) {
-          if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
-          settleTimers.current[key] = null;
-        }
-        if (tdpTimer.current) clearTimeout(tdpTimer.current);
-        tdpTimer.current = null;
-        tdpEditGeneration.current = 0;
-        if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
-        profileTdpTimer.current = null;
-        profileTdpGeneration.current = 0;
-        for (const key of ["ac", "dc"]) { if (fpsTimers.current[key]) clearTimeout(fpsTimers.current[key]); fpsTimers.current[key] = null; fpsGeneration.current[key] = 0; }
+        cancelQamSliderCommits();
         activeProfileAppIdRef.current = 0;
           setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
           setFpsDraft({ ac: 60, dc: 60 });
@@ -569,12 +551,9 @@
           const nextProfile = await request("captureActiveGameProfile");
           const nextAppId = Number(nextProfile?.appId || 0);
           if (activeProfileAppIdRef.current !== nextAppId) {
-            if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
-            profileTdpTimer.current = null;
-            profileTdpGeneration.current = 0;
+            cancelQamSliderCommits(key => key.startsWith("profile-"));
             profileTdpDraftRef.current = null;
             setProfileTdpDraft(null);
-            for (const key of ["ac", "dc"]) { if (fpsTimers.current[key]) clearTimeout(fpsTimers.current[key]); fpsTimers.current[key] = null; fpsGeneration.current[key] = 0; }
           }
           activeProfileAppIdRef.current = nextAppId;
           const activeGame = nextAppId > 0;
@@ -587,14 +566,16 @@
             dc: { ...nextTdp.configuration.dc },
           } : null;
           setStatus(nextStatus); setCpu(nextCpu); setPowerMode(nextPowerMode); setTdp(nextTdp); setProfile(nextProfile);
-          setFpsDraft({ ac: nextProfile?.fpsLimit?.acFps ?? 60, dc: nextProfile?.fpsLimit?.dcFps ?? 60 });
-          if (nextProfile?.tdp && profileTdpGeneration.current === 0) {
+          setFpsDraft({ ac: state.qamSliderCommits?.get("profile-fps-ac")?.value ?? nextProfile?.fpsLimit?.acFps ?? 60, dc: state.qamSliderCommits?.get("profile-fps-dc")?.value ?? nextProfile?.fpsLimit?.dcFps ?? 60 });
+          if (nextProfile?.tdp && !state.qamSliderCommits?.has("profile-tdp")) {
             const nextProfileDraft = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
             profileTdpDraftRef.current = nextProfileDraft;
             setProfileTdpDraft(nextProfileDraft);
           }
-          if (tdpEditGeneration.current === 0) { setTdpDraft(nextDraft); tdpDraftRef.current = nextDraft; }
-          setPreviewAc(null); setPreviewDc(null); setError(null);
+          if (!state.qamSliderCommits?.has("device-tdp")) { setTdpDraft(nextDraft); tdpDraftRef.current = nextDraft; }
+          setPreviewAc(state.qamSliderCommits?.get("device-cpu-ac")?.value ?? state.qamSliderCommits?.get("profile-cpu-ac")?.value ?? null);
+          setPreviewDc(state.qamSliderCommits?.get("device-cpu-dc")?.value ?? state.qamSliderCommits?.get("profile-cpu-dc")?.value ?? null);
+          setError(null);
         } catch (_) { failClosed("QAM bridge unavailable"); }
         finally {
           refreshInFlight.current = false;
@@ -602,26 +583,18 @@
         }
       }, [failClosed]);
 
-      const cancelModeTimers = React.useCallback(() => {
-        for (const key of ["ac", "dc"]) {
-          if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
-          settleTimers.current[key] = null;
-        }
-      }, []);
-
       const beginMutation = React.useCallback(() => { mutationDepthRef.current++; }, []);
       const endMutation = React.useCallback(() => {
         mutationDepthRef.current = Math.max(0, mutationDepthRef.current - 1);
-        const modeEditPending = Object.values(settleTimers.current).some(Boolean) || Object.values(modeMutationInFlight.current).some(Boolean);
-        if (mutationDepthRef.current === 0 && deferredInvalidationRef.current && !modeEditPending) {
+        if (mutationDepthRef.current === 0 && deferredInvalidationRef.current) {
           deferredInvalidationRef.current = false;
-          cancelModeTimers();
           setPreviewAc(null); setPreviewDc(null);
           void refresh();
         }
-      }, [cancelModeTimers, refresh]);
+      }, [refresh]);
       const runPowerMutation = React.useCallback(async (method, payload) => {
         if (!state.installed) return;
+        if (method.endsWith("PowerModeEnabled") && payload?.enabled === false) cancelQamSliderCommits(key => key.includes("power-"));
         try {
           beginMutation();
           setError(null);
@@ -639,7 +612,7 @@
         finally { endMutation(); }
       }, [beginMutation, endMutation, failClosed, refresh]);
 
-      React.useEffect(() => { void refresh(); return cancelModeTimers; }, [refresh, cancelModeTimers]);
+      React.useEffect(() => { void refresh(); }, [refresh]);
 
       React.useEffect(() => {
         const previous = state.onStateInvalidated;
@@ -649,14 +622,13 @@
             deferredInvalidationRef.current = true;
             return;
           }
-          cancelModeTimers();
           // Keep a dirty TDP draft's debounce alive across invalidation; DevicePage does the same.
           setPreviewAc(null); setPreviewDc(null);
           void refresh();
         };
         state.onStateInvalidated = handler;
         return () => { if (state.onStateInvalidated === handler) state.onStateInvalidated = previous || null; };
-      }, [refresh, cancelModeTimers]);
+      }, [refresh]);
 
       const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
       const activeProfile = Number(profile?.appId || 0) > 0;
@@ -674,27 +646,17 @@
       const scheduleMode = (side, value) => {
         if (!state.installed || !modeWritableRef.current) return;
         const key = side === "ac" ? "ac" : "dc";
-        const generation = ++modeEditGeneration.current[key];
         side === "ac" ? setPreviewAc(value) : setPreviewDc(value);
-        if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
-        settleTimers.current[key] = setTimeout(async () => {
-          settleTimers.current[key] = null;
-          if (!state.installed || !modeWritableRef.current) return;
-          setError(null);
-          try {
-            modeMutationInFlight.current[key] = true;
-            beginMutation();
-            const result = await request(side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value });
-            if (generation === modeEditGeneration.current[key]) {
-              setCpu(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
-            }
-            if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
-          } catch (_) { failClosed("CPU Boost update failed"); }
-          finally { modeMutationInFlight.current[key] = false; endMutation(); }
-        }, 250);
+        scheduleQamSliderCommit(`device-cpu-${key}`, { value }, side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value }, async (result, failure) => {
+          if (failure) { failClosed("CPU Boost update failed"); return; }
+          if (result?.snapshot) setCpu(result.snapshot);
+          side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
+          if (!result?.succeeded) setError(result?.failureMessage || "CPU Boost update failed");
+          await refresh();
+        });
       };
       const setEnabled = async value => {
-        cancelModeTimers();
+        cancelQamSliderCommits(key => key.startsWith("device-cpu-"));
         setPreviewAc(null); setPreviewDc(null);
         if (!state.installed) return;
         if (!mutationAvailable) return;
@@ -717,31 +679,20 @@
         if (!pl1WasEdited && pl1 > pl2 - gap) return pl2 - gap >= limits.pl1MinimumWatts ? { pl1Watts: pl2 - gap, pl2Watts: pl2 } : { pl1Watts: limits.pl1MinimumWatts, pl2Watts: limits.pl1MinimumWatts + gap };
         return { pl1Watts: pl1, pl2Watts: pl2 };
       };
-      const submitTdpDraft = async (draft, generation) => {
-        if (!state.installed || !tdpWritableRef.current || !draft) return;
-        setError(null);
-        try {
-          beginMutation();
-          const result = await request("setDeviceTdp", { configuration: draft });
-          if (generation === tdpEditGeneration.current) {
-            tdpEditGeneration.current = 0;
-            setTdp(result.snapshot); setTdpDraft(result.snapshot.configuration); tdpDraftRef.current = result.snapshot.configuration;
-          }
-          if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
-        } catch (_) { failClosed("TDP update failed"); }
-        finally { endMutation(); }
-      };
       const scheduleTdp = (nextDraft) => {
         if (!tdpWritableRef.current) return;
-        const generation = ++tdpEditGeneration.current;
         tdpDraftRef.current = nextDraft; setTdpDraft(nextDraft);
-        if (tdpTimer.current) clearTimeout(tdpTimer.current);
-        tdpTimer.current = setTimeout(() => { tdpTimer.current = null; void submitTdpDraft(nextDraft, generation); }, 300);
+        scheduleQamSliderCommit("device-tdp", { draft: nextDraft }, "setDeviceTdp", { configuration: nextDraft }, async (result, failure) => {
+          if (failure) { failClosed("TDP update failed"); return; }
+          const authoritative = result?.snapshot?.configuration;
+          if (authoritative) { setTdp(result.snapshot); setTdpDraft(authoritative); tdpDraftRef.current = authoritative; }
+          if (!result?.succeeded) setError(result?.failureMessage || "TDP update failed");
+          await refresh();
+        });
       };
       const setTdpEnabled = async enabled => {
         if (!state.installed || !tdpMutationAvailable) return;
-        if (tdpTimer.current) clearTimeout(tdpTimer.current);
-        tdpTimer.current = null; tdpEditGeneration.current = 0; setBusy(true); setError(null);
+        cancelQamSliderCommits(key => key === "device-tdp"); setBusy(true); setError(null);
         try {
           beginMutation();
           const result = await request("setDeviceTdpEnabled", { enabled });
@@ -800,9 +751,21 @@
 
       const powerInitialized = powerMode?.ac?.desired != null && powerMode?.dc?.desired != null;
       const powerWritable = !!powerMode?.persistenceWritable && powerInitialized && !status?.steam?.appId && !busy;
-      const powerSlider = (label, value, onChange, disabled) => value == null ? null : React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, powerModeLabels[powerModeIndex(value)] ?? "Unknown"))), min: 0, max: 2, step: 1, value: powerModeIndex(value), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => onChange(Number(next)) });
+      const schedulePowerMode = (key, method, value, appId = 0) => {
+        scheduleQamSliderCommit(key, { value, appId }, method, { mode: powerModeValue(value) }, async (result, failure) => {
+          if (failure) { failClosed("Power Mode update failed"); return; }
+          await refresh();
+          if (!result?.succeeded) setError(result?.failureMessage || "Power Mode update failed");
+        });
+      };
+      const powerSlider = (label, value, key, method, disabled) => {
+        if (value == null) return null;
+        const pendingValue = state.qamSliderCommits?.get(key)?.value;
+        const currentValue = pendingValue ?? value;
+        return React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, powerModeLabels[powerModeIndex(currentValue)] ?? "Unknown"))), min: 0, max: 2, step: 1, value: powerModeIndex(currentValue), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => schedulePowerMode(key, method, Number(next), activeProfile ? Number(profile?.appId || 0) : 0) });
+      };
       const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !powerWritable, onChange: value => void runPowerMutation("setDevicePowerModeEnabled", { enabled: !!value }) }) }];
-      if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, value => void runPowerMutation("setDevicePowerModeAc", { mode: powerModeValue(value) }), !powerWritable) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, value => void runPowerMutation("setDevicePowerModeDc", { mode: powerModeValue(value) }), !powerWritable) }); }
+      if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, "device-power-ac", "setDevicePowerModeAc", !powerWritable) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, "device-power-dc", "setDevicePowerModeDc", !powerWritable) }); }
 
       const tdpControls = [{ key: "tdp-toggle", node: React.createElement(native.ToggleField, {
         label: "TDP Control",
@@ -825,29 +788,18 @@
         const scheduleProfileMode = (side, value) => {
           if (!state.installed || !profile.persistenceWritable || !enabled) return;
           const key = side === "ac" ? "ac" : "dc";
-          const generation = ++modeEditGeneration.current[key];
           side === "ac" ? setPreviewAc(value) : setPreviewDc(value);
-          if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
-          settleTimers.current[key] = setTimeout(async () => {
-            settleTimers.current[key] = null;
-            if (!state.installed || !profile.persistenceWritable || !profile.enabled) return;
-            try {
-              modeMutationInFlight.current[key] = true; beginMutation();
-              const result = await request(side === "ac" ? "setActiveGameCpuBoostAc" : "setActiveGameCpuBoostDc", { mode: value });
-              if (generation === modeEditGeneration.current[key]) {
-                setProfile(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
-              }
-              if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
-            } catch (_) { failClosed("CPU Boost update failed"); }
-            finally { modeMutationInFlight.current[key] = false; endMutation(); }
-          }, 250);
+          scheduleQamSliderCommit(`profile-cpu-${key}`, { value, appId: Number(profile.appId || 0) }, side === "ac" ? "setActiveGameCpuBoostAc" : "setActiveGameCpuBoostDc", { mode: value }, async (result, failure) => {
+            if (failure) { failClosed("CPU Boost update failed"); return; }
+            if (result?.snapshot) setProfile(result.snapshot);
+            side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
+            if (!result?.succeeded) setError(result?.failureMessage || "CPU Boost update failed");
+            await refresh();
+          });
         };
         const toggleProfile = async value => {
           if (!state.installed || !writable) return;
-          cancelModeTimers();
-          if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
-          profileTdpTimer.current = null;
-          profileTdpGeneration.current = 0;
+          cancelQamSliderCommits(key => key.startsWith("profile-"));
           setPreviewAc(null); setPreviewDc(null);
           setBusy(true); setError(null);
           try {
@@ -864,19 +816,12 @@
           if (!state.installed || !profile.persistenceWritable || !enabled || !profile.limits) return;
           profileTdpDraftRef.current = draft;
           setProfileTdpDraft(draft);
-          const generation = ++profileTdpGeneration.current;
-          if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
-          profileTdpTimer.current = setTimeout(async () => {
-            profileTdpTimer.current = null;
-            if (!state.installed || !profile.persistenceWritable || !profile.enabled) return;
-            try {
-              beginMutation();
-              const result = await request("setActiveGameTdp", { configuration: draft });
-              if (generation === profileTdpGeneration.current) { profileTdpGeneration.current = 0; setProfile(result.snapshot); const nextDraft = { ac: { ...result.snapshot.tdp.ac }, dc: { ...result.snapshot.tdp.dc } }; profileTdpDraftRef.current = nextDraft; setProfileTdpDraft(nextDraft); }
-              if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
-            } catch (_) { failClosed("TDP update failed"); }
-            finally { endMutation(); }
-          }, 300);
+          scheduleQamSliderCommit("profile-tdp", { draft, appId: Number(profile.appId || 0) }, "setActiveGameTdp", { configuration: draft }, async (result, failure) => {
+            if (failure) { failClosed("Profile TDP update failed"); return; }
+            if (result?.snapshot?.tdp) { setProfile(result.snapshot); const nextDraft = { ac: { ...result.snapshot.tdp.ac }, dc: { ...result.snapshot.tdp.dc } }; profileTdpDraftRef.current = nextDraft; setProfileTdpDraft(nextDraft); }
+            if (!result?.succeeded) setError(result?.failureMessage || "TDP update failed");
+            await refresh();
+          });
         };
         const profileSlider = (label, side, value, preview, separator) => value == null ? null : React.createElement(native.SliderField, {
           label: React.createElement(React.Fragment, null,
@@ -890,7 +835,7 @@
         const profileTdpSlider = (label, side, value, separator) => value == null || !profile.limits ? null : React.createElement(native.SliderField, {
           label, min: label === "PL1" ? profile.limits.pl1MinimumWatts : profile.limits.pl2MinimumWatts,
           max: profile.limits.pl2MaximumWatts,
-          step: 1, value, showValue: true, disabled: !profile.persistenceWritable || !enabled || busy, bottomSeparator: separator,
+          step: 1, value: state.qamSliderCommits?.get("profile-tdp")?.draft?.[side]?.[label === "PL1" ? "pl1Watts" : "pl2Watts"] ?? value, showValue: true, disabled: !profile.persistenceWritable || !enabled || busy, bottomSeparator: separator,
           onChange: next => {
             const draft = profileTdpDraftRef.current || profileTdpDraft || { ac: { ...profile.tdp.ac }, dc: { ...profile.tdp.dc } };
             const pair = { ...draft[side] }; let numeric = Number(next);
@@ -905,8 +850,8 @@
           { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, previewDc, "standard") },
         ];
         const profilePowerControls = [
-          { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Power Mode plugged in", profile.powerMode.ac, value => void runPowerMutation("setActiveGamePowerModeAc", { mode: powerModeValue(value) }), !enabled || !writable) : null },
-          { key: "profile-power-dc", node: profile.powerMode ? powerSlider("Power Mode on battery", profile.powerMode.dc, value => void runPowerMutation("setActiveGamePowerModeDc", { mode: powerModeValue(value) }), !enabled || !writable) : null },
+          { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Power Mode plugged in", profile.powerMode.ac, "profile-power-ac", "setActiveGamePowerModeAc", !enabled || !writable) : null },
+          { key: "profile-power-dc", node: profile.powerMode ? powerSlider("Power Mode on battery", profile.powerMode.dc, "profile-power-dc", "setActiveGamePowerModeDc", !enabled || !writable) : null },
         ];
         const profileTdpControls = profile.limits ? [
           { key: "profile-tdp-ac-heading", node: React.createElement("div", null, "Plugged in") },
@@ -933,17 +878,15 @@
         const scheduleFps = (side, value) => {
           if (!fps.available || !profile.persistenceWritable || !enabled || !fps.enabled || busy) return;
           setFpsDraft(current => ({ ...current, [side]: value }));
-          const generation = ++fpsGeneration.current[side];
-          if (fpsTimers.current[side]) clearTimeout(fpsTimers.current[side]);
-          fpsTimers.current[side] = setTimeout(async () => {
-            fpsTimers.current[side] = null;
-            if (generation !== fpsGeneration.current[side]) return;
-            await runFpsMutation(side === "ac" ? "setActiveGameFpsLimitAc" : "setActiveGameFpsLimitDc", { fps: value });
-          }, 275);
+          scheduleQamSliderCommit(`profile-fps-${side}`, { value, appId: Number(profile.appId || 0) }, side === "ac" ? "setActiveGameFpsLimitAc" : "setActiveGameFpsLimitDc", { fps: value }, async (result, failure) => {
+            if (failure) { failClosed("Intel FPS Limit update failed"); return; }
+            if (!result?.succeeded) setError(result?.failureMessage || "Intel FPS Limit update failed");
+            await refresh();
+          });
         };
-        const fpsSlider = (label, side, value) => { const currentValue = fpsDraft[side] ?? value; return React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, `${currentValue} FPS`))), min: 40, max: 120, step: 1, value: currentValue, disabled: !fps.available || !profile.persistenceWritable || !enabled || !fps.enabled || busy, onChange: next => scheduleFps(side, Number(next)) }); };
+        const fpsSlider = (label, side, value) => { const currentValue = state.qamSliderCommits?.get(`profile-fps-${side}`)?.value ?? fpsDraft[side] ?? value; return React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, `${currentValue} FPS`))), min: 40, max: 120, step: 1, value: currentValue, disabled: !fps.available || !profile.persistenceWritable || !enabled || !fps.enabled || busy, onChange: next => scheduleFps(side, Number(next)) }); };
         const fpsControls = [
-          { key: "fps-toggle", node: React.createElement(native.ToggleField, { label: "FPS Limit", checked: !!fps.enabled, disabled: !fps.available || !writable || !enabled, onChange: value => void runFpsMutation("setActiveGameFpsLimitEnabled", { enabled: !!value }) }) },
+          { key: "fps-toggle", node: React.createElement(native.ToggleField, { label: "FPS Limit", checked: !!fps.enabled, disabled: !fps.available || !writable || !enabled, onChange: value => { if (!value) cancelQamSliderCommits(key => key.startsWith("profile-fps-")); void runFpsMutation("setActiveGameFpsLimitEnabled", { enabled: !!value }); } }) },
           { key: "fps-description", node: React.createElement("div", null, fps.available ? "Uses Intel's official API. Some games may not support FPS limiting." : fps.unavailableReason) },
           { key: "fps-ac", node: fpsSlider("Plugged in", "ac", fps.acFps ?? 60) },
           { key: "fps-dc", node: fpsSlider("On battery", "dc", fps.dcFps ?? 60) },
@@ -985,6 +928,42 @@
   // replacing it, so the functions exposed on it below always remain callable.
   const state = window[GLOBAL_KEY] || (window[GLOBAL_KEY] = {});
 
+  function cancelQamSliderCommits(predicate = () => true) {
+    for (const [key, pending] of state.qamSliderCommits ?? []) {
+      if (!predicate(key, pending)) continue;
+      clearTimeout(pending.timer);
+      state.qamSliderCommits.delete(key);
+    }
+  }
+
+  function scheduleQamSliderCommit(key, pending, method, payload, onSettled) {
+    state.qamSliderCommits ??= new Map();
+    const previous = state.qamSliderCommits.get(key);
+    if (previous) clearTimeout(previous.timer);
+    const token = (state.qamSliderCommitToken || 0) + 1;
+    state.qamSliderCommitToken = token;
+      const entry = { ...pending, method, payload, token, timer: null };
+      entry.timer = setTimeout(async () => {
+        if (state.qamSliderCommits.get(key)?.token !== token) return;
+        state.qamSliderCommits.delete(key);
+        if (!state.installed) return;
+        try {
+          if (entry.appId) {
+            const activeProfile = await request("captureActiveGameProfile");
+            if (Number(activeProfile?.appId || 0) !== entry.appId) {
+              state.onStateInvalidated?.();
+              return;
+            }
+          }
+          const result = await request(method, payload);
+        await onSettled(result, null, entry);
+      } catch (error) {
+        await onSettled(null, error, entry);
+      }
+    }, QAM_SLIDER_COMMIT_DELAY_MS);
+    state.qamSliderCommits.set(key, entry);
+  }
+
   function request(method, payload) {
     return new Promise((resolve, reject) => {
       state.bridgePending ??= new Map();
@@ -1008,6 +987,7 @@
   }
 
   function retireBridgeConsumers() {
+    cancelQamSliderCommits();
     for (const pending of state.bridgePending?.values() ?? []) {
       try { pending.reject(new Error("QAM bridge stopped")); } catch (_) {}
     }
