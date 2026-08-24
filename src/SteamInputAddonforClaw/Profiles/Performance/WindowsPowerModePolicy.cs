@@ -31,8 +31,8 @@ internal sealed class WindowsPowerModePolicy : IPowerModePolicy
     {
         uint? acResult = ac is { } a ? SetAc(a) : null;
         uint? dcResult = dc is { } d ? SetDc(d) : null;
-        if (ac is not null && acResult != 0) LogWriteFailure("AC", acResult.Value);
-        if (dc is not null && dcResult != 0) LogWriteFailure("DC", dcResult.Value);
+        if (acResult is { } acError && acError != 0) LogWriteFailure("AC", acError);
+        if (dcResult is { } dcError && dcError != 0) LogWriteFailure("DC", dcError);
         var acOk = ac is null || acResult == 0;
         var dcOk = dc is null || dcResult == 0;
         return new(acOk, dcOk, !acOk ? $"PowerSetUserConfiguredACPowerMode failed (Win32 error {acResult})." : !dcOk ? $"PowerSetUserConfiguredDCPowerMode failed (Win32 error {dcResult})." : null);
