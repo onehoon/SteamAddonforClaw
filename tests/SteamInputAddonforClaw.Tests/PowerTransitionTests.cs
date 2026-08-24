@@ -9,6 +9,22 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class PowerTransitionTests
 {
     [Fact]
+    public async Task Resume_observer_runs_only_for_the_first_accepted_resume_cycle()
+    {
+        var observed = 0;
+        var coordinator = new PowerTransitionCoordinator(new PowerMutationGate(false), new RecoverySafetyState(RecoverySafety.Unsafe), [],
+            hasIncompleteRecovery: () => false,
+            resumeObserved: () => observed++);
+
+        var notification = new PowerNotificationObservation(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true);
+        await coordinator.HandleAsync(notification);
+        await coordinator.HandleAsync(notification);
+
+        Assert.Equal(1, observed);
+        await coordinator.DisposeAsync();
+    }
+
+    [Fact]
     public async Task CleanResume_NoResidualNoJournal_EstablishesBaselineAndOpensGate()
     {
         var gate = new PowerMutationGate(false);

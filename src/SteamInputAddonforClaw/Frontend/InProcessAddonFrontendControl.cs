@@ -57,7 +57,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         public required string HardwareReason { get; init; }
     }
     private sealed class FanProbeSession(MsiFanHardwareProbe probe, string manufacturer, string model, string board)
-    { public MsiFanHardwareProbe Probe { get; } = probe; public string Manufacturer { get; } = manufacturer; public string Model { get; } = model; public string Board { get; } = board; }
+    { public MsiFanHardwareProbe Probe { get; } = probe; public string Manufacturer { get; } = manufacturer; public string Model { get; } = model; public string Board { get; } = board; public FrontendFanProbeSnapshot? LastResult { get; set; } }
     // Device/Profile CPU Boost -- a sibling capability, not a member of Routing/OEM1 (work order
     // PR277 section 1): this projection deliberately has NO dependency on _runtime/routing status
     // and must keep working when _runtime is null (no routing composition at all).
@@ -96,6 +96,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _status = status;
         _runtime = runtime;
         _captureRoutingStatus = captureRoutingStatus ?? (() => _runtime?.CaptureRoutingStatus() ?? throw new InvalidOperationException("Routing status is unavailable."));
+        if (_runtime is not null) _runtime.PowerResumeObserved += OnPowerResumeObserved;
         _developer = developer;
         _registrationMessage = registrationMessage;
         _setupExecutor = setupExecutor ?? new FrontendPrerequisiteSetupExecutor();
@@ -548,6 +549,20 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     internal void BeginProcessShutdown()
     {
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0) return;
+        if (_runtime is not null) _runtime.PowerResumeObserved -= OnPowerResumeObserved;
+        FanProbeSession? fanProbe;
+        lock (_fanProbeGate) fanProbe = _fanProbe;
+        if (fanProbe is not null)
+        {
+            try
+            {
+                fanProbe.Probe.RequestShutdownCleanup();
+                var cleanup = fanProbe.Probe.CancelSuspendResumeIfArmed();
+                if (cleanup is { Succeeded: false }) AppLog.Warn("MsiFanProbe", "Armed fan probe shutdown hand-back failed.");
+                if (!fanProbe.Probe.WaitForShutdownCleanup(TimeSpan.FromSeconds(5))) AppLog.Warn("MsiFanProbe", "Timed out waiting for active fan-probe shutdown cleanup.");
+            }
+            catch (Exception exception) { AppLog.Warn("MsiFanProbe", "Armed fan probe shutdown cleanup failed.", exception); }
+        }
         Feedback.VibrationTestSessionWriter? session;
         lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
         if (session is not null)
@@ -576,7 +591,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var model = FanProbeModelMap.Resolve(board);
         if (model == FanProbeModel.Unsupported) return new(false, FrontendFanProbeState.Unavailable, "Unsupported MSI board.", status.Device.Manufacturer, status.Device.Model, board, model.ToString(), null, false, "The authoritative board identity is unsupported.");
         lock (_fanProbeGate) _fanProbe ??= new(new MsiFanHardwareProbe(_fanProbeTransport, AppLog.DirectoryPath), status.Device.Manufacturer, status.Device.Model, board);
-        return MapFanProbe(FrontendFanProbeState.Ready, "Ready", null);
+        return _fanProbe.LastResult ?? MapFanProbe(FrontendFanProbeState.Ready, "Ready", null);
     }
 
     public async Task<FrontendFanProbeSnapshot> RunFanProbeAsync(FrontendFanProbeOperation operation, CancellationToken cancellationToken = default)
@@ -588,9 +603,25 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         {
             FrontendFanProbeOperation.Capture => session.Probe.Capture(session.Model, session.Board, ReadFanProbeFirmwareIdentity()),
             FrontendFanProbeOperation.AutomaticTest => session.Probe.AutomaticTest(session.Model, session.Board, ReadFanProbeFirmwareIdentity()),
-            _ => session.Probe.RestoreAuto(session.Model, session.Board, ReadFanProbeFirmwareIdentity())
+            FrontendFanProbeOperation.RestoreAuto => session.Probe.RestoreAuto(session.Model, session.Board, ReadFanProbeFirmwareIdentity()),
+            FrontendFanProbeOperation.PhysicalResponse => session.Probe.PhysicalResponse(session.Model, session.Board, ReadFanProbeFirmwareIdentity()),
+            _ => session.Probe.ArmSuspendResume(session.Model, session.Board, ReadFanProbeFirmwareIdentity())
         }, CancellationToken.None).ConfigureAwait(false);
-        return MapFanProbe(result.Succeeded ? FrontendFanProbeState.Completed : FrontendFanProbeState.Failed, result.Status, result.ReportPath);
+        var snapshot = MapFanProbe(result.Succeeded ? FrontendFanProbeState.Completed : FrontendFanProbeState.Failed, result.Status, result.ReportPath);
+        session.LastResult = snapshot;
+        return snapshot;
+    }
+
+    private void OnPowerResumeObserved()
+    {
+        FanProbeSession? session; lock (_fanProbeGate) session = _fanProbe;
+        if (session is null) return;
+        _ = Task.Run(() =>
+        {
+            var result = session.Probe.CompleteSuspendResumeAfterResume();
+            if (result is null) return;
+            session.LastResult = MapFanProbe(result.Succeeded ? FrontendFanProbeState.Completed : FrontendFanProbeState.Failed, result.Status, result.ReportPath);
+        });
     }
 
     private static string ReadFanProbeFirmwareIdentity()

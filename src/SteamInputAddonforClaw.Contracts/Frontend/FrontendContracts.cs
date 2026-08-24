@@ -126,7 +126,7 @@ public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcom
 }
 
 public enum FrontendFanProbeState { Unavailable, Ready, Running, Completed, Failed }
-public enum FrontendFanProbeOperation { Capture, AutomaticTest, RestoreAuto }
+public enum FrontendFanProbeOperation { Capture, AutomaticTest, RestoreAuto, PhysicalResponse, ArmSuspendResume }
 public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeState State, string Status, string Manufacturer, string Model, string BaseBoard, string ProbeModel, string? ReportPath, bool HasReport, string? ErrorMessage)
 {
     public static readonly FrontendFanProbeSnapshot Unavailable = new(false, FrontendFanProbeState.Unavailable, "Unavailable", "", "", "", "Unsupported", null, false, "MSI fan probe is unavailable.");

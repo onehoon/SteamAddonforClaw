@@ -4,7 +4,7 @@ using System.Text;
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal enum FanProbeModel { Unsupported, A2vm, Cg3em }
-internal enum FanProbeOperation { Capture, AutomaticTest, RestoreAuto }
+internal enum FanProbeOperation { Capture, AutomaticTest, RestoreAuto, PhysicalResponse, ArmSuspendResume }
 internal sealed record FanProbeResult(bool Available, bool Succeeded, string Status, string? ReportPath, FanProbeModel Model, string Board);
 
 internal static class FanProbeModelMap
@@ -45,6 +45,29 @@ internal static class FanProbeLogic
 
     internal static string ClassifyReadback(bool immediateMatch, bool laterMatch, bool targetRead) =>
         immediateMatch ? "IMMEDIATE_MATCH" : laterMatch ? "DELAYED_MATCH" : targetRead ? "MISMATCH" : "READ_FAILED";
+
+    internal static string ClassifyDirectionalResponse(int? before, int? after)
+    {
+        if (before is null || after is null) return "INCONCLUSIVE";
+        var delta = after.Value - before.Value;
+        var deadband = Math.Max(50, (int)Math.Ceiling(Math.Abs(before.Value) * 0.02));
+        if (Math.Abs(delta) <= deadband) return "UNCHANGED";
+        return delta < 0 ? "DECREASED" : "INCREASED";
+    }
+
+    internal static bool IsSafePhysicalCurve(IReadOnlyList<byte> duties) => duties.Count == 6 && duties.All(d => d is >= 10 and <= 75);
+
+    internal static string ClassifyResumeState(byte[] fan1, byte[] fan2, byte ownership)
+    {
+        if (fan1.Length < 8 || fan2.Length < 8) return "READ_FAILED";
+        var armed = new byte[] { 75, 75, 75, 75, 75, 75 };
+        var tablesPersisted = fan1.Skip(1).Take(6).SequenceEqual(armed) && fan2.Skip(1).Take(6).SequenceEqual(armed);
+        var ownershipOn = (ownership & 0x80) != 0;
+        if (tablesPersisted && ownershipOn) return "CUSTOM_PERSISTED";
+        if (tablesPersisted) return "CURVE_PERSISTED_OWNERSHIP_LOST";
+        if (!ownershipOn) return "FIRMWARE_AUTO_RESET";
+        return "OTHER_STATE";
+    }
 }
 
 /// <summary>Bounded developer-only MSI fan diagnostic. It owns no persistent fan state.</summary>
@@ -54,11 +77,20 @@ internal sealed class MsiFanHardwareProbe
     private readonly IMsiFanDiagnosticTransport? _diagnostics;
     private readonly string _reportDirectory;
     private readonly Action<TimeSpan> _delay;
+    private readonly ManualResetEventSlim _idle = new(true);
     private readonly object _gate = new();
     private bool _running;
     private bool _hardwareWritesStarted;
     private byte[]? _originalFan1;
     private byte[]? _originalFan2;
+    private bool _suspendArmed;
+    private StringBuilder? _armedReport;
+    private string? _armedPath;
+    private string? _armedDevice;
+    private string? _armedBoard;
+    private string? _armedFirmware;
+    private FanProbeModel _armedModel;
+    private volatile bool _shutdownRequested;
 
     internal MsiFanHardwareProbe(IMsiClawTdpTransport transport, string reportDirectory, Action<TimeSpan>? delay = null)
     {
@@ -70,7 +102,78 @@ internal sealed class MsiFanHardwareProbe
 
     internal FanProbeResult Capture(string device, string board, string firmware) => Run(FanProbeOperation.Capture, device, board, firmware, WriteCapture);
     internal FanProbeResult AutomaticTest(string device, string board, string firmware) => Run(FanProbeOperation.AutomaticTest, device, board, firmware, WriteAutomaticTest);
-    internal FanProbeResult RestoreAuto(string device, string board, string firmware) => Run(FanProbeOperation.RestoreAuto, device, board, firmware, WriteRestore);
+    internal FanProbeResult RestoreAuto(string device, string board, string firmware)
+    {
+        if (IsSuspendResumeArmed()) return CancelSuspendResume();
+        return Run(FanProbeOperation.RestoreAuto, device, board, firmware, WriteRestore);
+    }
+    internal FanProbeResult? CancelSuspendResumeIfArmed() => IsSuspendResumeArmed() ? CancelSuspendResume() : null;
+    internal void RequestShutdownCleanup() => _shutdownRequested = true;
+    internal bool WaitForShutdownCleanup(TimeSpan timeout) => _idle.Wait(timeout);
+    internal FanProbeResult PhysicalResponse(string device, string board, string firmware) => Run(FanProbeOperation.PhysicalResponse, device, board, firmware, WritePhysicalResponse);
+    internal FanProbeResult ArmSuspendResume(string device, string board, string firmware) => Run(FanProbeOperation.ArmSuspendResume, device, board, firmware, WriteArmSuspendResume);
+    internal FanProbeResult? CompleteSuspendResumeAfterResume()
+    {
+        lock (_gate)
+        {
+            if (!_suspendArmed || _armedReport is null || _armedPath is null) return null;
+            _suspendArmed = false;
+        }
+        var report = _armedReport; var path = _armedPath; var resultModel = _armedModel; var resultBoard = _armedBoard ?? ""; var success = false; var handback = false; var observationOk = false; var tables = false;
+        try
+        {
+            report.AppendLine("=== RESUME OBSERVATION ===");
+            _delay(TimeSpan.FromMilliseconds(750));
+            WritePhysicalSnapshot(report, "POST_RESUME");
+            string classification;
+            if (TryReadFan(1, out _, out var fan1) && TryReadFan(2, out _, out var fan2) && _transport.TryGetAp(1, out var ap) && ap.Length > 0)
+            {
+                classification = FanProbeLogic.ClassifyResumeState(fan1, fan2, ap[0]);
+                report.AppendLine($"Resume classification: {classification}");
+                report.AppendLine($"Resume custom table persisted: {(classification is "CUSTOM_PERSISTED" or "CURVE_PERSISTED_OWNERSHIP_LOST" ? "YES" : "NO")}");
+                report.AppendLine($"Resume ownership persisted: {(classification == "CUSTOM_PERSISTED" ? "YES" : "NO")}");
+                report.AppendLine($"Resume policy implication: {classification switch { "CUSTOM_PERSISTED" => "No reapply indicated by this observation.", "CURVE_PERSISTED_OWNERSHIP_LOST" => "Ownership reapply may be required; verify before production policy.", "FIRMWARE_AUTO_RESET" => "Firmware Auto reset observed; no automatic reapply is performed by this diagnostic.", _ => "Read state requires manual analysis." }}");
+            }
+            else classification = "READ_FAILED";
+            if (classification == "READ_FAILED") report.AppendLine("Resume classification: READ_FAILED");
+            observationOk = classification != "READ_FAILED";
+        }
+        catch (Exception exception) { report.AppendLine($"Observation exception: {exception}"); }
+        finally
+        {
+            report.AppendLine("=== CLEANUP ===");
+            try { tables = RestoreOriginalTables(report); }
+            catch (Exception exception) { report.AppendLine($"Table restore exception: {exception}"); }
+            try { handback = RestoreFirmwareAuto(report); }
+            catch (Exception exception) { report.AppendLine($"Firmware hand-back exception: {exception}"); }
+            success = observationOk && tables && handback;
+            report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}");
+            report.AppendLine($"Firmware Auto hand-back: {(handback ? "PASS" : "FAIL")}");
+            report.AppendLine($"FINAL STATE: {(handback ? "AUTO" : "UNKNOWN")}");
+            report.AppendLine($"OVERALL: {(success ? "PASS" : "FAILED")}");
+            Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString());
+            lock (_gate) { _running = false; _armedReport = null; _armedPath = null; _armedDevice = null; _armedBoard = null; _armedFirmware = null; }
+            _idle.Set();
+        }
+        return new(true, success, success ? "PASS" : "FAILED", path, resultModel, resultBoard);
+    }
+
+    private FanProbeResult CancelSuspendResume()
+    {
+        var report = _armedReport!; var path = _armedPath!; var model = _armedModel; var board = _armedBoard ?? ""; var tables = false; var auto = false;
+        lock (_gate) _suspendArmed = false;
+        report.AppendLine("=== CANCEL BEFORE SUSPEND ===");
+        try { tables = RestoreOriginalTables(report); }
+        catch (Exception exception) { report.AppendLine($"Table restore exception: {exception}"); }
+        try { auto = RestoreFirmwareAuto(report); }
+        catch (Exception exception) { report.AppendLine($"Firmware hand-back exception: {exception}"); }
+        report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}"); report.AppendLine($"Firmware Auto hand-back: {(auto ? "PASS" : "FAIL")}"); report.AppendLine($"OVERALL: {(tables && auto ? "PASS" : "FAILED")}");
+        Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString());
+        lock (_gate) { _running = false; _armedReport = null; _armedPath = null; _armedBoard = null; }
+        _idle.Set();
+        return new(true, tables && auto, tables && auto ? "PASS" : "FAILED", path, model, board);
+    }
+    private bool IsSuspendResumeArmed() { lock (_gate) return _suspendArmed; }
     private bool WriteRestore(StringBuilder report, FanProbeModel model) => RestoreFirmwareAuto(report);
 
     private FanProbeResult Run(FanProbeOperation operation, string device, string board, string firmware, Func<StringBuilder, FanProbeModel, bool> action)
@@ -78,16 +181,18 @@ internal sealed class MsiFanHardwareProbe
         lock (_gate)
         {
             if (_running) return new(true, false, "Another fan probe operation is already running.", null, FanProbeModelMap.Resolve(board), board);
-            _running = true;
+            _running = true; _shutdownRequested = false; _idle.Reset();
         }
 
         var model = FanProbeModelMap.Resolve(board);
-        var path = Path.Combine(_reportDirectory, $"MsiFanProbe_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+        var prefix = operation switch { FanProbeOperation.PhysicalResponse => "MsiFanProbe_Physical", FanProbeOperation.ArmSuspendResume => "MsiFanProbe_SuspendResume", _ => "MsiFanProbe" };
+        var path = Path.Combine(_reportDirectory, $"{prefix}_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
         var report = new StringBuilder();
         var success = false;
         var status = "FAILED";
         var handback = true;
         _hardwareWritesStarted = false;
+        _suspendArmed = false;
         _originalFan1 = null;
         _originalFan2 = null;
         try
@@ -106,6 +211,22 @@ internal sealed class MsiFanHardwareProbe
             }
             WriteEnvironment(report);
             success = action(report, model);
+            if (operation == FanProbeOperation.ArmSuspendResume && success)
+            {
+                lock (_gate)
+                {
+                    if (_shutdownRequested)
+                    {
+                        report.AppendLine("ABORTED: process shutdown requested before suspend arm commit.");
+                        success = false;
+                    }
+                    else
+                    {
+                        _armedReport = report; _armedPath = path; _armedDevice = device; _armedBoard = board; _armedFirmware = firmware; _armedModel = model;
+                        _suspendArmed = true;
+                    }
+                }
+            }
             status = success ? "PASS" : "FAILED";
         }
         catch (Exception exception)
@@ -114,7 +235,7 @@ internal sealed class MsiFanHardwareProbe
         }
         finally
         {
-            if (operation == FanProbeOperation.AutomaticTest && _hardwareWritesStarted)
+            if (operation is FanProbeOperation.AutomaticTest or FanProbeOperation.PhysicalResponse && _hardwareWritesStarted)
             {
                 report.AppendLine("=== RESTORE TABLES ===");
                 var tables = RestoreOriginalTables(report);
@@ -126,9 +247,28 @@ internal sealed class MsiFanHardwareProbe
                 WriteFinalSnapshot(report);
                 if (!tables) success = false;
             }
+            else if (operation == FanProbeOperation.ArmSuspendResume && _hardwareWritesStarted && !_suspendArmed)
+            {
+                report.AppendLine("=== FAILED ARM CLEANUP ===");
+                var tables = false;
+                try { tables = RestoreOriginalTables(report); }
+                catch (Exception exception) { report.AppendLine($"Table restore exception: {exception}"); }
+                try { handback = RestoreFirmwareAuto(report); }
+                catch (Exception exception) { report.AppendLine($"Firmware hand-back exception: {exception}"); handback = false; }
+                report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}");
+                report.AppendLine($"Firmware Auto hand-back: {(handback ? "PASS" : "FAIL")}");
+                success = false;
+            }
         }
-        if (operation == FanProbeOperation.AutomaticTest && !_hardwareWritesStarted)
+        if (operation is FanProbeOperation.AutomaticTest or FanProbeOperation.PhysicalResponse && !_hardwareWritesStarted)
             report.AppendLine("FINAL STATE: UNCHANGED (no hardware writes performed)");
+        if (operation == FanProbeOperation.ArmSuspendResume && success && _suspendArmed)
+        {
+            report.AppendLine("STATUS: ARMED; sleep/resume is required to complete the bounded diagnostic.");
+            Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString());
+            lock (_gate) { _running = true; }
+            return new(true, true, "ARMED", path, model, board);
+        }
         if (!handback) { success = false; status = "FAILED"; }
         return Finish(path, report, success && status == "PASS", success && status == "PASS" ? "PASS" : "FAILED", model, board);
     }
@@ -139,6 +279,7 @@ internal sealed class MsiFanHardwareProbe
         Directory.CreateDirectory(_reportDirectory);
         File.WriteAllText(path, report.ToString());
         lock (_gate) _running = false;
+        _idle.Set();
         return new(true, success, status, path, model, board);
     }
 
@@ -265,6 +406,100 @@ internal sealed class MsiFanHardwareProbe
         if (!ownership) return false;
         ObserveOwnership(report);
         return true;
+    }
+
+    private bool WritePhysicalResponse(StringBuilder report, FanProbeModel model)
+    {
+        report.AppendLine("=== PHYSICAL RESPONSE TEST ===");
+        if (ShouldAbort(report)) return false;
+        if (!CaptureBaseline(report, true) || _originalFan1 is null || _originalFan2 is null) { report.AppendLine("PRECHECK: FAIL; no writes performed"); return false; }
+        var flat = new byte[] { 75, 75, 75, 75, 75, 75 };
+        if (!FanProbeLogic.IsSafePhysicalCurve(flat) || !ApplyCurve(report, flat, "75")) return false;
+        if (!SetOwnership(report, true)) return false;
+        int? previousStageRpm = null;
+        var stageRpms = new Dictionary<string, int?>();
+        foreach (var stage in new[] { ("75", flat, new[] { 0, 500, 1000, 2000, 5000 }), ("40", new byte[] { 40, 40, 40, 40, 40, 40 }, new[] { 0, 500, 1000, 2000, 5000 }), ("10", new byte[] { 10, 10, 10, 10, 10, 10 }, new[] { 0, 500, 1000, 2000, 3000 }), ("75_RECOVERY", flat, new[] { 0, 500, 1000, 2000 }) })
+        {
+            if (ShouldAbort(report)) return false;
+            report.AppendLine($"=== STAGE {stage.Item1} ===");
+            if (!FanProbeLogic.IsSafePhysicalCurve(stage.Item2) || !ApplyCurve(report, stage.Item2, stage.Item1)) return false;
+            int? firstRpm = null; int? lastRpm = null;
+            foreach (var milliseconds in stage.Item3)
+            {
+                if (ShouldAbort(report)) return false;
+                if (milliseconds != 0) _delay(TimeSpan.FromMilliseconds(milliseconds - (stage.Item3.TakeWhile(x => x < milliseconds).LastOrDefault())));
+                if (ShouldAbort(report)) return false;
+                var rpm = WritePhysicalSnapshot(report, $"{stage.Item1} T+{milliseconds}ms"); firstRpm ??= rpm; lastRpm = rpm;
+            }
+            report.AppendLine($"Stage directional response: {FanProbeLogic.ClassifyDirectionalResponse(firstRpm, lastRpm)} (Fan 1 RPM observation only; no exact threshold enforced)");
+            if (previousStageRpm is not null || lastRpm is not null) report.AppendLine($"Transition from previous stage to {stage.Item1}: {FanProbeLogic.ClassifyDirectionalResponse(previousStageRpm, lastRpm)}");
+            previousStageRpm = lastRpm;
+            stageRpms[stage.Item1] = lastRpm;
+        }
+        var down75To40 = FanProbeLogic.ClassifyDirectionalResponse(stageRpms["75"], stageRpms["40"]);
+        var down40To10 = FanProbeLogic.ClassifyDirectionalResponse(stageRpms["40"], stageRpms["10"]);
+        var up10To75 = FanProbeLogic.ClassifyDirectionalResponse(stageRpms["10"], stageRpms["75_RECOVERY"]);
+        var lowDutyNonZero = stageRpms["10"] is > 0;
+        var physicalValidated = down75To40 == "DECREASED" && down40To10 == "DECREASED" && lowDutyNonZero && up10To75 == "INCREASED";
+        report.AppendLine("=== PHYSICAL RESPONSE SUMMARY ===");
+        report.AppendLine($"75 -> 40: {down75To40}"); report.AppendLine($"40 -> 10: {down40To10}");
+        report.AppendLine($"Duty 10 non-zero: {(lowDutyNonZero ? "YES" : "NO/UNKNOWN")}"); report.AppendLine($"10 -> 75: {up10To75}");
+        report.AppendLine($"No bounded latch behavior observed: {(physicalValidated ? "YES" : "NO/INCONCLUSIVE")}");
+        return physicalValidated;
+    }
+
+    private bool ShouldAbort(StringBuilder report)
+    {
+        if (!_shutdownRequested) return false;
+        report.AppendLine("ABORTED: process shutdown requested; restoring original tables and firmware Auto.");
+        return true;
+    }
+
+    private bool WriteArmSuspendResume(StringBuilder report, FanProbeModel model)
+    {
+        report.AppendLine("=== SUSPEND/RESUME ARM ===");
+        if (ShouldAbort(report)) return false;
+        if (!CaptureBaseline(report, true) || _originalFan1 is null || _originalFan2 is null) return false;
+        if (ShouldAbort(report)) return false;
+        var flat = new byte[] { 75, 75, 75, 75, 75, 75 };
+        if (!ApplyCurve(report, flat, "ARM_75") || !SetOwnership(report, true)) return false;
+        if (ShouldAbort(report)) return false;
+        WritePhysicalSnapshot(report, "ARMED");
+        if (ShouldAbort(report)) return false;
+        return true;
+    }
+
+    private bool ApplyCurve(StringBuilder report, byte[] duties, string label) =>
+        FanProbeLogic.IsSafePhysicalCurve(duties) && WritePhysicalCurveBlock(report, 1, WithDuties(_originalFan1!, duties), $"{label} Fan 1") && WritePhysicalCurveBlock(report, 2, WithDuties(_originalFan2!, duties), $"{label} Fan 2");
+
+    private bool WritePhysicalCurveBlock(StringBuilder report, int block, byte[] logical, string label)
+    {
+        if (!TryReadFan(block, out _, out var current)) { report.AppendLine($"{label}: READ_FAILED"); return false; }
+        var requested = (byte[])current.Clone(); logical.AsSpan(1, 6).CopyTo(requested.AsSpan(1, 6));
+        if (!FanProbeLogic.IsSafePhysicalCurve(requested.Skip(1).Take(6).ToArray())) { report.AppendLine($"{label}: SKIPPED unsafe duty"); return false; }
+        if (!SetFan(report, block, requested, label)) return false;
+        if (!TryReadFan(block, out _, out var readback) || !readback.Skip(1).Take(6).SequenceEqual(requested.Skip(1).Take(6))) { report.AppendLine($"{label}: READBACK_MISMATCH"); return false; }
+        report.AppendLine($"{label}: READBACK_PASS; duties={string.Join(",", readback.Skip(1).Take(6))}"); return true;
+    }
+
+    private int? WritePhysicalSnapshot(StringBuilder report, string label)
+    {
+        report.AppendLine($"--- SNAPSHOT {label} @ {DateTimeOffset.Now:O} ---");
+        int? fan1Rpm = null;
+        if (TryReadFan(0, out var fan0Raw, out var fan0Logical))
+        {
+            DescribeFan(report, 0, fan0Raw, fan0Logical);
+            if (fan0Logical.Length >= 2 && fan0Logical[0] != fan0Logical[1]) fan1Rpm = Math.Abs(480000 / (fan0Logical[0] - fan0Logical[1]));
+            report.AppendLine($"Fan 1 RPM (source-backed tach pair bytes 0/1): {fan1Rpm?.ToString(CultureInfo.InvariantCulture) ?? "unavailable"}");
+            report.AppendLine($"Fan 2 tach raw secondary pair bytes 2/3: {(fan0Logical.Length >= 4 ? $"{fan0Logical[2]} / {fan0Logical[3]}" : "unavailable")}; RPM formula intentionally not inferred");
+        }
+        else report.AppendLine("Get_Fan(0): READ_FAILED; Fan 1 RPM unavailable; Fan 2 tach unavailable");
+        ReadFan(report, 1, true); ReadFan(report, 2, true);
+        ReadPayload(report, "Get_AP(1)", "GetAp", 1, () => _transport.TryGetAp(1, out var p) ? p : null);
+        ReadPayload(report, "Get_Data(212)", "GetData", 212, () => _transport.TryGetData(212, out var p) ? p : null);
+        ReadPayload(report, "Get_Data(152)", "GetData", 152, () => _transport.TryGetData(152, out var p) ? p : null);
+        report.AppendLine("Response classification: directional RPM interpretation is observational; latch behavior is not inferred from a single snapshot.");
+        return fan1Rpm;
     }
 
     private static void WriteReferenceBaseline(StringBuilder report, FanProbeModel model)
