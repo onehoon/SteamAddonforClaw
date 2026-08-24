@@ -10,6 +10,7 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
 {
+    private const string OfficialHidHideClient = "C:\\Program Files\\Nefarius Software Solutions\\HidHide\\x64\\HidHideClient.exe";
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "ClawIsolationTests", Guid.NewGuid().ToString("N"));
     private string JournalPath => Path.Combine(_directory, "recovery.json");
 
@@ -24,6 +25,41 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.DoesNotContain(hid.Trace, entry => entry.Contains("USB\\MSI_ROOT", StringComparison.OrdinalIgnoreCase));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal(["AddApplication", "AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "RemoveDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "RemoveApplication"], hid.Trace);
+    }
+
+    [Fact]
+    public async Task Prepare_allows_addon_and_official_hidhide_client()
+    {
+        var hid = new FakeHidHide { Applications = ["C:\\addon.exe", OfficialHidHideClient] };
+        var stage = Create(hid, trustedHidHideApplicationPaths: [OfficialHidHideClient]);
+
+        var result = await stage.PrepareMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+    }
+
+    [Fact]
+    public async Task Prepare_rejects_addon_and_foreign_application()
+    {
+        var hid = new FakeHidHide { Applications = ["C:\\addon.exe", "C:\\other.exe"] };
+        var stage = Create(hid, trustedHidHideApplicationPaths: [OfficialHidHideClient]);
+
+        var result = await stage.PrepareMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("ForeignConfiguration", result.Reason);
+    }
+
+    [Fact]
+    public async Task Prepare_rejects_preexisting_hidden_device_with_official_client()
+    {
+        var hid = new FakeHidHide { Applications = ["C:\\addon.exe", OfficialHidHideClient], HiddenDevices = ["HID\\FOREIGN"] };
+        var stage = Create(hid, trustedHidHideApplicationPaths: [OfficialHidHideClient]);
+
+        var result = await stage.PrepareMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("ForeignConfiguration", result.Reason);
     }
 
     [Fact]
@@ -397,14 +433,14 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.Empty(hid.Trace);
     }
 
-    private MsiClawPhysicalIsolationStage Create(FakeHidHide hid, string physicalIdentity = "USB\\MSI_ROOT", IRecoveryJournalStore? store = null, string pnpInstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD")
+    private MsiClawPhysicalIsolationStage Create(FakeHidHide hid, string physicalIdentity = "USB\\MSI_ROOT", IRecoveryJournalStore? store = null, string pnpInstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null)
     {
         Directory.CreateDirectory(_directory);
         var recovery = new RecoveryManager(store ?? new RecoveryJournalStore(JournalPath));
         recovery.BeginDeviceNativeStateMutation(new(NativeStateCaptureStatus.Success,
             new(new("test"), 1, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(new { Mode = "XInput" })), "captured"));
         var sessionId = recovery.LoadJournal().Journal!.RecoverySessionId;
-        return new(new FakeInput(new(Guid.NewGuid(), "path", pnpInstanceId, physicalIdentity)), new FakeSession(sessionId), recovery, hid, () => "C:\\addon.exe");
+        return new(new FakeInput(new(Guid.NewGuid(), "path", pnpInstanceId, physicalIdentity)), new FakeSession(sessionId), recovery, hid, () => "C:\\addon.exe", trustedHidHideApplicationPaths);
     }
 
     public void Dispose() { try { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); } catch { } }

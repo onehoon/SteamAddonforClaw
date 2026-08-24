@@ -152,6 +152,30 @@ public sealed class HidHideInstallDetectionTests
         Assert.Empty(fileSystem.Deleted);
     }
 
+    [Fact]
+    public void Official_client_path_resolver_returns_only_existing_exact_package_client()
+    {
+        const string installLocation = "C:\\Program Files\\Nefarius Software Solutions\\HidHide";
+        const string officialPath = installLocation + "\\x64\\HidHideClient.exe";
+        var resolver = new HidHideClientPathResolver(
+            new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.", installLocation)], []),
+            path => string.Equals(path, officialPath, StringComparison.OrdinalIgnoreCase));
+
+        var result = resolver.Resolve();
+
+        Assert.Equal([officialPath], result);
+    }
+
+    [Fact]
+    public void Official_client_path_resolution_failure_returns_no_trusted_path()
+    {
+        var resolver = new HidHideClientPathResolver(
+            new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.", "C:\\Program Files\\HidHide")], []),
+            _ => false);
+
+        Assert.Empty(resolver.Resolve());
+    }
+
     private sealed class FakeRegistry(IReadOnlyList<HidHideUninstallCandidate> registry64, IReadOnlyList<HidHideUninstallCandidate> registry32, string? dependency64 = null, string? dependency32 = null) : IHidHideUninstallRegistry, IHidHideDependencyRegistry
     {
         public IReadOnlyList<HidHideUninstallCandidate> Enumerate(Microsoft.Win32.RegistryView view) => view == Microsoft.Win32.RegistryView.Registry64 ? registry64 : registry32;

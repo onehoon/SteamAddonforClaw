@@ -97,14 +97,15 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         Settings.IOem1MappingPreference oem1MappingPreference,
         bool hardwareSupported,
         WinGSuppressionGuard winGSuppressionGuard,
-        Settings.IWingMappingPreference? wingMappingPreference = null)
+        Settings.IWingMappingPreference? wingMappingPreference = null,
+        IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null)
     {
         ArgumentNullException.ThrowIfNull(oem1MappingPreference);
         wingMappingPreference ??= new DefaultWingMappingPreference();
         ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         // Forwarded, never recomputed: the startup hardware-support result is the single authority
         // both routing and the device composition's OEM1 availability gate read.
-        var handheldRoutingComposition = new HandheldRoutingCompositionFactory().Create(handheldDeviceAdapter, recovery, powerGate, recoverySafety, hardwareSupported);
+        var handheldRoutingComposition = new HandheldRoutingCompositionFactory().Create(handheldDeviceAdapter, recovery, powerGate, recoverySafety, hardwareSupported, trustedHidHideApplicationPaths);
         if (handheldRoutingComposition is null) return null;
 
         var safetySession = handheldRoutingComposition.SafetySession;

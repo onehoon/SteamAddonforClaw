@@ -22,7 +22,7 @@ internal static class HidHidePackageMetadata
 internal sealed record HidHidePackageState(bool Installed, string? Version, bool InspectionSucceeded);
 internal interface IHidHidePackageProbe { HidHidePackageState Inspect(); }
 
-internal sealed record HidHideUninstallCandidate(string DisplayName, string? DisplayVersion, string? Publisher);
+internal sealed record HidHideUninstallCandidate(string DisplayName, string? DisplayVersion, string? Publisher, string? InstallLocation = null);
 internal interface IHidHideUninstallRegistry
 {
     IReadOnlyList<HidHideUninstallCandidate> Enumerate(RegistryView view);
@@ -46,7 +46,7 @@ internal sealed class WindowsHidHideUninstallRegistry : IHidHideUninstallRegistr
         {
             using var entry = uninstall.OpenSubKey(name);
             if (entry?.GetValue("DisplayName") is string displayName)
-                candidates.Add(new(displayName, entry.GetValue("DisplayVersion") as string, entry.GetValue("Publisher") as string));
+                candidates.Add(new(displayName, entry.GetValue("DisplayVersion") as string, entry.GetValue("Publisher") as string, entry.GetValue("InstallLocation") as string));
         }
         return candidates;
     }
@@ -118,6 +118,52 @@ internal sealed class WindowsHidHidePackageProbe : IHidHidePackageProbe
     }
     internal static string NormalizeVersion(string value) => NormalizeVersion(Version.Parse(value));
     internal static string NormalizeVersion(Version version) => new Version(version.Major, Math.Max(version.Minor, 0), Math.Max(version.Build, 0), Math.Max(version.Revision, 0)).ToString(4);
+}
+
+internal sealed class HidHideClientPathResolver(
+    IHidHideUninstallRegistry? uninstallRegistry = null,
+    Func<string, bool>? fileExists = null)
+{
+    private readonly IHidHideUninstallRegistry _uninstallRegistry = uninstallRegistry ?? new WindowsHidHideUninstallRegistry();
+    private readonly Func<string, bool> _fileExists = fileExists ?? File.Exists;
+
+    internal IReadOnlyList<string> Resolve()
+    {
+        try
+        {
+            var candidates = Enum.GetValues<RegistryView>()
+                .Where(view => view is RegistryView.Registry64 or RegistryView.Registry32)
+                .SelectMany(view => _uninstallRegistry.Enumerate(view))
+                .Where(WindowsHidHidePackageProbe.IsExactCandidate)
+                .SelectMany(candidate => CandidatePaths(candidate.InstallLocation))
+                .Select(Canonicalize)
+                .Where(path => path is not null && _fileExists(path!))
+                .Cast<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return candidates;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHide", "Official HidHide Configuration Client path resolution failed.", exception,
+                ("Action", "DoNotTrustWhitelistEntry"));
+            return [];
+        }
+    }
+
+    private static IEnumerable<string> CandidatePaths(string? installLocation)
+    {
+        if (string.IsNullOrWhiteSpace(installLocation)) yield break;
+        var root = installLocation.Trim().Trim('"');
+        yield return Path.Combine(root, "HidHideClient.exe");
+        yield return Path.Combine(root, "x64", "HidHideClient.exe");
+    }
+
+    private static string? Canonicalize(string path)
+    {
+        try { return Path.IsPathFullyQualified(path) ? Path.GetFullPath(path) : null; }
+        catch { return null; }
+    }
 }
 
 internal static class HidHidePackageVersionPolicy

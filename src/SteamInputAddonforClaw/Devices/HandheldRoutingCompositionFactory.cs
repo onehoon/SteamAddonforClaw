@@ -31,11 +31,12 @@ internal sealed class HandheldRoutingCompositionFactory
         RecoveryManager recovery,
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafety,
-        bool hardwareSupported)
+        bool hardwareSupported,
+        IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null)
     {
         if (adapter is MsiClawDeviceAdapter && adapter.NativeState is MsiClawNativeStateManager nativeState)
         {
-            return new MsiClawRoutingComposition(nativeState, recovery, powerGate, recoverySafety, hardwareSupported: hardwareSupported);
+            return new MsiClawRoutingComposition(nativeState, recovery, powerGate, recoverySafety, hardwareSupported: hardwareSupported, trustedHidHideApplicationPaths: trustedHidHideApplicationPaths);
         }
 
         return null;

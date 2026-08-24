@@ -25,7 +25,8 @@ internal sealed record AddonRuntimeComposition(
     /// <summary>The owned initial OEM1 action-path activation task. Frontend/tray startup does not
     /// await it; Routing awaits the same task before entering its pipeline/helper-acquisition
     /// boundary. <see cref="Task.CompletedTask"/> when there is no routing runtime.</summary>
-    Task Oem1ActivationTask);
+    Task Oem1ActivationTask,
+    IReadOnlyCollection<string>? TrustedHidHideApplicationPaths = null);
 
 internal static class AddonRuntimeCompositionFactory
 {
@@ -43,6 +44,7 @@ internal static class AddonRuntimeCompositionFactory
     {
         ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
+        var trustedHidHideApplicationPaths = new HidHideClientPathResolver().Resolve();
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
@@ -83,7 +85,8 @@ internal static class AddonRuntimeCompositionFactory
             startupSettings,
             hardwareSupported,
             winGSuppressionGuard,
-            wingMappingPreference: startupSettings);
+            wingMappingPreference: startupSettings,
+            trustedHidHideApplicationPaths: trustedHidHideApplicationPaths);
 
         Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
             ? _ => Task.FromResult(false)
@@ -104,6 +107,7 @@ internal static class AddonRuntimeCompositionFactory
 
         return new AddonRuntimeComposition(
             runtimeHost, startupSettings, startupRegistrationResult.Message, statusProvider,
-            routingRuntime?.Oem1ActivationTask ?? Task.CompletedTask);
+            routingRuntime?.Oem1ActivationTask ?? Task.CompletedTask,
+            trustedHidHideApplicationPaths);
     }
 }
