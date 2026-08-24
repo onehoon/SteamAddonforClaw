@@ -18,35 +18,12 @@ internal static class UninstallBootstrap
 {
     internal const string ElevatedArgument = "--elevated-uninstall-cleanup";
 
-    internal static void Run()
+    internal static void RunFastCallbackOnly()
     {
         AppLog.Info("Uninstall", "Velopack uninstall cleanup started.", ("FastCallback", true));
-        var runtimeReleased = RequestRunningRuntimeShutdown();
+        _ = RequestRunningRuntimeShutdown();
         try { new WindowsTaskSchedulerStartupManager().Synchronize(false); } catch (Exception exception) { AppLog.Warn("Uninstall", "Startup registration cleanup failed.", exception); }
-        if (!UninstallRuntimeReleasePolicy.AllowsSensitiveCleanup(runtimeReleased))
-        {
-            AppLog.Warn("Uninstall", "Runtime ownership was not released; dependency, routing-helper, marker, and data cleanup were preserved.", null, ("Action", "StopCleanup"));
-            return;
-        }
-        try
-        {
-            var processPath = Environment.ProcessPath;
-            if (!string.IsNullOrWhiteSpace(processPath))
-            {
-                var result = RequestElevatedCleanupAsync(() => new ElevatedProcessRunner().RunAsync(processPath, ElevatedArgument, CancellationToken.None)).GetAwaiter().GetResult();
-                AppLog.Info("Uninstall", "Elevated cleanup completed.", ("Result", result.Kind), ("ExitCode", result.ExitCode));
-            }
-        }
-        catch (Exception exception) { AppLog.Warn("Uninstall", "Elevated cleanup could not be completed; continuing safe user cleanup.", exception); }
-
-        TryDeleteDirectory(CenterM.CenterMHelperStaging.RuntimeDirectory);
-        SteamCefDebugBootstrap.RemoveOwnedMarker();
-        TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-        if (File.Exists(AddonDataPaths.RecoveryJournalPath))
-            AppLog.Warn("Uninstall", "Recovery evidence remains; Addon data root was preserved.", null, ("Action", "PreserveRecoveryEvidence"));
-        else
-            AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
-        AppLog.Info("Uninstall", "User-level Addon cleanup completed.");
+        AppLog.Info("Uninstall", "FastCallback completed without elevation or dependency teardown.", ("Action", "BoundedOnly"));
     }
 
     internal static async Task<ElevatedProcessResult> RequestElevatedCleanupAsync(Func<Task<ElevatedProcessResult>> request)
@@ -194,24 +171,34 @@ internal static class UninstallSafetyCoordinator
         }
 
         var devices = new WindowsControllerDeviceEnumerator();
-        if (journal.OriginalDeviceState is not null || journal.Mutations.DeviceNativeStateChanged)
-        {
-            var adapter = new MsiClawDeviceAdapter(devices);
-            if (adapter.NativeState is not MsiClawNativeStateManager nativeState) return false;
-            var baseline = new StockCenterMStartupBaseline(nativeState).EstablishAsync(CancellationToken.None).GetAwaiter().GetResult();
-            if (!baseline.Succeeded) return false;
-        }
-
+        var virtualOutputSafe = true;
         if (journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } virtualEntries)
         {
             var virtualAssessment = new StartupVirtualOutputRecoveryInspector(devices).AssessAsync(virtualEntries, CancellationToken.None).GetAwaiter().GetResult();
-            if (!virtualAssessment.SafeToRetire) return false;
+            if (!virtualAssessment.SafeToRetire && virtualAssessment.Reason == "EvidenceInvalid") return false;
+            virtualOutputSafe = virtualAssessment.SafeToRetire;
         }
 
         if (StartupHidHideRecoveryCleaner.RequiresCleanup(journal))
         {
             var cleaner = new StartupHidHideRecoveryCleaner(new HidHideDriverClient());
             if (!cleaner.TryClean(journal, out _)) return false;
+        }
+
+        if (!virtualOutputSafe) return false;
+
+        if (journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } finalVirtualEntries)
+        {
+            var finalAssessment = new StartupVirtualOutputRecoveryInspector(devices).AssessAsync(finalVirtualEntries, CancellationToken.None).GetAwaiter().GetResult();
+            if (!finalAssessment.SafeToRetire) return false;
+        }
+
+        if (journal.OriginalDeviceState is not null || journal.Mutations.DeviceNativeStateChanged)
+        {
+            var adapter = new MsiClawDeviceAdapter(devices);
+            if (adapter.NativeState is not MsiClawNativeStateManager nativeState) return false;
+            var baseline = new StockCenterMStartupBaseline(nativeState).EstablishAsync(CancellationToken.None).GetAwaiter().GetResult();
+            if (!baseline.Succeeded) return false;
         }
 
         journalStore.Delete();

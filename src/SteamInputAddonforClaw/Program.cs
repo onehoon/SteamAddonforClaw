@@ -23,7 +23,7 @@ public static class Program
                 .OnBeforeUninstallFastCallback(_ =>
                 {
                     if (!args.Contains(UninstallBootstrap.ElevatedArgument, StringComparer.OrdinalIgnoreCase))
-                        UninstallBootstrap.Run();
+                        UninstallBootstrap.RunFastCallbackOnly();
                 })
                 .Run();
             AddonLogRetention.PruneDirectory(AppLog.DirectoryPath);
