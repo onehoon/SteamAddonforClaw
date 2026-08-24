@@ -108,7 +108,7 @@ internal sealed class MsiFanHardwareProbe
             if (!_suspendArmed || _armedReport is null || _armedPath is null) return new(true, false, "No suspend/resume fan test is armed.", null, _armedModel, _armedBoard ?? "");
             _suspendArmed = false;
         }
-        var report = _armedReport; var path = _armedPath; var resultModel = _armedModel; var resultBoard = _armedBoard ?? ""; var success = false; var handback = false;
+        var report = _armedReport; var path = _armedPath; var resultModel = _armedModel; var resultBoard = _armedBoard ?? ""; var success = false; var handback = false; var observationOk = false; var tables = false;
         try
         {
             report.AppendLine("=== RESUME OBSERVATION ===");
@@ -123,16 +123,19 @@ internal sealed class MsiFanHardwareProbe
                 report.AppendLine($"Resume policy implication: {classification switch { "CUSTOM_PERSISTED" => "No reapply indicated by this observation.", "CURVE_PERSISTED_OWNERSHIP_LOST" => "Ownership reapply may be required; verify before production policy.", "FIRMWARE_AUTO_RESET" => "Firmware Auto reset observed; no automatic reapply is performed by this diagnostic.", _ => "Read state requires manual analysis." }}");
             }
             else report.AppendLine("Resume classification: READ_FAILED");
-            report.AppendLine("=== CLEANUP ===");
-            var tables = RestoreOriginalTables(report);
-            handback = RestoreFirmwareAuto(report);
-            success = tables && handback;
-            report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}");
-            report.AppendLine($"Firmware Auto hand-back: {(handback ? "PASS" : "FAIL")}");
+            observationOk = true;
         }
-        catch (Exception exception) { report.AppendLine($"EXCEPTION: {exception}"); }
+        catch (Exception exception) { report.AppendLine($"Observation exception: {exception}"); }
         finally
         {
+            report.AppendLine("=== CLEANUP ===");
+            try { tables = RestoreOriginalTables(report); }
+            catch (Exception exception) { report.AppendLine($"Table restore exception: {exception}"); }
+            try { handback = RestoreFirmwareAuto(report); }
+            catch (Exception exception) { report.AppendLine($"Firmware hand-back exception: {exception}"); }
+            success = observationOk && tables && handback;
+            report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}");
+            report.AppendLine($"Firmware Auto hand-back: {(handback ? "PASS" : "FAIL")}");
             report.AppendLine($"FINAL STATE: {(handback ? "AUTO" : "UNKNOWN")}");
             report.AppendLine($"OVERALL: {(success ? "PASS" : "FAILED")}");
             Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString());
@@ -146,8 +149,10 @@ internal sealed class MsiFanHardwareProbe
         var report = _armedReport!; var path = _armedPath!; var model = _armedModel; var board = _armedBoard ?? ""; var tables = false; var auto = false;
         lock (_gate) _suspendArmed = false;
         report.AppendLine("=== CANCEL BEFORE SUSPEND ===");
-        try { tables = RestoreOriginalTables(report); auto = RestoreFirmwareAuto(report); }
-        catch (Exception exception) { report.AppendLine($"EXCEPTION: {exception}"); }
+        try { tables = RestoreOriginalTables(report); }
+        catch (Exception exception) { report.AppendLine($"Table restore exception: {exception}"); }
+        try { auto = RestoreFirmwareAuto(report); }
+        catch (Exception exception) { report.AppendLine($"Firmware hand-back exception: {exception}"); }
         report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}"); report.AppendLine($"Firmware Auto hand-back: {(auto ? "PASS" : "FAIL")}"); report.AppendLine($"OVERALL: {(tables && auto ? "PASS" : "FAILED")}");
         Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString());
         lock (_gate) { _running = false; _armedReport = null; _armedPath = null; _armedBoard = null; }
@@ -212,8 +217,15 @@ internal sealed class MsiFanHardwareProbe
             }
             else if (operation == FanProbeOperation.ArmSuspendResume && _hardwareWritesStarted && !_suspendArmed)
             {
-                report.AppendLine("=== FIRMWARE HAND-BACK ===");
-                handback = RestoreFirmwareAuto(report); success &= handback;
+                report.AppendLine("=== FAILED ARM CLEANUP ===");
+                var tables = false;
+                try { tables = RestoreOriginalTables(report); }
+                catch (Exception exception) { report.AppendLine($"Table restore exception: {exception}"); }
+                try { handback = RestoreFirmwareAuto(report); }
+                catch (Exception exception) { report.AppendLine($"Firmware hand-back exception: {exception}"); handback = false; }
+                report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}");
+                report.AppendLine($"Firmware Auto hand-back: {(handback ? "PASS" : "FAIL")}");
+                success = false;
             }
         }
         if (operation is FanProbeOperation.AutomaticTest or FanProbeOperation.PhysicalResponse && !_hardwareWritesStarted)
