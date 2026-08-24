@@ -15,6 +15,35 @@ public sealed class MsiFanHardwareProbeTests
         Assert.False(TdpHelperProtocol.IsSupported("SetFan", 0)); Assert.True(TdpHelperProtocol.IsSupported("SetFan", 1)); Assert.True(TdpHelperProtocol.IsSupported("SetData", 152));
     }
 
+    [Fact]
+    public void Thirty_one_byte_raw_fan_response_is_normalized_to_the_first_eight_bytes()
+    {
+        var raw = new byte[] { 58, 70, 74, 76, 78, 80, 84, 94 }.Concat(new byte[23]).ToArray();
+        Assert.True(FanProbeLogic.TryNormalizeLogicalFanBlock(raw, out var logical));
+        Assert.Equal(8, logical.Length);
+        Assert.Equal(new byte[] { 58, 70, 74, 76, 78, 80, 84, 94 }, logical);
+        Assert.False(FanProbeLogic.TryNormalizeLogicalFanBlock(new byte[7], out _));
+    }
+
+    [Fact]
+    public void Automatic_test_never_sends_trailing_raw_response_bytes_to_SetFan()
+    {
+        var transport = new FakeFanTransport { RawFanResponse = true };
+        _ = NewProbe(transport).AutomaticTest("EX", "MS-1T91", "test");
+        Assert.Contains(transport.Writes, x => x.Block is 1 or 2);
+        Assert.All(transport.Writes.Where(x => x.Block is 1 or 2), write => Assert.Equal(8, write.Payload.Length));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 70, 74, 76, 78, 80, 84 }, 1, 75)]
+    [InlineData(new byte[] { 0, 40, 49, 58, 67, 75 }, 4, 68)]
+    public void Selects_a_safe_middle_duty_increment(byte[] duties, int expectedIndex, byte expectedNext)
+    {
+        Assert.True(FanProbeLogic.TrySelectSafeIncrement(duties, out var index, out var next));
+        Assert.Equal(expectedIndex, index);
+        Assert.Equal(expectedNext, next);
+    }
+
     [Theory]
     [InlineData("MS-1T42", "A2vm")]
     [InlineData("MS-1T52", "A2vm")]
@@ -72,14 +101,15 @@ public sealed class MsiFanHardwareProbeTests
     private sealed class FakeFanTransport : IMsiClawTdpTransport
     {
         internal readonly List<(int Block, byte[] Payload)> Writes = []; internal readonly List<string> Reads = [];
-        internal bool FailTemperature; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool HighDuty; internal bool DivergentFan2; internal bool CoupleFanWrites;
+        internal bool FailTemperature; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool HighDuty; internal bool DivergentFan2; internal bool CoupleFanWrites; internal bool RawFanResponse;
         private readonly Dictionary<int, byte[]> _fans = new() { [1] = [70, 0, 40, 49, 58, 67, 75, 84], [2] = [71, 0, 40, 49, 58, 67, 75, 85] };
         private byte _ownership;
         public bool TryGetAp(int index, out byte[] payload) { Reads.Add($"AP{index}"); if (index == 1 && (FailAp212 || (FailApOnRestore && Writes.Any(x => x.Block == 1 || x.Block == 2)))) { payload = []; return false; } payload = index == 1 ? [_ownership] : [0x00, 0x01]; return true; }
         public bool TrySetData(int block, byte value) { Writes.Add((block, [value])); if (block == 212 && FailRestoreWrite) return false; if (block == 212) _ownership = value; return true; }
-        public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); if (block == 1 && FailFan1Read) { payload = []; return false; } if (_fans.TryGetValue(block, out var value)) { payload = (byte[])value.Clone(); if (block == 1 && HighDuty) payload[2] = 100; if (block == 2 && DivergentFan2) payload[3] = 50; return true; } payload = []; return false; }
+        public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); if (block == 1 && FailFan1Read) { payload = []; return false; } if (_fans.TryGetValue(block, out var value)) { payload = (byte[])value.Clone(); if (block == 1 && HighDuty) payload[2] = 100; if (block == 2 && DivergentFan2) payload[3] = 50; if (RawFanResponse) payload = payload.Concat(new byte[23]).ToArray(); return true; } payload = []; return false; }
         public bool TrySetFan(int block, byte[] payload) { if (block == 2 && FailFan2Write) return false; Writes.Add((block, (byte[])payload.Clone())); if (!DoNotPersistFanWrites) _fans[block] = (byte[])payload.Clone(); if (CoupleFanWrites) { var other = block == 1 ? 2 : 1; var coupled = (byte[])_fans[other].Clone(); coupled[2] = (byte)(coupled[2] + 1); _fans[other] = coupled; } return true; }
         public bool TryGetTemperature(int index, out byte[] payload) { Reads.Add($"Temp{index}"); payload = FailTemperature ? [] : [47, 50, 57, 64, 71, 78]; return !FailTemperature; }
+        public bool TryGetThermal(int index, out byte[] payload) { Reads.Add($"Thermal{index}"); payload = [44, 54, 64, 74, 82, 82]; return true; }
         public bool TryGetData(int block, out byte[] payload) { Reads.Add($"Data{block}"); payload = [0]; return true; }
     }
 }

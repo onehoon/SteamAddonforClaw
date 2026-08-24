@@ -17,126 +17,458 @@ internal static class FanProbeModelMap
     };
 }
 
+internal static class FanProbeLogic
+{
+    internal static bool TryNormalizeLogicalFanBlock(byte[] raw, out byte[] logical)
+    {
+        if (raw.Length < 8) { logical = []; return false; }
+        logical = raw.AsSpan(0, 8).ToArray();
+        return true;
+    }
+
+    internal static bool TrySelectSafeIncrement(IReadOnlyList<byte> duties, out int index, out byte next)
+    {
+        // Prefer the highest safe middle slot so the EX reference curve naturally tests 74 -> 75.
+        for (var candidate = Math.Min(duties.Count - 2, 4); candidate >= 1; candidate--)
+        {
+            if (duties[candidate] < 75)
+            {
+                index = candidate;
+                next = (byte)(duties[candidate] + 1);
+                return true;
+            }
+        }
+        index = -1;
+        next = 0;
+        return false;
+    }
+}
+
 /// <summary>Bounded developer-only MSI fan diagnostic. It owns no persistent fan state.</summary>
 internal sealed class MsiFanHardwareProbe
 {
     private readonly IMsiClawTdpTransport _transport;
+    private readonly IMsiFanDiagnosticTransport? _diagnostics;
     private readonly string _reportDirectory;
+    private readonly Action<TimeSpan> _delay;
     private readonly object _gate = new();
     private bool _running;
     private bool _hardwareWritesStarted;
-    internal MsiFanHardwareProbe(IMsiClawTdpTransport transport, string reportDirectory) { _transport = transport; _reportDirectory = reportDirectory; }
+    private byte[]? _originalFan1;
+    private byte[]? _originalFan2;
+
+    internal MsiFanHardwareProbe(IMsiClawTdpTransport transport, string reportDirectory, Action<TimeSpan>? delay = null)
+    {
+        _transport = transport;
+        _diagnostics = transport as IMsiFanDiagnosticTransport;
+        _reportDirectory = reportDirectory;
+        _delay = delay ?? Thread.Sleep;
+    }
+
     internal FanProbeResult Capture(string device, string board, string firmware) => Run(FanProbeOperation.Capture, device, board, firmware, WriteCapture);
     internal FanProbeResult AutomaticTest(string device, string board, string firmware) => Run(FanProbeOperation.AutomaticTest, device, board, firmware, WriteAutomaticTest);
     internal FanProbeResult RestoreAuto(string device, string board, string firmware) => Run(FanProbeOperation.RestoreAuto, device, board, firmware, WriteRestore);
+    private bool WriteRestore(StringBuilder report, FanProbeModel model) => RestoreFirmwareAuto(report);
 
     private FanProbeResult Run(FanProbeOperation operation, string device, string board, string firmware, Func<StringBuilder, FanProbeModel, bool> action)
     {
-        lock (_gate) { if (_running) return new(true, false, "Another fan probe operation is already running.", null, FanProbeModelMap.Resolve(board), board); _running = true; }
-        var model = FanProbeModelMap.Resolve(board); var path = Path.Combine(_reportDirectory, $"MsiFanProbe_{DateTime.Now:yyyyMMdd_HHmmss}.txt"); _hardwareWritesStarted = false;
-        var report = new StringBuilder(); var success = false; var status = "FAILED"; var handback = true;
+        lock (_gate)
+        {
+            if (_running) return new(true, false, "Another fan probe operation is already running.", null, FanProbeModelMap.Resolve(board), board);
+            _running = true;
+        }
+
+        var model = FanProbeModelMap.Resolve(board);
+        var path = Path.Combine(_reportDirectory, $"MsiFanProbe_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+        var report = new StringBuilder();
+        var success = false;
+        var status = "FAILED";
+        var handback = true;
+        _hardwareWritesStarted = false;
+        _originalFan1 = null;
+        _originalFan2 = null;
         try
         {
-            report.AppendLine("MSI Fan Hardware Probe"); report.AppendLine($"Operation: {operation.ToString().ToUpperInvariant()}"); report.AppendLine($"Timestamp: {DateTimeOffset.Now:O}");
-            report.AppendLine($"Device: {device}"); report.AppendLine($"Board: {board}"); report.AppendLine($"Probe model: {model}"); report.AppendLine($"BIOS/EC/Firmware: {firmware}");
-            if (model == FanProbeModel.Unsupported) { report.AppendLine("PRECHECK: FAIL - unsupported board"); return Finish(path, report, false, status, model, board); }
-            success = action(report, model); status = success ? "PASS" : "FAILED";
+            report.AppendLine("MSI Fan Hardware Probe");
+            report.AppendLine($"Operation: {operation.ToString().ToUpperInvariant()}");
+            report.AppendLine($"Timestamp: {DateTimeOffset.Now:O}");
+            report.AppendLine($"Device: {device}");
+            report.AppendLine($"Board: {board}");
+            report.AppendLine($"Probe model: {model}");
+            report.AppendLine($"BIOS/EC/Firmware: {firmware}");
+            WriteEnvironment(report);
+            if (model == FanProbeModel.Unsupported)
+            {
+                report.AppendLine("PRECHECK: FAIL - unsupported board");
+                return Finish(path, report, false, status, model, board);
+            }
+            success = action(report, model);
+            status = success ? "PASS" : "FAILED";
         }
-        catch (Exception exception) { report.AppendLine($"EXCEPTION: {exception}"); }
-        finally { if (operation == FanProbeOperation.AutomaticTest && _hardwareWritesStarted) { report.AppendLine("=== FIRMWARE HAND-BACK ==="); handback = RestoreFirmwareAuto(); report.AppendLine($"Result: {handback}"); report.AppendLine("Final state intentionally: MSI firmware Auto"); } }
+        catch (Exception exception)
+        {
+            report.AppendLine($"EXCEPTION: {exception}");
+        }
+        finally
+        {
+            if (operation == FanProbeOperation.AutomaticTest && _hardwareWritesStarted)
+            {
+                report.AppendLine("=== RESTORE TABLES ===");
+                var tables = RestoreOriginalTables(report);
+                report.AppendLine("=== FIRMWARE HAND-BACK ===");
+                handback = RestoreFirmwareAuto(report);
+                report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}");
+                report.AppendLine($"Firmware Auto hand-back: {(handback ? "PASS" : "FAIL")}");
+                report.AppendLine($"FINAL STATE: {(handback ? "AUTO" : "UNKNOWN")}");
+                WriteFinalSnapshot(report);
+                if (!tables) success = false;
+            }
+        }
+        if (operation == FanProbeOperation.AutomaticTest && !_hardwareWritesStarted)
+            report.AppendLine("FINAL STATE: AUTO (no hardware writes performed)");
         if (!handback) { success = false; status = "FAILED"; }
-        return Finish(path, report, success && status == "PASS", status, model, board);
+        return Finish(path, report, success && status == "PASS", success && status == "PASS" ? "PASS" : "FAILED", model, board);
     }
+
     private FanProbeResult Finish(string path, StringBuilder report, bool success, string status, FanProbeModel model, string board)
-    { report.AppendLine($"OVERALL: {status}"); Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString()); lock (_gate) _running = false; return new(true, success, status, path, model, board); }
+    {
+        report.AppendLine($"OVERALL: {status}");
+        Directory.CreateDirectory(_reportDirectory);
+        File.WriteAllText(path, report.ToString());
+        lock (_gate) _running = false;
+        return new(true, success, status, path, model, board);
+    }
+
+    private void WriteEnvironment(StringBuilder report)
+    {
+        report.AppendLine("=== HELPER ===");
+        if (_diagnostics is null || !_diagnostics.TryGetHelperInfo(out var helper))
+            report.AppendLine("Helper diagnostics: UNAVAILABLE");
+        else
+        {
+            report.AppendLine($"Helper PID: {helper.ProcessId}");
+            report.AppendLine($"Helper executable: {helper.Executable}");
+            report.AppendLine($"Helper elevated/admin: {(helper.Elevated ? "YES" : "NO")}");
+            report.AppendLine($"Process architecture: {helper.ProcessArchitecture}");
+            report.AppendLine($"OS architecture: {helper.OsArchitecture}");
+        }
+        report.AppendLine("=== WMI ENVIRONMENT ===");
+        if (_diagnostics is not null && _diagnostics.TryGetWmiVersion(out var version))
+        {
+            report.AppendLine($"WMI version raw response: {Hex(version.RawPayload)}");
+            report.AppendLine($"WMI major: {version.Major?.ToString(CultureInfo.InvariantCulture) ?? "unavailable"}");
+            report.AppendLine($"WMI minor: {version.Minor?.ToString(CultureInfo.InvariantCulture) ?? "unavailable"}");
+            report.AppendLine("WMI3 dispatch: observed only; no speculative Fan-specific method added");
+        }
+        else report.AppendLine("WMI version: unavailable");
+        if (_diagnostics is not null && _diagnostics.TryGetMethodInventory(out var methods))
+            report.AppendLine($"Relevant method inventory: {(methods.Length == 0 ? "none" : string.Join(", ", methods))}");
+        else report.AppendLine("Relevant method inventory: unavailable");
+    }
 
     private bool WriteCapture(StringBuilder report, FanProbeModel model)
     {
-        report.AppendLine("=== BASELINE READS ==="); var fan0Ok = ReadFan(report, 0, false); var fan1Ok = ReadFan(report, 1, true); var fan2Ok = ReadFan(report, 2, true);
-        try
-        {
-            Read(report, "Get_Temperature(1)", () => _transport.TryGetTemperature(1, out var p) ? p : throw new InvalidOperationException("Get_Temperature(1) failed"));
-            Read(report, "Get_Temperature(2)", () => _transport.TryGetTemperature(2, out var p) ? p : throw new InvalidOperationException("Get_Temperature(2) failed"));
-            Read(report, "Get_AP(1)", () => _transport.TryGetAp(1, out var p) ? p : throw new InvalidOperationException("Get_AP(1) failed"));
-            Read(report, "Get_Data(152)", () => _transport.TryGetData(152, out var p) ? p : throw new InvalidOperationException("Get_Data(152) failed"));
-        }
-        catch (Exception exception) { report.AppendLine($"CAPTURE FAIL: {exception.Message}"); return false; }
+        report.AppendLine("=== BASELINE ===");
+        WriteReferenceBaseline(report, model);
+        var baseline = CaptureBaseline(report, requireFanTables: true);
         report.AppendLine($"Model-specific expectation: {(model == FanProbeModel.Cg3em ? "EX observations recorded, not enforced" : "A2VM reference values recorded, not enforced")}");
-        return fan0Ok && fan1Ok && fan2Ok;
+        return baseline;
     }
+
+    private bool CaptureBaseline(StringBuilder report, bool requireFanTables)
+    {
+        ReadFan(report, 0, false);
+        var fan1 = ReadFan(report, 1, requireFanTables);
+        var fan2 = ReadFan(report, 2, requireFanTables);
+        var reads = true;
+        foreach (var index in new[] { 1, 2 })
+        {
+            reads &= ReadPayload(report, $"Get_Temperature({index})", "GetTemperature", index, () => _transport.TryGetTemperature(index, out var p) ? p : null);
+            reads &= ReadPayload(report, $"Get_Thermal({index})", "GetThermal", index, () => _transport.TryGetThermal(index, out var p) ? p : null);
+        }
+        foreach (var index in new[] { 0, 1, 2 })
+            reads &= ReadPayload(report, $"Get_AP({index})", "GetAp", index, () => _transport.TryGetAp(index, out var p) ? p : null);
+        foreach (var block in new[] { 152, 210, 212 })
+            reads &= ReadPayload(report, $"Get_Data({block})", "GetData", block, () => _transport.TryGetData(block, out var p) ? p : null);
+        if (fan1.Logical is not null) _originalFan1 = fan1.Logical;
+        if (fan2.Logical is not null) _originalFan2 = fan2.Logical;
+        return fan1.Success && fan2.Success && reads;
+    }
+
     private bool WriteAutomaticTest(StringBuilder report, FanProbeModel model)
     {
         report.AppendLine("=== PREFLIGHT ===");
-        if (!TryReadFan(1, out var fan1) || !TryReadFan(2, out var fan2) || !_transport.TryGetTemperature(1, out _) || !_transport.TryGetTemperature(2, out _) || !_transport.TryGetAp(1, out _) || !_transport.TryGetData(152, out var cooler)) { report.AppendLine("PRECHECK: FAIL; no writes performed"); return false; }
-        report.AppendLine($"Cooler Boost block 152 before: 0x{cooler[0]:X2}");
+        WriteReferenceBaseline(report, model);
+        if (!CaptureBaseline(report, requireFanTables: true) || _originalFan1 is null || _originalFan2 is null)
+        {
+            report.AppendLine("PRECHECK: FAIL; no fan writes performed");
+            return false;
+        }
+        if (!_transport.TryGetData(152, out var cooler) || cooler.Length == 0)
+        {
+            report.AppendLine("Cooler Boost: READ_FAILED; no fan writes performed");
+            return false;
+        }
+        report.AppendLine($"Cooler Boost before: 0x{cooler[0]:X2}");
         if ((cooler[0] & 0x80) != 0)
         {
-            var requestedCooler = (byte)(cooler[0] & 0x7F); report.AppendLine($"Cooler Boost requested transition: 0x{cooler[0]:X2} -> 0x{requestedCooler:X2}");
-            _hardwareWritesStarted = true; if (!_transport.TrySetData(152, requestedCooler) || !_transport.TryGetData(152, out var coolerAfter) || (coolerAfter[0] & 0x80) != 0) { report.AppendLine("Cooler Boost transition: FAIL"); return false; }
+            _hardwareWritesStarted = true;
+            var requestedCooler = (byte)(cooler[0] & 0x7F);
+            if (!_transport.TrySetData(152, requestedCooler) || !_transport.TryGetData(152, out var coolerAfter) || coolerAfter.Length == 0 || (coolerAfter[0] & 0x80) != 0)
+            {
+                report.AppendLine("Cooler Boost transition: FAIL");
+                return false;
+            }
             report.AppendLine($"Cooler Boost after: 0x{coolerAfter[0]:X2}");
         }
-        report.AppendLine("PRECHECK: PASS"); DescribeFan(report, 1, fan1); DescribeFan(report, 2, fan2);
-        var fan1Ok = TestBlock(report, 1, fan1); var fan2Ok = fan1Ok && TestBlock(report, 2, fan2);
-        if (!fan1Ok || !fan2Ok) { report.AppendLine("PARTIAL APPLY FAILURE: custom ownership not enabled"); return false; }
-        var fan1Duties = fan1.Skip(1).Take(6).ToArray(); var fan2Duties = fan2.Skip(1).Take(6).ToArray();
-        if (!fan1Duties.SequenceEqual(fan2Duties))
+        report.AppendLine("PRECHECK: PASS");
+        var fan1 = TestBlock(report, 1, _originalFan1);
+        var fan2 = fan1 && TestBlock(report, 2, _originalFan2);
+        if (!fan1 || !fan2)
         {
-            report.AppendLine("Shared curve test: SKIPPED - Fan 1 and Fan 2 curves differ; custom ownership was not enabled.");
+            report.AppendLine("PARTIAL APPLY FAILURE: custom ownership not enabled");
             return false;
         }
-        if (!TryGetSafeIncrement(fan1Duties[2], out var sharedPoint))
+
+        var shared = _originalFan1.Skip(1).Take(6).ToArray();
+        if (!_originalFan1.Skip(1).Take(6).SequenceEqual(_originalFan2.Skip(1).Take(6)))
         {
-            report.AppendLine($"Shared curve test: SKIPPED - current duty {fan1Duties[2]} is outside the conservative test range.");
+            report.AppendLine("=== SHARED CURVE ===");
+            report.AppendLine("SKIPPED: current fan curves differ; no synthesized per-model curve used");
             return false;
         }
-        var curve = (byte[])fan1Duties.Clone(); curve[2] = sharedPoint;
-        report.AppendLine("=== SHARED CURVE TEST ==="); var shared1 = TryWriteDutiesRmw(1, curve, out _, out _, out _); var shared2 = shared1 && TryWriteDutiesRmw(2, curve, out _, out _, out _);
-        report.AppendLine($"Fan 1/Fan 2 shared curve verification: {(shared1 && shared2 ? "PASS" : "FAIL")}"); if (!(shared1 && shared2)) return false;
-        var ownership = SetOwnership(true); report.AppendLine($"Custom ownership enable: {(ownership ? "PASS" : "FAIL")}"); if (!ownership) return false;
+        if (!FanProbeLogic.TrySelectSafeIncrement(shared, out var sharedIndex, out var sharedNext))
+        {
+            report.AppendLine("=== SHARED CURVE ===");
+            report.AppendLine("SKIPPED: no safe current duty below 75");
+            return false;
+        }
+        var temporaryDuties = (byte[])shared.Clone();
+        temporaryDuties[sharedIndex] = sharedNext;
+        var temporary = WithDuties(_originalFan1, temporaryDuties);
+        report.AppendLine("=== SHARED CURVE ===");
+        report.AppendLine($"Current duties: {string.Join(",", shared)}");
+        report.AppendLine($"Temporary duties: {string.Join(",", temporary)}");
+        if (!WriteLogicalBlock(report, 1, temporary, "Shared Fan 1") || !WriteLogicalBlock(report, 2, temporary, "Shared Fan 2"))
+        {
+            report.AppendLine("Shared curve verification: FAIL");
+            return false;
+        }
+        report.AppendLine("Shared curve verification: PASS");
+
+        report.AppendLine("=== CUSTOM OWNERSHIP ===");
+        var ownership = SetOwnership(report, true);
+        report.AppendLine($"Custom ownership: {(ownership ? "PASS" : "FAIL")}");
+        if (!ownership) return false;
+        ObserveOwnership(report);
         return true;
     }
-    private bool WriteRestore(StringBuilder report, FanProbeModel model) { var restored = RestoreFirmwareAuto(); report.AppendLine($"Firmware Auto hand-back: {(restored ? "PASS" : "FAIL")}"); return restored; }
-    private bool TestBlock(StringBuilder report, int block, byte[] original)
+
+    private static void WriteReferenceBaseline(StringBuilder report, FanProbeModel model)
     {
-        if (original.Length < 8) { report.AppendLine($"Fan {block}: FAIL short payload"); return false; } var point = 2; var originalDuties = original.Skip(1).Take(6).ToArray(); if (!TryGetSafeIncrement(original[point], out var next)) { report.AppendLine($"Fan {block}: SKIPPED bounded delta; current duty {original[point]} is outside the conservative test range."); return true; }
-        var otherBlock = block == 1 ? 2 : 1; if (!TryReadFan(otherBlock, out var otherBefore)) { report.AppendLine($"Fan {otherBlock} changed unexpectedly during Fan {block} write: UNKNOWN"); return false; } var otherDutiesBefore = otherBefore.Skip(1).Take(6).ToArray();
-        var requestedDuties = (byte[])originalDuties.Clone(); requestedDuties[point - 1] = next; var wrote = TryWriteDutiesRmw(block, requestedDuties, out var back, out _, out var requestBoundaries); var dutiesVerified = wrote && back.Skip(1).Take(6).SequenceEqual(requestedDuties); report.AppendLine($"Fan {block} RMW point {point} {original[point]} -> {next}: request byte0/byte7 preserved: {requestBoundaries}; owned duty readback: {(dutiesVerified ? "PASS" : "FAIL")}");
-        var otherUnchanged = TryReadFan(otherBlock, out var otherAfter) && otherAfter.Skip(1).Take(6).SequenceEqual(otherDutiesBefore); report.AppendLine($"Fan {otherBlock} changed unexpectedly during Fan {block} write: {(otherUnchanged ? "NO" : "YES/UNKNOWN")}"); if (!otherUnchanged) { _ = TryWriteDutiesRmw(otherBlock, otherDutiesBefore, out _, out _, out _); return false; }
-        var restored = TryWriteDutiesRmw(block, originalDuties, out _, out _, out _); report.AppendLine($"Fan {block} restore: {(restored ? "PASS" : "FAIL")}"); return dutiesVerified && requestBoundaries && restored;
+        report.AppendLine("Known reference (comparison only; not enforced):");
+        report.AppendLine(model == FanProbeModel.Cg3em
+            ? "EX Fan 1/2 logical: 58 | 70 74 76 78 80 84 | 94; temperature labels: 47 / 50 / 57 / 64 / 71 / 78; ownership OFF; Cooler Boost OFF"
+            : "A2VM reference Fan logical: 0 | 40 49 58 67 75 | model-specific current values are not enforced");
     }
 
-    private bool TryWriteDutiesRmw(int block, byte[] duties, out byte[] readback, out byte[] requested, out bool requestBoundaries)
+    private bool TestBlock(StringBuilder report, int block, byte[] original)
     {
-        readback = []; requested = []; requestBoundaries = false;
-        if (duties.Length != 6 || !TryReadFan(block, out var current)) return false;
-        requested = (byte[])current.Clone(); duties.CopyTo(requested, 1); requestBoundaries = requested[0] == current[0] && requested[7] == current[7]; _hardwareWritesStarted = true;
-        return _transport.TrySetFan(block, requested) && TryReadFan(block, out readback) && readback.Skip(1).Take(6).SequenceEqual(duties);
+        report.AppendLine($"=== FAN {block} ===");
+        if (!WriteLogicalBlock(report, block, original, $"Fan {block} same-value")) return false;
+        var duties = original.Skip(1).Take(6).ToArray();
+        if (!FanProbeLogic.TrySelectSafeIncrement(duties, out var index, out var next))
+        {
+            report.AppendLine("Changed duty: SKIPPED - no safe point below 75");
+            return false;
+        }
+        var requested = (byte[])duties.Clone();
+        requested[index] = next;
+        report.AppendLine($"Changed duty: index {index + 1}, {duties[index]} -> {next}");
+        var changed = WriteLogicalBlock(report, block, WithDuties(original, requested), $"Fan {block} changed");
+        var otherBlock = block == 1 ? 2 : 1;
+        var otherUnchanged = TryReadFan(otherBlock, out _, out var otherAfter) &&
+            otherAfter.Skip(1).Take(6).SequenceEqual((block == 1 ? _originalFan2 : _originalFan1)!.Skip(1).Take(6));
+        report.AppendLine($"Fan {otherBlock} changed unexpectedly during Fan {block} write: {(otherUnchanged ? "NO" : "YES/UNKNOWN")}");
+        var restore = WriteLogicalBlock(report, block, original, $"Fan {block} restore");
+        report.AppendLine($"Fan {block} restore: {(restore ? "PASS" : "FAIL")}");
+        return changed && otherUnchanged && restore;
     }
-    private bool RestoreFirmwareAuto()
+
+    private bool WriteLogicalBlock(StringBuilder report, int block, byte[] logical, string label)
+    {
+        if (logical.Length != 8)
+        {
+            report.AppendLine($"{label}: PRE_WMI_PROTOCOL_FAIL logical payload length={logical.Length}");
+            return false;
+        }
+        if (!TryReadFan(block, out var currentRaw, out var current)) return false;
+        var requested = (byte[])current.Clone();
+        logical.AsSpan(1, 6).CopyTo(requested.AsSpan(1, 6));
+        report.AppendLine($"{label} raw Get_Fan response length: {currentRaw.Length}");
+        report.AppendLine($"{label} logical before block: {Hex(current)}");
+        report.AppendLine($"{label} requested logical block: {Hex(requested)}");
+        report.AppendLine($"{label} byte0 preserved: {requested[0] == current[0]}; byte7 preserved: {requested[7] == current[7]}");
+        var operation = SetFan(report, block, requested, label);
+        if (!operation) return false;
+        var observations = ObserveReadback(report, block, requested, label);
+        report.AppendLine($"{label} classification: WMI_INVOKE_OK_READBACK_{observations switch { "IMMEDIATE_MATCH" => "PASS", "DELAYED_MATCH" => "DELAYED_MATCH", "READ_FAILED" => "FAIL", _ => "MISMATCH" }}");
+        return observations is "IMMEDIATE_MATCH" or "DELAYED_MATCH";
+    }
+
+    private bool SetFan(StringBuilder report, int block, byte[] requested, string label)
+    {
+        _hardwareWritesStarted = true;
+        if (_diagnostics is null)
+        {
+            var ok = _transport.TrySetFan(block, requested);
+            report.AppendLine($"{label} Stage: {(ok ? "WMI_INVOKE_OK" : "WMI_INVOKE_FAIL")}");
+            report.AppendLine($"{label} Logical payload length: {requested.Length}; WMI package length: 32");
+            report.AppendLine($"{label} Package: {Hex(BuildPackageForReport(block, requested))}");
+            return ok;
+        }
+        var result = _diagnostics.InvokeFanDiagnostic("SetFan", block, requested);
+        report.AppendLine($"{label} Operation: Set_Fan; Block: {block}");
+        report.AppendLine($"{label} Stage: {result.Stage}; Exception type: {result.ExceptionType ?? "none"}; HRESULT: {(result.HResult is int hr ? $"0x{hr:X8}" : "none")}");
+        report.AppendLine($"{label} ManagementStatus: {result.ManagementStatus?.ToString() ?? "none"}; UsedFallback: {result.UsedFallback}");
+        report.AppendLine($"{label} Invoke returned normally: {result.InvokeReturnedNormally}; Output object present: {result.OutputObjectPresent}");
+        report.AppendLine($"{label} Logical payload length: {result.LogicalPayloadLength}; WMI package length: {result.WmiPackageLength}");
+        report.AppendLine($"{label} Package: {Hex(result.RequestPackage)}");
+        return result.Succeeded && result.InvokeReturnedNormally;
+    }
+
+    private string ObserveReadback(StringBuilder report, int block, byte[] expected, string label)
+    {
+        var other = block == 1 ? 2 : 1;
+        var samples = new[] { ("T+0 ms", TimeSpan.Zero), ("T+50 ms", TimeSpan.FromMilliseconds(50)), ("T+250 ms", TimeSpan.FromMilliseconds(200)) };
+        var targetMatch = false;
+        var delayedMatch = false;
+        var targetRead = false;
+        foreach (var (name, wait) in samples)
+        {
+            if (wait > TimeSpan.Zero) _delay(wait);
+            var target = TryReadFan(block, out _, out var actual);
+            var otherRead = TryReadFan(other, out _, out var otherActual);
+            targetRead |= target;
+            var matches = target && actual.Skip(1).Take(6).SequenceEqual(expected.Skip(1).Take(6));
+            targetMatch |= matches;
+            if (matches && name != "T+0 ms") delayedMatch = true;
+            report.AppendLine($"{label} {name}: {(target ? Hex(actual) : "READ_FAILED")}; other fan: {(otherRead ? Hex(otherActual) : "READ_FAILED")}");
+        }
+        var verdict = targetMatch ? (delayedMatch ? "DELAYED_MATCH" : "IMMEDIATE_MATCH") : (targetRead ? "MISMATCH" : "READ_FAILED");
+        report.AppendLine($"{label} readback verdict: {verdict}");
+        return verdict;
+    }
+
+    private bool SetOwnership(StringBuilder report, bool enabled)
+    {
+        if (!_transport.TryGetAp(1, out var ap) || ap.Length == 0) { report.AppendLine("Ownership before: READ_FAILED"); return false; }
+        var requested = enabled ? (byte)(ap[0] | 0x80) : (byte)(ap[0] & 0x7F);
+        report.AppendLine($"Ownership before: 0x{ap[0]:X2}; requested: 0x{requested:X2}; Set_Data(212)");
+        _hardwareWritesStarted = true;
+        var ok = _diagnostics is null ? _transport.TrySetData(212, requested) : _diagnostics.InvokeFanDiagnostic("SetData", 212, [requested]).Succeeded;
+        if (!ok || !_transport.TryGetAp(1, out var after) || after.Length == 0) return false;
+        report.AppendLine($"Ownership after: 0x{after[0]:X2}; bit7={(after[0] & 0x80) != 0}");
+        return (((after[0] & 0x80) != 0) == enabled);
+    }
+
+    private void ObserveOwnership(StringBuilder report)
+    {
+        report.AppendLine("=== SHORT LIVE OBSERVATION ===");
+        foreach (var (name, wait) in new[] { ("T+0", TimeSpan.Zero), ("T+250", TimeSpan.FromMilliseconds(250)), ("T+750", TimeSpan.FromMilliseconds(500)) })
+        {
+            if (wait > TimeSpan.Zero) _delay(wait);
+            report.AppendLine(name);
+            ReadFan(report, 0, false); ReadFan(report, 1, false); ReadFan(report, 2, false);
+            ReadPayload(report, "Get_AP(1)", "GetAp", 1, () => _transport.TryGetAp(1, out var p) ? p : null);
+            ReadPayload(report, "Get_Data(212)", "GetData", 212, () => _transport.TryGetData(212, out var p) ? p : null);
+        }
+    }
+
+    private bool RestoreOriginalTables(StringBuilder report)
+    {
+        var fan1 = _originalFan1 is null || WriteLogicalBlock(report, 1, _originalFan1, "Final Fan 1 restore");
+        var fan2 = _originalFan2 is null || WriteLogicalBlock(report, 2, _originalFan2, "Final Fan 2 restore");
+        return fan1 && fan2;
+    }
+
+    private bool RestoreFirmwareAuto(StringBuilder report)
     {
         if (!_transport.TryGetData(152, out var cooler) || cooler.Length == 0) return false;
-        if ((cooler[0] & 0x80) != 0)
-        {
-            var requestedCooler = (byte)(cooler[0] & 0x7F);
-            if (!_transport.TrySetData(152, requestedCooler) || !_transport.TryGetData(152, out var coolerVerify) || coolerVerify.Length == 0 || (coolerVerify[0] & 0x80) != 0) return false;
-        }
+        if ((cooler[0] & 0x80) != 0 && !_transport.TrySetData(152, (byte)(cooler[0] & 0x7F))) return false;
         if (!_transport.TryGetAp(1, out var ap) || ap.Length == 0) return false;
-        var requestedOwnership = (byte)(ap[0] & 0x7F);
-        if (!_transport.TrySetData(212, requestedOwnership)) return false;
-        return _transport.TryGetAp(1, out var verify) && verify.Length > 0 && (verify[0] & 0x80) == 0;
+        var requested = (byte)(ap[0] & 0x7F);
+        var released = _diagnostics is null ? _transport.TrySetData(212, requested) : _diagnostics.InvokeFanDiagnostic("SetData", 212, [requested]).Succeeded;
+        if (!released || !_transport.TryGetAp(1, out var verify) || verify.Length == 0) return false;
+        report.AppendLine($"Ownership final verification: 0x{verify[0]:X2}; OFF={((verify[0] & 0x80) == 0)}");
+        return (verify[0] & 0x80) == 0;
     }
-    private bool SetOwnership(bool enabled)
+
+    private void WriteFinalSnapshot(StringBuilder report)
     {
-        if (!_transport.TryGetAp(1, out var ap) || ap.Length == 0) return false;
-        var requested = enabled ? (byte)(ap[0] | 0x80) : (byte)(ap[0] & 0x7F);
-        _hardwareWritesStarted = true; if (!_transport.TrySetData(212, requested)) return false;
-        return _transport.TryGetAp(1, out var verify) && verify.Length > 0 && (((verify[0] & 0x80) != 0) == enabled);
+        report.AppendLine("=== FINAL SNAPSHOT ===");
+        ReadFan(report, 0, false);
+        ReadFan(report, 1, false);
+        ReadFan(report, 2, false);
+        ReadPayload(report, "Get_AP(1)", "GetAp", 1, () => _transport.TryGetAp(1, out var p) ? p : null);
+        ReadPayload(report, "Get_Data(152)", "GetData", 152, () => _transport.TryGetData(152, out var p) ? p : null);
+        ReadPayload(report, "Get_Data(212)", "GetData", 212, () => _transport.TryGetData(212, out var p) ? p : null);
     }
-    private bool TryReadFan(int block, out byte[] payload) => _transport.TryGetFan(block, out payload) && payload.Length >= 8;
-    private static bool TryGetSafeIncrement(byte current, out byte next)
-    { next = current; if (current >= 75) return false; next = (byte)(current + 1); return true; }
-    private bool ReadFan(StringBuilder report, int block, bool required) { if (TryReadFan(block, out var p)) { DescribeFan(report, block, p); return true; } report.AppendLine($"Get_Fan({block}): {(required ? "FAIL" : "UNAVAILABLE")}"); return !required; }
-    private static void DescribeFan(StringBuilder report, int block, byte[] payload) => report.AppendLine($"Get_Fan({block}) HEX: {string.Join(" ", payload.Select(x => x.ToString("X2", CultureInfo.InvariantCulture)))} DEC: {string.Join(" ", payload.Select(x => x.ToString(CultureInfo.InvariantCulture)))} Duties[1..6]: {string.Join(",", payload.Skip(1).Take(6))} byte0 preserved: {payload[0]} byte7 preserved: {payload[7]}");
-    private static byte[] WithDuties(byte[] original, byte[] duties) { var copy = (byte[])original.Clone(); duties.CopyTo(copy, 1); return copy; }
-    private static void Read(StringBuilder report, string name, Func<byte[]> read) { var p = read(); report.AppendLine($"{name} HEX: {string.Join(" ", p.Select(x => x.ToString("X2", CultureInfo.InvariantCulture)))} DEC: {string.Join(" ", p)}"); }
+
+    private (bool Success, byte[]? Logical) ReadFan(StringBuilder report, int block, bool required)
+    {
+        if (TryReadFan(block, out var raw, out var logical))
+        {
+            DescribeFan(report, block, raw, logical);
+            if (block == 0 && logical.Length >= 2)
+            {
+                var denominator = logical[0] - logical[1];
+                report.AppendLine($"Fan 0 RPM: {(denominator == 0 ? "unavailable / 0" : Math.Abs(480000 / denominator).ToString(CultureInfo.InvariantCulture))}");
+            }
+            return (true, logical);
+        }
+        report.AppendLine($"Get_Fan({block}): {(required ? "FAIL" : "UNAVAILABLE")}");
+        return (false, null);
+    }
+
+    private bool ReadPayload(StringBuilder report, string name, string operation, int index, Func<byte[]?> fallback)
+    {
+        byte[]? payload = null;
+        if (_diagnostics is not null)
+        {
+            var result = _diagnostics.InvokeFanDiagnostic(operation, index, null);
+            payload = result.Succeeded ? result.Payload : null;
+            report.AppendLine($"{name}: {(payload is null ? result.Stage : Hex(payload))}");
+        }
+        else
+        {
+            payload = fallback();
+            report.AppendLine($"{name}: {(payload is null ? "READ_FAILED" : Hex(payload))}");
+        }
+        return payload is not null;
+    }
+
+    private bool TryReadFan(int block, out byte[] raw, out byte[] logical)
+    {
+        if (!_transport.TryGetFan(block, out raw)) { logical = []; return false; }
+        return FanProbeLogic.TryNormalizeLogicalFanBlock(raw, out logical);
+    }
+
+    private void DescribeFan(StringBuilder report, int block, byte[] raw, byte[] logical) =>
+        report.AppendLine($"Get_Fan({block}) Raw response payload: {raw.Length} bytes\nRaw HEX: {Hex(raw)}\nRaw DEC: {string.Join(" ", raw)}\nLogical fan block: {logical.Length} bytes\nLogical HEX: {Hex(logical)}\nLogical DEC: {string.Join(" ", logical)}\nDuties[1..6]: {string.Join(",", logical.Skip(1).Take(6))}\nbyte0: {logical[0]} byte7: {logical[7]}");
+
+    private static byte[] WithDuties(byte[] original, byte[] duties)
+    {
+        var copy = (byte[])original.Clone();
+        if (duties.Length == 6) duties.AsSpan().CopyTo(copy.AsSpan(1, 6));
+        else duties.AsSpan(1, 6).CopyTo(copy.AsSpan(1, 6));
+        return copy;
+    }
+
+    private static byte[] BuildPackageForReport(int block, byte[] logical)
+    {
+        var package = new byte[32]; package[0] = (byte)block; logical.CopyTo(package, 1); return package;
+    }
+
+    private static string Hex(IEnumerable<byte> bytes) => string.Join(" ", bytes.Select(x => x.ToString("X2", CultureInfo.InvariantCulture)));
 }

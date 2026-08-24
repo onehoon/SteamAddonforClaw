@@ -17,7 +17,9 @@ public static class TdpHelperProtocol
         "GetFan" => "Get_Fan",
         "SetFan" => "Set_Fan",
         "GetTemperature" => "Get_Temperature",
+        "GetThermal" => "Get_Thermal",
         "GetData" => "Get_Data",
+        "GetWmiVersion" => "Get_WMI",
         _ => throw new ArgumentException("Unsupported TDP operation.", nameof(operation))
     };
 
@@ -28,7 +30,9 @@ public static class TdpHelperProtocol
         "GetFan" => index is 0 or 1 or 2,
         "SetFan" => index is 1 or 2,
         "GetTemperature" => index is 1 or 2,
-        "GetData" => index == 152,
+        "GetThermal" => index is 1 or 2,
+        "GetData" => index is 152 or 210 or 212,
+        "GetWmiVersion" or "GetMethodInventory" or "GetHelperInfo" => index == 0,
         _ => false
     };
 }
