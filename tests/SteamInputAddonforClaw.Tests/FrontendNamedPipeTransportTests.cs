@@ -225,18 +225,14 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task Previous_protocol_version_is_rejected_at_handshake()
+    public async Task Pre_fps_v12_peer_is_rejected_at_handshake()
     {
-        // Review fix (MAJOR): the Steam Input Routing master-switch PR renamed
-        // FrontendRpcMethod.SetRouteInSteamBigPicture -> SetSteamInputRoutingEnabled (and the
-        // matching request record / FrontendSettingsSnapshot property), which
-        // FrontendRpcMethodJsonConverter serializes by exact string name. A stale v1 peer must be
-        // rejected up front at the protocol-version handshake gate, not allowed to connect and only
-        // fail later as UnsupportedMethod/payload-deserialization errors once it tries the renamed RPC.
+        // Protocol v12 is the current-main fan-probe contract. It predates the FPS snapshot/RPCs,
+        // so a v12 peer must be rejected before it can deserialize or invoke a v13-only contract.
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
         await using var serverLifetime = server;
-        await using var client = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
+        await using var client = new NamedPipeAddonFrontendClient(pipeName, 12);
 
         await Assert.ThrowsAsync<FrontendProtocolException>(() => client.ConnectAsync());
         Assert.Equal(0, fake.TotalCalls);
@@ -976,9 +972,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":12,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":12,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":12,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":13,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":13,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":13,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
