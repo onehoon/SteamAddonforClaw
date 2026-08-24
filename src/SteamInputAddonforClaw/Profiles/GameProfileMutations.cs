@@ -136,8 +136,10 @@ internal sealed class GameProfileMutations
         {
             var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
             var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            if (!loaded.Document.Games.TryGetValue(key, out var profile) || profile.Performance.PowerMode is not { } current) return MutationOutcome.Unavailable;
-            loaded.Document.Games[key] = profile with { Performance = profile.Performance with { PowerMode = update(current) } };
+            if (!loaded.Document.Games.TryGetValue(key, out var profile)) return MutationOutcome.Unavailable;
+            var completed = Complete(profile, loaded.Document.Device);
+            if (completed.Performance.PowerMode is not { } current) return MutationOutcome.Unavailable;
+            loaded.Document.Games[key] = completed with { Performance = completed.Performance with { PowerMode = update(current) } };
             try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
         }
     }

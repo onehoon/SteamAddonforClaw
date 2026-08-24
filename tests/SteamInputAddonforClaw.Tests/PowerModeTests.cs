@@ -30,6 +30,23 @@ public sealed class PowerModeTests
         var runtime = new PowerModeRuntime(new ProfileStore(path), new FakePowerModePolicy()); runtime.StartupReconcile();
         Assert.False(runtime.Snapshot.PersistenceWritable);
     }
+
+    [Fact]
+    public void Existing_enabled_profile_lazily_adopts_device_power_mode_before_first_edit()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");
+        var store = new ProfileStore(path);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { PowerMode = new DevicePowerModeSettings { Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.BestPowerEfficiency } } },
+            Games = new() { ["42"] = new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } } } } }
+        });
+        var mutations = new GameProfileMutations(store);
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetPowerModeAc(42, WindowsPowerMode.BestPerformance));
+        var saved = store.Load().Document.Games["42"].Performance.PowerMode;
+        Assert.Equal(WindowsPowerMode.BestPerformance, saved!.Ac);
+        Assert.Equal(WindowsPowerMode.BestPowerEfficiency, saved.Dc);
+    }
     [Theory]
     [InlineData("961cc777-2547-4f9d-8174-7d86181b8a7a", PowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency)]
     [InlineData("00000000-0000-0000-0000-000000000000", PowerModeReadStatus.Known, WindowsPowerMode.Balanced)]

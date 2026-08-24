@@ -128,7 +128,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         var outcome = _gameProfileMutations?.SetEnabled(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
-        return Task.FromResult(MutateGame(appId, outcome, cpu: true, tdp: true));
+        return Task.FromResult(MutateGame(appId, outcome, cpu: true, tdp: true, power: true));
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
