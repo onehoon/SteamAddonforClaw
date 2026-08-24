@@ -9,9 +9,35 @@ internal static class UninstallBootstrap
     internal static void RunFastCallbackOnly()
     {
         AppLog.Info("Uninstall", "Velopack uninstall cleanup started.", ("FastCallback", true));
-        _ = RequestRunningRuntimeShutdown();
+        var runtimeReleased = RequestRunningRuntimeShutdown();
         try { new WindowsTaskSchedulerStartupManager().Synchronize(false); } catch (Exception exception) { AppLog.Warn("Uninstall", "Startup registration cleanup failed.", exception); }
+
+        if (!runtimeReleased)
+        {
+            AppLog.Warn("Uninstall", "Runtime ownership was not released; preserving Addon-owned artifacts and recovery evidence.", null, ("Action", "PreserveDependencySafety"));
+            return;
+        }
+
+        Steam.SteamCefDebugBootstrap.RemoveOwnedMarker();
+        TryDeleteDirectory(CenterM.CenterMHelperStaging.RuntimeDirectory);
+        TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
+
+        if (!File.Exists(AddonDataPaths.RecoveryJournalPath))
+            AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
+
         AppLog.Info("Uninstall", "FastCallback completed without elevation or dependency teardown.", ("Action", "BoundedOnly"));
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); }
+        catch (Exception exception) { AppLog.Warn("Uninstall", "Bounded Addon-owned directory cleanup failed.", exception, ("Path", path)); }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (Exception exception) { AppLog.Warn("Uninstall", "Bounded Addon-owned file cleanup failed.", exception, ("Path", path)); }
     }
 
     private static bool RequestRunningRuntimeShutdown()

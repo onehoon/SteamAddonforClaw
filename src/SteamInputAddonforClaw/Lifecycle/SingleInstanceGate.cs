@@ -9,6 +9,7 @@ internal sealed class SingleInstanceGate : IDisposable
     private readonly EventWaitHandle _uninstallEvent;
     private readonly Lock _sync = new();
     private RegisteredWaitHandle? _activationRegistration;
+    private RegisteredWaitHandle? _uninstallRegistration;
     private bool _disposed;
 
     internal SingleInstanceGate(string mutexName, string activationEventName)
@@ -69,10 +70,15 @@ internal sealed class SingleInstanceGate : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (!IsPrimaryInstance) throw new InvalidOperationException("Only the primary instance can receive uninstall requests.");
-            _ = ThreadPool.RegisterWaitForSingleObject(_uninstallEvent, (_, timedOut) =>
-            {
-                if (!timedOut) requestHandler();
-            }, null, Timeout.Infinite, executeOnlyOnce: true);
+            if (_uninstallRegistration is not null)
+                throw new InvalidOperationException("An uninstall handler is already registered.");
+
+            _uninstallRegistration = ThreadPool.RegisterWaitForSingleObject(
+                _uninstallEvent,
+                (_, timedOut) => OnUninstallSignaled(requestHandler, timedOut),
+                null,
+                Timeout.Infinite,
+                executeOnlyOnce: true);
         }
     }
 
@@ -84,7 +90,8 @@ internal sealed class SingleInstanceGate : IDisposable
 
     public void Dispose()
     {
-        RegisteredWaitHandle? registration;
+        RegisteredWaitHandle? activation;
+        RegisteredWaitHandle? uninstall;
         lock (_sync)
         {
             if (_disposed)
@@ -93,11 +100,14 @@ internal sealed class SingleInstanceGate : IDisposable
             }
 
             _disposed = true;
-            registration = _activationRegistration;
+            activation = _activationRegistration;
+            uninstall = _uninstallRegistration;
             _activationRegistration = null;
+            _uninstallRegistration = null;
         }
 
-        registration?.Unregister(null);
+        activation?.Unregister(null);
+        uninstall?.Unregister(null);
         _activationEvent.Dispose();
         _uninstallEvent.Dispose();
         _mutex.Dispose();
@@ -121,5 +131,19 @@ internal sealed class SingleInstanceGate : IDisposable
 
         AppLog.Info("SingleInstance", "Primary activation received.");
         activationHandler();
+    }
+
+    private void OnUninstallSignaled(Action requestHandler, bool timedOut)
+    {
+        if (timedOut)
+            return;
+
+        lock (_sync)
+        {
+            if (_disposed)
+                return;
+        }
+
+        requestHandler();
     }
 }
