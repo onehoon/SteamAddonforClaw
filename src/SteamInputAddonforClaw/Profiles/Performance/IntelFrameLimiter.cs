@@ -71,13 +71,40 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
     {
         var target = appId > 0 && doc.Games.TryGetValue(appId.ToString(System.Globalization.CultureInfo.InvariantCulture), out var game) && game.Enabled && game.Performance.FpsLimit is { Enabled: true } fps ? fps : null;
         if (target is null) return Release(appId, reason);
-        var source = _power(); if (source is null) return false;
+        var source = _power(); if (source is null) return FailClosedOwnedState(appId, reason, "UnknownPowerSource");
         var value = source == FpsPowerSource.AC ? target.AcFps : target.DcFps;
-        if (value is < 40 or > 120 || !_limiter.Enable(value, source.Value, appId)) return false;
+        if (value is < 40 or > 120) return FailClosedOwnedState(appId, reason, "InvalidTarget");
+        if (!_limiter.Enable(value, source.Value, appId)) return FailClosedOwnedState(appId, reason, "EnableFailed");
         try { Directory.CreateDirectory(Path.GetDirectoryName(_marker)!); File.WriteAllText(_marker, $"{{\"fps\":{value}}}"); return true; }
-        catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS ownership marker persistence failed; disabling immediately.", e); _limiter.Disable(source, appId); return false; }
+        catch (Exception e)
+        {
+            AppLog.Error("Profiles.IntelFps", "FPS ownership marker persistence failed; disabling immediately.", e);
+            var disabled = _limiter.Disable(source, appId);
+            if (!disabled) AppLog.Warn("Profiles.IntelFps", "Immediate disable after ownership marker failure also failed; retaining any ownership evidence.", null, ("RunningAppID", appId));
+            return false;
+        }
     }
-    private bool Release(uint appId, string reason) { if (!File.Exists(_marker)) return true; var ok = _limiter.Disable(_power(), appId); if (ok) try { File.Delete(_marker); } catch (Exception e) { AppLog.Warn("Profiles.IntelFps", "FPS ownership marker deletion failed.", e); } return ok; }
+    private bool FailClosedOwnedState(uint appId, string reason, string cause)
+    {
+        if (!File.Exists(_marker)) return false;
+        var disabled = _limiter.Disable(_power(), appId);
+        if (!disabled)
+            AppLog.Warn("Profiles.IntelFps", "FPS fail-close disable failed; keeping ownership marker.", null, ("Reason", reason), ("Cause", cause), ("RunningAppID", appId));
+        else
+            TryDeleteOwnershipMarker(reason, appId);
+        return false;
+    }
+    private bool Release(uint appId, string reason)
+    {
+        if (!File.Exists(_marker)) return true;
+        if (!_limiter.Disable(_power(), appId)) return false;
+        return TryDeleteOwnershipMarker(reason, appId);
+    }
+    private bool TryDeleteOwnershipMarker(string reason, uint appId)
+    {
+        try { File.Delete(_marker); return true; }
+        catch (Exception e) { AppLog.Warn("Profiles.IntelFps", "FPS ownership marker deletion failed; keeping ownership evidence.", e, ("Reason", reason), ("RunningAppID", appId)); return false; }
+    }
     internal void BeginShutdown() => _shutdown = true;
     public void Dispose() { if (_shutdown) { try { lock (_gate.Sync) Release(_app(), "Shutdown"); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS shutdown cleanup failed.", e); } } _limiter.Dispose(); }
 }
@@ -109,16 +136,35 @@ internal sealed class NativeIgcl : IDisposable
     internal void Initialize()
     {
         if (_initialized) return;
-        _initialized = true;
         try
         {
             _library = NativeLibrary.Load(Path.Combine(Environment.SystemDirectory, "ControlLib.dll")); _init = Get<CtlInit>("ctlInit"); _close = Get<CtlClose>("ctlClose"); _enumerate = Get<CtlEnumerate>("ctlEnumerateDevices"); _caps = Get<CtlCaps>("ctlGetSupported3DCapabilities"); _getSet = Get<CtlGetSet>("ctlGetSet3DFeature");
             var args = new InitArgs { Size = (uint)Marshal.SizeOf<InitArgs>(), Version = 0, AppVersion = 0x00010001, ApplicationUid = new ApplicationId() }; var result = _init(ref args, out _api); Log("ctlInit", result); if (result != 0) throw new InvalidOperationException($"ctlInit failed: 0x{result:X8}");
             uint count = 0; result = _enumerate(_api, ref count, null); Log("ctlEnumerateDevices", result); if (result != 0 || count == 0) throw new InvalidOperationException("No IGCL adapter."); var adapters = new nint[count]; result = _enumerate(_api, ref count, adapters); Log("ctlEnumerateDevices", result); if (result != 0) throw new InvalidOperationException($"ctlEnumerateDevices failed: 0x{result:X8}");
-            foreach (var adapter in adapters) if (TryInspectAdapter(adapter)) { _adapter = adapter; Available = true; return; }
+            foreach (var adapter in adapters) if (TryInspectAdapter(adapter)) { _adapter = adapter; Available = true; _initialized = true; return; }
             UnavailableReason = "Intel FRAME_LIMIT is unavailable or cannot represent 40-120 FPS.";
+            _initialized = true;
         }
-        catch (Exception e) { UnavailableReason = e.Message; AppLog.Warn("Profiles.IntelFps", "IGCL is unavailable.", e); }
+        catch (Exception e)
+        {
+            ResetFailedInitializationAttempt();
+            _initialized = false;
+            Available = false;
+            UnavailableReason = e.Message;
+            AppLog.Warn("Profiles.IntelFps", "IGCL initialization failed; a later startup phase may retry.", e);
+        }
+    }
+    private void ResetFailedInitializationAttempt()
+    {
+        if (_api != 0)
+        {
+            try { if (_close is not null) _ = _close(_api); } catch { }
+            _api = 0;
+        }
+        if (_library != 0) { try { NativeLibrary.Free(_library); } catch { } _library = 0; }
+        _adapter = _cleanupAdapter = 0;
+        _cleanupCapability = Capability = null;
+        _init = null!; _close = null!; _enumerate = null!; _caps = null!; _getSet = null!;
     }
     private bool TryInspectAdapter(nint adapter)
     {

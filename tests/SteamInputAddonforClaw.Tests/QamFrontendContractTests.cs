@@ -438,7 +438,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("profile-fps-section", source);
         Assert.Contains("Intel FPS Limit", source);
         Assert.Contains("min: 40, max: 120, step: 1", source);
-        Assert.Contains("${value} FPS", source);
+        Assert.Contains("`${currentValue} FPS`", source);
+        Assert.Contains("value: currentValue", source);
         Assert.Contains("setActiveGameFpsLimitAc", source);
         Assert.Contains("setActiveGameFpsLimitDc", source);
         Assert.Contains("await runFpsMutation(side === \"ac\" ? \"setActiveGameFpsLimitAc\" : \"setActiveGameFpsLimitDc\"", source);
