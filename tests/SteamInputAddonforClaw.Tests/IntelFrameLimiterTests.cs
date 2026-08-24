@@ -10,13 +10,21 @@ public sealed class IntelFrameLimiterTests
     public void Projected_igcl_x64_layout_matches_the_native_struct_sizes() =>
         Assert.True(NativeIgcl.AbiLayoutIsExpectedForTests());
 
+    [Fact]
+    public void Frame_limit_without_live_change_is_not_available_for_active_profile_control()
+    {
+        var capability = new IntelFpsCapability(30, 300, 1, 2, 0, true);
+        Assert.False(capability.SupportsLiveChange);
+        Assert.False(capability.SupportsAddonRange);
+    }
+
     [Theory]
     [InlineData(41, 300, 1, false)]
     [InlineData(30, 119, 1, false)]
     [InlineData(30, 300, 2, false)]
     [InlineData(30, 300, 1, true)]
     public void Capability_requires_the_complete_addon_range(int min, int max, int step, bool expected) =>
-        Assert.Equal(expected, new IntelFpsCapability(min, max, step, 2, 0, true).SupportsAddonRange);
+        Assert.Equal(expected, new IntelFpsCapability(min, max, step, 2, 1 << 4, true).SupportsAddonRange);
 
     [Fact]
     public void Missing_profile_projects_off_and_first_enable_creates_60_pair()
@@ -180,7 +188,7 @@ public sealed class IntelFrameLimiterTests
     private sealed class FakeLimiter : IIntelFrameLimiter
     {
         public void Initialize() { }
-        public bool Available => AvailableValue; public bool AvailableValue = true; public string? UnavailableReason => null; public IntelFpsCapability? Capability => new(30, 300, 1, 2, 0, true); public bool LastEnable; public bool LastDisable; public int LastFps; public int EnableCalls; public int DisableCalls; public bool EnableResult = true; public bool DisableResult = true;
+        public bool Available => AvailableValue; public bool AvailableValue = true; public string? UnavailableReason => null; public IntelFpsCapability? Capability => new(30, 300, 1, 2, 1 << 4, true); public bool LastEnable; public bool LastDisable; public int LastFps; public int EnableCalls; public int DisableCalls; public bool EnableResult = true; public bool DisableResult = true;
         public bool Enable(int fps, FpsPowerSource source, uint appId) { EnableCalls++; LastEnable = true; LastDisable = false; LastFps = fps; return EnableResult; }
         public bool Disable(FpsPowerSource? source, uint appId) { DisableCalls++; LastDisable = true; LastEnable = false; return DisableResult; }
         public void Dispose() { }

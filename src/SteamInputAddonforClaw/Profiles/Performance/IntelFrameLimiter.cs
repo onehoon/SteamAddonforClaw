@@ -14,7 +14,9 @@ internal static class WindowsFpsPowerSource
 
 internal readonly record struct IntelFpsCapability(int Minimum, int Maximum, int Step, int ValueType, short FeatureMiscSupport, bool PerAppSupport)
 {
-    internal bool SupportsAddonRange { get { if (ValueType != 2 || Minimum > 40 || Maximum < 120 || Step <= 0) return false; for (var x = 40; x <= 120; x++) if ((x - Minimum) % Step != 0) return false; return true; } }
+    private const short LiveChange = 1 << 4;
+    internal bool SupportsLiveChange => (FeatureMiscSupport & LiveChange) != 0;
+    internal bool SupportsAddonRange { get { if (ValueType != 2 || !SupportsLiveChange || Minimum > 40 || Maximum < 120 || Step <= 0) return false; for (var x = 40; x <= 120; x++) if ((x - Minimum) % Step != 0) return false; return true; } }
 }
 
 internal interface IIntelFrameLimiter : IDisposable
@@ -148,7 +150,9 @@ internal sealed class NativeIgcl : IDisposable
             var args = new InitArgs { Size = (uint)Marshal.SizeOf<InitArgs>(), Version = 0, AppVersion = 0x00010001, ApplicationUid = new ApplicationId() }; var result = _init(ref args, out _api); Log("ctlInit", result); if (result != 0) throw new InvalidOperationException($"ctlInit failed: 0x{result:X8}");
             uint count = 0; result = _enumerate(_api, ref count, null); Log("ctlEnumerateDevices", result); if (result != 0 || count == 0) throw new InvalidOperationException("No IGCL adapter."); var adapters = new nint[count]; result = _enumerate(_api, ref count, adapters); Log("ctlEnumerateDevices", result); if (result != 0) throw new InvalidOperationException($"ctlEnumerateDevices failed: 0x{result:X8}");
             foreach (var adapter in adapters) if (TryInspectAdapter(adapter)) { _adapter = adapter; Available = true; _initialized = true; return; }
-            UnavailableReason = "Intel FRAME_LIMIT is unavailable or cannot represent 40-120 FPS.";
+            UnavailableReason = Capability is { SupportsLiveChange: false }
+                ? "Intel FRAME_LIMIT does not support live changes for the active game."
+                : "Intel FRAME_LIMIT is unavailable or cannot represent 40-120 FPS.";
             _initialized = true;
         }
         catch (Exception e)
