@@ -825,16 +825,19 @@
             if (feature === "Power Mode") setPowerPreview(current => Object.fromEntries(Object.entries(current).filter(([key]) => !pendingPredicate(key))));
           }
           setBusy(true); setError(null);
+          beginMutation();
           try {
             const result = await request(method, { enabled: !!value });
-            setProfile(result.snapshot);
             if (feature === "TDP" && result.snapshot?.tdp) {
               const nextDraft = { ac: { ...result.snapshot.tdp.ac }, dc: { ...result.snapshot.tdp.dc } };
               profileTdpDraftRef.current = nextDraft; setProfileTdpDraft(nextDraft);
             }
-            if (!result.succeeded) setError(result.failureMessage || `${feature} update failed`);
+            const failure = !result?.succeeded ? (result.failureMessage || `${feature} update failed`) : null;
+            await refresh();
+            deferredInvalidationRef.current = false;
+            if (failure) setError(failure);
           } catch (_) { failClosed(`${feature} update failed`); }
-          finally { setBusy(false); }
+          finally { endMutation(); setBusy(false); }
         };
         const scheduleProfileTdp = draft => {
           if (!state.installed || !profile.persistenceWritable || !enabled || !profile.limits) return;

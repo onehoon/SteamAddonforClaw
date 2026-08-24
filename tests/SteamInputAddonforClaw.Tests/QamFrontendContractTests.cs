@@ -430,6 +430,11 @@ public sealed class QamFrontendContractTests
         Assert.Contains("setActiveGameCpuBoostEnabled", source);
         Assert.Contains("setActiveGameTdpEnabled", source);
         Assert.Contains("setActiveGamePowerModeEnabled", source);
+        var featureToggle = source[source.IndexOf("const toggleProfileFeature", StringComparison.Ordinal)..source.IndexOf("const scheduleProfileTdp", StringComparison.Ordinal)];
+        Assert.Contains("beginMutation();", featureToggle);
+        Assert.Contains("await refresh();", featureToggle);
+        Assert.Contains("deferredInvalidationRef.current = false;", featureToggle);
+        Assert.Contains("finally { endMutation(); setBusy(false); }", featureToggle);
         Assert.Contains("Plugged in · PL1", source);
         Assert.Contains("On battery · PL2", source);
         Assert.Contains("if (feature === \"CPU Boost\")", source);
