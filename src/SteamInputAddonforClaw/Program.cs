@@ -20,11 +20,7 @@ public static class Program
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
             VelopackApp.Build()
-                .OnBeforeUninstallFastCallback(_ =>
-                {
-                    if (!args.Contains(UninstallBootstrap.ElevatedArgument, StringComparer.OrdinalIgnoreCase))
-                        UninstallBootstrap.RunFastCallbackOnly();
-                })
+                .OnBeforeUninstallFastCallback(_ => UninstallBootstrap.RunFastCallbackOnly())
                 .Run();
             AddonLogRetention.PruneDirectory(AppLog.DirectoryPath);
             var persistedLogLevel = LogLevelBootstrap.Read(AddonDataPaths.SettingsPath);
@@ -34,11 +30,6 @@ public static class Program
             if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = ElevatedPrerequisiteSetup.Run();
-                return;
-            }
-            if (args.Contains(UninstallBootstrap.ElevatedArgument, StringComparer.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = UninstallBootstrap.RunElevated();
                 return;
             }
 

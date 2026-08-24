@@ -69,14 +69,27 @@ internal static class SteamCefDebugBootstrap
             try
             {
                 using var marker = new FileStream(markerPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-                Directory.CreateDirectory(Path.GetDirectoryName(OwnershipPath)!);
-                File.WriteAllText(OwnershipPath, JsonSerializer.Serialize(new CefMarkerOwnership(normalizedDirectory)));
             }
             catch (IOException) when (File.Exists(markerPath))
             {
                 // Another same-user process won the create race. The required end state is satisfied.
                 AppLog.Info("QAM.Bootstrap", "Steam CEF remote-debugging marker already present.", ("Path", markerPath));
                 return true;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(OwnershipPath)!);
+                File.WriteAllText(OwnershipPath, JsonSerializer.Serialize(new CefMarkerOwnership(normalizedDirectory)));
+            }
+            catch
+            {
+                try { File.Delete(markerPath); }
+                catch (Exception cleanupException)
+                {
+                    AppLog.Warn("QAM.Bootstrap", "CEF marker rollback after ownership persistence failure failed.", cleanupException);
+                }
+                throw;
             }
 
             AppLog.Info(
