@@ -106,7 +106,7 @@ public sealed class QamFrontendContractTests
         Assert.True(enabledIndex >= 0);
         var enabledPath = source[enabledIndex..];
 
-        Assert.Contains("cancelModeTimers();", enabledPath);
+        Assert.Contains("cancelQamSliderCommits(key => key.startsWith(\"device-cpu-\"));", enabledPath);
         Assert.Contains("setPreviewAc(null); setPreviewDc(null);", enabledPath);
         Assert.Contains("if (!state.installed) return;", enabledPath);
         Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", enabledPath);
@@ -270,22 +270,20 @@ public sealed class QamFrontendContractTests
         Assert.Contains("request(\"captureStatus\")", source);
         Assert.Contains("request(\"captureCpuBoost\")", source);
         Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", source);
-        Assert.Contains("request(side === \"ac\" ? \"setDeviceCpuBoostAc\" : \"setDeviceCpuBoostDc\"", source);
+        Assert.Contains("scheduleQamSliderCommit(`device-cpu-${key}`", source);
         var cpuModeMutation = source[source.IndexOf("const scheduleMode", StringComparison.Ordinal)..source.IndexOf("const setEnabled", StringComparison.Ordinal)];
         Assert.DoesNotContain("setBusy(true)", cpuModeMutation);
         Assert.DoesNotContain("setBusy(false)", cpuModeMutation);
-        Assert.Contains("setTimeout(async () =>", cpuModeMutation);
+        Assert.Contains("scheduleQamSliderCommit", cpuModeMutation);
         Assert.Contains("setPreviewAc", cpuModeMutation);
         Assert.Contains("setPreviewDc", cpuModeMutation);
-        Assert.Contains("const modeEditGeneration = React.useRef({ ac: 0, dc: 0 })", source);
-        Assert.Contains("const generation = ++modeEditGeneration.current[key]", source);
-        Assert.Contains("generation === modeEditGeneration.current[key]", source);
-        Assert.Contains("const modeEditPending", source);
+        Assert.Contains("const QAM_SLIDER_COMMIT_DELAY_MS = 2000", source);
+        Assert.Contains("function scheduleQamSliderCommit", source);
         Assert.Contains("setTimeout(async () =>", source);
         Assert.Contains("state.onStateInvalidated", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.Contains("request(\"captureTdp\")", source);
-        Assert.Contains("cancelModeTimers();", source);
+        Assert.Contains("cancelQamSliderCommits", source);
         Assert.Contains("setPreviewAc(null); setPreviewDc(null);", source);
         Assert.Contains("state.onStateInvalidated === handler", source);
         Assert.Contains("function findNativeQamComponents(webpackRequire)", source);
@@ -368,19 +366,15 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         Assert.Contains("label: \"TDP Control\"", source);
-        Assert.Contains("request(\"setDeviceTdp\", { configuration: draft })", source);
+        Assert.Contains("scheduleQamSliderCommit(\"device-tdp\"", source);
         Assert.Contains("request(\"setDeviceTdpEnabled\", { enabled })", source);
         Assert.Contains("const tdpLimits = tdp?.limits", source);
         Assert.Contains("max: label === \"PL1\" ? limit.pl2MaximumWatts : limit.pl2MaximumWatts", source);
         Assert.Contains("step: 1", source);
         Assert.Contains("const adjustTdpPair", source);
-        Assert.Contains("const generation = ++tdpEditGeneration.current", source);
-        Assert.Contains("generation === tdpEditGeneration.current", source);
-        Assert.Contains("setTimeout(() => { tdpTimer.current = null; void submitTdpDraft(nextDraft, generation); }, 300)", source);
-        Assert.Contains("Keep a dirty TDP draft's debounce alive across invalidation", source);
-        var tdpSubmit = source[source.IndexOf("const submitTdpDraft", StringComparison.Ordinal)..source.IndexOf("const scheduleTdp", StringComparison.Ordinal)];
-        Assert.DoesNotContain("setBusy(true)", tdpSubmit);
-        Assert.DoesNotContain("setBusy(false)", tdpSubmit);
+        Assert.Contains("scheduleQamSliderCommit(\"device-tdp\"", source);
+        Assert.Contains("scheduleQamSliderCommit(\"profile-tdp\"", source);
+        Assert.Contains("QAM_SLIDER_COMMIT_DELAY_MS", source);
         Assert.Contains("if (tdpDraft?.enabled && tdpLimits)", source);
         Assert.DoesNotContain("setTdpAcPl1", source);
         Assert.DoesNotContain("setTdpAcPl2", source);
@@ -428,7 +422,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("\"setActiveGameTdp\"", source);
         Assert.Contains("const activeProfileAppIdRef = React.useRef(0);", source);
         Assert.Contains("if (activeProfileAppIdRef.current !== nextAppId)", source);
-        Assert.Contains("profileTdpGeneration.current = 0", source);
+        Assert.Contains("cancelQamSliderCommits(key => key.startsWith(\"profile-\"))", source);
         Assert.Contains("labelFor(preview ?? value)", source);
         Assert.Contains("profile-tdp-ac-heading", source);
         Assert.Contains("profile-tdp-dc-heading", source);
@@ -442,7 +436,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("value: currentValue", source);
         Assert.Contains("setActiveGameFpsLimitAc", source);
         Assert.Contains("setActiveGameFpsLimitDc", source);
-        Assert.Contains("await runFpsMutation(side === \"ac\" ? \"setActiveGameFpsLimitAc\" : \"setActiveGameFpsLimitDc\"", source);
+        Assert.Contains("scheduleQamSliderCommit(`profile-fps-${side}`", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("type: \"checkbox\"", source);
         Assert.DoesNotContain("type: \"range\"", source);
@@ -466,6 +460,65 @@ public sealed class QamFrontendContractTests
         var cpuLayout = profileLayout[cpuSection..powerSection];
         Assert.Contains("profileCpuControls.filter", cpuLayout);
         Assert.DoesNotContain("profilePowerControls.filter", cpuLayout);
+    }
+
+    [Fact]
+    public void Qam_all_sliders_use_the_shared_trailing_commit_path_while_toggles_stay_immediate()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("const QAM_SLIDER_COMMIT_DELAY_MS = 2000", source);
+        Assert.Contains("state.qamSliderCommits", source);
+        Assert.Contains("clearTimeout(pending.timer)", source);
+        Assert.Contains("cancelQamSliderCommits();", source);
+        Assert.Contains("scheduleQamSliderCommit(`profile-fps-${side}`", source);
+        Assert.Contains("\"device-power-ac\"", source);
+        var powerSchedule = source[source.IndexOf("const schedulePowerMode", StringComparison.Ordinal)..source.IndexOf("const powerSlider", StringComparison.Ordinal)];
+        Assert.Contains("setPowerPreview(current => ({ ...current, [key]: value }))", powerSchedule);
+        Assert.True(powerSchedule.IndexOf("setPowerPreview", StringComparison.Ordinal)
+            < powerSchedule.IndexOf("scheduleQamSliderCommit", StringComparison.Ordinal));
+        var powerSlider = source[source.IndexOf("const powerSlider", StringComparison.Ordinal)..source.IndexOf("const powerControls", StringComparison.Ordinal)];
+        Assert.Contains("schedulePowerMode", powerSlider);
+        Assert.Contains("powerPreview[key] ?? pendingValue ?? value", powerSlider);
+        Assert.DoesNotContain("runPowerMutation", powerSlider);
+        Assert.True(powerSchedule.IndexOf("await refresh();", StringComparison.Ordinal)
+            < powerSchedule.IndexOf("delete next[key]", StringComparison.Ordinal));
+        Assert.Contains("setDevicePowerModeEnabled", source);
+        Assert.Contains("setActiveGameFpsLimitEnabled", source);
+        Assert.DoesNotContain("250", source);
+        Assert.DoesNotContain("275", source);
+        Assert.DoesNotContain("300", source);
+    }
+
+    [Fact]
+    public void Qam_pending_tdp_drafts_restore_after_remount_and_old_commit_responses_cannot_rewind_new_edits()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("const effectiveDeviceDraft = state.qamSliderCommits?.get(\"device-tdp\")?.draft ?? nextDraft", source);
+        Assert.Contains("const effectiveProfileDraft = state.qamSliderCommits?.get(\"profile-tdp\")?.draft ?? authoritativeProfileDraft", source);
+        Assert.Contains("tdpDraftRef.current = effectiveDeviceDraft", source);
+        Assert.Contains("profileTdpDraftRef.current = effectiveProfileDraft", source);
+
+        var scheduler = source[source.IndexOf("function scheduleQamSliderCommit", StringComparison.Ordinal)..source.IndexOf("function receiveBridgeResponse", StringComparison.Ordinal)];
+        Assert.Contains("if (state.qamSliderCommits.get(key)?.token !== token) return;", scheduler);
+        Assert.Contains("state.qamSliderCommits.delete(key);", scheduler);
+        Assert.True(scheduler.IndexOf("const result = await request(method, payload)", StringComparison.Ordinal)
+            < scheduler.IndexOf("state.qamSliderCommits.delete(key);", scheduler.IndexOf("const result = await request(method, payload)", StringComparison.Ordinal), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Qam_invalidation_keeps_pending_cpu_preview_and_scopes_it_to_the_active_panel()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var handlerStart = source.IndexOf("const handler = () =>", StringComparison.Ordinal);
+        var handler = source[handlerStart..source.IndexOf("state.onStateInvalidated = handler", handlerStart, StringComparison.Ordinal)];
+        Assert.DoesNotContain("setPreviewAc(null)", handler);
+        Assert.DoesNotContain("setPreviewDc(null)", handler);
+        Assert.Contains("const cpuScope = activeGame ? \"profile\" : \"device\"", source);
+        Assert.Contains("`${cpuScope}-cpu-ac`", source);
+        Assert.Contains("`${cpuScope}-cpu-dc`", source);
     }
 
     [Fact]
@@ -494,9 +547,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("const modeWritableRef = React.useRef(false);", source);
         Assert.Contains("modeWritableRef.current = modeWritable;", source);
         Assert.Contains("if (!state.installed || !modeWritableRef.current) return;", source);
-        Assert.Contains("const cancelModeTimers = React.useCallback", source);
-        Assert.Contains("cancelModeTimers();", source);
-        Assert.Contains("settleTimers.current[key] = null;", source);
+        Assert.Contains("cancelQamSliderCommits();", source);
+        Assert.Contains("retireBridgeConsumers", source);
     }
 
     private static string ReadSource(params string[] parts)
