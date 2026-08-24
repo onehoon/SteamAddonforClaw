@@ -12,6 +12,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     private readonly IRoutingRecoverySessionProvider _session;
     private readonly RecoveryManager _recovery;
     private readonly IHidHideClient _hidHide;
+    private readonly IReadOnlyCollection<string> _trustedHidHideApplicationPaths;
     private readonly Func<string?> _executablePathProvider;
     private readonly Lock _sync = new();
     private Prepared? _prepared;
@@ -34,8 +35,8 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         internal bool Ambiguous { get; set; }
     }
 
-    internal MsiClawPhysicalIsolationStage(IMsiClawPhysicalInputIdentityProvider input, IRoutingRecoverySessionProvider session, RecoveryManager recovery, IHidHideClient hidHide, Func<string?>? executablePathProvider = null)
-    { _input = input ?? throw new ArgumentNullException(nameof(input)); _session = session ?? throw new ArgumentNullException(nameof(session)); _recovery = recovery ?? throw new ArgumentNullException(nameof(recovery)); _hidHide = hidHide ?? throw new ArgumentNullException(nameof(hidHide)); _executablePathProvider = executablePathProvider ?? (() => Environment.ProcessPath); }
+    internal MsiClawPhysicalIsolationStage(IMsiClawPhysicalInputIdentityProvider input, IRoutingRecoverySessionProvider session, RecoveryManager recovery, IHidHideClient hidHide, Func<string?>? executablePathProvider = null, IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null)
+    { _input = input ?? throw new ArgumentNullException(nameof(input)); _session = session ?? throw new ArgumentNullException(nameof(session)); _recovery = recovery ?? throw new ArgumentNullException(nameof(recovery)); _hidHide = hidHide ?? throw new ArgumentNullException(nameof(hidHide)); _executablePathProvider = executablePathProvider ?? (() => Environment.ProcessPath); _trustedHidHideApplicationPaths = trustedHidHideApplicationPaths ?? []; }
 
     public RoutingStageKind Kind => RoutingStageKind.PhysicalIsolation;
 
@@ -117,7 +118,9 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)) return ValueTask.FromResult(Failure("ExecutablePathInvalid"));
         var executablePath = Path.GetFullPath(path);
         var inspection = _hidHide.Inspect();
-        var admission = HidHideRoutingAdmissionPolicy.Evaluate(inspection, executablePath);
+        var admission = HidHideRoutingAdmissionPolicy.Evaluate(inspection, executablePath, _trustedHidHideApplicationPaths);
+        if (admission != HidHideRoutingAdmissionOutcome.Allowed)
+            HidHideRoutingAdmissionPolicy.LogRejection(inspection, executablePath, _trustedHidHideApplicationPaths, admission);
         if (admission != HidHideRoutingAdmissionOutcome.Allowed) return ValueTask.FromResult(Failure(admission.ToString()));
         if (!CanPrepareIsolation(inspection, out var admissionFailure)) return ValueTask.FromResult(Failure(admissionFailure));
 

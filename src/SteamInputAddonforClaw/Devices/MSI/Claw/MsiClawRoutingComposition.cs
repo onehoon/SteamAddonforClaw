@@ -168,7 +168,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         IOem1GestureDelay? testOnlyOem1GestureDelay = null,
         IOem1GestureClock? testOnlyOem1GestureClock = null,
         Action? testOnlyOem1LaunchBigPicture = null,
-        IMsiEventSource? testOnlyWingEventSource = null)
+        IMsiEventSource? testOnlyWingEventSource = null,
+        IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null)
     {
         _hardwareSupported = hardwareSupported;
         _testOnlyOem1EventSource = testOnlyOem1EventSource;
@@ -195,7 +196,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             NativeModeSession,
             recovery,
             new HidHideDriverClient(),
-            () => Environment.ProcessPath);
+            () => Environment.ProcessPath,
+            trustedHidHideApplicationPaths);
 
         PhysicalRumbleSink = new MsiClawRumbleSink(PhysicalInputStage, new WindowsMsiClawRumbleTransport(),
             rumbleEndpointResolverFactory?.Invoke() ?? new MsiClawRumbleEndpointResolver());

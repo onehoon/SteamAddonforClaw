@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.HidHide;
 
 internal enum HidHideInspectionStatus { Available, NotInstalled, ConfigurationUnavailable, AccessDenied, Disabled, InverseWhitelist }
@@ -21,7 +23,7 @@ internal enum HidHideRoutingAdmissionOutcome { Allowed, ForeignConfiguration, In
 
 internal static class HidHideRoutingAdmissionPolicy
 {
-    internal static HidHideRoutingAdmissionOutcome Evaluate(HidHideInspection inspection, string executablePath)
+    internal static HidHideRoutingAdmissionOutcome Evaluate(HidHideInspection inspection, string executablePath, IReadOnlyCollection<string>? trustedApplicationPaths = null)
     {
         if (inspection.Status == HidHideInspectionStatus.NotInstalled) return HidHideRoutingAdmissionOutcome.Allowed;
         if (!inspection.IsConfigurationReadable || inspection.Status is HidHideInspectionStatus.AccessDenied or HidHideInspectionStatus.ConfigurationUnavailable)
@@ -30,9 +32,39 @@ internal static class HidHideRoutingAdmissionPolicy
             return HidHideRoutingAdmissionOutcome.ForeignConfiguration;
         if ((inspection.HiddenDeviceEntries ?? []).Count > 0)
             return HidHideRoutingAdmissionOutcome.ForeignConfiguration;
-        if (inspection.ApplicationWhitelist.Any(entry => !string.Equals(entry, executablePath, StringComparison.OrdinalIgnoreCase)))
+        var trusted = (trustedApplicationPaths ?? []).Where(IsCanonicalPath).ToArray();
+        if (inspection.ApplicationWhitelist.Any(entry => !PathEquals(entry, executablePath) && !trusted.Any(path => PathEquals(entry, path))))
             return HidHideRoutingAdmissionOutcome.ForeignConfiguration;
         return HidHideRoutingAdmissionOutcome.Allowed;
+    }
+
+    internal static void LogRejection(HidHideInspection inspection, string executablePath, IReadOnlyCollection<string>? trustedApplicationPaths, HidHideRoutingAdmissionOutcome outcome)
+    {
+        var trusted = (trustedApplicationPaths ?? []).Where(IsCanonicalPath).ToArray();
+        var foreignWhitelistCount = inspection.ApplicationWhitelist.Count(entry => !PathEquals(entry, executablePath) && !trusted.Any(path => PathEquals(entry, path)));
+        AppLog.Warn("HidHide", "HidHide routing admission rejected.", null,
+            ("Outcome", outcome),
+            ("HiddenDeviceCount", (inspection.HiddenDeviceEntries ?? []).Count),
+            ("ForeignWhitelistCount", foreignWhitelistCount),
+            ("InverseWhitelist", inspection.IsInverseWhitelist || inspection.Status == HidHideInspectionStatus.InverseWhitelist),
+            ("UnresolvedWhitelist", inspection.HasUnresolvedApplicationWhitelistEntries),
+            ("OfficialHidHideClientResolved", trusted.Length > 0));
+    }
+
+    private static bool IsCanonicalPath(string path)
+    {
+        try { return Path.IsPathFullyQualified(path) && string.Equals(path, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase); }
+        catch { return false; }
+    }
+
+    private static bool PathEquals(string left, string right)
+    {
+        try
+        {
+            return IsCanonicalPath(left) && IsCanonicalPath(right)
+                && string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 }
 

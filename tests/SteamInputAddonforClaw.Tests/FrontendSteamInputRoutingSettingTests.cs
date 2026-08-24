@@ -25,6 +25,7 @@ namespace SteamInputAddonforClaw.Tests;
 [Collection("AppLog")]
 public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
 {
+    private const string OfficialHidHideClient = "C:\\Program Files\\Nefarius Software Solutions\\HidHide\\x64\\HidHideClient.exe";
     private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
 
     [Fact]
@@ -64,6 +65,20 @@ public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
     }
 
     [Fact]
+    public async Task Enabling_with_official_hidhide_client_configuration_is_allowed()
+    {
+        var control = CreateControl(new AppSettings(SteamInputRoutingEnabled: false), out var store,
+            new FakeHidHide(new(HidHideInspectionStatus.Available, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "C:\\addon.exe", OfficialHidHideClient })),
+            [OfficialHidHideClient], () => "C:\\addon.exe");
+
+        var result = await control.SetSteamInputRoutingEnabledAsync(true);
+
+        Assert.True(result.Succeeded, result.Outcome.ToString());
+        Assert.True(result.Settings.SteamInputRoutingEnabled);
+        Assert.True(store.Load().SteamInputRoutingEnabled);
+    }
+
+    [Fact]
     public async Task Disabling_does_not_inspect_hidhide()
     {
         var hid = new FakeHidHide(null) { ThrowOnInspect = true };
@@ -87,7 +102,7 @@ public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
         Assert.Contains(names, name => name == nameof(FrontendSettingsSnapshot.SteamInputRoutingEnabled));
     }
 
-    private InProcessAddonFrontendControl CreateControl(AppSettings settings, out SettingsStore store, IHidHideClient? hidHide = null)
+    private InProcessAddonFrontendControl CreateControl(AppSettings settings, out SettingsStore store, IHidHideClient? hidHide = null, IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null, Func<string?>? processPath = null)
     {
         // The bootstrap snapshot reports the log directory, which otherwise resolves through the
         // Velopack locator that only exists in an installed app.
@@ -101,7 +116,7 @@ public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
             new DeveloperTestModeState(),
             "",
             captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false),
-            hidHide: hidHide);
+            processPath: processPath, hidHide: hidHide, trustedHidHideApplicationPaths: trustedHidHideApplicationPaths);
     }
 
     public void Dispose()
