@@ -184,8 +184,6 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             var inspection = _hidHide.Inspect();
             if (!inspection.IsConfigurationReadable) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));
             if (inspection.IsInverseWhitelist) return ValueTask.FromResult(Failure("ActiveStateRestoreUnsafeInverseWhitelistDrift"));
-            if (inspection.IsActive && !ContainsOnlySessionOwnedEntries(inspection))
-                return ValueTask.FromResult(Failure("ActiveStateRestoreUnsafeForeignBlockedEntries"));
             var restoreSucceeded = !inspection.IsActive || Try(() => _hidHide.SetActive(false));
             var verification = _hidHide.Inspect();
             if (!verification.IsConfigurationReadable || verification.IsActive)

@@ -67,17 +67,17 @@ public sealed class StartupHidHideRecoveryCleanerTests
     }
 
     [Fact]
-    public void OriginalActiveFalse_CurrentActiveTrue_ForeignHiddenEntryExists_FailsClosed()
+    public void OriginalActiveFalse_CurrentActiveTrue_ForeignHiddenEntryExists_RestoresAndPreservesForeignEntry()
     {
         var client = new FakeHidHideClient(active: true, hidden: ["HID\\B", "HID\\Foreign"], whitelist: []);
         var journal = Journal(hidden: ["HID\\A", "HID\\B"], originalActive: false);
 
-        Assert.False(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out var reason));
+        Assert.True(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out var reason));
 
-        Assert.False(client.SetActiveCalled);
-        Assert.NotEmpty(reason);
-        // Nothing mutated.
-        Assert.Equal(["HID\\B", "HID\\Foreign"], client.CurrentHidden);
+        Assert.True(client.SetActiveCalled);
+        Assert.False(client.IsActive);
+        Assert.Equal(["HID\\Foreign"], client.CurrentHidden);
+        Assert.Equal("Startup stale HidHide recovery completed.", reason);
     }
 
     [Fact]
@@ -207,7 +207,7 @@ public sealed class StartupHidHideRecoveryCleanerTests
     }
 
     [Fact]
-    public void StateDriftsBeforeDisable_SecondInspectionUnsafe_SetActiveNeverCalledFailsClosed()
+    public void StateDriftsBeforeDisable_ForeignEntryStillAllowsOwnedActiveRestore()
     {
         var client = new FakeHidHideClient(active: true, hidden: ["HID\\A"], whitelist: []);
         var journal = Journal(hidden: ["HID\\A"], originalActive: false);
@@ -218,8 +218,10 @@ public sealed class StartupHidHideRecoveryCleanerTests
             client.CurrentHidden.Add("HID\\Foreign");
         };
 
-        Assert.False(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out _));
-        Assert.False(client.SetActiveCalled);
+        Assert.True(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out _));
+        Assert.True(client.SetActiveCalled);
+        Assert.False(client.IsActive);
+        Assert.Equal(["HID\\Foreign"], client.CurrentHidden);
     }
 
     [Fact]

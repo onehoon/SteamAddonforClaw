@@ -281,7 +281,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
-    public async Task ForeignEntryDuringTemporaryActiveLeasePreservesRecoveryEvidence()
+    public async Task ForeignEntryDuringTemporaryActiveLeaseDoesNotBlockOwnedActiveRestore()
     {
         var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
         var stage = Create(hid);
@@ -291,16 +291,9 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
 
         var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
 
-        Assert.False(rollback.Succeeded);
-        Assert.Equal("ActiveStateRestoreUnsafeForeignBlockedEntries", rollback.Reason);
-        Assert.DoesNotContain("SetActive:False", hid.Trace);
-        Assert.Contains("C:\\addon.exe", hid.Applications);
-        Assert.Contains("HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", hid.HiddenDevices);
-
-        hid.HiddenDevices.Remove("HID\\FOREIGN");
-        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True(rollback.Succeeded, rollback.Reason);
         Assert.False(hid.Active);
-        Assert.Empty(hid.HiddenDevices);
+        Assert.Equal(["HID\\FOREIGN"], hid.HiddenDevices);
         Assert.Contains("C:\\addon.exe", hid.Applications);
     }
 
@@ -335,7 +328,10 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.Equal("ActiveStateEnableUnsafeForeignBlockedEntries", execute.Reason);
         Assert.True(hid.Active);
         Assert.Contains("HID\\FOREIGN", hid.HiddenDevices);
-        Assert.Equal("ActiveStateRestoreUnsafeForeignBlockedEntries", (await stage.RollbackMutationAsync(CancellationToken.None)).Reason);
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+        Assert.True(rollback.Succeeded, rollback.Reason);
+        Assert.False(hid.Active);
+        Assert.Equal(["HID\\FOREIGN"], hid.HiddenDevices);
         Assert.Contains("C:\\addon.exe", hid.Applications);
     }
 
