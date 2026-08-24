@@ -161,11 +161,19 @@ public sealed class MsiFanHardwareProbeTests
     }
 
     [Theory]
-    [InlineData(75, 40, "DECREASED")]
-    [InlineData(40, 10, "DECREASED")]
-    [InlineData(10, 75, "INCREASED")]
+    [InlineData(3500, 3200, "DECREASED")]
+    [InlineData(2000, 1400, "DECREASED")]
+    [InlineData(2000, 2600, "INCREASED")]
     [InlineData(null, 10, "INCONCLUSIVE")]
     public void Physical_directional_classification_is_conservative(int? before, int? after, string expected)
+        => Assert.Equal(expected, FanProbeLogic.ClassifyDirectionalResponse(before, after));
+
+    [Theory]
+    [InlineData(3500, 3475, "UNCHANGED")]
+    [InlineData(3500, 3525, "UNCHANGED")]
+    [InlineData(3500, 3200, "DECREASED")]
+    [InlineData(2000, 2600, "INCREASED")]
+    public void Physical_directional_classification_ignores_small_tach_noise(int before, int after, string expected)
         => Assert.Equal(expected, FanProbeLogic.ClassifyDirectionalResponse(before, after));
 
     [Fact]
@@ -176,7 +184,7 @@ public sealed class MsiFanHardwareProbeTests
         var armed = probe.ArmSuspendResume("EX", "MS-1T91", "test");
         Assert.True(armed.Succeeded); Assert.Equal("ARMED", armed.Status);
         var resumed = probe.CompleteSuspendResumeAfterResume();
-        Assert.True(resumed.Succeeded); Assert.Contains("FINAL STATE: AUTO", File.ReadAllText(resumed.ReportPath!));
+        Assert.NotNull(resumed); Assert.True(resumed!.Succeeded); Assert.Contains("FINAL STATE: AUTO", File.ReadAllText(resumed.ReportPath!));
     }
 
     [Fact]
@@ -246,7 +254,7 @@ public sealed class MsiFanHardwareProbeTests
         var probe = NewProbe(t);
         Assert.Equal("ARMED", probe.ArmSuspendResume("EX", "MS-1T91", "test").Status);
         var result = probe.CompleteSuspendResumeAfterResume();
-        Assert.False(result.Succeeded);
+        Assert.NotNull(result); Assert.False(result!.Succeeded);
         Assert.Contains(t.Writes, x => x.Block == 212 && x.Payload[0] == 0);
     }
 

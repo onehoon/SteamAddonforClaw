@@ -111,7 +111,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                 return;
             }
             if (observation.Signal is not (PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend)) return;
-            try { _resumeObserved?.Invoke(); } catch (Exception exception) { AppLog.Warn("Power.Resume", "Resume observer failed.", exception); }
             if (State == PowerTransitionState.Recovering || (_cycle != 0 && _resumeCycle == _cycle)) { AppLog.Debug("Power.Coordinator", "Duplicate resume ignored.", ("Cycle", _cycle), ("Epoch", _gate.Epoch)); return; }
             // A queued resume is authoritative only for the epoch recorded when the
             // observation was created. Check before applying a fallback barrier so a newer
@@ -135,6 +134,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
             var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
             _resumeCycle = cycleForResume;
+            try { _resumeObserved?.Invoke(); } catch (Exception exception) { AppLog.Warn("Power.Resume", "Resume observer failed.", exception); }
             var resumeStartedUtc = DateTimeOffset.UtcNow;
             var recoveryManagerStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var recoveryElapsedMs = 0d;

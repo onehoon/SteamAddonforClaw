@@ -46,8 +46,14 @@ internal static class FanProbeLogic
     internal static string ClassifyReadback(bool immediateMatch, bool laterMatch, bool targetRead) =>
         immediateMatch ? "IMMEDIATE_MATCH" : laterMatch ? "DELAYED_MATCH" : targetRead ? "MISMATCH" : "READ_FAILED";
 
-    internal static string ClassifyDirectionalResponse(int? before, int? after) =>
-        before is null || after is null ? "INCONCLUSIVE" : after < before ? "DECREASED" : after > before ? "INCREASED" : "UNCHANGED";
+    internal static string ClassifyDirectionalResponse(int? before, int? after)
+    {
+        if (before is null || after is null) return "INCONCLUSIVE";
+        var delta = after.Value - before.Value;
+        var deadband = Math.Max(50, (int)Math.Ceiling(Math.Abs(before.Value) * 0.02));
+        if (Math.Abs(delta) <= deadband) return "UNCHANGED";
+        return delta < 0 ? "DECREASED" : "INCREASED";
+    }
 
     internal static bool IsSafePhysicalCurve(IReadOnlyList<byte> duties) => duties.Count == 6 && duties.All(d => d is >= 10 and <= 75);
 
@@ -102,11 +108,11 @@ internal sealed class MsiFanHardwareProbe
     }
     internal FanProbeResult PhysicalResponse(string device, string board, string firmware) => Run(FanProbeOperation.PhysicalResponse, device, board, firmware, WritePhysicalResponse);
     internal FanProbeResult ArmSuspendResume(string device, string board, string firmware) => Run(FanProbeOperation.ArmSuspendResume, device, board, firmware, WriteArmSuspendResume);
-    internal FanProbeResult CompleteSuspendResumeAfterResume()
+    internal FanProbeResult? CompleteSuspendResumeAfterResume()
     {
         lock (_gate)
         {
-            if (!_suspendArmed || _armedReport is null || _armedPath is null) return new(true, false, "No suspend/resume fan test is armed.", null, _armedModel, _armedBoard ?? "");
+            if (!_suspendArmed || _armedReport is null || _armedPath is null) return null;
             _suspendArmed = false;
         }
         var report = _armedReport; var path = _armedPath; var resultModel = _armedModel; var resultBoard = _armedBoard ?? ""; var success = false; var handback = false; var observationOk = false; var tables = false;

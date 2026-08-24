@@ -578,6 +578,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _ = Task.Run(() =>
         {
             var result = session.Probe.CompleteSuspendResumeAfterResume();
+            if (result is null) return;
             session.LastResult = MapFanProbe(result.Succeeded ? FrontendFanProbeState.Completed : FrontendFanProbeState.Failed, result.Status, result.ReportPath);
         });
     }
