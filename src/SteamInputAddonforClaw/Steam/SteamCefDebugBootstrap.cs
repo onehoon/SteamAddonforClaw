@@ -1,5 +1,7 @@
 using Microsoft.Win32;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Install;
+using System.Text.Json;
 
 namespace SteamInputAddonforClaw.Steam;
 
@@ -75,6 +77,21 @@ internal static class SteamCefDebugBootstrap
                 return true;
             }
 
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(OwnershipPath)!);
+                File.WriteAllText(OwnershipPath, JsonSerializer.Serialize(new CefMarkerOwnership(normalizedDirectory)));
+            }
+            catch
+            {
+                try { File.Delete(markerPath); }
+                catch (Exception cleanupException)
+                {
+                    AppLog.Warn("QAM.Bootstrap", "CEF marker rollback after ownership persistence failure failed.", cleanupException);
+                }
+                throw;
+            }
+
             AppLog.Info(
                 "QAM.Bootstrap",
                 "Steam CEF remote-debugging marker created. Restart Steam once if it is already running.",
@@ -83,6 +100,12 @@ internal static class SteamCefDebugBootstrap
         }
         catch (Exception exception)
         {
+            try
+            {
+                var markerPath = Path.Combine(Path.GetFullPath(steamDirectory.Trim().Trim('\"')), MarkerFileName);
+                if (File.Exists(markerPath) && !File.Exists(OwnershipPath)) File.Delete(markerPath);
+            }
+            catch { }
             AppLog.Warn(
                 "QAM.Bootstrap",
                 "Steam CEF remote-debugging marker could not be prepared; Runtime remains available.",
@@ -91,4 +114,28 @@ internal static class SteamCefDebugBootstrap
             return false;
         }
     }
+
+    internal static bool RemoveOwnedMarker()
+    {
+        if (!File.Exists(OwnershipPath)) return true;
+        try
+        {
+            var ownership = JsonSerializer.Deserialize<CefMarkerOwnership>(File.ReadAllText(OwnershipPath));
+            if (ownership is not { SteamDirectory.Length: > 0 }) return false;
+            var markerPath = Path.Combine(ownership.SteamDirectory, MarkerFileName);
+            if (File.Exists(markerPath)) File.Delete(markerPath);
+            File.Delete(OwnershipPath);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Uninstall", "Owned Steam CEF marker cleanup failed; ownership evidence was preserved.", exception);
+            return false;
+        }
+    }
+
+    internal static Func<string> OwnershipPathProvider { get; set; } = static () => AddonDataPaths.CefMarkerOwnershipPath;
+    private static string OwnershipPath => OwnershipPathProvider();
+
+    private sealed record CefMarkerOwnership(string SteamDirectory);
 }

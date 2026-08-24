@@ -99,8 +99,8 @@ public sealed class MsiClawPhysicalInputStageTests
         using var sink = new MsiClawRumbleSink(stage, transport, new TestResolver());
         stage.PhysicalSessionStarted += sink.BeginPhysicalSession;
         var retirementReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        stage.PhysicalSessionRetiring += () => retirementReached.TrySetResult();
         stage.PhysicalSessionRetiring += sink.BeginPhysicalSessionRetirement;
+        stage.PhysicalSessionRetiring += () => retirementReached.TrySetResult();
         stage.PhysicalSessionRetired += sink.InvalidatePhysicalSession;
         // Rumble retirement is best-effort and must not be a prerequisite for stopping input.
         // Assert the ordering at the StopAsync boundary rather than racing the rollback

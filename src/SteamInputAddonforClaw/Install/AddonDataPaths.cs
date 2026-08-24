@@ -12,6 +12,8 @@ internal static class AddonDataPaths
 
     internal static string LogDirectory => ResolveLogDirectory(VelopackAppPaths.RootAppDirectory);
 
+    internal static string CefMarkerOwnershipPath => Path.Combine(RootDirectory, "steam-cef-marker.json");
+
     /// <summary>Path to the Device/Profile document (see SteamInputAddonforClaw.Profiles.ProfileStore) --
     /// a separate storage domain from <see cref="SettingsPath"/>, but the same canonical
     /// persistent <c>-Data</c> root.</summary>
@@ -29,6 +31,13 @@ internal static class AddonDataPaths
 
     internal static string ResolveLogDirectory(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "logs");
+
+    internal static void DeleteFullResetRoot(string rootAppDirectory)
+    {
+        var root = ResolveDataRoot(rootAppDirectory);
+        try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+        catch (Exception exception) { Diagnostics.AppLog.Warn("Uninstall", "Full reset data removal failed.", exception, ("Path", root)); }
+    }
 
     internal static string ResolveDataRoot(string rootAppDirectory)
     {

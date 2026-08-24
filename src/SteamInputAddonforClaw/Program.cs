@@ -16,10 +16,13 @@ public static class Program
     public static void Main(string[] args)
     {
         // Program is the sole owner of final log shutdown on every exit path.
+        var runtimeLifetimeEntered = false;
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
-            VelopackApp.Build().Run();
+            VelopackApp.Build()
+                .OnBeforeUninstallFastCallback(_ => UninstallBootstrap.RunFastCallbackOnly())
+                .Run();
             AddonLogRetention.PruneDirectory(AppLog.DirectoryPath);
             var persistedLogLevel = LogLevelBootstrap.Read(AddonDataPaths.SettingsPath);
             AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(persistedLogLevel);
@@ -68,14 +71,28 @@ public static class Program
 
             using (singleInstanceGate)
             {
-                var launchMode = args.Contains("--background", StringComparer.OrdinalIgnoreCase) ? "Background" : "Manual";
-                AppLog.Info("App", "Application launch header.", ("Version", typeof(Program).Assembly.GetName().Version), ("LaunchMode", launchMode), ("PID", Environment.ProcessId), ("ProcessArchitecture", RuntimeInformation.ProcessArchitecture), ("OSArchitecture", RuntimeInformation.OSArchitecture), ("OS", Environment.OSVersion), ("Runtime", Environment.Version), ("ProcessPath", Environment.ProcessPath), ("BaseDirectory", AppContext.BaseDirectory));
-                new RuntimeProcessApplication(args, singleInstanceGate).Run();
+                runtimeLifetimeEntered = true;
+                try
+                {
+                    var launchMode = args.Contains("--background", StringComparer.OrdinalIgnoreCase) ? "Background" : "Manual";
+                    AppLog.Info("App", "Application launch header.", ("Version", typeof(Program).Assembly.GetName().Version), ("LaunchMode", launchMode), ("PID", Environment.ProcessId), ("ProcessArchitecture", RuntimeInformation.ProcessArchitecture), ("OSArchitecture", RuntimeInformation.OSArchitecture), ("OS", Environment.OSVersion), ("Runtime", Environment.Version), ("ProcessPath", Environment.ProcessPath), ("BaseDirectory", AppContext.BaseDirectory));
+                    new RuntimeProcessApplication(args, singleInstanceGate).Run();
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Fatal("Startup", "Fatal runtime exception.", exception);
+                    throw;
+                }
+                finally
+                {
+                    AppLog.Shutdown();
+                }
             }
         }
         catch (Exception exception)
         {
-            AppLog.Fatal("Startup", "Fatal startup exception.", exception);
+            if (!runtimeLifetimeEntered)
+                AppLog.Fatal("Startup", "Fatal startup exception.", exception);
             throw;
         }
         finally
