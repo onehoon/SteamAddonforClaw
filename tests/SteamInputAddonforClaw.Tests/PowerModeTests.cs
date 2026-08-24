@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Profiles;
 using Xunit;
@@ -91,6 +92,25 @@ public sealed class PowerModeTests
     [InlineData(WindowsPowerMode.Balanced, "00000000-0000-0000-0000-000000000000")]
     [InlineData(WindowsPowerMode.BestPerformance, "ded574b5-45a0-4f42-8737-46345c09c238")]
     public void Maps_all_supported_modes_to_the_documented_guid(WindowsPowerMode mode, string raw) => Assert.Equal(Guid.Parse(raw), WindowsPowerModePolicy.ToGuid(mode));
+
+    [Fact]
+    public void Logs_native_read_and_write_failures_with_side_and_win32_error()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"power-mode-log-{Guid.NewGuid():N}");
+        AppLog.DirectoryOverride = directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+
+        WindowsPowerModePolicy.LogReadFailure("AC", 5);
+        WindowsPowerModePolicy.LogWriteFailure("DC", 87);
+        AppLog.DrainForTests();
+
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Power Mode AC read failed", log);
+        Assert.Contains("Side=", log); // side is part of the category-specific message
+        Assert.Contains("Win32Error=5", log);
+        Assert.Contains("Power Mode DC write failed", log);
+        Assert.Contains("Win32Error=87", log);
+    }
 }
 
 internal sealed class FakePowerModePolicy : IPowerModePolicy
