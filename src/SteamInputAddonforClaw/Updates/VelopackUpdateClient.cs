@@ -13,7 +13,7 @@ internal interface IVelopackUpdateOperations
 
 internal sealed class VelopackUpdateClient : IUpdateClient
 {
-    private const string RepositoryUrl = "https://github.com/onehoon/SteamInputAddonforClaw";
+    private const string RepositoryUrl = "https://github.com/onehoon/SteamAddonforClaw";
     private readonly IVelopackUpdateOperations _operations;
     private UpdateInfo? _availableUpdate;
 

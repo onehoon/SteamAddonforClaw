@@ -356,11 +356,11 @@ Steam Client 업데이트 후 Steam Quick Access의 Addon 탭이 보이지 않�
 
 ## 개발 문서
 
-기술 구현 메모, 프로토콜 조사, Lifecycle 설계, 공개 전 개발용 README는 GitHub 저장소의 [`docs/`](https://github.com/onehoon/SteamInputAddonforClaw/tree/main/docs)에서 확인할 수 있습니다.
+기술 구현 메모, 프로토콜 조사, Lifecycle 설계, 공개 전 개발용 README는 GitHub 저장소의 [`docs/`](https://github.com/onehoon/SteamAddonforClaw/tree/main/docs)에서 확인할 수 있습니다.
 
-이전에 사용하던 개발 중심 README는 [`docs/PRE_RELEASE_DEVELOPMENT_STATUS.md`](https://github.com/onehoon/SteamInputAddonforClaw/blob/main/docs/PRE_RELEASE_DEVELOPMENT_STATUS.md)에 보관되어 있습니다.
+이전에 사용하던 개발 중심 README는 [`docs/PRE_RELEASE_DEVELOPMENT_STATUS.md`](https://github.com/onehoon/SteamAddonforClaw/blob/main/docs/PRE_RELEASE_DEVELOPMENT_STATUS.md)에 보관되어 있습니다.
 
-현재 영문 사용자 문서는 저장소 루트의 [`README.md`](https://github.com/onehoon/SteamInputAddonforClaw/blob/main/README.md)에서 확인할 수 있습니다.
+현재 영문 사용자 문서는 저장소 루트의 [`README.md`](https://github.com/onehoon/SteamAddonforClaw/blob/main/README.md)에서 확인할 수 있습니다.
 
 ## 라이선스
 
