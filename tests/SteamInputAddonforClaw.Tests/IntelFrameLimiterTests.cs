@@ -151,6 +151,24 @@ public sealed class IntelFrameLimiterTests
         Assert.True(File.Exists(fixture.Marker));
     }
 
+    [Fact]
+    public void Marker_write_and_immediate_disable_failure_keeps_in_process_ownership_for_retry()
+    {
+        using var fixture = new FpsFixture();
+        fixture.Store.Save(new ProfileDocument { Games = new() { ["42"] = EnabledProfile(new GameFpsLimitSettings { Enabled = true, AcFps = 73, DcFps = 47 }) } });
+        Directory.CreateDirectory(fixture.Marker);
+        var fake = new FakeLimiter { DisableResult = false };
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+
+        Assert.False(runtime.ReconcileWithResult(42));
+        Assert.Equal(1, fake.DisableCalls);
+
+        fake.DisableResult = true;
+        runtime.Reconcile(0);
+
+        Assert.Equal(2, fake.DisableCalls);
+    }
+
     private static GameProfile EnabledProfile(GameFpsLimitSettings? fps = null) => new() { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new() { Ac = SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode.Enabled, Dc = SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode.Enabled }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } }, FpsLimit = fps } };
 
     private sealed class FpsFixture : IDisposable

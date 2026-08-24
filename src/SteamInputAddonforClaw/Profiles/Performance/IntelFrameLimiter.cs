@@ -55,15 +55,15 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
 {
     internal const int DefaultFps = 60;
     private readonly ProfileStore _store; private readonly ProfileMutationGate _gate; private readonly IIntelFrameLimiter _limiter; private readonly Func<FpsPowerSource?> _power; private readonly string _marker;
-    private Func<uint> _app = static () => 0; private bool _shutdown;
+    private Func<uint> _app = static () => 0; private bool _shutdown; private bool _ownsGlobalState;
     internal IntelFrameLimiterRuntime(ProfileStore store, ProfileMutationGate gate, IIntelFrameLimiter limiter, Func<FpsPowerSource?>? power = null, string? marker = null) { _store = store; _gate = gate; _limiter = limiter; _power = power ?? WindowsFpsPowerSource.Read; _marker = marker ?? AddonDataPaths.IntelFpsLimitOwnershipPath; }
     internal bool Available => _limiter.Available;
     internal string? UnavailableReason => _limiter.UnavailableReason;
     internal IntelFpsCapability? Capability => _limiter.Capability;
-    internal bool HasPendingOwnership => File.Exists(_marker);
+    internal bool HasPendingOwnership => _ownsGlobalState || File.Exists(_marker);
     internal void Initialize() => _limiter.Initialize();
     internal void SetActualAppIdSource(Func<uint> source) => _app = source;
-    internal void StartupRecover() { if (!File.Exists(_marker)) return; try { if (_limiter.Disable(_power(), 0)) File.Delete(_marker); else AppLog.Warn("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed; keeping marker."); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed.", e); } }
+    internal void StartupRecover() { if (!HasPendingOwnership) return; try { if (_limiter.Disable(_power(), 0)) { _ownsGlobalState = false; TryDeleteOwnershipMarker("StartupRecovery", 0); } else AppLog.Warn("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed; keeping marker."); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed.", e); } }
     internal void StartupReconcile(uint appId) => Reconcile(appId, "Startup");
     internal void Reconcile(uint appId, string reason = "Reconcile") { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace || (!_limiter.Available && !HasPendingOwnership)) return; ApplyPolicy(loaded.Document, appId, reason); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS reconcile failed.", e, ("RunningAppID", appId), ("Reason", reason)); } }
     internal bool ReconcileWithResult(uint appId) { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return false; return ApplyPolicy(loaded.Document, appId, "Mutation"); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS apply failed.", e, ("RunningAppID", appId)); return false; } }
@@ -75,29 +75,35 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
         var value = source == FpsPowerSource.AC ? target.AcFps : target.DcFps;
         if (value is < 40 or > 120) return FailClosedOwnedState(appId, reason, "InvalidTarget");
         if (!_limiter.Enable(value, source.Value, appId)) return FailClosedOwnedState(appId, reason, "EnableFailed");
+        _ownsGlobalState = true;
         try { Directory.CreateDirectory(Path.GetDirectoryName(_marker)!); File.WriteAllText(_marker, $"{{\"fps\":{value}}}"); return true; }
         catch (Exception e)
         {
             AppLog.Error("Profiles.IntelFps", "FPS ownership marker persistence failed; disabling immediately.", e);
             var disabled = _limiter.Disable(source, appId);
+            if (disabled) _ownsGlobalState = false;
             if (!disabled) AppLog.Warn("Profiles.IntelFps", "Immediate disable after ownership marker failure also failed; retaining any ownership evidence.", null, ("RunningAppID", appId));
             return false;
         }
     }
     private bool FailClosedOwnedState(uint appId, string reason, string cause)
     {
-        if (!File.Exists(_marker)) return false;
+        if (!_ownsGlobalState && !File.Exists(_marker)) return false;
         var disabled = _limiter.Disable(_power(), appId);
         if (!disabled)
             AppLog.Warn("Profiles.IntelFps", "FPS fail-close disable failed; keeping ownership marker.", null, ("Reason", reason), ("Cause", cause), ("RunningAppID", appId));
         else
+        {
+            _ownsGlobalState = false;
             TryDeleteOwnershipMarker(reason, appId);
+        }
         return false;
     }
     private bool Release(uint appId, string reason)
     {
-        if (!File.Exists(_marker)) return true;
+        if (!_ownsGlobalState && !File.Exists(_marker)) return true;
         if (!_limiter.Disable(_power(), appId)) return false;
+        _ownsGlobalState = false;
         return TryDeleteOwnershipMarker(reason, appId);
     }
     private bool TryDeleteOwnershipMarker(string reason, uint appId)
