@@ -39,7 +39,6 @@ public enum FrontendPrerequisiteSetupResultKind { Ready, Installed, RebootRequir
 public enum FrontendRoutingEligibilityReason
 {
     SteamInactive,
-    AddonOwnedOutputIdentityUncertain,
     RecoveryUnsafe,
     UnsupportedDevice,
     DeviceCompatibilityIndeterminate,
@@ -226,7 +225,6 @@ public sealed record FrontendStatusSnapshot(
     FrontendAddonOperationalStatus AddonStatus,
     string AddonReason,
     bool RecoverySafe,
-    bool AddonOwnedOutputIdentityUncertain,
     FrontendSetupStatus SetupStatus,
     string SetupReason,
     bool CanInstallRequiredComponents);

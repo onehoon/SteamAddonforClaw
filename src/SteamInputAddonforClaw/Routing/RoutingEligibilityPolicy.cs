@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Routing;
 internal enum RoutingDecisionKind { Passive, WaitingForSteam, Eligible, SetupRequired, Indeterminate }
 internal enum RoutingDecisionReason
 {
-    SteamInactive, AddonOwnedOutputIdentityUncertain,
+    SteamInactive,
     RecoveryUnsafe, UnsupportedDevice, DeviceCompatibilityIndeterminate, ControllerEnvironmentUnsupported, ControllerEnvironmentIndeterminate, PrerequisitesNotReady, Eligible
 }
 
@@ -18,8 +18,7 @@ internal sealed record RoutingPolicyInput(
     HardwareCompatibilityAssessment HardwareCompatibility,
     ControllerEnvironmentCompatibilityAssessment Compatibility,
     RuntimePrerequisiteAssessment Prerequisites,
-    bool RecoverySafe,
-    bool AddonOwnedOutputIdentityUncertain);
+    bool RecoverySafe);
 
 internal static class RoutingEligibilityPolicy
 {
@@ -27,12 +26,6 @@ internal static class RoutingEligibilityPolicy
     {
         if (!input.RecoverySafe)
             return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.RecoveryUnsafe);
-        // Addon-owned VIIPER output identity safety is independent of external-controller detection:
-        // if a previous virtual-output mutation left ownership unverifiable, routing must fail safe
-        // regardless of what other physical controllers are connected. See AddonOwnedVirtualDeviceTracker.
-        if (input.AddonOwnedOutputIdentityUncertain)
-            return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.AddonOwnedOutputIdentityUncertain);
-
         if (input.HardwareCompatibility.Status == HardwareCompatibilityStatus.Unsupported)
             return new(RoutingDecisionKind.Passive, RoutingDecisionReason.UnsupportedDevice);
         if (input.HardwareCompatibility.Status == HardwareCompatibilityStatus.Indeterminate)

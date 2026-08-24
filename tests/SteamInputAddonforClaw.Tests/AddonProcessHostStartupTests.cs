@@ -30,7 +30,7 @@ public sealed class AddonProcessHostStartupTests
         var host = new AddonProcessHost(null, (_, _) => runtimeComposition, testDataRoot,
             () => $"SteamInputAddonforClaw.Frontend.Test.{Guid.NewGuid():N}");
         host.TestOnly_SetStartupForInitialization(
-            new AddonStartupComposition(null!, null!, null!, null!, null!, null!, null!),
+            new AddonStartupComposition(null!, null!, null!, null!, null!, null!),
             new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate));
 
         var initialization = host.InitializeRuntimeAsync();

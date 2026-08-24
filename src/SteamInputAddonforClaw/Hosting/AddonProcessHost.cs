@@ -213,7 +213,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 startupComposition.HandheldDeviceAdapter,
                 startupComposition.DeviceRegistry,
                 startupComposition.ControllerEnvironmentAssessmentProvider,
-                startupComposition.AddonOwnedVirtualDeviceTracker,
                 startupComposition.RuntimeRecoveryManager,
                 startupComposition.StockCenterMBaseline,
                 startupResult.RecoverySafe,

@@ -124,7 +124,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
         new(new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Test")),
         new(false, 0),
         new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible),
-        new(AddonOperationalStatus.Ready, "Test"), true, false);
+        new(AddonOperationalStatus.Ready, "Test"), true);
 
     private sealed class QueueStatusProvider(IEnumerable<SystemStatusSnapshot> snapshots) : ISystemStatusProvider
     {

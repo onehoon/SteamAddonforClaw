@@ -585,7 +585,6 @@ public sealed class AddonRuntimeHostTests
         var runtime = AddonRoutingRuntime.Create(
             new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
             statusProvider,
-            new AddonOwnedVirtualDeviceTracker(),
             new RecoveryManager(new MemoryJournalStore()),
             powerGate,
             recoverySafetyState,
@@ -682,7 +681,7 @@ public sealed class AddonRuntimeHostTests
     }
 
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
-        new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true, false);
+        new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true);
 
     private static RoutingDecision WaitingForSteam() => new(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive);
 

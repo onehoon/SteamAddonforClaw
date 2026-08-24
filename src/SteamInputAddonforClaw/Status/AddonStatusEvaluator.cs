@@ -16,7 +16,6 @@ internal static class AddonStatusEvaluator
         },
         decision.Reason switch
         {
-            RoutingDecisionReason.AddonOwnedOutputIdentityUncertain => "Addon-owned virtual controller identity could not be verified.",
             RoutingDecisionReason.RecoveryUnsafe => "Recovery state is not safe.",
             RoutingDecisionReason.UnsupportedDevice => "This handheld model is not supported by the current version.",
             RoutingDecisionReason.DeviceCompatibilityIndeterminate => "Handheld model compatibility could not be verified.",

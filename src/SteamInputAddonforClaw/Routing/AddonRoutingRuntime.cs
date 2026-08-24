@@ -91,7 +91,6 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     internal static AddonRoutingRuntime? Create(
         IHandheldDeviceAdapter handheldDeviceAdapter,
         ISystemStatusProvider statusProvider,
-        AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker,
         RecoveryManager recovery,
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafety,
@@ -120,11 +119,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         var deckStage = new CanonicalSteamDeckOutputStage(
             viiperRuntime is { State: CanonicalViiperRuntimeState.Ready } ? () => new CanonicalSteamDeckSession(viiperRuntime) : () => new UnavailableCanonicalSteamDeckSession(),
             new WindowsControllerDeviceEnumerator(),
-            new SteamDeckVirtualDeviceIdentityResolver(new SteamDeckVirtualDeviceIdentityPolicy()),
-            addonOwnedVirtualDeviceTracker,
-            recovery,
-            () => safetySession?.CurrentRecoverySessionId,
-            new HidHideDriverClient(), handheldRoutingComposition.ControllerStateSource,
+            handheldRoutingComposition.ControllerStateSource,
             feedbackAuthority: feedbackAuthority, physicalRumbleSink: handheldRoutingComposition.PhysicalRumbleSink);
         IRoutingPipelineStage steamOutputStage = deckStage;
         var winGProtectionStage = new WinGProtectionRoutingStage(winGSuppressionGuard);

@@ -327,12 +327,12 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     private static SystemStatusSnapshot ClawFamilySnapshot(HardwareCompatibilityStatus status) => new(
         new("MSI", "Claw A1M", "Claw A1M board", []),
         new HardwareCompatibilityAssessment(status, new HandheldDeviceId("msi.claw"), null, "test"),
-        [], null!, null!, null!, null!, null!, true, false);
+        [], null!, null!, null!, null!, null!, true);
 
     private static SystemStatusSnapshot NonClawSnapshot() => new(
         new("Dell", "G Series", "Board", []),
         new HardwareCompatibilityAssessment(HardwareCompatibilityStatus.Unsupported, null, null, "No handheld-device adapter matched."),
-        [], null!, null!, null!, null!, null!, true, false);
+        [], null!, null!, null!, null!, null!, true);
 
     public void Dispose()
     {
