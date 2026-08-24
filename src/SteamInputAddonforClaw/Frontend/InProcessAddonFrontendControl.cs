@@ -522,6 +522,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0) return;
         if (_runtime is not null) _runtime.PowerResumeObserved -= OnPowerResumeObserved;
+        FanProbeSession? fanProbe;
+        lock (_fanProbeGate) fanProbe = _fanProbe;
+        if (fanProbe is not null)
+        {
+            try
+            {
+                var cleanup = fanProbe.Probe.CancelSuspendResumeIfArmed();
+                if (cleanup is { Succeeded: false }) AppLog.Warn("MsiFanProbe", "Armed fan probe shutdown hand-back failed.");
+            }
+            catch (Exception exception) { AppLog.Warn("MsiFanProbe", "Armed fan probe shutdown cleanup failed.", exception); }
+        }
         Feedback.VibrationTestSessionWriter? session;
         lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
         if (session is not null)

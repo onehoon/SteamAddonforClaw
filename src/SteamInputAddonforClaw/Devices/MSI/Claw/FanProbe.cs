@@ -102,10 +102,10 @@ internal sealed class MsiFanHardwareProbe
     internal FanProbeResult AutomaticTest(string device, string board, string firmware) => Run(FanProbeOperation.AutomaticTest, device, board, firmware, WriteAutomaticTest);
     internal FanProbeResult RestoreAuto(string device, string board, string firmware)
     {
-        bool armed; lock (_gate) armed = _suspendArmed;
-        if (armed) return CancelSuspendResume();
+        if (IsSuspendResumeArmed()) return CancelSuspendResume();
         return Run(FanProbeOperation.RestoreAuto, device, board, firmware, WriteRestore);
     }
+    internal FanProbeResult? CancelSuspendResumeIfArmed() => IsSuspendResumeArmed() ? CancelSuspendResume() : null;
     internal FanProbeResult PhysicalResponse(string device, string board, string firmware) => Run(FanProbeOperation.PhysicalResponse, device, board, firmware, WritePhysicalResponse);
     internal FanProbeResult ArmSuspendResume(string device, string board, string firmware) => Run(FanProbeOperation.ArmSuspendResume, device, board, firmware, WriteArmSuspendResume);
     internal FanProbeResult? CompleteSuspendResumeAfterResume()
@@ -167,6 +167,7 @@ internal sealed class MsiFanHardwareProbe
         lock (_gate) { _running = false; _armedReport = null; _armedPath = null; _armedBoard = null; }
         return new(true, tables && auto, tables && auto ? "PASS" : "FAILED", path, model, board);
     }
+    private bool IsSuspendResumeArmed() { lock (_gate) return _suspendArmed; }
     private bool WriteRestore(StringBuilder report, FanProbeModel model) => RestoreFirmwareAuto(report);
 
     private FanProbeResult Run(FanProbeOperation operation, string device, string board, string firmware, Func<StringBuilder, FanProbeModel, bool> action)

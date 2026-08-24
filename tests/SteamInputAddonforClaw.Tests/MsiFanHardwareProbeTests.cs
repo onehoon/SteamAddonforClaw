@@ -197,6 +197,26 @@ public sealed class MsiFanHardwareProbeTests
         Assert.True(result.Succeeded); Assert.Contains("CANCEL BEFORE SUSPEND", File.ReadAllText(result.ReportPath!));
     }
 
+    [Fact]
+    public void Armed_probe_can_be_cancelled_idempotently_for_process_shutdown()
+    {
+        var t = new FakeFanTransport();
+        var probe = NewProbe(t);
+        Assert.Equal("ARMED", probe.ArmSuspendResume("EX", "MS-1T91", "test").Status);
+        var cleanup = probe.CancelSuspendResumeIfArmed();
+        Assert.NotNull(cleanup); Assert.True(cleanup!.Succeeded);
+        Assert.Null(probe.CancelSuspendResumeIfArmed());
+        Assert.Contains(t.Writes, x => x.Block == 212 && (x.Payload[0] & 0x80) == 0);
+    }
+
+    [Fact]
+    public void Unarmed_shutdown_cleanup_does_not_touch_fan_state()
+    {
+        var t = new FakeFanTransport();
+        Assert.Null(NewProbe(t).CancelSuspendResumeIfArmed());
+        Assert.Empty(t.Writes);
+    }
+
     [Theory]
     [InlineData(0x80, "CUSTOM_PERSISTED")]
     [InlineData(0x00, "CURVE_PERSISTED_OWNERSHIP_LOST")]
