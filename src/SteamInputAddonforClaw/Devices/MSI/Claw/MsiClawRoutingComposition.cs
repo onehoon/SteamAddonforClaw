@@ -37,6 +37,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 {
     internal MsiClawNativeModeSessionCoordinator NativeModeSession { get; }
     internal MsiClawNativeModeStage NativeModeStage { get; }
+    internal MsiClawHidHideBaselineStage HidHideBaselineStage { get; }
     internal MsiClawInputSource PhysicalInputSource { get; }
     internal MsiClawPhysicalInputStage PhysicalInputStage { get; }
     internal MsiClawPhysicalIsolationStage PhysicalIsolationStage { get; }
@@ -168,8 +169,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         IOem1GestureDelay? testOnlyOem1GestureDelay = null,
         IOem1GestureClock? testOnlyOem1GestureClock = null,
         Action? testOnlyOem1LaunchBigPicture = null,
-        IMsiEventSource? testOnlyWingEventSource = null,
-        IReadOnlyCollection<string>? trustedHidHideApplicationPaths = null)
+        IMsiEventSource? testOnlyWingEventSource = null)
     {
         _hardwareSupported = hardwareSupported;
         _testOnlyOem1EventSource = testOnlyOem1EventSource;
@@ -191,13 +191,17 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             () => new VorticeDirectInputDeviceEnumerator(IntPtr.Zero),
             PhysicalInputSource);
 
+        var hidHideClient = new HidHideDriverClient();
+        HidHideBaselineStage = new MsiClawHidHideBaselineStage(
+            hidHideClient,
+            Environment.ProcessPath ?? throw new InvalidOperationException("The Addon executable path is unavailable."));
+
         PhysicalIsolationStage = new MsiClawPhysicalIsolationStage(
             PhysicalInputStage,
             NativeModeSession,
             recovery,
-            new HidHideDriverClient(),
-            () => Environment.ProcessPath,
-            trustedHidHideApplicationPaths);
+            hidHideClient,
+            () => Environment.ProcessPath);
 
         PhysicalRumbleSink = new MsiClawRumbleSink(PhysicalInputStage, new WindowsMsiClawRumbleTransport(),
             rumbleEndpointResolverFactory?.Invoke() ?? new MsiClawRumbleEndpointResolver());
@@ -278,7 +282,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         if (startCenterMOem1LifecycleRuntime)
             CenterMOem1Runtime.Start();
 
-        _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];
+        _stages = [HidHideBaselineStage, NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];
         _sessionBoundaryParticipants = [NativeModeSession];
     }
 

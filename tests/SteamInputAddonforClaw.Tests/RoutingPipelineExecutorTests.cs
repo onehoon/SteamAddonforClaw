@@ -9,8 +9,8 @@ public sealed class RoutingPipelineExecutorTests
     [Fact]
     public void StageOrder_IsExplicitAndDependencyAwareForRollback()
     {
-        Assert.Equal([RoutingStageKind.WinGProtection, RoutingStageKind.CenterMGuard, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalInput, RoutingStageKind.PhysicalIsolation, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.SteamOutput, RoutingStageKind.XboxOutput, RoutingStageKind.GameBarRouting], RoutingPipelineStageOrder.Forward);
-        Assert.Equal([RoutingStageKind.GameBarRouting, RoutingStageKind.XboxOutput, RoutingStageKind.SteamOutput, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalIsolation, RoutingStageKind.CenterMGuard, RoutingStageKind.WinGProtection], RoutingPipelineStageOrder.Rollback);
+        Assert.Equal([RoutingStageKind.WinGProtection, RoutingStageKind.HidHideBaseline, RoutingStageKind.CenterMGuard, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalInput, RoutingStageKind.PhysicalIsolation, RoutingStageKind.SteamOutput, RoutingStageKind.XboxOutput, RoutingStageKind.GameBarRouting], RoutingPipelineStageOrder.Forward);
+        Assert.Equal([RoutingStageKind.GameBarRouting, RoutingStageKind.XboxOutput, RoutingStageKind.SteamOutput, RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalIsolation, RoutingStageKind.CenterMGuard, RoutingStageKind.HidHideBaseline, RoutingStageKind.WinGProtection], RoutingPipelineStageOrder.Rollback);
     }
 
     [Fact]
@@ -132,16 +132,16 @@ public sealed class RoutingPipelineExecutorTests
     }
 
     [Fact]
-    public async Task ThirdPartyIsolationRollbackFailure_ContinuesWithIndependentTeardown()
+    public async Task HidHideBaselineRollbackFailure_ContinuesWithIndependentTeardown()
     {
         var native = new FakeStage(RoutingStageKind.NativeMode);
-        var thirdParty = new FakeStage(RoutingStageKind.ThirdPartyIsolation) { RollbackResult = RoutingStageOperationResult.Failure("rollback") };
-        var result = await new RoutingPipelineExecutor([native, thirdParty]).RollbackAsync(
+        var baseline = new FakeStage(RoutingStageKind.HidHideBaseline) { RollbackResult = RoutingStageOperationResult.Failure("rollback") };
+        var result = await new RoutingPipelineExecutor([native, baseline]).RollbackAsync(
             new(RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled),
             CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(["Rollback"], thirdParty.Calls);
+        Assert.Equal(["Rollback"], baseline.Calls);
         Assert.Equal(["Rollback"], native.Calls);
     }
 

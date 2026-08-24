@@ -41,21 +41,42 @@ public sealed partial class ControllerPage : UserControl
     private async void SteamInputRoutingToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
         if (_isLoading || _frontend is null) return;
+        if (SteamInputRoutingToggleSwitch.IsOn && !_lastKnownSteamInputRoutingEnabled)
+        {
+            if (!await ConfirmRoutingEnableAsync())
+            {
+                SetRouteToggle(false);
+                return;
+            }
+        }
+
         try
         {
             var result = await _frontend.SetSteamInputRoutingEnabledAsync(SteamInputRoutingToggleSwitch.IsOn);
             _lastKnownSteamInputRoutingEnabled = result.Settings.SteamInputRoutingEnabled;
             SetRouteToggle(_lastKnownSteamInputRoutingEnabled);
-            if (result.Outcome == FrontendSteamInputRoutingMutationOutcome.HidHideConflict)
-                await ShowRoutingErrorAsync("HidHide Conflict Detected", "Steam Input routing requires exclusive use of HidHide.\n\nAnother application's HidHide configuration was detected, so routing cannot be enabled.\n\nTo use Steam Input routing, uninstall the other controller/remapping application and remove its HidHide configuration.");
-            else if (result.Outcome == FrontendSteamInputRoutingMutationOutcome.HidHideInspectionUnavailable)
-                await ShowRoutingErrorAsync("HidHide Check Failed", "Steam Input routing could not verify the current HidHide configuration, so routing was not enabled.");
         }
         catch (Exception exception)
         {
             AppLog.Warn("Controller", "Steam Input routing update failed.", exception);
             SetRouteToggle(_lastKnownSteamInputRoutingEnabled);
         }
+    }
+
+    private async Task<bool> ConfirmRoutingEnableAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Enable Steam Input Routing?",
+            Content = "This feature manages HidHide configuration for Steam Input routing.\n\n" +
+                      "If another application also uses HidHide, its controller hiding or remapping features may not work correctly while this feature is enabled.",
+            PrimaryButtonText = "Enable",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
     private void SetRouteToggle(bool value)
@@ -65,15 +86,4 @@ public sealed partial class ControllerPage : UserControl
         _isLoading = false;
     }
 
-    private async Task ShowRoutingErrorAsync(string title, string message)
-    {
-        var dialog = new ContentDialog
-        {
-            Title = title,
-            Content = message,
-            CloseButtonText = "OK",
-            XamlRoot = XamlRoot
-        };
-        await dialog.ShowAsync();
-    }
 }

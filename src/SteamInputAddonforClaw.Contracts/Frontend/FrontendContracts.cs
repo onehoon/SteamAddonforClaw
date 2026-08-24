@@ -141,7 +141,7 @@ public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, Front
     public bool DeveloperMenuEnabled { get; init; }
     public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
 }
-public enum FrontendSteamInputRoutingMutationOutcome { Succeeded, HidHideConflict, HidHideInspectionUnavailable }
+public enum FrontendSteamInputRoutingMutationOutcome { Succeeded }
 public sealed record FrontendSteamInputRoutingMutationResult(FrontendSteamInputRoutingMutationOutcome Outcome, FrontendSettingsSnapshot Settings)
 {
     public bool Succeeded => Outcome == FrontendSteamInputRoutingMutationOutcome.Succeeded;

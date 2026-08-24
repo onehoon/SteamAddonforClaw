@@ -12,7 +12,7 @@ public sealed class RoutingPipelinePlanTests
             RoutingStageKind.NativeMode,
             RoutingStageKind.PhysicalInput,
             RoutingStageKind.PhysicalIsolation,
-            RoutingStageKind.ThirdPartyIsolation,
+            RoutingStageKind.HidHideBaseline,
             RoutingStageKind.SteamOutput,
             RoutingStageKind.XboxOutput,
             RoutingStageKind.GameBarRouting,
@@ -35,7 +35,7 @@ public sealed class RoutingPipelinePlanTests
         Assert.Equal(RoutingStageMode.Enabled, plan.NativeMode);
         Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalInput);
         Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalIsolation);
-        Assert.Equal(RoutingStageMode.Disabled, plan.ThirdPartyIsolation);
+        Assert.Equal(RoutingStageMode.Enabled, plan.HidHideBaseline);
         Assert.Equal(RoutingStageMode.Enabled, plan.SteamOutput);
         Assert.Equal(RoutingStageMode.Disabled, plan.XboxOutput);
         Assert.Equal(RoutingStageMode.Disabled, plan.GameBarRouting);
@@ -125,7 +125,7 @@ public sealed class RoutingPipelinePlanTests
         Assert.Equal(RoutingStageMode.Enabled, plan.GetMode(RoutingStageKind.NativeMode));
         Assert.Equal(RoutingStageMode.ObserveOnly, plan.GetMode(RoutingStageKind.PhysicalInput));
         Assert.Equal(RoutingStageMode.Disabled, plan.GetMode(RoutingStageKind.PhysicalIsolation));
-        Assert.Equal(RoutingStageMode.ObserveOnly, plan.GetMode(RoutingStageKind.ThirdPartyIsolation));
+        Assert.Equal(RoutingStageMode.ObserveOnly, plan.GetMode(RoutingStageKind.HidHideBaseline));
         Assert.Equal(RoutingStageMode.Enabled, plan.GetMode(RoutingStageKind.SteamOutput));
         Assert.Equal(RoutingStageMode.Disabled, plan.GetMode(RoutingStageKind.XboxOutput));
         Assert.Equal(RoutingStageMode.Enabled, plan.GetMode(RoutingStageKind.GameBarRouting));

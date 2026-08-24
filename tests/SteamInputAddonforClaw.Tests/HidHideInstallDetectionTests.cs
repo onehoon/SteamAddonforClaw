@@ -157,7 +157,7 @@ public sealed class HidHideInstallDetectionTests
     {
         const string installLocation = "C:\\Program Files\\Nefarius Software Solutions\\HidHide";
         const string officialPath = installLocation + "\\x64\\HidHideClient.exe";
-        var resolver = new HidHideClientPathResolver(
+        var resolver = new HidHideTrustedApplicationPathResolver(
             new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.", installLocation)], []),
             path => string.Equals(path, officialPath, StringComparison.OrdinalIgnoreCase));
 
@@ -167,9 +167,40 @@ public sealed class HidHideInstallDetectionTests
     }
 
     [Fact]
+    public void Official_path_resolver_returns_client_and_cli_from_package_layouts()
+    {
+        const string installLocation = "C:\\Program Files\\Nefarius Software Solutions\\HidHide";
+        const string clientPath = installLocation + "\\x64\\HidHideClient.exe";
+        const string cliPath = installLocation + "\\HidHideCLI.exe";
+        var resolver = new HidHideTrustedApplicationPathResolver(
+            new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.", installLocation)], []),
+            path => string.Equals(path, clientPath, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(path, cliPath, StringComparison.OrdinalIgnoreCase));
+
+        var result = resolver.Resolve();
+
+        Assert.Equal([clientPath, cliPath], result);
+    }
+
+    [Fact]
+    public void Official_path_resolver_does_not_trust_same_named_files_outside_package_location()
+    {
+        const string installLocation = "C:\\Program Files\\Nefarius Software Solutions\\HidHide";
+        var resolver = new HidHideTrustedApplicationPathResolver(
+            new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.", installLocation)], []),
+            _ => true);
+
+        var result = resolver.Resolve();
+
+        Assert.DoesNotContain(result, path => path.StartsWith("C:\\Temp", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result, path => path.EndsWith("\\HidHideClient.exe", StringComparison.OrdinalIgnoreCase) &&
+            path.Contains("Temp", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Official_client_path_resolution_failure_returns_no_trusted_path()
     {
-        var resolver = new HidHideClientPathResolver(
+        var resolver = new HidHideTrustedApplicationPathResolver(
             new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.", "C:\\Program Files\\HidHide")], []),
             _ => false);
 

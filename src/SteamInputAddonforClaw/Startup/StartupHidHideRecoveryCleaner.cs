@@ -58,24 +58,17 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
 
         if (originalActive == false && inspection.IsActive)
         {
-            if (!IsHiddenSubsetOfOwned(inspection.HiddenDeviceEntries, hiddenEntries))
-            {
-                reason = "Currently hidden devices are not fully owned by the recovery journal; global HidHide state cannot be safely restored.";
-                LogFailure(journal, reason);
-                return false;
-            }
-
             // Re-inspect immediately before the global mutation to guard against another
             // process changing HidHide between the admission check above and this call.
             var reinspection = hidHideClient.Inspect();
-            if (!IsSafeToMutate(reinspection) || !reinspection.IsActive || !IsHiddenSubsetOfOwned(reinspection.HiddenDeviceEntries, hiddenEntries))
+            if (!IsSafeToMutate(reinspection))
             {
                 reason = "HidHide configuration changed before the global active-state restore could proceed safely.";
                 LogFailure(journal, reason);
                 return false;
             }
 
-            if (!hidHideClient.SetActive(false))
+            if (reinspection.IsActive && !hidHideClient.SetActive(false))
             {
                 reason = "HidHide global active-state restore failed.";
                 LogFailure(journal, reason);
@@ -168,9 +161,6 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
 
     private static bool IsSafeToMutate(HidHideInspection inspection) =>
         inspection.IsConfigurationReadable && inspection.Status != HidHideInspectionStatus.InverseWhitelist;
-
-    private static bool IsHiddenSubsetOfOwned(IReadOnlyList<string>? current, IReadOnlyList<string> owned) =>
-        (current ?? []).All(entry => owned.Contains(entry, StringComparer.OrdinalIgnoreCase));
 
     private static bool StillPresent(IReadOnlyList<string>? current, IReadOnlyList<string> owned) =>
         owned.Any(entry => (current ?? []).Contains(entry, StringComparer.OrdinalIgnoreCase));
