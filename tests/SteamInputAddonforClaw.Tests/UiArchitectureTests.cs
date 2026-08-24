@@ -86,6 +86,19 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Power_mode_ui_failures_clear_stale_state()
+    {
+        var root = FindRepositoryRoot();
+        var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var profilePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+
+        Assert.Contains("RenderPowerMode(FrontendPowerModeSnapshot.Unavailable)", devicePage, StringComparison.Ordinal);
+        Assert.Contains("PowerModeInfoBar.Message = \"Power Mode settings could not be loaded.\"", devicePage, StringComparison.Ordinal);
+        Assert.Contains("PowerModeAcComboBox.SelectedItem = null", profilePage, StringComparison.Ordinal);
+        Assert.Contains("PowerModeDcComboBox.SelectedItem = null", profilePage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Developer_cards_have_unique_gyro_icon_and_requested_order()
     {
         var root = FindRepositoryRoot();

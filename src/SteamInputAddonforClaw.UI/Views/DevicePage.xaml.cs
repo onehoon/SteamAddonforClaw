@@ -91,7 +91,14 @@ public sealed partial class DevicePage : UserControl
             TdpInfoBar.IsOpen = true;
         }
         try { RenderPowerMode(await _frontend.CapturePowerModeAsync()); }
-        catch (Exception exception) { AppLog.Warn("Device", "Power Mode snapshot capture failed.", exception); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "Power Mode snapshot capture failed.", exception);
+            RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);
+            PowerModeInfoBar.Severity = InfoBarSeverity.Error;
+            PowerModeInfoBar.Message = "Power Mode settings could not be loaded.";
+            PowerModeInfoBar.IsOpen = true;
+        }
     }
 
     private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];
