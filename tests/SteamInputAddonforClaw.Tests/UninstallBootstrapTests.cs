@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
+using SteamInputAddonforClaw.Steam;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -20,14 +21,17 @@ public sealed class UninstallBootstrapTests
         Directory.CreateDirectory(root);
         var evidencePath = Path.Combine(root, "steam-cef-marker.json");
         File.WriteAllText(evidencePath, "owned-evidence");
+        var previousOwnershipPathProvider = SteamCefDebugBootstrap.OwnershipPathProvider;
 
         try
         {
+            SteamCefDebugBootstrap.OwnershipPathProvider = () => evidencePath;
             UninstallBootstrap.RunBoundedLocalCleanup(runtimeReleased: false);
             Assert.True(File.Exists(evidencePath));
         }
         finally
         {
+            SteamCefDebugBootstrap.OwnershipPathProvider = previousOwnershipPathProvider;
             Directory.Delete(root, recursive: true);
         }
     }
