@@ -23,6 +23,7 @@ public sealed partial class DevicePage : UserControl
     private bool _suppressSelectionEvents;
     private bool _suppressTdpEvents;
     private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
+    private FrontendPowerModeSnapshot _powerModeSnapshot = FrontendPowerModeSnapshot.Unavailable;
     private int? _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft;
     private CancellationTokenSource? _tdpEditDebounce;
     private long _tdpEditGeneration;
@@ -44,6 +45,8 @@ public sealed partial class DevicePage : UserControl
         InitializeComponent();
         CpuBoostAcComboBox.ItemsSource = Modes;
         CpuBoostDcComboBox.ItemsSource = Modes;
+        PowerModeAcComboBox.ItemsSource = PowerModes;
+        PowerModeDcComboBox.ItemsSource = PowerModes;
     }
 
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
@@ -86,6 +89,49 @@ public sealed partial class DevicePage : UserControl
             TdpInfoBar.Severity = InfoBarSeverity.Error;
             TdpInfoBar.Message = "TDP settings could not be loaded.";
             TdpInfoBar.IsOpen = true;
+        }
+        try { RenderPowerMode(await _frontend.CapturePowerModeAsync()); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "Power Mode snapshot capture failed.", exception);
+            RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);
+            PowerModeInfoBar.Severity = InfoBarSeverity.Error;
+            PowerModeInfoBar.Message = "Power Mode settings could not be loaded.";
+            PowerModeInfoBar.IsOpen = true;
+        }
+    }
+
+    private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];
+    private void RenderPowerMode(FrontendPowerModeSnapshot snapshot)
+    {
+        _powerModeSnapshot = snapshot; _suppressSelectionEvents = true;
+        try { PowerModeEnabledToggleSwitch.IsOn = snapshot.Enabled; PowerModeAcComboBox.SelectedItem = PowerModeItemFor(snapshot.Ac); PowerModeDcComboBox.SelectedItem = PowerModeItemFor(snapshot.Dc); }
+        finally { _suppressSelectionEvents = false; }
+        var editable = snapshot.PersistenceWritable && snapshot.Ac.Desired is not null && snapshot.Dc.Desired is not null;
+        PowerModeEnabledToggleSwitch.IsEnabled = editable; PowerModeAcComboBox.IsEnabled = editable && snapshot.Enabled; PowerModeDcComboBox.IsEnabled = editable && snapshot.Enabled;
+        PowerModeInfoBar.IsOpen = !editable || snapshot.LastFailure is not null;
+        PowerModeInfoBar.Message = snapshot.LastFailure ?? (editable ? "Power Mode settings are unavailable." : "Windows Power Mode could not be initialized.");
+    }
+    private static PowerModeItem? PowerModeItemFor(FrontendPowerModeSideSnapshot side) => PowerModes.FirstOrDefault(x => x.Mode == (side.Desired ?? side.Current));
+    private async void PowerModeAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (_suppressSelectionEvents || _frontend is null || PowerModeAcComboBox.SelectedItem is not PowerModeItem item) return; await RunPowerModeMutationAsync(() => _frontend.SetDevicePowerModeAcAsync(item.Mode)); }
+    private async void PowerModeDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (_suppressSelectionEvents || _frontend is null || PowerModeDcComboBox.SelectedItem is not PowerModeItem item) return; await RunPowerModeMutationAsync(() => _frontend.SetDevicePowerModeDcAsync(item.Mode)); }
+    private async void PowerModeEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e) { if (_suppressSelectionEvents || _frontend is null) return; await RunPowerModeMutationAsync(() => _frontend.SetDevicePowerModeEnabledAsync(PowerModeEnabledToggleSwitch.IsOn)); }
+    private async Task RunPowerModeMutationAsync(Func<Task<FrontendPowerModeMutationResult>> mutation)
+    {
+        try
+        {
+            var result = await mutation(); RenderPowerMode(result.Snapshot);
+            if (!result.Succeeded)
+            {
+                PowerModeInfoBar.Severity = result.Outcome == FrontendPowerModeMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning;
+                PowerModeInfoBar.Message = result.FailureMessage ?? "Power Mode could not be updated."; PowerModeInfoBar.IsOpen = true;
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "Power Mode mutation failed.", exception);
+            PowerModeInfoBar.Severity = InfoBarSeverity.Error; PowerModeInfoBar.Message = "Power Mode could not be updated because the Runtime connection was interrupted."; PowerModeInfoBar.IsOpen = true;
+            await RefreshAsync();
         }
     }
 
@@ -407,4 +453,5 @@ public sealed partial class DevicePage : UserControl
     }
 
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
+    private sealed record PowerModeItem(WindowsPowerMode Mode, string Label);
 }

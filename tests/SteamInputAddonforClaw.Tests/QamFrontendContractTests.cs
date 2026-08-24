@@ -349,10 +349,17 @@ public sealed class QamFrontendContractTests
         Assert.Contains("disabled: !modeWritable", source);
         Assert.DoesNotContain("value: value == null ? 0 : value", source);
         Assert.Contains("const failClosed", source);
-        Assert.Contains("setStatus(null); setCpu(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null", source);
+        Assert.Contains("setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null", source);
         Assert.Contains("cpu.lastFailure", source);
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
         Assert.Contains("QAM required native controls/layout unavailable", source);
+        Assert.Contains("const powerWritable", source);
+        Assert.Contains("const powerInitialized = powerMode?.ac?.desired != null && powerMode?.dc?.desired != null;", source);
+        Assert.Contains("powerInitialized && !status?.steam?.appId", source);
+        Assert.Contains("const runPowerMutation", source);
+        Assert.Contains("Power Mode update failed", source);
+        Assert.Contains("Best power efficiency", source);
+        Assert.Contains("Best performance", source);
     }
 
     [Fact]
@@ -428,6 +435,42 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("type: \"checkbox\"", source);
         Assert.DoesNotContain("type: \"range\"", source);
+    }
+
+    [Fact]
+    public void Qam_active_profile_renders_power_mode_in_its_own_section()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var profileStart = source.IndexOf("const profileCpuControls", StringComparison.Ordinal);
+        var tdpSection = source.IndexOf("key: \"profile-tdp-section\"", profileStart, StringComparison.Ordinal);
+        Assert.True(profileStart >= 0 && tdpSection > profileStart);
+        var profileLayout = source[profileStart..tdpSection];
+
+        Assert.Contains("const profilePowerControls", profileLayout);
+        Assert.Contains("key: \"profile-power-section\", title: \"Windows Power Mode\"", profileLayout);
+        Assert.Contains("key: \"profile-cpu-section\", title: \"CPU Boost\"", profileLayout);
+        var cpuSection = profileLayout.IndexOf("key: \"profile-cpu-section\"", StringComparison.Ordinal);
+        var powerSection = profileLayout.IndexOf("key: \"profile-power-section\"", StringComparison.Ordinal);
+        var cpuLayout = profileLayout[cpuSection..powerSection];
+        Assert.Contains("profileCpuControls.filter", cpuLayout);
+        Assert.DoesNotContain("profilePowerControls.filter", cpuLayout);
+    }
+
+    [Fact]
+    public void Qam_power_mutation_refresh_preserves_explicit_failure()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var mutationStart = source.IndexOf("const runPowerMutation", StringComparison.Ordinal);
+        var mutation = source[mutationStart..source.IndexOf("React.useEffect", mutationStart, StringComparison.Ordinal)];
+
+        Assert.Contains("const failure = !result?.succeeded", mutation);
+        Assert.Contains("await refresh();", mutation);
+        Assert.Contains("deferredInvalidationRef.current = false;", mutation);
+        Assert.Contains("if (failure) setError(failure);", mutation);
+        Assert.True(mutation.IndexOf("await refresh();", StringComparison.Ordinal)
+            < mutation.IndexOf("if (failure) setError(failure);", StringComparison.Ordinal));
     }
 
     [Fact]

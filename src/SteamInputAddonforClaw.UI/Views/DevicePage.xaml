@@ -40,6 +40,15 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
+            <InfoBar x:Name="PowerModeInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+            <ctcontrols:SettingsExpander Header="Windows Power Mode" Description="Configured Windows 11 power mode for each power rail.">
+                <ToggleSwitch x:Name="PowerModeEnabledToggleSwitch" Toggled="PowerModeEnabledToggleSwitch_Toggled" />
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard Header="Plugged in"><ComboBox x:Name="PowerModeAcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeAcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard Header="On battery"><ComboBox x:Name="PowerModeDcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeDcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
+
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control"
                 Description="Configure processor power limits for plugged-in and battery operation."

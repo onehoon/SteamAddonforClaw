@@ -511,6 +511,7 @@
     function CpuBoostPanel() {
       const [status, setStatus] = React.useState(null);
       const [cpu, setCpu] = React.useState(null);
+      const [powerMode, setPowerMode] = React.useState(null);
       const [tdp, setTdp] = React.useState(null);
       const [profile, setProfile] = React.useState(null);
       const [profileTdpDraft, setProfileTdpDraft] = React.useState(null);
@@ -535,6 +536,10 @@
       const deferredInvalidationRef = React.useRef(false);
       const modeEditGeneration = React.useRef({ ac: 0, dc: 0 });
       const modeMutationInFlight = React.useRef({ ac: false, dc: false });
+      const powerModeLabels = ["Best power efficiency", "Balanced", "Best performance"];
+      const powerModeNames = ["BestPowerEfficiency", "Balanced", "BestPerformance"];
+      const powerModeIndex = value => typeof value === "number" ? value : powerModeNames.indexOf(value);
+      const powerModeValue = value => Number(value);
 
       const failClosed = React.useCallback(message => {
         for (const key of ["ac", "dc"]) {
@@ -548,7 +553,7 @@
         profileTdpTimer.current = null;
         profileTdpGeneration.current = 0;
         activeProfileAppIdRef.current = 0;
-        setStatus(null); setCpu(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
+          setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
       }, []);
 
       const refresh = React.useCallback(async () => {
@@ -568,13 +573,14 @@
           activeProfileAppIdRef.current = nextAppId;
           const activeGame = nextAppId > 0;
           const nextCpu = activeGame ? null : await request("captureCpuBoost");
+          const nextPowerMode = activeGame ? null : await request("capturePowerMode");
           const nextTdp = activeGame ? null : await request("captureTdp");
           const nextDraft = nextTdp?.configuration ? {
             enabled: nextTdp.configuration.enabled,
             ac: { ...nextTdp.configuration.ac },
             dc: { ...nextTdp.configuration.dc },
           } : null;
-          setStatus(nextStatus); setCpu(nextCpu); setTdp(nextTdp); setProfile(nextProfile);
+          setStatus(nextStatus); setCpu(nextCpu); setPowerMode(nextPowerMode); setTdp(nextTdp); setProfile(nextProfile);
           if (nextProfile?.tdp && profileTdpGeneration.current === 0) {
             const nextProfileDraft = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
             profileTdpDraftRef.current = nextProfileDraft;
@@ -607,6 +613,24 @@
           void refresh();
         }
       }, [cancelModeTimers, refresh]);
+      const runPowerMutation = React.useCallback(async (method, payload) => {
+        if (!state.installed) return;
+        try {
+          beginMutation();
+          setError(null);
+          const result = await request(method, payload);
+          const failure = !result?.succeeded
+            ? (result?.failureMessage || "Power Mode update failed")
+            : null;
+          await refresh();
+          // The explicit refresh consumed the mutation's invalidation. Preserve
+          // the operation failure after refreshing Runtime authority.
+          deferredInvalidationRef.current = false;
+          if (failure) setError(failure);
+        }
+        catch (_) { failClosed("Power Mode update failed"); }
+        finally { endMutation(); }
+      }, [beginMutation, endMutation, failClosed, refresh]);
 
       React.useEffect(() => { void refresh(); return cancelModeTimers; }, [refresh, cancelModeTimers]);
 
@@ -767,6 +791,12 @@
         controls.push({ key: "cpu-on-battery", node: slider("On battery", "dc", sideValue(cpu.dc, previewDc), "standard") });
       }
 
+      const powerInitialized = powerMode?.ac?.desired != null && powerMode?.dc?.desired != null;
+      const powerWritable = !!powerMode?.persistenceWritable && powerInitialized && !status?.steam?.appId && !busy;
+      const powerSlider = (label, value, onChange, disabled) => value == null ? null : React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, powerModeLabels[powerModeIndex(value)] ?? "Unknown"))), min: 0, max: 2, step: 1, value: powerModeIndex(value), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => onChange(Number(next)) });
+      const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !powerWritable, onChange: value => void runPowerMutation("setDevicePowerModeEnabled", { enabled: !!value }) }) }];
+      if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, value => void runPowerMutation("setDevicePowerModeAc", { mode: powerModeValue(value) }), !powerWritable) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, value => void runPowerMutation("setDevicePowerModeDc", { mode: powerModeValue(value) }), !powerWritable) }); }
+
       const tdpControls = [{ key: "tdp-toggle", node: React.createElement(native.ToggleField, {
         label: "TDP Control",
         checked: !!tdpDraft?.enabled,
@@ -863,10 +893,13 @@
             scheduleProfileTdp({ ...draft, [side]: adjusted });
           },
         });
-        const profileControls = [
-          { key: "profile-toggle", node: React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }) },
+        const profileCpuControls = [
           { key: "profile-ac", node: profileSlider("Plugged in", "ac", profile.cpuBoost?.ac, previewAc, "none") },
           { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, previewDc, "standard") },
+        ];
+        const profilePowerControls = [
+          { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Power Mode plugged in", profile.powerMode.ac, value => void runPowerMutation("setActiveGamePowerModeAc", { mode: powerModeValue(value) }), !enabled || !writable) : null },
+          { key: "profile-power-dc", node: profile.powerMode ? powerSlider("Power Mode on battery", profile.powerMode.dc, value => void runPowerMutation("setActiveGamePowerModeDc", { mode: powerModeValue(value) }), !enabled || !writable) : null },
         ];
         const profileTdpControls = profile.limits ? [
           { key: "profile-tdp-ac-heading", node: React.createElement("div", null, "Plugged in") },
@@ -878,8 +911,9 @@
         ] : [];
         return React.createElement(React.Fragment, null,
           displayError ? React.createElement("p", { key: "error" }, displayError) : null,
-          React.createElement(native.PanelSection, { key: "profile-header", title: profile.displayName || `Game ${profile.appId}` }, ...profileControls.slice(0, 1).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
-          React.createElement(native.PanelSection, { key: "profile-cpu-section", title: "CPU Boost" }, ...profileControls.slice(1).filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
+          React.createElement(native.PanelSection, { key: "profile-header", title: profile.displayName || `Game ${profile.appId}` }, React.createElement(native.PanelSectionRow, { key: "profile-toggle" }, React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }))),
+          React.createElement(native.PanelSection, { key: "profile-cpu-section", title: "CPU Boost" }, ...profileCpuControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
+          profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section", title: "Windows Power Mode" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null,
           React.createElement(native.PanelSection, { key: "profile-tdp-section", title: "TDP Control" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key, style: x.compact ? { marginTop: "-4px" } : undefined }, x.node))));
       }
 
@@ -888,6 +922,8 @@
         displayError ? React.createElement("p", { key: "error" }, displayError) : null,
         React.createElement(native.PanelSection, { key: "cpu-section" },
           ...controls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
+        React.createElement(native.PanelSection, { key: "power-section", title: "Windows Power Mode" },
+          ...powerControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
         React.createElement(native.PanelSection, { key: "tdp-section" },
           ...tdpControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key, style: control.compact ? { marginTop: "-4px" } : undefined }, control.node))));
     }

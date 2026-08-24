@@ -37,9 +37,17 @@ public sealed record GamePerformanceOverrides
 {
     public GameCpuBoostSettings? CpuBoost { get; init; }
     public GameTdpSettings? Tdp { get; init; }
+    public GamePowerModeSettings? PowerMode { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed record GamePowerModeSettings
+{
+    public required WindowsPowerMode Ac { get; init; }
+    public required WindowsPowerMode Dc { get; init; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
 
 public sealed record GameCpuBoostSettings
