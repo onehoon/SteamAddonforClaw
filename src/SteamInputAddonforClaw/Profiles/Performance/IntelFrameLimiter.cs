@@ -295,6 +295,25 @@ internal sealed class NativeIgcl : IDisposable
         var property = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps };
         return EncodeFrameLimitPropertyBytes(property);
     }
+    internal static byte[] EncodeFrameLimitSetFeatureBytesForTests(bool enable, int fps) =>
+        EncodeFrameLimitFeatureBytes(CreateFrameLimitSetFeature(enable, fps));
+    private static byte[] EncodeFrameLimitFeatureBytes(FeatureGetSet feature)
+    {
+        var size = Marshal.SizeOf<FeatureGetSet>();
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(feature, buffer, false);
+            var bytes = new byte[size];
+            Marshal.Copy(buffer, bytes, 0, size);
+            return bytes;
+        }
+        finally
+        {
+            Marshal.DestroyStructure<FeatureGetSet>(buffer);
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
     private static byte[] EncodeFrameLimitPropertyBytes(Property property) => MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref property, 1)).ToArray();
     private static void Log(string operation, uint result, int? fps = null, FpsPowerSource? source = null, uint? appId = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source), ("RunningAppID", appId)); }
     public void Dispose() { if (_closed) return; _closed = true; if (_api != 0) { var result = _close(_api); Log("ctlClose", result); _api = 0; } if (_library != 0) { NativeLibrary.Free(_library); _library = 0; } }

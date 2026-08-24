@@ -18,6 +18,20 @@ public sealed class IntelFrameLimiterTests
     }
 
     [Fact]
+    public void Frame_limit_enable_feature_marshals_exact_native_value_bytes()
+    {
+        var bytes = NativeIgcl.EncodeFrameLimitSetFeatureBytesForTests(true, 60);
+        Assert.Equal(new byte[] { 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x00 }, bytes.AsSpan(32, 8).ToArray());
+    }
+
+    [Fact]
+    public void Frame_limit_disable_feature_marshals_exact_native_value_bytes()
+    {
+        var bytes = NativeIgcl.EncodeFrameLimitSetFeatureBytesForTests(false, 30);
+        Assert.Equal(new byte[] { 0x00, 0x00, 0x00, 0x00, 0x1E, 0x00, 0x00, 0x00 }, bytes.AsSpan(32, 8).ToArray());
+    }
+
+    [Fact]
     public void Frame_limit_get_property_starts_zero_initialized()
     {
         Assert.Equal(new byte[8], NativeIgcl.EncodeFrameLimitGetPropertyBytesForTests());
