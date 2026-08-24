@@ -207,10 +207,48 @@ internal sealed class NativeIgcl : IDisposable
         // Cleanup only needs a valid INT32 value. Enable=false is the actual off semantic,
         // so it remains possible after a driver update narrows the user-facing range.
         var nativeFps = enable ? fps : _cleanupCapability?.Minimum ?? fps;
-        var feature = new FeatureGetSet { Size = (uint)Marshal.SizeOf<FeatureGetSet>(), Version = 0, FeatureType = FrameLimit, ApplicationName = 0, ApplicationNameLength = 0, Set = true, ValueType = Int32, Value = new Property { Int = new IntProperty { Enable = enable, Value = nativeFps } } };
-        var result = _getSet(adapter, ref feature);
-        Log(enable ? "ctlGetSet3DFeature enable" : "ctlGetSet3DFeature disable", result, nativeFps, source, appId);
-        return result == 0;
+        var setFeature = CreateFrameLimitFeature(set: true, enable: enable, fps: nativeFps);
+        var setResult = _getSet(adapter, ref setFeature);
+        var getFeature = CreateFrameLimitFeature(set: false, enable: enable, fps: nativeFps);
+        var getResult = setResult == 0 ? _getSet(adapter, ref getFeature) : 1u;
+        var readbackEnabled = getFeature.Value.EnableBits != 0;
+        var readbackFps = getFeature.Value.IntValue;
+        var failureReason = FrameLimitVerificationFailureReason(enable, setResult, getResult, readbackEnabled, readbackFps, nativeFps);
+        var verified = failureReason is null;
+        LogFrameLimitVerification(enable, source, appId, nativeFps, setResult, getResult, readbackEnabled, readbackFps, verified, failureReason);
+        return verified;
+    }
+    private static FeatureGetSet CreateFrameLimitFeature(bool set, bool enable, int fps) => new()
+    {
+        Size = (uint)Marshal.SizeOf<FeatureGetSet>(),
+        Version = 0,
+        FeatureType = FrameLimit,
+        ApplicationName = 0,
+        ApplicationNameLength = 0,
+        Set = set,
+        ValueType = Int32,
+        Value = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps }
+    };
+    private static string? FrameLimitVerificationFailureReason(bool enable, uint setResult, uint getResult, bool readbackEnabled, int readbackFps, int requestedFps) =>
+        setResult != 0 ? "SetFailed" : getResult != 0 ? "ReadbackFailed" : enable && !readbackEnabled ? "ReadbackEnableMismatch" : enable && readbackFps != requestedFps ? "ReadbackFpsMismatch" : !enable && readbackEnabled ? "ReadbackEnableMismatch" : null;
+    private static void LogFrameLimitVerification(bool enable, FpsPowerSource? source, uint appId, int requestedFps, uint setResult, uint getResult, bool readbackEnabled, int readbackFps, bool verified, string? failureReason)
+    {
+        var fields = new (string Key, object? Value)[]
+        {
+            ("Operation", enable ? "Enable" : "Disable"), ("RunningAppID", appId), ("PowerSource", source),
+            ("RequestedEnabled", enable), ("RequestedFps", requestedFps), ("SetResult", $"0x{setResult:X8}"),
+            ("GetResult", $"0x{getResult:X8}"), ("ReadbackEnabled", readbackEnabled), ("ReadbackFps", readbackFps),
+            ("Verified", verified), ("FailureReason", failureReason)
+        };
+        if (verified) AppLog.Info("Profiles.IntelFps", enable ? "FRAME_LIMIT apply verified." : "FRAME_LIMIT disable verified.", fields);
+        else AppLog.Warn("Profiles.IntelFps", $"FRAME_LIMIT {(enable ? "apply" : "disable")} verification failed.", null, fields);
+    }
+    internal static bool VerifyFrameLimitReadbackForTests(bool enable, int requestedFps, uint setResult, uint getResult, bool readbackEnabled, int readbackFps) =>
+        FrameLimitVerificationFailureReason(enable, setResult, getResult, readbackEnabled, readbackFps, requestedFps) is null;
+    internal static byte[] EncodeFrameLimitPropertyBytesForTests(bool enable, int fps)
+    {
+        var property = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps };
+        return MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref property, 1)).ToArray();
     }
     private static void Log(string operation, uint result, int? fps = null, FpsPowerSource? source = null, uint? appId = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source), ("RunningAppID", appId)); }
     public void Dispose() { if (_closed) return; _closed = true; if (_api != 0) { var result = _close(_api); Log("ctlClose", result); _api = 0; } if (_library != 0) { NativeLibrary.Free(_library); _library = 0; } }
@@ -222,8 +260,7 @@ internal sealed class NativeIgcl : IDisposable
     [StructLayout(LayoutKind.Explicit, Size = 24)] private struct PropertyInfo { [FieldOffset(0)] public IntInfo IntType; [FieldOffset(0)] public EnumInfo EnumType; }
     [StructLayout(LayoutKind.Sequential)] private struct FeatureDetails { public int FeatureType; public int ValueType; public PropertyInfo Value; public int CustomSize; public nint Custom; [MarshalAs(UnmanagedType.I1)] public bool PerAppSupport; public long Conflicts; public short FeatureMiscSupport; public short Reserved; public short Reserved1; public short Reserved2; }
     [StructLayout(LayoutKind.Sequential)] private struct FeatureCaps { public uint Size; public byte Version; public uint NumSupportedFeatures; public nint Features; }
-    [StructLayout(LayoutKind.Sequential)] private struct IntProperty { [MarshalAs(UnmanagedType.I1)] public bool Enable; public int Value; }
-    [StructLayout(LayoutKind.Explicit, Size = 8)] private struct Property { [FieldOffset(0)] public IntProperty Int; }
+    [StructLayout(LayoutKind.Explicit, Size = 8)] private struct Property { [FieldOffset(0)] public uint EnableBits; [FieldOffset(4)] public int IntValue; }
     [StructLayout(LayoutKind.Sequential)] private struct FeatureGetSet { public uint Size; public byte Version; public int FeatureType; public nint ApplicationName; public sbyte ApplicationNameLength; [MarshalAs(UnmanagedType.I1)] public bool Set; public int ValueType; public Property Value; public int CustomSize; public nint Custom; }
     internal static bool AbiLayoutIsExpectedForTests() => Marshal.SizeOf<InitArgs>() == 36 && Marshal.SizeOf<PropertyInfo>() == 24 && Marshal.SizeOf<FeatureDetails>() == 72 && Marshal.SizeOf<FeatureCaps>() == 24 && Marshal.SizeOf<FeatureGetSet>() == 56 && Marshal.OffsetOf<FeatureDetails>(nameof(FeatureDetails.Value)) == 8 && Marshal.OffsetOf<FeatureDetails>(nameof(FeatureDetails.Custom)) == 40 && Marshal.OffsetOf<FeatureGetSet>(nameof(FeatureGetSet.Value)) == 32 && Marshal.OffsetOf<FeatureGetSet>(nameof(FeatureGetSet.Custom)) == 48;
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate uint CtlInit(ref InitArgs args, out nint api); [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate uint CtlClose(nint api); [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate uint CtlEnumerate(nint api, ref uint count, [Out] nint[]? devices); [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate uint CtlCaps(nint adapter, ref FeatureCaps caps); [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate uint CtlGetSet(nint adapter, ref FeatureGetSet feature);

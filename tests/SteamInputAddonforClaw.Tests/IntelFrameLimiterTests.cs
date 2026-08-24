@@ -11,6 +11,24 @@ public sealed class IntelFrameLimiterTests
         Assert.True(NativeIgcl.AbiLayoutIsExpectedForTests());
 
     [Fact]
+    public void Frame_limit_enable_property_uses_exact_native_bytes()
+    {
+        Assert.Equal(new byte[] { 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x00 }, NativeIgcl.EncodeFrameLimitPropertyBytesForTests(true, 60));
+        Assert.Equal(new byte[] { 0x00, 0x00, 0x00, 0x00, 0x1E, 0x00, 0x00, 0x00 }, NativeIgcl.EncodeFrameLimitPropertyBytesForTests(false, 30));
+    }
+
+    [Theory]
+    [InlineData(true, 60, 1u, 0u, false, 0, false)]
+    [InlineData(true, 60, 0u, 1u, false, 0, false)]
+    [InlineData(true, 60, 0u, 0u, false, 60, false)]
+    [InlineData(true, 60, 0u, 0u, true, 59, false)]
+    [InlineData(true, 60, 0u, 0u, true, 60, true)]
+    [InlineData(false, 30, 0u, 0u, true, 30, false)]
+    [InlineData(false, 30, 0u, 0u, false, 60, true)]
+    public void Frame_limit_set_get_verification_requires_expected_readback(bool enable, int requestedFps, uint setResult, uint getResult, bool readbackEnabled, int readbackFps, bool expected) =>
+        Assert.Equal(expected, NativeIgcl.VerifyFrameLimitReadbackForTests(enable, requestedFps, setResult, getResult, readbackEnabled, readbackFps));
+
+    [Fact]
     public void Frame_limit_without_live_change_is_not_available_for_active_profile_control()
     {
         var capability = new IntelFpsCapability(30, 300, 1, 2, 0, true);
