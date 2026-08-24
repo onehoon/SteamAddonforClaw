@@ -207,6 +207,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         _runtimeHost = composition.RuntimeHost;
         _cpuBoostRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
+        _powerModeRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
         if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
             && startupResult.HardwareDeviceModel is { } tdpModel

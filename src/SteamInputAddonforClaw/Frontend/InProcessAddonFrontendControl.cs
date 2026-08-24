@@ -137,9 +137,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostDcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
         MutateCpuBoostAfterShutdownCheck(appId, static (mutations, id, value) => mutations.SetCpuBoostDc(id, value), mode);
     public Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeAcAsync(uint appId, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
-        Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetPowerModeAc(appId, mode) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: false, power: true));
+        MutatePowerModeAfterShutdownCheck(appId, mode, ac: true);
     public Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeDcAsync(uint appId, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
-        Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetPowerModeDc(appId, mode) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: false, power: true));
+        MutatePowerModeAfterShutdownCheck(appId, mode, ac: false);
+    private Task<FrontendGameProfileMutationResult> MutatePowerModeAfterShutdownCheck(uint appId, WindowsPowerMode mode, bool ac)
+    {
+        ThrowIfShuttingDown();
+        var outcome = _gameProfileMutations is { } mutations
+            ? ac ? mutations.SetPowerModeAc(appId, mode) : mutations.SetPowerModeDc(appId, mode)
+            : GameProfileMutations.MutationOutcome.Unavailable;
+        return Task.FromResult(MutateGame(appId, outcome, cpu: false, tdp: false, power: true));
+    }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
         MutateTdpAfterShutdownCheck(appId, configuration);

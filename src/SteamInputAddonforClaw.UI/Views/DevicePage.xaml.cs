@@ -106,9 +106,27 @@ public sealed partial class DevicePage : UserControl
         PowerModeInfoBar.Message = snapshot.LastFailure ?? "Power Mode settings are unavailable.";
     }
     private static PowerModeItem? PowerModeItemFor(FrontendPowerModeSideSnapshot side) => PowerModes.FirstOrDefault(x => x.Mode == (side.Desired ?? side.Current));
-    private async void PowerModeAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_suppressSelectionEvents && PowerModeAcComboBox.SelectedItem is PowerModeItem item && _frontend is not null) RenderPowerMode((await _frontend.SetDevicePowerModeAcAsync(item.Mode)).Snapshot); }
-    private async void PowerModeDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_suppressSelectionEvents && PowerModeDcComboBox.SelectedItem is PowerModeItem item && _frontend is not null) RenderPowerMode((await _frontend.SetDevicePowerModeDcAsync(item.Mode)).Snapshot); }
-    private async void PowerModeEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e) { if (!_suppressSelectionEvents && _frontend is not null) RenderPowerMode((await _frontend.SetDevicePowerModeEnabledAsync(PowerModeEnabledToggleSwitch.IsOn)).Snapshot); }
+    private async void PowerModeAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (_suppressSelectionEvents || _frontend is null || PowerModeAcComboBox.SelectedItem is not PowerModeItem item) return; await RunPowerModeMutationAsync(() => _frontend.SetDevicePowerModeAcAsync(item.Mode)); }
+    private async void PowerModeDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (_suppressSelectionEvents || _frontend is null || PowerModeDcComboBox.SelectedItem is not PowerModeItem item) return; await RunPowerModeMutationAsync(() => _frontend.SetDevicePowerModeDcAsync(item.Mode)); }
+    private async void PowerModeEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e) { if (_suppressSelectionEvents || _frontend is null) return; await RunPowerModeMutationAsync(() => _frontend.SetDevicePowerModeEnabledAsync(PowerModeEnabledToggleSwitch.IsOn)); }
+    private async Task RunPowerModeMutationAsync(Func<Task<FrontendPowerModeMutationResult>> mutation)
+    {
+        try
+        {
+            var result = await mutation(); RenderPowerMode(result.Snapshot);
+            if (!result.Succeeded)
+            {
+                PowerModeInfoBar.Severity = result.Outcome == FrontendPowerModeMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning;
+                PowerModeInfoBar.Message = result.FailureMessage ?? "Power Mode could not be updated."; PowerModeInfoBar.IsOpen = true;
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "Power Mode mutation failed.", exception);
+            PowerModeInfoBar.Severity = InfoBarSeverity.Error; PowerModeInfoBar.Message = "Power Mode could not be updated because the Runtime connection was interrupted."; PowerModeInfoBar.IsOpen = true;
+            await RefreshAsync();
+        }
+    }
 
     private void Render(FrontendCpuBoostSnapshot snapshot)
     {
