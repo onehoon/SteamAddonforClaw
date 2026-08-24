@@ -52,7 +52,7 @@ internal sealed class MsiFanHardwareProbe
 
     private bool WriteCapture(StringBuilder report, FanProbeModel model)
     {
-        report.AppendLine("=== BASELINE READS ==="); for (var i = 0; i <= 2; i++) ReadFan(report, i, i != 0);
+        report.AppendLine("=== BASELINE READS ==="); var fan0Ok = ReadFan(report, 0, false); var fan1Ok = ReadFan(report, 1, true); var fan2Ok = ReadFan(report, 2, true);
         try
         {
             Read(report, "Get_Temperature(1)", () => _transport.TryGetTemperature(1, out var p) ? p : throw new InvalidOperationException("Get_Temperature(1) failed"));
@@ -62,7 +62,7 @@ internal sealed class MsiFanHardwareProbe
         }
         catch (Exception exception) { report.AppendLine($"CAPTURE FAIL: {exception.Message}"); return false; }
         report.AppendLine($"Model-specific expectation: {(model == FanProbeModel.Cg3em ? "EX observations recorded, not enforced" : "A2VM reference values recorded, not enforced")}");
-        return true;
+        return fan0Ok && fan1Ok && fan2Ok;
     }
     private bool WriteAutomaticTest(StringBuilder report, FanProbeModel model)
     {
@@ -78,7 +78,13 @@ internal sealed class MsiFanHardwareProbe
         report.AppendLine("PRECHECK: PASS"); DescribeFan(report, 1, fan1); DescribeFan(report, 2, fan2);
         var fan1Ok = TestBlock(report, 1, fan1); var fan2Ok = fan1Ok && TestBlock(report, 2, fan2);
         if (!fan1Ok || !fan2Ok) { report.AppendLine("PARTIAL APPLY FAILURE: custom ownership not enabled"); return false; }
-        var curve = fan1.Skip(1).Take(6).ToArray(); curve[2] = (byte)Math.Min(75, curve[2] + 1);
+        var fan1Duties = fan1.Skip(1).Take(6).ToArray(); var fan2Duties = fan2.Skip(1).Take(6).ToArray();
+        if (!fan1Duties.SequenceEqual(fan2Duties))
+        {
+            report.AppendLine("Shared curve test: SKIPPED - Fan 1 and Fan 2 curves differ; restored per-fan tables are preserved.");
+            var ownershipOnly = SetOwnership(true); report.AppendLine($"Custom ownership with restored per-fan tables: {(ownershipOnly ? "PASS" : "FAIL")}"); return ownershipOnly;
+        }
+        var curve = (byte[])fan1Duties.Clone(); curve[2] = (byte)Math.Min(75, curve[2] + 1);
         report.AppendLine("=== SHARED CURVE TEST ==="); _hardwareWritesStarted = true; var shared1 = _transport.TrySetFan(1, WithDuties(fan1, curve)) && TryReadFan(1, out var after1) && after1.Skip(1).Take(6).SequenceEqual(curve); var shared2 = shared1 && _transport.TrySetFan(2, WithDuties(fan2, curve)) && TryReadFan(2, out var after2) && after2.Skip(1).Take(6).SequenceEqual(curve);
         report.AppendLine($"Fan 1/Fan 2 shared curve verification: {(shared1 && shared2 ? "PASS" : "FAIL")}"); if (!(shared1 && shared2)) return false;
         var ownership = SetOwnership(true); report.AppendLine($"Custom ownership enable: {(ownership ? "PASS" : "FAIL")}"); if (!ownership) return false;
@@ -108,7 +114,7 @@ internal sealed class MsiFanHardwareProbe
         return _transport.TryGetAp(1, out var verify) && verify.Length > 0 && (((verify[0] & 0x80) != 0) == enabled);
     }
     private bool TryReadFan(int block, out byte[] payload) => _transport.TryGetFan(block, out payload) && payload.Length >= 8;
-    private void ReadFan(StringBuilder report, int block, bool required) { if (TryReadFan(block, out var p)) DescribeFan(report, block, p); else report.AppendLine($"Get_Fan({block}): {(required ? "FAIL" : "UNAVAILABLE")}"); }
+    private bool ReadFan(StringBuilder report, int block, bool required) { if (TryReadFan(block, out var p)) { DescribeFan(report, block, p); return true; } report.AppendLine($"Get_Fan({block}): {(required ? "FAIL" : "UNAVAILABLE")}"); return !required; }
     private static void DescribeFan(StringBuilder report, int block, byte[] payload) => report.AppendLine($"Get_Fan({block}) HEX: {string.Join(" ", payload.Select(x => x.ToString("X2", CultureInfo.InvariantCulture)))} DEC: {string.Join(" ", payload.Select(x => x.ToString(CultureInfo.InvariantCulture)))} Duties[1..6]: {string.Join(",", payload.Skip(1).Take(6))} byte0 preserved: {payload[0]} byte7 preserved: {payload[7]}");
     private static byte[] WithDuties(byte[] original, byte[] duties) { var copy = (byte[])original.Clone(); duties.CopyTo(copy, 1); return copy; }
     private static void Read(StringBuilder report, string name, Func<byte[]> read) { var p = read(); report.AppendLine($"{name} HEX: {string.Join(" ", p.Select(x => x.ToString("X2", CultureInfo.InvariantCulture)))} DEC: {string.Join(" ", p)}"); }

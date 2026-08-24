@@ -24,7 +24,7 @@ public static class TdpHelperProtocol
     public static bool IsSupported(string operation, int index) => operation switch
     {
         "GetAp" => index is 0 or 1 or 2,
-        "SetData" => index is 80 or 81 or 210 or 212,
+        "SetData" => index is 80 or 81 or 152 or 210 or 212,
         "GetFan" => index is 0 or 1 or 2,
         "SetFan" => index is 1 or 2,
         "GetTemperature" => index is 1 or 2,
