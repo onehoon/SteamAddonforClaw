@@ -12,6 +12,7 @@ internal enum MainNavigationPage
     ClawSensorProbe,
     CenterMButton,
     VibrationTest,
+    FanHardwareProbe,
 }
 
 internal sealed class MainNavigationState
@@ -57,6 +58,7 @@ internal sealed class MainNavigationState
 
     internal MainNavigationPage OpenClawSensorProbe() => CurrentPage = MainNavigationPage.ClawSensorProbe;
     internal MainNavigationPage OpenVibrationTest() => CurrentPage = MainNavigationPage.VibrationTest;
+    internal MainNavigationPage OpenFanHardwareProbe() => CurrentPage = MainNavigationPage.FanHardwareProbe;
 
     internal MainNavigationPage? GetMouseBackDestination() => CurrentPage switch
     {
@@ -64,6 +66,7 @@ internal sealed class MainNavigationState
         MainNavigationPage.ClawSensorProbe => MainNavigationPage.DeveloperMenu,
         MainNavigationPage.CenterMButton => MainNavigationPage.Controller,
         MainNavigationPage.VibrationTest => MainNavigationPage.DeveloperMenu,
+        MainNavigationPage.FanHardwareProbe => MainNavigationPage.DeveloperMenu,
         _ => null
     };
 }
