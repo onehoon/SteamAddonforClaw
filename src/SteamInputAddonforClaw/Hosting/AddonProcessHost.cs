@@ -113,6 +113,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _startupStarted, 1) != 0)
             throw new InvalidOperationException("Startup has already been started.");
 
+        try
+        {
+            // Display recovery is independent of controller hardware compatibility. Restore any
+            // outstanding Addon-owned mode before startup can exit for an unsupported or
+            // indeterminate device result.
+            _displayResolutionRuntime.StartupRecover();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Display", "Display resolution startup recovery failed.", exception);
+        }
+
         AppLog.Info("Startup coordination started.");
         var startupComposition = AddonStartupCompositionFactory.Create(_updateRestartArguments);
         _startupComposition = startupComposition;
@@ -296,7 +308,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         try
         {
-            _displayResolutionRuntime.StartupRecover();
             _displayResolutionRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0);
         }
         catch (Exception exception) { AppLog.Error("Profiles.Display", "Display resolution startup reconcile failed.", exception); }
