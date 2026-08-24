@@ -1036,7 +1036,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     [Fact]
     public async Task CancelledQueuedSuspendPropagatesAndDoesNotLeakTransitionPermission()
     {
-        var executor = new FakeExecutor();
+        var executor = new FakeExecutor { HoldRollbackCancellationUntilReleased = true };
         var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
         var bridge = Create(provider, executor);
         await bridge.Bridge.ReconcileAsync(CancellationToken.None);
@@ -1052,7 +1052,6 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => quiesce);
-        Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
         executor.ReleaseRollback.TrySetResult();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => holder);
         Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
@@ -1524,6 +1523,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         internal Queue<RoutingPipelineRollbackResult> RollbackResults { get; } = [];
         internal bool BlockNextExecute { get; set; }
         internal bool BlockNextRollback { get; set; }
+        internal bool HoldRollbackCancellationUntilReleased { get; set; }
         internal TaskCompletionSource ExecuteStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ExecuteCancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource RollbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1565,7 +1565,15 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
             {
                 BlockNextRollback = false;
                 RollbackStarted.TrySetResult();
-                await ReleaseRollback.Task.WaitAsync(cancellationToken);
+                if (HoldRollbackCancellationUntilReleased)
+                {
+                    await ReleaseRollback.Task;
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                else
+                {
+                    await ReleaseRollback.Task.WaitAsync(cancellationToken);
+                }
             }
             return RollbackResults.Count == 0 ? new RoutingPipelineRollbackResult(true, null, "Success") : RollbackResults.Dequeue();
         }

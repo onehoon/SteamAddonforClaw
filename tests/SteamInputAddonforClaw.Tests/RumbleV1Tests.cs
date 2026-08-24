@@ -93,6 +93,7 @@ public sealed class RumbleV1Tests
         await Task.Run(authority.Revoke).WaitAsync(TimeSpan.FromSeconds(2));
         Assert.False(authority.IsCurrent(token));
         sink.Release.Set();
+        await sink.WriteCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal([new TwoMotorRumble(1, 2)], sink.Snapshot());
     }
 
@@ -133,9 +134,10 @@ public sealed class RumbleV1Tests
         private readonly object _gate = new();
         public List<TwoMotorRumble> Values { get; } = [];
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource WriteCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim Release { get; } = new(false);
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
-        { Entered.TrySetResult(); Release.Wait(); lock (_gate) Values.Add(rumble); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+        { Entered.TrySetResult(); Release.Wait(); lock (_gate) Values.Add(rumble); WriteCompleted.TrySetResult(); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
         public TwoMotorRumble[] Snapshot() { lock (_gate) return [.. Values]; }
     }
     [Fact]
