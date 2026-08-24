@@ -46,13 +46,14 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
                 blacklist = raw.Blacklist;
             }
             var normalizedWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var hasUnresolvedWhitelistEntries = false;
             foreach (var fullImageName in rawWhitelist)
             {
                 try { normalizedWhitelist.Add(_pathConverter.ToDosPath(fullImageName)); }
-                catch (Exception exception) { AppLog.Warn("HidHide", "A HidHide whitelist entry could not be normalized.", exception, ("Action", "PreserveRawEntry")); }
+                catch (Exception exception) { hasUnresolvedWhitelistEntries = true; AppLog.Warn("HidHide", "A HidHide whitelist entry could not be normalized.", exception, ("Action", "PreserveRawEntry")); }
             }
             var status = inverse ? HidHideInspectionStatus.InverseWhitelist : !active ? HidHideInspectionStatus.Disabled : HidHideInspectionStatus.Available;
-            return new(status, normalizedWhitelist, blacklist, rawWhitelist, active, inverse);
+            return new(status, normalizedWhitelist, blacklist, rawWhitelist, active, inverse, HasUnresolvedApplicationWhitelistEntries: hasUnresolvedWhitelistEntries);
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == 2)
         {

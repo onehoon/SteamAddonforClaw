@@ -28,7 +28,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 11: Windows Power Mode contracts and RPCs.
 // Version 12: developer-only MSI fan probe contracts and RPCs.
 // Version 13: Intel Game Profile FPS Limit snapshot and mutation RPCs.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 13; }
+// Version 14: SetSteamInputRoutingEnabled returns a typed mutation result instead of a settings snapshot.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 14; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

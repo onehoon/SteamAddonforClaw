@@ -114,23 +114,6 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
-    public async Task ReconcileOwnedState_fails_when_preexisting_device_disappears()
-    {
-        const string device = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD";
-        var hid = new FakeHidHide { Applications = ["C:\\addon.exe"], HiddenDevices = [device] };
-        var stage = Create(hid);
-        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        hid.HiddenDevices.Clear(); hid.Trace.Clear();
-
-        var result = await stage.ReconcileOwnedStateAsync();
-
-        Assert.False(result.Succeeded);
-        Assert.Equal("PreExistingDeviceDrift", result.Reason);
-        Assert.Empty(hid.Trace);
-    }
-
-    [Fact]
     public async Task ReconcileOwnedState_fails_when_preexisting_active_disappears()
     {
         var hid = new FakeHidHide { Applications = ["C:\\addon.exe"], Active = true };
@@ -230,34 +213,6 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
-    public async Task PreExistingEntriesArePreserved()
-    {
-        var hid = new FakeHidHide { HiddenDevices = ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD"], Applications = ["C:\\addon.exe"] };
-        var stage = Create(hid);
-        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Empty(hid.Trace);
-        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal(["HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD"], hid.HiddenDevices);
-        Assert.Contains("C:\\addon.exe", hid.Applications);
-    }
-
-    [Fact]
-    public async Task ActiveHidHidePreservesForeignBlockedEntries()
-    {
-        var hid = new FakeHidHide { HiddenDevices = ["HID\\FOREIGN_A", "HID\\FOREIGN_B"] };
-        var stage = Create(hid);
-        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-
-        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-
-        Assert.Equal(["HID\\FOREIGN_A", "HID\\FOREIGN_B"], hid.HiddenDevices);
-        Assert.DoesNotContain("SetActive:True", hid.Trace);
-        Assert.DoesNotContain("SetActive:False", hid.Trace);
-    }
-
-    [Fact]
     public async Task AmbiguousDeviceMutationDoesNotRemoveWhitelist()
     {
         var hid = new FakeHidHide { FailInspectionAfterDeviceMutation = true };
@@ -324,7 +279,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
-    public async Task DisabledHidHideWithForeignBlockedEntryFailsBeforeAnyMutation()
+    public async Task AnyExistingHiddenEntryIsRejectedBeforeAnyMutation()
     {
         var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled, HiddenDevices = ["HID\\FOREIGN"] };
         var stage = Create(hid);
@@ -332,7 +287,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         var result = await stage.PrepareMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Equal("HidHideDisabledWithExistingBlockedEntries", result.Reason);
+        Assert.Equal("ForeignConfiguration", result.Reason);
         Assert.Empty(hid.Trace);
     }
 

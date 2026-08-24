@@ -41,7 +41,7 @@ public sealed class WingMappingSettingsPersistenceTests : IDisposable
 
         var persisted = new SettingsStore(PathName).Load();
         Assert.Equal(mapping, persisted.WingMapping);
-        Assert.True(persisted.SteamInputRoutingEnabled);
+        Assert.False(persisted.SteamInputRoutingEnabled);
         Assert.Equal(Oem1MappingSettings.Default, persisted.Oem1Mapping);
         Assert.Equal(1, changes);
     }

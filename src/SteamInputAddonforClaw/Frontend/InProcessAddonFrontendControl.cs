@@ -16,6 +16,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.HidHide;
 using System.Diagnostics;
 using Microsoft.Win32;
 
@@ -31,6 +32,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private string _registrationMessage;
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
     private readonly Func<string?> _processPath;
+    private readonly IHidHideClient _hidHide;
     private readonly bool _oem1MappingAvailable;
     private int _shutdownStarted;
     private readonly object _vibrationSessionGate = new();
@@ -80,7 +82,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, IHidHideClient? hidHide = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _cpuBoostRuntime = cpuBoostRuntime;
@@ -100,6 +102,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _registrationMessage = registrationMessage;
         _setupExecutor = setupExecutor ?? new FrontendPrerequisiteSetupExecutor();
         _processPath = processPath ?? (() => Environment.ProcessPath);
+        _hidHide = hidHide ?? new HidHideDriverClient();
         if (_runtime is not null)
         {
             _runtime.SteamSessionStateChanged += (_, _) => StateInvalidated?.Invoke(this, EventArgs.Empty);
@@ -280,12 +283,26 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(new FrontendLaunchAtStartupResult(MapSettings(), _registrationMessage));
     }
 
-    public Task<FrontendSettingsSnapshot> SetSteamInputRoutingEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    public Task<FrontendSteamInputRoutingMutationResult> SetSteamInputRoutingEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
+        if (enabled)
+        {
+            var path = _processPath();
+            if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+                return Task.FromResult(new FrontendSteamInputRoutingMutationResult(FrontendSteamInputRoutingMutationOutcome.HidHideInspectionUnavailable, MapSettings()));
+            var admission = HidHideRoutingAdmissionPolicy.Evaluate(_hidHide.Inspect(), Path.GetFullPath(path));
+            if (admission != HidHideRoutingAdmissionOutcome.Allowed)
+            {
+                var outcome = admission == HidHideRoutingAdmissionOutcome.ForeignConfiguration
+                    ? FrontendSteamInputRoutingMutationOutcome.HidHideConflict
+                    : FrontendSteamInputRoutingMutationOutcome.HidHideInspectionUnavailable;
+                return Task.FromResult(new FrontendSteamInputRoutingMutationResult(outcome, MapSettings()));
+            }
+        }
         _settings.ChangeSteamInputRoutingEnabled(enabled);
         StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return Task.FromResult(MapSettings());
+        return Task.FromResult(new FrontendSteamInputRoutingMutationResult(FrontendSteamInputRoutingMutationOutcome.Succeeded, MapSettings()));
     }
 
     public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default)

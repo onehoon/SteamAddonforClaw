@@ -39,7 +39,8 @@ public sealed class SettingsStore
             var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty) && startupProperty.ValueKind is JsonValueKind.False or JsonValueKind.True
                 ? startupProperty.GetBoolean() : true;
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
-            var steamInputRoutingEnabled = !root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty) || routeProperty.ValueKind == JsonValueKind.True;
+            var steamInputRoutingEnabled = root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty)
+                && routeProperty.ValueKind == JsonValueKind.True;
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
             var developerMenuEnabled = root.TryGetProperty("DeveloperMenuEnabled", out var developerMenuProperty) && developerMenuProperty.ValueKind == JsonValueKind.True && developerMenuProperty.GetBoolean();
             var settings = new AppSettings(startup, logLevel, steamInputRoutingEnabled, suppressDeveloperMenuWarning)
@@ -143,7 +144,7 @@ public sealed class SettingsStore
                 : null);
             var route = root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty)
                 ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("SteamInputRoutingEnabled must be boolean.")
-                : true;
+                : false;
             // Developer-menu warning suppression and the OEM1 mapping are UI/feature preference data,
             // not safety-gate inputs. Keep malformed values from affecting the prerequisite mutation
             // decision -- and note this result is only ever evaluated, never saved back, so omitting

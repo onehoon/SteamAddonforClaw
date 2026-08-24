@@ -142,6 +142,11 @@ public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, Front
     public bool DeveloperMenuEnabled { get; init; }
     public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
 }
+public enum FrontendSteamInputRoutingMutationOutcome { Succeeded, HidHideConflict, HidHideInspectionUnavailable }
+public sealed record FrontendSteamInputRoutingMutationResult(FrontendSteamInputRoutingMutationOutcome Outcome, FrontendSettingsSnapshot Settings)
+{
+    public bool Succeeded => Outcome == FrontendSteamInputRoutingMutationOutcome.Succeeded;
+}
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
 public sealed record FrontendVibrationTestResult(bool Succeeded, string Reason, string? LogFilePath);
 /// <param name="Oem1MappingAvailable">Whether the Center M (OEM1) mapping feature exists at all on
@@ -232,7 +237,7 @@ public interface IAddonFrontendControl
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
     Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken cancellationToken = default);
-    Task<FrontendSettingsSnapshot> SetSteamInputRoutingEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task<FrontendSteamInputRoutingMutationResult> SetSteamInputRoutingEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);
     /// <summary>Persists a COMPLETE new OEM1 mapping (remapping switch + all four slot bindings).
     /// Whole-record, not per-slot: it is what makes "turning remapping off never erases the mappings"
