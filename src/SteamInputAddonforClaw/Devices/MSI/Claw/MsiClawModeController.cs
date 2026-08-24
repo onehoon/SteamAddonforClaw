@@ -72,12 +72,21 @@ internal sealed class MsiClawModeController(
         var deadline = started + _timeout;
         MsiClawControlHidDevice? control = source.Control;
         var commandWrittenAt = Stopwatch.GetTimestamp();
+        var commandStartLogged = false;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!commandStartLogged)
+            {
+                commandStartLogged = true;
+                AppLog.Debug("RoutingTrace", "Native mode command starting.",
+                    ("Event", "NativeModeCommandStarted"), ("TargetMode", target));
+            }
             if (await writer.WriteAsync(control!, target, cancellationToken).ConfigureAwait(false))
             {
                 commandWrittenAt = Stopwatch.GetTimestamp();
+                AppLog.Debug("RoutingTrace", "Native mode command written.",
+                    ("Event", "NativeModeCommandWritten"), ("TargetMode", target));
                 AppLog.Debug("NativeMode", "NativeModeCommandWriteSucceeded", ("TargetMode", target));
                 break;
             }
@@ -91,22 +100,19 @@ internal sealed class MsiClawModeController(
             control = source.Control;
         }
 
-        var oldPid = source.ProductId; var oldGone = false; var targetSeen = false; var poll = 0;
+        var oldPid = source.ProductId; var oldGone = false; var targetSeen = false; var firstPid1902Logged = false; var poll = 0;
+        var logPid1902Arrival = target == MsiClawNativeMode.DirectInput
+            && targetTopology.ProductId == MsiClawHardware.DirectInputProductId;
         while (_now() < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
             poll++;
             var probeStarted = Stopwatch.GetTimestamp();
-            var targetPidPresent = deviceEnumerator.IsPresent(MsiClawHardware.VendorId, targetTopology.ProductId);
+            var verificationStarted = Stopwatch.GetTimestamp();
+            var current = deviceEnumerator.EnumeratePresentDevices(MsiClawHardware.VendorId, targetTopology.ProductId);
+            var exactVerificationMs = Stopwatch.GetElapsedTime(verificationStarted).TotalMilliseconds;
             var targetProbeMs = Stopwatch.GetElapsedTime(probeStarted).TotalMilliseconds;
-            IReadOnlyList<ControllerDeviceInfo> current = [];
-            var exactVerificationMs = 0d;
-            if (targetPidPresent)
-            {
-                var verificationStarted = Stopwatch.GetTimestamp();
-                current = deviceEnumerator.EnumeratePresentDevices(MsiClawHardware.VendorId, targetTopology.ProductId);
-                exactVerificationMs = Stopwatch.GetElapsedTime(verificationStarted).TotalMilliseconds;
-            }
+            var targetPidPresent = current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId);
             oldGone = oldPid is not { } sourcePid || !deviceEnumerator.IsPresent(MsiClawHardware.VendorId, sourcePid);
             // TargetPidPresent: any present node with the target PID, regardless of topology --
             // distinguishes "PID_1902 hasn't appeared yet" from "PID_1902 is present but the
@@ -114,6 +120,11 @@ internal sealed class MsiClawModeController(
             var targets = current.Where(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId && d.UsagePage == targetTopology.UsagePage && d.Usage == targetTopology.Usage).ToArray();
             var targetGroups = targets.GroupBy(MsiClawLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).ToArray();
             targetSeen = targetGroups.Length > 0;
+            if (logPid1902Arrival && targetPidPresent && !firstPid1902Logged)
+            {
+                firstPid1902Logged = true;
+                AppLog.Debug("RoutingTrace", "PID1902 first seen.", ("Event", "Pid1902FirstSeen"), ("TargetPID", targetTopology.ProductId));
+            }
             AppLog.Debug("NativeMode", "NativeModeTransitionPoll",
                 ("Poll", poll),
                 ("ElapsedMs", (long)(_now() - started).TotalMilliseconds),

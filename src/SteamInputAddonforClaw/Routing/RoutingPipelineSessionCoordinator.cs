@@ -175,6 +175,8 @@ internal sealed class RoutingPipelineSessionCoordinator
     private void SetActiveSession(ActiveRoutingPipelineSession session)
     {
         lock (_sessionSync) _activeSession = session;
+        AppLog.Debug("RoutingTrace", "Routing session activated.",
+            ("Event", "RoutingActivated"));
     }
 
     private void SetEnteringSession(ActiveRoutingPipelineSession session)

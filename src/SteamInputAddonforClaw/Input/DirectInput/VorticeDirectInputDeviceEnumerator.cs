@@ -33,6 +33,15 @@ public sealed class VorticeDirectInputDeviceEnumerator : IDirectInputDeviceEnume
 
     private DirectInputDeviceDescriptor CreateDescriptor(DeviceInstance device)
     {
+        var vendorId = GetVendorId(device.ProductGuid);
+        var productId = GetProductId(device.ProductGuid);
+        // Product GUID is available from GetDevices without opening the device. Avoid interface,
+        // capability, and PnP topology work for unrelated gamepads; only the exact MSI target is
+        // eligible for the additional identity checks.
+        if (vendorId != Devices.MSI.Claw.MsiClawHardware.VendorId || productId != Devices.MSI.Claw.MsiClawHardware.DirectInputProductId)
+            return new DirectInputDeviceDescriptor(device.InstanceGuid, device.ProductGuid, device.ProductName,
+                vendorId, productId, null, null, null, null, null, null, null, "SkippedNonMsiPid1902");
+
         string? devicePath = null;
         int? buttonCount = null;
         int? axisCount = null;
@@ -50,7 +59,7 @@ public sealed class VorticeDirectInputDeviceEnumerator : IDirectInputDeviceEnume
         }
 
         var topology = _topologyResolver.Resolve(devicePath);
-        return new DirectInputDeviceDescriptor(device.InstanceGuid, device.ProductGuid, device.ProductName, GetVendorId(device.ProductGuid), GetProductId(device.ProductGuid),
+        return new DirectInputDeviceDescriptor(device.InstanceGuid, device.ProductGuid, device.ProductName, vendorId, productId,
             devicePath, topology.PnpInstanceId, topology.PhysicalIdentity, topology.UsagePage, topology.Usage, buttonCount, axisCount, topology.SelectionReason);
     }
 

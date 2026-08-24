@@ -41,6 +41,40 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task PersistentIdentityCache_replaces_only_after_successful_fallback_resolution()
+    {
+        var first = Device("USB\\VID_28DE&PID_1205\\CACHE_A");
+        var firstStage = Create(new FakeCanonicalSession(), new FakeEnumerator([
+            [], [UsbIpHost(), first], [UsbIpHost(), first]
+        ]), new FakeHidHide());
+        Assert.True((await firstStage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await firstStage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var cachePath = CanonicalSteamDeckOutputStage.TestOnlyIdentityCachePath!;
+        Assert.Contains("CACHE_A", File.ReadAllText(cachePath), StringComparison.OrdinalIgnoreCase);
+
+        var second = Device("USB\\VID_28DE&PID_1205\\CACHE_B");
+        var secondStage = Create(new FakeCanonicalSession(), new FakeEnumerator([
+            [], [UsbIpHost(), second], [UsbIpHost(), second]
+        ]), new FakeHidHide());
+        Assert.True((await secondStage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await secondStage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var latest = File.ReadAllText(cachePath);
+        Assert.DoesNotContain("CACHE_A", latest, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CACHE_B", latest, StringComparison.OrdinalIgnoreCase);
+
+        var hitEnumerator = new FakeEnumerator([
+            [], [UsbIpHost(), second], [UsbIpHost(), second]
+        ], directLookup: true);
+        var hitStage = Create(new FakeCanonicalSession(), hitEnumerator, new FakeHidHide());
+        Assert.True((await hitStage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await hitStage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True(hitEnumerator.DirectLookupCalls > 0);
+        Assert.Equal(1, hitEnumerator.EnumerateCalls);
+    }
+
+    [Fact]
     public async Task ReconcileOwnedState_healthy_canonical_route_is_strict_noop()
     {
         var session = new FakeCanonicalSession();
@@ -82,7 +116,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_attached_without_owned_pnp_fails_without_mutation()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [], [], []]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         var traceCount = session.Trace.Count;
@@ -112,7 +146,8 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_does_not_adopt_foreign_matching_pnp()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), Device("foreign")]]), new FakeHidHide());
+        var foreign = DeviceWithContainer("USB\\VID_28DE&PID_1205\\foreign", Guid.NewGuid());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), foreign], [UsbIpHost(), Device("owned"), foreign], [UsbIpHost(), Device("owned"), foreign]]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -125,14 +160,15 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     [Fact]
     public async Task ReconcileOwnedState_allows_exact_preexisting_matching_pnp()
     {
-        var preExisting = Device("preexisting");
+        var preExisting = CanonicalDeckGroup(Guid.NewGuid(), "PREEXISTING");
+        var owned = CanonicalDeckGroup(Guid.NewGuid(), "OWNED");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
-            [UsbIpHost(), preExisting],
-            [UsbIpHost(), preExisting, Device("owned")],
-            [UsbIpHost(), preExisting, Device("owned")],
-            [UsbIpHost(), preExisting, Device("owned")],
-            [UsbIpHost(), preExisting, Device("owned")]
+            [UsbIpHost(), ..preExisting],
+            [UsbIpHost(), ..preExisting, ..owned],
+            [UsbIpHost(), ..preExisting, ..owned],
+            [UsbIpHost(), ..preExisting, ..owned],
+            [UsbIpHost(), ..preExisting, ..owned]
         ]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
@@ -341,7 +377,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task PreExistingHidHideOutputBlockIsPreserved()
     {
         var session = new FakeCanonicalSession();
-        var hidHide = new FakeHidHide { Inspection = new(HidHideInspectionStatus.Available, new HashSet<string>(), ["owned"]) };
+        var hidHide = new FakeHidHide { Inspection = new(HidHideInspectionStatus.Available, new HashSet<string>(), ["USB\\VID_28DE&PID_1205\\owned"]) };
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), hidHide);
         await stage.PrepareMutationAsync(CancellationToken.None);
 
@@ -349,7 +385,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Contains("HidHideOutputAlreadyBlocked", result.Reason);
-        Assert.Contains("owned", hidHide.Inspection.HiddenDeviceEntries!);
+        Assert.Contains("USB\\VID_28DE&PID_1205\\owned", hidHide.Inspection.HiddenDeviceEntries!);
         Assert.Equal(1, session.RemoveCalls);
     }
 
@@ -881,10 +917,16 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task MultiplePnPNodesSharingSameContainerIdResolveToOneLogicalDeck()
     {
         var container = Guid.NewGuid();
-        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
-        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var root = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\ROOT", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205"], [], "USB", null, null, 0x28DE, 0x1205, true);
+        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205&MI_00"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
+        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205&MI_01"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var controllerLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var keyboardHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_00"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var mouseHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_01"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var controllerHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), keyboardLeaf, mouseLeaf], [UsbIpHost(), keyboardLeaf, mouseLeaf], [UsbIpHost(), keyboardLeaf, mouseLeaf], []]), new FakeHidHide());
+        var complete = new[] { UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid };
+        var stage = Create(session, new FakeEnumerator([[], complete, complete, []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
@@ -959,17 +1001,20 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         // the candidate set stops growing, all three siblings must resolve together as ONE fully-owned
         // logical Deck device, and teardown must then cleanly verify absence/ownership for all three.
         var container = Guid.NewGuid();
-        var controllerLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
-        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
-        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var controllerLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_00"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
+        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_01"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var root = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\ROOT", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205"], [], "USB", null, null, 0x28DE, 0x1205, true);
+        var keyboardHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_00"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var mouseHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_01"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var controllerHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
-            [UsbIpHost(), controllerLeaf], // t1: Controller interface appears first
-            [UsbIpHost(), controllerLeaf, keyboardLeaf], // t2: Keyboard sibling joins
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // t3: Mouse sibling joins
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // stable (2/3 consecutive)
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // stable (3/3 consecutive) -> resolved
+            [UsbIpHost(), root], // composite root only
+            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf], // USB interface layer only
+            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid], // complete group
+            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid],
             [], // rollback: all three verified absent after native remove
         ]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -977,19 +1022,22 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
         Assert.True(result.Succeeded, result.Reason);
 
+        var cache = File.ReadAllText(CanonicalSteamDeckOutputStage.TestOnlyIdentityCachePath!);
+        Assert.Contains("CONTROLLER", cache, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("KBD", cache, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MOUSE", cache, StringComparison.OrdinalIgnoreCase);
+
         var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
         Assert.True(rollback.Succeeded, rollback.Reason);
         Assert.Equal(1, session.RemoveCalls);
     }
 
     [Fact]
-    public async Task DifferentContainerIdAppearingDuringStabilizationIsAmbiguous()
+    public async Task FirstValidDeckIdentityIsAcceptedWithoutStabilizationWindow()
     {
-        // Unlike a true sibling of the SAME composite device (same ContainerId, see the convergence
-        // test above), a genuinely different device (different ContainerId) appearing WHILE the
-        // resolver is still stabilizing an existing candidate group must still fail closed as
-        // Ambiguous -- stabilization must not be mistaken for "wait indefinitely and merge anything
-        // that shows up".
+        // A genuinely different device (different ContainerId) appearing alongside an otherwise
+        // valid candidate must still fail closed as Ambiguous; removing repeated snapshots must
+        // not weaken ownership checks.
         var containerA = Guid.NewGuid();
         var containerB = Guid.NewGuid();
         var leafA = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\A", containerA, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
@@ -997,8 +1045,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
-            [UsbIpHost(), leafA], // t1: group A candidate observed, stabilization begins
-            [UsbIpHost(), leafA, leafB], // t2: a genuinely different ContainerId's node appears
+            [UsbIpHost(), leafA, leafB], // ambiguity in the current snapshot fails immediately
             [], // rollback: both potential candidates verified absent
         ]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -1006,78 +1053,71 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Contains("AmbiguousVirtualDeviceIdentity", result.Reason);
+        Assert.Contains("Ambiguous", result.Reason, StringComparison.OrdinalIgnoreCase);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
-    public async Task SameCountWithDifferentContainerIdsNeverStabilizes()
+    public async Task StableDeckIdentityDoesNotRequireRepeatedSamples()
     {
-        var leafA = DeviceWithContainer("USB\\VID_28DE&PID_1205\\A", Guid.NewGuid());
-        var leafB = DeviceWithContainer("USB\\VID_28DE&PID_1205\\B", Guid.NewGuid());
+        var leafA = Device("USB\\VID_28DE&PID_1205\\A");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
-            [], [UsbIpHost(), leafA], [UsbIpHost(), leafB], [UsbIpHost(), leafA], [UsbIpHost(), leafB], []
+            [], [UsbIpHost(), leafA], [UsbIpHost(), leafA], []
         ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
-    public async Task SameLogicalKeyWithDifferentInstanceIdsNeverStabilizes()
+    public async Task ValidLogicalDeckIdentityIsAcceptedOnFirstEvidence()
     {
-        var container = Guid.NewGuid();
-        var first = DeviceWithContainer("USB\\VID_28DE&PID_1205\\FIRST", container);
-        var second = DeviceWithContainer("USB\\VID_28DE&PID_1205\\SECOND", container);
+        var first = Device("USB\\VID_28DE&PID_1205\\FIRST");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
-            [], [UsbIpHost(), first], [UsbIpHost(), second], [UsbIpHost(), first], [UsbIpHost(), second], []
+            [], [UsbIpHost(), first], [UsbIpHost(), first], []
         ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
-    public async Task CandidateResolvedOnceThenDisappearingFailsClosedAtTimeout()
+    public async Task CurrentExactCandidateIsAcceptedWithoutASecondSnapshot()
     {
         var candidate = Device("USB\\VID_28DE&PID_1205\\TRANSIENT");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
-            [], [UsbIpHost(), candidate], [], [], []
+            [], [UsbIpHost(), candidate], []
         ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
-    public async Task CandidateAppearingTooLateForThreeStableSamplesFailsClosed()
+    public async Task CandidateAppearingBeforeTimeoutCanResolveImmediately()
     {
         var candidate = Device("USB\\VID_28DE&PID_1205\\LATE");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], [], [UsbIpHost(), candidate], [UsbIpHost(), candidate], []
-        ]), new FakeHidHide(), TimeSpan.FromMilliseconds(2));
+        ]), new FakeHidHide(), TimeSpan.FromMilliseconds(100));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
@@ -1258,14 +1298,28 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
     private const string UsbIpHostInstanceId = "ROOT\\USB\\0000";
     private static ControllerDeviceInfo UsbIpHost() => new(UsbIpHostInstanceId, null, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "System", null, "usbip2_ude", null, null, true);
-    private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
-    private static ControllerDeviceInfo DeviceWithContainer(string id, Guid container) => new(id, container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+    private static IReadOnlyList<ControllerDeviceInfo> CanonicalDeckGroup(Guid container, string suffix)
+    {
+        var nodes = new List<ControllerDeviceInfo>
+        {
+            new($"USB\\VID_28DE&PID_1205\\{suffix}_ROOT", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205"], [], "USB", null, null, 0x28DE, 0x1205, true)
+        };
+        foreach (var (mi, name) in new[] { ("00", "KBD"), ("01", "MOUSE"), ("02", "CONTROLLER") })
+        {
+            nodes.Add(new($"USB\\VID_28DE&PID_1205&MI_{mi}\\{suffix}_{name}", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", [$"USB\\VID_28DE&PID_1205&MI_{mi}"], [], "USB", null, null, 0x28DE, 0x1205, true));
+            nodes.Add(new($"HID\\VID_28DE&PID_1205&MI_{mi}\\{suffix}_{name}", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", [$"HID\\VID_28DE&PID_1205&MI_{mi}"], [], "HIDClass", null, null, 0x28DE, 0x1205, true));
+        }
+        return nodes;
+    }
+    private static ControllerDeviceInfo Device(string id) => new(id.Contains('\\') ? id : $"USB\\VID_28DE&PID_1205\\{id}", Guid.Empty, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205", "USB\\VID_28DE&PID_1205&MI_00", "USB\\VID_28DE&PID_1205&MI_01", "USB\\VID_28DE&PID_1205&MI_02", "HID\\VID_28DE&PID_1205&MI_00", "HID\\VID_28DE&PID_1205&MI_01", "HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+    private static ControllerDeviceInfo DeviceWithContainer(string id, Guid container) => new(id, container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205", "USB\\VID_28DE&PID_1205&MI_00", "USB\\VID_28DE&PID_1205&MI_01", "USB\\VID_28DE&PID_1205&MI_02", "HID\\VID_28DE&PID_1205&MI_00", "HID\\VID_28DE&PID_1205&MI_01", "HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
 
     public CanonicalSteamDeckOutputStageTests()
     {
         Directory.CreateDirectory(_directory);
         AppLog.DirectoryOverride = _directory;
         AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        CanonicalSteamDeckOutputStage.TestOnlyIdentityCachePath = Path.Combine(_directory, "steamdeck-pnp-cache.json");
     }
 
     public void Dispose()
@@ -1273,11 +1327,44 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
+        CanonicalSteamDeckOutputStage.TestOnlyIdentityCachePath = null;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 
-    private sealed class FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states) : IControllerDeviceEnumerator
-    { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)]; }
+    private sealed class FakeEnumerator : IControllerDeviceEnumerator
+    {
+        private readonly IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> _states;
+        private readonly bool _directLookup;
+        private int _index;
+        private IReadOnlyList<ControllerDeviceInfo> Current => _states[Math.Min(_index, _states.Count - 1)];
+        public FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states, bool directLookup = false)
+        {
+            _directLookup = directLookup;
+            _states = states;
+        }
+        public int DirectLookupCalls { get; private set; }
+        public int EnumerateCalls { get; private set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            EnumerateCalls++;
+            return _states[Math.Min(_index++, _states.Count - 1)];
+        }
+        public ControllerDeviceInfo? FindPresentDevice(string instanceId)
+        {
+            DirectLookupCalls++;
+            if (!_directLookup) return null;
+            return Current.FirstOrDefault(device =>
+                string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
+        }
+        public IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId)
+        {
+            var current = Current;
+            if (_index < _states.Count - 1) _index++;
+            return current.Where(device => device.Present && device.VendorId == vendorId && device.ProductId == productId)
+                .Select(device => device.InstanceId).ToArray();
+        }
+
+    }
 
     // Returns [] for the very first call (the "before" snapshot) and thereafter either [deck] or []
     // depending on DeviceRemoved, regardless of how many times WaitForIdentityAsync polls.

@@ -8,6 +8,7 @@ using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using System.Buffers.Binary;
+using System.Text.Json;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
@@ -162,9 +163,12 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         if (_sessionId() is null) return ValueTask.FromResult(RoutingStageOperationResult.Failure("RecoverySessionUnavailable"));
         if (_state != LifecycleState.Inactive) return ValueTask.FromResult(RoutingStageOperationResult.Failure("SteamOutputAlreadyActive"));
         if (_before is not null) return ValueTask.FromResult(RoutingStageOperationResult.Failure("SteamOutputAlreadyPrepared"));
-        // Recovery and exact before/after delta semantics require the complete pre-mutation view.
-        // Only the repeated post-create stabilization snapshots are target-scoped.
-        _before = _enumerator.EnumeratePresentDevices();
+        // Recovery consumes only prior Steam Deck identities. The target-scoped enumerator also
+        // returns the required ancestor nodes, so ownership semantics remain complete without
+        // hydrating unrelated present devices.
+        _before = _enumerator.EnumeratePresentDevices(
+            SteamDeckVirtualDeviceIdentityPolicy.VendorId,
+            SteamDeckVirtualDeviceIdentityPolicy.ProductId);
         _mutationId = Guid.NewGuid();
         _state = LifecycleState.Prepared;
         return ValueTask.FromResult(RoutingStageOperationResult.Success("SteamOutputPreflightComplete"));
@@ -194,12 +198,14 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             operationToken.ThrowIfCancellationRequested();
             _state = LifecycleState.Creating;
             var started = Stopwatch.GetTimestamp();
+            AppLog.Debug("RoutingTrace", "Steam Deck attach started.", ("Event", "SteamDeckAttachStarted"));
             bool sessionStarted;
             try
             {
                 sessionStarted = _canonicalSession.Start();
             }
             finally { timing.CanonicalSessionStartMs = Elapsed(started); }
+            AppLog.Debug("RoutingTrace", "Steam Deck attach returned.", ("Event", "SteamDeckAttachReturned"), ("ElapsedMs", timing.CanonicalSessionStartMs), ("Succeeded", sessionStarted));
             if (!sessionStarted) return await FailAndRollbackCoreAsync("CanonicalSessionStartFailed", timing).ConfigureAwait(false);
             operationToken.ThrowIfCancellationRequested();
             _busId = _canonicalSession.BusId ?? 0;
@@ -217,11 +223,14 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 return await FailAndRollbackCoreAsync(resolved.Reason, timing).ConfigureAwait(false);
             }
             _owned = resolved.Devices;
+            AppLog.Debug("RoutingTrace", "Exact Steam Deck identity resolved.",
+                ("Event", "ExactDeckIdentityResolved"), ("IdentityCount", _owned.Count));
             started = Stopwatch.GetTimestamp();
             RecoveryResult checkpoint;
             try { checkpoint = _recovery.ResolveAddonOwnedVirtualDeviceIdentity(session, _mutationId, _owned.Select(device => device.InstanceId)); }
             finally { timing.RecoveryCheckpointMs = Elapsed(started); }
             if (!checkpoint.IsSafeToContinue) return await FailAndRollbackCoreAsync("VirtualDeviceRecoveryCheckpointFailed", timing).ConfigureAwait(false);
+            SaveIdentityCache(_owned);
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             HidHideInspection hidHideInspection;
@@ -266,6 +275,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             try { _publisher.Start(); }
             finally { timing.PublisherStartMs = Elapsed(started); }
             _state = LifecycleState.Active;
+            AppLog.Debug("RoutingTrace", "Steam Deck output ready.",
+                ("Event", "SteamOutputReady"), ("IdentityCount", _owned.Count));
             _presentationPaused = false;
             AppLog.Debug("SteamOutput", "SteamDeckOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{SteamDeckVirtualDeviceIdentityPolicy.VendorId:X4}"), ("PID", $"{SteamDeckVirtualDeviceIdentityPolicy.ProductId:X4}"), ("NeutralAccepted", true));
             AppLog.Debug("RoutingTrace", "Steam Deck output creation completed.", ("Event", "SteamDeckOutputCreated"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(timing.Started)), ("CanonicalSessionStartMs", timing.CanonicalSessionStartMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
@@ -552,61 +563,170 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             .ToArray();
     }
 
-    // Steam Deck (28DE:1205) is a composite device exposing separate Keyboard/Mouse/Controller HID
-    // interfaces that can enumerate as sibling PnP nodes with real-world timing skew between them.
-    // Resolving as soon as the FIRST sibling appears would treat normal composite enumeration as
-    // already-complete and strand the later siblings as unowned. Instead, once a candidate logical
-    // group is observed we keep polling (reusing the same before/after delta resolver, which always
-    // re-evaluates against the original "before" snapshot, so the candidate set naturally grows as
-    // more siblings appear) until the logical key and complete InstanceId set remain identical across
-    // N consecutive snapshots, and
-    // only then treat it as converged. A second, genuinely different logical group appearing at any
-    // point during stabilization still surfaces as Ambiguous immediately (fail closed, unchanged).
-    private const int IdentityStabilizationConsecutiveSnapshots = 3;
-
     private async ValueTask<(ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> WaitForIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, CancellationToken token)
     {
+        AppLog.Debug("RoutingTrace", "Steam Deck PnP cache lookup started.", ("Event", "PnpCacheLookupStarted"));
+        var cachedIds = LoadIdentityCache();
         var deadline = DateTime.UtcNow + _pnPTimeout;
+        var cached = await TryResolveCachedIdentityAsync(before, cachedIds, deadline, token).ConfigureAwait(false);
+        if (cached.Success)
+        {
+            AppLog.Debug("RoutingTrace", "Steam Deck PnP cache hit; target-scoped enumeration skipped.",
+                ("Event", "PnpCacheHit"), ("IdentityCount", cachedIds.Count));
+            return (cached.Result, cached.Snapshot);
+        }
+
+        AppLog.Debug("RoutingTrace", "Steam Deck PnP cache miss; using full target-scoped discovery.",
+            ("Event", "PnpCacheMiss"), ("Fallback", "FullDiscovery"));
+
         ViiperVirtualDeviceResolution result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear");
         IReadOnlyList<ControllerDeviceInfo> snapshot;
-        var stableConsecutiveSnapshots = 0;
-        string? lastCandidateSignature = null;
+        var firstCandidateLogged = false;
         while (true)
         {
             snapshot = _enumerator.EnumeratePresentDevices(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId);
+            if (!firstCandidateLogged && snapshot.Any(device => device.Present
+                && device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId
+                && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId))
+            {
+                firstCandidateLogged = true;
+                AppLog.Debug("RoutingTrace", "First Steam Deck target node observed.",
+                    ("Event", "FirstDeckCandidateSeen"));
+            }
             result = _resolver.Resolve(before, snapshot);
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Ambiguous)
                 return (result, snapshot);
-            if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)
-            {
-                var signature = BuildIdentitySignature(result.Devices);
-                stableConsecutiveSnapshots = StringComparer.OrdinalIgnoreCase.Equals(signature, lastCandidateSignature)
-                    ? stableConsecutiveSnapshots + 1
-                    : 1;
-                lastCandidateSignature = signature;
-                if (stableConsecutiveSnapshots >= IdentityStabilizationConsecutiveSnapshots) return (result, snapshot);
-            }
-            else
-            {
-                stableConsecutiveSnapshots = 0;
-                lastCandidateSignature = null;
-            }
+            if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved &&
+                HasRequiredSteamDeckInterfaces(result))
+                return (result, snapshot);
             if (DateTime.UtcNow >= deadline) break;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }
-        // A resolved candidate that did not reach the required consecutive identical signatures is
-        // not safe evidence of ownership. In particular, do not promote a candidate merely because
-        // it was resolved once before disappearing or changing identity near the timeout.
-        return (new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceIdentityDidNotStabilize"), snapshot);
+        return (new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear"), snapshot);
     }
 
-    private static string BuildIdentitySignature(IReadOnlyList<ControllerDeviceInfo> devices)
+    private static bool HasRequiredSteamDeckInterfaces(ViiperVirtualDeviceResolution resolved)
     {
-        var logicalKey = ControllerLogicalIdentity.GetLogicalKey(devices[0]);
-        var instanceIds = devices.Select(device => device.InstanceId)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(instanceId => instanceId, StringComparer.OrdinalIgnoreCase);
-        return $"{logicalKey}\u001f{string.Join("\u001f", instanceIds)}";
+        var devices = resolved.Devices;
+        static bool IsTarget(ControllerDeviceInfo device) =>
+            device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId &&
+            device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId;
+
+        static bool HasMi(ControllerDeviceInfo device, string mi) =>
+            device.InstanceId.Contains($"&{mi}", StringComparison.OrdinalIgnoreCase) ||
+            device.HardwareIds.Any(id => id.Contains($"&{mi}", StringComparison.OrdinalIgnoreCase));
+
+        static bool HasLayer(IEnumerable<ControllerDeviceInfo> candidates, string prefix, string mi) =>
+            candidates.Any(device => IsTarget(device) &&
+                (device.InstanceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                 device.HardwareIds.Any(id => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))) &&
+                HasMi(device, mi));
+
+        var hasRoot = devices.Any(device => IsTarget(device) &&
+            device.InstanceId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase) &&
+            !device.InstanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase));
+        return hasRoot && new[] { "MI_00", "MI_01", "MI_02" }.All(mi =>
+            HasLayer(devices, "USB\\", mi) && HasLayer(devices, "HID\\", mi));
+    }
+
+    private async ValueTask<(bool Success, ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> TryResolveCachedIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds, DateTime deadline, CancellationToken token)
+    {
+        var result = new ViiperVirtualDeviceResolution(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "CachedIdentityUnavailable");
+        IReadOnlyList<ControllerDeviceInfo> snapshot = [];
+        if (cachedIds.Count == 0) return (false, result, snapshot);
+
+        var beforeTargetIds = before
+            .Where(device => device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId
+                && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId)
+            .Select(device => device.InstanceId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (cachedIds.Any(beforeTargetIds.Contains)) return (false, result, snapshot);
+
+        HashSet<string>? previousSubset = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            var currentTargetIds = _enumerator
+                .EnumeratePresentInstanceIds(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId)
+                .Where(id => !beforeTargetIds.Contains(id))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (currentTargetIds.Count == 0)
+            {
+                await Task.Delay(_pollInterval, token).ConfigureAwait(false);
+                continue;
+            }
+            if (currentTargetIds.Any(id => !cachedIds.Contains(id)))
+                return (false, result, snapshot);
+            if (!currentTargetIds.SetEquals(cachedIds))
+            {
+                if (previousSubset is not null && previousSubset.SetEquals(currentTargetIds))
+                    return (false, result, snapshot);
+                previousSubset = currentTargetIds;
+                await Task.Delay(_pollInterval, token).ConfigureAwait(false);
+                continue;
+            }
+            break;
+        }
+        if (DateTime.UtcNow >= deadline) return (false, result, snapshot);
+
+        var byId = new Dictionary<string, ControllerDeviceInfo>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Queue<string>(cachedIds);
+        while (pending.Count > 0)
+        {
+            var id = pending.Dequeue();
+            if (byId.ContainsKey(id)) continue;
+            var device = _enumerator.FindPresentDevice(id);
+            if (device is null || !device.Present) return (false, result, snapshot);
+            byId[device.InstanceId] = device;
+            foreach (var ancestorId in device.AncestorInstanceIds)
+                if (!byId.ContainsKey(ancestorId)) pending.Enqueue(ancestorId);
+            if (device.ParentInstanceId is { Length: > 0 } parentId && !byId.ContainsKey(parentId))
+                pending.Enqueue(parentId);
+        }
+
+        var candidateSnapshot = byId.Values.ToArray();
+        var policy = new SteamDeckVirtualDeviceIdentityPolicy();
+        var index = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(candidateSnapshot);
+        var cachedTargets = candidateSnapshot.Where(device => cachedIds.Contains(device.InstanceId)).ToArray();
+        if (cachedTargets.Length != cachedIds.Count || cachedTargets.Any(device => !policy.IsMatchingCandidate(device, index)))
+            return (false, result, snapshot);
+        result = _resolver.Resolve(before, candidateSnapshot);
+        snapshot = candidateSnapshot;
+        return (result.Succeeded && HasRequiredSteamDeckInterfaces(result) && result.Devices.Select(device => device.InstanceId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(cachedIds), result, snapshot);
+    }
+
+    internal static string? TestOnlyIdentityCachePath { get; set; }
+    private static string IdentityCachePath => TestOnlyIdentityCachePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "steamdeck-pnp-cache.json");
+
+    private static IReadOnlySet<string> LoadIdentityCache()
+    {
+        try
+        {
+            if (!File.Exists(IdentityCachePath)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var ids = JsonSerializer.Deserialize<string[]>(File.ReadAllText(IdentityCachePath)) ?? [];
+            return ids.Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException)
+        {
+            AppLog.Debug("RoutingTrace", "Steam Deck PnP cache could not be read; discovery continues.", ("Event", "PnpCacheMiss"), ("Reason", exception.GetType().Name));
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static void SaveIdentityCache(IReadOnlyList<ControllerDeviceInfo> devices)
+    {
+        try
+        {
+            var path = IdentityCachePath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var temporary = path + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(devices.Select(d => d.InstanceId).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()));
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AppLog.Debug("RoutingTrace", "Steam Deck PnP cache could not be saved; routing remains valid.", ("Event", "PnpCacheMiss"), ("Reason", exception.GetType().Name));
+        }
     }
 
     private async ValueTask<(bool Verified, IReadOnlyList<ControllerDeviceInfo> Snapshot)> WaitForSafeTeardownEvidenceAsync(IEnumerable<string> exactIds, CancellationToken token)

@@ -43,6 +43,8 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
         {
             enumerator = _enumeratorFactory();
             var selection = MsiClawDirectInputDeviceSelector.Select(enumerator.EnumerateGameControllers());
+            if (selection.IsSelected)
+                AppLog.Debug("RoutingTrace", "Physical input candidate found.", ("Event", "PhysicalInputCandidateFound"), ("CandidateCount", selection.CandidateCount));
             return ValueTask.FromResult(selection.IsSelected
                 ? RoutingStageOperationResult.Success(selection.Reason)
                 : RoutingStageOperationResult.Failure(selection.Reason));
@@ -75,6 +77,8 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
             var selection = MsiClawDirectInputDeviceSelector.Select(enumerator.EnumerateGameControllers());
             if (!selection.IsSelected)
                 return ValueTask.FromResult(RoutingStageOperationResult.Failure(selection.Reason));
+            AppLog.Debug("RoutingTrace", "Physical input candidate found.",
+                ("Event", "PhysicalInputCandidateFound"), ("CandidateCount", selection.CandidateCount));
             lock (_sync) _preparedDescriptor = selection.Descriptor;
             return ValueTask.FromResult(RoutingStageOperationResult.Success(selection.Reason));
         }
@@ -136,6 +140,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
             _currentIdentity = new(descriptor.InstanceGuid, descriptor.DevicePath!, descriptor.PnpInstanceId!, descriptor.PhysicalIdentity!);
         }
         PhysicalSessionStarted?.Invoke();
+        AppLog.Debug("RoutingTrace", "Physical input acquired.", ("Event", "PhysicalInputAcquired"), ("InstanceGuid", descriptor.InstanceGuid));
         AppLog.Debug("PhysicalInput", "PhysicalInput selected", ("InstanceGuid", descriptor.InstanceGuid), ("DevicePath", descriptor.DevicePath), ("PnpInstanceId", descriptor.PnpInstanceId), ("PhysicalIdentity", descriptor.PhysicalIdentity));
         return RoutingStageOperationResult.Success("Started");
     }

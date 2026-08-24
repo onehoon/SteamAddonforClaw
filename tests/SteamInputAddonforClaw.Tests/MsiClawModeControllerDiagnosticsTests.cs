@@ -80,11 +80,33 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
         var result = await controller.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
 
         Assert.Equal(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, result.Status);
-        Assert.Equal(1, enumerator.CallCount);
+        Assert.Equal(2, enumerator.CallCount);
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("TargetPidPresent=False", log);
         Assert.Contains("TargetControlCandidateCount=0", log);
+    }
+
+    [Fact]
+    public async Task Pid1902FirstSeen_is_logged_only_for_the_forward_DirectInput_transition()
+    {
+        var container = Guid.NewGuid();
+        var xinput = Topology(container, "USB\\VID_0DB0&PID_1901\\ROOT_C", 0x1901, 0xFFA0, 0x0001);
+        var directInput = Topology(container, "USB\\VID_0DB0&PID_1902\\ROOT_C", 0x1902, 0xFFF0, 0x0040);
+
+        var enter = new MsiClawModeController(
+            new SequenceEnumerator([xinput], [xinput, directInput]),
+            new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        Assert.True((await enter.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(xinput), CancellationToken.None)).Succeeded);
+
+        var restore = new MsiClawModeController(
+            new SequenceEnumerator([directInput], [directInput, xinput]),
+            new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        Assert.True((await restore.SwitchModeAsync(MsiClawNativeMode.XInput, MsiClawPhysicalIdentity.From(directInput), CancellationToken.None)).Succeeded);
+
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(1, log.Split('\n').Count(line => line.Contains("Event=Pid1902FirstSeen", StringComparison.Ordinal)));
     }
 
     private static ControllerDeviceInfo Topology(Guid container, string root, ushort pid, ushort usagePage, ushort usage)
@@ -106,8 +128,11 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
             if (productId == 0x1902) TargetProbeCount++;
             return states[Math.Min(_index, states.Length - 1)].Any(d => d.VendorId == vendorId && d.ProductId == productId);
         }
-        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId) =>
-            states[Math.Min(_index++, states.Length - 1)].Where(d => d.VendorId == vendorId && d.ProductId == productId).ToArray();
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
+        {
+            if (productId == 0x1902) TargetProbeCount++;
+            return states[Math.Min(_index++, states.Length - 1)].Where(d => d.VendorId == vendorId && d.ProductId == productId).ToArray();
+        }
     }
 
     private sealed class RecordingWriter : IMsiClawModeWriter

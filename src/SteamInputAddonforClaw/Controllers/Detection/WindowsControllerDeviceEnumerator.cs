@@ -84,16 +84,27 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         using var set = OpenPresentSet();
         for (uint index = 0; TryGetDevice(set.Handle, index, out var data); index++)
         {
-            var parsed = ParseVendorProductId(GetRegistryMultiString(set.Handle, ref data, SpdrpHardwareId));
+            var parsed = ParseVendorProductId([GetDeviceInstanceId(set.Handle, ref data)]);
             if (parsed.VendorId == vendorId && parsed.ProductId == productId) return true;
         }
         return false;
     }
 
+    public IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId)
+    {
+        using var set = OpenPresentSet();
+        var light = ReadLightweightDevices(set.Handle, vendorId, productId);
+        return light.Values
+            .Where(d => ParseVendorProductId([d.InstanceId]).VendorId == vendorId
+                && ParseVendorProductId([d.InstanceId]).ProductId == productId)
+            .Select(d => d.InstanceId)
+            .ToArray();
+    }
+
     public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
     {
         using var set = OpenPresentSet();
-        var light = ReadLightweightDevices(set.Handle);
+        var light = ReadLightweightDevices(set.Handle, vendorId, productId);
         var target = light.Values.Where(d => ParseVendorProductId(d.HardwareIds).VendorId == vendorId && ParseVendorProductId(d.HardwareIds).ProductId == productId).ToArray();
         var selected = target.SelectMany(d => AncestorIds(d.DevInst)).Concat(target.Select(d => d.InstanceId))
             .Where(id => id.Length != 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -144,13 +155,17 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
             GetRegistryString(set, ref data, SpdrpFriendlyName), usage.Page, usage.Usage);
     }
 
-    private static Dictionary<string, LightDevice> ReadLightweightDevices(IntPtr set)
+    private static Dictionary<string, LightDevice> ReadLightweightDevices(IntPtr set, ushort vendorId, ushort productId)
     {
         var result = new Dictionary<string, LightDevice>(StringComparer.OrdinalIgnoreCase);
         for (uint index = 0; TryGetDevice(set, index, out var data); index++)
         {
-            var ids = GetRegistryMultiString(set, ref data, SpdrpHardwareId);
             var instanceId = GetDeviceInstanceId(set, ref data);
+            // InstanceId is the cheap first discriminator for the common USB/HID case.
+            var instanceIdentity = ParseVendorProductId([instanceId]);
+            var ids = instanceIdentity.VendorId == vendorId && instanceIdentity.ProductId == productId
+                ? (IReadOnlyList<string>)[instanceId]
+                : [];
             result[instanceId] = new LightDevice(instanceId, data.DevInst, ids, data);
         }
         return result;

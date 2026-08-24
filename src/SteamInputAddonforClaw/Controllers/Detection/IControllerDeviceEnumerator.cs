@@ -4,6 +4,12 @@ public interface IControllerDeviceEnumerator
 {
     IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices();
 
+    IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId) =>
+        EnumeratePresentDevices()
+            .Where(d => d.Present && d.VendorId == vendorId && d.ProductId == productId)
+            .Select(d => d.InstanceId)
+            .ToArray();
+
     IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
     {
         var devices = EnumeratePresentDevices();
