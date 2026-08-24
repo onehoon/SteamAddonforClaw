@@ -30,7 +30,10 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 13: Intel Game Profile FPS Limit snapshot and mutation RPCs.
 // Version 14: SetSteamInputRoutingEnabled returns a typed mutation result instead of a settings snapshot.
 // Version 15: virtual output identity uncertainty is removed from frontend status and routing contracts.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 15; }
+// Version 16: per-profile CPU Boost, TDP, and Power Mode ownership adds required Enabled members
+// to game-profile frontend snapshots and adds three profile feature-enable RPCs. A v15 peer must
+// fail the handshake before either side deserializes or invokes the new contract.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 16; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
