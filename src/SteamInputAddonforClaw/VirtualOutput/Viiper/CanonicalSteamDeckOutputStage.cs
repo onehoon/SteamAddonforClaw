@@ -567,7 +567,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     {
         AppLog.Debug("RoutingTrace", "Steam Deck PnP cache lookup started.", ("Event", "PnpCacheLookupStarted"));
         var cachedIds = LoadIdentityCache();
-        var cached = await TryResolveCachedIdentityAsync(before, cachedIds, token).ConfigureAwait(false);
+        var deadline = DateTime.UtcNow + _pnPTimeout;
+        var cached = await TryResolveCachedIdentityAsync(before, cachedIds, deadline, token).ConfigureAwait(false);
         if (cached.Success)
         {
             AppLog.Debug("RoutingTrace", "Steam Deck PnP cache hit; target-scoped enumeration skipped.",
@@ -578,7 +579,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         AppLog.Debug("RoutingTrace", "Steam Deck PnP cache miss; using full target-scoped discovery.",
             ("Event", "PnpCacheMiss"), ("Fallback", "FullDiscovery"));
 
-        var deadline = DateTime.UtcNow + _pnPTimeout;
         ViiperVirtualDeviceResolution result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear");
         IReadOnlyList<ControllerDeviceInfo> snapshot;
         var firstCandidateLogged = false;
@@ -596,8 +596,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             result = _resolver.Resolve(before, snapshot);
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Ambiguous)
                 return (result, snapshot);
-            if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved
-                && HasCompleteCanonicalDeck(result.Devices))
+            if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)
                 return (result, snapshot);
             if (DateTime.UtcNow >= deadline) break;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
@@ -605,29 +604,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         return (new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear"), snapshot);
     }
 
-    private static bool HasCompleteCanonicalDeck(IReadOnlyList<ControllerDeviceInfo> devices)
-    {
-        var targets = devices.Where(device => device.Present
-            && device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId
-            && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId).ToArray();
-        bool HasMi(ControllerDeviceInfo device, string marker) =>
-            device.InstanceId.Contains(marker, StringComparison.OrdinalIgnoreCase)
-            || device.HardwareIds.Any(id => id.Contains(marker, StringComparison.OrdinalIgnoreCase));
-        bool IsUsb(ControllerDeviceInfo device) => device.InstanceId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase);
-        bool IsHid(ControllerDeviceInfo device) => device.InstanceId.StartsWith("HID\\", StringComparison.OrdinalIgnoreCase);
-
-        var hasCompositeRoot = targets.Any(device =>
-            IsUsb(device)
-            && device.InstanceId.Contains("VID_28DE&PID_1205\\", StringComparison.OrdinalIgnoreCase)
-            && !device.InstanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase));
-        if (!hasCompositeRoot) return false;
-
-        return new[] { "MI_00", "MI_01", "MI_02" }.All(marker =>
-            targets.Any(device => IsUsb(device) && HasMi(device, marker))
-            && targets.Any(device => IsHid(device) && HasMi(device, marker)));
-    }
-
-    private async ValueTask<(bool Success, ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> TryResolveCachedIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds, CancellationToken token)
+    private async ValueTask<(bool Success, ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> TryResolveCachedIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds, DateTime deadline, CancellationToken token)
     {
         var result = new ViiperVirtualDeviceResolution(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "CachedIdentityUnavailable");
         IReadOnlyList<ControllerDeviceInfo> snapshot = [];
@@ -640,7 +617,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (cachedIds.Any(beforeTargetIds.Contains)) return (false, result, snapshot);
 
-        var deadline = DateTime.UtcNow + _pnPTimeout;
         while (DateTime.UtcNow < deadline)
         {
             var currentTargetIds = _enumerator
@@ -678,8 +654,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         var cachedTargets = candidateSnapshot.Where(device => cachedIds.Contains(device.InstanceId)).ToArray();
         if (cachedTargets.Length != cachedIds.Count || cachedTargets.Any(device => !policy.IsMatchingCandidate(device, index)))
             return (false, result, snapshot);
-        if (!HasCompleteCanonicalDeck(candidateSnapshot)) return (false, result, snapshot);
-
         result = _resolver.Resolve(before, candidateSnapshot);
         snapshot = candidateSnapshot;
         return (result.Succeeded && result.Devices.Select(device => device.InstanceId)

@@ -1010,9 +1010,8 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
-            [UsbIpHost(), keyboardLeaf], // partial composite: not ready
-            [UsbIpHost(), keyboardLeaf, mouseLeaf], // still partial
-            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid], // first complete composite identity
+            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid], // complete composite identity
+            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid],
             [], // rollback: all three verified absent after native remove
         ]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -1338,7 +1337,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states, bool directLookup = false)
         {
             _directLookup = directLookup;
-            _states = states.Select(CanonicalizeSyntheticState).ToArray();
+            _states = states;
         }
         public int DirectLookupCalls { get; private set; }
         public int EnumerateCalls { get; private set; }
@@ -1362,33 +1361,6 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
                 .Select(device => device.InstanceId).ToArray();
         }
 
-        private static IReadOnlyList<ControllerDeviceInfo> CanonicalizeSyntheticState(IReadOnlyList<ControllerDeviceInfo> state)
-        {
-            var targets = state.Where(device => device.Present
-                && device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId
-                && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId).ToArray();
-            if (targets.Length == 0 || targets.Any(device => device.ContainerId != Guid.Empty)
-                || targets.Any(device => device.InstanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase)))
-                return state;
-
-            // Keep one-node fixtures in the same parent-based logical group so their original
-            // instance ID remains available for cache assertions. Multi-node fixtures retain
-            // their independent synthetic identities for ambiguity/reconciliation coverage.
-            var container = targets.All(device => device.ContainerId == Guid.Empty) ? Guid.Empty : Guid.NewGuid();
-            var nodes = new List<ControllerDeviceInfo>();
-            if (!targets.Any(device => device.InstanceId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase)
-                && device.InstanceId.Contains("VID_28DE&PID_1205\\", StringComparison.OrdinalIgnoreCase)
-                && !device.InstanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase)))
-            {
-                nodes.Add(new("USB\\VID_28DE&PID_1205\\SYNTH_ROOT", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205"], [], "USB", null, null, 0x28DE, 0x1205, true));
-            }
-            foreach (var (mi, name) in new[] { ("00", "KBD"), ("01", "MOUSE"), ("02", "CONTROLLER") })
-            {
-                nodes.Add(new($"USB\\VID_28DE&PID_1205&MI_{mi}\\SYNTH_{name}", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", [$"USB\\VID_28DE&PID_1205&MI_{mi}"], [], "USB", null, null, 0x28DE, 0x1205, true));
-                nodes.Add(new($"HID\\VID_28DE&PID_1205&MI_{mi}\\SYNTH_{name}", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", [$"HID\\VID_28DE&PID_1205&MI_{mi}"], [], "HIDClass", null, null, 0x28DE, 0x1205, true));
-            }
-            return state.Concat(nodes).ToArray();
-        }
     }
 
     // Returns [] for the very first call (the "before" snapshot) and thereafter either [deck] or []
