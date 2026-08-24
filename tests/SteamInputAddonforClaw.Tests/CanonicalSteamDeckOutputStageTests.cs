@@ -1311,8 +1311,8 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         }
         return nodes;
     }
-    private static ControllerDeviceInfo Device(string id) => new(id.Contains('\\') ? id : $"USB\\VID_28DE&PID_1205\\{id}", Guid.Empty, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
-    private static ControllerDeviceInfo DeviceWithContainer(string id, Guid container) => new(id, container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+    private static ControllerDeviceInfo Device(string id) => new(id.Contains('\\') ? id : $"USB\\VID_28DE&PID_1205\\{id}", Guid.Empty, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205", "USB\\VID_28DE&PID_1205&MI_00", "USB\\VID_28DE&PID_1205&MI_01", "USB\\VID_28DE&PID_1205&MI_02", "HID\\VID_28DE&PID_1205&MI_00", "HID\\VID_28DE&PID_1205&MI_01", "HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+    private static ControllerDeviceInfo DeviceWithContainer(string id, Guid container) => new(id, container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205", "USB\\VID_28DE&PID_1205&MI_00", "USB\\VID_28DE&PID_1205&MI_01", "USB\\VID_28DE&PID_1205&MI_02", "HID\\VID_28DE&PID_1205&MI_00", "HID\\VID_28DE&PID_1205&MI_01", "HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
 
     public CanonicalSteamDeckOutputStageTests()
     {

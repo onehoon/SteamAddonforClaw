@@ -608,12 +608,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     private static bool HasRequiredSteamDeckInterfaces(ViiperVirtualDeviceResolution resolved)
     {
         var devices = resolved.Devices;
-        // Records without a container identity are legacy test/synthetic records; the resolver
-        // policy remains authoritative for that compatibility shape. Real Windows composite
-        // records carry a container identity and must satisfy the canonical descriptor layers.
-        if (devices.Count > 0 && devices.All(device => device.ContainerId is null || device.ContainerId == Guid.Empty))
-            return true;
-
         static bool IsTarget(ControllerDeviceInfo device) =>
             device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId &&
             device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId;
@@ -624,7 +618,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
 
         static bool HasLayer(IEnumerable<ControllerDeviceInfo> candidates, string prefix, string mi) =>
             candidates.Any(device => IsTarget(device) &&
-                device.InstanceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                (device.InstanceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                 device.HardwareIds.Any(id => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))) &&
                 HasMi(device, mi));
 
         var hasRoot = devices.Any(device => IsTarget(device) &&
