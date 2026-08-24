@@ -183,6 +183,21 @@ public sealed class HidHideInstallDetectionTests
     }
 
     [Fact]
+    public void Official_path_resolver_does_not_trust_same_named_files_outside_package_location()
+    {
+        const string installLocation = "C:\\Program Files\\Nefarius Software Solutions\\HidHide";
+        var resolver = new HidHideTrustedApplicationPathResolver(
+            new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.", installLocation)], []),
+            _ => true);
+
+        var result = resolver.Resolve();
+
+        Assert.DoesNotContain(result, path => path.StartsWith("C:\\Temp", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result, path => path.EndsWith("\\HidHideClient.exe", StringComparison.OrdinalIgnoreCase) &&
+            path.Contains("Temp", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Official_client_path_resolution_failure_returns_no_trusted_path()
     {
         var resolver = new HidHideTrustedApplicationPathResolver(

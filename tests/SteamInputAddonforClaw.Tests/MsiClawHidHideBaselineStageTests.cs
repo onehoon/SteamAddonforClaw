@@ -47,6 +47,21 @@ public sealed class MsiClawHidHideBaselineStageTests
         Assert.Contains("AddApplication:C:\\addon.exe", hid.Trace);
     }
 
+    [Fact]
+    public async Task Missing_official_tools_are_added_to_the_required_baseline()
+    {
+        var hid = new FakeHidHide { Applications = [Addon] };
+        var stage = Create(hid);
+
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal([Addon, Client, Cli], hid.Applications);
+        Assert.Contains("AddApplication:" + Client, hid.Trace);
+        Assert.Contains("AddApplication:" + Cli, hid.Trace);
+    }
+
     [Theory]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
     [InlineData((int)HidHideInspectionStatus.ConfigurationUnavailable)]
@@ -125,7 +140,7 @@ public sealed class MsiClawHidHideBaselineStageTests
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Equal("AddonWhitelistVerificationFailed", result.Reason);
+        Assert.Equal("RequiredWhitelistVerificationFailed", result.Reason);
     }
 
     [Fact]

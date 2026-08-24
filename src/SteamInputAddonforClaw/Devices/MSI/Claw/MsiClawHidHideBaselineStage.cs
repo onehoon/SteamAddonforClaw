@@ -59,12 +59,16 @@ internal sealed class MsiClawHidHideBaselineStage : IRoutingPipelineStage
 
         var hiddenRemoved = 0;
         var foreignApplicationsRemoved = 0;
-        var addonAdded = false;
+        var applicationAdded = 0;
+        var requiredApplications = _trustedOfficialApplicationPaths
+            .Append(_executablePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         foreach (var entry in (inspection.HiddenDeviceEntries ?? []).ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!Try(() => _hidHide.RemoveHiddenDevice(entry)))
-                return Fail("RemoveHiddenDeviceFailed", hiddenRemoved, foreignApplicationsRemoved, addonAdded, started);
+                return Fail("RemoveHiddenDeviceFailed", hiddenRemoved, foreignApplicationsRemoved, applicationAdded, started);
             hiddenRemoved++;
         }
 
@@ -73,27 +77,29 @@ internal sealed class MsiClawHidHideBaselineStage : IRoutingPipelineStage
             cancellationToken.ThrowIfCancellationRequested();
             if (IsAllowedApplication(entry)) continue;
             if (!Try(() => _hidHide.RemoveApplication(entry)))
-                return Fail("RemoveApplicationFailed", hiddenRemoved, foreignApplicationsRemoved, addonAdded, started);
+                return Fail("RemoveApplicationFailed", hiddenRemoved, foreignApplicationsRemoved, applicationAdded, started);
             foreignApplicationsRemoved++;
         }
 
-        if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, _executablePath)))
+        foreach (var required in requiredApplications)
         {
-            if (!Try(() => _hidHide.AddApplication(_executablePath)))
-                return Fail("AddApplicationFailed", hiddenRemoved, foreignApplicationsRemoved, addonAdded, started);
-            addonAdded = true;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, required))) continue;
+            if (!Try(() => _hidHide.AddApplication(required)))
+                return Fail("AddApplicationFailed", hiddenRemoved, foreignApplicationsRemoved, applicationAdded, started);
+            applicationAdded++;
         }
 
         var verification = Inspect();
-        if (verification is null) return Fail("VerificationInspectionUnavailable", hiddenRemoved, foreignApplicationsRemoved, addonAdded, started);
+        if (verification is null) return Fail("VerificationInspectionUnavailable", hiddenRemoved, foreignApplicationsRemoved, applicationAdded, started);
         failure = ValidateBaseline(verification);
-        if (failure is not null) return Fail(failure, hiddenRemoved, foreignApplicationsRemoved, addonAdded, started);
+        if (failure is not null) return Fail(failure, hiddenRemoved, foreignApplicationsRemoved, applicationAdded, started);
 
         AppLog.Info("HidHideBaseline", "HidHide baseline normalized.",
-            ("AlreadyNormalized", hiddenRemoved == 0 && foreignApplicationsRemoved == 0 && !addonAdded),
+            ("AlreadyNormalized", hiddenRemoved == 0 && foreignApplicationsRemoved == 0 && applicationAdded == 0),
             ("HiddenEntriesRemoved", hiddenRemoved),
             ("ForeignWhitelistEntriesRemoved", foreignApplicationsRemoved),
-            ("AddonWhitelistAdded", addonAdded),
+            ("RequiredApplicationsAdded", applicationAdded),
             ("TrustedOfficialApplicationCount", _trustedOfficialApplicationPaths.Count),
             ("Result", "Success"),
             ("Reason", "HidHideBaselineReady"),
@@ -133,7 +139,11 @@ internal sealed class MsiClawHidHideBaselineStage : IRoutingPipelineStage
         var failure = ValidateInspection(inspection);
         if (failure is not null) return failure;
         if ((inspection.HiddenDeviceEntries ?? []).Count != 0) return "HiddenDeviceVerificationFailed";
-        if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, _executablePath))) return "AddonWhitelistVerificationFailed";
+        var requiredApplications = _trustedOfficialApplicationPaths
+            .Append(_executablePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        if (requiredApplications.Any(required => !inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, required))))
+            return "RequiredWhitelistVerificationFailed";
         if (inspection.ApplicationWhitelist.Any(entry => !IsAllowedApplication(entry))) return "ForeignWhitelistVerificationFailed";
         return null;
     }
@@ -146,12 +156,12 @@ internal sealed class MsiClawHidHideBaselineStage : IRoutingPipelineStage
         catch { return false; }
     }
 
-    private ValueTask<RoutingStageOperationResult> Fail(string reason, int hiddenRemoved, int foreignApplicationsRemoved, bool addonAdded, long started)
+    private ValueTask<RoutingStageOperationResult> Fail(string reason, int hiddenRemoved, int foreignApplicationsRemoved, int applicationAdded, long started)
     {
         AppLog.Warn("HidHideBaseline", "HidHide baseline normalization failed.", null,
             ("HiddenEntriesRemoved", hiddenRemoved),
             ("ForeignWhitelistEntriesRemoved", foreignApplicationsRemoved),
-            ("AddonWhitelistAdded", addonAdded),
+            ("RequiredApplicationsAdded", applicationAdded),
             ("TrustedOfficialApplicationCount", _trustedOfficialApplicationPaths.Count),
             ("Result", "Failure"),
             ("Reason", reason),

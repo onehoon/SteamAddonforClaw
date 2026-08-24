@@ -237,6 +237,17 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.Contains(hid.Applications, x => string.Equals(x, "C:\\addon.exe", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task DeviceVerifiedAbsentButJournalCompletionFailureKeepsRollbackPending()
+    {
+        var hid = new FakeHidHide { FailDeviceAddWithoutApplying = true };
+        var stage = Create(hid, store: new FaultingStore(JournalPath, successfulReplacements: 1));
+
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal("DeviceJournalCompletionFailed", (await stage.ExecuteMutationAsync(CancellationToken.None)).Reason);
+        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
     [Theory]
     [InlineData("HID\\VID_0DB0&PID_1901&MI_00&COL01\\CHILD")]
     [InlineData("HID\\VID_0DB0&PID_1902&MI_01&COL01\\CHILD")]
