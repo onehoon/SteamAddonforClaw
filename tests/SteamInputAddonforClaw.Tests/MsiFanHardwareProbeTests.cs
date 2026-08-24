@@ -149,6 +149,18 @@ public sealed class MsiFanHardwareProbeTests
     }
 
     [Theory]
+    [InlineData("MS-1T42")]
+    [InlineData("MS-1T52")]
+    public void A2vm_physical_response_uses_the_shared_validation_path(string board)
+    {
+        var t = new FakeFanTransport();
+        var result = new MsiFanHardwareProbe(t, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N")), _ => { }).PhysicalResponse("A2VM", board, "test");
+        Assert.True(result.Succeeded);
+        Assert.Contains(t.Writes, x => x.Block == 1 && x.Payload.Skip(1).Take(6).All(v => v == 10));
+        Assert.Contains($"Board: {board}", File.ReadAllText(result.ReportPath!));
+    }
+
+    [Theory]
     [InlineData(75, 40, "DECREASED")]
     [InlineData(40, 10, "DECREASED")]
     [InlineData(10, 75, "INCREASED")]
@@ -175,6 +187,31 @@ public sealed class MsiFanHardwareProbeTests
         Assert.Equal("ARMED", probe.ArmSuspendResume("EX", "MS-1T91", "test").Status);
         var result = probe.RestoreAuto("EX", "MS-1T91", "test");
         Assert.True(result.Succeeded); Assert.Contains("CANCEL BEFORE SUSPEND", File.ReadAllText(result.ReportPath!));
+    }
+
+    [Theory]
+    [InlineData(0x80, "CUSTOM_PERSISTED")]
+    [InlineData(0x00, "CURVE_PERSISTED_OWNERSHIP_LOST")]
+    public void Resume_state_classification_distinguishes_persisted_curve_and_ownership(byte ownership, string expected)
+    {
+        var flat = new byte[] { 70, 75, 75, 75, 75, 75, 75, 84 };
+        Assert.Equal(expected, FanProbeLogic.ClassifyResumeState(flat, flat, ownership));
+    }
+
+    [Fact]
+    public void Resume_state_classification_identifies_firmware_auto_reset()
+    {
+        var original = new byte[] { 70, 0, 40, 49, 58, 67, 75, 84 };
+        Assert.Equal("FIRMWARE_AUTO_RESET", FanProbeLogic.ClassifyResumeState(original, original, 0));
+    }
+
+    [Fact]
+    public void Physical_response_does_not_pass_when_tach_is_unavailable()
+    {
+        var t = new FakeFanTransport { FailFan0Read = true };
+        var result = new MsiFanHardwareProbe(t, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N")), _ => { }).PhysicalResponse("EX", "MS-1T91", "test");
+        Assert.False(result.Succeeded);
+        Assert.Contains("NO/INCONCLUSIVE", File.ReadAllText(result.ReportPath!));
     }
 
     [Fact]
@@ -238,7 +275,7 @@ public sealed class MsiFanHardwareProbeTests
     private sealed class FakeFanTransport : IMsiClawTdpTransport
     {
         internal readonly List<(int Block, byte[] Payload)> Writes = []; internal readonly List<string> Reads = [];
-        internal bool FailTemperature; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool FailCoolerRead; internal bool HighDuty; internal bool DivergentFan2; internal bool CoupleFanWrites; internal bool RawFanResponse;
+        internal bool FailTemperature; internal bool FailFan0Read; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool FailCoolerRead; internal bool HighDuty; internal bool DivergentFan2; internal bool CoupleFanWrites; internal bool RawFanResponse;
         internal byte InitialOwnership; internal byte InitialCooler;
         private readonly Dictionary<int, byte[]> _fans = new() { [1] = [70, 0, 40, 49, 58, 67, 75, 84], [2] = [71, 0, 40, 49, 58, 67, 75, 85] };
         private byte _ownership;
@@ -246,7 +283,7 @@ public sealed class MsiFanHardwareProbeTests
         private bool _initialized;
         public bool TryGetAp(int index, out byte[] payload) { EnsureInitialState(); Reads.Add($"AP{index}"); if (index == 1 && (FailAp212 || (FailApOnRestore && Writes.Any(x => x.Block == 1 || x.Block == 2)))) { payload = []; return false; } payload = index == 1 ? [_ownership] : [0x00, 0x01]; return true; }
         public bool TrySetData(int block, byte value) { EnsureInitialState(); Writes.Add((block, [value])); if (block == 212 && FailRestoreWrite) return false; if (block == 212) _ownership = value; if (block == 152) _cooler = value; return true; }
-        public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); if (block == 1 && FailFan1Read) { payload = []; return false; } if (_fans.TryGetValue(block, out var value)) { payload = (byte[])value.Clone(); if (block == 1 && HighDuty) payload[2] = 100; if (block == 2 && DivergentFan2) payload[3] = 50; if (RawFanResponse) payload = payload.Concat(new byte[23]).ToArray(); return true; } payload = []; return false; }
+        public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); if (block == 0 && FailFan0Read) { payload = []; return false; } if (block == 0) { var duty = _fans[1][1]; var tach = duty switch { >= 70 => 100, >= 40 => 150, _ => 200 }; payload = [(byte)tach, 0, 1, 2, 0, 0, 0, 0]; return true; } if (block == 1 && FailFan1Read) { payload = []; return false; } if (_fans.TryGetValue(block, out var value)) { payload = (byte[])value.Clone(); if (block == 1 && HighDuty) payload[2] = 100; if (block == 2 && DivergentFan2) payload[3] = 50; if (RawFanResponse) payload = payload.Concat(new byte[23]).ToArray(); return true; } payload = []; return false; }
         public bool TrySetFan(int block, byte[] payload) { if (block == 2 && FailFan2Write) return false; Writes.Add((block, (byte[])payload.Clone())); if (!DoNotPersistFanWrites) _fans[block] = (byte[])payload.Clone(); if (CoupleFanWrites) { var other = block == 1 ? 2 : 1; var coupled = (byte[])_fans[other].Clone(); coupled[2] = (byte)(coupled[2] + 1); _fans[other] = coupled; } return true; }
         public bool TryGetTemperature(int index, out byte[] payload) { Reads.Add($"Temp{index}"); payload = FailTemperature ? [] : [47, 50, 57, 64, 71, 78]; return !FailTemperature; }
         public bool TryGetThermal(int index, out byte[] payload) { Reads.Add($"Thermal{index}"); payload = [44, 54, 64, 74, 82, 82]; return true; }

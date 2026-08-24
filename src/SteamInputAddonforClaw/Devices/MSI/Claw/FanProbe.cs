@@ -50,6 +50,17 @@ internal static class FanProbeLogic
         before is null || after is null ? "INCONCLUSIVE" : after < before ? "DECREASED" : after > before ? "INCREASED" : "UNCHANGED";
 
     internal static bool IsSafePhysicalCurve(IReadOnlyList<byte> duties) => duties.Count == 6 && duties.All(d => d is >= 10 and <= 75);
+
+    internal static string ClassifyResumeState(byte[] fan1, byte[] fan2, byte ownership)
+    {
+        var armed = new byte[] { 75, 75, 75, 75, 75, 75 };
+        var tablesPersisted = fan1.Skip(1).Take(6).SequenceEqual(armed) && fan2.Skip(1).Take(6).SequenceEqual(armed);
+        var ownershipOn = (ownership & 0x80) != 0;
+        if (tablesPersisted && ownershipOn) return "CUSTOM_PERSISTED";
+        if (tablesPersisted) return "CURVE_PERSISTED_OWNERSHIP_LOST";
+        if (!ownershipOn) return "FIRMWARE_AUTO_RESET";
+        return "OTHER_STATE";
+    }
 }
 
 /// <summary>Bounded developer-only MSI fan diagnostic. It owns no persistent fan state.</summary>
@@ -103,13 +114,21 @@ internal sealed class MsiFanHardwareProbe
             report.AppendLine("=== RESUME OBSERVATION ===");
             _delay(TimeSpan.FromMilliseconds(750));
             WritePhysicalSnapshot(report, "POST_RESUME");
+            if (TryReadFan(1, out _, out var fan1) && TryReadFan(2, out _, out var fan2) && _transport.TryGetAp(1, out var ap) && ap.Length > 0)
+            {
+                var classification = FanProbeLogic.ClassifyResumeState(fan1, fan2, ap[0]);
+                report.AppendLine($"Resume classification: {classification}");
+                report.AppendLine($"Resume custom table persisted: {(classification is "CUSTOM_PERSISTED" or "CURVE_PERSISTED_OWNERSHIP_LOST" ? "YES" : "NO")}");
+                report.AppendLine($"Resume ownership persisted: {(classification == "CUSTOM_PERSISTED" ? "YES" : "NO")}");
+                report.AppendLine($"Resume policy implication: {classification switch { "CUSTOM_PERSISTED" => "No reapply indicated by this observation.", "CURVE_PERSISTED_OWNERSHIP_LOST" => "Ownership reapply may be required; verify before production policy.", "FIRMWARE_AUTO_RESET" => "Firmware Auto reset observed; no automatic reapply is performed by this diagnostic.", _ => "Read state requires manual analysis." }}");
+            }
+            else report.AppendLine("Resume classification: READ_FAILED");
             report.AppendLine("=== CLEANUP ===");
             var tables = RestoreOriginalTables(report);
             handback = RestoreFirmwareAuto(report);
             success = tables && handback;
             report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}");
             report.AppendLine($"Firmware Auto hand-back: {(handback ? "PASS" : "FAIL")}");
-            report.AppendLine("Resume classification: OBSERVED; production implication: no automatic reapply is performed by this diagnostic.");
         }
         catch (Exception exception) { report.AppendLine($"EXCEPTION: {exception}"); }
         finally
@@ -348,12 +367,12 @@ internal sealed class MsiFanHardwareProbe
     private bool WritePhysicalResponse(StringBuilder report, FanProbeModel model)
     {
         report.AppendLine("=== PHYSICAL RESPONSE TEST ===");
-        if (model == FanProbeModel.A2vm) { report.AppendLine("SKIPPED: A2VM physical write validation is not yet validated on hardware."); return false; }
         if (!CaptureBaseline(report, true) || _originalFan1 is null || _originalFan2 is null) { report.AppendLine("PRECHECK: FAIL; no writes performed"); return false; }
         var flat = new byte[] { 75, 75, 75, 75, 75, 75 };
         if (!FanProbeLogic.IsSafePhysicalCurve(flat) || !ApplyCurve(report, flat, "75")) return false;
         if (!SetOwnership(report, true)) return false;
         int? previousStageRpm = null;
+        var stageRpms = new Dictionary<string, int?>();
         foreach (var stage in new[] { ("75", flat, new[] { 0, 500, 1000, 2000, 5000 }), ("40", new byte[] { 40, 40, 40, 40, 40, 40 }, new[] { 0, 500, 1000, 2000, 5000 }), ("10", new byte[] { 10, 10, 10, 10, 10, 10 }, new[] { 0, 500, 1000, 2000, 3000 }), ("75_RECOVERY", flat, new[] { 0, 500, 1000, 2000 }) })
         {
             report.AppendLine($"=== STAGE {stage.Item1} ===");
@@ -363,14 +382,23 @@ internal sealed class MsiFanHardwareProbe
             report.AppendLine($"Stage directional response: {FanProbeLogic.ClassifyDirectionalResponse(firstRpm, lastRpm)} (Fan 1 RPM observation only; no exact threshold enforced)");
             if (previousStageRpm is not null || lastRpm is not null) report.AppendLine($"Transition from previous stage to {stage.Item1}: {FanProbeLogic.ClassifyDirectionalResponse(previousStageRpm, lastRpm)}");
             previousStageRpm = lastRpm;
+            stageRpms[stage.Item1] = lastRpm;
         }
-        return true;
+        var down75To40 = FanProbeLogic.ClassifyDirectionalResponse(stageRpms["75"], stageRpms["40"]);
+        var down40To10 = FanProbeLogic.ClassifyDirectionalResponse(stageRpms["40"], stageRpms["10"]);
+        var up10To75 = FanProbeLogic.ClassifyDirectionalResponse(stageRpms["10"], stageRpms["75_RECOVERY"]);
+        var lowDutyNonZero = stageRpms["10"] is > 0;
+        var physicalValidated = down75To40 == "DECREASED" && down40To10 == "DECREASED" && lowDutyNonZero && up10To75 == "INCREASED";
+        report.AppendLine("=== PHYSICAL RESPONSE SUMMARY ===");
+        report.AppendLine($"75 -> 40: {down75To40}"); report.AppendLine($"40 -> 10: {down40To10}");
+        report.AppendLine($"Duty 10 non-zero: {(lowDutyNonZero ? "YES" : "NO/UNKNOWN")}"); report.AppendLine($"10 -> 75: {up10To75}");
+        report.AppendLine($"No bounded latch behavior observed: {(physicalValidated ? "YES" : "NO/INCONCLUSIVE")}");
+        return physicalValidated;
     }
 
     private bool WriteArmSuspendResume(StringBuilder report, FanProbeModel model)
     {
         report.AppendLine("=== SUSPEND/RESUME ARM ===");
-        if (model == FanProbeModel.A2vm) { report.AppendLine("SKIPPED: A2VM suspend/resume write validation is not yet validated on hardware."); return false; }
         if (!CaptureBaseline(report, true) || _originalFan1 is null || _originalFan2 is null) return false;
         var flat = new byte[] { 75, 75, 75, 75, 75, 75 };
         if (!ApplyCurve(report, flat, "ARM_75") || !SetOwnership(report, true)) return false;
