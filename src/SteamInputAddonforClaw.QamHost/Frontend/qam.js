@@ -575,8 +575,9 @@
           }
           const effectiveDeviceDraft = state.qamSliderCommits?.get("device-tdp")?.draft ?? nextDraft;
           setTdpDraft(effectiveDeviceDraft); tdpDraftRef.current = effectiveDeviceDraft;
-          setPreviewAc(state.qamSliderCommits?.get("device-cpu-ac")?.value ?? state.qamSliderCommits?.get("profile-cpu-ac")?.value ?? null);
-          setPreviewDc(state.qamSliderCommits?.get("device-cpu-dc")?.value ?? state.qamSliderCommits?.get("profile-cpu-dc")?.value ?? null);
+          const cpuScope = activeGame ? "profile" : "device";
+          setPreviewAc(state.qamSliderCommits?.get(`${cpuScope}-cpu-ac`)?.value ?? null);
+          setPreviewDc(state.qamSliderCommits?.get(`${cpuScope}-cpu-dc`)?.value ?? null);
           setError(null);
         } catch (_) { failClosed("QAM bridge unavailable"); }
         finally {
@@ -590,7 +591,6 @@
         mutationDepthRef.current = Math.max(0, mutationDepthRef.current - 1);
         if (mutationDepthRef.current === 0 && deferredInvalidationRef.current) {
           deferredInvalidationRef.current = false;
-          setPreviewAc(null); setPreviewDc(null);
           void refresh();
         }
       }, [refresh]);
@@ -624,8 +624,7 @@
             deferredInvalidationRef.current = true;
             return;
           }
-          // Keep a dirty TDP draft's debounce alive across invalidation; DevicePage does the same.
-          setPreviewAc(null); setPreviewDc(null);
+          // Keep all pending slider drafts authoritative across invalidation.
           void refresh();
         };
         state.onStateInvalidated = handler;

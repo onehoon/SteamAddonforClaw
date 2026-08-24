@@ -501,6 +501,20 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_invalidation_keeps_pending_cpu_preview_and_scopes_it_to_the_active_panel()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var handlerStart = source.IndexOf("const handler = () =>", StringComparison.Ordinal);
+        var handler = source[handlerStart..source.IndexOf("state.onStateInvalidated = handler", handlerStart, StringComparison.Ordinal)];
+        Assert.DoesNotContain("setPreviewAc(null)", handler);
+        Assert.DoesNotContain("setPreviewDc(null)", handler);
+        Assert.Contains("const cpuScope = activeGame ? \"profile\" : \"device\"", source);
+        Assert.Contains("`${cpuScope}-cpu-ac`", source);
+        Assert.Contains("`${cpuScope}-cpu-dc`", source);
+    }
+
+    [Fact]
     public void Qam_power_mutation_refresh_preserves_explicit_failure()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
