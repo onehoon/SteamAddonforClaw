@@ -61,6 +61,7 @@
             <views:DeveloperPage x:Name="DeveloperMenuContent" Visibility="Collapsed" />
             <views:VibrationTestPage x:Name="VibrationTestContent" Visibility="Collapsed" />
             <views:ClawSensorProbePage x:Name="ClawSensorProbeContent" Visibility="Collapsed" />
+            <views:FanHardwareProbePage x:Name="FanHardwareProbeContent" Visibility="Collapsed" />
         </Grid>
     </NavigationView>
         <Grid x:Name="PrerequisiteSetupBusyOverlay"

@@ -58,6 +58,11 @@
                 <Button Content="Open" Click="OpenSensorProbeButton_Click" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard Header="Fan Hardware Probe" Description="Developer-only MSI fan EC/WMI diagnostics. Bounded writes always return to MSI firmware Auto.">
+                <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsCard.HeaderIcon>
+                <Button Content="Open" Click="OpenFanHardwareProbeButton_Click" />
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsCard Header="Logging" Description="Off by default. Info enables runtime diagnostics; Debug is verbose and for developer use only.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="List" />

@@ -125,6 +125,13 @@ public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcom
     public bool Succeeded => Outcome == FrontendTdpMutationOutcome.Succeeded;
 }
 
+public enum FrontendFanProbeState { Unavailable, Ready, Running, Completed, Failed }
+public enum FrontendFanProbeOperation { Capture, AutomaticTest, RestoreAuto }
+public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeState State, string Status, string Manufacturer, string Model, string BaseBoard, string ProbeModel, string? ReportPath, bool HasReport, string? ErrorMessage)
+{
+    public static readonly FrontendFanProbeSnapshot Unavailable = new(false, FrontendFanProbeState.Unavailable, "Unavailable", "", "", "", "Unsupported", null, false, "MSI fan probe is unavailable.");
+}
+
 /// <remarks><see cref="Oem1Mapping"/> is the settings-layer projection of the persisted OEM1 mapping.
 /// The frontend deliberately carries the SAME <see cref="Oem1MappingSettings"/> the runtime persists
 /// and the dispatcher validates against, rather than a parallel frontend-shaped copy -- the settings
@@ -278,6 +285,8 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
     Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
+    Task<FrontendFanProbeSnapshot> OpenFanProbeAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
+    Task<FrontendFanProbeSnapshot> RunFanProbeAsync(FrontendFanProbeOperation operation, CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
     Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));

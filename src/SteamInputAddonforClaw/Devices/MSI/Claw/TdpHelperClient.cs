@@ -17,6 +17,10 @@ internal sealed class TdpHelperClient : IAsyncDisposable
 
     public bool TryGetAp(int index, out byte[] payload) => Invoke(new("GetAp", index, 0), out payload);
     public bool TrySetData(int block, byte value) => Invoke(new("SetData", block, value), out _);
+    public bool TryGetFan(int block, out byte[] payload) => Invoke(new("GetFan", block, 0), out payload);
+    public bool TrySetFan(int block, byte[] payload) => Invoke(new("SetFan", block, 0, Convert.ToBase64String(payload)), out _);
+    public bool TryGetTemperature(int index, out byte[] payload) => Invoke(new("GetTemperature", index, 0), out payload);
+    public bool TryGetData(int block, out byte[] payload) => Invoke(new("GetData", block, 0), out payload);
 
     private bool Invoke(Request request, out byte[] payload)
     {
@@ -87,6 +91,6 @@ internal sealed class TdpHelperClient : IAsyncDisposable
     }
 
     public ValueTask DisposeAsync() { lock (_sync) CloseUnderLock(); return ValueTask.CompletedTask; }
-    private sealed record Request(string Operation, int Index, byte Value);
+    private sealed record Request(string Operation, int Index, byte Value, string? Payload = null);
     private sealed record Response(bool Ok, string? Payload, string? Stage = null, string? ExceptionType = null, int? HResult = null, int? ManagementStatus = null, bool UsedFallback = false);
 }

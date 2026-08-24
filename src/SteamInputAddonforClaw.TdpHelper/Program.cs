@@ -26,7 +26,8 @@ while (true)
                 TdpHelperProtocol.GetWmiMethod(request.Operation),
                 request.Index,
                 request.Value,
-                request.Operation == "GetAp")).WaitAsync(TimeSpan.FromSeconds(10));
+                request.Operation is "GetAp" or "GetFan" or "GetTemperature" or "GetData",
+                request.Payload is null ? null : Convert.FromBase64String(request.Payload))).WaitAsync(TimeSpan.FromSeconds(10));
         }
         catch (TimeoutException)
         {
@@ -38,7 +39,7 @@ while (true)
         { await writer.WriteLineAsync(JsonSerializer.Serialize(Failure("Protocol", exception))); }
 }
 
-static WmiResult Invoke(string method, int block, byte value, bool responseRequired)
+static WmiResult Invoke(string method, int block, byte value, bool responseRequired, byte[]? requestedPayload)
 {
     try
     {
@@ -64,7 +65,7 @@ static WmiResult Invoke(string method, int block, byte value, bool responseRequi
         using (data)
         {
             if (input is null || data is null) return Failure("InputDataUnavailable", null, usedFallback);
-            try { data["Bytes"] = BuildPackage(block, value); input["Data"] = data; }
+            try { data["Bytes"] = requestedPayload ?? BuildPackage(block, value); input["Data"] = data; }
             catch (Exception exception) when (IsExpectedWmiException(exception)) { return Failure("InputSetup", exception, usedFallback); }
             using var output = obj.InvokeMethod(method, input, null);
             if (!responseRequired) return Success(null, fallbackCause, usedFallback);
@@ -83,6 +84,6 @@ static WmiResult Success(byte[]? payload, Exception? fallbackCause, bool usedFal
     fallbackCause is null ? null : "GetMethodParameters", fallbackCause?.GetType().Name, fallbackCause?.HResult,
     fallbackCause is ManagementException management ? (int)management.ErrorCode : null, usedFallback);
 static byte[] BuildPackage(int block, byte value) { var p = new byte[32]; p[0] = (byte)block; p[1] = value; return p; }
-record Request(string Operation, int Index, byte Value);
+record Request(string Operation, int Index, byte Value, string? Payload = null);
 record Response(bool Ok, string? Payload, string? Stage = null, string? ExceptionType = null, int? HResult = null, int? ManagementStatus = null, bool UsedFallback = false);
 record WmiResult(bool Ok, byte[]? Payload, string? Stage, string? ExceptionType, int? HResult, int? ManagementStatus, bool UsedFallback);
