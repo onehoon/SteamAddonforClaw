@@ -54,7 +54,7 @@ internal sealed class TdpHelperClient : IAsyncDisposable
                         ("HResult", response.HResult is int hr ? $"0x{hr:X8}" : null),
                         ("ManagementStatus", response.ManagementStatus));
                 payload = response.Payload is null ? [] : Convert.FromBase64String(response.Payload);
-                return request.Operation == "SetData" || payload.Length > 0;
+                return request.Operation is "SetData" or "SetFan" || payload.Length > 0;
             }
             catch { CloseUnderLock(); return false; }
         }

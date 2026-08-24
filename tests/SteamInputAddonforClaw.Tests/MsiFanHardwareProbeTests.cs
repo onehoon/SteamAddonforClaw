@@ -14,6 +14,7 @@ public sealed class MsiFanHardwareProbeTests
         Assert.Equal(32, package.Length); Assert.Equal(1, package[0]); Assert.Equal(payload, package[1..9]); Assert.All(package[9..], value => Assert.Equal(0, value));
         Assert.False(TdpHelperProtocol.IsSupported("SetFan", 0)); Assert.True(TdpHelperProtocol.IsSupported("SetFan", 1)); Assert.True(TdpHelperProtocol.IsSupported("SetData", 152));
     }
+
     [Theory]
     [InlineData("MS-1T42", "A2vm")]
     [InlineData("MS-1T52", "A2vm")]

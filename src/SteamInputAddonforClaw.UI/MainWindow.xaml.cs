@@ -79,6 +79,8 @@ public sealed partial class MainWindow : Window
         DeveloperMenuContent.FanHardwareProbeRequested += (_, _) => ShowPage(_navigationState.OpenFanHardwareProbe());
         ClawSensorProbeContent.Initialize(_frontend);
         ClawSensorProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        FanHardwareProbeContent.Initialize(_frontend);
+        FanHardwareProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
         StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
