@@ -530,6 +530,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             {
                 var cleanup = fanProbe.Probe.CancelSuspendResumeIfArmed();
                 if (cleanup is { Succeeded: false }) AppLog.Warn("MsiFanProbe", "Armed fan probe shutdown hand-back failed.");
+                fanProbe.Probe.RequestShutdownCleanup();
+                if (!fanProbe.Probe.WaitForShutdownCleanup(TimeSpan.FromSeconds(5))) AppLog.Warn("MsiFanProbe", "Timed out waiting for active fan-probe shutdown cleanup.");
             }
             catch (Exception exception) { AppLog.Warn("MsiFanProbe", "Armed fan probe shutdown cleanup failed.", exception); }
         }

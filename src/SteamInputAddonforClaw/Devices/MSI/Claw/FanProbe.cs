@@ -77,6 +77,7 @@ internal sealed class MsiFanHardwareProbe
     private readonly IMsiFanDiagnosticTransport? _diagnostics;
     private readonly string _reportDirectory;
     private readonly Action<TimeSpan> _delay;
+    private readonly ManualResetEventSlim _idle = new(true);
     private readonly object _gate = new();
     private bool _running;
     private bool _hardwareWritesStarted;
@@ -89,6 +90,7 @@ internal sealed class MsiFanHardwareProbe
     private string? _armedBoard;
     private string? _armedFirmware;
     private FanProbeModel _armedModel;
+    private volatile bool _shutdownRequested;
 
     internal MsiFanHardwareProbe(IMsiClawTdpTransport transport, string reportDirectory, Action<TimeSpan>? delay = null)
     {
@@ -106,6 +108,8 @@ internal sealed class MsiFanHardwareProbe
         return Run(FanProbeOperation.RestoreAuto, device, board, firmware, WriteRestore);
     }
     internal FanProbeResult? CancelSuspendResumeIfArmed() => IsSuspendResumeArmed() ? CancelSuspendResume() : null;
+    internal void RequestShutdownCleanup() => _shutdownRequested = true;
+    internal bool WaitForShutdownCleanup(TimeSpan timeout) => _idle.Wait(timeout);
     internal FanProbeResult PhysicalResponse(string device, string board, string firmware) => Run(FanProbeOperation.PhysicalResponse, device, board, firmware, WritePhysicalResponse);
     internal FanProbeResult ArmSuspendResume(string device, string board, string firmware) => Run(FanProbeOperation.ArmSuspendResume, device, board, firmware, WriteArmSuspendResume);
     internal FanProbeResult? CompleteSuspendResumeAfterResume()
@@ -149,6 +153,7 @@ internal sealed class MsiFanHardwareProbe
             report.AppendLine($"OVERALL: {(success ? "PASS" : "FAILED")}");
             Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString());
             lock (_gate) { _running = false; _armedReport = null; _armedPath = null; _armedDevice = null; _armedBoard = null; _armedFirmware = null; }
+            _idle.Set();
         }
         return new(true, success, success ? "PASS" : "FAILED", path, resultModel, resultBoard);
     }
@@ -165,6 +170,7 @@ internal sealed class MsiFanHardwareProbe
         report.AppendLine($"Table restore: {(tables ? "PASS" : "FAIL")}"); report.AppendLine($"Firmware Auto hand-back: {(auto ? "PASS" : "FAIL")}"); report.AppendLine($"OVERALL: {(tables && auto ? "PASS" : "FAILED")}");
         Directory.CreateDirectory(_reportDirectory); File.WriteAllText(path, report.ToString());
         lock (_gate) { _running = false; _armedReport = null; _armedPath = null; _armedBoard = null; }
+        _idle.Set();
         return new(true, tables && auto, tables && auto ? "PASS" : "FAILED", path, model, board);
     }
     private bool IsSuspendResumeArmed() { lock (_gate) return _suspendArmed; }
@@ -175,7 +181,7 @@ internal sealed class MsiFanHardwareProbe
         lock (_gate)
         {
             if (_running) return new(true, false, "Another fan probe operation is already running.", null, FanProbeModelMap.Resolve(board), board);
-            _running = true;
+            _running = true; _shutdownRequested = false; _idle.Reset();
         }
 
         var model = FanProbeModelMap.Resolve(board);
@@ -258,6 +264,7 @@ internal sealed class MsiFanHardwareProbe
         Directory.CreateDirectory(_reportDirectory);
         File.WriteAllText(path, report.ToString());
         lock (_gate) _running = false;
+        _idle.Set();
         return new(true, success, status, path, model, board);
     }
 
@@ -389,6 +396,7 @@ internal sealed class MsiFanHardwareProbe
     private bool WritePhysicalResponse(StringBuilder report, FanProbeModel model)
     {
         report.AppendLine("=== PHYSICAL RESPONSE TEST ===");
+        if (ShouldAbort(report)) return false;
         if (!CaptureBaseline(report, true) || _originalFan1 is null || _originalFan2 is null) { report.AppendLine("PRECHECK: FAIL; no writes performed"); return false; }
         var flat = new byte[] { 75, 75, 75, 75, 75, 75 };
         if (!FanProbeLogic.IsSafePhysicalCurve(flat) || !ApplyCurve(report, flat, "75")) return false;
@@ -397,10 +405,17 @@ internal sealed class MsiFanHardwareProbe
         var stageRpms = new Dictionary<string, int?>();
         foreach (var stage in new[] { ("75", flat, new[] { 0, 500, 1000, 2000, 5000 }), ("40", new byte[] { 40, 40, 40, 40, 40, 40 }, new[] { 0, 500, 1000, 2000, 5000 }), ("10", new byte[] { 10, 10, 10, 10, 10, 10 }, new[] { 0, 500, 1000, 2000, 3000 }), ("75_RECOVERY", flat, new[] { 0, 500, 1000, 2000 }) })
         {
+            if (ShouldAbort(report)) return false;
             report.AppendLine($"=== STAGE {stage.Item1} ===");
             if (!FanProbeLogic.IsSafePhysicalCurve(stage.Item2) || !ApplyCurve(report, stage.Item2, stage.Item1)) return false;
             int? firstRpm = null; int? lastRpm = null;
-            foreach (var milliseconds in stage.Item3) { if (milliseconds != 0) _delay(TimeSpan.FromMilliseconds(milliseconds - (stage.Item3.TakeWhile(x => x < milliseconds).LastOrDefault()))); var rpm = WritePhysicalSnapshot(report, $"{stage.Item1} T+{milliseconds}ms"); firstRpm ??= rpm; lastRpm = rpm; }
+            foreach (var milliseconds in stage.Item3)
+            {
+                if (ShouldAbort(report)) return false;
+                if (milliseconds != 0) _delay(TimeSpan.FromMilliseconds(milliseconds - (stage.Item3.TakeWhile(x => x < milliseconds).LastOrDefault())));
+                if (ShouldAbort(report)) return false;
+                var rpm = WritePhysicalSnapshot(report, $"{stage.Item1} T+{milliseconds}ms"); firstRpm ??= rpm; lastRpm = rpm;
+            }
             report.AppendLine($"Stage directional response: {FanProbeLogic.ClassifyDirectionalResponse(firstRpm, lastRpm)} (Fan 1 RPM observation only; no exact threshold enforced)");
             if (previousStageRpm is not null || lastRpm is not null) report.AppendLine($"Transition from previous stage to {stage.Item1}: {FanProbeLogic.ClassifyDirectionalResponse(previousStageRpm, lastRpm)}");
             previousStageRpm = lastRpm;
@@ -416,6 +431,13 @@ internal sealed class MsiFanHardwareProbe
         report.AppendLine($"Duty 10 non-zero: {(lowDutyNonZero ? "YES" : "NO/UNKNOWN")}"); report.AppendLine($"10 -> 75: {up10To75}");
         report.AppendLine($"No bounded latch behavior observed: {(physicalValidated ? "YES" : "NO/INCONCLUSIVE")}");
         return physicalValidated;
+    }
+
+    private bool ShouldAbort(StringBuilder report)
+    {
+        if (!_shutdownRequested) return false;
+        report.AppendLine("ABORTED: process shutdown requested; restoring original tables and firmware Auto.");
+        return true;
     }
 
     private bool WriteArmSuspendResume(StringBuilder report, FanProbeModel model)

@@ -217,6 +217,23 @@ public sealed class MsiFanHardwareProbeTests
         Assert.Empty(t.Writes);
     }
 
+    [Fact]
+    public async Task Shutdown_request_aborts_physical_response_before_later_temporary_stages()
+    {
+        var enteredDelay = new ManualResetEventSlim();
+        var releaseDelay = new ManualResetEventSlim();
+        var t = new FakeFanTransport();
+        var probe = new MsiFanHardwareProbe(t, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N")), _ => { enteredDelay.Set(); releaseDelay.Wait(); });
+        var operation = Task.Run(() => probe.PhysicalResponse("EX", "MS-1T91", "test"));
+        Assert.True(enteredDelay.Wait(TimeSpan.FromSeconds(2)));
+        probe.RequestShutdownCleanup(); releaseDelay.Set();
+        Assert.True(probe.WaitForShutdownCleanup(TimeSpan.FromSeconds(2)));
+        var result = await operation;
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain(t.Writes, x => x.Block is 1 or 2 && x.Payload.Skip(1).Take(6).All(v => v == 40));
+        Assert.Contains(t.Writes, x => x.Block == 212 && (x.Payload[0] & 0x80) == 0);
+    }
+
     [Theory]
     [InlineData(0x80, "CUSTOM_PERSISTED")]
     [InlineData(0x00, "CURVE_PERSISTED_OWNERSHIP_LOST")]
