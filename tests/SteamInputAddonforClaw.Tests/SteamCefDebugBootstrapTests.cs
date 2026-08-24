@@ -76,6 +76,18 @@ public sealed class SteamCefDebugBootstrapTests
         Assert.False(File.Exists(System.IO.Path.Combine(scope.Path, SteamCefDebugBootstrap.MarkerFileName)));
     }
 
+    [Fact]
+    public void Owned_marker_removal_failure_preserves_ownership_evidence()
+    {
+        using var scope = new SteamDirectoryScope();
+        Assert.True(SteamCefDebugBootstrap.EnsureForSteamDirectory(scope.Path));
+        var marker = System.IO.Path.Combine(scope.Path, SteamCefDebugBootstrap.MarkerFileName);
+        using var markerLock = new FileStream(marker, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        Assert.False(SteamCefDebugBootstrap.RemoveOwnedMarker());
+        Assert.True(File.Exists(scope.OwnershipPath));
+    }
+
     private sealed class SteamDirectoryScope : IDisposable
     {
         internal SteamDirectoryScope()

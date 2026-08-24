@@ -115,16 +115,23 @@ internal static class SteamCefDebugBootstrap
         }
     }
 
-    internal static void RemoveOwnedMarker()
+    internal static bool RemoveOwnedMarker()
     {
+        if (!File.Exists(OwnershipPath)) return true;
         try
         {
-            if (!File.Exists(OwnershipPath)) return;
             var ownership = JsonSerializer.Deserialize<CefMarkerOwnership>(File.ReadAllText(OwnershipPath));
-            if (ownership is { SteamDirectory.Length: > 0 }) File.Delete(Path.Combine(ownership.SteamDirectory, MarkerFileName));
+            if (ownership is not { SteamDirectory.Length: > 0 }) return false;
+            var markerPath = Path.Combine(ownership.SteamDirectory, MarkerFileName);
+            if (File.Exists(markerPath)) File.Delete(markerPath);
+            File.Delete(OwnershipPath);
+            return true;
         }
-        catch (Exception exception) { AppLog.Warn("Uninstall", "Owned Steam CEF marker cleanup failed.", exception); }
-        finally { try { File.Delete(OwnershipPath); } catch { } }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Uninstall", "Owned Steam CEF marker cleanup failed; ownership evidence was preserved.", exception);
+            return false;
+        }
     }
 
     internal static Func<string> OwnershipPathProvider { get; set; } = static () => AddonDataPaths.CefMarkerOwnershipPath;

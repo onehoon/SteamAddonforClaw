@@ -18,14 +18,20 @@ internal static class UninstallBootstrap
             return;
         }
 
-        Steam.SteamCefDebugBootstrap.RemoveOwnedMarker();
-        TryDeleteDirectory(CenterM.CenterMHelperStaging.RuntimeDirectory);
-        TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-
-        if (!File.Exists(AddonDataPaths.RecoveryJournalPath))
-            AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
+        RunBoundedLocalCleanup(runtimeReleased);
 
         AppLog.Info("Uninstall", "FastCallback completed without elevation or dependency teardown.", ("Action", "BoundedOnly"));
+    }
+
+    internal static void RunBoundedLocalCleanup(bool runtimeReleased)
+    {
+        if (!runtimeReleased)
+            return;
+        var cefCleaned = Steam.SteamCefDebugBootstrap.RemoveOwnedMarker();
+        TryDeleteDirectory(CenterM.CenterMHelperStaging.RuntimeDirectory);
+        TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
+        if (cefCleaned && !File.Exists(AddonDataPaths.RecoveryJournalPath))
+            AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
     }
 
     private static void TryDeleteDirectory(string path)

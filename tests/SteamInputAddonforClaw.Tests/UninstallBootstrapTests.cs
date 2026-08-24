@@ -14,6 +14,12 @@ public sealed class UninstallBootstrapTests
     }
 
     [Fact]
+    public void Bounded_local_cleanup_preserves_artifacts_when_runtime_release_failed()
+    {
+        UninstallBootstrap.RunBoundedLocalCleanup(runtimeReleased: false);
+    }
+
+    [Fact]
     public void Single_instance_gate_can_dispose_after_uninstall_handler_registration()
     {
         using var gate = new SingleInstanceGate(
