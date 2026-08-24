@@ -17,6 +17,7 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.FrontendTransport;
 using System.Diagnostics;
+using Microsoft.Win32;
 
 namespace SteamInputAddonforClaw.Frontend;
 
@@ -536,11 +537,31 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (session is null) return FrontendFanProbeSnapshot.Unavailable;
         var result = await Task.Run(() => operation switch
         {
-            FrontendFanProbeOperation.Capture => session.Probe.Capture(session.Model, session.Board, "Available identifiers are reported by existing startup infrastructure."),
-            FrontendFanProbeOperation.AutomaticTest => session.Probe.AutomaticTest(session.Model, session.Board, "Available identifiers are reported by existing startup infrastructure."),
-            _ => session.Probe.RestoreAuto(session.Model, session.Board, "Available identifiers are reported by existing startup infrastructure.")
+            FrontendFanProbeOperation.Capture => session.Probe.Capture(session.Model, session.Board, ReadFanProbeFirmwareIdentity()),
+            FrontendFanProbeOperation.AutomaticTest => session.Probe.AutomaticTest(session.Model, session.Board, ReadFanProbeFirmwareIdentity()),
+            _ => session.Probe.RestoreAuto(session.Model, session.Board, ReadFanProbeFirmwareIdentity())
         }, CancellationToken.None).ConfigureAwait(false);
         return MapFanProbe(result.Succeeded ? FrontendFanProbeState.Completed : FrontendFanProbeState.Failed, result.Status, result.ReportPath);
+    }
+
+    private static string ReadFanProbeFirmwareIdentity()
+    {
+        try
+        {
+            using var bios = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS");
+            var version = bios?.GetValue("BIOSVersion") switch
+            {
+                string value when !string.IsNullOrWhiteSpace(value) => value,
+                string[] values when values.Length > 0 => string.Join("; ", values),
+                _ => "unavailable"
+            };
+            return $"BIOS: {version}; EC: unavailable";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Debug("MsiFanProbe", "Unable to read BIOS version.", ("Exception", exception.GetType().Name));
+            return "BIOS: unavailable; EC: unavailable";
+        }
     }
 
     private FrontendFanProbeSnapshot MapFanProbe(FrontendFanProbeState state, string status, string? path)

@@ -34,12 +34,18 @@ internal sealed class TdpHelperClient : IAsyncDisposable, IMsiFanDiagnosticTrans
 
     public bool TryGetWmiVersion(out MsiFanWmiVersion version)
     {
-        var response = InvokeDetailed(new("GetWmiVersion", 0, 0));
+        var response = InvokeDetailed(new("GetWmiVersion", 1, 0));
         var payload = response.Payload is null ? [] : Convert.FromBase64String(response.Payload);
-        byte? major = payload.Length >= 2 && payload[0] >= 2 ? payload[0] : null;
-        version = new(response.Ok, payload, major, major.HasValue ? payload[1] : null,
+        var decoded = DecodeWmiVersionPayload(payload);
+        version = new(response.Ok, payload, decoded.Major, decoded.Minor,
             response.Stage ?? "HelperProtocol", response.ExceptionType, response.HResult, response.ManagementStatus, response.UsedFallback);
         return response.Ok;
+    }
+
+    internal static (byte? Major, byte? Minor) DecodeWmiVersionPayload(byte[] payload)
+    {
+        byte? major = payload.Length > 2 && payload[1] >= 2 ? payload[1] : null;
+        return (major, major.HasValue ? payload[2] : null);
     }
 
     public bool TryGetMethodInventory(out string[] methods)

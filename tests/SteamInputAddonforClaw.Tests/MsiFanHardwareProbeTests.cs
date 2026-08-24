@@ -30,6 +30,25 @@ public sealed class MsiFanHardwareProbeTests
     }
 
     [Fact]
+    public void Wmi_version_decoder_uses_source_backed_major_and_minor_positions()
+    {
+        var decoded = TdpHelperClient.DecodeWmiVersionPayload([1, 3, 7]);
+
+        Assert.Equal((byte?)3, decoded.Major);
+        Assert.Equal((byte?)7, decoded.Minor);
+        Assert.True(TdpHelperProtocol.IsSupported("GetWmiVersion", 1));
+        Assert.False(TdpHelperProtocol.IsSupported("GetWmiVersion", 0));
+    }
+
+    [Theory]
+    [InlineData(true, true, true, "IMMEDIATE_MATCH")]
+    [InlineData(false, true, true, "DELAYED_MATCH")]
+    [InlineData(false, false, true, "MISMATCH")]
+    [InlineData(false, false, false, "READ_FAILED")]
+    public void Readback_classification_preserves_immediate_and_delayed_distinctions(bool immediate, bool later, bool read, string expected)
+        => Assert.Equal(expected, FanProbeLogic.ClassifyReadback(immediate, later, read));
+
+    [Fact]
     public void Thirty_one_byte_raw_fan_response_is_normalized_to_the_first_eight_bytes()
     {
         var raw = new byte[] { 58, 70, 74, 76, 78, 80, 84, 94 }.Concat(new byte[23]).ToArray();
@@ -108,6 +127,27 @@ public sealed class MsiFanHardwareProbeTests
     public void Restore_failure_is_reported_as_failure() { var t = new FakeFanTransport { FailRestoreWrite = true }; var r = NewProbe(t).RestoreAuto("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); Assert.Contains("FAIL", File.ReadAllText(r.ReportPath!)); }
 
     [Fact]
+    public void Cooler_cleanup_failure_does_not_skip_ownership_release()
+    {
+        var t = new FakeFanTransport { InitialOwnership = 0x80, FailCoolerRead = true };
+        var result = NewProbe(t).RestoreAuto("EX", "MS-1T91", "test");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(t.Writes, x => x.Block == 212 && x.Payload[0] == 0);
+        Assert.Contains("Cooler Boost final verification: READ_FAILED", File.ReadAllText(result.ReportPath!));
+    }
+
+    [Fact]
+    public void Cooler_cleanup_verifies_the_cleared_value()
+    {
+        var t = new FakeFanTransport { InitialCooler = 0x80, InitialOwnership = 0x80 };
+        var result = NewProbe(t).RestoreAuto("EX", "MS-1T91", "test");
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("Cooler Boost final verification: OFF", File.ReadAllText(result.ReportPath!));
+    }
+
+    [Fact]
     public void Unsupported_model_does_not_touch_transport() { var t = new FakeFanTransport(); var r = NewProbe(t).Capture("unknown", "unknown", "test"); Assert.False(r.Succeeded); Assert.Empty(t.Writes); Assert.Empty(t.Reads); }
 
     private static MsiFanHardwareProbe NewProbe(FakeFanTransport transport) => new(transport, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N")));
@@ -115,15 +155,26 @@ public sealed class MsiFanHardwareProbeTests
     private sealed class FakeFanTransport : IMsiClawTdpTransport
     {
         internal readonly List<(int Block, byte[] Payload)> Writes = []; internal readonly List<string> Reads = [];
-        internal bool FailTemperature; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool HighDuty; internal bool DivergentFan2; internal bool CoupleFanWrites; internal bool RawFanResponse;
+        internal bool FailTemperature; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool FailCoolerRead; internal bool HighDuty; internal bool DivergentFan2; internal bool CoupleFanWrites; internal bool RawFanResponse;
+        internal byte InitialOwnership; internal byte InitialCooler;
         private readonly Dictionary<int, byte[]> _fans = new() { [1] = [70, 0, 40, 49, 58, 67, 75, 84], [2] = [71, 0, 40, 49, 58, 67, 75, 85] };
         private byte _ownership;
-        public bool TryGetAp(int index, out byte[] payload) { Reads.Add($"AP{index}"); if (index == 1 && (FailAp212 || (FailApOnRestore && Writes.Any(x => x.Block == 1 || x.Block == 2)))) { payload = []; return false; } payload = index == 1 ? [_ownership] : [0x00, 0x01]; return true; }
-        public bool TrySetData(int block, byte value) { Writes.Add((block, [value])); if (block == 212 && FailRestoreWrite) return false; if (block == 212) _ownership = value; return true; }
+        private byte _cooler;
+        private bool _initialized;
+        public bool TryGetAp(int index, out byte[] payload) { EnsureInitialState(); Reads.Add($"AP{index}"); if (index == 1 && (FailAp212 || (FailApOnRestore && Writes.Any(x => x.Block == 1 || x.Block == 2)))) { payload = []; return false; } payload = index == 1 ? [_ownership] : [0x00, 0x01]; return true; }
+        public bool TrySetData(int block, byte value) { EnsureInitialState(); Writes.Add((block, [value])); if (block == 212 && FailRestoreWrite) return false; if (block == 212) _ownership = value; if (block == 152) _cooler = value; return true; }
         public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); if (block == 1 && FailFan1Read) { payload = []; return false; } if (_fans.TryGetValue(block, out var value)) { payload = (byte[])value.Clone(); if (block == 1 && HighDuty) payload[2] = 100; if (block == 2 && DivergentFan2) payload[3] = 50; if (RawFanResponse) payload = payload.Concat(new byte[23]).ToArray(); return true; } payload = []; return false; }
         public bool TrySetFan(int block, byte[] payload) { if (block == 2 && FailFan2Write) return false; Writes.Add((block, (byte[])payload.Clone())); if (!DoNotPersistFanWrites) _fans[block] = (byte[])payload.Clone(); if (CoupleFanWrites) { var other = block == 1 ? 2 : 1; var coupled = (byte[])_fans[other].Clone(); coupled[2] = (byte)(coupled[2] + 1); _fans[other] = coupled; } return true; }
         public bool TryGetTemperature(int index, out byte[] payload) { Reads.Add($"Temp{index}"); payload = FailTemperature ? [] : [47, 50, 57, 64, 71, 78]; return !FailTemperature; }
         public bool TryGetThermal(int index, out byte[] payload) { Reads.Add($"Thermal{index}"); payload = [44, 54, 64, 74, 82, 82]; return true; }
-        public bool TryGetData(int block, out byte[] payload) { Reads.Add($"Data{block}"); payload = [0]; return true; }
+        public bool TryGetData(int block, out byte[] payload) { EnsureInitialState(); Reads.Add($"Data{block}"); if (block == 152 && FailCoolerRead) { payload = []; return false; } if (block == 152) { payload = [_cooler]; return true; } payload = [0]; return true; }
+
+        private void EnsureInitialState()
+        {
+            if (_initialized) return;
+            _ownership = InitialOwnership;
+            _cooler = InitialCooler;
+            _initialized = true;
+        }
     }
 }

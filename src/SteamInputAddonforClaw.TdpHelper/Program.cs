@@ -102,19 +102,7 @@ string[] GetRelevantMethods()
 }
 
 WmiResult InvokeWmiVersion()
-{
-    try
-    {
-        using var obj = new ManagementObject(@"\\.\root\WMI", "MSI_ACPI.InstanceName='ACPI\\PNP0C14\\0_0'", null);
-        using var output = obj.InvokeMethod("Get_WMI", null, null);
-        if (output?["Data"] is not ManagementBaseObject data || data["Bytes"] is not byte[] bytes || bytes.Length < 1)
-            return Failure("WMI_INVOKE_FAIL", null, false, true, false, [], 32);
-        if (bytes[0] != 1) return Failure("WMI_INVOKE_FAIL", null, false, true, true, bytes, 32);
-        return new(true, bytes[1..], "WMI_INVOKE_OK", null, null, null, false, true, true, [], [.. bytes], 0, 32);
-    }
-    catch (Exception exception) when (IsExpectedWmiException(exception))
-    { return Failure("WMI_INVOKE_FAIL", exception, false, false, false, [], 32); }
-}
+    => Invoke("Get_WMI", block: 1, value: 0, responseRequired: true, requestedPayload: null);
 
 WmiResult Invoke(string method, int block, byte value, bool responseRequired, byte[]? requestedPayload)
 {

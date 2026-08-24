@@ -42,6 +42,9 @@ internal static class FanProbeLogic
         next = 0;
         return false;
     }
+
+    internal static string ClassifyReadback(bool immediateMatch, bool laterMatch, bool targetRead) =>
+        immediateMatch ? "IMMEDIATE_MATCH" : laterMatch ? "DELAYED_MATCH" : targetRead ? "MISMATCH" : "READ_FAILED";
 }
 
 /// <summary>Bounded developer-only MSI fan diagnostic. It owns no persistent fan state.</summary>
@@ -341,21 +344,25 @@ internal sealed class MsiFanHardwareProbe
     {
         var other = block == 1 ? 2 : 1;
         var samples = new[] { ("T+0 ms", TimeSpan.Zero), ("T+50 ms", TimeSpan.FromMilliseconds(50)), ("T+250 ms", TimeSpan.FromMilliseconds(200)) };
-        var targetMatch = false;
-        var delayedMatch = false;
+        var immediateMatch = false;
+        var laterMatch = false;
         var targetRead = false;
-        foreach (var (name, wait) in samples)
+        for (var i = 0; i < samples.Length; i++)
         {
+            var (name, wait) = samples[i];
             if (wait > TimeSpan.Zero) _delay(wait);
             var target = TryReadFan(block, out _, out var actual);
             var otherRead = TryReadFan(other, out _, out var otherActual);
             targetRead |= target;
             var matches = target && actual.Skip(1).Take(6).SequenceEqual(expected.Skip(1).Take(6));
-            targetMatch |= matches;
-            if (matches && name != "T+0 ms") delayedMatch = true;
+            if (matches)
+            {
+                if (i == 0) immediateMatch = true;
+                else laterMatch = true;
+            }
             report.AppendLine($"{label} {name}: {(target ? Hex(actual) : "READ_FAILED")}; other fan: {(otherRead ? Hex(otherActual) : "READ_FAILED")}");
         }
-        var verdict = targetMatch ? (delayedMatch ? "DELAYED_MATCH" : "IMMEDIATE_MATCH") : (targetRead ? "MISMATCH" : "READ_FAILED");
+        var verdict = FanProbeLogic.ClassifyReadback(immediateMatch, laterMatch, targetRead);
         report.AppendLine($"{label} readback verdict: {verdict}");
         return verdict;
     }
@@ -394,14 +401,34 @@ internal sealed class MsiFanHardwareProbe
 
     private bool RestoreFirmwareAuto(StringBuilder report)
     {
-        if (!_transport.TryGetData(152, out var cooler) || cooler.Length == 0) return false;
-        if ((cooler[0] & 0x80) != 0 && !_transport.TrySetData(152, (byte)(cooler[0] & 0x7F))) return false;
-        if (!_transport.TryGetAp(1, out var ap) || ap.Length == 0) return false;
-        var requested = (byte)(ap[0] & 0x7F);
-        var released = _diagnostics is null ? _transport.TrySetData(212, requested) : _diagnostics.InvokeFanDiagnostic("SetData", 212, [requested]).Succeeded;
-        if (!released || !_transport.TryGetAp(1, out var verify) || verify.Length == 0) return false;
-        report.AppendLine($"Ownership final verification: 0x{verify[0]:X2}; OFF={((verify[0] & 0x80) == 0)}");
-        return (verify[0] & 0x80) == 0;
+        var coolerOk = true;
+        if (!_transport.TryGetData(152, out var cooler) || cooler.Length == 0)
+        {
+            coolerOk = false;
+            report.AppendLine("Cooler Boost final verification: READ_FAILED");
+        }
+        else if ((cooler[0] & 0x80) != 0)
+        {
+            var cleared = _transport.TrySetData(152, (byte)(cooler[0] & 0x7F))
+                && _transport.TryGetData(152, out var verifyCooler)
+                && verifyCooler.Length > 0
+                && (verifyCooler[0] & 0x80) == 0;
+            coolerOk = cleared;
+            report.AppendLine($"Cooler Boost final verification: {(cleared ? "OFF" : "FAIL")}");
+        }
+        else report.AppendLine("Cooler Boost final verification: OFF");
+
+        var ownershipOk = false;
+        if (!_transport.TryGetAp(1, out var ap) || ap.Length == 0)
+            report.AppendLine("Ownership final verification: READ_FAILED");
+        else
+        {
+            var requested = (byte)(ap[0] & 0x7F);
+            var released = _diagnostics is null ? _transport.TrySetData(212, requested) : _diagnostics.InvokeFanDiagnostic("SetData", 212, [requested]).Succeeded;
+            ownershipOk = released && _transport.TryGetAp(1, out var verify) && verify.Length > 0 && (verify[0] & 0x80) == 0;
+            report.AppendLine($"Ownership final verification: {(ownershipOk ? "OFF" : "FAIL")}");
+        }
+        return coolerOk && ownershipOk;
     }
 
     private void WriteFinalSnapshot(StringBuilder report)

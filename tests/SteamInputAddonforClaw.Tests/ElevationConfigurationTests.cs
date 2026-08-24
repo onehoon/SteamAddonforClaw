@@ -54,7 +54,7 @@ public sealed class ElevationConfigurationTests
     public void Tdp_helper_preserves_the_wmi_compatibility_fallback_and_narrow_protocol()
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
-        Assert.Contains("obj.InvokeMethod(\"Get_WMI\", null, null)", source);
+        Assert.Contains("Invoke(\"Get_WMI\", block: 1", source);
         Assert.Contains("TdpHelperProtocol.IsSupported", source);
         Assert.Contains("PRE_WMI_PROTOCOL_FAIL", source);
     }
@@ -64,11 +64,15 @@ public sealed class ElevationConfigurationTests
     {
         var helper = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
         var protocol = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "TdpHelperProtocol.cs"));
+        var frontend = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Frontend", "InProcessAddonFrontendControl.cs"));
         Assert.Contains("WindowsPrincipal", helper);
         Assert.Contains("HelperPid", helper);
         Assert.Contains("GetMethodInventory", helper);
         Assert.Contains("GetThermal", protocol);
         Assert.Contains("index is 152 or 210 or 212", protocol);
+        Assert.Contains("GetWmiVersion\" => index == 1", protocol);
+        Assert.Contains("BIOSVersion", frontend);
+        Assert.Contains("EC: unavailable", frontend);
         Assert.Contains("WMI_INVOKE_FAIL", helper);
     }
 

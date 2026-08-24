@@ -32,7 +32,8 @@ public static class TdpHelperProtocol
         "GetTemperature" => index is 1 or 2,
         "GetThermal" => index is 1 or 2,
         "GetData" => index is 152 or 210 or 212,
-        "GetWmiVersion" or "GetMethodInventory" or "GetHelperInfo" => index == 0,
+        "GetWmiVersion" => index == 1,
+        "GetMethodInventory" or "GetHelperInfo" => index == 0,
         _ => false
     };
 }
