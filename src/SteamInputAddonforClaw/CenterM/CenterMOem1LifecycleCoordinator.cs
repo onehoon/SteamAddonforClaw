@@ -1135,7 +1135,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IAsyncDisposable, ICente
     private async Task TryAdoptRealMainUi(ProcessSnapshotEntry candidate, long expectedEpoch, CancellationToken cancellationToken)
     {
         if (!string.Equals(candidate.ProcessName, CenterMProcessNames.MainUi, StringComparison.Ordinal)
-            || !SafeMainUiTerminator.PathMatchesExpectedPackage(candidate.ExecutablePath))
+            || (candidate.ExecutablePath is not null
+                && !SafeMainUiTerminator.PathMatchesExpectedPackage(candidate.ExecutablePath)))
         {
             _lastReason = "MainUiCandidatePathMismatch";
             SetState(CenterMOem1LifecycleState.FaultedNative);
