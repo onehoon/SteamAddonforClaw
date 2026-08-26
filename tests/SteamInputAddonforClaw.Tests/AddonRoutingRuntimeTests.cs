@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.GameBar;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Feedback;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -772,6 +773,37 @@ public sealed class AddonRoutingRuntimeTests
         }
     }
 
+    [Fact]
+    public async Task Physical_input_loss_reenters_same_active_steam_session_after_safe_cleanup()
+    {
+        var status = new FakeStatusProvider(Snapshot(Eligible()));
+        var safety = new RuntimeTestSafetySession();
+        var composition = new RuntimeTestComposition(safety);
+        var executor = new RoutingPipelineExecutor(composition.Stages);
+        var sessions = new RoutingPipelineSessionCoordinator(executor);
+        var coordinator = new RoutingPipelineRuntimeCoordinator(status, sessions, composition.SessionBoundaryParticipants);
+        var deckStage = new CanonicalSteamDeckOutputStage(
+            () => new UnavailableCanonicalSteamDeckSession(),
+            new EmptyDeviceEnumerator(),
+            new FakeSnapshot());
+        await using var runtime = new AddonRoutingRuntime(composition, safety, coordinator, deckStage, null);
+        runtime.TestOnly_SetSteamOutputReady(true);
+
+        Assert.True(await runtime.ReconcileSafelyAsync(static () => { }));
+        Assert.True(runtime.CaptureStatus().SteamOutputActive);
+        Assert.True(runtime.CaptureStatus().NativeDirectInputActive);
+
+        await composition.TriggerRuntimeFaultAsync(MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason, retryCurrentSessionAfterSafeCleanup: true);
+
+        Assert.True(status.CaptureCalls >= 2);
+        Assert.Equal(0, safety.SessionEndedCalls);
+        Assert.Equal(2, safety.NativeActivations);
+        Assert.True(runtime.CaptureStatus().SteamOutputActive);
+        Assert.True(runtime.CaptureStatus().NativeDirectInputActive);
+
+        Assert.True(await runtime.ShutdownAsync());
+    }
+
     private static AddonRoutingRuntime? CreateMsiRuntime(
         ISystemStatusProvider? statusProvider = null,
         bool steamOutputReady = true)
@@ -793,6 +825,7 @@ public sealed class AddonRoutingRuntimeTests
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
         new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true);
 
+    private static RoutingDecision Eligible() => new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible);
     private static RoutingDecision WaitingForSteam() => new(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive);
 
     private static WinGSuppressionGuard CreateTestWinGGuard()
@@ -806,6 +839,86 @@ public sealed class AddonRoutingRuntimeTests
     private sealed class EmptyDeviceEnumerator : IControllerDeviceEnumerator
     {
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => [];
+    }
+
+    private sealed class RuntimeTestComposition(RuntimeTestSafetySession safety) : IHandheldRoutingComposition
+    {
+        private Func<string, bool, bool, ValueTask>? _runtimeFaultHandler;
+
+        public IReadOnlyList<IRoutingPipelineStage> Stages { get; } =
+            Enum.GetValues<RoutingStageKind>()
+                .Where(kind => kind != RoutingStageKind.XboxOutput && kind != RoutingStageKind.GameBarRouting)
+                .Select(kind => (IRoutingPipelineStage)new RuntimeTestStage(kind, safety))
+                .ToArray();
+        public IControllerStateSnapshotSource ControllerStateSource { get; } = new FakeSnapshot();
+        public IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> SessionBoundaryParticipants { get; } = [];
+        public IRoutingSafetySession? SafetySession => safety;
+        public IPhysicalRumbleSink? PhysicalRumbleSink => null;
+
+        public void SetRuntimeFaultHandler(Func<string, bool, bool, ValueTask> handler) => _runtimeFaultHandler = handler;
+
+        public ValueTask TriggerRuntimeFaultAsync(string reason, bool retryCurrentSessionAfterSafeCleanup) =>
+            _runtimeFaultHandler is { } handler
+                ? handler(reason, false, retryCurrentSessionAfterSafeCleanup)
+                : ValueTask.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class RuntimeTestStage(RoutingStageKind kind, RuntimeTestSafetySession safety) : IRoutingPipelineStage
+    {
+        public RoutingStageKind Kind => kind;
+        public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken) => Success();
+        public ValueTask<RoutingStageOperationResult> PrepareMutationAsync(CancellationToken cancellationToken) => Success();
+        public ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
+        {
+            if (kind == RoutingStageKind.NativeMode)
+            {
+                safety.NativeActivations++;
+                safety.SetActive(true);
+            }
+            return Success();
+        }
+        public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
+        {
+            if (kind == RoutingStageKind.NativeMode) safety.SetActive(false);
+            return Success();
+        }
+        private static ValueTask<RoutingStageOperationResult> Success() =>
+            ValueTask.FromResult(RoutingStageOperationResult.Success());
+    }
+
+    private sealed class RuntimeTestSafetySession : IRoutingSafetySession
+    {
+        public bool IsActive { get; private set; }
+        public bool HasOwnedRecoveryBoundary => false;
+        public Guid? CurrentRecoverySessionId => null;
+        public int SessionEndedCalls { get; private set; }
+        public int NativeActivations { get; set; }
+        private bool _faultLatched;
+
+        public Task LatchRoutingFaultAsync(string reason, CancellationToken cancellationToken = default)
+        {
+            _faultLatched = true;
+            return Task.CompletedTask;
+        }
+
+        public Task FailClosedAsync(string reason, CancellationToken cancellationToken = default)
+        {
+            IsActive = false;
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken = default, bool allowSafeWithoutOwnedUnsafe = false)
+        {
+            if (!allowSafeWithoutOwnedUnsafe || IsActive || !_faultLatched)
+                return Task.FromResult(false);
+            _faultLatched = false;
+            return Task.FromResult(true);
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public void SetActive(bool active) => IsActive = active;
     }
 
     private sealed class FakeUnsupportedAdapter : IHandheldDeviceAdapter
