@@ -142,9 +142,13 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 : runtime.ReconcileOwnedRouteStateAsync(cancellationToken),
             ordinaryReconcileAllowed: () => powerGate.IsOpen);
         deckStage.SetOutputFaultHandler(async () => { await coordinator.FailClosedAsync().ConfigureAwait(false); });
-        handheldRoutingComposition.SetRuntimeFaultHandler((reason, yieldCurrentSteamSession) => HandleBackendRuntimeFaultAsync(reason, yieldCurrentSteamSession));
+        handheldRoutingComposition.SetRuntimeFaultHandler((reason, yieldCurrentSteamSession, retryCurrentSessionAfterSafeCleanup) =>
+            HandleBackendRuntimeFaultAsync(reason, yieldCurrentSteamSession, retryCurrentSessionAfterSafeCleanup));
 
-        async ValueTask HandleBackendRuntimeFaultAsync(string reason, bool yieldCurrentSteamSession)
+        async ValueTask HandleBackendRuntimeFaultAsync(
+            string reason,
+            bool yieldCurrentSteamSession,
+            bool retryCurrentSessionAfterSafeCleanup)
         {
             if (yieldCurrentSteamSession)
             {
@@ -155,7 +159,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 if (!takeoverRollback.Succeeded)
                     AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(takeoverRollback.Reason), ("Reason", reason));
                 else if (runtime is not null)
-                    await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault");
+                    await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault", retryCurrentSessionAfterSafeCleanup);
                 return;
             }
 
@@ -167,7 +171,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
             else if (runtime is not null)
             {
-                if (await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault"))
+                if (await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault", retryCurrentSessionAfterSafeCleanup)
+                    && retryCurrentSessionAfterSafeCleanup)
                     await runtime.ReconcileSafelyAsync(static () => { }).ConfigureAwait(false);
             }
         }
@@ -674,11 +679,15 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return succeeded;
     }
 
-    private async Task<bool> TryConvergeSafetyAfterCleanupAsync(string reason)
+    private async Task<bool> TryConvergeSafetyAfterCleanupAsync(
+        string reason,
+        bool allowSafeWithoutOwnedUnsafe = false)
     {
         if (_safetySession is null || _coordinator.HasResidualSessionState)
             return false;
-        return await _safetySession.ConvergeAfterRoutingCleanupAsync(CancellationToken.None).ConfigureAwait(false);
+        return await _safetySession.ConvergeAfterRoutingCleanupAsync(
+            CancellationToken.None,
+            allowSafeWithoutOwnedUnsafe).ConfigureAwait(false);
     }
 
     private bool SteamOutputReady => _testOnlySteamOutputReadyOverride

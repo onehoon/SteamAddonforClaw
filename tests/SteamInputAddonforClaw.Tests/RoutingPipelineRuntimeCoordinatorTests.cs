@@ -1483,7 +1483,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         }
 
         public Task FailClosedAsync(string reason, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<bool> ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken = default)
+        public Task<bool> ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken = default, bool allowSafeWithoutOwnedUnsafe = false)
         {
             events.Add("ConvergeAfterRoutingCleanup");
             return Task.FromResult(true);

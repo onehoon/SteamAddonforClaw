@@ -47,9 +47,11 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     /// Registers the callback the composition must invoke when it detects a fatal backend runtime
     /// fault -- currently, unexpected loss of an owned physical-input session -- that invalidates
     /// the currently active routing pipeline. The reported reason is a short stable string, not a
-    /// user-facing message. A backend with nothing to report may simply never invoke it.
+    /// user-facing message. The second callback argument indicates whether the current Steam
+    /// session should be yielded; the third explicitly authorizes retry after already-safe cleanup.
+    /// A backend with nothing to report may simply never invoke it.
     /// </summary>
-    void SetRuntimeFaultHandler(Func<string, bool, ValueTask> handler);
+    void SetRuntimeFaultHandler(Func<string, bool, bool, ValueTask> handler);
 
     /// <summary>
     /// Optional additional power-suspend participant this composition owns, beyond the routing
