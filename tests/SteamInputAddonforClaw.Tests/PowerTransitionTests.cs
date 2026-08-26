@@ -76,6 +76,38 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task Preserved_recovery_runs_post_commit_callback_only_after_safe_recovery_is_committed()
+    {
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var callbackCalls = 0;
+        var callbackSawSafe = false;
+        var callbackSawOpenGate = false;
+        await using var coordinator = new PowerTransitionCoordinator(
+            gate,
+            recovery,
+            [],
+            hasIncompleteRecovery: () => false,
+            hasPreservedRoutingSession: () => true,
+            reconcilePreservedRoutingSession: _ => Task.FromResult(true),
+            afterPreservedRecoveryCommit: () =>
+            {
+                callbackCalls++;
+                callbackSawSafe = recovery.Current == RecoverySafety.Safe;
+                callbackSawOpenGate = gate.IsOpen;
+                return Task.CompletedTask;
+            });
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
+
+        Assert.Equal(1, callbackCalls);
+        Assert.True(callbackSawSafe);
+        Assert.True(callbackSawOpenGate);
+        Assert.Equal(RecoverySafety.Safe, recovery.Current);
+        Assert.True(gate.IsOpen);
+    }
+
+    [Fact]
     public async Task JournalRemainsAfterCanonicalCleanup_FailsClosedWithoutReplayOrBaseline()
     {
         var gate = new PowerMutationGate(false);

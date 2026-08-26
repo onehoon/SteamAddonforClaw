@@ -220,7 +220,11 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
             if (entry.Stage is null)
             {
                 firstFailure ??= new(false, entry.Kind, "StageImplementationMissing");
-                if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind)) break;
+                if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind))
+                {
+                    await RollbackWinGProtectionBestEffortAsync(stages, executionId).ConfigureAwait(false);
+                    break;
+                }
                 continue;
             }
 
@@ -232,17 +236,48 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
                 if (!result.Succeeded)
                 {
                     firstFailure ??= new(false, entry.Kind, result.Reason);
-                    if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind)) break;
+                    if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind))
+                    {
+                        await RollbackWinGProtectionBestEffortAsync(stages, executionId).ConfigureAwait(false);
+                        break;
+                    }
                 }
             }
             catch (Exception exception)
             {
                 firstFailure ??= new(false, entry.Kind, exception.GetType().Name);
-                if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind)) break;
+                if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind))
+                {
+                    await RollbackWinGProtectionBestEffortAsync(stages, executionId).ConfigureAwait(false);
+                    break;
+                }
             }
         }
 
         return firstFailure;
+    }
+
+    private static async ValueTask RollbackWinGProtectionBestEffortAsync(
+        IReadOnlyList<(RoutingStageKind Kind, IRoutingPipelineStage? Stage)> stages,
+        int? executionId)
+    {
+        var entry = stages.FirstOrDefault(static candidate => candidate.Kind == RoutingStageKind.WinGProtection);
+        if (entry.Stage is null) return;
+
+        try
+        {
+            var started = Stopwatch.GetTimestamp();
+            var result = await entry.Stage.RollbackMutationAsync(CancellationToken.None).ConfigureAwait(false);
+            AppLog.Debug("RoutingTrace", "Routing stage timing.",
+                ("RoutingExecution", executionId), ("Stage", entry.Kind), ("Phase", "Rollback"),
+                ("Result", result.Succeeded ? "Success" : "Failure"), ("Reason", result.Reason),
+                ("ElapsedMs", Elapsed(started)), ("BestEffort", true));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("RoutingTrace", "Best-effort WinGProtection rollback failed.", exception,
+                ("RoutingExecution", executionId), ("Stage", RoutingStageKind.WinGProtection));
+        }
     }
 
     private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;

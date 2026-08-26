@@ -276,8 +276,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                     catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); }
                 }, cancellationToken).ConfigureAwait(false);
-            needsPostCommitFreshReconcile = succeeded &&
-                _routingRuntime.CaptureStatus().OperationalState == RoutingOperationalState.Passive;
+            needsPostCommitFreshReconcile = succeeded;
         }
         finally
         {
