@@ -844,18 +844,21 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task UnknownPath_NoKillNoAdoption()
+    public async Task UnknownPath_DefersToRetainedIdentityAndAdoptsValidMainUi()
     {
         var h = NewHarness();
         var coordinator = h.Build();
         await coordinator.SetDesiredEnabledAsync(true);
 
         h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, null)];
+        h.IdentityInspector.ProcessId = 5555;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 0, 0);
 
         await coordinator.PollTickAsync();
 
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
-        Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
+        Assert.Equal(5555, coordinator.GetSnapshot().RealMainUiProcessId);
+        Assert.NotEqual("MainUiCandidatePathMismatch", coordinator.GetSnapshot().LastReason);
     }
 
     [Fact]
@@ -871,6 +874,26 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
         Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
+        Assert.Equal("MainUiCandidatePathMismatch", coordinator.GetSnapshot().LastReason);
+        Assert.Equal(0, h.HandleOpener.OpenCallCount);
+    }
+
+    [Fact]
+    public async Task UnknownPath_RetainedIdentityWrongPath_FaultsAtAdoption()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, null)];
+        h.IdentityInspector.ProcessId = 5555;
+        h.IdentityInspector.ExecutablePath = @"C:\Temp\MSI Center M.exe";
+
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Equal("MainUiRetainedIdentityMismatchAtAdoption", coordinator.GetSnapshot().LastReason);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
     }
 
     [Fact]
