@@ -166,7 +166,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             if (!rollback.Succeeded)
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
             else if (runtime is not null)
-                await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault");
+            {
+                if (await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault"))
+                    await runtime.ReconcileSafelyAsync(static () => { }).ConfigureAwait(false);
+            }
         }
 
         runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage, viiperRuntime);

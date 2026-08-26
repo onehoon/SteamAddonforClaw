@@ -150,20 +150,18 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
                 return false;
 
             var unsafeVersion = _unsafeRecoveryVersion;
-            if (unsafeVersion is null)
-                return false;
-
             var converged = false;
-            if (_recoverySafety.IsCurrent(unsafeVersion.Value, RecoverySafety.Unsafe))
+            if (unsafeVersion is { } version && _recoverySafety.IsCurrent(version, RecoverySafety.Unsafe))
             {
                 var changed = false;
                 converged = _powerGate.IsOpen &&
-                    _powerGate.TryCommitMutation(token, () => changed = _recoverySafety.TrySet(unsafeVersion.Value, RecoverySafety.Safe)) && changed;
+                    _powerGate.TryCommitMutation(token, () => changed = _recoverySafety.TrySet(version, RecoverySafety.Safe)) && changed;
             }
             else if (_recoverySafety.Current == RecoverySafety.Safe)
             {
                 // A newer authoritative recovery commit, such as resume recovery, may have
-                // superseded this coordinator's old Unsafe claim already.
+                // superseded this coordinator's old Unsafe claim already. A runtime routing
+                // fault can also complete fail-close without ever requiring an Unsafe claim.
                 converged = true;
             }
 

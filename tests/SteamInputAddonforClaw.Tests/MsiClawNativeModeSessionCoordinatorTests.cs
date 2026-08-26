@@ -300,7 +300,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task Successful_fail_close_latches_forward_mutation_until_steam_session_ends()
+    public async Task Successful_fail_close_with_safe_recovery_converges_and_allows_forward_mutation()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
         await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices));
@@ -308,12 +308,12 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
         await coordinator.FailClosedAsync("PipelineFailure");
 
-        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
-        var blocked = await coordinator.EnterForPipelineAsync(CancellationToken.None);
-        Assert.False(blocked.Succeeded);
-        Assert.Equal("RoutingFaultLatched", blocked.Reason);
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        var reentry = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+        Assert.True(reentry.Succeeded);
+        Assert.True(coordinator.IsActive);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
         Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
-        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
@@ -360,7 +360,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task Ordinary_safe_runtime_fault_remains_latched_until_steam_boundary()
+    public async Task Ordinary_safe_runtime_fault_converges_after_cleanup_without_unsafe_claim()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
         var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
@@ -369,9 +369,10 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
         await coordinator.FailClosedAsync("RuntimeFault");
 
-        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
-        Assert.Equal("RoutingFaultLatched", (await coordinator.EnterForPipelineAsync(CancellationToken.None)).Reason);
-        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+        Assert.False(coordinator.IsActive);
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
     }
 
@@ -392,6 +393,8 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
 
         Assert.True(recovery.HasIncompleteRecovery);
         Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.Equal("RoutingFaultLatched",
+            (await coordinator.EnterForPipelineAsync(CancellationToken.None)).Reason);
     }
 
     [Fact]
@@ -414,9 +417,9 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         await coordinator.LatchRoutingFaultAsync("NewOrdinaryFailure");
         await coordinator.FailClosedAsync("NewOrdinaryFailure");
 
-        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
-        Assert.Equal("RoutingFaultLatched",
-            (await coordinator.EnterForPipelineAsync(CancellationToken.None)).Reason);
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
         Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
     }
 
