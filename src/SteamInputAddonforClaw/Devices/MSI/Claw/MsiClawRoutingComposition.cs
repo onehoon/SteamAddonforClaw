@@ -91,7 +91,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// passes it explicitly; direct test constructions opt out by passing false.</summary>
     private readonly bool _hardwareSupported;
 
-    private Func<string, bool, ValueTask>? _runtimeFaultHandler;
+    private Func<string, bool, bool, ValueTask>? _runtimeFaultHandler;
 
     // PR3: development-only OEM1 production E2E POC action path -- Event41 observation, gesture
     // recognition/bridge, and dispatch. Never constructed until ConfigureOem1ActionPath is called
@@ -300,7 +300,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     IPowerSuspendParticipant? IHandheldRoutingComposition.AuxiliaryPowerParticipant => null;
     IRuntimeResumeParticipant? IHandheldRoutingComposition.AuxiliaryResumeParticipant => CenterMOem1Runtime;
 
-    void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, bool, ValueTask> handler) =>
+    void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, bool, bool, ValueTask> handler) =>
         _runtimeFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
 
     Task<RoutingStageOperationResult> IHandheldRoutingComposition.PauseOwnedRouteForSuspendAsync(CancellationToken cancellationToken) =>
@@ -674,7 +674,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         if (reason == MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason)
             AppLog.Warn("Routing.Runtime", "Owned physical-input session terminated unexpectedly; requesting routing fail-close.", null,
                 ("Event", "PhysicalInputSessionLost"), ("StopReason", summary.StopReason), ("Action", "FailClosed"));
-        ReportRuntimeFault(reason, reason == MsiClawPhysicalInputFaultPolicy.ExternalNativeTakeoverReason);
+        ReportRuntimeFault(
+            reason,
+            yieldCurrentSteamSession: reason == MsiClawPhysicalInputFaultPolicy.ExternalNativeTakeoverReason,
+            retryCurrentSessionAfterSafeCleanup: reason == MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason);
     }
 
     /// <summary>
@@ -682,13 +685,16 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// exercised directly in tests without needing committed physical-input ownership, which
     /// requires real DirectInput hardware.
     /// </summary>
-    internal void ReportRuntimeFault(string reason, bool yieldCurrentSteamSession = false)
+    internal void ReportRuntimeFault(
+        string reason,
+        bool yieldCurrentSteamSession = false,
+        bool retryCurrentSessionAfterSafeCleanup = false)
     {
         if (_runtimeFaultHandler is not { } handler)
             return;
 
         ValueTask operation;
-        try { operation = handler(reason, yieldCurrentSteamSession); }
+        try { operation = handler(reason, yieldCurrentSteamSession, retryCurrentSessionAfterSafeCleanup); }
         catch (Exception exception)
         {
             AppLog.Error("Routing.Runtime", "Backend runtime fault handler failed.", exception, ("Reason", reason));

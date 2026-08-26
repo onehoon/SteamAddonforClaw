@@ -131,7 +131,9 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
         finally { _gate.Release(); }
     }
 
-    public async Task<bool> ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> ConvergeAfterRoutingCleanupAsync(
+        CancellationToken cancellationToken = default,
+        bool allowSafeWithoutOwnedUnsafe = false)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -150,17 +152,14 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
                 return false;
 
             var unsafeVersion = _unsafeRecoveryVersion;
-            if (unsafeVersion is null)
-                return false;
-
             var converged = false;
-            if (_recoverySafety.IsCurrent(unsafeVersion.Value, RecoverySafety.Unsafe))
+            if (unsafeVersion is { } version && _recoverySafety.IsCurrent(version, RecoverySafety.Unsafe))
             {
                 var changed = false;
                 converged = _powerGate.IsOpen &&
-                    _powerGate.TryCommitMutation(token, () => changed = _recoverySafety.TrySet(unsafeVersion.Value, RecoverySafety.Safe)) && changed;
+                    _powerGate.TryCommitMutation(token, () => changed = _recoverySafety.TrySet(version, RecoverySafety.Safe)) && changed;
             }
-            else if (_recoverySafety.Current == RecoverySafety.Safe)
+            else if (_recoverySafety.Current == RecoverySafety.Safe && (unsafeVersion is not null || allowSafeWithoutOwnedUnsafe))
             {
                 // A newer authoritative recovery commit, such as resume recovery, may have
                 // superseded this coordinator's old Unsafe claim already.
@@ -356,8 +355,10 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
     Task IRoutingSafetySession.FailClosedAsync(string reason, CancellationToken cancellationToken)
         => FailClosedAsync(reason, cancellationToken);
 
-    Task<bool> IRoutingSafetySession.ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken)
-        => ConvergeAfterRoutingCleanupAsync(cancellationToken);
+    Task<bool> IRoutingSafetySession.ConvergeAfterRoutingCleanupAsync(
+        CancellationToken cancellationToken,
+        bool allowSafeWithoutOwnedUnsafe)
+        => ConvergeAfterRoutingCleanupAsync(cancellationToken, allowSafeWithoutOwnedUnsafe);
 
     private void LatchRoutingFaultCore(string reason)
     {

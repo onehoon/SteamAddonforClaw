@@ -66,13 +66,15 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     private readonly SemaphoreSlim _presentationGate = new(1, 1);
     private CanonicalXbox360InputPublisher? _xbox360Publisher;
 
-    private AddonRoutingRuntime(IHandheldRoutingComposition composition, IRoutingSafetySession? safetySession, RoutingPipelineRuntimeCoordinator coordinator, CanonicalSteamDeckOutputStage deckStage, CanonicalViiperRuntime? viiperRuntime)
+    internal AddonRoutingRuntime(IHandheldRoutingComposition composition, IRoutingSafetySession? safetySession, RoutingPipelineRuntimeCoordinator coordinator, CanonicalSteamDeckOutputStage deckStage, CanonicalViiperRuntime? viiperRuntime)
     {
         _composition = composition;
         _safetySession = safetySession;
         _coordinator = coordinator;
         _deckStage = deckStage;
         _viiperRuntime = viiperRuntime;
+        _composition.SetRuntimeFaultHandler((reason, yieldCurrentSteamSession, retryCurrentSessionAfterSafeCleanup) =>
+            HandleBackendRuntimeFaultAsync(reason, yieldCurrentSteamSession, retryCurrentSessionAfterSafeCleanup));
     }
 
     /// <summary>Owned initial OEM1 activation task. Frontend and tray startup do not await this task.
@@ -142,33 +144,6 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 : runtime.ReconcileOwnedRouteStateAsync(cancellationToken),
             ordinaryReconcileAllowed: () => powerGate.IsOpen);
         deckStage.SetOutputFaultHandler(async () => { await coordinator.FailClosedAsync().ConfigureAwait(false); });
-        handheldRoutingComposition.SetRuntimeFaultHandler((reason, yieldCurrentSteamSession) => HandleBackendRuntimeFaultAsync(reason, yieldCurrentSteamSession));
-
-        async ValueTask HandleBackendRuntimeFaultAsync(string reason, bool yieldCurrentSteamSession)
-        {
-            if (yieldCurrentSteamSession)
-            {
-                var yieldRequest = coordinator.RequestCurrentSessionYield();
-                if (yieldRequest is null) return;
-                await Task.Yield();
-                var takeoverRollback = await coordinator.FailClosedForSessionYieldAsync(yieldRequest.Value).ConfigureAwait(false);
-                if (!takeoverRollback.Succeeded)
-                    AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(takeoverRollback.Reason), ("Reason", reason));
-                else if (runtime is not null)
-                    await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault");
-                return;
-            }
-
-            if (safetySession is not null)
-                await safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
-
-            var rollback = await coordinator.FailClosedAsync().ConfigureAwait(false);
-            if (!rollback.Succeeded)
-                AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
-            else if (runtime is not null)
-                await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault");
-        }
-
         runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage, viiperRuntime);
 
         // PR3: development-only OEM1 production E2E POC. The only two facts a device-specific OEM1
@@ -671,11 +646,44 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return succeeded;
     }
 
-    private async Task<bool> TryConvergeSafetyAfterCleanupAsync(string reason)
+    private async Task<bool> TryConvergeSafetyAfterCleanupAsync(
+        string reason,
+        bool allowSafeWithoutOwnedUnsafe = false)
     {
         if (_safetySession is null || _coordinator.HasResidualSessionState)
             return false;
-        return await _safetySession.ConvergeAfterRoutingCleanupAsync(CancellationToken.None).ConfigureAwait(false);
+        return await _safetySession.ConvergeAfterRoutingCleanupAsync(
+            CancellationToken.None,
+            allowSafeWithoutOwnedUnsafe).ConfigureAwait(false);
+    }
+
+    private async ValueTask HandleBackendRuntimeFaultAsync(
+        string reason,
+        bool yieldCurrentSteamSession,
+        bool retryCurrentSessionAfterSafeCleanup)
+    {
+        if (yieldCurrentSteamSession)
+        {
+            var yieldRequest = _coordinator.RequestCurrentSessionYield();
+            if (yieldRequest is null) return;
+            await Task.Yield();
+            var takeoverRollback = await _coordinator.FailClosedForSessionYieldAsync(yieldRequest.Value).ConfigureAwait(false);
+            if (!takeoverRollback.Succeeded)
+                AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(takeoverRollback.Reason), ("Reason", reason));
+            else
+                await TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault", retryCurrentSessionAfterSafeCleanup).ConfigureAwait(false);
+            return;
+        }
+
+        if (_safetySession is not null)
+            await _safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
+
+        var rollback = await _coordinator.FailClosedAsync().ConfigureAwait(false);
+        if (!rollback.Succeeded)
+            AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
+        else if (await TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault", retryCurrentSessionAfterSafeCleanup).ConfigureAwait(false)
+            && retryCurrentSessionAfterSafeCleanup)
+            await ReconcileSafelyAsync(static () => { }).ConfigureAwait(false);
     }
 
     private bool SteamOutputReady => _testOnlySteamOutputReadyOverride
