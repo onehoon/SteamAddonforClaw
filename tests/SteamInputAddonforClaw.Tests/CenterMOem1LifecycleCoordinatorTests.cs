@@ -897,6 +897,27 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
+    public async Task UnknownPath_RetainedIdentityUncertain_FailsOpenWithoutAdoptionOrTermination()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign =
+            [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, null)];
+        h.IdentityInspector.Status = LiveProcessProbeStatus.Uncertain;
+
+        await coordinator.PollTickAsync();
+
+        var snapshot = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snapshot.State);
+        Assert.Equal("MainUiRetainedIdentityMismatchAtAdoption", snapshot.LastReason);
+        Assert.Null(snapshot.RealMainUiProcessId);
+        Assert.True(snapshot.NativeBehaviorGuaranteed);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task MultipleForeignCandidates_NoKill_FaultedNative()
     {
         var h = NewHarness();
