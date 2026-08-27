@@ -38,6 +38,20 @@ public sealed class IntelFrameLimiterTests
     public void Only_compatible_intel_frame_limit_adapters_are_selected(uint vendorId, bool frameLimitSupported, bool expected) =>
         Assert.Equal(expected, NativeIgcl.IsCompatibleIntelAdapterForTests(vendorId, frameLimitSupported));
 
+    [Theory]
+    [InlineData(0x8086u, true, true)]
+    [InlineData(0x8086u, false, false)]
+    [InlineData(0x10DEu, true, false)]
+    public void Intel_frame_limit_adapter_is_cleanup_eligible_when_frame_limit_is_present(uint vendorId, bool frameLimitPresent, bool expected) =>
+        Assert.Equal(expected, NativeIgcl.IsIntelFrameLimitAdapterForCleanupForTests(vendorId, frameLimitPresent));
+
+    [Fact]
+    public void Unsupported_intel_frame_limit_range_is_not_enable_compatible_but_remains_cleanup_eligible()
+    {
+        Assert.True(NativeIgcl.IsIntelFrameLimitAdapterForCleanupForTests(0x8086u, true));
+        Assert.False(NativeIgcl.IsCompatibleIntelAdapterForTests(0x8086u, false));
+    }
+
     [Fact]
     public void Frame_limit_without_live_change_is_not_available_for_active_profile_control()
     {

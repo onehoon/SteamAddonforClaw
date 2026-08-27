@@ -224,6 +224,7 @@ internal sealed class NativeIgcl : IDisposable
                 frameLimit = new IntelFpsCapability(d.Value.IntType.Range.Min, d.Value.IntType.Range.Max, d.Value.IntType.Range.Step, d.ValueType, d.FeatureMiscSupport, d.PerAppSupport);
                 break;
             }
+            var intelFrameLimit = IsIntelFrameLimitAdapter(properties.PciVendorId, frameLimit);
             var compatible = IsCompatibleIntelAdapter(properties.PciVendorId, frameLimit);
             AppLog.Debug("Profiles.IntelFps", "Intel IGCL adapter discovered.",
                 ("Index", _currentAdapterIndex), ("Name", DecodeAdapterName(properties.Name)),
@@ -234,6 +235,11 @@ internal sealed class NativeIgcl : IDisposable
                 ("Maximum", frameLimit?.Maximum), ("Step", frameLimit?.Step),
                 ("FeatureMiscSupport", frameLimit?.FeatureMiscSupport), ("PerAppSupport", frameLimit?.PerAppSupport),
                 ("Selected", compatible));
+            if (intelFrameLimit && _cleanupAdapter == 0)
+            {
+                _cleanupAdapter = adapter;
+                _selectedAdapter = new AdapterDiagnostics(_currentAdapterIndex, DecodeAdapterName(properties.Name), properties.PciVendorId, properties.PciDeviceId);
+            }
             if (!compatible) return false;
             Capability = frameLimit;
             _adapter = adapter;
@@ -276,9 +282,11 @@ internal sealed class NativeIgcl : IDisposable
         if (setResult == 0) AppLog.Info("Profiles.IntelFps", "FRAME_LIMIT apply succeeded.", fields);
         else AppLog.Warn("Profiles.IntelFps", $"FRAME_LIMIT {(enable ? "apply" : "disable")} failed.", null, fields);
     }
-    private static bool IsCompatibleIntelAdapter(uint vendorId, IntelFpsCapability? frameLimit) => vendorId == IntelVendorId && frameLimit is { SupportsAddonRange: true };
+    private static bool IsIntelFrameLimitAdapter(uint vendorId, IntelFpsCapability? frameLimit) => vendorId == IntelVendorId && frameLimit is not null;
+    private static bool IsCompatibleIntelAdapter(uint vendorId, IntelFpsCapability? frameLimit) => IsIntelFrameLimitAdapter(vendorId, frameLimit) && frameLimit!.Value.SupportsAddonRange;
     private static string DecodeAdapterName(byte[]? name) => name is null ? string.Empty : System.Text.Encoding.ASCII.GetString(name).TrimEnd('\0');
     internal static bool IsCompatibleIntelAdapterForTests(uint vendorId, bool frameLimitSupported) => vendorId == IntelVendorId && frameLimitSupported;
+    internal static bool IsIntelFrameLimitAdapterForCleanupForTests(uint vendorId, bool frameLimitPresent) => IsIntelFrameLimitAdapter(vendorId, frameLimitPresent ? new IntelFpsCapability(30, 300, 1, Int32, 1 << 4, true) : null);
     internal static byte[] EncodeFrameLimitPropertyBytesForTests(bool enable, int fps)
     {
         var property = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps };
