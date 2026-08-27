@@ -20,6 +20,28 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class AddonRuntimeHostTests
 {
     [Fact]
+    public void Healthy_preserved_resume_keeps_active_route_without_post_commit_fresh_reconcile()
+    {
+        var shouldSchedule = AddonRuntimeHost.ShouldSchedulePostCommitFreshReconcile(
+            preservedResumeSucceeded: true,
+            routingState: RoutingOperationalState.OverrideActive,
+            routeStillDesired: true);
+
+        Assert.False(shouldSchedule);
+    }
+
+    [Fact]
+    public void Steam_session_end_before_resume_suppression_schedules_post_commit_reconcile()
+    {
+        var shouldSchedule = AddonRuntimeHost.ShouldSchedulePostCommitFreshReconcile(
+            preservedResumeSucceeded: true,
+            routingState: RoutingOperationalState.OverrideActive,
+            routeStillDesired: false);
+
+        Assert.True(shouldSchedule);
+    }
+
+    [Fact]
     public void Failed_routing_shutdown_retains_runtime_win_g_hook()
     {
         using var guard = CreateTestWinGGuard();

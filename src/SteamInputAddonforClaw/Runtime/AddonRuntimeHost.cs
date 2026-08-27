@@ -39,6 +39,11 @@ namespace SteamInputAddonforClaw.Runtime;
 internal sealed class AddonRuntimeHost : IAsyncDisposable
 {
     internal static bool ShouldDisposeRoutingBackend(bool canonicalShutdownSucceeded) => canonicalShutdownSucceeded;
+    internal static bool ShouldSchedulePostCommitFreshReconcile(
+        bool preservedResumeSucceeded,
+        RoutingOperationalState routingState,
+        bool routeStillDesired) => preservedResumeSucceeded &&
+            (routingState == RoutingOperationalState.Passive || !routeStillDesired);
     internal bool RoutingShutdownSucceeded { get; private set; }
     private readonly SteamSessionRuntime _steamRuntime;
     private readonly AddonRoutingRuntime? _routingRuntime;
@@ -276,7 +281,14 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                     catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); }
                 }, cancellationToken).ConfigureAwait(false);
-            needsPostCommitFreshReconcile = succeeded;
+            // A healthy preserved route is already authoritative and must not be sent through
+            // the ordinary post-resume planner while the external power state is still settling.
+            // The fallback branch retires the preserved session, so only that passive outcome
+            // needs a fresh re-entry after the recovery commit.
+            needsPostCommitFreshReconcile = ShouldSchedulePostCommitFreshReconcile(
+                succeeded,
+                _routingRuntime.CaptureStatus().OperationalState,
+                _steamRuntime.State.IsActive);
         }
         finally
         {
