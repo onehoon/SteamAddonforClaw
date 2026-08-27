@@ -231,6 +231,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _powerModeRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _intelFpsRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
+        _runtimeHost.PowerResumeObserved += OnPowerResumeObserved;
         if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
             && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
@@ -483,7 +484,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _runtimeShutdownPrepared, 1) != 0) return;
         if (_runtimeHost is not null)
+        {
             _runtimeHost.ActualRunningAppIdChanged -= OnActualRunningAppIdChanged;
+            _runtimeHost.PowerResumeObserved -= OnPowerResumeObserved;
+        }
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.BeginProcessShutdown();
         try { _displayResolutionRuntime.Shutdown(); } catch (Exception exception) { AppLog.Error("Profiles.Display", "Display resolution shutdown restore failed.", exception); }
@@ -525,6 +529,53 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         try { _intelFpsRuntime.Reconcile(appId, "ActualRunningAppIdChanged"); }
         catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "FPS game-profile reconcile failed after Actual RunningAppID changed.", exception, ("RunningAppID", appId)); }
+    }
+
+    private void OnPowerResumeObserved()
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        _ = ReconcilePerformanceAfterResumeAsync(
+            _startupCancellationTokenSource.Token,
+            static (delay, cancellationToken) => Task.Delay(delay, cancellationToken),
+            () => _runtimeHost?.ActualRunningAppId ?? 0,
+            appId => _cpuBoostRuntime.Reconcile(appId),
+            appId => _powerModeRuntime.Reconcile(appId));
+    }
+
+    internal static async Task ReconcilePerformanceAfterResumeAsync(
+        CancellationToken cancellationToken,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        Func<uint> actualAppIdSource,
+        Action<uint> reconcileCpuBoost,
+        Action<uint> reconcilePowerMode)
+    {
+        try
+        {
+            await delay(TimeSpan.FromMilliseconds(2500), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var appId = actualAppIdSource();
+        try
+        {
+            reconcileCpuBoost(appId);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.CpuBoost", "CPU Boost resume reconcile failed.", exception);
+        }
+
+        try
+        {
+            reconcilePowerMode(appId);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.PowerMode", "Power Mode resume reconcile failed.", exception);
+        }
     }
 
     private void OnIntelFpsPowerSourceChanged() => _ = Task.Run(() => _intelFpsRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0, "PowerSourceChanged"));
