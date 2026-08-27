@@ -31,25 +31,29 @@ public sealed class IntelFrameLimiterTests
         Assert.Equal(new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, bytes.AsSpan(32, 8).ToArray());
     }
 
-    [Theory]
-    [InlineData(0x8086u, true, true)]
-    [InlineData(0x10DEu, true, false)]
-    [InlineData(0x8086u, false, false)]
-    public void Only_compatible_intel_frame_limit_adapters_are_selected(uint vendorId, bool frameLimitSupported, bool expected) =>
-        Assert.Equal(expected, NativeIgcl.IsCompatibleIntelAdapterForTests(vendorId, frameLimitSupported));
+    [Fact]
+    public void Only_compatible_intel_frame_limit_adapters_are_selected()
+    {
+        var compatible = new IntelFpsCapability(30, 300, 1, 2, 1 << 4, true);
+        Assert.True(NativeIgcl.IsCompatibleIntelAdapterForTests(0x8086u, compatible));
+        Assert.False(NativeIgcl.IsCompatibleIntelAdapterForTests(0x10DEu, compatible));
+        Assert.False(NativeIgcl.IsCompatibleIntelAdapterForTests(0x8086u, null));
+    }
 
-    [Theory]
-    [InlineData(0x8086u, true, true)]
-    [InlineData(0x8086u, false, false)]
-    [InlineData(0x10DEu, true, false)]
-    public void Intel_frame_limit_adapter_is_cleanup_eligible_when_frame_limit_is_present(uint vendorId, bool frameLimitPresent, bool expected) =>
-        Assert.Equal(expected, NativeIgcl.IsIntelFrameLimitAdapterForCleanupForTests(vendorId, frameLimitPresent));
+    [Fact]
+    public void Intel_frame_limit_adapter_is_cleanup_eligible_when_frame_limit_is_present()
+    {
+        var capability = new IntelFpsCapability(50, 120, 1, 2, 1 << 4, true);
+        Assert.True(NativeIgcl.IsIntelFrameLimitAdapterForCleanupForTests(0x8086u, capability));
+        Assert.False(NativeIgcl.IsIntelFrameLimitAdapterForCleanupForTests(0x8086u, null));
+    }
 
     [Fact]
     public void Unsupported_intel_frame_limit_range_is_not_enable_compatible_but_remains_cleanup_eligible()
     {
-        Assert.True(NativeIgcl.IsIntelFrameLimitAdapterForCleanupForTests(0x8086u, true));
-        Assert.False(NativeIgcl.IsCompatibleIntelAdapterForTests(0x8086u, false));
+        var incompatible = new IntelFpsCapability(50, 120, 1, 2, 1 << 4, true);
+        Assert.True(NativeIgcl.IsIntelFrameLimitAdapterForCleanupForTests(0x8086u, incompatible));
+        Assert.False(NativeIgcl.IsCompatibleIntelAdapterForTests(0x8086u, incompatible));
     }
 
     [Fact]

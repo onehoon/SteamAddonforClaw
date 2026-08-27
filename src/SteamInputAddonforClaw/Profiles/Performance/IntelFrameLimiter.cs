@@ -285,8 +285,8 @@ internal sealed class NativeIgcl : IDisposable
     private static bool IsIntelFrameLimitAdapter(uint vendorId, IntelFpsCapability? frameLimit) => vendorId == IntelVendorId && frameLimit is not null;
     private static bool IsCompatibleIntelAdapter(uint vendorId, IntelFpsCapability? frameLimit) => IsIntelFrameLimitAdapter(vendorId, frameLimit) && frameLimit!.Value.SupportsAddonRange;
     private static string DecodeAdapterName(byte[]? name) => name is null ? string.Empty : System.Text.Encoding.ASCII.GetString(name).TrimEnd('\0');
-    internal static bool IsCompatibleIntelAdapterForTests(uint vendorId, bool frameLimitSupported) => vendorId == IntelVendorId && frameLimitSupported;
-    internal static bool IsIntelFrameLimitAdapterForCleanupForTests(uint vendorId, bool frameLimitPresent) => IsIntelFrameLimitAdapter(vendorId, frameLimitPresent ? new IntelFpsCapability(30, 300, 1, Int32, 1 << 4, true) : null);
+    internal static bool IsCompatibleIntelAdapterForTests(uint vendorId, IntelFpsCapability? frameLimit) => IsCompatibleIntelAdapter(vendorId, frameLimit);
+    internal static bool IsIntelFrameLimitAdapterForCleanupForTests(uint vendorId, IntelFpsCapability? frameLimit) => IsIntelFrameLimitAdapter(vendorId, frameLimit);
     internal static byte[] EncodeFrameLimitPropertyBytesForTests(bool enable, int fps)
     {
         var property = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps };
