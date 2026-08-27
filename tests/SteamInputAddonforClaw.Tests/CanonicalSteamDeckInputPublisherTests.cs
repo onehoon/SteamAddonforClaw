@@ -79,6 +79,190 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Steam_pulse_summary_counts_only_successful_asserted_publishes_and_confirms_release()
+    {
+        var line = await PublishPulseAndReadSummary(static overlay => overlay.RequestSteamPulse(), static state => state.Steam);
+
+        Assert.Contains("Button=Steam", line);
+        Assert.Contains("ActiveSetStateCount=2", line);
+        Assert.Contains("FirstPublishDelayMs=", line);
+        Assert.Contains("PublishedHighDurationMs=", line);
+        Assert.Contains("ReleasePublished=True", line);
+        Assert.Contains("SetStateFailures=0", line);
+    }
+
+    [Fact]
+    public async Task Repeated_same_button_requests_share_one_pulse_diagnostic()
+    {
+        var fakeNow = 0L;
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => fakeNow);
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow, systemButtonOverlay: overlay);
+        publisher.Start();
+
+        overlay.RequestSteamPulse();
+        fakeNow = 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        time.Advance(TimeSpan.FromMilliseconds(50));
+        fakeNow = 50;
+        overlay.RequestSteamPulse();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        time.Advance(TimeSpan.FromMilliseconds(101));
+        fakeNow = 151;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var line = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("PulseCompleted"));
+        Assert.Contains("PulseId=1", line);
+        Assert.Contains("RequestCount=2", line);
+        Assert.Contains("ActiveSetStateCount=2", line);
+    }
+
+    [Fact]
+    public async Task QuickAccess_pulse_summary_counts_only_successful_asserted_publishes_and_confirms_release()
+    {
+        var line = await PublishPulseAndReadSummary(static overlay => overlay.RequestQuickAccessPulse(), static state => state.QuickAccess);
+
+        Assert.Contains("Button=QuickAccess", line);
+        Assert.Contains("ActiveSetStateCount=2", line);
+        Assert.Contains("ReleasePublished=True", line);
+        Assert.Contains("SetStateFailures=0", line);
+    }
+
+    [Fact]
+    public async Task First_ordinary_input_is_logged_once_and_system_button_only_does_not_satisfy_it()
+    {
+        var fakeNow = 0L;
+        var source = new Snapshot(new ControllerState(
+            new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+            new StickState(-1, 1), default, new TriggerState(7, 7), new([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => fakeNow);
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow, systemButtonOverlay: overlay);
+        publisher.Start();
+
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        overlay.RequestQuickAccessPulse();
+        fakeNow = 10;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        source.Value = new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, new([false, false]));
+        fakeNow = 20;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        source.Value = new ControllerState(new AuxiliaryButtonState([false, false]));
+        fakeNow = 30;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(4);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(1, log.Split('\n').Count(line => line.Contains("FirstOrdinaryInputPublished")));
+        Assert.Contains("ElapsedSincePublisherStartMs=", log);
+    }
+
+    [Fact]
+    public async Task Failed_set_state_emits_terminal_pulse_summary_without_changing_fail_closed_behavior()
+    {
+        var now = 0L;
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => now);
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var faultObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalSteamDeckInputPublisher(new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))), sink, ticks,
+            _ => faultObserved.TrySetResult(true), timestampProvider: () => now, systemButtonOverlay: overlay);
+        publisher.Start();
+        overlay.RequestSteamPulse();
+        now = 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        sink.Accept = false;
+        now = 2;
+        await ticks.TickAsync();
+        await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var line = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("PulseCompleted"));
+        Assert.Contains("ActiveSetStateCount=1", line);
+        Assert.Contains("SetStateFailures=1", line);
+        Assert.Contains("ReleasePublished=False", line);
+    }
+
+    [Fact]
+    public void Overlapping_pulses_are_logged_without_changing_the_output()
+    {
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time);
+        overlay.RequestSteamPulse();
+        time.Advance(TimeSpan.FromMilliseconds(25));
+        overlay.RequestQuickAccessPulse();
+
+        var state = overlay.Apply(default);
+        Assert.Equal((byte)1, state.Steam);
+        Assert.Equal((byte)1, state.QuickAccess);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("QuickAccess pulse requested", log);
+        Assert.Contains("OtherSystemButtonActive=True", log);
+    }
+
+    [Fact]
+    public async Task Clearing_teardown_pulse_discards_diagnostic_before_later_neutral_publish()
+    {
+        var fakeNow = 0L;
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => fakeNow);
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            new FakeSink(),
+            ticks,
+            timestampProvider: () => fakeNow,
+            systemButtonOverlay: overlay);
+        publisher.Start();
+        overlay.RequestSteamPulse();
+        overlay.Clear();
+        await ticks.TickAsync();
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        Assert.DoesNotContain("PulseCompleted", LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath));
+    }
+
+    private async Task<string> PublishPulseAndReadSummary(Action<SteamDeckSystemButtonOverlay> request, Func<SteamDeckDeviceState, byte> button)
+    {
+        var fakeNow = 0L;
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => fakeNow);
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow, systemButtonOverlay: overlay);
+        publisher.Start();
+
+        request(overlay);
+        fakeNow = 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        Assert.Equal((byte)1, button(sink.States[0]));
+        fakeNow = 50;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        Assert.Equal((byte)1, button(sink.States[1]));
+        time.Advance(TimeSpan.FromMilliseconds(101));
+        fakeNow = 102;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        Assert.Equal((byte)0, button(sink.States[2]));
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        return Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("PulseCompleted"));
+    }
+
+    [Fact]
     public async Task Unchanged_state_is_published_every_tick()
     {
         var state = new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, new([false, false]));
