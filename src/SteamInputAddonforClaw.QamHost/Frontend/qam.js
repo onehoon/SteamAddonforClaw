@@ -927,10 +927,10 @@
         return React.createElement(React.Fragment, null,
           displayError ? React.createElement("p", { key: "error" }, displayError) : null,
           React.createElement(native.PanelSection, { key: "profile-header", title: profile.displayName || `Game ${profile.appId}` }, React.createElement(native.PanelSectionRow, { key: "profile-toggle" }, React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }))),
-          React.createElement(native.PanelSection, { key: "profile-cpu-section" }, ...profileCpuControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
-          profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null,
           React.createElement(native.PanelSection, { key: "profile-tdp-section" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
-          React.createElement(native.PanelSection, { key: "profile-fps-section" }, ...fpsControls.map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))));
+          React.createElement(native.PanelSection, { key: "profile-fps-section" }, ...fpsControls.map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
+          React.createElement(native.PanelSection, { key: "profile-cpu-section" }, ...profileCpuControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
+          profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null);
       }
 
       return React.createElement(React.Fragment, null,

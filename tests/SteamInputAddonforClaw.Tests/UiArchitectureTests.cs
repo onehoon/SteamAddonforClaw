@@ -101,6 +101,31 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Profile_feature_order_expander_state_and_resolution_contract_are_explicit()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+
+        Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Resolution\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("x:Name=\"DisplayExpander\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<ctcontrols:SettingsCard Header=\"Resolution\">", xaml, StringComparison.Ordinal);
+        Assert.Contains("IntelFpsExpander.IsExpanded = snapshot.FpsLimit?.Enabled == true", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("PowerModeExpander.IsExpanded = snapshot.PowerMode?.Enabled == true", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CpuBoostExpander.IsExpanded = snapshot.CpuBoost.Enabled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("TdpExpander.IsExpanded = snapshot.Tdp.Enabled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("new(null, null, \"Do not change\"), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("HeaderIcon", xaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xE9D9;\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xE83F;\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Profile_power_mode_enable_mutation_preserves_apply_failure_contract()
     {
         var root = FindRepositoryRoot();

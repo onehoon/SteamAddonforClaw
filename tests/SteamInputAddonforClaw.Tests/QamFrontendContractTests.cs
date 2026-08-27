@@ -468,18 +468,20 @@ public sealed class QamFrontendContractTests
 
         var profileStart = source.IndexOf("const profileCpuControls", StringComparison.Ordinal);
         var tdpSection = source.IndexOf("key: \"profile-tdp-section\"", profileStart, StringComparison.Ordinal);
-        Assert.True(profileStart >= 0 && tdpSection > profileStart);
-        var profileLayout = source[profileStart..tdpSection];
+        var fpsSection = source.IndexOf("key: \"profile-fps-section\"", tdpSection, StringComparison.Ordinal);
+        var cpuSection = source.IndexOf("key: \"profile-cpu-section\"", fpsSection, StringComparison.Ordinal);
+        var powerSection = source.IndexOf("key: \"profile-power-section\"", cpuSection, StringComparison.Ordinal);
+        Assert.True(profileStart >= 0 && tdpSection > profileStart && fpsSection > tdpSection && cpuSection > fpsSection && powerSection > cpuSection);
+        var profileLayout = source[profileStart..];
 
         Assert.Contains("const profilePowerControls", profileLayout);
+        Assert.DoesNotContain("Resolution", profileLayout, StringComparison.Ordinal);
         Assert.Contains("key: \"profile-power-section\"", profileLayout);
         Assert.Contains("key: \"profile-cpu-section\"", profileLayout);
         Assert.DoesNotContain("key: \"profile-power-section\", title:", profileLayout);
         Assert.DoesNotContain("key: \"profile-cpu-section\", title:", profileLayout);
         Assert.DoesNotContain("key: \"profile-tdp-section\", title:", source);
-        var cpuSection = profileLayout.IndexOf("key: \"profile-cpu-section\"", StringComparison.Ordinal);
-        var powerSection = profileLayout.IndexOf("key: \"profile-power-section\"", StringComparison.Ordinal);
-        var cpuLayout = profileLayout[cpuSection..powerSection];
+        var cpuLayout = profileLayout[profileLayout.IndexOf("key: \"profile-cpu-section\"", StringComparison.Ordinal)..profileLayout.IndexOf("key: \"profile-power-section\"", StringComparison.Ordinal)];
         Assert.Contains("profileCpuControls.filter", cpuLayout);
         Assert.DoesNotContain("profilePowerControls.filter", cpuLayout);
     }
