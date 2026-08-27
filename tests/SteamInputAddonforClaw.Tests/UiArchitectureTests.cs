@@ -138,7 +138,7 @@ public sealed class UiArchitectureTests
         Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("<TextBlock Text=\"Profile\" VerticalAlignment=\"Center\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"ProfileEnabledToggle\" Grid.Column=\"1\" HorizontalAlignment=\"Right\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("<Grid x:Name=\"DetailPanel\" Visibility=\"Collapsed\">", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Grid x:Name=\"DetailPanel\" Visibility=\"Collapsed\" RowSpacing=\"16\">", xaml, StringComparison.Ordinal);
         Assert.Contains("<Grid.RowDefinitions><RowDefinition Height=\"Auto\"/><RowDefinition Height=\"Auto\"/><RowDefinition Height=\"*\"/></Grid.RowDefinitions>", xaml, StringComparison.Ordinal);
         Assert.Contains("<Grid Grid.Row=\"1\" ColumnSpacing=\"12\"><Grid.ColumnDefinitions><ColumnDefinition Width=\"*\"/><ColumnDefinition Width=\"Auto\"/></Grid.ColumnDefinitions>", xaml, StringComparison.Ordinal);
         Assert.Contains("<ScrollViewer Grid.Row=\"2\" HorizontalScrollMode=\"Disabled\" HorizontalScrollBarVisibility=\"Disabled\"", xaml, StringComparison.Ordinal);

@@ -14,7 +14,7 @@
 </ItemsRepeater>
 </ScrollViewer>
 </Grid>
-<Grid x:Name="DetailPanel" Visibility="Collapsed">
+<Grid x:Name="DetailPanel" Visibility="Collapsed" RowSpacing="16">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <Button Grid.Row="0" Content="Back" HorizontalAlignment="Left" Click="BackButton_Click"/>
 <Grid Grid.Row="1" ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="SelectedGameNameText" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/><ToggleSwitch x:Name="ProfileEnabledToggle" Grid.Column="1" HorizontalAlignment="Right" OffContent="" OnContent="" IsEnabled="False" Toggled="ProfileEnabledToggle_Toggled"/></Grid>
