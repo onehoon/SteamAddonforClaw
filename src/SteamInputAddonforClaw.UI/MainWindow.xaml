@@ -11,7 +11,6 @@
     <NavigationView
         x:Name="MainNavigationView"
         PaneDisplayMode="Left"
-        HorizontalContentAlignment="Stretch"
         Loaded="MainNavigationView_Loaded"
         PointerPressed="MainNavigationView_PointerPressed"
         SelectionChanged="MainNavigationView_SelectionChanged">
