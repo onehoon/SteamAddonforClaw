@@ -151,7 +151,9 @@ internal sealed class SteamDeckSystemButtonOverlay
         if (!accepted)
         {
             diagnostic.SetStateFailures++;
-            return null;
+            var failed = BuildSummary(diagnostic, releasePublished: false);
+            current = null;
+            return failed;
         }
         if (asserted)
         {
@@ -161,18 +163,20 @@ internal sealed class SteamDeckSystemButtonOverlay
             return null;
         }
 
-        var summary = new PulseSummary(
-            diagnostic.PulseId,
-            diagnostic.Button,
-            diagnostic.RequestCount,
-            diagnostic.ActiveSetStateCount,
-            diagnostic.FirstAssertedTimestamp.HasValue ? Stopwatch.GetElapsedTime(diagnostic.RequestTimestamp, diagnostic.FirstAssertedTimestamp.Value).TotalMilliseconds : (double?)null,
-            diagnostic.FirstAssertedTimestamp.HasValue ? Stopwatch.GetElapsedTime(diagnostic.FirstAssertedTimestamp.Value, diagnostic.LastAssertedTimestamp).TotalMilliseconds : (double?)null,
-            diagnostic.FirstAssertedTimestamp.HasValue,
-            diagnostic.SetStateFailures);
+        var summary = BuildSummary(diagnostic, diagnostic.FirstAssertedTimestamp.HasValue);
         current = null;
         return summary;
     }
+
+    private static PulseSummary BuildSummary(PulseDiagnostic diagnostic, bool releasePublished) => new(
+        diagnostic.PulseId,
+        diagnostic.Button,
+        diagnostic.RequestCount,
+        diagnostic.ActiveSetStateCount,
+        diagnostic.FirstAssertedTimestamp.HasValue ? Stopwatch.GetElapsedTime(diagnostic.RequestTimestamp, diagnostic.FirstAssertedTimestamp.Value).TotalMilliseconds : (double?)null,
+        diagnostic.FirstAssertedTimestamp.HasValue ? Stopwatch.GetElapsedTime(diagnostic.FirstAssertedTimestamp.Value, diagnostic.LastAssertedTimestamp).TotalMilliseconds : (double?)null,
+        releasePublished,
+        diagnostic.SetStateFailures);
 
     private static void LogSummary(PulseSummary summary)
     {

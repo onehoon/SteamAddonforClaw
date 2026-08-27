@@ -166,25 +166,31 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
-    public void Failed_asserted_publish_is_not_counted_but_is_reported_in_the_summary()
+    public async Task Failed_set_state_emits_terminal_pulse_summary_without_changing_fail_closed_behavior()
     {
         var now = 0L;
         var time = new FakeTimeProvider();
         var overlay = new SteamDeckSystemButtonOverlay(time, () => now);
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var faultObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalSteamDeckInputPublisher(new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))), sink, ticks,
+            _ => faultObserved.TrySetResult(true), timestampProvider: () => now, systemButtonOverlay: overlay);
+        publisher.Start();
         overlay.RequestSteamPulse();
-        var asserted = overlay.Apply(default);
-        overlay.RecordPublishResult(asserted, accepted: false, now);
         now = 1;
-        overlay.RecordPublishResult(asserted, accepted: true, now);
-        time.Advance(TimeSpan.FromMilliseconds(101));
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        sink.Accept = false;
         now = 2;
-        var released = overlay.Apply(default);
-        overlay.RecordPublishResult(released, accepted: true, now);
+        await ticks.TickAsync();
+        await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await publisher.StopAsync();
 
         AppLog.DrainForTests();
         var line = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("PulseCompleted"));
         Assert.Contains("ActiveSetStateCount=1", line);
         Assert.Contains("SetStateFailures=1", line);
+        Assert.Contains("ReleasePublished=False", line);
     }
 
     [Fact]
