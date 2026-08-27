@@ -59,6 +59,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private Task? _task;
     private int _publishedStateCount;
     private int _faultReported;
+    private long _publisherStartedTimestamp;
+    private bool _firstOrdinaryInputPublished;
 
     // Production path only: dedicated worker thread driven by a real Windows high-resolution
     // one-shot timer, re-armed each iteration against the deadline schedule below. Never used when
@@ -108,7 +110,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _ticks = ticks;
         _fault = fault;
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
-        _systemButtonOverlay = systemButtonOverlay ?? new SteamDeckSystemButtonOverlay();
+        _systemButtonOverlay = systemButtonOverlay ?? new SteamDeckSystemButtonOverlay(timestampProvider: _timestampProvider);
     }
 
     internal bool IsRunning => _task is { IsCompleted: false } || _workerThread is { IsAlive: true };
@@ -122,7 +124,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
     internal void Start()
     {
         if (IsRunning) throw new InvalidOperationException("The canonical Steam Deck publisher is already running.");
-        _lastHeartbeatTimestamp = _timestampProvider();
+        _publisherStartedTimestamp = _timestampProvider();
+        _lastHeartbeatTimestamp = _publisherStartedTimestamp;
+        _firstOrdinaryInputPublished = false;
         ResetTimingDiagnosticsForNewRun();
 
         if (_ticks is not null)
@@ -389,7 +393,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
         var state = _systemButtonOverlay.Apply(mapped);
 
         var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
-        var callStart = diagnosticsEnabled ? _timestampProvider() : 0;
+        var pulseDiagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
+        var callStart = diagnosticsEnabled || pulseDiagnosticsEnabled ? _timestampProvider() : 0;
         var accepted = _sink.SetState(state);
 
         if (diagnosticsEnabled)
@@ -402,14 +407,35 @@ internal sealed class CanonicalSteamDeckInputPublisher
         if (!accepted)
         {
             if (diagnosticsEnabled) _totalSetStateFailures++;
+            if (pulseDiagnosticsEnabled) _systemButtonOverlay.RecordPublishResult(state, accepted, _timestampProvider());
             ReportFault(new InvalidOperationException("Canonical VIIPER rejected a typed Steam Deck state."));
             return false;
         }
         _publishedStateCount++;
 
+        if (pulseDiagnosticsEnabled)
+        {
+            _systemButtonOverlay.RecordPublishResult(state, accepted, _timestampProvider());
+            if (!_firstOrdinaryInputPublished && HasOrdinaryInput(mapped))
+            {
+                _firstOrdinaryInputPublished = true;
+                AppLog.Debug("SteamOutput", "FirstOrdinaryInputPublished",
+                    ("ElapsedSincePublisherStartMs", Stopwatch.GetElapsedTime(_publisherStartedTimestamp, _timestampProvider()).TotalMilliseconds));
+            }
+        }
+
         if (diagnosticsEnabled) EmitHeartbeatIfDue();
         return true;
     }
+
+    private static bool HasOrdinaryInput(SteamDeckDeviceState state) =>
+        state.A != 0 || state.X != 0 || state.B != 0 || state.Y != 0 ||
+        state.L1 != 0 || state.R1 != 0 || state.L2Digital != 0 || state.R2Digital != 0 ||
+        state.L5 != 0 || state.Menu != 0 || state.Options != 0 ||
+        state.DPadDown != 0 || state.DPadLeft != 0 || state.DPadRight != 0 || state.DPadUp != 0 ||
+        state.L3 != 0 || state.R3 != 0 || state.R4 != 0 || state.L4 != 0 ||
+        state.LTrigger != 0 || state.RTrigger != 0 || state.LStickX != 0 || state.LStickY != 0 ||
+        state.RStickX != 0 || state.RStickY != 0;
 
     private void EmitHeartbeatIfDue()
     {

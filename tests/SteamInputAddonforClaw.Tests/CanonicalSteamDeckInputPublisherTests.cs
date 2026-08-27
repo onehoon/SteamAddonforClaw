@@ -79,6 +79,128 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Steam_pulse_summary_counts_only_successful_asserted_publishes_and_confirms_release()
+    {
+        var line = await PublishPulseAndReadSummary(static overlay => overlay.RequestSteamPulse(), static state => state.Steam);
+
+        Assert.Contains("Button=Steam", line);
+        Assert.Contains("ActiveSetStateCount=2", line);
+        Assert.Contains("FirstPublishDelayMs=", line);
+        Assert.Contains("PublishedHighDurationMs=", line);
+        Assert.Contains("ReleasePublished=True", line);
+        Assert.Contains("SetStateFailures=0", line);
+    }
+
+    [Fact]
+    public async Task QuickAccess_pulse_summary_counts_only_successful_asserted_publishes_and_confirms_release()
+    {
+        var line = await PublishPulseAndReadSummary(static overlay => overlay.RequestQuickAccessPulse(), static state => state.QuickAccess);
+
+        Assert.Contains("Button=QuickAccess", line);
+        Assert.Contains("ActiveSetStateCount=2", line);
+        Assert.Contains("ReleasePublished=True", line);
+        Assert.Contains("SetStateFailures=0", line);
+    }
+
+    [Fact]
+    public async Task First_ordinary_input_is_logged_once_and_system_button_only_does_not_satisfy_it()
+    {
+        var fakeNow = 0L;
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => fakeNow);
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow, systemButtonOverlay: overlay);
+        publisher.Start();
+
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        overlay.RequestQuickAccessPulse();
+        fakeNow = 10;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        source.Value = new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, new([false, false]));
+        fakeNow = 20;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        source.Value = new ControllerState(new AuxiliaryButtonState([false, false]));
+        fakeNow = 30;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(4);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(1, log.Split('\n').Count(line => line.Contains("FirstOrdinaryInputPublished")));
+        Assert.Contains("ElapsedSincePublisherStartMs=", log);
+    }
+
+    [Fact]
+    public void Failed_asserted_publish_is_not_counted_but_is_reported_in_the_summary()
+    {
+        var now = 0L;
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => now);
+        overlay.RequestSteamPulse();
+        var asserted = overlay.Apply(default);
+        overlay.RecordPublishResult(asserted, accepted: false, now);
+        now = 1;
+        overlay.RecordPublishResult(asserted, accepted: true, now);
+        time.Advance(TimeSpan.FromMilliseconds(101));
+        now = 2;
+        var released = overlay.Apply(default);
+        overlay.RecordPublishResult(released, accepted: true, now);
+
+        AppLog.DrainForTests();
+        var line = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("PulseCompleted"));
+        Assert.Contains("ActiveSetStateCount=1", line);
+        Assert.Contains("SetStateFailures=1", line);
+    }
+
+    [Fact]
+    public void Overlapping_pulses_are_logged_without_changing_the_output()
+    {
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time);
+        overlay.RequestSteamPulse();
+        time.Advance(TimeSpan.FromMilliseconds(25));
+        overlay.RequestQuickAccessPulse();
+
+        var state = overlay.Apply(default);
+        Assert.Equal((byte)1, state.Steam);
+        Assert.Equal((byte)1, state.QuickAccess);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("QuickAccess pulse requested", log);
+        Assert.Contains("OtherSystemButtonActive=True", log);
+    }
+
+    private async Task<string> PublishPulseAndReadSummary(Action<SteamDeckSystemButtonOverlay> request, Func<SteamDeckDeviceState, byte> button)
+    {
+        var fakeNow = 0L;
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => fakeNow);
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow, systemButtonOverlay: overlay);
+        publisher.Start();
+
+        request(overlay);
+        fakeNow = 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        Assert.Equal((byte)1, button(sink.States[0]));
+        fakeNow = 50;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        Assert.Equal((byte)1, button(sink.States[1]));
+        time.Advance(TimeSpan.FromMilliseconds(101));
+        fakeNow = 102;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        Assert.Equal((byte)0, button(sink.States[2]));
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        return Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("PulseCompleted"));
+    }
+
+    [Fact]
     public async Task Unchanged_state_is_published_every_tick()
     {
         var state = new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, new([false, false]));
