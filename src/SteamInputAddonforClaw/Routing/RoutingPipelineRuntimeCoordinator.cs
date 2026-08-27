@@ -381,6 +381,9 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         Func<CancellationToken, Task>? afterRoutingReconcile,
         CancellationToken cancellationToken)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        AppLog.Info("Routing.Power", "Resume fast path started.",
+            ("Event", "ResumeFastPathStarted"), ("FullRecovery", false));
         Interlocked.Increment(ref _transitionOperationCount);
         var acquired = false;
         try
@@ -390,14 +393,37 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             var preserved = _suspendPreservedSession;
             if (preserved is null || !ReferenceEquals(_sessionCoordinator.ActiveSession, preserved) ||
                 _sessionCoordinator.PendingCleanup is not null || _reconcileOwnedRouteState is null)
+            {
+                AppLog.Info("Routing.Power", "Resume fast path unavailable.",
+                    ("Event", "ResumeFastPathFailed"), ("Reason", "PreservedSessionUnavailable"),
+                    ("FullRecovery", true), ("ElapsedMs", Elapsed(started)));
                 return false;
+            }
             using var transition = CreateTransitionCancellation(cancellationToken);
             var token = transition.Token;
             var owned = await _reconcileOwnedRouteState(token).ConfigureAwait(false);
             if (!owned.Succeeded)
             {
+                AppLog.Info("Routing.Power", "Resume fast path validation failed; falling back to full recovery.",
+                    ("Event", "ResumeFastPathFailed"), ("Reason", owned.Reason),
+                    ("FullRecovery", true), ("ElapsedMs", Elapsed(started)));
                 var cleaned = await RetireResidualSessionCoreAsync(token, cancelPendingCleanup: true).ConfigureAwait(false);
-                if (!cleaned) return false;
+                if (!cleaned)
+                {
+                    AppLog.Info("Routing.Power", "Resume fast path fallback cleanup failed.",
+                        ("Event", "ResumeFastPathFallbackFailed"), ("Reason", "ResidualCleanupFailed"),
+                        ("FullRecovery", true), ("ElapsedMs", Elapsed(started)));
+                    return false;
+                }
+                AppLog.Info("Routing.Power", "Resume fast path fallback cleanup completed.",
+                    ("Event", "ResumeFastPathFallbackReady"), ("Reason", owned.Reason),
+                    ("FullRecovery", true), ("ElapsedMs", Elapsed(started)));
+            }
+            else
+            {
+                AppLog.Info("Routing.Power", "Resume fast path validated the preserved route.",
+                    ("Event", "ResumeFastPathValidated"), ("Reason", owned.Reason),
+                    ("FullRecovery", false), ("ElapsedMs", Elapsed(started)));
             }
             await refreshBeforeDecision(token).ConfigureAwait(false);
             if (afterRoutingReconcile is not null)
@@ -558,6 +584,9 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         decision.Kind == RoutingDecisionKind.WaitingForSteam && decision.Reason == RoutingDecisionReason.SteamInactive;
     private RoutingPipelineSessionReconcileResult RuntimeStoppedResult() =>
         new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "RuntimeShuttingDown");
+
+    private static long Elapsed(long started) =>
+        (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
     private static ControllerManagerClassification Classify(IReadOnlyList<ControllerSoftwareStatus> software)
     {
