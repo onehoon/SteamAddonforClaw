@@ -14,7 +14,7 @@
 </ItemsRepeater>
 </ScrollViewer>
 </Grid>
-<ScrollViewer x:Name="DetailPanel" Visibility="Collapsed"><StackPanel Spacing="16">
+<ScrollViewer x:Name="DetailPanel" Visibility="Collapsed" HorizontalContentAlignment="Stretch" HorizontalScrollBarVisibility="Disabled"><StackPanel Spacing="16">
 <Button Content="Back" HorizontalAlignment="Left" Click="BackButton_Click"/>
 <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="SelectedGameNameText" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/><ToggleSwitch x:Name="ProfileEnabledToggle" Grid.Column="1" HorizontalAlignment="Right" OffContent="" OnContent="" IsEnabled="False" Toggled="ProfileEnabledToggle_Toggled"/></Grid>
 <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control" Description="Configure processor power limits for plugged-in and battery operation."><ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;"/></ctcontrols:SettingsExpander.HeaderIcon><ToggleSwitch x:Name="TdpEnabledToggle" OffContent="" OnContent="" Toggled="TdpEnabledToggle_Toggled"/><ctcontrols:SettingsExpander.Items>
