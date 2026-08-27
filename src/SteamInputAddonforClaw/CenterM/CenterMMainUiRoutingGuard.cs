@@ -116,6 +116,39 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     internal bool IsArmed => _armed;
     internal bool HasHelperDemand => _helperDemandActive;
 
+    internal async Task<CenterMMainUiRoutingGuardResult> ReconcileOwnedStateAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_armed || !_mutexOwnership.IsOwned)
+                return CenterMMainUiRoutingGuardResult.InvariantFailure;
+            if (!_helperOwnership.IsOperationallyOwned)
+                return CenterMMainUiRoutingGuardResult.HelperOwnershipUnresolved;
+
+            var liveness = _helperOwnership.PollLiveness();
+            if (liveness == HelperLivenessState.Exited)
+                return CenterMMainUiRoutingGuardResult.HelperFailure;
+            if (liveness != HelperLivenessState.Alive)
+                return CenterMMainUiRoutingGuardResult.Uncertain;
+
+            var sameName = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
+            var invariant = sameName is null
+                ? CenterMHelperInvariantState.Uncertain
+                : CenterMHelperInvariant.Evaluate(sameName, _helperOwnership.ProcessId!.Value);
+            if (invariant == CenterMHelperInvariantState.Valid)
+                return CenterMMainUiRoutingGuardResult.Armed;
+
+            return invariant == CenterMHelperInvariantState.HelperMissing
+                ? CenterMMainUiRoutingGuardResult.HelperFailure
+                : invariant == CenterMHelperInvariantState.Uncertain
+                    ? CenterMMainUiRoutingGuardResult.Uncertain
+                    : CenterMMainUiRoutingGuardResult.InvariantFailure;
+        }
+        finally { _gate.Release(); }
+    }
+
     internal async Task<CenterMMainUiRoutingGuardResult> ArmAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

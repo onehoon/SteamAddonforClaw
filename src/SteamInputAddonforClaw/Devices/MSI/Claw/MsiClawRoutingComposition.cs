@@ -308,6 +308,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     async Task<RoutingStageOperationResult> IHandheldRoutingComposition.ReconcileOwnedRouteStateAsync(CancellationToken cancellationToken)
     {
+        var guard = await CenterMGuard.ReconcileOwnedStateAsync(cancellationToken).ConfigureAwait(false);
+        if (guard != CenterMMainUiRoutingGuardResult.Armed)
+            return RoutingStageOperationResult.Failure($"CenterMGuard{guard}");
+
         var result = await NativeModeSession.ReconcileOwnedStateAsync(cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return result;
         result = await PhysicalInputStage.ReconcileOwnedInputAsync(cancellationToken).ConfigureAwait(false);

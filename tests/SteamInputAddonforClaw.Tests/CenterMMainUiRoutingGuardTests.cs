@@ -43,6 +43,31 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task ReconcileOwnedState_requires_live_helper_mutex_and_same_name_invariant()
+    {
+        var snapshots = new FakeSnapshotSource([[],
+            [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)],
+            [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+        var helperApi = new RecordingHelperApi();
+        var guard = Create(snapshots, new FakeStager("C:\\fake\\MSI Center M.exe"), helperApi, new FakeMutexFactory());
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ReconcileOwnedStateAsync());
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_rejects_exited_owned_helper()
+    {
+        var snapshots = new FakeSnapshotSource([[],
+            [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+        var helperApi = new RecordingHelperApi { Liveness = LiveProcessProbeStatus.Exited };
+        var guard = Create(snapshots, new FakeStager("C:\\fake\\MSI Center M.exe"), helperApi, new FakeMutexFactory());
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+        Assert.Equal(CenterMMainUiRoutingGuardResult.HelperFailure, await guard.ReconcileOwnedStateAsync());
+    }
+
+    [Fact]
     public async Task Disarm_relinquishes_started_helper_to_ready_persistent_OEM1_owner()
     {
         var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
@@ -1197,6 +1222,7 @@ public sealed class CenterMMainUiRoutingGuardTests
         internal bool CreateSucceeds { get; init; } = true;
         internal bool WaitForExitSucceeds { get; init; } = true;
         internal bool ResumeSucceeds { get; init; } = true;
+        internal LiveProcessProbeStatus Liveness { get; set; } = LiveProcessProbeStatus.Alive;
 
         /// <summary>When set, the first <see cref="TryCreateSuspended"/> call signals
         /// <see cref="CreateSuspendedEntered"/> and then blocks until this is released -- lets a
@@ -1263,7 +1289,7 @@ public sealed class CenterMMainUiRoutingGuardTests
         public LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle)
         {
             Calls.Add("PollLiveness");
-            return LiveProcessProbeStatus.Alive;
+            return Liveness;
         }
 
         [DllImport("kernel32.dll")]
