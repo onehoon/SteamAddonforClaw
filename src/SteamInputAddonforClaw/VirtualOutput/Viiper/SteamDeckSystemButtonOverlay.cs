@@ -97,7 +97,13 @@ internal sealed class SteamDeckSystemButtonOverlay
     /// <summary>Immediately clears any pending/active synthetic Quick Access pulse.</summary>
     internal void Clear()
     {
-        lock (_gate) { _steamPulseExpiresAt = null; _quickAccessPulseExpiresAt = null; }
+        lock (_gate)
+        {
+            _steamPulseExpiresAt = null;
+            _quickAccessPulseExpiresAt = null;
+            _steamPulseDiagnostic = null;
+            _quickAccessPulseDiagnostic = null;
+        }
     }
 
     /// <summary>

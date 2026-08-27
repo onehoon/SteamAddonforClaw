@@ -211,6 +211,29 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Contains("OtherSystemButtonActive=True", log);
     }
 
+    [Fact]
+    public async Task Clearing_teardown_pulse_discards_diagnostic_before_later_neutral_publish()
+    {
+        var fakeNow = 0L;
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => fakeNow);
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            new FakeSink(),
+            ticks,
+            timestampProvider: () => fakeNow,
+            systemButtonOverlay: overlay);
+        publisher.Start();
+        overlay.RequestSteamPulse();
+        overlay.Clear();
+        await ticks.TickAsync();
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        Assert.DoesNotContain("PulseCompleted", LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath));
+    }
+
     private async Task<string> PublishPulseAndReadSummary(Action<SteamDeckSystemButtonOverlay> request, Func<SteamDeckDeviceState, byte> button)
     {
         var fakeNow = 0L;
