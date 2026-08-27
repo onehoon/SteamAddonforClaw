@@ -101,6 +101,19 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Device_feature_expanders_follow_authoritative_enabled_snapshots()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+
+        Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("CpuBoostExpander.IsExpanded = snapshot.Enabled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("PowerModeExpander.IsExpanded = snapshot.Enabled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("TdpExpander.IsExpanded = snapshot.Configuration?.Enabled == true", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Profile_feature_order_expander_state_and_resolution_contract_are_explicit()
     {
         var root = FindRepositoryRoot();
@@ -123,6 +136,10 @@ public sealed class UiArchitectureTests
         Assert.Contains("Glyph=\"&#xEC4A;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE83F;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TextBlock Text=\"Profile\" VerticalAlignment=\"Center\"/>", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ProfileEnabledToggle\" Grid.Column=\"1\" HorizontalAlignment=\"Right\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("OnContent=\"On\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("OffContent=\"Off\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
