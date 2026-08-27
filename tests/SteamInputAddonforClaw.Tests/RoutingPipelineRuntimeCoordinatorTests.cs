@@ -1333,10 +1333,12 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     [Fact]
     public async Task Preserved_resume_owner_failure_runs_auxiliary_callback_after_cleanup()
     {
-        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(WaitingForSteam(), Software()));
         var executor = new FakeExecutor();
         var session = new RoutingPipelineSessionCoordinator(executor);
-        var auxiliaryCalls = 0;
+        var events = new List<string>();
         var bridge = new RoutingPipelineRuntimeCoordinator(
             provider,
             session,
@@ -1347,15 +1349,22 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
 
         Assert.True(await bridge.ReconcilePreservedSessionAsync(
-            _ => Task.CompletedTask,
+            _ => { events.Add("Refresh"); return Task.CompletedTask; },
             _ =>
             {
-                auxiliaryCalls++;
+                events.Add("Auxiliary");
                 return Task.CompletedTask;
             },
             CancellationToken.None));
-        Assert.Equal(1, auxiliaryCalls);
+        Assert.Equal(["Refresh", "Auxiliary"], events);
         Assert.Null(session.ActiveSession);
+
+        var postCommit = await bridge.ReconcileAsync(CancellationToken.None);
+        Assert.True(postCommit.Succeeded);
+        Assert.Equal(RoutingActionKind.None, postCommit.Action);
+        Assert.Equal("AlreadyPassive", postCommit.Reason);
+        Assert.Equal(2, provider.CaptureCount);
+        Assert.Single(executor.RollbackPlans);
     }
 
     [Fact]
