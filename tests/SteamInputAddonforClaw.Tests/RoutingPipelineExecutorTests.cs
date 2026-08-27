@@ -176,6 +176,93 @@ public sealed class RoutingPipelineExecutorTests
     }
 
     [Fact]
+    public async Task NativeModeRollbackFailure_BestEffortReleasesWinGWithoutDependentTeardown()
+    {
+        var trace = new List<string>();
+        var wing = new FakeStage(RoutingStageKind.WinGProtection, trace);
+        var baseline = new FakeStage(RoutingStageKind.HidHideBaseline, trace);
+        var center = new FakeStage(RoutingStageKind.CenterMGuard, trace);
+        var native = new FakeStage(RoutingStageKind.NativeMode, trace)
+        {
+            RollbackResult = RoutingStageOperationResult.Failure("NativeModeRestoreFailed")
+        };
+        var isolation = new FakeStage(RoutingStageKind.PhysicalIsolation, trace);
+        var input = new FakeStage(RoutingStageKind.PhysicalInput, trace);
+        var output = new FakeStage(RoutingStageKind.SteamOutput, trace);
+
+        var result = await new RoutingPipelineExecutor([wing, baseline, center, native, isolation, input, output]).RollbackAsync(
+            RoutingPipelinePlan.AllDisabled with
+            {
+                WinGProtection = RoutingStageMode.Enabled,
+                HidHideBaseline = RoutingStageMode.Enabled,
+                CenterMGuard = RoutingStageMode.Enabled,
+                NativeMode = RoutingStageMode.Enabled,
+                PhysicalIsolation = RoutingStageMode.Enabled,
+                PhysicalInput = RoutingStageMode.Enabled,
+                SteamOutput = RoutingStageMode.Enabled
+            }, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(RoutingStageKind.NativeMode, result.FailedStage);
+        Assert.Equal("NativeModeRestoreFailed", result.Reason);
+        Assert.Equal(["Rollback"], output.Calls);
+        Assert.Equal(["Rollback"], input.Calls);
+        Assert.Equal(["Rollback"], native.Calls);
+        Assert.Empty(isolation.Calls);
+        Assert.Empty(center.Calls);
+        Assert.Empty(baseline.Calls);
+        Assert.Equal(["SteamOutput.Rollback", "PhysicalInput.Rollback", "NativeMode.Rollback", "WinGProtection.Rollback"], trace);
+    }
+
+    [Fact]
+    public async Task SteamOutputRollbackFailure_BestEffortReleasesWinGAndPreservesBarrierFailure()
+    {
+        var trace = new List<string>();
+        var wing = new FakeStage(RoutingStageKind.WinGProtection, trace);
+        var output = new FakeStage(RoutingStageKind.SteamOutput, trace)
+        {
+            RollbackResult = RoutingStageOperationResult.Failure("SteamOutputDetachFailed")
+        };
+        var native = new FakeStage(RoutingStageKind.NativeMode, trace);
+
+        var result = await new RoutingPipelineExecutor([wing, output, native]).RollbackAsync(
+            RoutingPipelinePlan.AllDisabled with
+            {
+                WinGProtection = RoutingStageMode.Enabled,
+                SteamOutput = RoutingStageMode.Enabled,
+                NativeMode = RoutingStageMode.Enabled
+            }, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(RoutingStageKind.SteamOutput, result.FailedStage);
+        Assert.Equal("SteamOutputDetachFailed", result.Reason);
+        Assert.Equal(["Rollback"], output.Calls);
+        Assert.Equal(["Rollback"], wing.Calls);
+        Assert.Empty(native.Calls);
+    }
+
+    [Fact]
+    public async Task WinGDisarmFailureDoesNotMaskNativeModeRollbackFailure()
+    {
+        var wing = new FakeStage(RoutingStageKind.WinGProtection) { ThrowOnRollback = true };
+        var native = new FakeStage(RoutingStageKind.NativeMode)
+        {
+            RollbackResult = RoutingStageOperationResult.Failure("NativeModeRestoreFailed")
+        };
+
+        var result = await new RoutingPipelineExecutor([wing, native]).RollbackAsync(
+            RoutingPipelinePlan.AllDisabled with
+            {
+                WinGProtection = RoutingStageMode.Enabled,
+                NativeMode = RoutingStageMode.Enabled
+            }, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(RoutingStageKind.NativeMode, result.FailedStage);
+        Assert.Equal("NativeModeRestoreFailed", result.Reason);
+    }
+
+    [Fact]
     public async Task PublicRollback_MissingSteamOutputImplementationBlocksDependentTeardown()
     {
         var native = new FakeStage(RoutingStageKind.NativeMode);
@@ -328,6 +415,7 @@ public sealed class RoutingPipelineExecutorTests
         public RoutingStageOperationResult PrepareResult { get; init; } = RoutingStageOperationResult.Success();
         public RoutingStageOperationResult ExecuteResult { get; init; } = RoutingStageOperationResult.Success();
         public RoutingStageOperationResult RollbackResult { get; init; } = RoutingStageOperationResult.Success();
+        public bool ThrowOnRollback { get; init; }
         public bool ThrowOnPrepare { get; init; }
         public bool ThrowOnExecute { get; init; }
         public CancellationTokenSource? ThrowOnExecuteCancellation { get; init; }
@@ -364,6 +452,7 @@ public sealed class RoutingPipelineExecutorTests
         {
             Calls.Add("Rollback");
             trace?.Add($"{Kind}.Rollback");
+            if (ThrowOnRollback) throw new InvalidOperationException("rollback");
             return ValueTask.FromResult(RollbackResult);
         }
     }

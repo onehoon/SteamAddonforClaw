@@ -258,8 +258,9 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     internal RoutingOperationalState CurrentOperationalState => _sessionCoordinator.CurrentState;
 
     /// <summary>True only when an active session exists and its plan has the Steam output stage enabled.</summary>
-    internal bool ActiveSessionHasSteamOutputEnabled =>
-        _sessionCoordinator.ActiveSession?.Plan.SteamOutput == RoutingStageMode.Enabled;
+    internal bool ActiveSessionHasUsableSteamOutput =>
+        _sessionCoordinator.ActiveSession?.Plan.SteamOutput == RoutingStageMode.Enabled &&
+        _sessionCoordinator.PendingCleanup is null;
 
     /// <summary>True when an independent interactive presentation mutation may begin.</summary>
     internal bool CanApplyInteractivePresentation =>
@@ -397,18 +398,12 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             {
                 var cleaned = await RetireResidualSessionCoreAsync(token, cancelPendingCleanup: true).ConfigureAwait(false);
                 if (!cleaned) return false;
-                if (afterRoutingReconcile is not null)
-                    await afterRoutingReconcile(token).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested();
-                return true;
             }
             await refreshBeforeDecision(token).ConfigureAwait(false);
-            var result = await ReconcileCoreAsync(token).ConfigureAwait(false);
-            if (!result.Succeeded) return false;
             if (afterRoutingReconcile is not null)
                 await afterRoutingReconcile(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
-            return result.Succeeded;
+            return true;
         }
         finally
         {

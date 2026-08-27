@@ -238,7 +238,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     internal RoutingRuntimeStatusSnapshot CaptureStatus() => new(
         Available: true,
         OperationalState: _coordinator.CurrentOperationalState,
-        SteamOutputActive: _coordinator.ActiveSessionHasSteamOutputEnabled,
+        SteamOutputActive: _coordinator.ActiveSessionHasUsableSteamOutput,
         NativeDirectInputActive: _safetySession?.IsActive == true);
     internal Task<DeveloperVibrationTestOutcome> RunDeveloperVibrationTestAsync(Contracts.Frontend.FrontendVibrationTestCommand command, CancellationToken cancellationToken) => CaptureStatus().SteamOutputActive ? _deckStage.RunDeveloperVibrationTestAsync(command, cancellationToken) : Task.FromResult(new DeveloperVibrationTestOutcome(false, null, null));
     internal PhysicalRumbleWriteResult? CancelDeveloperVibrationTest() => _deckStage.CancelDeveloperVibrationTest();

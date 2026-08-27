@@ -474,7 +474,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software())), new FakeExecutor());
 
         Assert.Equal(RoutingOperationalState.Passive, bridge.Bridge.CurrentOperationalState);
-        Assert.False(bridge.Bridge.ActiveSessionHasSteamOutputEnabled);
+        Assert.False(bridge.Bridge.ActiveSessionHasUsableSteamOutput);
     }
 
     [Fact]
@@ -488,7 +488,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
 
         Assert.True(result.Succeeded);
         Assert.Equal(RoutingOperationalState.OverrideActive, bridge.Bridge.CurrentOperationalState);
-        Assert.True(bridge.Bridge.ActiveSessionHasSteamOutputEnabled);
+        Assert.True(bridge.Bridge.ActiveSessionHasUsableSteamOutput);
         // Reading the accessors again must not mutate the session.
         Assert.Equal(RoutingOperationalState.OverrideActive, bridge.Bridge.CurrentOperationalState);
         Assert.NotNull(bridge.Session.ActiveSession);
@@ -703,7 +703,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
         var bridge = Create(provider, executor);
         Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
-        Assert.True(bridge.Bridge.ActiveSessionHasSteamOutputEnabled);
+        Assert.True(bridge.Bridge.ActiveSessionHasUsableSteamOutput);
 
         var events = new List<string>();
         var safetySession = new FakeSafetySession(events);
@@ -720,7 +720,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.Equal([MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason], safetySession.LatchedReasons);
         Assert.Single(executor.RollbackPlans);
         Assert.Null(bridge.Session.ActiveSession);
-        Assert.False(bridge.Bridge.ActiveSessionHasSteamOutputEnabled);
+        Assert.False(bridge.Bridge.ActiveSessionHasUsableSteamOutput);
         Assert.Equal(RoutingOperationalState.Passive, bridge.Bridge.CurrentOperationalState);
 
         // The fault must be latched strictly before fail-close runs, not merely both eventually
@@ -777,6 +777,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.False(result.Succeeded);
         Assert.NotNull(bridge.Session.PendingCleanup);
         Assert.Equal(RoutingOperationalState.OverrideActive, bridge.Session.CurrentState);
+        Assert.False(bridge.Bridge.ActiveSessionHasUsableSteamOutput);
     }
 
     [Fact]
@@ -1332,10 +1333,12 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     [Fact]
     public async Task Preserved_resume_owner_failure_runs_auxiliary_callback_after_cleanup()
     {
-        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(WaitingForSteam(), Software()));
         var executor = new FakeExecutor();
         var session = new RoutingPipelineSessionCoordinator(executor);
-        var auxiliaryCalls = 0;
+        var events = new List<string>();
         var bridge = new RoutingPipelineRuntimeCoordinator(
             provider,
             session,
@@ -1346,15 +1349,52 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
 
         Assert.True(await bridge.ReconcilePreservedSessionAsync(
-            _ => Task.CompletedTask,
+            _ => { events.Add("Refresh"); return Task.CompletedTask; },
             _ =>
             {
-                auxiliaryCalls++;
+                events.Add("Auxiliary");
                 return Task.CompletedTask;
             },
             CancellationToken.None));
-        Assert.Equal(1, auxiliaryCalls);
+        Assert.Equal(["Refresh", "Auxiliary"], events);
         Assert.Null(session.ActiveSession);
+
+        var postCommit = await bridge.ReconcileAsync(CancellationToken.None);
+        Assert.True(postCommit.Succeeded);
+        Assert.Equal(RoutingActionKind.None, postCommit.Action);
+        Assert.Equal("AlreadyPassive", postCommit.Reason);
+        Assert.Equal(2, provider.CaptureCount);
+        Assert.Single(executor.RollbackPlans);
+    }
+
+    [Fact]
+    public async Task Preserved_resume_reconciles_owner_without_policy_capture_before_recovery_commit()
+    {
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var refreshCalls = 0;
+        var auxiliaryCalls = 0;
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Success("Paused")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Success("Healthy")));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var preserved = session.ActiveSession;
+        Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+
+        Assert.True(await bridge.ReconcilePreservedSessionAsync(
+            _ => { refreshCalls++; return Task.CompletedTask; },
+            _ => { auxiliaryCalls++; return Task.CompletedTask; },
+            CancellationToken.None));
+
+        Assert.Same(preserved, session.ActiveSession);
+        Assert.Equal(1, refreshCalls);
+        Assert.Equal(1, auxiliaryCalls);
+        Assert.Equal(1, provider.CaptureCount);
+        Assert.Empty(executor.RollbackPlans);
     }
 
     [Fact]
