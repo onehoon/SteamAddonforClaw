@@ -120,7 +120,7 @@ public sealed class UiArchitectureTests
         Assert.Contains("TdpExpander.IsExpanded = snapshot.Tdp.Enabled", codeBehind, StringComparison.Ordinal);
         Assert.Contains("new(null, null, \"Do not change\"), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", codeBehind, StringComparison.Ordinal);
         Assert.Contains("HeaderIcon", xaml, StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xE9D9;\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xEC4A;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE83F;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
     }
