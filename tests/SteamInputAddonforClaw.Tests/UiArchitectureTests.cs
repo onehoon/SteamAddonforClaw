@@ -136,6 +136,10 @@ public sealed class UiArchitectureTests
         Assert.Contains("Glyph=\"&#xEC4A;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE83F;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TextBlock Text=\"Profile\" VerticalAlignment=\"Center\"/>", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ProfileEnabledToggle\" Grid.Column=\"1\" HorizontalAlignment=\"Right\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("OnContent=\"On\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("OffContent=\"Off\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
