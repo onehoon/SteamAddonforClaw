@@ -92,6 +92,37 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Repeated_same_button_requests_share_one_pulse_diagnostic()
+    {
+        var fakeNow = 0L;
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time, () => fakeNow);
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow, systemButtonOverlay: overlay);
+        publisher.Start();
+
+        overlay.RequestSteamPulse();
+        fakeNow = 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        time.Advance(TimeSpan.FromMilliseconds(50));
+        fakeNow = 50;
+        overlay.RequestSteamPulse();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        time.Advance(TimeSpan.FromMilliseconds(101));
+        fakeNow = 151;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var line = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("PulseCompleted"));
+        Assert.Contains("PulseId=1", line);
+        Assert.Contains("RequestCount=2", line);
+        Assert.Contains("ActiveSetStateCount=2", line);
+    }
+
+    [Fact]
     public async Task QuickAccess_pulse_summary_counts_only_successful_asserted_publishes_and_confirms_release()
     {
         var line = await PublishPulseAndReadSummary(static overlay => overlay.RequestQuickAccessPulse(), static state => state.QuickAccess);
@@ -106,7 +137,9 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     public async Task First_ordinary_input_is_logged_once_and_system_button_only_does_not_satisfy_it()
     {
         var fakeNow = 0L;
-        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var source = new Snapshot(new ControllerState(
+            new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+            new StickState(-1, 1), default, new TriggerState(7, 7), new([false, false])));
         var sink = new FakeSink();
         var ticks = new ManualTicks();
         var time = new FakeTimeProvider();

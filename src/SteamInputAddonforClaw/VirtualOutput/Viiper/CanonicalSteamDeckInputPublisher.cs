@@ -45,6 +45,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private static readonly TimeSpan WakeAlarmThreshold = TimeSpan.FromMilliseconds(5);
     private static readonly TimeSpan ProductionPeriod = TimeSpan.FromMilliseconds(4);
     private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
+    private const int DiagnosticStickActivityThreshold = 4096;
+    private const ushort DiagnosticTriggerActivityThreshold = 1024;
 
     /// <summary>Test-only seam so the join-timeout fail-closed path can be exercised deterministically.</summary>
     internal TimeSpan WorkerJoinTimeoutForTests { get; set; } = DefaultWorkerJoinTimeout;
@@ -434,8 +436,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
         state.L5 != 0 || state.Menu != 0 || state.Options != 0 ||
         state.DPadDown != 0 || state.DPadLeft != 0 || state.DPadRight != 0 || state.DPadUp != 0 ||
         state.L3 != 0 || state.R3 != 0 || state.R4 != 0 || state.L4 != 0 ||
-        state.LTrigger != 0 || state.RTrigger != 0 || state.LStickX != 0 || state.LStickY != 0 ||
-        state.RStickX != 0 || state.RStickY != 0;
+        state.LTrigger >= DiagnosticTriggerActivityThreshold || state.RTrigger >= DiagnosticTriggerActivityThreshold ||
+        Math.Abs((int)state.LStickX) >= DiagnosticStickActivityThreshold || Math.Abs((int)state.LStickY) >= DiagnosticStickActivityThreshold ||
+        Math.Abs((int)state.RStickX) >= DiagnosticStickActivityThreshold || Math.Abs((int)state.RStickY) >= DiagnosticStickActivityThreshold;
 
     private void EmitHeartbeatIfDue()
     {

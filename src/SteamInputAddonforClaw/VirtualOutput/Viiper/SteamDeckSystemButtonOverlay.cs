@@ -45,11 +45,20 @@ internal sealed class SteamDeckSystemButtonOverlay
         lock (_gate)
         {
             otherActive = _steamPulseExpiresAt is { } steam && now < steam;
+            var alreadyActive = _quickAccessPulseExpiresAt is { } expiry && now < expiry;
             _quickAccessPulseExpiresAt = now + PulseDuration;
             if (diagnosticEnabled)
             {
-                pulseId = ++_nextPulseId;
-                _quickAccessPulseDiagnostic = new PulseDiagnostic(pulseId, "QuickAccess", _timestampProvider());
+                if (alreadyActive && _quickAccessPulseDiagnostic is not null)
+                {
+                    pulseId = _quickAccessPulseDiagnostic.PulseId;
+                    _quickAccessPulseDiagnostic.RequestCount++;
+                }
+                else
+                {
+                    pulseId = ++_nextPulseId;
+                    _quickAccessPulseDiagnostic = new PulseDiagnostic(pulseId, "QuickAccess", _timestampProvider());
+                }
             }
         }
         AppLog.Debug("SteamDeck.QuickAccess", "QuickAccess pulse requested",
@@ -65,11 +74,20 @@ internal sealed class SteamDeckSystemButtonOverlay
         lock (_gate)
         {
             otherActive = _quickAccessPulseExpiresAt is { } quickAccess && now < quickAccess;
+            var alreadyActive = _steamPulseExpiresAt is { } expiry && now < expiry;
             _steamPulseExpiresAt = now + PulseDuration;
             if (diagnosticEnabled)
             {
-                pulseId = ++_nextPulseId;
-                _steamPulseDiagnostic = new PulseDiagnostic(pulseId, "Steam", _timestampProvider());
+                if (alreadyActive && _steamPulseDiagnostic is not null)
+                {
+                    pulseId = _steamPulseDiagnostic.PulseId;
+                    _steamPulseDiagnostic.RequestCount++;
+                }
+                else
+                {
+                    pulseId = ++_nextPulseId;
+                    _steamPulseDiagnostic = new PulseDiagnostic(pulseId, "Steam", _timestampProvider());
+                }
             }
         }
         AppLog.Debug("SteamDeck.SystemButton", "Steam pulse requested",
@@ -146,6 +164,7 @@ internal sealed class SteamDeckSystemButtonOverlay
         var summary = new PulseSummary(
             diagnostic.PulseId,
             diagnostic.Button,
+            diagnostic.RequestCount,
             diagnostic.ActiveSetStateCount,
             diagnostic.FirstAssertedTimestamp.HasValue ? Stopwatch.GetElapsedTime(diagnostic.RequestTimestamp, diagnostic.FirstAssertedTimestamp.Value).TotalMilliseconds : (double?)null,
             diagnostic.FirstAssertedTimestamp.HasValue ? Stopwatch.GetElapsedTime(diagnostic.FirstAssertedTimestamp.Value, diagnostic.LastAssertedTimestamp).TotalMilliseconds : (double?)null,
@@ -159,6 +178,7 @@ internal sealed class SteamDeckSystemButtonOverlay
     {
         AppLog.Debug("SteamDeck.SystemButton", "PulseCompleted",
             ("PulseId", summary.PulseId), ("Button", summary.Button),
+            ("RequestCount", summary.RequestCount),
             ("ActiveSetStateCount", summary.ActiveSetStateCount),
             ("FirstPublishDelayMs", summary.FirstPublishDelayMs ?? -1.0),
             ("PublishedHighDurationMs", summary.PublishedHighDurationMs ?? -1.0),
@@ -170,12 +190,13 @@ internal sealed class SteamDeckSystemButtonOverlay
         internal readonly long PulseId = pulseId;
         internal readonly string Button = button;
         internal readonly long RequestTimestamp = requestTimestamp;
+        internal int RequestCount = 1;
         internal int ActiveSetStateCount;
         internal int SetStateFailures;
         internal long? FirstAssertedTimestamp;
         internal long LastAssertedTimestamp;
     }
 
-    private readonly record struct PulseSummary(long PulseId, string Button, int ActiveSetStateCount,
+    private readonly record struct PulseSummary(long PulseId, string Button, int RequestCount, int ActiveSetStateCount,
         double? FirstPublishDelayMs, double? PublishedHighDurationMs, bool ReleasePublished, int SetStateFailures);
 }
