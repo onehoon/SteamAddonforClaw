@@ -105,7 +105,7 @@ public sealed partial class DevicePage : UserControl
     private void RenderPowerMode(FrontendPowerModeSnapshot snapshot)
     {
         _powerModeSnapshot = snapshot; _suppressSelectionEvents = true;
-        try { PowerModeEnabledToggleSwitch.IsOn = snapshot.Enabled; PowerModeAcComboBox.SelectedItem = PowerModeItemFor(snapshot.Ac); PowerModeDcComboBox.SelectedItem = PowerModeItemFor(snapshot.Dc); }
+        try { PowerModeEnabledToggleSwitch.IsOn = snapshot.Enabled; PowerModeExpander.IsExpanded = snapshot.Enabled; PowerModeAcComboBox.SelectedItem = PowerModeItemFor(snapshot.Ac); PowerModeDcComboBox.SelectedItem = PowerModeItemFor(snapshot.Dc); }
         finally { _suppressSelectionEvents = false; }
         var editable = snapshot.PersistenceWritable && snapshot.Ac.Desired is not null && snapshot.Dc.Desired is not null;
         PowerModeEnabledToggleSwitch.IsEnabled = editable; PowerModeAcComboBox.IsEnabled = editable && snapshot.Enabled; PowerModeDcComboBox.IsEnabled = editable && snapshot.Enabled;
@@ -147,12 +147,12 @@ public sealed partial class DevicePage : UserControl
             CpuBoostAcComboBox.SelectedItem = SelectedItem(snapshot.Ac);
             CpuBoostDcComboBox.SelectedItem = SelectedItem(snapshot.Dc);
             CpuBoostEnabledToggleSwitch.IsOn = snapshot.Enabled;
+            CpuBoostExpander.IsExpanded = snapshot.Enabled;
         }
         finally { _suppressSelectionEvents = false; }
 
-        // Device CPU Boost Toggle addendum sections 8/9: the saved AC/DC selections stay visible
-        // (never nulled out) and the Expander stays expanded while the feature is OFF -- only
-        // editing is disabled, so the user can see what will re-apply the moment it's turned back on.
+        // Device CPU Boost Toggle addendum sections 8/9: the saved AC/DC selections stay intact
+        // (never nulled out) while the feature Expander reflects the authoritative Enabled state.
         CpuBoostEnabledToggleSwitch.IsEnabled = snapshot.PersistenceWritable;
         var selectorsEditable = snapshot.PersistenceWritable && snapshot.Enabled;
         CpuBoostAcComboBox.IsEnabled = selectorsEditable;
@@ -275,6 +275,7 @@ public sealed partial class DevicePage : UserControl
             }
 
             TdpEnabledToggleSwitch.IsOn = snapshot.Configuration?.Enabled == true;
+            TdpExpander.IsExpanded = snapshot.Configuration?.Enabled == true;
             SetSlider(TdpAcPl1Slider, _acPl1Draft); SetSlider(TdpAcPl2Slider, _acPl2Draft);
             SetSlider(TdpDcPl1Slider, _dcPl1Draft); SetSlider(TdpDcPl2Slider, _dcPl2Draft);
         }
