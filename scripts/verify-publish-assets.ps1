@@ -66,6 +66,11 @@ if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
 }
 
+$qamSdkProjection = Join-Path $PublishDirectory 'qam\Microsoft.Windows.SDK.NET.dll'
+if (Test-Path -LiteralPath $qamSdkProjection -PathType Leaf) {
+    throw 'QAM publish output must not contain Microsoft.Windows.SDK.NET.dll.'
+}
+
 $runtimePayloadNames = @('System.Private.CoreLib.dll', 'coreclr.dll', 'hostpolicy.dll')
 foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), (Join-Path $PublishDirectory 'qam'))) {
     $runtimePayload = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Name -in $runtimePayloadNames })
