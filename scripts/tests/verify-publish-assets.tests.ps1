@@ -103,6 +103,14 @@ try {
 
     $root = New-Fixture
     $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'qam\Microsoft.Windows.SDK.NET.dll') -Value 'forbidden Windows SDK projection'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'Microsoft.Windows.SDK.NET.dll') {
+        throw 'Expected the QAM Windows SDK projection payload to be rejected.'
+    }
+
+    $root = New-Fixture
+    $fixturesToClean += $root
     Set-Content -LiteralPath (Join-Path $root 'ui\System.Private.CoreLib.dll') -Value 'forbidden runtime payload'
     $result = Invoke-Verify -PublishDirectory $root
     if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'runtime payload') {

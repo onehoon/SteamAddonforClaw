@@ -25,12 +25,12 @@
   </ItemGroup>
 
   <Target Name="PublishTdpHelper" BeforeTargets="CopyTdpHelperOutput">
-    <MSBuild Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" Targets="Publish" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=false;PublishSingleFile=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\" />
+    <MSBuild Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" Targets="Publish" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=false;PublishSingleFile=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0\win-x64\publish\" />
   </Target>
 
   <Target Name="CopyTdpHelperOutput" AfterTargets="Build;Publish">
     <ItemGroup>
-      <TdpHelperOutput Include="..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\SteamInputAddonforClaw.TdpHelper.exe" />
+      <TdpHelperOutput Include="..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0\win-x64\publish\SteamInputAddonforClaw.TdpHelper.exe" />
     </ItemGroup>
     <Error Text="TDP helper publish output not found." Condition="!Exists('%(TdpHelperOutput.Identity)')" />
     <Copy SourceFiles="@(TdpHelperOutput)" DestinationFolder="$(OutDir)" />
