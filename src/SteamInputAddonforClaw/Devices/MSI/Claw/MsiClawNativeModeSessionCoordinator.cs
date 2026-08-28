@@ -90,26 +90,48 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
 
     internal bool ConfirmExternalNativeTakeover()
     {
-        if (!_gate.Wait(0)) return false;
+        // PhysicalInputSource.TestCompleted is raised from its background completion path. Keep
+        // this synchronous boundary, but wait for the existing coordinator operation to finish
+        // instead of treating temporary gate ownership as evidence against a takeover.
+        _gate.Wait();
         try
         {
             if (!_active || _snapshot is null) return false;
             var original = _snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
             var current = _nativeState.CaptureSnapshot();
+            if (current.Status is NativeStateCaptureStatus.DeviceNotFound or NativeStateCaptureStatus.Indeterminate)
+            {
+                AppLog.Info("NativeMode", "External takeover confirmation requires stable native state.",
+                    ("Event", "ExternalNativeTakeoverConfirmation"),
+                    ("InitialCaptureStatus", current.Status),
+                    ("Action", "AwaitStableNativeState"));
+                current = _nativeState.CaptureStableCurrentSnapshotAsync(
+                    CancellationToken.None,
+                    allowTransientDeviceNotFound: true).GetAwaiter().GetResult();
+            }
             var currentPayload = current.Snapshot?.Payload.Deserialize<MsiClawNativeStatePayload>();
             if (original is null || currentPayload is null || original.Mode != MsiClawNativeMode.XInput
+                || original.ProductId != MsiClawHardware.XInputProductId
                 || currentPayload.Mode != MsiClawNativeMode.XInput
                 || currentPayload.ProductId != MsiClawHardware.XInputProductId)
                 return false;
             var originalIdentity = MsiClawPhysicalIdentity.FromPayload(original);
             var currentIdentity = MsiClawPhysicalIdentity.FromPayload(currentPayload);
-            return originalIdentity.Confidence == MsiClawIdentityConfidence.Strong
+            var samePhysicalDevice = originalIdentity.Confidence == MsiClawIdentityConfidence.Strong
                 && currentIdentity.Confidence == MsiClawIdentityConfidence.Strong
                 && ((MsiClawPhysicalIdentity.IsUsableContainer(originalIdentity.ContainerId)
                     && MsiClawPhysicalIdentity.IsUsableContainer(currentIdentity.ContainerId)
                     && originalIdentity.ContainerId == currentIdentity.ContainerId)
                     || (!string.IsNullOrWhiteSpace(originalIdentity.PhysicalDeviceKey)
                         && string.Equals(originalIdentity.PhysicalDeviceKey, currentIdentity.PhysicalDeviceKey, StringComparison.OrdinalIgnoreCase)));
+            if (samePhysicalDevice)
+                AppLog.Info("NativeMode", "External native takeover confirmed.",
+                    ("Event", "ExternalNativeTakeoverDetected"),
+                    ("OriginalProductId", $"0x{original.ProductId:X4}"),
+                    ("CurrentProductId", $"0x{currentPayload.ProductId:X4}"),
+                    ("IdentityConfidence", MsiClawIdentityConfidence.Strong),
+                    ("Action", "YieldCurrentSteamSession"));
+            return samePhysicalDevice;
         }
         catch (JsonException) { return false; }
         finally { _gate.Release(); }

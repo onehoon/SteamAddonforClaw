@@ -35,6 +35,67 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task ConfirmExternalNativeTakeover_waits_through_device_not_found_gap()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices),
+            settleTimeout: TimeSpan.FromSeconds(1), settlePollInterval: TimeSpan.FromMilliseconds(1));
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        devices.Sequence = new Queue<MsiClawNativeMode?>([null, MsiClawNativeMode.XInput]);
+
+        Assert.True(coordinator.ConfirmExternalNativeTakeover());
+    }
+
+    [Fact]
+    public async Task ConfirmExternalNativeTakeover_waits_for_gate_instead_of_rejecting_takeover()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { BlockFirstSwitch = true, AfterSwitchCompleted = () => devices.Mode = MsiClawNativeMode.XInput };
+        await using var coordinator = CreateCoordinator(devices, modeController);
+
+        var entering = coordinator.EnterForPipelineAsync(CancellationToken.None);
+        await modeController.FirstSwitchStarted.Task;
+        var confirmation = Task.Run(coordinator.ConfirmExternalNativeTakeover);
+
+        await Task.Delay(50);
+        Assert.False(confirmation.IsCompleted);
+
+        modeController.ReleaseFirstSwitch();
+        Assert.True((await entering).Succeeded);
+        Assert.True(await confirmation);
+    }
+
+    [Fact]
+    public async Task ConfirmExternalNativeTakeover_rejects_device_loss_after_stable_settle()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput) { Missing = true };
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices),
+            settleTimeout: TimeSpan.FromMilliseconds(20), settlePollInterval: TimeSpan.FromMilliseconds(1));
+
+        // Capture the owned original state before simulating the persistent disappearance.
+        devices.Missing = false;
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        devices.Missing = true;
+
+        Assert.False(coordinator.ConfirmExternalNativeTakeover());
+    }
+
+    [Fact]
+    public async Task ConfirmExternalNativeTakeover_rejects_different_physical_identity()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices));
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        devices.ContainerId = Guid.NewGuid();
+        devices.ParentInstanceId = "PCIROOT\\1";
+        devices.Mode = MsiClawNativeMode.XInput;
+
+        Assert.False(coordinator.ConfirmExternalNativeTakeover());
+    }
+
+    [Fact]
     public async Task ReconcileOwnedState_healthy_pid1902_is_noop()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
@@ -660,11 +721,13 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
         PowerMutationGate? gate = null,
-        RecoverySafetyState? recoverySafety = null)
+        RecoverySafetyState? recoverySafety = null,
+        TimeSpan? settleTimeout = null,
+        TimeSpan? settlePollInterval = null)
     {
         var store = new MemoryJournalStore();
         var recovery = new RecoveryManager(store);
-        var native = new MsiClawNativeStateManager(devices, modeController);
+        var native = new MsiClawNativeStateManager(devices, modeController, settleTimeout, settlePollInterval);
         return new(native, recovery, gate ?? new PowerMutationGate(initiallyOpen: true), recoverySafety ?? new RecoverySafetyState(RecoverySafety.Safe));
     }
 
@@ -690,16 +753,19 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
 
     private sealed class FakeDeviceEnumerator(MsiClawNativeMode initialMode) : IControllerDeviceEnumerator
     {
-        private readonly Guid _containerId = Guid.NewGuid();
-        private readonly string _parent = "PCIROOT\\0";
+        public Guid ContainerId { get; set; } = Guid.NewGuid();
+        public string ParentInstanceId { get; set; } = "PCIROOT\\0";
         public MsiClawNativeMode Mode { get; set; } = initialMode;
+        public bool Missing { get; set; }
         public Queue<MsiClawNativeMode?>? Sequence { get; set; }
 
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
         {
+            if (Missing)
+                return [];
             var mode = Sequence is { Count: > 0 } ? Sequence.Dequeue() : Mode;
             return mode is null ? [] :
-            [new("HID\\MSI_CLAW", _containerId, _parent, [], "HID", [], [], "HIDClass", null, null,
+            [new("HID\\MSI_CLAW", ContainerId, ParentInstanceId, [], "HID", [], [], "HIDClass", null, null,
                 MsiClawHardware.VendorId, mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId, true)];
         }
     }
@@ -712,6 +778,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         public bool ThrowEnterCancellation { get; set; }
         public Action? AfterModeApplied { get; set; }
         public Action? AfterRestoreApplied { get; set; }
+        public Action? AfterSwitchCompleted { get; set; }
         public TaskCompletionSource FirstSwitchStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<MsiClawNativeMode> Targets { get; } = [];
         private readonly TaskCompletionSource _releaseFirstSwitch = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -739,6 +806,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
             if (target == MsiClawNativeMode.XInput)
                 AfterRestoreApplied?.Invoke();
             devices.Mode = target;
+            AfterSwitchCompleted?.Invoke();
             return new(MsiClawModeTransitionStatus.Succeeded, target == MsiClawNativeMode.XInput ? MsiClawNativeMode.DirectInput : MsiClawNativeMode.XInput,
                 target, null, target == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId,
                 true, true, true, true, true, 1, "test");
