@@ -48,6 +48,24 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task ConfirmExternalNativeTakeover_waits_through_mixed_topology()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices),
+            settleTimeout: TimeSpan.FromSeconds(1), settlePollInterval: TimeSpan.FromMilliseconds(1));
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        devices.TopologySequence = new Queue<IReadOnlyList<MsiClawNativeMode>>([
+            [MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput],
+            [MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput],
+            [MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput],
+            [MsiClawNativeMode.XInput]
+        ]);
+
+        Assert.True(coordinator.ConfirmExternalNativeTakeover());
+    }
+
+    [Fact]
     public async Task ConfirmExternalNativeTakeover_waits_for_gate_instead_of_rejecting_takeover()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
@@ -758,16 +776,22 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         public MsiClawNativeMode Mode { get; set; } = initialMode;
         public bool Missing { get; set; }
         public Queue<MsiClawNativeMode?>? Sequence { get; set; }
+        public Queue<IReadOnlyList<MsiClawNativeMode>>? TopologySequence { get; set; }
 
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
         {
             if (Missing)
                 return [];
+            if (TopologySequence is { Count: > 0 })
+                return CreateDevices(TopologySequence.Dequeue());
             var mode = Sequence is { Count: > 0 } ? Sequence.Dequeue() : Mode;
-            return mode is null ? [] :
-            [new("HID\\MSI_CLAW", ContainerId, ParentInstanceId, [], "HID", [], [], "HIDClass", null, null,
-                MsiClawHardware.VendorId, mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId, true)];
+            return mode is null ? [] : CreateDevices([mode.Value]);
         }
+
+        private IReadOnlyList<ControllerDeviceInfo> CreateDevices(IReadOnlyList<MsiClawNativeMode> modes) =>
+            modes.Select((mode, index) => new ControllerDeviceInfo(
+                $"HID\\MSI_CLAW\\{index}", ContainerId, ParentInstanceId, [], "HID", [], [], "HIDClass", null, null,
+                MsiClawHardware.VendorId, mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId, true)).ToArray();
     }
 
     private sealed class FakeModeController(FakeDeviceEnumerator devices) : IMsiClawModeController
