@@ -230,6 +230,8 @@ public sealed class CanonicalXbox360InputPublisherTests
         long observedDeadline = 0;
         long observedNow = 0;
         ThreadPriority? observedPriority = null;
+        var qosThreadId = 0;
+        PublisherThreadQoS.NativeCallOverrideForTests = _ => { qosThreadId = Environment.CurrentManagedThreadId; return (true, 0); };
 
         var publisher = new CanonicalXbox360InputPublisher(
             new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
@@ -252,8 +254,15 @@ public sealed class CanonicalXbox360InputPublisherTests
             },
         };
 
-        publisher.Start();
-        await publisher.StopAsync();
+        try
+        {
+            publisher.Start();
+            await publisher.StopAsync();
+        }
+        finally
+        {
+            PublisherThreadQoS.NativeCallOverrideForTests = null;
+        }
 
         var expectedPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(
             TimeSpan.FromMilliseconds(4),
@@ -262,6 +271,7 @@ public sealed class CanonicalXbox360InputPublisherTests
         Assert.Equal(origin, observedNow);
         Assert.Equal(expectedPeriodTicks, observedDeadline - observedNow);
         Assert.Equal(ThreadPriority.AboveNormal, observedPriority);
+        Assert.NotEqual(0, qosThreadId);
     }
 
     [Fact]

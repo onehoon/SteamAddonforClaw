@@ -242,6 +242,7 @@ internal sealed class CanonicalXbox360InputPublisher
     {
         try
         {
+            PublisherThreadQoS.ApplyHighQoS("Xbox360");
             WaitHandle[] handles = [stopEvent, timer];
             while (true)
             {

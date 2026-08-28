@@ -260,6 +260,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
     {
         try
         {
+            PublisherThreadQoS.ApplyHighQoS("SteamDeck");
             WaitHandle[] handles = [stopEvent, timer];
             while (true)
             {
