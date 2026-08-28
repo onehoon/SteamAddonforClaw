@@ -1,9 +1,11 @@
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.GameBar;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class WinGSuppressionGuardTests
 {
     [Fact] public void DisarmedWinGPasses() { using var g = Create(); Assert.Equal(IntPtr.Zero, g.ProcessKey(0x5B, true)); Assert.Equal(IntPtr.Zero, g.ProcessKey(0x47, true)); }
@@ -26,6 +28,49 @@ public sealed class WinGSuppressionGuardTests
     [Fact] public void CleanupExceptionStillSuppressesG() { using var g = Create(send: _ => throw new InvalidOperationException()); g.EnsureArmed(); g.ProcessKey(0x5B, true); Assert.NotEqual(IntPtr.Zero, g.ProcessKey(0x47, true)); }
     [Fact] public void FailedDummyFallbackIsObservedWithoutReleasingPhysicalWin() { var calls = 0; using var g = Create(send: _ => ++calls == 1 ? 1u : 0u); g.EnsureArmed(); g.ProcessKey(0x5B, true); Assert.NotEqual(IntPtr.Zero, g.ProcessKey(0x47, true)); Assert.Equal(2, calls); Assert.Equal(IntPtr.Zero, g.ProcessKey(0x5B, false)); }
     [Fact] public void SuccessfulCleanupDoesNotPoisonLaterPlainG() { using var g = Create(); g.EnsureArmed(); g.ProcessKey(0x5B, true); g.ProcessKey(0x47, true); g.ProcessKey(0x47, false); g.ProcessKey(0x5B, false); Assert.Equal(IntPtr.Zero, g.ProcessKey(0x47, true)); }
+    [Fact] public void KeyboardDiagnosticsCaptureCompleteGSignatureWithoutChangingSuppression()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            AppLog.DirectoryOverride = directory;
+            AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+            using var g = Create();
+            g.EnsureArmed();
+            Assert.Equal(IntPtr.Zero, g.ProcessKey(0x5B, true, flags: 0x01, scan: 0x1D, wParam: new(0x100)));
+            Assert.Equal(IntPtr.Zero, g.ProcessKey(0x5B, false, flags: 0x81, scan: 0x1D, wParam: new(0x101)));
+            Assert.Equal(IntPtr.Zero, g.ProcessKey(0x47, true, flags: 0x33, extraInfo: 0x1234, scan: 0x22, wParam: new(0x104)));
+            AppLog.DrainForTests();
+            var log = AppLog.ReadAllTextForTests(Path.Combine(directory, AppLog.CurrentLogFileName));
+            Assert.Contains("Event=WinG.KeyboardEvent", log, StringComparison.Ordinal);
+            Assert.Contains("Vk=G", log, StringComparison.Ordinal);
+            Assert.Contains("VkCode=0x47", log, StringComparison.Ordinal);
+            Assert.Contains("ScanCode=0x22", log, StringComparison.Ordinal);
+            Assert.Contains("Flags=0x33", log, StringComparison.Ordinal);
+            Assert.Contains("WParam=0x104", log, StringComparison.Ordinal);
+            Assert.Contains("KeyAction=SysKeyDown", log, StringComparison.Ordinal);
+            Assert.Contains("Injected=True", log, StringComparison.Ordinal);
+            Assert.Contains("LowerIntegrityInjected=True", log, StringComparison.Ordinal);
+            Assert.Contains("AltDown=True", log, StringComparison.Ordinal);
+            Assert.Contains("Extended=True", log, StringComparison.Ordinal);
+            Assert.Contains("DwExtraInfo=0x1234", log, StringComparison.Ordinal);
+            Assert.Contains("TrackedLeftWinDown=False", log, StringComparison.Ordinal);
+            Assert.Contains("TrackedRightWinDown=False", log, StringComparison.Ordinal);
+            Assert.Contains("SuppressionArmed=True", log, StringComparison.Ordinal);
+            Assert.Contains("Suppressed=False", log, StringComparison.Ordinal);
+            Assert.Contains("Vk=LWIN", log, StringComparison.Ordinal);
+            Assert.Contains("KeyAction=KeyDown", log, StringComparison.Ordinal);
+            Assert.Contains("KeyAction=KeyUp", log, StringComparison.Ordinal);
+            Assert.Contains("TrackedLeftWinDown=True", log, StringComparison.Ordinal);
+        }
+        finally
+        {
+            AppLog.MinimumLevelOverride = AppLogLevel.Off;
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = null;
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
 
     private static void AssertChord(int win)
     {
