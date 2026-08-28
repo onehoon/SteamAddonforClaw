@@ -12,7 +12,7 @@ log.Info($"QamHost starting. ManagedMode={managed}. DevToolsEndpoint=http://127.
 
 // The Runtime prepares Steam's .cef-enable-remote-debugging marker during Addon startup. Steam
 // consumes that marker when its CEF/steamwebhelper session starts and exposes the loopback DevTools
-// endpoint below. QamHost itself remains BPM-scoped and never starts/stops/restarts Steam.
+// endpoint below. QamHost itself remains GamepadUI-session scoped and never starts/stops/restarts Steam.
 var devToolsEndpoint = new Uri("http://127.0.0.1:8080");
 var frontendPath = Path.Combine(AppContext.BaseDirectory, "Frontend", "qam.js");
 
@@ -112,7 +112,7 @@ try
             if (target is null)
             {
                 if (managed && QamHostRecovery.IsOpen(DateTimeOffset.UtcNow, recoveryDeadline)) continue;
-                log.Warn("GamepadUI recovery window expired; QAM remains unavailable for this BPM session.");
+                log.Warn("GamepadUI recovery window expired; QAM remains unavailable for this GamepadUI session.");
                 break;
             }
             log.Info($"GamepadUI target acquired. Id={target.Id} Title={target.Title} Url={target.Url}");
@@ -186,7 +186,7 @@ finally
     if (currentClient is not null) await currentClient.DisposeAsync();
 }
 if (!stopRequested && !lifetimeToken.IsCancellationRequested && recoveryDeadline is not null)
-    log.Warn("GamepadUI recovery window expired; QAM remains unavailable for this BPM session.");
+    log.Warn("GamepadUI recovery window expired; QAM remains unavailable for this GamepadUI session.");
 if (stopRequested || lifetimeToken.IsCancellationRequested)
     log.Info("QamHost stop requested.");
 return 0;

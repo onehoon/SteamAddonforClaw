@@ -174,7 +174,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ? AddonProcessStartupOutcome.RuntimeReady
                 : AddonProcessStartupOutcome.UpdateRestartScheduled;
 
-            // QamHost itself remains BPM-scoped. Prepare only Steam's persistent CEF bootstrap
+            // QamHost itself remains GamepadUI-session scoped. Prepare only Steam's persistent CEF bootstrap
             // marker here so a normal future Steam/steamwebhelper launch exposes the loopback CDP
             // endpoint without requiring the user to add launch flags manually. Failure is
             // feature-local: controller/routing Runtime startup must continue normally.
@@ -232,6 +232,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _intelFpsRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
         _runtimeHost.PowerResumeObserved += OnPowerResumeObserved;
+        _qamHostController.OnActualRunningAppIdChanged(_runtimeHost.ActualRunningAppId);
         if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
             && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
@@ -496,6 +497,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnActualRunningAppIdChanged(uint appId)
     {
+        _qamHostController.OnActualRunningAppIdChanged(appId);
         try
         {
             _cpuBoostRuntime.Reconcile(appId);

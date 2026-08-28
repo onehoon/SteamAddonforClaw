@@ -12,6 +12,8 @@ internal sealed class QamHostProcessController : IAsyncDisposable
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private Process? _process;
+    private bool _bigPictureActive;
+    private bool _steamGameActive;
     private bool _stopping;
 
     internal QamHostProcessController(string runtimeBaseDirectory, string logDirectory, Func<ProcessStartInfo, Process?>? startProcess = null)
@@ -24,17 +26,46 @@ internal sealed class QamHostProcessController : IAsyncDisposable
     internal string ExecutablePath => _executablePath;
     internal bool HasTrackedProcess { get { lock (_sync) return _process is not null; } }
 
-    internal void OnBigPictureStateChanged(bool active) => _ = TransitionAsync(active);
+    internal void OnBigPictureStateChanged(bool active)
+    {
+        lock (_sync)
+        {
+            if (_stopping) return;
+            _bigPictureActive = active;
+        }
 
-    internal Task StopAsync() => TransitionAsync(false);
+        _ = ReconcileDesiredStateAsync();
+    }
 
-    private async Task TransitionAsync(bool active)
+    internal void OnActualRunningAppIdChanged(uint appId)
+    {
+        lock (_sync)
+        {
+            if (_stopping) return;
+            _steamGameActive = appId != 0;
+        }
+
+        _ = ReconcileDesiredStateAsync();
+    }
+
+    internal Task StopAsync() => TransitionAsync(forceStop: true);
+
+    private Task ReconcileDesiredStateAsync() => TransitionAsync(forceStop: false);
+
+    private async Task TransitionAsync(bool forceStop)
     {
         await _transition.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (active) StartLocked();
-            else await StopLockedAsync().ConfigureAwait(false);
+            bool desired;
+            lock (_sync)
+            {
+                if (_stopping && !forceStop) return;
+                desired = _bigPictureActive || _steamGameActive;
+            }
+
+            if (forceStop || !desired) await StopLockedAsync().ConfigureAwait(false);
+            else StartLocked();
         }
         finally { _transition.Release(); }
     }

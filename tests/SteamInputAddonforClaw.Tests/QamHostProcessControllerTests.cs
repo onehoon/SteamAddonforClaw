@@ -73,6 +73,112 @@ public sealed class QamHostProcessControllerTests
     }
 
     [Fact]
+    public async Task Steam_game_starts_qam_host_without_big_picture_and_stops_after_game_exit()
+    {
+        using var scope = new QamHostTestScope();
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "ping 127.0.0.1 -n 30 > nul"));
+
+        controller.OnActualRunningAppIdChanged(123);
+        await WaitForTrackedProcessAsync(controller);
+        controller.OnActualRunningAppIdChanged(0);
+        await controller.StopAsync();
+
+        Assert.False(controller.HasTrackedProcess);
+    }
+
+    [Fact]
+    public async Task Game_exit_keeps_qam_host_running_while_big_picture_is_active()
+    {
+        using var scope = new QamHostTestScope();
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "ping 127.0.0.1 -n 30 > nul"));
+
+        controller.OnBigPictureStateChanged(true);
+        controller.OnActualRunningAppIdChanged(123);
+        await WaitForTrackedProcessAsync(controller);
+        controller.OnActualRunningAppIdChanged(0);
+        await Task.Delay(50);
+
+        Assert.True(controller.HasTrackedProcess);
+        await controller.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Big_picture_exit_keeps_qam_host_running_while_steam_game_is_active()
+    {
+        using var scope = new QamHostTestScope();
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "ping 127.0.0.1 -n 30 > nul"));
+
+        controller.OnBigPictureStateChanged(true);
+        controller.OnActualRunningAppIdChanged(123);
+        await WaitForTrackedProcessAsync(controller);
+        controller.OnBigPictureStateChanged(false);
+        await Task.Delay(50);
+
+        Assert.True(controller.HasTrackedProcess);
+        await controller.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Both_sources_must_be_inactive_before_qam_host_stops()
+    {
+        using var scope = new QamHostTestScope();
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "ping 127.0.0.1 -n 30 > nul"));
+
+        controller.OnBigPictureStateChanged(true);
+        controller.OnActualRunningAppIdChanged(123);
+        await WaitForTrackedProcessAsync(controller);
+        controller.OnBigPictureStateChanged(false);
+        await Task.Delay(50);
+        Assert.True(controller.HasTrackedProcess);
+
+        controller.OnActualRunningAppIdChanged(0);
+        await controller.StopAsync();
+        Assert.False(controller.HasTrackedProcess);
+    }
+
+    [Fact]
+    public async Task Duplicate_source_notifications_do_not_start_a_second_process()
+    {
+        using var scope = new QamHostTestScope();
+        var starts = 0;
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            Interlocked.Increment(ref starts);
+            return StartCommand("/c", "ping 127.0.0.1 -n 30 > nul");
+        });
+
+        controller.OnActualRunningAppIdChanged(123);
+        controller.OnActualRunningAppIdChanged(456);
+        await WaitForTrackedProcessAsync(controller);
+        await Task.Delay(50);
+
+        Assert.Equal(1, starts);
+        await controller.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Shutdown_prevents_later_source_notifications_from_restarting_qam_host()
+    {
+        using var scope = new QamHostTestScope();
+        var starts = 0;
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            Interlocked.Increment(ref starts);
+            return StartCommand("/c", "ping 127.0.0.1 -n 30 > nul");
+        });
+
+        controller.OnBigPictureStateChanged(true);
+        await WaitForTrackedProcessAsync(controller);
+        controller.BeginShutdown();
+        controller.OnActualRunningAppIdChanged(123);
+        await controller.StopAsync();
+        await Task.Delay(50);
+
+        Assert.Equal(1, starts);
+        Assert.False(controller.HasTrackedProcess);
+    }
+
+    [Fact]
     public async Task Failed_stdin_stop_falls_back_to_termination_and_clears_child()
     {
         using var scope = new QamHostTestScope();
@@ -98,6 +204,14 @@ public sealed class QamHostProcessControllerTests
         };
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         return Process.Start(info)!;
+    }
+
+    private static async Task WaitForTrackedProcessAsync(QamHostProcessController controller)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (!controller.HasTrackedProcess && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        Assert.True(controller.HasTrackedProcess);
     }
 
     private sealed class QamHostTestScope : IDisposable

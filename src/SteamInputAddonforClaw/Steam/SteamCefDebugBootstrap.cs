@@ -7,7 +7,7 @@ namespace SteamInputAddonforClaw.Steam;
 
 /// <summary>
 /// Ensures Steam's built-in CEF remote-debugging bootstrap marker exists before a future
-/// steamwebhelper launch. QamHost remains BPM-scoped; this is only the persistent Steam startup
+/// steamwebhelper launch. QamHost remains GamepadUI-session scoped; this is only the persistent Steam startup
 /// prerequisite that makes Steam expose its loopback DevTools endpoint without manual launch flags.
 /// </summary>
 internal static class SteamCefDebugBootstrap

@@ -273,6 +273,14 @@ This behavior intentionally follows Steam's own running-game state. The Addon do
 
 Steam Addon for Claw integrates its performance controls into Steam's GamepadUI / Quick Access Menu.
 
+The Addon tab is available when Steam's GamepadUI Quick Access Menu exists, including:
+
+- Steam Big Picture sessions.
+- Desktop Steam games using Steam's Big Picture/GamepadUI in-game overlay.
+
+Steam controls whether a Desktop Steam game receives the GamepadUI overlay; the Addon does not
+enable that Steam setting automatically.
+
 During active routing, press **Center M** to open Steam Quick Access.
 
 The Addon tab provides quick access to the same performance settings used by the desktop UI:
