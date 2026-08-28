@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.GameBar;
 internal sealed class WinGSuppressionGuard : IDisposable
 {
     private const int VkLWin = 0x5B, VkRWin = 0x5C, VkG = 0x47;
-    private const uint LlkhfInjected = 0x10, LlkhfLowerIlInjected = 0x02;
+    private const uint LlkhfInjected = 0x10, LlkhfLowerIlInjected = 0x02, LlkhfAltDown = 0x20;
     private const uint KeyUp = 0x0002, Extended = 0x0001;
     private const uint WhKeyboardLl = 13;
     private readonly Func<IntPtr, int, LowLevelKeyboardProc, IntPtr, uint, IntPtr> _install;
@@ -102,7 +102,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
         _callback = null;
     }
 
-    internal IntPtr ProcessKey(int vk, bool keyDown, uint flags = 0, long extraInfo = 0, uint scan = 0)
+    internal IntPtr ProcessKey(int vk, bool keyDown, uint flags = 0, long extraInfo = 0, uint scan = 0, IntPtr wParam = default)
     {
         var own = extraInfo == OwnMarker;
         if (own)
@@ -122,7 +122,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
                 if (syntheticRelease)
                 {
                     Interlocked.And(ref _releasedByCleanup, ~bit);
-                    LogRelevant(vk, keyDown, flags, extraInfo, scan);
+                    LogRelevant(vk, keyDown, flags, extraInfo, scan, wParam);
                     AppLog.Debug("Wing.Input", "Physical Win-up consumed after synthetic release.", ("Vk", vk));
                     return new(1);
                 }
@@ -131,7 +131,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
 
         var blocking = IsArmed || Volatile.Read(ref _suppressG) != 0;
         if (blocking && (bit != 0 || vk == VkG))
-            LogRelevant(vk, keyDown, flags, extraInfo, scan);
+            LogRelevant(vk, keyDown, flags, extraInfo, scan, wParam);
         if (vk == VkG && keyDown && blocking && Volatile.Read(ref _winDown) != 0)
         {
             Interlocked.Exchange(ref _suppressG, 1);
@@ -191,19 +191,34 @@ internal sealed class WinGSuppressionGuard : IDisposable
             AppLog.Warn("Wing.Input", "Partial SendInput during Win+G cleanup.", fields: [("RequestedInputs", inputs.Count), ("SentInputs", sent), ("Win32Error", primaryError)]);
     }
 
-    private void LogRelevant(int vk, bool keyDown, uint flags, long extraInfo, uint scan)
+    private void LogRelevant(int vk, bool keyDown, uint flags, long extraInfo, uint scan, IntPtr wParam)
     {
         if (!AppLog.IsEnabled(AppLogLevel.Debug)) return;
+        var rawWParam = wParam == IntPtr.Zero
+            ? keyDown ? 0x00000100u : 0x00000101u
+            : unchecked((uint)wParam.ToInt64());
         AppLog.Debug("Wing.Input", "Relevant keyboard hook event.",
-            ("Vk", vk), ("Scan", scan), ("Flags", $"0x{flags:X}"),
+            ("Event", "WinG.KeyboardEvent"),
+            ("Vk", vk switch { VkLWin => "LWIN", VkRWin => "RWIN", VkG => "G", _ => $"0x{vk:X2}" }),
+            ("VkCode", $"0x{vk:X2}"), ("ScanCode", $"0x{scan:X}"), ("Flags", $"0x{flags:X}"),
+            ("WParam", $"0x{rawWParam:X}"), ("KeyAction", KeyAction(rawWParam)),
             ("Injected", (flags & LlkhfInjected) != 0),
-            ("LowerIlInjected", (flags & LlkhfLowerIlInjected) != 0),
-            ("ExtraInfo", $"0x{unchecked((ulong)extraInfo):X}"),
-            ("KeyDown", keyDown),
-            ("LeftWinDown", (Volatile.Read(ref _winDown) & 1) != 0),
-            ("RightWinDown", (Volatile.Read(ref _winDown) & 2) != 0),
-            ("Armed", IsArmed));
+            ("LowerIntegrityInjected", (flags & LlkhfLowerIlInjected) != 0),
+            ("AltDown", (flags & LlkhfAltDown) != 0), ("Extended", (flags & Extended) != 0),
+            ("DwExtraInfo", $"0x{unchecked((ulong)extraInfo):X}"),
+            ("TrackedLeftWinDown", (Volatile.Read(ref _winDown) & 1) != 0),
+            ("TrackedRightWinDown", (Volatile.Read(ref _winDown) & 2) != 0),
+            ("SuppressionArmed", IsArmed), ("Suppressed", vk == VkG && (Volatile.Read(ref _suppressG) != 0 || (keyDown && Volatile.Read(ref _winDown) != 0))));
     }
+
+    private static string KeyAction(uint wParam) => wParam switch
+    {
+        0x0100 => "KeyDown",
+        0x0101 => "KeyUp",
+        0x0104 => "SysKeyDown",
+        0x0105 => "SysKeyUp",
+        _ => $"0x{wParam:X}"
+    };
 
     private IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam)
     {
@@ -211,7 +226,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
         try
         {
             var data = Marshal.PtrToStructure<KeyboardData>(lParam);
-            var result = ProcessKey((int)data.VkCode, (wParam.ToInt64() & 1) == 0, data.Flags, data.ExtraInfo, data.ScanCode);
+            var result = ProcessKey((int)data.VkCode, (wParam.ToInt64() & 1) == 0, data.Flags, data.ExtraInfo, data.ScanCode, wParam);
             return result != IntPtr.Zero ? result : _next(_hook, code, wParam, lParam);
         }
         catch (Exception exception) { AppLog.Warn("Wing.Guard", "Win+G hook callback was contained.", exception); return _next(_hook, code, wParam, lParam); }
