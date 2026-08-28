@@ -301,11 +301,11 @@ public sealed class MsiClawRoutingCompositionTests
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
         var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
         await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
-        var calls = new List<(string Reason, bool Retry)>();
+        var calls = new List<(string Reason, bool Yield, bool Retry)>();
         var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler((reason, _, retry) =>
+        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler((reason, yieldCurrentSteamSession, retry) =>
         {
-            calls.Add((reason, retry));
+            calls.Add((reason, yieldCurrentSteamSession, retry));
             dispatched.TrySetResult();
             return ValueTask.CompletedTask;
         });
@@ -314,12 +314,16 @@ public sealed class MsiClawRoutingCompositionTests
             MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason,
             retryCurrentSessionAfterSafeCleanup: true);
         await dispatched.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        composition.ReportRuntimeFault(
+            MsiClawPhysicalInputFaultPolicy.ExternalNativeTakeoverReason,
+            yieldCurrentSteamSession: true);
         composition.ReportRuntimeFault("SharedHelperSafetyFault");
         await Task.Delay(50);
 
         Assert.Equal([
-            (MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason, true),
-            ("SharedHelperSafetyFault", false)], calls);
+            (MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason, false, true),
+            (MsiClawPhysicalInputFaultPolicy.ExternalNativeTakeoverReason, true, false),
+            ("SharedHelperSafetyFault", false, false)], calls);
     }
 
     private static MsiClawInputTestSummary StoppedSummary(MsiClawInputStopReason stopReason) =>
