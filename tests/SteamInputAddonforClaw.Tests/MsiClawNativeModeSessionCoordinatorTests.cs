@@ -58,7 +58,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         devices.TopologySequence = new Queue<IReadOnlyList<MsiClawNativeMode>>([
             [MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput],
             [MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput],
-            [MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput],
+            [MsiClawNativeMode.XInput],
             [MsiClawNativeMode.XInput]
         ]);
 

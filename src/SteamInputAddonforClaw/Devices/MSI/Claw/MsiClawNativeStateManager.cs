@@ -80,6 +80,14 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
             current = CaptureSnapshot();
             var missingDevice = current.Status == NativeStateCaptureStatus.DeviceNotFound && allowTransientDeviceNotFound;
             var mixedTopology = current.Status == NativeStateCaptureStatus.Indeterminate && HasMixedNativeModeTopology();
+            if (current.Status == NativeStateCaptureStatus.Indeterminate && !mixedTopology)
+            {
+                // The topology may have settled between the capture and the probe. Take one
+                // authoritative follow-up capture instead of returning the stale Indeterminate result.
+                current = CaptureSnapshot();
+                missingDevice = current.Status == NativeStateCaptureStatus.DeviceNotFound && allowTransientDeviceNotFound;
+                mixedTopology = current.Status == NativeStateCaptureStatus.Indeterminate && HasMixedNativeModeTopology();
+            }
             if (!missingDevice && !mixedTopology)
                 return current;
             waitCause = missingDevice ? "DeviceReenumeration" : "MixedNativeModeTopology";
