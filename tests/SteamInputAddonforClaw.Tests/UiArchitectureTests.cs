@@ -152,16 +152,18 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Profile_page_stretches_its_root_content_horizontally()
+    public void Main_navigation_content_stretches_horizontally()
     {
         var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
-        var userControlEnd = xaml.IndexOf('>');
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
+        var navigationStart = xaml.IndexOf("<NavigationView", StringComparison.Ordinal);
+        Assert.True(navigationStart >= 0);
 
-        Assert.True(userControlEnd >= 0);
+        var navigationEnd = xaml.IndexOf('>', navigationStart);
+        Assert.True(navigationEnd > navigationStart);
 
-        var declaration = xaml[..userControlEnd];
-        Assert.Contains("x:Class=\"SteamInputAddonforClaw.Views.ProfilePage\"", declaration, StringComparison.Ordinal);
+        var declaration = xaml[navigationStart..navigationEnd];
+        Assert.Contains("x:Name=\"MainNavigationView\"", declaration, StringComparison.Ordinal);
         Assert.Contains("HorizontalContentAlignment=\"Stretch\"", declaration, StringComparison.Ordinal);
     }
 
