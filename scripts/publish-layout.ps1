@@ -34,7 +34,7 @@ if ($NoRestore) { $commonArguments += '--no-restore' }
 dotnet publish $runtimeProject @commonArguments '--output' $runtimeOutput
 if ($LASTEXITCODE -ne 0) { throw "Runtime publish failed with exit code $LASTEXITCODE." }
 
-$uiArguments = @('--configuration', $Configuration, '--runtime', 'win-x64', '--self-contained', 'true', "/p:Version=$Version")
+$uiArguments = @('--configuration', $Configuration, '--runtime', 'win-x64', '--self-contained', 'false', "/p:Version=$Version")
 if ($NoRestore) { $uiArguments += '--no-restore' }
 dotnet publish $uiProject @uiArguments '--output' $uiOutput
 if ($LASTEXITCODE -ne 0) { throw "UI publish failed with exit code $LASTEXITCODE." }
