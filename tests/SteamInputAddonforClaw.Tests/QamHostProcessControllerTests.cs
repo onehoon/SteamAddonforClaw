@@ -73,7 +73,7 @@ public sealed class QamHostProcessControllerTests
     }
 
     [Fact]
-    public async Task Steam_game_starts_qam_host_without_big_picture_and_stops_after_game_exit()
+    public async Task Steam_game_exit_stops_qam_host_without_big_picture()
     {
         using var scope = new QamHostTestScope();
         var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "ping 127.0.0.1 -n 30 > nul"));
@@ -81,8 +81,8 @@ public sealed class QamHostProcessControllerTests
         controller.OnActualRunningAppIdChanged(123);
         await WaitForTrackedProcessAsync(controller);
         controller.OnActualRunningAppIdChanged(0);
-        await controller.StopAsync();
 
+        await WaitForNoTrackedProcessAsync(controller);
         Assert.False(controller.HasTrackedProcess);
     }
 
@@ -127,12 +127,29 @@ public sealed class QamHostProcessControllerTests
         controller.OnBigPictureStateChanged(true);
         controller.OnActualRunningAppIdChanged(123);
         await WaitForTrackedProcessAsync(controller);
+        controller.OnActualRunningAppIdChanged(0);
+        await Task.Delay(50);
+        Assert.True(controller.HasTrackedProcess);
+        controller.OnBigPictureStateChanged(false);
+        await WaitForNoTrackedProcessAsync(controller);
+        Assert.False(controller.HasTrackedProcess);
+    }
+
+    [Fact]
+    public async Task Game_is_last_active_source_before_automatic_qam_host_stop()
+    {
+        using var scope = new QamHostTestScope();
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "ping 127.0.0.1 -n 30 > nul"));
+
+        controller.OnBigPictureStateChanged(true);
+        controller.OnActualRunningAppIdChanged(123);
+        await WaitForTrackedProcessAsync(controller);
         controller.OnBigPictureStateChanged(false);
         await Task.Delay(50);
         Assert.True(controller.HasTrackedProcess);
 
         controller.OnActualRunningAppIdChanged(0);
-        await controller.StopAsync();
+        await WaitForNoTrackedProcessAsync(controller);
         Assert.False(controller.HasTrackedProcess);
     }
 
@@ -212,6 +229,14 @@ public sealed class QamHostProcessControllerTests
         while (!controller.HasTrackedProcess && DateTime.UtcNow < deadline)
             await Task.Delay(10);
         Assert.True(controller.HasTrackedProcess);
+    }
+
+    private static async Task WaitForNoTrackedProcessAsync(QamHostProcessController controller)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (controller.HasTrackedProcess && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        Assert.False(controller.HasTrackedProcess);
     }
 
     private sealed class QamHostTestScope : IDisposable
