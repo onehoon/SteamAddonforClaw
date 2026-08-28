@@ -41,6 +41,9 @@
 
             <InfoBar x:Name="PowerModeInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="PowerModeExpander" Header="Windows Power Mode" Description="Configured Windows 11 power mode for each power rail.">
+                <ctcontrols:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE83F;" />
+                </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="PowerModeEnabledToggleSwitch" OffContent="" OnContent="" Toggled="PowerModeEnabledToggleSwitch_Toggled" />
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard Header="Plugged in"><ComboBox x:Name="PowerModeAcComboBox" DisplayMemberPath="Label" SelectionChanged="PowerModeAcComboBox_SelectionChanged" /></ctcontrols:SettingsCard>
