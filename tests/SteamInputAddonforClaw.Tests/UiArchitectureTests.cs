@@ -106,12 +106,13 @@ public sealed class UiArchitectureTests
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
         var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var normalizedXaml = xaml.Replace("\r\n", "\n", StringComparison.Ordinal);
 
         Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CpuBoostExpander.IsExpanded = snapshot.Enabled", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PowerModeExpander.IsExpanded = snapshot.Enabled", codeBehind, StringComparison.Ordinal);
         Assert.Contains("TdpExpander.IsExpanded = snapshot.Configuration?.Enabled == true", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE83F;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE83F;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", normalizedXaml, StringComparison.Ordinal);
         Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
     }
@@ -164,6 +165,20 @@ public sealed class UiArchitectureTests
 
         var declaration = xaml[navigationStart..navigationEnd];
         Assert.Contains("x:Name=\"MainNavigationView\"", declaration, StringComparison.Ordinal);
+        Assert.Contains("HorizontalContentAlignment=\"Stretch\"", declaration, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Profile_page_stretches_its_root_content_horizontally()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
+        var userControlEnd = xaml.IndexOf('>');
+
+        Assert.True(userControlEnd >= 0);
+
+        var declaration = xaml[..userControlEnd];
+        Assert.Contains("x:Class=\"SteamInputAddonforClaw.Views.ProfilePage\"", declaration, StringComparison.Ordinal);
         Assert.Contains("HorizontalContentAlignment=\"Stretch\"", declaration, StringComparison.Ordinal);
     }
 
