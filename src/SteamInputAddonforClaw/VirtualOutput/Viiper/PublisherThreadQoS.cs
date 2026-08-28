@@ -5,7 +5,6 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 internal static class PublisherThreadQoS
 {
-    private const int ThreadPowerThrottling = 4;
     private const uint ThreadPowerThrottlingExecutionSpeed = 0x1;
 
     internal static Func<PublisherThreadQoSRequest, (bool Succeeded, int Win32Error)>? NativeCallOverrideForTests { get; set; }
@@ -13,7 +12,7 @@ internal static class PublisherThreadQoS
     internal static bool ApplyHighQoS(string publisher)
     {
         var request = new PublisherThreadQoSRequest(
-            ThreadPowerThrottling,
+            ThreadInformationClass.ThreadPowerThrottling,
             ThreadPowerThrottlingExecutionSpeed,
             StateMask: 0);
 
@@ -55,9 +54,17 @@ internal static class PublisherThreadQoS
     }
 
     internal readonly record struct PublisherThreadQoSRequest(
-        int ThreadInformationClass,
+        ThreadInformationClass ThreadInformationClass,
         uint ControlMask,
         uint StateMask);
+
+    internal enum ThreadInformationClass
+    {
+        ThreadMemoryPriority = 0,
+        ThreadAbsoluteCpuPriority = 1,
+        ThreadDynamicCodePolicy = 2,
+        ThreadPowerThrottling = 3,
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ThreadPowerThrottlingState
@@ -70,7 +77,7 @@ internal static class PublisherThreadQoS
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetThreadInformation(
         IntPtr hThread,
-        int threadInformationClass,
+        ThreadInformationClass threadInformationClass,
         ref ThreadPowerThrottlingState threadInformation,
         uint threadInformationSize);
 

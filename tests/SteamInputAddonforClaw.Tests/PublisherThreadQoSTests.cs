@@ -24,7 +24,7 @@ public sealed class PublisherThreadQoSTests
             PublisherThreadQoS.NativeCallOverrideForTests = null;
         }
 
-        Assert.Equal(4, request?.ThreadInformationClass);
+        Assert.Equal(PublisherThreadQoS.ThreadInformationClass.ThreadPowerThrottling, request?.ThreadInformationClass);
         Assert.Equal(0x1u, request?.ControlMask);
         Assert.Equal(0u, request?.StateMask);
     }
