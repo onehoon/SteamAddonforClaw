@@ -7,6 +7,27 @@
         <StackPanel Spacing="16">
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="Device" />
 
+            <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+            <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control"
+                Description="Configure processor power limits for plugged-in and battery operation.">
+                <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
+                <ToggleSwitch x:Name="TdpEnabledToggleSwitch" OffContent="" OnContent="" Toggled="TdpEnabledToggleSwitch_Toggled" />
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard Header="Plugged in">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                        </StackPanel>
+                    </ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard Header="On battery">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
+                        </StackPanel>
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
+
             <InfoBar x:Name="CpuBoostInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
 
             <ctcontrols:SettingsExpander
@@ -51,26 +72,6 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
-            <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
-            <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control"
-                Description="Configure processor power limits for plugged-in and battery operation.">
-                <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
-                <ToggleSwitch x:Name="TdpEnabledToggleSwitch" OffContent="" OnContent="" Toggled="TdpEnabledToggleSwitch_Toggled" />
-                <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard Header="Plugged in">
-                        <StackPanel Spacing="6">
-                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpAcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpAcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpAcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                        </StackPanel>
-                    </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard Header="On battery">
-                        <StackPanel Spacing="6">
-                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl1ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl1ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL1" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl1Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="68"/><ColumnDefinition Width="20"/><ColumnDefinition Width="40"/><ColumnDefinition Width="420"/></Grid.ColumnDefinitions><TextBlock x:Name="TdpDcPl2ValueText" Text="— W" VerticalAlignment="Center"/><TextBlock x:Name="TdpDcPl2ResultText" Grid.Column="1" VerticalAlignment="Center"/><TextBlock Text="PL2" Grid.Column="3" VerticalAlignment="Center"/><Slider x:Name="TdpDcPl2Slider" Grid.Column="4" ValueChanged="TdpSlider_ValueChanged"/></Grid>
-                        </StackPanel>
-                    </ctcontrols:SettingsCard>
-                </ctcontrols:SettingsExpander.Items>
-            </ctcontrols:SettingsExpander>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

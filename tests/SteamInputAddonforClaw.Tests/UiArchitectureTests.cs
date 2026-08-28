@@ -112,6 +112,8 @@ public sealed class UiArchitectureTests
         Assert.Contains("PowerModeExpander.IsExpanded = snapshot.Enabled", codeBehind, StringComparison.Ordinal);
         Assert.Contains("TdpExpander.IsExpanded = snapshot.Configuration?.Enabled == true", codeBehind, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE83F;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", xaml, StringComparison.Ordinal);
+        Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
     }
 
     [Fact]
