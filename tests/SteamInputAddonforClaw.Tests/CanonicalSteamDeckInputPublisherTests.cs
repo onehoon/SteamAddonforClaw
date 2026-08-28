@@ -933,6 +933,8 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
         var sink = new FakeSink();
         ThreadPriority? observedPriority = null;
+        var qosThreadId = 0;
+        PublisherThreadQoS.NativeCallOverrideForTests = _ => { qosThreadId = Environment.CurrentManagedThreadId; return (true, 0); };
         var publisher = new CanonicalSteamDeckInputPublisher(source, sink)
         {
             WorkerThreadStartOverrideForTests = thread =>
@@ -952,9 +954,11 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         finally
         {
             await publisher.StopAsync();
+            PublisherThreadQoS.NativeCallOverrideForTests = null;
         }
 
         Assert.Equal(ThreadPriority.AboveNormal, observedPriority);
+        Assert.NotEqual(0, qosThreadId);
     }
 
     private sealed class BlockingFirstCallSink(ManualResetEventSlim firstCallBlocked, ManualResetEventSlim releaseFirstCall) : ICanonicalSteamDeckStateSink
