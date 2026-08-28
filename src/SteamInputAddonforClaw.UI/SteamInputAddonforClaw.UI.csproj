@@ -8,7 +8,7 @@
     <WindowsPackageType>None</WindowsPackageType>
     <UseWinUI>true</UseWinUI>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
+    <SelfContained>false</SelfContained>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>

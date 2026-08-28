@@ -67,7 +67,7 @@ if ($missingAssets) {
 }
 
 $runtimePayloadNames = @('System.Private.CoreLib.dll', 'coreclr.dll', 'hostpolicy.dll')
-foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'qam'))) {
+foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), (Join-Path $PublishDirectory 'qam'))) {
     $runtimePayload = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Name -in $runtimePayloadNames })
     if ($runtimePayload.Count -gt 0) {
         throw "Framework-dependent publish contains runtime payload in '$directory': $($runtimePayload.Name -join ', ')"
@@ -87,7 +87,7 @@ $uiManagedPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Fi
 $uiPriPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.pri')
 $uiWinmdPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.winmd')
 if ($uiManagedPayload.Count -eq 0 -or $uiPriPayload.Count -eq 0 -or $uiWinmdPayload.Count -eq 0) {
-    throw 'UI publish output is missing its self-contained managed or WinUI/Windows App SDK payload.'
+    throw 'UI publish output is missing its framework-dependent managed or WinUI/Windows App SDK payload.'
 }
 
 $applicationPri = Join-Path $uiDirectory 'SteamInputAddonforClaw.UI.pri'
