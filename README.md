@@ -44,7 +44,6 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - Configurable Center M normal action outside active routing
 - Device-level CPU Boost, Windows 11 Power Mode, and TDP control independent from Steam Input Routing
 - Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles independent from Steam Input Routing
-- Per-game Intel FPS Limit profiles using the official IGCL FRAME_LIMIT API (40-120 FPS with AC/DC values)
 - Event-driven Steam game detection without periodic game/process polling
 - Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls
@@ -199,7 +198,6 @@ Use **Refresh** if you install a game or add a new Non-Steam shortcut while the 
 3. Enable the profile using the toggle beside the game selector.
 4. Configure CPU Boost for plugged-in and battery operation.
 5. Configure TDP PL1 / PL2 for plugged-in and battery operation.
-6. Optionally enable Intel FPS Limit and choose integer AC/DC values from 40-120 FPS.
 
 A profile is a complete per-game performance configuration rather than a set of individual inherited overrides.
 

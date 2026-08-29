@@ -445,11 +445,13 @@ public sealed class QamFrontendContractTests
         Assert.Contains("disabled: !profile.persistenceWritable || !enabled", source);
         Assert.Contains("profile.cpuBoost?.ac", source);
         Assert.Contains("profileTdpDraft?.dc?.pl2Watts", source);
+        Assert.Contains("const SHOW_INTEL_FPS_LIMIT = false;", source);
         Assert.Contains("profile-fps-section", source);
         Assert.Contains("Intel FPS Limit", source);
         Assert.Contains("label: \"Intel FPS Limit\"", source);
         Assert.Contains("fps.unavailableReason || \"Intel FPS Limit is unavailable.\"", source);
         Assert.DoesNotContain("key: \"profile-fps-section\", title:", source);
+        Assert.Contains("SHOW_INTEL_FPS_LIMIT ? React.createElement(native.PanelSection, { key: \"profile-fps-section\" }", source);
         Assert.Contains("min: 40, max: 120, step: 1", source);
         Assert.Contains("`${currentValue} FPS`", source);
         Assert.Contains("value: currentValue", source);

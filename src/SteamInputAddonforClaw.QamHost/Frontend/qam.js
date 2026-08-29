@@ -26,6 +26,7 @@
   const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
   const QAM_SLIDER_COMMIT_DELAY_MS = 2000;
+  const SHOW_INTEL_FPS_LIMIT = false;
 
   function log(message) {
     console.log("[SteamInputAddon:QAM] " + message);
@@ -928,7 +929,7 @@
           displayError ? React.createElement("p", { key: "error" }, displayError) : null,
           React.createElement(native.PanelSection, { key: "profile-header", title: profile.displayName || `Game ${profile.appId}` }, React.createElement(native.PanelSectionRow, { key: "profile-toggle" }, React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }))),
           React.createElement(native.PanelSection, { key: "profile-tdp-section" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
-          React.createElement(native.PanelSection, { key: "profile-fps-section" }, ...fpsControls.map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
+          SHOW_INTEL_FPS_LIMIT ? React.createElement(native.PanelSection, { key: "profile-fps-section" }, ...fpsControls.map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null,
           React.createElement(native.PanelSection, { key: "profile-cpu-section" }, ...profileCpuControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
           profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null);
       }
