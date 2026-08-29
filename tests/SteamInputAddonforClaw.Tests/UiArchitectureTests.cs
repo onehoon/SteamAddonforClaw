@@ -124,6 +124,11 @@ public sealed class UiArchitectureTests
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
         var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
 
+        var fpsDeclarationStart = xaml.IndexOf("<ctcontrols:SettingsExpander x:Name=\"IntelFpsExpander\"", StringComparison.Ordinal);
+        var fpsDeclarationEnd = xaml.IndexOf('>', fpsDeclarationStart);
+        Assert.True(fpsDeclarationStart >= 0 && fpsDeclarationEnd > fpsDeclarationStart);
+        var fpsDeclaration = xaml[fpsDeclarationStart..fpsDeclarationEnd];
+        Assert.Contains("Visibility=\"Collapsed\"", fpsDeclaration, StringComparison.Ordinal);
         Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
