@@ -1,6 +1,7 @@
 namespace SteamInputAddonforClaw.Startup;
 
 using System.Diagnostics;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
@@ -16,6 +17,8 @@ internal sealed class StartupCoordinator
     private readonly RecoveryManager _recoveryManager;
     private readonly IStartupHidHideRecoveryCleaner? _hidHideRecoveryCleaner;
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
+    private readonly IDisabledBootControllerAdmission? _disabledBootAdmission;
+    private readonly Func<FrontendCenterMStartupSnapshot>? _captureCenterMStartup;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
     private readonly TimeSpan _hardwareProbePollInterval;
@@ -31,6 +34,8 @@ internal sealed class StartupCoordinator
         IRecoveryJournalStore recoveryJournalStore,
         IStockCenterMStartupBaseline? stockCenterMBaseline = null,
         IStartupHidHideRecoveryCleaner? hidHideRecoveryCleaner = null,
+        IDisabledBootControllerAdmission? disabledBootAdmission = null,
+        Func<FrontendCenterMStartupSnapshot>? captureCenterMStartup = null,
         TimeSpan? hardwareProbePollInterval = null,
         TimeSpan? hardwareProbeTimeout = null,
         Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null)
@@ -42,6 +47,8 @@ internal sealed class StartupCoordinator
         _recoveryManager = new RecoveryManager(_recoveryJournalStore);
         _hidHideRecoveryCleaner = hidHideRecoveryCleaner;
         _stockCenterMBaseline = stockCenterMBaseline;
+        _disabledBootAdmission = disabledBootAdmission;
+        _captureCenterMStartup = captureCenterMStartup;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
         _hardwareProbePollInterval = hardwareProbePollInterval ?? TimeSpan.FromMilliseconds(500);
@@ -78,6 +85,34 @@ internal sealed class StartupCoordinator
             return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate,
                 HardwareStatus: hardware.Status, HardwareDeviceModel: hardware.DeviceModel);
 
+        // PR4: make startup authority-aware. The actual Center M startup roots decide whether the
+        // legacy stock baseline path or the new read-only Addon Disabled-boot admission runs. A
+        // construction path with no capture delegate (e.g. focused legacy tests) keeps the existing
+        // stock path unchanged.
+        var centerMStartupState = _captureCenterMStartup is null
+            ? FrontendCenterMStartupState.Enabled
+            : _captureCenterMStartup().State;
+        AppLog.Info("CenterM.StartupAuthority", "Center M startup authority captured.",
+            ("State", centerMStartupState),
+            ("Action", centerMStartupState switch
+            {
+                FrontendCenterMStartupState.Enabled => "StockPath",
+                FrontendCenterMStartupState.Disabled => "DisabledAdmission",
+                _ => "Passive",
+            }));
+
+        if (centerMStartupState == FrontendCenterMStartupState.Disabled)
+            return await RunDisabledBootAdmissionAsync(hardwareSupported, hardware, cancellationToken).ConfigureAwait(false);
+
+        if (centerMStartupState is FrontendCenterMStartupState.Partial or FrontendCenterMStartupState.Unavailable)
+        {
+            AppLog.Warn("CenterM.StartupAuthority", "Center M startup roots are neither exactly Enabled nor Disabled; no controller owner is selected.", null,
+                ("State", centerMStartupState), ("Action", "Passive"));
+            return new StartupResult(true, ControllerEnvironmentMode.StockCenterM, ControllerEnvironmentReadiness.NotApplicable,
+                RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+                CenterMStartupState: centerMStartupState, LegacyRoutingAllowed: false);
+        }
+
         AppLog.Info("Environment", "Initial environment detection started.");
         var assessment = _environmentAssessmentProvider.Capture();
         var environment = StartupControllerEnvironmentMapper.Map(assessment);
@@ -111,7 +146,33 @@ internal sealed class StartupCoordinator
             return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
 
         var recoverySafe = await ResolveStaleRecoveryAsync(cancellationToken).ConfigureAwait(false);
-        return new StartupResult(true, environment.Mode, readiness, RecoverySafe: recoverySafe, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
+        return new StartupResult(true, environment.Mode, readiness, RecoverySafe: recoverySafe, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+            CenterMStartupState: FrontendCenterMStartupState.Enabled);
+    }
+
+    /// <summary>PR4 Disabled branch (work order sections 9-13): read-only only. Waits for a stable
+    /// MSI Claw topology, then runs the read-only admission facts. Never calls
+    /// <see cref="IStockCenterMStartupBaseline.EstablishAsync"/>, the old HidHide recovery cleaner,
+    /// or journal retirement; issues no PID/HidHide/VIIPER mutation.</summary>
+    private async Task<StartupResult> RunDisabledBootAdmissionAsync(bool hardwareSupported, HardwareCompatibilityAssessment hardware, CancellationToken cancellationToken)
+    {
+        var deviceModel = hardware.Status == HardwareCompatibilityStatus.Supported ? hardware.DeviceModel : null;
+
+        var readinessStopwatch = Stopwatch.StartNew();
+        AppLog.Info("Environment", "Disabled-boot controller topology stabilization started.", ("Mode", ControllerEnvironmentMode.StockCenterM));
+        var readiness = await _environmentWaiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, cancellationToken).ConfigureAwait(false);
+        AppLog.Info("ControllerAdmission", "Disabled-boot controller topology stabilization completed.", ("Topology", readiness), ("ElapsedMs", readinessStopwatch.ElapsedMilliseconds));
+
+        DisabledBootControllerAdmissionResult admission;
+        if (readiness != ControllerEnvironmentReadiness.Stable)
+            admission = DisabledBootControllerAdmissionResult.Blocked("ControllerTopologyNotStable:" + readiness);
+        else
+            admission = _disabledBootAdmission?.Evaluate()
+                ?? DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionUnavailable");
+
+        return new StartupResult(true, ControllerEnvironmentMode.StockCenterM, readiness,
+            RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: deviceModel, HardwareStatus: hardware.Status,
+            CenterMStartupState: FrontendCenterMStartupState.Disabled, LegacyRoutingAllowed: false, DisabledBootAdmission: admission);
     }
 
     /// <summary>
@@ -243,6 +304,13 @@ internal sealed class StartupCoordinator
 /// supported MSI Claw (<see cref="HardwareCompatibilityStatus.Supported"/>). Defaults to false so a
 /// construction path that does not reach the hardware gate can never report support it never
 /// established. Consumed by the OEM1 mapping availability gate; never recomputed downstream.</param>
+/// <param name="CenterMStartupState">PR4: the actual Center M startup-root classification captured
+/// once at startup (not persisted). <see cref="FrontendCenterMStartupState.Unavailable"/> on paths
+/// that never reached the authority branch.</param>
+/// <param name="LegacyRoutingAllowed">PR4: false once Center M is exactly Disabled/Partial/Unavailable
+/// -- the old Steam-session physical routing owner must not be selected in those authority states.</param>
+/// <param name="DisabledBootAdmission">PR4: the read-only Disabled-boot admission result PR5 will
+/// consume. Null unless Center M roots were exactly Disabled.</param>
 internal sealed record StartupResult(
     bool ShouldStartRuntime,
     ControllerEnvironmentMode EnvironmentMode,
@@ -250,4 +318,7 @@ internal sealed record StartupResult(
     bool RecoverySafe = false,
     bool HardwareSupported = false,
     HandheldDeviceModelId? HardwareDeviceModel = null,
-    HardwareCompatibilityStatus? HardwareStatus = null);
+    HardwareCompatibilityStatus? HardwareStatus = null,
+    Contracts.Frontend.FrontendCenterMStartupState CenterMStartupState = Contracts.Frontend.FrontendCenterMStartupState.Unavailable,
+    bool LegacyRoutingAllowed = true,
+    DisabledBootControllerAdmissionResult? DisabledBootAdmission = null);

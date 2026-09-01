@@ -213,7 +213,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
         AppLog.Info($"Starting runtime. Environment={startupResult.EnvironmentMode}; Readiness={startupResult.EnvironmentReadiness}.");
 
-        _centerMStartupControl = new CenterMStartupControl(startupResult.HardwareSupported);
+        // PR4: reuse the ONE Center M startup control constructed by the startup composition -- the
+        // same instance the authority branch read -- for the mandatory policy, PR3 transition, and
+        // Device-page capture. No second Center M startup writer/manager is created.
+        _centerMStartupControl = startupComposition.CenterMStartupControl;
 
         var composition = _runtimeCompositionFactory?.Invoke(startupComposition, startupResult)
             ?? AddonRuntimeCompositionFactory.Create(
@@ -224,6 +227,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 startupComposition.StockCenterMBaseline,
                 startupResult.RecoverySafe,
                 startupResult.HardwareSupported,
+                startupResult.LegacyRoutingAllowed,
                 winGSuppressionGuard: _winGSuppressionGuard,
                 bigPictureStateChanged: _qamHostController.OnBigPictureStateChanged,
                 routingReconcileCompleted: null,
