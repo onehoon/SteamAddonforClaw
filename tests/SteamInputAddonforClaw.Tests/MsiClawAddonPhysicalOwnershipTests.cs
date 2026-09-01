@@ -462,18 +462,206 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(0, h.SwitchCalls);
     }
 
-    [Fact] // 21.4 -- PID1901 detected, never reclaimed in PR8
-    public async Task Recovery_detecting_pid1901_drift_fails_closed_with_zero_mode_write()
+    // ---------- PR9: owned PID1901 drift reclaim (work order section 21) ----------
+
+    /// <summary>Owned, then session lost, then the same device drifted to PID1901.</summary>
+    private static async Task<(MsiClawAddonPhysicalOwnership Owner, Harness Harness)> AcquiredThenLostAsPid1901(Harness h)
     {
-        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
-        h.RecoveryMode = MsiClawNativeMode.XInput;
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+        h.InputSource.SimulateSessionLoss();
+        h.Recovering = true;
+        h.RecoveryMode = MsiClawNativeMode.XInput; // current observed mode is PID1901
+        h.RecoveryModeAfterReclaim = MsiClawNativeMode.DirectInput; // a successful reclaim lands PID1902
+        h.Events.Clear();
+        return (owner, h);
+    }
+
+    [Fact] // 21.1
+    public async Task Same_owned_pid1901_reclaims_pid1902_then_continues_the_shared_recovery_tail()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(recovery.IsOwned);
+        Assert.Equal("OwnedPhysicalStateDriftReclaimed", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.Equal(PrimaryPnp, recovery.HiddenTarget);
+        Assert.Equal(1, h.RecoverySwitchCalls);
+        Assert.Equal(MsiClawNativeMode.DirectInput, h.LastSwitchTarget);
+        Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets); // never a reverse write
+        Assert.Same(h.InputSource, owner.LiveInputSource);
+        Assert.True(h.InputSource.IsRunning);
+        // identity proven before the write; HidHide proven before the restart
+        Assert.Equal(
+            new[] { "NativeCapture", "NativeCapture", "DescriptorResolve", "HidHideApply", "InputStart", "FirstValidState" },
+            h.Events);
+    }
+
+    [Fact] // 21.2 -- mandatory: a different strong PID1901 identity is never switched
+    public async Task Pid1901_on_a_different_strong_identity_never_receives_a_mode_write()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryPhysKey = OtherPhysKey;
 
         var recovery = await owner.RecoverLostInputAsync(default);
 
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
-        Assert.Equal("OwnedPhysicalStateDriftPid1901", recovery.Reason);
+        Assert.Contains("PhysicalIdentityMismatch", recovery.Reason);
         Assert.Equal(0, h.SwitchCalls);
+        Assert.DoesNotContain("HidHideApply", h.Events);
         Assert.DoesNotContain("InputStart", h.Events);
+    }
+
+    [Theory] // 21.3
+    [InlineData("Enabled")]
+    [InlineData("Partial")]
+    [InlineData("Unavailable")]
+    public async Task Pid1901_reclaim_is_blocked_when_center_m_is_not_exactly_disabled(string authority)
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryAuthority = Enum.Parse<FrontendCenterMStartupState>(authority);
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("AuthorityNotDisabled", recovery.Reason);
+        Assert.Equal(0, h.SwitchCalls);
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.DoesNotContain("InputStart", h.Events);
+    }
+
+    [Fact] // 21.4
+    public async Task Pid1902_reclaim_transition_failure_fails_closed_with_no_reverse_write()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoverySwitchSucceeds = false;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("OwnedPhysicalStateDriftReclaimFailed", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.Equal(1, h.RecoverySwitchCalls); // exactly one attempt
+        Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets);
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.DoesNotContain("InputStart", h.Events);
+    }
+
+    [Theory] // 21.5 / 21.6 -- post-write verification
+    [InlineData("XInput", null)]        // final mode still PID1901
+    [InlineData("Other", null)]         // final mode ambiguous / unsupported
+    [InlineData("DirectInput", "diff")] // final PID1902 but a different strong identity
+    public async Task Pid1902_reclaim_post_write_verification_failure_fails_closed(string finalMode, string? identity)
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryModeAfterReclaim = Enum.Parse<MsiClawNativeMode>(finalMode);
+        if (identity is not null) h.RecoveryPhysKeyAfterReclaim = OtherPhysKey;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.Equal(1, h.RecoverySwitchCalls);
+        Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets); // no rollback
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.DoesNotContain("InputStart", h.Events);
+    }
+
+    [Fact] // 21.7
+    public async Task Pid1901_reclaim_then_changed_exact_target_fails_closed_without_migration()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryPnp = OtherPrimaryPnp;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("RecoveredTargetChanged", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.Equal(new[] { PrimaryPnp }, h.HidHideApplied); // only the original acquisition
+    }
+
+    [Theory] // 21.8
+    [InlineData("Conflict")]
+    [InlineData("MutationFailed")]
+    [InlineData("VerificationFailed")]
+    public async Task Pid1901_reclaim_then_hidhide_failure_blocks_restart_without_rollback(string outcome)
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryHidHideOutcome = Enum.Parse<AddonHidHideBaselineOutcome>(outcome);
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("HidHideReconcileFailed", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.Equal(1, h.RecoverySwitchCalls);
+        Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets);
+        Assert.DoesNotContain("InputStart", h.Events);
+        Assert.Null(owner.LiveInputSource);
+    }
+
+    [Fact] // 21.9
+    public async Task Pid1901_reclaim_then_directinput_start_failure_fails_closed_without_rollback()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.InputSource.StartResult = MsiClawInputStartStatus.AcquireFailed;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("DirectInputStartFailed", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets);
+        Assert.Null(owner.LiveInputSource);
+    }
+
+    [Fact] // 21.10
+    public async Task Pid1901_reclaim_then_first_valid_state_failure_stops_the_partial_session()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.InputSource.FirstValidState = false;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("FirstValidStateNotObserved", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.True(h.InputSource.StopCalled);
+        Assert.Null(owner.LiveInputSource);
+    }
+
+    [Fact] // 21.11 -- the PR8 same-PID1902 path is unchanged
+    public async Task Same_pid1902_recovery_still_issues_no_mode_write()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(recovery.IsOwned);
+        Assert.Equal("OwnedPhysicalInputRecovered", recovery.Reason);
+        Assert.False(recovery.ModeWriteIssued);
+        Assert.Equal(0, h.SwitchCalls);
+        Assert.Equal(
+            new[] { "NativeCapture", "DescriptorResolve", "HidHideApply", "InputStart", "FirstValidState" },
+            h.Events);
+    }
+
+    [Fact] // 21.12 -- explicit release still works after a post-write reclaim failure
+    public async Task Explicit_release_still_works_after_a_failed_pid1901_reclaim()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryHidHideOutcome = AddonHidHideBaselineOutcome.Conflict; // fails after the mode write
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.RecoverLostInputAsync(default)).Outcome);
+
+        h.Recovering = false;
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Equal(PrimaryPnp, release.HiddenTarget); // owned target evidence retained through the failure
     }
 
     [Theory] // 21.5
@@ -571,11 +759,11 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Same(h.InputSource, owner.LiveInputSource);
     }
 
-    [Fact] // 21.11
+    [Fact] // 21.12 -- explicit release still works after a pre-write recovery failure
     public async Task Explicit_release_still_works_after_a_failed_recovery()
     {
         var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
-        h.RecoveryMode = MsiClawNativeMode.XInput; // force recovery failure
+        h.RecoveryPhysKey = OtherPhysKey; // identity mismatch -> fails before any mode write
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.RecoverLostInputAsync(default)).Outcome);
 
         h.Recovering = false;
@@ -735,7 +923,23 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public string? RecoveryPnp { get; set; }
         public AddonHidHideBaselineOutcome? RecoveryHidHideOutcome { get; set; }
         public FrontendCenterMStartupState? RecoveryAuthority { get; set; }
+        // ---- PR9 PID1901 drift reclaim knobs: the "after the reclaim mode write" observed state ----
+        public MsiClawNativeMode? RecoveryModeAfterReclaim { get; set; }
+        public string? RecoveryPhysKeyAfterReclaim { get; set; }
+        public NativeStateCaptureStatus? RecoveryCaptureStatusAfterReclaim { get; set; }
+        public bool RecoverySwitchSucceeds { get; set; } = true;
+        public int RecoverySwitchCalls { get; private set; }
         public List<string> Events { get; } = [];
+
+        private MsiClawNativeMode RecoveryCurrentMode => RecoverySwitchCalls > 0
+            ? RecoveryModeAfterReclaim ?? MsiClawNativeMode.DirectInput
+            : RecoveryMode ?? MsiClawNativeMode.DirectInput;
+        private string RecoveryCurrentPhysKey => RecoverySwitchCalls > 0
+            ? RecoveryPhysKeyAfterReclaim ?? RecoveryPhysKey ?? FinalPhysKey
+            : RecoveryPhysKey ?? FinalPhysKey;
+        private NativeStateCaptureStatus RecoveryCurrentStatus => RecoverySwitchCalls > 0
+            ? RecoveryCaptureStatusAfterReclaim ?? NativeStateCaptureStatus.Success
+            : RecoveryCaptureStatus ?? NativeStateCaptureStatus.Success;
 
         public int SwitchCalls { get; private set; }
         public MsiClawNativeMode LastSwitchTarget { get; private set; }
@@ -764,10 +968,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 if (Recovering)
                 {
                     Events.Add("NativeCapture");
-                    return Task.FromResult(Capture(
-                        RecoveryMode ?? MsiClawNativeMode.DirectInput,
-                        MsiClawIdentityConfidence.Strong,
-                        RecoveryPhysKey ?? FinalPhysKey));
+                    if (RecoveryCurrentStatus != NativeStateCaptureStatus.Success)
+                        return Task.FromResult(new NativeStateCaptureResult(RecoveryCurrentStatus, null, RecoveryCurrentStatus.ToString()));
+                    return Task.FromResult(Capture(RecoveryCurrentMode, MsiClawIdentityConfidence.Strong, RecoveryCurrentPhysKey));
                 }
                 return Task.FromResult(Capture(
                     SwitchCalls == 0 ? InitialMode : LastSwitchTarget,
@@ -777,9 +980,12 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             (target, _, _) =>
             {
                 SwitchCalls++;
+                if (Recovering) RecoverySwitchCalls++;
                 LastSwitchTarget = target;
                 SwitchTargets.Add(target);
-                var ok = target == MsiClawNativeMode.XInput ? !SwitchFailsForRelease : SwitchSucceeds;
+                var ok = target == MsiClawNativeMode.XInput
+                    ? !SwitchFailsForRelease
+                    : Recovering ? RecoverySwitchSucceeds : SwitchSucceeds;
                 return Task.FromResult(new MsiClawModeTransitionResult(
                     ok ? MsiClawModeTransitionStatus.Succeeded : MsiClawModeTransitionStatus.WriteFailed,
                     MsiClawNativeMode.XInput, target, 0x1901, 0x1902, ok, ok, ok, ok, ok, 0,
