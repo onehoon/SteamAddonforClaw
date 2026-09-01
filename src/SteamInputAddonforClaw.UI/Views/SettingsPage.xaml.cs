@@ -21,11 +21,22 @@ public sealed partial class SettingsPage : UserControl
     {
         _frontend = frontend;
         DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
+        RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage);
+    }
+
+    // PR2.5: while MSI Center M is Disabled the Runtime forces launch-at-startup ON and rejects an
+    // OFF request; lock the control and explain why rather than let a user toggle something the
+    // backend immediately reverts.
+    private void RenderLaunchAtStartup(FrontendSettingsSnapshot settings, string registrationMessage)
+    {
         _isLoadingStartupSettings = true;
-        LaunchAtWindowsStartupToggleSwitch.IsOn = bootstrap.Settings.LaunchAtWindowsStartup;
-        _lastKnownLaunchAtWindowsStartup = bootstrap.Settings.LaunchAtWindowsStartup;
+        LaunchAtWindowsStartupToggleSwitch.IsOn = settings.LaunchAtWindowsStartup;
+        _lastKnownLaunchAtWindowsStartup = settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
-        LaunchAtStartupCard.Description = bootstrap.StartupRegistrationMessage;
+        LaunchAtWindowsStartupToggleSwitch.IsEnabled = !settings.LaunchAtWindowsStartupRequired;
+        LaunchAtStartupCard.Description = settings.LaunchAtWindowsStartupRequired
+            ? "Required while MSI Center M is disabled."
+            : registrationMessage;
     }
 
     internal static Visibility GetDeveloperMenuCardVisibility(bool developerMenuEnabled) =>
@@ -41,9 +52,7 @@ public sealed partial class SettingsPage : UserControl
         try
         {
             var result = await _frontend.SetLaunchAtWindowsStartupAsync(LaunchAtWindowsStartupToggleSwitch.IsOn);
-            _lastKnownLaunchAtWindowsStartup = result.Settings.LaunchAtWindowsStartup;
-            SetLaunchAtWindowsStartupToggle(_lastKnownLaunchAtWindowsStartup);
-            LaunchAtStartupCard.Description = result.RegistrationMessage;
+            RenderLaunchAtStartup(result.Settings, result.RegistrationMessage);
         }
         catch (Exception exception)
         {
@@ -51,9 +60,7 @@ public sealed partial class SettingsPage : UserControl
             try
             {
                 var bootstrap = await _frontend.GetBootstrapAsync();
-                _lastKnownLaunchAtWindowsStartup = bootstrap.Settings.LaunchAtWindowsStartup;
-                LaunchAtStartupCard.Description = bootstrap.StartupRegistrationMessage;
-                SetLaunchAtWindowsStartupToggle(_lastKnownLaunchAtWindowsStartup);
+                RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage);
             }
             catch (Exception refreshException)
             {

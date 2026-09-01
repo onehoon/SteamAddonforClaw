@@ -39,14 +39,15 @@ internal static class AddonRuntimeCompositionFactory
         bool hardwareSupported,
         WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
-        Action? routingReconcileCompleted = null)
+        Action? routingReconcileCompleted = null,
+        Func<bool>? isLaunchAtWindowsStartupRequired = null)
     {
         ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
-        var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
+        var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration, isLaunchAtWindowsStartupRequired);
         var steamRuntime = new SteamSessionRuntime(startupSettings);
         if (bigPictureStateChanged is not null) steamRuntime.BigPictureStateChanged += bigPictureStateChanged;
         var startupRegistrationResult = startupSettings.Repair();
