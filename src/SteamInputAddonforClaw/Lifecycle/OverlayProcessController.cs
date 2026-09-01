@@ -13,17 +13,21 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private readonly string _executablePath;
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
+    private readonly Func<string, NamedPipeOverlayServer> _serverFactory;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
     private bool _stopping;
     private int _disposed;
 
-    internal OverlayProcessController(string runtimeBaseDirectory, string logDirectory, Func<ProcessStartInfo, Process?>? startProcess = null)
+    internal OverlayProcessController(string runtimeBaseDirectory, string logDirectory,
+        Func<ProcessStartInfo, Process?>? startProcess = null,
+        Func<string, NamedPipeOverlayServer>? serverFactory = null)
     {
         _executablePath = Path.Combine(runtimeBaseDirectory, "overlay", "SteamInputAddonforClaw.Overlay.exe");
         _logDirectory = logDirectory;
         _startProcess = startProcess ?? Process.Start;
+        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName));
     }
 
     internal string ExecutablePath => _executablePath;
@@ -69,11 +73,15 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             }
             if (server is null) return;
             var command = show ? OverlayCommand.Show : OverlayCommand.Hide;
-            if (await server.SendCommandAsync(command).ConfigureAwait(false))
+            if (!await server.SendCommandAsync(command).ConfigureAwait(false))
             {
-                lock (_sync) _visible = show;
-                AppLog.Info("Overlay", $"Overlay POC {(show ? "shown" : "hidden")}.");
+                AppLog.Warn("Overlay", "Overlay POC command was not acknowledged; retiring the current Overlay session.",
+                    null, ("Command", command));
+                await StopCurrentAsync().ConfigureAwait(false);
+                return;
             }
+            lock (_sync) _visible = show;
+            AppLog.Info("Overlay", $"Overlay POC {(show ? "shown" : "hidden")}.");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -116,7 +124,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private async Task<bool> StartCoreAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(_executablePath)) return false;
-        var server = new NamedPipeOverlayServer(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
+        var server = _serverFactory(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
         await server.StartAsync(cancellationToken).ConfigureAwait(false);
         Process? process;
         try

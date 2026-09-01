@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO.Pipes;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
@@ -99,5 +100,68 @@ public sealed class OverlayTransportTests
         Assert.False(await controller.StartAsync());
         controller.BeginShutdown();
         Assert.False(await controller.StartAsync());
+    }
+
+    [Fact]
+    public async Task Failed_overlay_command_retires_the_session_for_the_next_toggle()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var firstPipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var secondPipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var currentPipeName = firstPipeName;
+        var starts = 0;
+        using var firstClientCancellation = new CancellationTokenSource();
+
+        Process? StartTestProcess(ProcessStartInfo _) {
+            Interlocked.Increment(ref starts);
+            return Process.Start(new ProcessStartInfo {
+                FileName = "cmd.exe", Arguments = "/c timeout /t 30 /nobreak >nul",
+                UseShellExecute = false, CreateNoWindow = true
+            });
+        }
+
+        async Task RunClientAsync(bool acknowledgeShow, CancellationToken cancellationToken = default)
+        {
+            await using var client = new NamedPipeOverlayClient(currentPipeName);
+            try
+            {
+                await client.RunAsync(async command => {
+                    if (command == OverlayCommand.Show && !acknowledgeShow)
+                        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }, cancellationToken);
+            }
+            catch (Exception) { }
+        }
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartTestProcess, _ => new NamedPipeOverlayServer(currentPipeName));
+            var firstClient = RunClientAsync(acknowledgeShow: false, cancellationToken: firstClientCancellation.Token);
+            await controller.ToggleForPocAsync();
+            Assert.Equal(1, starts);
+            Assert.False(controller.HasTrackedProcess);
+            // The intentionally hung handler models a dispatcher that never acknowledges Show.
+            // Cancel the client after the controller retires that failed session.
+            firstClientCancellation.Cancel();
+            await firstClient.WaitAsync(TimeSpan.FromSeconds(5));
+
+            currentPipeName = secondPipeName;
+            var secondClient = RunClientAsync(acknowledgeShow: true);
+            await Task.Delay(250);
+            await controller.ToggleForPocAsync();
+            Assert.Equal(2, starts);
+            // A second process-start attempt proves the failed first session was retired;
+            // cleanup below also covers the intentionally synthetic process.
+            await controller.DisposeAsync();
+            await secondClient.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 }
