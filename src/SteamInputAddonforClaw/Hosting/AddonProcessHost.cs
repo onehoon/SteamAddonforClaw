@@ -97,6 +97,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // PR10 review [P1]: a single "a Device Arrival landed while a recovery was in flight" bit, so the
     // only real arrival signal is never lost to coalescing. Consumed for exactly one follow-up.
     private int _pendingOwnedControllerArrival;
+    // PR10 review [P1]: once an owned-session completion reports unproven DirectInput cleanup, refuse
+    // ALL further owned-controller recovery (including Device Arrival) for the rest of this Runtime
+    // lifetime -- native resources may still be retained. A Runtime restart resets it.
+    private int _ownedControllerRecoveryBlockedByCleanup;
     // PR10: one Runtime-owned, event-driven Windows Device Arrival observer. Non-null once a physical
     // owner has actually committed; it only wakes the existing recovery entrypoint, which re-proves
     // the strong MSI Claw identity itself. Disposed at BeginProcessShutdown before recovery drains.
@@ -516,8 +520,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         // 7.4: the dead DirectInput device/enumerator cleanup is not proven -- do not acquire another
         // session on top of possibly-retained native resources. Fail closed; publisher stays neutral.
+        // This is a native-resource safety boundary for the REST of this Runtime lifetime, not just
+        // this one completion -- a later Device Arrival must not be allowed to bypass it (review [P1]).
         if (!summary.CleanupSucceeded)
         {
+            Interlocked.Exchange(ref _ownedControllerRecoveryBlockedByCleanup, 1);
             AppLog.Warn("ControllerOwnership", "Owned physical input recovery blocked; dead DirectInput session cleanup is unproven.", null,
                 ("Event", "OwnedPhysicalRecoveryBlocked"), ("Reason", "CleanupUnproven"));
             return;
@@ -541,6 +548,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnControllerDeviceArrived()
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        // 7.4 continued: an unproven prior DirectInput cleanup blocks recovery for the rest of this
+        // Runtime lifetime -- a Device Arrival is only a trigger and must never bypass that rule.
+        if (Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0)
+        {
+            AppLog.Warn("ControllerOwnership", "Device-arrival recovery ignored because prior DirectInput cleanup is unproven.", null,
+                ("Event", "OwnedPhysicalRecoveryBlocked"), ("Reason", "CleanupUnproven"));
+            return;
+        }
         var physical = _physicalOwnership;
         if (physical is null) return;
         // A live owned session is healthy -- an unrelated arrival must not cause native/HidHide/DI work.
@@ -597,8 +612,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         finally
         {
             // A Device Arrival was observed while this attempt was in flight -- run exactly one
-            // follow-up if the owned source is still not running.
+            // follow-up if the owned source is still not running and cleanup was never found unproven
+            // in the meantime (review [P1]: the cleanup gate must not be bypassable via a queued arrival).
             if (Volatile.Read(ref _processShutdownStarted) == 0
+                && Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) == 0
                 && Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0) != 0
                 && physical.LiveInputSource is not { IsRunning: true })
             {

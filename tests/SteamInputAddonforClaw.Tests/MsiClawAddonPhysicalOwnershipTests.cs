@@ -938,6 +938,11 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Contains("Interlocked.Exchange(ref _pendingOwnedControllerArrival, 1)", host, StringComparison.Ordinal);
         Assert.Contains("Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0) != 0", host, StringComparison.Ordinal);
         Assert.Contains("\"DeferredDeviceArrival\"", host, StringComparison.Ordinal);
+        // review [P1]: unproven DirectInput cleanup blocks ALL owned-controller recovery -- including
+        // Device Arrival and its deferred follow-up -- for the rest of this Runtime lifetime.
+        Assert.Contains("Interlocked.Exchange(ref _ownedControllerRecoveryBlockedByCleanup, 1)", host, StringComparison.Ordinal);
+        Assert.Contains("Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) != 0", host, StringComparison.Ordinal);
+        Assert.Contains("Volatile.Read(ref _ownedControllerRecoveryBlockedByCleanup) == 0", host, StringComparison.Ordinal);
         // Shutdown stops the watcher before recovery drains.
         Assert.True(
             host.IndexOf("_deviceArrivalWatcher?.Dispose();", StringComparison.Ordinal)
