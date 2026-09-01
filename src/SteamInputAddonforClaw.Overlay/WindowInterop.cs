@@ -14,6 +14,7 @@ internal static class WindowInterop
     private const uint MonitorDefaultToPrimary = 1;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoSendChanging = 0x0400;
+    private const uint SwpNoZOrder = 0x0004;
     private const uint WsExNoActivate = 0x08000000;
     private const uint WsExToolWindow = 0x00000080;
 
@@ -31,7 +32,25 @@ internal static class WindowInterop
         if (!GetMonitorInfo(monitor, ref info))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the target monitor work area.");
 
+        var workWidth = Math.Max(0, info.rcWork.Right - info.rcWork.Left);
+        var workHeight = Math.Max(0, info.rcWork.Bottom - info.rcWork.Top);
+        var provisionalWidth = Math.Min((int)OverlayWindowGeometry.PocPanelWidthDip, workWidth);
+        if (!SetWindowPos(
+                hwnd,
+                IntPtr.Zero,
+                info.rcWork.Left,
+                info.rcWork.Top,
+                provisionalWidth,
+                workHeight,
+                SwpNoActivate | SwpNoSendChanging | SwpNoZOrder))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window on the target monitor.");
+        }
+
         dpi = GetDpiForWindow(hwnd);
+        if (dpi == 0)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the target-monitor DPI.");
+
         rect = OverlayWindowGeometry.Calculate(
             info.rcWork.Left,
             info.rcWork.Top,
