@@ -218,6 +218,94 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Explicit_show_and_hide_track_visibility_and_are_idempotent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var commands = new List<OverlayCommand>();
+
+        Process? StartTestProcess(ProcessStartInfo _) => Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe", Arguments = "/c timeout /t 30 /nobreak >nul",
+            UseShellExecute = false, CreateNoWindow = true
+        });
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(command =>
+            {
+                lock (commands) commands.Add(command);
+                return Task.CompletedTask;
+            });
+
+            Assert.False(controller.IsVisible);
+            Assert.True(await controller.EnsureHiddenAsync()); // idempotent while already hidden
+            Assert.True(await controller.ShowAsync());
+            Assert.True(controller.IsVisible);
+            Assert.True(await controller.ShowAsync()); // idempotent while already visible
+            Assert.True(await controller.EnsureHiddenAsync());
+            Assert.False(controller.IsVisible);
+            await Task.Delay(100);
+            lock (commands) Assert.Equal([OverlayCommand.Show, OverlayCommand.Hide], commands);
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Failed_explicit_hide_retires_the_session_and_reports_failure()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        using var hangCancellation = new CancellationTokenSource();
+
+        Process? StartTestProcess(ProcessStartInfo _) => Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe", Arguments = "/c timeout /t 30 /nobreak >nul",
+            UseShellExecute = false, CreateNoWindow = true
+        });
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(async command =>
+            {
+                if (command == OverlayCommand.Hide)
+                    await Task.Delay(Timeout.InfiniteTimeSpan, hangCancellation.Token);
+            });
+
+            Assert.True(await controller.ShowAsync());
+            Assert.False(await controller.EnsureHiddenAsync());
+            Assert.False(controller.HasTrackedProcess);
+            Assert.False(controller.IsVisible);
+
+            hangCancellation.Cancel();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+            await client.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Disconnect_allows_a_later_overlay_client_to_reconnect()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";

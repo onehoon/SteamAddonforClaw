@@ -16,6 +16,9 @@ public partial class App : Application
     private DispatcherQueue? _dispatcherQueue;
     private UiShutdownCoordinator? _shutdownCoordinator;
     private bool _activationPending;
+    // OQ3-A: a Runtime CloseRequested that arrives before MainWindow exists is honored once the
+    // window is constructed, without activating it first.
+    private bool _pendingClose;
     private int _shuttingDown;
 
     public App() => InitializeComponent();
@@ -51,6 +54,7 @@ public partial class App : Application
         {
             _frontendClient = UiFrontendClientFactory.Create();
             _frontendClient.Disconnected += OnFrontendDisconnected;
+            _frontendClient.CloseRequested += OnFrontendCloseRequested;
             stage = "RuntimeConnection";
             await _frontendClient.ConnectAsync().ConfigureAwait(true);
             AppLog.Info("Frontend", "Frontend connected.");
@@ -61,6 +65,12 @@ public partial class App : Application
             _mainWindow = CreateMainWindowWithDiagnostics(_frontendClient, bootstrap);
             _mainWindow.Closed += OnMainWindowClosed;
             AppLog.Info("Frontend", "MainWindow initialized.");
+            if (_pendingClose)
+            {
+                AppLog.Info("Frontend", "Pending Runtime close honored before activation.");
+                _mainWindow.Close();
+                return;
+            }
             if (_activationPending)
                 AppLog.Info("Frontend", "Pending UI activation fulfilled.");
             stage = "Activation";
@@ -126,6 +136,26 @@ public partial class App : Application
         }
     }
 
+    private void OnFrontendCloseRequested(object? sender, EventArgs args)
+    {
+        AppLog.Info("Frontend", "Runtime close requested.", ("HasDispatcher", _dispatcherQueue is not null), ("HasMainWindow", _mainWindow is not null));
+        if (_dispatcherQueue?.TryEnqueue(CloseForRuntimeRequestOnUiThread) == true) return;
+        AppLog.Error("Frontend", "Runtime close request dispatch failed; leaving UI alive for the Runtime-side timeout.",
+            new InvalidOperationException("UI dispatcher was unavailable."));
+    }
+
+    private void CloseForRuntimeRequestOnUiThread()
+    {
+        if (Volatile.Read(ref _shuttingDown) != 0) return;
+        if (_mainWindow is null)
+        {
+            _pendingClose = true;
+            AppLog.Info("Frontend", "Runtime close deferred until MainWindow construction.");
+            return;
+        }
+        _mainWindow.Close();
+    }
+
     private void ActivateOrDeferOnUiThread()
     {
         if (Volatile.Read(ref _shuttingDown) != 0) return;
@@ -165,6 +195,7 @@ public partial class App : Application
             if (_frontendClient is not null)
             {
                 _frontendClient.Disconnected -= OnFrontendDisconnected;
+                _frontendClient.CloseRequested -= OnFrontendCloseRequested;
                 AppLog.Info("Frontend", "Frontend client disposal started.");
                 await _frontendClient.DisposeAsync().ConfigureAwait(false);
                 _frontendClient = null;

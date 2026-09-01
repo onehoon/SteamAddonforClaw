@@ -56,6 +56,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly QamHostProcessController _qamHostController;
     private readonly OverlayProcessController _overlayController;
+    // OQ3-A: one narrow cross-surface ordering gate so a normal user request cannot run the two
+    // opposite Main UI <-> Overlay visibility transitions at the same time. Not a surface manager.
+    private readonly SemaphoreSlim _visibleSurfaceTransition = new(1, 1);
+    private static readonly TimeSpan MainUiCloseTimeout = TimeSpan.FromSeconds(6);
     private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
     private readonly GameBarForegroundPresentationDelivery _gameBarDelivery;
     private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
@@ -639,9 +643,78 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
-    internal void RequestFrontendOpen(FrontendOpenReason reason) => _frontendLauncher.RequestOpen(reason);
+    // OQ3-A: Main UI and Overlay are mutually exclusive visible surfaces. A Main UI open request
+    // first hides/retires the Overlay; an Overlay Show request first asks the Main UI to run its
+    // normal close path and waits for the .Frontend connection to disconnect.
+    internal void RequestFrontendOpen(FrontendOpenReason reason) => _ = CoordinateFrontendOpenAsync(reason);
 
-    internal void ToggleOverlayForPoc() => _ = _overlayController.ToggleForPocAsync();
+    internal void ToggleOverlayForPoc() => _ = CoordinateOverlayToggleAsync();
+
+    private async Task CoordinateFrontendOpenAsync(FrontendOpenReason reason)
+    {
+        await _visibleSurfaceTransition.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_overlayController.IsVisible)
+            {
+                AppLog.Info("UiSurface", "Overlay Hide requested before Main UI open.", ("Reason", reason));
+                await _overlayController.EnsureHiddenAsync().ConfigureAwait(false);
+                if (_overlayController.IsVisible)
+                    AppLog.Warn("UiSurface", "Main UI open proceeding though the Overlay still reports visible.", null, ("Reason", reason));
+                else
+                    AppLog.Info("UiSurface", "Overlay retired before Main UI open.", ("Reason", reason));
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("UiSurface", "Overlay retirement before Main UI open failed; requesting open anyway.", exception, ("Reason", reason));
+        }
+        finally { _visibleSurfaceTransition.Release(); }
+
+        _frontendLauncher.RequestOpen(reason);
+    }
+
+    private async Task CoordinateOverlayToggleAsync()
+    {
+        await _visibleSurfaceTransition.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_overlayController.IsVisible)
+            {
+                await _overlayController.EnsureHiddenAsync().ConfigureAwait(false);
+                return;
+            }
+
+            var server = _frontendServer;
+            if (server is not null)
+            {
+                AppLog.Info("UiSurface", "Main UI close requested before Overlay Show.");
+                bool retired;
+                try
+                {
+                    retired = await server.RequestClientCloseAsync(MainUiCloseTimeout, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("UiSurface", "Overlay Show blocked because the Main UI close request failed.", exception);
+                    return;
+                }
+                if (!retired)
+                {
+                    AppLog.Warn("UiSurface", "Overlay Show blocked because Main UI did not retire.", null);
+                    return;
+                }
+                AppLog.Info("UiSurface", "Main UI retired before Overlay Show.");
+            }
+
+            await _overlayController.ShowAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("UiSurface", "Overlay visible-surface coordination failed.", exception);
+        }
+        finally { _visibleSurfaceTransition.Release(); }
+    }
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
 
@@ -893,6 +966,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         _intelFpsRuntime.Dispose();
         await _qamHostController.DisposeAsync().ConfigureAwait(false);
+        // OQ3-A: disposed last, after the frontend server and Overlay controller are gone, so any
+        // in-flight visible-surface coordination has already unwound and released the gate.
+        try { _visibleSurfaceTransition.Dispose(); } catch (ObjectDisposedException) { }
         _startupComposition = null;
     }
 
