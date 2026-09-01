@@ -171,21 +171,34 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 return Fail("AuthorityChangedBeforeModeWrite", false, null);
             var transition = await _switchMode(MsiClawNativeMode.DirectInput, initialIdentity, cancellationToken).ConfigureAwait(false);
             modeWriteIssued = true;
-            if (!transition.Succeeded)
-                return Fail("Pid1902TransitionFailed:" + transition.Status + ":" + transition.Reason, true, null);
+            // PR11 section 6.2: the Addon's own controlled transition is the cross-mode continuity
+            // bridge -- the write succeeded, the old PID1901 disappeared, exactly one present PID1902
+            // target logical group appeared, and both source and target topology verified. The
+            // Windows physical-root/container string legitimately changes across a real MSI native
+            // mode switch, so it is NOT compared here.
+            if (!IsCrossModeTransitionProven(transition, out var transitionFailure))
+                return Fail("Pid1902TransitionFailed:" + transitionFailure, true, null);
+            AppLog.Info("ControllerOwnership", "PID1901->PID1902 transition verified.", ("Event", "Pid1902TransitionVerified"),
+                ("OldPidDisappeared", transition.OldPidDisappeared), ("TargetPidAppeared", transition.TargetPidAppeared),
+                ("SourceIdentityVerified", transition.SourceIdentityVerified), ("TargetTopologyVerified", transition.TargetTopologyVerified),
+                ("CrossModeTransitionVerified", true), ("CurrentTargetTopologyVerified", true));
         }
 
-        // 6-7. Authoritative post-transition capture; final state must be PID1902 with the SAME
-        //      strong physical identity. Never auto-roll PID1902 back to PID1901 on a later failure.
+        // 6-7. Authoritative post-transition capture; final state must be PID1902 / Strong.
+        //      Never auto-roll PID1902 back to PID1901 on a later failure.
         var finalCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
         if (!TryReadIdentity(finalCapture, out var finalMode, out var finalIdentity, out var finalReason))
             return Fail("FinalNativeState:" + finalReason, modeWriteIssued, null);
         if (finalMode != MsiClawNativeMode.DirectInput)
             return Fail("FinalModeNotPid1902:" + finalMode, modeWriteIssued, null);
-        if (!initialIdentity.StronglyMatches(finalIdentity))
-            return Fail("CrossModeIdentityMismatch", modeWriteIssued, null);
+        // Strong physical-identity equality is a SAME-MODE predicate only. Apply it only on an
+        // already-PID1902 boot (no mode write); a PID1901->PID1902 transition is proven by the
+        // controlled-transition evidence above plus the live-DirectInput proof below (PR11 section 4).
+        if (!modeWriteIssued && !initialIdentity.StronglyMatches(finalIdentity))
+            return Fail("SameModeIdentityMismatch", modeWriteIssued, null);
         AppLog.Info("ControllerOwnership", "PID1902 transition completed.", ("Event", "Pid1902TransitionCompleted"),
-            ("ModeWriteIssued", modeWriteIssued), ("FinalMode", finalMode), ("SamePhysicalIdentity", true));
+            ("ModeWriteIssued", modeWriteIssued), ("FinalMode", finalMode),
+            ("SamePhysicalIdentity", !modeWriteIssued), ("CrossModeTransitionVerified", modeWriteIssued));
 
         // 8. Bounded DirectInput descriptor resolution (same logic whether or not a mode write ran).
         var descriptor = await ResolveDirectInputDescriptorAsync(cancellationToken).ConfigureAwait(false);
@@ -298,14 +311,20 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 return new(false, "UnsupportedReleaseMode:" + mode, target);
             if (mode == MsiClawNativeMode.DirectInput)
             {
+                // PR11 section 9: the inverse PID1902 -> PID1901 transition is proven by the Addon's
+                // own controlled-transition evidence and a fresh XInput/PID1901 capture. The Windows
+                // physical-root string legitimately changes across the mode switch, so PID1902 and
+                // PID1901 identities are NOT compared with StronglyMatches here.
                 var switched = await _switchMode(MsiClawNativeMode.XInput, identity, cancellationToken).ConfigureAwait(false);
-                if (!switched.Succeeded)
-                    return new(false, "Pid1901RestoreFailed:" + switched.Status + ":" + switched.Reason, target);
+                if (!IsCrossModeTransitionProven(switched, out var switchFailure))
+                    return new(false, "Pid1901RestoreFailed:" + switchFailure, target);
                 var verified = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
-                if (!TryReadIdentity(verified, out var finalMode, out var finalIdentity, out var verifyReason)
-                    || finalMode != MsiClawNativeMode.XInput
-                    || !identity.StronglyMatches(finalIdentity))
+                // PR11 section 10: split verification failures -- do not concatenate an unrelated
+                // "Ok" (TryReadIdentity succeeded) when a later predicate is what actually failed.
+                if (!TryReadIdentity(verified, out var finalMode, out _, out var verifyReason))
                     return new(false, "Pid1901RestoreUnverified:" + verifyReason, target);
+                if (finalMode != MsiClawNativeMode.XInput)
+                    return new(false, "Pid1901RestoreFinalModeNotXInput:" + finalMode, target);
             }
 
             AppLog.Info("ControllerOwnership", "Physical ownership released for Center M enable.",
@@ -355,22 +374,28 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         if (!TryReadIdentity(capture, out var mode, out var identity, out var reason))
             return RecoveryFail("PhysicalDeviceMissing:" + reason, ownedTarget);
 
-        // The same strong physical MSI Claw must be proven BEFORE any forward action -- for a PID1901
-        // capture this proof must precede the reclaim mode write (work order PR9 section 6).
-        if (!ownedIdentity.StronglyMatches(identity))
-            return RecoveryFail("PhysicalIdentityMismatch", ownedTarget);
-
-        // 10.4 / PR9. Reconcile the current observed physical mode to the desired PID1902:
-        //   - already PID1902 / DirectInput: continue the PR8 recovery tail unchanged (no mode write);
-        //   - PID1901 / XInput on the SAME owned device while Center M is still exactly Disabled:
-        //     owned physical-state drift -- reclaim PID1902 exactly once, then re-prove the same
-        //     device, then continue the SAME tail;
-        //   - anything else: fail closed.
+        // 10.4 / PR9 + PR11 section 8. Reconcile the current observed physical mode to the desired
+        // PID1902:
+        //   - already PID1902 / DirectInput: same-mode recovery -- the current capture must strongly
+        //     match the committed owned identity (PR8);
+        //   - PID1901 / XInput while Center M is still exactly Disabled and the capture proves a
+        //     single unambiguous supported MSI Claw: owned physical-state drift. The reclaim uses the
+        //     fresh PID1901 identity as the source expectation and the Addon-issued transition as the
+        //     cross-mode bridge -- the old PID1902 root string is NOT compared to the PID1901 root
+        //     string (hardware validation proved it changes across a real MSI native mode switch);
+        //   - anything else: fail closed. (Ambiguity is already fail-closed inside the native capture.)
         var modeWriteIssued = false;
-        if (mode == MsiClawNativeMode.XInput)
+        MsiClawPhysicalIdentity finalPid1902Identity;
+        if (mode == MsiClawNativeMode.DirectInput)
+        {
+            if (!ownedIdentity.StronglyMatches(identity))
+                return RecoveryFail("PhysicalIdentityMismatch", ownedTarget);
+            finalPid1902Identity = identity;
+        }
+        else if (mode == MsiClawNativeMode.XInput)
         {
             AppLog.Warn("ControllerOwnership", "Owned physical-state drift detected.", null,
-                ("Event", "OwnedPhysicalStateDriftDetected"), ("CurrentMode", "PID1901"), ("IdentityMatched", true));
+                ("Event", "OwnedPhysicalStateDriftDetected"), ("CurrentMode", "PID1901"), ("CurrentIdentityConfidence", identity.Confidence));
 
             // 12. Fresh Center M startup-root authority read immediately before the reclaim write.
             if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
@@ -379,31 +404,40 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             AppLog.Info("ControllerOwnership", "Owned physical PID1902 reclaim started.",
                 ("Event", "OwnedPhysicalPid1902ReclaimStarted"), ("HiddenTarget", ownedTarget));
 
-            // 7. Exactly one PID1901 -> PID1902 transition per recovery invocation, through the same
-            //    existing mode-write primitive. No retry loop, no PID1901 fallback.
+            // 7. Exactly one PID1901 -> PID1902 transition per recovery invocation, expecting the
+            //    fresh current PID1901 identity as the source. No retry loop, no PID1901 fallback.
             var transition = await _switchMode(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
             modeWriteIssued = true;
-            if (!transition.Succeeded)
-                return RecoveryFail("OwnedPhysicalStateDriftReclaimFailed:" + transition.Status + ":" + transition.Reason, ownedTarget, true);
+            if (!IsCrossModeTransitionProven(transition, out var transitionFailure))
+                return RecoveryFail("OwnedPhysicalStateDriftReclaimFailed:" + transitionFailure, ownedTarget, true);
 
-            // 8. Mandatory bounded post-reclaim verification: same device, final PID1902.
+            // 8. Mandatory bounded post-reclaim verification: fresh final PID1902 / Strong. The
+            //    cross-mode root string is proven by the controlled transition + the live DirectInput
+            //    proof below, not by StronglyMatches against the pre-write identities.
             var reclaimed = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
             if (!TryReadIdentity(reclaimed, out var reclaimedMode, out var reclaimedIdentity, out var reclaimReason))
                 return RecoveryFail("OwnedPhysicalStateDriftReclaimUnverified:" + reclaimReason, ownedTarget, true);
             if (reclaimedMode != MsiClawNativeMode.DirectInput)
                 return RecoveryFail("OwnedPhysicalStateDriftReclaimFinalModeNotPid1902:" + reclaimedMode, ownedTarget, true);
-            if (!ownedIdentity.StronglyMatches(reclaimedIdentity) || !identity.StronglyMatches(reclaimedIdentity))
-                return RecoveryFail("OwnedPhysicalStateDriftReclaimIdentityMismatch", ownedTarget, true);
+            finalPid1902Identity = reclaimedIdentity;
+            // Prior ownership was already committed before the loss. The controlled cross-mode
+            // transition + this fresh Strong PID1902 capture now define the CURRENT same-mode PID1902
+            // identity -- adopt it immediately so a later PR10 deferred Device Arrival that retries
+            // after a subsequent recovery-tail failure compares the current identity, not the stale
+            // pre-drift one (review). The exact committed HidHide target is unchanged and still
+            // protects the rest of the recovery tail.
+            _ownedPhysicalIdentity = reclaimedIdentity;
             AppLog.Info("ControllerOwnership", "Owned physical PID1902 reclaim completed.",
-                ("Event", "OwnedPhysicalPid1902ReclaimCompleted"), ("FinalMode", "PID1902"), ("SamePhysicalIdentity", true));
+                ("Event", "OwnedPhysicalPid1902ReclaimCompleted"), ("FinalMode", "PID1902"),
+                ("FinalIdentityConfidence", reclaimedIdentity.Confidence), ("CrossModeTransitionVerified", true));
         }
-        else if (mode != MsiClawNativeMode.DirectInput)
+        else
         {
             return RecoveryFail("PhysicalDeviceMissing:UnsupportedMode:" + mode, ownedTarget);
         }
         AppLog.Info("ControllerOwnership", "Owned physical recovery native state proven.",
             ("Event", "OwnedPhysicalRecoveryNativeProven"), ("CurrentNativeMode", MsiClawNativeMode.DirectInput),
-            ("IdentityMatched", true), ("ModeWriteIssued", modeWriteIssued));
+            ("ModeWriteIssued", modeWriteIssued));
 
         // 10.5. Re-resolve the DirectInput descriptor through the same bounded selector path.
         var descriptor = await ResolveDirectInputDescriptorAsync(cancellationToken).ConfigureAwait(false);
@@ -415,7 +449,9 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         if (pnpDevice is null)
             return RecoveryFail("DirectInputNotResolved:PnpNodeMissing", ownedTarget, modeWriteIssued);
         var directInputIdentity = MsiClawPhysicalIdentity.From(pnpDevice);
-        if (directInputIdentity.Confidence != MsiClawIdentityConfidence.Strong || !ownedIdentity.StronglyMatches(directInputIdentity))
+        // Same-mode PID1902 <-> PID1902 comparison: the fresh final PID1902 native identity must match
+        // the resolved PID1902 DirectInput PnP collection (PR11 sections 4, 8.2).
+        if (directInputIdentity.Confidence != MsiClawIdentityConfidence.Strong || !finalPid1902Identity.StronglyMatches(directInputIdentity))
             return RecoveryFail("DirectInputPhysicalIdentityMismatch", ownedTarget, modeWriteIssued);
 
         // 10.6. PR8 only reacquires the exact same persistent hidden target. A changed exact PnP
@@ -472,8 +508,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             return RecoveryFail("FirstValidStateNotObserved", ownedTarget, modeWriteIssued);
         }
 
-        // 10.10. Commit. The exact target and strong identity are unchanged; the existing publisher is
-        //        already reading this same source and resumes receiving live snapshots.
+        // 10.10 / PR11 section 8.4. Commit. The exact hidden target is unchanged; the existing
+        //        publisher is already reading this same source and resumes receiving live snapshots.
+        //        (After a PID1901->PID1902 reclaim, _ownedPhysicalIdentity was already refreshed to
+        //        the fresh Strong PID1902 identity right after the post-reclaim capture verified.)
         _ownsInputSource = true;
         var successReason = modeWriteIssued ? "OwnedPhysicalStateDriftReclaimed" : "OwnedPhysicalInputRecovered";
         AppLog.Info("ControllerOwnership", "Owned physical input recovery succeeded.",
@@ -529,6 +567,22 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             }
             await _delay(_directInputSettleInterval, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>PR11 sections 3-6: an Addon-issued cross-mode PID transition is proven by the
+    /// transition's own evidence -- a successful write, the old PID gone, exactly one present target
+    /// logical group, and verified source + target topology -- NOT by physical-root string equality
+    /// (hardware validation proved that string is not stable across a real MSI native mode switch).</summary>
+    private static bool IsCrossModeTransitionProven(MsiClawModeTransitionResult transition, out string failure)
+    {
+        if (!transition.Succeeded) { failure = transition.Status + ":" + transition.Reason; return false; }
+        if (!transition.WriteSucceeded) { failure = "WriteNotConfirmed"; return false; }
+        if (!transition.OldPidDisappeared) { failure = "OldPidStillPresent"; return false; }
+        if (!transition.TargetPidAppeared) { failure = "TargetPidDidNotAppear"; return false; }
+        if (!transition.SourceIdentityVerified) { failure = "SourceIdentityNotVerified"; return false; }
+        if (!transition.TargetTopologyVerified) { failure = "TargetTopologyNotVerified"; return false; }
+        failure = string.Empty;
+        return true;
     }
 
     private static bool TryReadIdentity(NativeStateCaptureResult capture, out MsiClawNativeMode mode, out MsiClawPhysicalIdentity identity, out string reason)

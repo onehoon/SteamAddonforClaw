@@ -108,24 +108,60 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Empty(h.HidHideApplied);
     }
 
-    // ---- 25.5 final cross-mode identity mismatch (MANDATORY) ----
+    // ---- PR11 section 15: cross-mode root change is allowed; DI identity must still match ----
 
-    [Fact]
-    public async Task Final_cross_mode_identity_mismatch_fails_with_no_directinput_no_hide_no_rollback()
+    [Fact] // a PID1901->PID1902 transition whose fresh final PID1902 root differs from the PID1901
+           // root is NOT rejected for that reason -- the Addon-issued transition is the bridge.
+    public async Task Cross_mode_root_change_is_accepted_when_the_transition_and_live_directinput_verify()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.XInput,                 // initial PID1901 root == PhysKey
+            FinalPhysKey = @"USB\VID_0DB0\PID1902ROOT",             // DIFFERENT PID1902 physical root
+            DirectInputPnpPhysKey = @"USB\VID_0DB0\PID1902ROOT",    // live DI descriptor matches the FINAL PID1902 identity
+        };
+        var owner = h.Build();
+        var result = await owner.AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.True(result.ModeWriteIssued);
+        Assert.Equal(1, h.SwitchCalls);
+        Assert.Equal(new[] { PrimaryPnp }, h.HidHideApplied);
+        // PR11 section 19: a live PR5 input source MUST exist after a cross-mode ownership success,
+        // so PR6/PR7 can attach an X360/SteamDeck presentation instead of "no live PR5 input source".
+        Assert.NotNull(owner.LiveInputSource);
+        Assert.True(owner.LiveInputSource!.IsRunning);
+    }
+
+    [Fact] // ...but a DirectInput descriptor whose PID1902 identity does not match the fresh final
+           // PID1902 native identity still fails closed (stale/other-device protection).
+    public async Task Final_pid1902_identity_not_matching_the_directinput_descriptor_fails_closed()
     {
         var h = new Harness
         {
             InitialMode = MsiClawNativeMode.XInput,
-            FinalPhysKey = OtherPhysKey, // mode write "succeeded" but a different physical MSI Claw
+            FinalPhysKey = @"USB\VID_0DB0\PID1902ROOT",
+            DirectInputPnpPhysKey = OtherPhysKey, // descriptor belongs to a different current PID1902 identity
         };
         var result = await h.Build().AcquireAsync(default);
 
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
-        Assert.Contains("CrossModeIdentityMismatch", result.Reason);
-        Assert.Equal(1, h.SwitchCalls);
+        Assert.Contains("DirectInputPhysicalIdentityMismatch", result.Reason);
         Assert.DoesNotContain(h.SwitchTargets, t => t == MsiClawNativeMode.XInput); // no PID1901 rollback
         Assert.False(h.InputSource.StartCalled);
         Assert.Empty(h.HidHideApplied);
+    }
+
+    [Fact] // an already-PID1902 boot keeps the strict SAME-MODE identity check
+    public async Task Already_pid1902_boot_still_fails_on_a_same_mode_identity_mismatch()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, SecondCapturePhysKey = OtherPhysKey };
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Contains("SameModeIdentityMismatch", result.Reason);
+        Assert.Equal(0, h.SwitchCalls);
+        Assert.False(h.InputSource.StartCalled);
     }
 
     // ---- 26.1 DirectInput appears after a short delay ----
@@ -334,9 +370,47 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var release = await owner.ReleaseForCenterMEnableAsync(default);
 
         Assert.False(release.Succeeded);
-        Assert.Contains("Pid1901Restore", release.Reason);
+        Assert.Contains("Pid1901RestoreFailed", release.Reason);
         Assert.Equal(PrimaryPnp, release.HiddenTarget); // still surfaced so the caller does not lose it
         Assert.True(h.InputSource.StopCalled);
+    }
+
+    [Fact] // PR11 sections 9/10: the inverse PID1902->PID1901 transition is proven by the controlled
+           // transition + a fresh XInput capture. A different PID1901 root is NOT a failure, and the
+           // misleading literal "Pid1901RestoreUnverified:Ok" can no longer be emitted.
+    public async Task Release_succeeds_across_a_cross_mode_root_change_and_never_reports_restore_unverified_ok()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,        // owned PID1902 root == PhysKey
+            FinalPhysKey = @"USB\VID_0DB0\PID1901_ROOT_AFTER",  // fresh PID1901 root after the release switch
+        };
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Equal(new[] { MsiClawNativeMode.XInput }, h.SwitchTargets);
+        Assert.DoesNotContain("Pid1901RestoreUnverified:Ok", release.Reason);
+    }
+
+    [Fact] // PR11 section 10: final mode not XInput is its own reason, not "...:Ok"
+    public async Task Release_when_the_final_capture_is_not_xinput_fails_with_a_precise_reason()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            FinalModeAfterSwitch = MsiClawNativeMode.DirectInput, // the switch "succeeded" but PID1902 remains
+        };
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.False(release.Succeeded);
+        Assert.Contains("Pid1901RestoreFinalModeNotXInput", release.Reason);
+        Assert.DoesNotContain(":Ok", release.Reason);
     }
 
     [Fact]
@@ -499,19 +573,49 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             h.Events);
     }
 
-    [Fact] // 21.2 -- mandatory: a different strong PID1901 identity is never switched
-    public async Task Pid1901_on_a_different_strong_identity_never_receives_a_mode_write()
+    [Fact] // PR11 section 16: real cross-mode drift -- owned PID1902 root A, drifts to PID1901 root B,
+           // reclaims to PID1902 root C. The PID1901 root is NOT compared to the prior PID1902 root.
+    public async Task Cross_mode_pid1901_drift_reclaims_even_when_all_three_roots_differ()
     {
         var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
-        h.RecoveryPhysKey = OtherPhysKey;
+        h.RecoveryPhysKey = @"USB\VID_0DB0\PID1901_ROOT_B";           // current PID1901 root, != owned PID1902 root
+        h.RecoveryPhysKeyAfterReclaim = @"USB\VID_0DB0\PID1902_ROOT_C"; // fresh PID1902 root after the reclaim
 
         var recovery = await owner.RecoverLostInputAsync(default);
 
-        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
-        Assert.Contains("PhysicalIdentityMismatch", recovery.Reason);
-        Assert.Equal(0, h.SwitchCalls);
-        Assert.DoesNotContain("HidHideApply", h.Events);
-        Assert.DoesNotContain("InputStart", h.Events);
+        Assert.True(recovery.IsOwned);
+        Assert.Equal("OwnedPhysicalStateDriftReclaimed", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.Equal(1, h.RecoverySwitchCalls);
+        Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets);
+        Assert.Equal(PrimaryPnp, recovery.HiddenTarget); // exact owned target unchanged
+    }
+
+    [Fact] // review: a reclaim that succeeds then fails LATER in the tail must adopt the fresh PID1902
+           // identity so a PR10 deferred Device Arrival retry continues the same-mode PR8 tail.
+    public async Task Reclaim_that_fails_after_the_switch_still_lets_a_later_same_mode_retry_recover()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryPhysKey = @"USB\VID_0DB0\PID1901_ROOT_B";
+        h.RecoveryPhysKeyAfterReclaim = @"USB\VID_0DB0\PID1902_ROOT_C";
+        h.RecoveryPnp = OtherPrimaryPnp; // recovery #1: reclaim succeeds, then the tail fails (target changed)
+
+        var first = await owner.RecoverLostInputAsync(default);
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, first.Outcome);
+        Assert.Contains("RecoveredTargetChanged", first.Reason);
+        Assert.True(first.ModeWriteIssued);
+
+        // The controller is now PID1902 / root C. A later retry (e.g. PR10 deferred arrival) sees the
+        // current same-mode identity, NOT the stale pre-drift one.
+        h.RecoveryPnp = null;
+        h.Events.Clear();
+        var second = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(second.IsOwned);
+        Assert.Equal("OwnedPhysicalInputRecovered", second.Reason); // same-mode PR8 tail
+        Assert.False(second.ModeWriteIssued);
+        Assert.Equal(1, h.RecoverySwitchCalls); // NO second mode write
+        Assert.Same(h.InputSource, owner.LiveInputSource);
     }
 
     [Theory] // 21.3
@@ -549,15 +653,13 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.DoesNotContain("InputStart", h.Events);
     }
 
-    [Theory] // 21.5 / 21.6 -- post-write verification
-    [InlineData("XInput", null)]        // final mode still PID1901
-    [InlineData("Other", null)]         // final mode ambiguous / unsupported
-    [InlineData("DirectInput", "diff")] // final PID1902 but a different strong identity
-    public async Task Pid1902_reclaim_post_write_verification_failure_fails_closed(string finalMode, string? identity)
+    [Theory] // PR11 section 8: post-write verification -- the fresh final capture must be PID1902
+    [InlineData("XInput")]  // final mode still PID1901
+    [InlineData("Other")]   // final mode ambiguous / unsupported
+    public async Task Pid1902_reclaim_final_mode_not_pid1902_fails_closed(string finalMode)
     {
         var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
         h.RecoveryModeAfterReclaim = Enum.Parse<MsiClawNativeMode>(finalMode);
-        if (identity is not null) h.RecoveryPhysKeyAfterReclaim = OtherPhysKey;
 
         var recovery = await owner.RecoverLostInputAsync(default);
 
@@ -565,6 +667,23 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.True(recovery.ModeWriteIssued);
         Assert.Equal(1, h.RecoverySwitchCalls);
         Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets); // no rollback
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.DoesNotContain("InputStart", h.Events);
+    }
+
+    [Fact] // PR11 sections 4/8: the fresh final PID1902 native identity must match the resolved
+           // PID1902 DirectInput descriptor -- stale/other-device protection after a reclaim.
+    public async Task Pid1902_reclaim_where_the_directinput_descriptor_does_not_match_the_final_identity_fails_closed()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryPhysKeyAfterReclaim = @"USB\VID_0DB0\FINAL_1902";  // fresh final PID1902 native identity
+        h.RecoveryPnpPhysKeyAfterReclaim = OtherPhysKey;             // resolved descriptor belongs elsewhere
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("DirectInputPhysicalIdentityMismatch", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
         Assert.DoesNotContain("HidHideApply", h.Events);
         Assert.DoesNotContain("InputStart", h.Events);
     }
@@ -1018,6 +1137,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public NativeStateCaptureStatus InitialCaptureStatus { get; set; } = NativeStateCaptureStatus.Success;
         public MsiClawIdentityConfidence InitialConfidence { get; set; } = MsiClawIdentityConfidence.Strong;
         public string FinalPhysKey { get; set; } = PhysKey;
+        public string? SecondCapturePhysKey { get; set; }
+        public MsiClawNativeMode? FinalModeAfterSwitch { get; set; }
+        private int _nonRecoveringCaptureCount;
         public bool SwitchSucceeds { get; set; } = true;
         public int DirectInputMissingAttempts { get; set; }
         public int DirectInputUnverifiedAttempts { get; set; }
@@ -1038,6 +1160,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         // ---- PR9 PID1901 drift reclaim knobs: the "after the reclaim mode write" observed state ----
         public MsiClawNativeMode? RecoveryModeAfterReclaim { get; set; }
         public string? RecoveryPhysKeyAfterReclaim { get; set; }
+        public string? RecoveryPnpPhysKeyAfterReclaim { get; set; }
         public NativeStateCaptureStatus? RecoveryCaptureStatusAfterReclaim { get; set; }
         public bool RecoverySwitchSucceeds { get; set; } = true;
         public int RecoverySwitchCalls { get; private set; }
@@ -1084,10 +1207,16 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                         return Task.FromResult(new NativeStateCaptureResult(RecoveryCurrentStatus, null, RecoveryCurrentStatus.ToString()));
                     return Task.FromResult(Capture(RecoveryCurrentMode, MsiClawIdentityConfidence.Strong, RecoveryCurrentPhysKey));
                 }
+                _nonRecoveringCaptureCount++;
+                // PR11: an already-PID1902 boot (no switch) still does two captures -- SecondCapturePhysKey
+                // lets a test express a same-mode identity mismatch between them.
+                var physKey = SwitchCalls == 0
+                    ? _nonRecoveringCaptureCount > 1 ? SecondCapturePhysKey ?? PhysKey : PhysKey
+                    : FinalPhysKey;
                 return Task.FromResult(Capture(
-                    SwitchCalls == 0 ? InitialMode : LastSwitchTarget,
+                    SwitchCalls == 0 ? InitialMode : FinalModeAfterSwitch ?? LastSwitchTarget,
                     SwitchCalls == 0 ? InitialConfidence : MsiClawIdentityConfidence.Strong,
-                    SwitchCalls == 0 ? PhysKey : FinalPhysKey));
+                    physKey));
             },
             (target, _, _) =>
             {
@@ -1116,7 +1245,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 return [Descriptor(Guid.NewGuid())];
             },
             instanceId => instanceId == EffectivePnp
-                ? PnpDevice(EffectivePnp, Recovering ? RecoveryPhysKey ?? DirectInputPnpPhysKey : DirectInputPnpPhysKey)
+                ? PnpDevice(EffectivePnp, Recovering
+                    ? RecoverySwitchCalls > 0 && RecoveryPnpPhysKeyAfterReclaim is not null ? RecoveryPnpPhysKeyAfterReclaim : RecoveryCurrentPhysKey
+                    : DirectInputPnpPhysKey)
                 : null,
             InputSource,
             target =>

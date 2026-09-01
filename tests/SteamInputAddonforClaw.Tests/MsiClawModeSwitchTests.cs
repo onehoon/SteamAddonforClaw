@@ -253,31 +253,37 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
-    public async Task XInput_to_DirectInput_succeeds_when_target_has_a_new_root_and_old_pid_remains()
+    public async Task XInput_to_DirectInput_succeeds_when_the_target_has_a_new_root_and_the_old_pid_is_gone()
     {
+        // PR11 section 14: the supported MSI Claw legitimately exposes a DIFFERENT Windows
+        // physical-root representation in PID1902 vs PID1901. That alone must not fail the transition.
         var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
         var target = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1902\\ROOT_B", 0x1902);
         var writer = new RecordingWriter();
-        var result = await new MsiClawModeController(new SequenceEnumerator([source], [source, target]), new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(1), TimeSpan.Zero)
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [target]), new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(1), TimeSpan.Zero)
             .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
 
         Assert.True(result.Succeeded);
-        Assert.False(result.OldPidDisappeared);
+        Assert.True(result.OldPidDisappeared);
+        Assert.True(result.TargetPidAppeared);
         Assert.True(result.SourceIdentityVerified);
         Assert.True(result.TargetTopologyVerified);
     }
 
     [Fact]
-    public async Task DirectInput_to_XInput_succeeds_when_target_has_a_new_root_and_old_pid_remains()
+    public async Task Transition_does_not_succeed_while_the_old_pid_is_still_present()
     {
-        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1902\\ROOT_B", 0x1902);
-        var target = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_C", 0x1901);
-        var result = await new MsiClawModeController(new SequenceEnumerator([source], [source, target]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero)
-            .SwitchModeAsync(MsiClawNativeMode.XInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+        // PR11 section 5/14: one present target logical group is NOT enough -- the old native-mode
+        // device must be gone. If it stays through the bounded window, fail closed.
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var target = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1902\\ROOT_B", 0x1902);
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [source, target]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromMilliseconds(80), TimeSpan.FromMilliseconds(5))
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
 
-        Assert.True(result.Succeeded);
+        Assert.False(result.Succeeded);
+        Assert.Equal(MsiClawModeTransitionStatus.OldDeviceDidNotDisappear, result.Status);
         Assert.False(result.OldPidDisappeared);
-        Assert.True(result.TargetTopologyVerified);
+        Assert.True(result.TargetPidAppeared);
     }
 
     [Fact]

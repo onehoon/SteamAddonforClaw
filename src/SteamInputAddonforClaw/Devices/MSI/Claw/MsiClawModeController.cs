@@ -136,19 +136,29 @@ internal sealed class MsiClawModeController(
                 ("TargetPidPresent", targetPidPresent),
                 ("TargetControlCandidateCount", targets.Length),
                 ("LogicalCandidateCount", targetGroups.Length));
-            if (targetGroups.Length == 1)
-            {
-                var observed = targetGroups[0].First();
-                AppLog.Debug("NativeMode", "NativeModeTargetObserved", ("TargetPID", targetTopology.ProductId), ("TargetIdentityConfidence", MsiClawPhysicalIdentity.From(observed).Confidence), ("CrossModeIdentityChanged", !expectedIdentity.StronglyMatches(MsiClawPhysicalIdentity.From(observed))));
-                AppLog.Debug("NativeMode", "NativeModeTransitionSucceeded", ("SourceMode", source.Mode), ("TargetMode", target), ("OldPidDisappeared", oldGone));
-                return Result(MsiClawModeTransitionStatus.Succeeded, source.Mode, target, started, "Native mode transition verified.", oldPid, true, oldGone, true, true, true);
-            }
             if (targetGroups.Length > 1)
             {
                 AppLog.Debug("NativeMode", "NativeModeTargetAmbiguous", ("TargetMode", target), ("CandidateCount", targets.Length), ("LogicalCandidateCount", targetGroups.Length));
                 return Result(MsiClawModeTransitionStatus.AmbiguousDevice, source.Mode, target, started, "Target control HID was ambiguous.", oldPid, true, oldGone, true, true);
             }
+            // PR11 section 5: cross-mode continuity needs BOTH exactly one present target logical
+            // control group AND the old PID gone. A single target group while the old PID is still
+            // present is a normal mid-transition state -- keep settling inside the bounded window.
+            if (targetGroups.Length == 1 && oldGone)
+            {
+                var observed = targetGroups[0].First();
+                AppLog.Debug("NativeMode", "NativeModeTargetObserved", ("TargetPID", targetTopology.ProductId), ("TargetIdentityConfidence", MsiClawPhysicalIdentity.From(observed).Confidence), ("CrossModeIdentityChanged", !expectedIdentity.StronglyMatches(MsiClawPhysicalIdentity.From(observed))));
+                AppLog.Debug("NativeMode", "NativeModeTransitionSucceeded", ("SourceMode", source.Mode), ("TargetMode", target), ("OldPidDisappeared", true));
+                return Result(MsiClawModeTransitionStatus.Succeeded, source.Mode, target, started, "Native mode transition verified.", oldPid, true, true, true, true, true);
+            }
             await Task.Delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+        }
+        // Bounded window expired. Distinguish "target never appeared" from "target appeared but the
+        // old native-mode device stayed present" so the caller can fail closed with a real reason.
+        if (targetSeen && !oldGone)
+        {
+            AppLog.Debug("NativeMode", "NativeModeOldDeviceDidNotDisappear", ("SourceMode", source.Mode), ("TargetMode", target));
+            return Result(MsiClawModeTransitionStatus.OldDeviceDidNotDisappear, source.Mode, target, started, "The previous native-mode device did not disappear.", oldPid, true, oldGone, true, true);
         }
         AppLog.Debug("NativeMode", "NativeModeTransitionTimedOut", ("SourceMode", source.Mode), ("TargetMode", target), ("OldPidDisappeared", oldGone));
         return Result(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, source.Mode, target, started, "Native mode re-enumeration did not complete.", oldPid, true, oldGone, targetSeen, true);
