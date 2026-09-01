@@ -33,6 +33,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     internal string ExecutablePath => _executablePath;
     internal bool HasTrackedProcess { get { lock (_sync) return _process is { HasExited: false }; } }
 
+    // OQ3-A: the single Overlay visibility fact, exposed so AddonProcessHost can enforce the
+    // Main UI <-> Overlay visible-surface ordering explicitly instead of relying on a blind toggle.
+    internal bool IsVisible { get { lock (_sync) return _visible; } }
+
     internal async Task<bool> StartAsync(CancellationToken cancellationToken = default)
     {
         var startupRequested = Stopwatch.StartNew();
@@ -61,22 +65,33 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         finally { _transition.Release(); }
     }
 
-    internal async Task ToggleForPocAsync()
+    // Thin compatibility/test wrapper: flip whatever the current visibility is.
+    internal Task ToggleForPocAsync() => SetVisibilityAsync(requestedShow: null);
+
+    // OQ3-A: explicit Show, for the coordinated Main UI -> Overlay path.
+    internal Task<bool> ShowAsync() => SetVisibilityAsync(requestedShow: true);
+
+    // OQ3-A: explicit Hide/retire, for the coordinated Overlay -> Main UI path. Idempotent when the
+    // Overlay is already hidden. A failed Hide reuses the existing bounded session retirement.
+    internal Task<bool> EnsureHiddenAsync() => SetVisibilityAsync(requestedShow: false);
+
+    private async Task<bool> SetVisibilityAsync(bool? requestedShow)
     {
         await _transition.WaitAsync().ConfigureAwait(false);
         try
         {
-            lock (_sync) if (_stopping) return;
-            if (!await StartAsyncUnderTransitionAsync().ConfigureAwait(false)) return;
+            lock (_sync) if (_stopping) return false;
+            if (!await StartAsyncUnderTransitionAsync().ConfigureAwait(false)) return false;
 
             NamedPipeOverlayServer? server;
             bool show;
             lock (_sync)
             {
+                if (requestedShow is { } target && target == _visible) return true;
                 server = _server;
-                show = !_visible;
+                show = requestedShow ?? !_visible;
             }
-            if (server is null) return;
+            if (server is null) return false;
             var command = show ? OverlayCommand.Show : OverlayCommand.Hide;
             var pid = GetProcessId(process: null);
             var requested = Stopwatch.StartNew();
@@ -86,15 +101,17 @@ internal sealed class OverlayProcessController : IAsyncDisposable
                 AppLog.Warn("Overlay", "Overlay POC command was not acknowledged; retiring the current Overlay session.",
                     null, ("Command", command), ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds), ("Action", "RetireSession"));
                 await StopCurrentAsync().ConfigureAwait(false);
-                return;
+                return false;
             }
             lock (_sync) _visible = show;
             AppLog.Info("Overlay", "Overlay command acknowledged.", ("Command", command), ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds));
+            return true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             AppLog.Warn("Overlay", "Overlay POC toggle failed; the next explicit toggle may relaunch it.", exception);
             await StopCurrentAsync().ConfigureAwait(false);
+            return false;
         }
         finally { _transition.Release(); }
     }

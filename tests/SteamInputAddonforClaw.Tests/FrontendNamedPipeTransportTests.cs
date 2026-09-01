@@ -990,9 +990,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":18,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":18,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":18,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":19,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":19,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":19,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1135,6 +1135,92 @@ public sealed class FrontendNamedPipeTransportTests
         stream.ReleasePayload();
         await write;
         Assert.Equal(2, stream.WriteCount);
+    }
+
+    [Fact]
+    public async Task Pre_overlay_coexistence_v18_peer_is_rejected_at_handshake()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = new NamedPipeAddonFrontendClient(pipeName, 18);
+
+        await Assert.ThrowsAsync<FrontendProtocolException>(() => client.ConnectAsync());
+        Assert.Equal(0, fake.TotalCalls);
+    }
+
+    [Fact]
+    public async Task Close_requested_notification_reaches_the_client_event()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var closeRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.CloseRequested += (_, _) => closeRequested.TrySetResult();
+
+        _ = server.RequestClientCloseAsync(TimeSpan.FromSeconds(5));
+
+        await closeRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
+    }
+
+    [Fact]
+    public async Task Request_client_close_succeeds_only_after_the_client_disconnects()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        var client = await ConnectAsync(pipeName);
+        var closeRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.CloseRequested += (_, _) => closeRequested.TrySetResult();
+
+        var close = server.RequestClientCloseAsync(TimeSpan.FromSeconds(5));
+        await closeRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(close.IsCompleted);
+
+        await client.DisposeAsync();
+        Assert.True(await close.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Request_client_close_returns_true_immediately_when_no_frontend_is_connected()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+
+        Assert.True(await server.RequestClientCloseAsync(TimeSpan.FromSeconds(1)));
+    }
+
+    [Fact]
+    public async Task Request_client_close_times_out_when_the_connected_client_does_not_close()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        Assert.False(await server.RequestClientCloseAsync(TimeSpan.FromMilliseconds(300)));
+        Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
+    }
+
+    [Fact]
+    public async Task Close_request_notification_does_not_interleave_with_responses_or_state_invalidation()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var invalidated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.StateInvalidated += (_, _) => invalidated.TrySetResult();
+
+        var close = server.RequestClientCloseAsync(TimeSpan.FromMilliseconds(400));
+        fake.RaiseStateInvalidated();
+        Assert.Equal(fake.Bootstrap, await client.GetBootstrapAsync());
+        Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
+        await invalidated.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(await close);
     }
 
     private static async Task WriteRawFrameAsync(Stream stream, string json)

@@ -21,6 +21,9 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     private readonly CancellationTokenSource _lifetime = new(); private readonly SemaphoreSlim _writeGate = new(1, 1); private readonly object _connectionGate = new(); private NamedPipeClientStream? _pipe; private Exception? _disconnectReason; private Task? _readLoop; private long _nextRequestId; private int _disposed; private int _connecting; private int _disconnectedRaised;
     public event EventHandler? StateInvalidated;
     public event EventHandler? Disconnected;
+    // OQ3-A: the Runtime asks the connected Main UI to run its normal close path before the Addon
+    // Overlay is shown. Narrow notification only -- not a general command bus.
+    public event EventHandler? CloseRequested;
     public NamedPipeAddonFrontendClient(string pipeName) : this(pipeName, FrontendTransportProtocol.CurrentVersion) { }
     internal NamedPipeAddonFrontendClient(string pipeName, int version) { _pipeName = pipeName; _version = version; }
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -136,6 +139,11 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
                 if (message.Kind == FrontendWireMessageKind.Notification && message.Notification == FrontendNotificationKind.StateInvalidated)
                 {
                     StateInvalidated?.Invoke(this, EventArgs.Empty);
+                    continue;
+                }
+                if (message.Kind == FrontendWireMessageKind.Notification && message.Notification == FrontendNotificationKind.CloseRequested)
+                {
+                    CloseRequested?.Invoke(this, EventArgs.Empty);
                     continue;
                 }
                 if (message.Kind != FrontendWireMessageKind.Response || message.RequestId is not > 0)

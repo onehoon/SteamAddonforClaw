@@ -6,14 +6,55 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 
 public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
 {
-    private readonly string _pipeName; private readonly IAddonFrontendControl _inner; private readonly Func<NamedPipeServerStream> _pipeFactory; private readonly CancellationTokenSource _lifetime = new(); private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously); private NamedPipeServerStream? _activePipe; private Task? _acceptLoop; private int _started; private int _disposed;
+    private readonly string _pipeName; private readonly IAddonFrontendControl _inner; private readonly Func<NamedPipeServerStream> _pipeFactory; private readonly CancellationTokenSource _lifetime = new(); private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously); private NamedPipeServerStream? _activePipe; private Task? _acceptLoop; private int _started; private int _disposed; private volatile ServedConnection? _servedConnection;
+
+    // OQ3-A: a handle to the currently served frontend connection so the Runtime can ask the Main UI
+    // to run its normal close path and then positively observe THIS connection disconnecting. The
+    // server already permits only one connected frontend -- this is not a multi-client model.
+    private sealed class ServedConnection
+    {
+        internal required Func<Task> SendCloseRequestedAsync { get; init; }
+        internal required Task Completion { get; init; }
+    }
     public NamedPipeAddonFrontendServer(string pipeName, IAddonFrontendControl inner) : this(pipeName, inner, () => new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly)) { }
     internal NamedPipeAddonFrontendServer(string pipeName, IAddonFrontendControl inner, Func<NamedPipeServerStream> pipeFactory) { _pipeName = pipeName; _inner = inner; _pipeFactory = pipeFactory; }
     public Task StartAsync() { ObjectDisposedException.ThrowIf(_disposed != 0, this); if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("Server already started."); _acceptLoop = AcceptLoopAsync(); return _ready.Task; }
+
+    /// <summary>OQ3-A: ask the connected Main UI to run its normal close path, then wait for THIS
+    /// current frontend connection to disconnect. Returns true when no client is connected, or when
+    /// the connection is positively observed gone. Returns false when the send fails while the client
+    /// is still connected, or the wait times out with the client still connected. One attempt only --
+    /// no retries, no forced kill.</summary>
+    public async Task<bool> RequestClientCloseAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var served = _servedConnection;
+        if (served is null) return true;
+        try
+        {
+            await served.SendCloseRequestedAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // Send failed: only a connection that is already gone counts as successfully retired.
+            return served.Completion.IsCompleted;
+        }
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+        try
+        {
+            await served.Completion.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return served.Completion.IsCompleted;
+        }
+    }
     private async Task AcceptLoopAsync()
     { while (!_lifetime.IsCancellationRequested) { try { await using var pipe = _pipeFactory(); Interlocked.Exchange(ref _activePipe, pipe); _ready.TrySetResult(); await pipe.WaitForConnectionAsync(_lifetime.Token).ConfigureAwait(false); await ServeAsync(pipe, _lifetime.Token).ConfigureAwait(false); } catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { _ready.TrySetCanceled(_lifetime.Token); } catch (Exception exception) { if (_ready.TrySetException(exception)) return; try { await Task.Delay(100, _lifetime.Token).ConfigureAwait(false); } catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { } } finally { Interlocked.Exchange(ref _activePipe, null)?.Dispose(); } } }
     private async Task ServeAsync(Stream pipe, CancellationToken token)
-    { using var connection = CancellationTokenSource.CreateLinkedTokenSource(token); using var gate = new SemaphoreSlim(1, 1); var requests = new ConcurrentDictionary<long, CancellationTokenSource>(); var activeRequests = new ConcurrentDictionary<long, Task>(); var operationGate = new SemaphoreSlim(1, 1); var notificationGate = new object(); Task? notificationTask = null; var notificationDirty = false; var notificationSending = false; var probeSessionMayBeOpen = false;
+    { using var connection = CancellationTokenSource.CreateLinkedTokenSource(token); using var gate = new SemaphoreSlim(1, 1); var requests = new ConcurrentDictionary<long, CancellationTokenSource>(); var activeRequests = new ConcurrentDictionary<long, Task>(); var operationGate = new SemaphoreSlim(1, 1); var notificationGate = new object(); Task? notificationTask = null; var notificationDirty = false; var notificationSending = false; var probeSessionMayBeOpen = false; var connectionClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         async Task Send(FrontendWireEnvelope e) => await FrontendWireCodec.WriteAsync(pipe, e, gate, connection.Token).ConfigureAwait(false);
         async Task Notify()
         {
@@ -70,6 +111,11 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
             }
         }
         try { var hello = await FrontendWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false); if (hello.Kind != FrontendWireMessageKind.Handshake || hello.ProtocolVersion != FrontendTransportProtocol.CurrentVersion) { await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.ProtocolError, Error: new(FrontendRemoteErrorCode.ProtocolMismatch, "Protocol version mismatch."))).ConfigureAwait(false); return; } await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.HandshakeAccepted)).ConfigureAwait(false); _inner.StateInvalidated += Invalidated;
+            _servedConnection = new ServedConnection
+            {
+                SendCloseRequestedAsync = () => Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Notification, Notification: FrontendNotificationKind.CloseRequested)),
+                Completion = connectionClosed.Task
+            };
             while (!connection.IsCancellationRequested)
             {
                 FrontendWireEnvelope message;
@@ -119,7 +165,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                 activeRequests.TryAdd(id, requestTask);
                 startSignal.TrySetResult();
             } }
-        finally { _inner.StateInvalidated -= Invalidated; connection.Cancel(); foreach (var item in requests.Values) item.Cancel(); try { await Task.WhenAll(activeRequests.Values).ConfigureAwait(false); } catch { } Task? pendingNotification; lock (notificationGate) pendingNotification = notificationTask; if (pendingNotification is not null) try { await pendingNotification.ConfigureAwait(false); } catch { }
+        finally { _servedConnection = null; connectionClosed.TrySetResult(); _inner.StateInvalidated -= Invalidated; connection.Cancel(); foreach (var item in requests.Values) item.Cancel(); try { await Task.WhenAll(activeRequests.Values).ConfigureAwait(false); } catch { } Task? pendingNotification; lock (notificationGate) pendingNotification = notificationTask; if (pendingNotification is not null) try { await pendingNotification.ConfigureAwait(false); } catch { }
             // Frontend disconnect (crash/kill, or the pipe otherwise dropping without an orderly
             // Close call) must still retire a Runtime-owned Claw Sensor Probe session: unlike the
             // old in-process page, this diagnostic keeps actively reading sensors in the headless
