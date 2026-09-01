@@ -140,6 +140,11 @@ public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, Front
 {
     public bool DeveloperMenuEnabled { get; init; }
     public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
+    /// <summary>While true (MSI Center M startup config is exactly Disabled, PR2.5) the Runtime
+    /// enforces <see cref="LaunchAtWindowsStartup"/> ON -- an OFF request is rejected and this
+    /// snapshot comes back with <see cref="LaunchAtWindowsStartup"/> still true. Optional, defaulted:
+    /// an older peer that omits it simply renders the toggle unlocked.</summary>
+    public bool LaunchAtWindowsStartupRequired { get; init; }
 }
 public enum FrontendSteamInputRoutingMutationOutcome { Succeeded }
 public sealed record FrontendSteamInputRoutingMutationResult(FrontendSteamInputRoutingMutationOutcome Outcome, FrontendSettingsSnapshot Settings)

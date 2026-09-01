@@ -19,6 +19,7 @@ using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.GameBar;
+using SteamInputAddonforClaw.CenterMStartup;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -46,6 +47,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _disposed;
     private int _startupStarted;
     private IAddonFrontendControl? _frontendControl;
+    // One shared MSI Center M startup reader: the Device-page frontend feature, the mandatory
+    // Runtime termination policy, and the mandatory launch-at-startup predicate all read from it
+    // (PR2.5 work order section 8) rather than constructing independent Center M readers.
+    private CenterMStartupControl? _centerMStartupControl;
     private NamedPipeAddonFrontendServer? _frontendServer;
     private NamedPipeAddonFrontendServer? _qamFrontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher;
@@ -208,6 +213,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
         AppLog.Info($"Starting runtime. Environment={startupResult.EnvironmentMode}; Readiness={startupResult.EnvironmentReadiness}.");
 
+        _centerMStartupControl = new CenterMStartupControl(startupResult.HardwareSupported);
+
         var composition = _runtimeCompositionFactory?.Invoke(startupComposition, startupResult)
             ?? AddonRuntimeCompositionFactory.Create(
                 startupComposition.HandheldDeviceAdapter,
@@ -219,7 +226,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 startupResult.HardwareSupported,
                 winGSuppressionGuard: _winGSuppressionGuard,
                 bigPictureStateChanged: _qamHostController.OnBigPictureStateChanged,
-                routingReconcileCompleted: null);
+                routingReconcileCompleted: null,
+                // PR2.5: while Center M startup config is exactly Disabled, launch-at-startup is a
+                // mandatory-ON policy the Repair()/setter enforce -- not a user preference.
+                isLaunchAtWindowsStartupRequired: IsControllerRuntimeMandatory);
 
         // Frontend transport and tray readiness are independent of OEM1 activation. Routing still
         // awaits this task at its helper-acquisition boundary, so removing this process-wide await
@@ -256,10 +266,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
             intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
-            // MSI Center M startup Enable/Disable (work order PR1). Gated on the SAME startup
-            // hardware-support fact as OEM1 mapping above -- a non-Claw machine reports the feature
-            // unavailable rather than offering it.
-            centerMStartup: new SteamInputAddonforClaw.CenterMStartup.CenterMStartupControl(startupResult.HardwareSupported));
+            // MSI Center M startup Enable/Disable (work order PR1). The one shared reader -- also
+            // consulted by the mandatory Runtime termination / launch-at-startup policy (PR2.5).
+            centerMStartup: _centerMStartupControl);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
@@ -380,7 +389,26 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     internal UserTerminationDecision EvaluateUserTermination() =>
-        _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
+        UserTerminationComposition.Compose(
+            _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None),
+            IsControllerRuntimeMandatory());
+
+    /// <summary>The mandatory-controller-authority fact for a user action, read fresh from the shared
+    /// Center M startup reader (never cached from process startup). A read that cannot prove an
+    /// exactly-Disabled configuration is not treated as Addon-owned authority (PR2.5 section 14).</summary>
+    private bool IsControllerRuntimeMandatory()
+    {
+        try
+        {
+            return MandatoryControllerRuntimePolicy.IsMandatory(
+                _centerMStartupControl?.Capture().State ?? FrontendCenterMStartupState.Unavailable);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Lifecycle", "MSI Center M startup state read for the mandatory Runtime policy failed; not classifying mandatory.", exception);
+            return false;
+        }
+    }
 
     internal bool TryInitializeTray(Action restart, Action exit)
     {
