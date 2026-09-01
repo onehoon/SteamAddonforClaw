@@ -118,16 +118,24 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Device_page_owns_an_msi_center_m_startup_card_above_tdp_with_explicit_buttons()
+    public void Controller_page_owns_the_msi_center_m_startup_card_at_the_top_with_explicit_buttons()
     {
         var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
-        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
 
-        // Center M ownership lives on the Device page, above TDP Control (work order PR1 section 3).
+        // The card lives on the Controller page, above the Steam Input Routing section, and is no
+        // longer on the Device page.
         Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal) >= 0);
         Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal)
-            < xaml.IndexOf("x:Name=\"TdpExpander\"", StringComparison.Ordinal));
+            < xaml.IndexOf("x:Name=\"SteamInputRoutingExpander\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("CenterMStartupCard", devicePage, StringComparison.Ordinal);
+
+        // Re-read on every entry to the Controller page (the reboot-bound transition raises no StateInvalidated).
+        Assert.Contains("internal void Activate() => _ = RefreshCenterMStartupAsync();", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("if (page == MainNavigationPage.Controller) ControllerContent.Activate();", mainWindow, StringComparison.Ordinal);
 
         // Explicit Enable/Disable buttons, not an inverted toggle (work order PR1 section 4).
         Assert.Contains("x:Name=\"CenterMStartupEnableButton\"", xaml, StringComparison.Ordinal);

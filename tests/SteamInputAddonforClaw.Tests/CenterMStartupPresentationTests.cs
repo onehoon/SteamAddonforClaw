@@ -14,19 +14,19 @@ public sealed class CenterMStartupPresentationTests
     [InlineData(FrontendCenterMStartupState.Disabled)]
     public void A_settled_state_shows_no_infobar(FrontendCenterMStartupState state)
         => Assert.Equal(
-            DevicePage.CenterMStartupInfoBarKind.None,
-            DevicePage.CenterMStartupPresentation.ResolveInfoBar(state));
+            ControllerPage.CenterMStartupInfoBarKind.None,
+            ControllerPage.CenterMStartupPresentation.ResolveInfoBar(state));
 
     [Fact]
     public void Mixed_and_unreadable_states_still_surface()
     {
-        Assert.Equal(DevicePage.CenterMStartupInfoBarKind.Partial,
-            DevicePage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Partial));
-        Assert.Equal(DevicePage.CenterMStartupInfoBarKind.Unavailable,
-            DevicePage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Unavailable));
+        Assert.Equal(ControllerPage.CenterMStartupInfoBarKind.Partial,
+            ControllerPage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Partial));
+        Assert.Equal(ControllerPage.CenterMStartupInfoBarKind.Unavailable,
+            ControllerPage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Unavailable));
     }
 
     [Fact]
     public void No_restart_required_kind_exists_anymore()
-        => Assert.DoesNotContain("RestartRequired", Enum.GetNames<DevicePage.CenterMStartupInfoBarKind>());
+        => Assert.DoesNotContain("RestartRequired", Enum.GetNames<ControllerPage.CenterMStartupInfoBarKind>());
 }
