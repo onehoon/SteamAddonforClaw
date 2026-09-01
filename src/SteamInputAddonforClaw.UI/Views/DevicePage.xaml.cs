@@ -25,10 +25,6 @@ public sealed partial class DevicePage : UserControl
     private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
     private FrontendCenterMStartupSnapshot _centerMStartupSnapshot = FrontendCenterMStartupSnapshot.Unavailable;
     private bool _centerMStartupBusy;
-    // Sticky for the lifetime of this UI process: set by a successful Enable/Disable, never reset
-    // here, so no later RefreshAsync() (StateInvalidated event, or Activate() on tab re-entry) can
-    // erase the "Restart Windows to apply this change." notice (PR #430 review).
-    private bool _centerMRestartRequired;
     private FrontendPowerModeSnapshot _powerModeSnapshot = FrontendPowerModeSnapshot.Unavailable;
     private int? _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft;
     private CancellationTokenSource? _tdpEditDebounce;
@@ -250,17 +246,11 @@ public sealed partial class DevicePage : UserControl
         }
     }
 
-    /// <summary>Renders the MSI Center M startup card from the authoritative snapshot (work order
-    /// PR1 section 3/4). Explicit Enable/Disable buttons -- no inverted toggle; the button matching
-    /// the already-active configuration is disabled. Real Windows state is the only source of truth,
-    /// so nothing is persisted here.
-    ///
-    /// Once <see cref="_centerMRestartRequired"/> is set (a successful mutation this page session),
-    /// the "Restart Windows to apply this change." notice takes precedence over every other InfoBar
-    /// state and survives all later authoritative refreshes -- ordinary <c>StateInvalidated</c>
-    /// events and tab navigation must never erase the reboot requirement while the old Center M
-    /// session is deliberately still running (PR #430 review). It clears only when the UI process
-    /// restarts.</summary>
+    /// <summary>Renders the MSI Center M controller-authority card from the authoritative snapshot
+    /// (work order PR3 section 12). Explicit Enable/Disable buttons -- no inverted toggle; the button
+    /// matching the current authority is disabled. Real Windows state is the only source of truth, so
+    /// nothing is persisted here and there is no PR1-era sticky "restart later" state: a confirmed
+    /// transition restarts Windows immediately.</summary>
     private void RenderCenterMStartup(FrontendCenterMStartupSnapshot snapshot)
     {
         _centerMStartupSnapshot = snapshot;
@@ -287,13 +277,8 @@ public sealed partial class DevicePage : UserControl
         CenterMStartupEnableButton.IsEnabled = operable && snapshot.State != FrontendCenterMStartupState.Enabled;
         CenterMStartupDisableButton.IsEnabled = operable && snapshot.State != FrontendCenterMStartupState.Disabled;
 
-        switch (CenterMStartupPresentation.ResolveInfoBar(snapshot.State, _centerMRestartRequired))
+        switch (CenterMStartupPresentation.ResolveInfoBar(snapshot.State))
         {
-            case CenterMStartupInfoBarKind.RestartRequired:
-                CenterMStartupInfoBar.Severity = InfoBarSeverity.Informational;
-                CenterMStartupInfoBar.Message = "Restart Windows to apply this change.";
-                CenterMStartupInfoBar.IsOpen = true;
-                break;
             case CenterMStartupInfoBarKind.Partial:
                 CenterMStartupInfoBar.Severity = InfoBarSeverity.Warning;
                 CenterMStartupInfoBar.Message = "MSI Center M startup configuration is inconsistent. Choose Enable or Disable to repair it.";
@@ -301,7 +286,7 @@ public sealed partial class DevicePage : UserControl
                 break;
             case CenterMStartupInfoBarKind.Unavailable:
                 CenterMStartupInfoBar.Severity = InfoBarSeverity.Warning;
-                CenterMStartupInfoBar.Message = snapshot.FailureMessage ?? "MSI Center M startup control is unavailable.";
+                CenterMStartupInfoBar.Message = snapshot.FailureMessage ?? "MSI Center M controller authority control is unavailable.";
                 CenterMStartupInfoBar.IsOpen = true;
                 break;
             default:
@@ -310,58 +295,92 @@ public sealed partial class DevicePage : UserControl
         }
     }
 
-    internal enum CenterMStartupInfoBarKind { None, RestartRequired, Partial, Unavailable }
+    internal enum CenterMStartupInfoBarKind { None, Partial, Unavailable }
 
-    /// <summary>Pure InfoBar-precedence rule for the MSI Center M startup card, extracted so it can be
-    /// tested without a XAML root (PR #430 review). A sticky restart-required flag wins over every
-    /// snapshot-derived state, so a later authoritative refresh with a settled Enabled/Disabled state
-    /// still shows the reboot instruction.</summary>
+    /// <summary>Pure InfoBar-precedence rule for the MSI Center M card, extracted so it can be tested
+    /// without a XAML root.</summary>
     internal static class CenterMStartupPresentation
     {
-        internal static CenterMStartupInfoBarKind ResolveInfoBar(FrontendCenterMStartupState state, bool restartRequired)
+        internal static CenterMStartupInfoBarKind ResolveInfoBar(FrontendCenterMStartupState state) => state switch
         {
-            if (restartRequired) return CenterMStartupInfoBarKind.RestartRequired;
-            return state switch
-            {
-                FrontendCenterMStartupState.Partial => CenterMStartupInfoBarKind.Partial,
-                FrontendCenterMStartupState.Unavailable => CenterMStartupInfoBarKind.Unavailable,
-                _ => CenterMStartupInfoBarKind.None,
-            };
-        }
+            FrontendCenterMStartupState.Partial => CenterMStartupInfoBarKind.Partial,
+            FrontendCenterMStartupState.Unavailable => CenterMStartupInfoBarKind.Unavailable,
+            _ => CenterMStartupInfoBarKind.None,
+        };
     }
 
-    private async void CenterMStartupEnableButton_Click(object sender, RoutedEventArgs e) => await RunCenterMStartupMutationAsync(true);
-    private async void CenterMStartupDisableButton_Click(object sender, RoutedEventArgs e) => await RunCenterMStartupMutationAsync(false);
+    private async void CenterMStartupEnableButton_Click(object sender, RoutedEventArgs e) => await RequestCenterMTransitionAsync(centerMEnabled: true);
+    private async void CenterMStartupDisableButton_Click(object sender, RoutedEventArgs e) => await RequestCenterMTransitionAsync(centerMEnabled: false);
 
-    private async Task RunCenterMStartupMutationAsync(bool enabled)
+    private async Task RequestCenterMTransitionAsync(bool centerMEnabled)
     {
         if (_frontend is null || _centerMStartupBusy) return;
+
+        // Confirmation happens before any backend request (work order PR3 section 6.1/12.3). Cancel
+        // (or dismiss) issues zero RPC. The transition always restarts immediately -- there is no
+        // deferred-restart choice.
+        var dialog = new ContentDialog
+        {
+            Title = centerMEnabled ? "Enable MSI Center M" : "Disable MSI Center M",
+            Content = new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                Text = centerMEnabled
+                    ? "Restore MSI Center M controller authority.\n\nWindows must restart to apply this change."
+                    : "Disable MSI Center M and switch controller authority to Steam Addon for Claw.\n\nWindows must restart to apply this change.",
+            },
+            PrimaryButtonText = centerMEnabled ? "Enable and Restart" : "Disable and Restart",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
         _centerMStartupBusy = true;
         CenterMStartupEnableButton.IsEnabled = false;
         CenterMStartupDisableButton.IsEnabled = false;
         try
         {
-            var result = await _frontend.SetCenterMStartupEnabledAsync(enabled);
+            var result = await _frontend.RequestCenterMAuthorityTransitionAsync(centerMEnabled);
             _centerMStartupBusy = false;
-            if (result.Succeeded) _centerMRestartRequired = true;
             RenderCenterMStartup(result.Snapshot);
-            if (!result.Succeeded)
+            if (result.Succeeded)
             {
+                // Windows is restarting now -- no long-lived success screen is needed.
+                CenterMStartupEnableButton.IsEnabled = false;
+                CenterMStartupDisableButton.IsEnabled = false;
+                CenterMStartupInfoBar.Severity = InfoBarSeverity.Success;
+                CenterMStartupInfoBar.Message = "Controller authority updated. Restarting Windows…";
+                CenterMStartupInfoBar.IsOpen = true;
+            }
+            else
+            {
+                // A failed/cancelled Disable can leave verified startup/HidHide preparation behind
+                // while the Center M roots are still Enabled. The backend explicitly offers
+                // "Enable and Restart" as the cleanup path, so expose it here even though a plain
+                // Enabled snapshot would normally disable the redundant Enable button (PR3 review).
+                if (!centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled)
+                    CenterMStartupEnableButton.IsEnabled = true;
+
                 CenterMStartupInfoBar.Severity = result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
                     ? InfoBarSeverity.Informational
                     : InfoBarSeverity.Warning;
-                CenterMStartupInfoBar.Message = result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
-                    ? "Elevation was cancelled. MSI Center M startup was not changed."
-                    : result.FailureMessage ?? "The MSI Center M startup change could not be completed.";
+                // Always prefer the backend's authoritative message: a cancelled elevation prompt on
+                // Disable/Enable can still have left verified startup/HidHide preparation in place, so
+                // the UI must not invent a "nothing changed" claim (PR3 review).
+                CenterMStartupInfoBar.Message = result.FailureMessage
+                    ?? (result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
+                        ? "The controller authority change was cancelled."
+                        : "The controller authority change could not be completed.");
                 CenterMStartupInfoBar.IsOpen = true;
             }
         }
         catch (Exception exception)
         {
             _centerMStartupBusy = false;
-            AppLog.Warn("Device", "MSI Center M startup mutation failed.", exception, ("Reason", exception.GetType().Name));
+            AppLog.Warn("Device", "MSI Center M authority transition failed.", exception, ("Reason", exception.GetType().Name));
             CenterMStartupInfoBar.Severity = InfoBarSeverity.Error;
-            CenterMStartupInfoBar.Message = "MSI Center M startup could not be updated because the Runtime connection was interrupted.";
+            CenterMStartupInfoBar.Message = "The controller authority change could not be completed because the Runtime connection was interrupted.";
             CenterMStartupInfoBar.IsOpen = true;
             await RefreshAsync();
         }

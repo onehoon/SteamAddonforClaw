@@ -74,6 +74,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // Narrow MSI Center M startup control (work order PR1). Null is a valid passive state -- the
     // capture/mutation just report unavailable, like every other null-runtime fallback here.
     private readonly CenterMStartupControl? _centerMStartup;
+    // The reboot-bound MSI Center M controller-authority transition owner (work order PR3). Null is a
+    // valid passive state -- the request just reports unavailable, like every other null fallback here.
+    private readonly ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -84,10 +87,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _centerMStartup = centerMStartup;
+        _centerMAuthorityTransition = centerMAuthorityTransition;
         _cpuBoostRuntime = cpuBoostRuntime;
         _powerModeRuntime = powerModeRuntime;
         _intelFpsRuntime = intelFpsRuntime;
@@ -1105,20 +1109,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(_centerMStartup?.Capture() ?? FrontendCenterMStartupSnapshot.Unavailable);
     }
 
-    public async Task<FrontendCenterMStartupMutationResult> SetCenterMStartupEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    public async Task<FrontendCenterMStartupMutationResult> RequestCenterMAuthorityTransitionAsync(bool centerMEnabled, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        if (_centerMStartup is null)
+        if (_centerMAuthorityTransition is null)
             return new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable,
-                FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M startup control is unavailable.");
+                FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable.");
 
-        // Deliberately NO StateInvalidated broadcast here (PR #430 review): the returned result
-        // already carries the authoritative read-back snapshot, and this feature has no QAM surface.
-        // A self-generated invalidation would queue DevicePage.RefreshAsync(), which re-renders with
-        // restartRequired:false and would wipe the "Restart Windows to apply this change." notice
-        // right after a successful Enable/Disable -- the one cue that the new startup ownership is
-        // not active until reboot (work order PR1 sections 11/12).
-        return await _centerMStartup.SetEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
+        // Deliberately NO StateInvalidated broadcast (PR #430 review): the returned result already
+        // carries the authoritative read-back snapshot, this feature has no QAM surface, and a
+        // successful transition restarts Windows immediately anyway.
+        return await _centerMAuthorityTransition.RequestAsync(centerMEnabled, cancellationToken).ConfigureAwait(false);
     }
 
     private static FrontendTdpSnapshot MapTdpSnapshot(TdpRuntimeSnapshot snapshot) => new(

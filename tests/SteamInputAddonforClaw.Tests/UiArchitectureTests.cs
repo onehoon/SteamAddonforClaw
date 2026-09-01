@@ -134,16 +134,42 @@ public sealed class UiArchitectureTests
         Assert.Contains("x:Name=\"CenterMStartupDisableButton\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Disable MSI Center M", xaml, StringComparison.Ordinal);
 
-        // Informational-only restart message; no "Restart now" action in PR1 (Addendum D).
-        Assert.Contains("Restart Windows to apply this change.", codeBehind, StringComparison.Ordinal);
+        // PR3: the buttons confirm a reboot-bound transition and restart immediately -- the labels
+        // say so, and there is no "Restart Later" / deferred-restart mode.
+        Assert.Contains("and Restart", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("Restart Later", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("Restart now", codeBehind, StringComparison.Ordinal);
 
-        // The reboot requirement is sticky for the UI process: set on success, gated only on the
-        // field (not a render parameter), and never reset, so ordinary refreshes / tab navigation
-        // cannot erase it while the old Center M session is still running (PR #430 review).
-        Assert.Contains("if (result.Succeeded) _centerMRestartRequired = true;", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("CenterMStartupPresentation.ResolveInfoBar(snapshot.State, _centerMRestartRequired)", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("_centerMRestartRequired = false", codeBehind, StringComparison.Ordinal);
+        // PR3: no sticky UI restart flag -- the info bar is a pure function of the latest snapshot
+        // state (the successful transition ends the session by restarting Windows).
+        Assert.DoesNotContain("_centerMRestartRequired", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CenterMStartupPresentation.ResolveInfoBar(snapshot.State)", codeBehind, StringComparison.Ordinal);
+
+        // PR3: the UI never starts the OS restart itself -- that is the Runtime transition owner's job.
+        Assert.DoesNotContain("shutdown.exe", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("shutdown", xaml, StringComparison.Ordinal);
+
+        // PR3: a failed/cancelled Disable that left preparation behind (roots still Enabled) must
+        // re-expose "Enable and Restart" -- the cleanup path the backend message advertises -- even
+        // though a plain Enabled snapshot would otherwise disable the redundant Enable button.
+        Assert.Contains("!centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CenterMStartupEnableButton.IsEnabled = true;", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Settings_page_re_reads_the_authoritative_snapshot_on_every_entry()
+    {
+        var root = FindRepositoryRoot();
+        var settings = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml.cs"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+
+        // A PR3 reboot-bound authority transition can persist a new launch-at-startup value even when
+        // it returns Cancelled/Failed, and it raises no StateInvalidated -- so the Settings page must
+        // re-read bootstrap on activation instead of trusting its once-from-bootstrap render.
+        Assert.Contains("internal async Task ActivateAsync()", settings, StringComparison.Ordinal);
+        Assert.Contains("await _frontend.GetBootstrapAsync()", settings, StringComparison.Ordinal);
+        Assert.Contains("RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage)", settings, StringComparison.Ordinal);
+        Assert.Contains("if (page == MainNavigationPage.Settings) _ = SettingsContent.ActivateAsync();", mainWindow, StringComparison.Ordinal);
     }
 
     [Fact]

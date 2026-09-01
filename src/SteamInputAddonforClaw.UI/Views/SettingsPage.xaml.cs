@@ -39,6 +39,29 @@ public sealed partial class SettingsPage : UserControl
             : registrationMessage;
     }
 
+    /// <summary>Re-reads the authoritative settings snapshot on every entry to the Settings page.
+    /// A PR3 reboot-bound authority transition can persist a new launch-at-startup value (and its
+    /// mandatory-lock state) without a StateInvalidated broadcast, so the once-from-bootstrap render
+    /// would otherwise stay stale until the UI process restarts.</summary>
+    internal async Task ActivateAsync()
+    {
+        if (_frontend is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var bootstrap = await _frontend.GetBootstrapAsync();
+            DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
+            RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Settings", "Settings refresh on activation failed.", exception);
+        }
+    }
+
     internal static Visibility GetDeveloperMenuCardVisibility(bool developerMenuEnabled) =>
         developerMenuEnabled ? Visibility.Visible : Visibility.Collapsed;
 

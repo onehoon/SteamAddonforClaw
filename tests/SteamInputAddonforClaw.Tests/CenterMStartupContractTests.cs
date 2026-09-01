@@ -8,11 +8,13 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class CenterMStartupContractTests
 {
     [Fact]
-    public void Startup_rpcs_have_named_wire_methods_and_bump_the_protocol()
+    public void Center_m_rpcs_have_named_wire_methods_and_bump_the_protocol()
     {
         Assert.Equal("CaptureCenterMStartup", FrontendRpcMethod.CaptureCenterMStartup.ToString());
-        Assert.Equal("SetCenterMStartupEnabled", FrontendRpcMethod.SetCenterMStartupEnabled.ToString());
-        Assert.Equal(17, FrontendTransportProtocol.CurrentVersion);
+        // PR3: the PR1 SetCenterMStartupEnabled RPC is renamed to the reboot-bound authority transition.
+        Assert.Equal("RequestCenterMAuthorityTransition", FrontendRpcMethod.RequestCenterMAuthorityTransition.ToString());
+        Assert.DoesNotContain("SetCenterMStartupEnabled", Enum.GetNames<FrontendRpcMethod>());
+        Assert.Equal(18, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]
