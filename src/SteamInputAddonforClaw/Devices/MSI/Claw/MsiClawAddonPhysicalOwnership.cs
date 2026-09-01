@@ -59,6 +59,13 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
     /// same owner gate as acquisition, so the two can never interleave. Does NOT clear HidHide or
     /// enable Center M roots -- the authority transition does that next with the returned target.</summary>
     Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken);
+
+    /// <summary>PR8: reacquire an unexpectedly lost owned DirectInput session on the SAME input source
+    /// object, only when the same strongly-identified MSI Claw is still PID1902 with the same exact
+    /// persistent HidHide target. Runs through the same owner gate. Verifies/repairs the persistent
+    /// HidHide baseline BEFORE restarting DirectInput and requires a first valid state before it
+    /// commits. Never issues a PID mode write and never restores PID1901.</summary>
+    Task<MsiClawPhysicalOwnershipResult> RecoverLostInputAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -90,6 +97,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _ownsInputSource;
     private string? _ownedHiddenTarget;
+    // PR8 section 6: the strong physical identity committed by a successful acquisition. Kept only in
+    // memory, never persisted, and never cleared on a recovery failure -- the official
+    // Enable-and-Restart release still needs it as ownership evidence.
+    private MsiClawPhysicalIdentity? _ownedPhysicalIdentity;
     private bool _releasedForEnable;
     private int _disposed;
 
@@ -249,9 +260,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         AppLog.Info("ControllerOwnership", "Physical isolation verified.", ("Event", "PhysicalIsolationVerified"),
             ("HiddenTarget", target), ("HidHideOutcome", baseline.Outcome));
 
-        // 14-15. Retain the live DirectInput source for the process lifetime.
+        // 14-15. Retain the live DirectInput source for the process lifetime. The strong physical
+        //        identity is remembered here (PR8 section 6) so a later unexpected DirectInput session
+        //        loss can prove a recovery candidate is this same owned controller.
         _ownsInputSource = true;
         _ownedHiddenTarget = target;
+        _ownedPhysicalIdentity = finalIdentity;
         AppLog.Info("ControllerOwnership", "Physical ownership acquired.", ("Result", "Owned"),
             ("ModeWriteIssued", modeWriteIssued), ("HiddenTarget", target));
         return new(MsiClawPhysicalOwnershipOutcome.Owned, "PhysicalOwnershipVerified", modeWriteIssued, target);
@@ -299,6 +313,137 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             return new(true, "Released", target);
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<MsiClawPhysicalOwnershipResult> RecoverLostInputAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _disposed) != 0) return RecoveryFail("OwnerDisposed", _ownedHiddenTarget);
+            if (_releasedForEnable) return RecoveryFail("ReleasedForCenterMEnable", _ownedHiddenTarget);
+            return await RecoverLostInputCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private async Task<MsiClawPhysicalOwnershipResult> RecoverLostInputCoreAsync(CancellationToken cancellationToken)
+    {
+        // 10.2. Require the ownership evidence a successful PR5 acquisition committed. Never recover a
+        //       session that was never owned.
+        if (!_ownsInputSource
+            || _ownedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong } ownedIdentity
+            || _ownedHiddenTarget is not { } ownedTarget
+            || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(ownedTarget))
+            return RecoveryFail("OwnerNotCommitted", _ownedHiddenTarget);
+
+        // A still-running source needs no recovery.
+        if (_inputSource.IsRunning)
+            return new(MsiClawPhysicalOwnershipOutcome.Owned, "RecoveryNotNeeded", false, ownedTarget);
+
+        AppLog.Info("ControllerOwnership", "Owned physical input recovery started.",
+            ("Event", "OwnedPhysicalRecoveryStarted"), ("OwnedHiddenTarget", ownedTarget));
+
+        // The dead owned session is accepted for recovery. Do NOT clear the owned identity/target --
+        // the official Enable-and-Restart release must still be able to clear exactly this entry.
+        _ownsInputSource = false;
+
+        // 10.3. Reuse the same bounded native/PnP settle capture PR5 was given.
+        var capture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
+        if (!TryReadIdentity(capture, out var mode, out var identity, out var reason))
+            return RecoveryFail("PhysicalDeviceMissing:" + reason, ownedTarget);
+
+        // 10.4. The same physical MSI Claw must still be PID1902 / DirectInput. PID1901 drift is
+        //       detected and fails closed with ZERO mode write -- reclaim is a later focused PR.
+        if (mode == MsiClawNativeMode.XInput)
+            return RecoveryFail("OwnedPhysicalStateDriftPid1901", ownedTarget);
+        if (mode != MsiClawNativeMode.DirectInput)
+            return RecoveryFail("PhysicalDeviceMissing:UnsupportedMode:" + mode, ownedTarget);
+        if (!ownedIdentity.StronglyMatches(identity))
+            return RecoveryFail("PhysicalIdentityMismatch", ownedTarget);
+        AppLog.Info("ControllerOwnership", "Owned physical recovery native state proven.",
+            ("Event", "OwnedPhysicalRecoveryNativeProven"), ("CurrentNativeMode", mode), ("IdentityMatched", true));
+
+        // 10.5. Re-resolve the DirectInput descriptor through the same bounded selector path.
+        var descriptor = await ResolveDirectInputDescriptorAsync(cancellationToken).ConfigureAwait(false);
+        if (descriptor is null)
+            return RecoveryFail("DirectInputNotResolved", ownedTarget);
+        if (!MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(descriptor.PnpInstanceId))
+            return RecoveryFail("DirectInputNotResolved:NotPrimaryCollection", ownedTarget);
+        var pnpDevice = _resolvePnpDevice(descriptor.PnpInstanceId!);
+        if (pnpDevice is null)
+            return RecoveryFail("DirectInputNotResolved:PnpNodeMissing", ownedTarget);
+        var directInputIdentity = MsiClawPhysicalIdentity.From(pnpDevice);
+        if (directInputIdentity.Confidence != MsiClawIdentityConfidence.Strong || !ownedIdentity.StronglyMatches(directInputIdentity))
+            return RecoveryFail("DirectInputPhysicalIdentityMismatch", ownedTarget);
+
+        // 10.6. PR8 only reacquires the exact same persistent hidden target. A changed exact PnP
+        //       collection is HidHide target migration -- explicitly a later PR.
+        var recoveredTarget = descriptor.PnpInstanceId!;
+        if (!string.Equals(recoveredTarget, ownedTarget, StringComparison.OrdinalIgnoreCase))
+            return RecoveryFail("RecoveredTargetChanged", ownedTarget);
+        AppLog.Info("ControllerOwnership", "Owned physical recovery DirectInput candidate resolved.",
+            ("Event", "OwnedPhysicalRecoveryDirectInputResolved"), ("RecoveredTarget", recoveredTarget));
+
+        // 10.8. A fresh shared Center M authority read immediately before the first recovery mutation.
+        //       The bounded settle capture above may have taken time.
+        if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+            return RecoveryFail("AuthorityNotDisabled", ownedTarget);
+
+        // 10.7. Verify/repair the persistent HidHide baseline for the SAME exact target BEFORE
+        //       restarting DirectInput -- a virtual presentation is already attached to this source,
+        //       so physical isolation must be proven before non-neutral input can resume.
+        AddonHidHideBaselineResult baseline;
+        try
+        {
+            baseline = _applyHidHideTarget(ownedTarget);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerOwnership", "Owned physical recovery HidHide reconciliation threw.", exception);
+            return RecoveryFail("HidHideReconcileFailed:Threw", ownedTarget);
+        }
+        if (!baseline.IsCompliant)
+            return RecoveryFail("HidHideReconcileFailed:" + baseline.Outcome + ":" + baseline.Reason, ownedTarget);
+        AppLog.Info("ControllerOwnership", "Owned physical recovery isolation verified.",
+            ("Event", "OwnedPhysicalRecoveryIsolationVerified"), ("HiddenTarget", ownedTarget), ("HidHideOutcome", baseline.Outcome));
+
+        // 10.9. Restart the SAME input source object. Never construct a replacement.
+        var start = _inputSource.StartPrepared(descriptor);
+        if (!start.Started || !_inputSource.IsRunning)
+        {
+            await SafeStopAsync().ConfigureAwait(false);
+            return RecoveryFail("DirectInputStartFailed:" + start.Status, ownedTarget);
+        }
+        bool ready;
+        try
+        {
+            ready = await _inputSource.WaitForFirstValidStateAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await SafeStopAsync().ConfigureAwait(false);
+            throw;
+        }
+        if (!ready || !_inputSource.IsRunning)
+        {
+            await SafeStopAsync().ConfigureAwait(false);
+            return RecoveryFail("FirstValidStateNotObserved", ownedTarget);
+        }
+
+        // 10.10. Commit. The exact target and strong identity are unchanged; the existing publisher is
+        //        already reading this same source and resumes receiving live snapshots.
+        _ownsInputSource = true;
+        AppLog.Info("ControllerOwnership", "Owned physical input recovery succeeded.",
+            ("Event", "OwnedPhysicalRecoverySucceeded"), ("HiddenTarget", ownedTarget), ("DirectInputStartStatus", start.Status));
+        return new(MsiClawPhysicalOwnershipOutcome.Owned, "OwnedPhysicalInputRecovered", false, ownedTarget);
+    }
+
+    private static MsiClawPhysicalOwnershipResult RecoveryFail(string reason, string? hiddenTarget)
+    {
+        AppLog.Warn("ControllerOwnership", "Owned physical input recovery failed.", null,
+            ("Event", "OwnedPhysicalRecoveryFailed"), ("Reason", reason));
+        return new(MsiClawPhysicalOwnershipOutcome.Failed, reason, false, hiddenTarget);
     }
 
     private async Task<DirectInputDeviceDescriptor?> ResolveDirectInputDescriptorAsync(CancellationToken cancellationToken)

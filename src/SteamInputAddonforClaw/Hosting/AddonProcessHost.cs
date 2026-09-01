@@ -90,6 +90,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // PR7: the most recently requested runtime X360 <-> SteamDeck presentation reconcile. Serialized
     // inside the presentation owner's own gate; tracked only so controlled teardown can await it.
     private Task _presentationReconcile = Task.CompletedTask;
+    // PR8: the one in-flight owned-DirectInput recovery, scheduled event-driven from an unexpected
+    // owned-session completion. Serialized inside the physical owner's own gate; tracked only so
+    // controlled teardown drains it BEFORE the presentation reconcile it may itself request.
+    private Task _ownedControllerRecovery = Task.CompletedTask;
 
     internal AddonProcessHost(string[]? updateRestartArguments,
         Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
@@ -450,6 +454,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         var controllerDevices = new Controllers.Detection.WindowsControllerDeviceEnumerator();
         var directInputInputSource = new Devices.MSI.Claw.MsiClawInputSource(() => new Input.DirectInput.VorticeDirectInputDeviceEnumerator(IntPtr.Zero));
+        // PR8 section 7: the one Full-1902 owned-input completion signal. MsiClawInputSource already
+        // neutralizes LatestState and cleans up the dead session before raising this, so the callback
+        // only decides whether an unexpected owned-session loss should request recovery.
+        directInputInputSource.TestCompleted += OnOwnedControllerPhysicalInputCompleted;
         var hidHideBaseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
             new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
             Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable."));
@@ -469,6 +477,63 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             target => hidHideBaseline.ApplyDisabledModeBaseline([target]),
             () => hidHideBaseline.TryGetSingleExistingOwnedTarget(
                 Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
+    }
+
+    /// <summary>PR8 section 7: decide whether an owned DirectInput session completion is an unexpected
+    /// loss that should request recovery. Runs on the input polling worker -- it must only classify and
+    /// schedule, never do native/PnP/DirectInput work synchronously.</summary>
+    private void OnOwnedControllerPhysicalInputCompleted(object? sender, Devices.MSI.Claw.MsiClawInputTestSummary summary)
+    {
+        // 7.1: a normal explicit Stop/Dispose/Enable teardown is expected -- never a recovery.
+        if (summary.StopReason == Devices.MSI.Claw.MsiClawInputStopReason.Stopped) return;
+        // 15: no new recovery may be scheduled once controlled shutdown has begun.
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+
+        var physical = _physicalOwnership;
+        if (physical is null) return;
+        // 7.2: PR5 has not committed the owned live source yet (or it was already released) -- the
+        // startup acquisition itself reports failure; do not stack a runtime recovery behind it.
+        var source = physical.LiveInputSource;
+        if (source is null) return;
+        // The source recovered/stayed healthy between finalization and this callback.
+        if (source.IsRunning) return;
+
+        AppLog.Warn("ControllerOwnership", "Owned physical DirectInput session terminated unexpectedly.", null,
+            ("Event", "OwnedPhysicalInputLost"), ("StopReason", summary.StopReason),
+            ("ReadFailures", summary.ReadFailures), ("CleanupSucceeded", summary.CleanupSucceeded));
+
+        // 7.4: the dead DirectInput device/enumerator cleanup is not proven -- do not acquire another
+        // session on top of possibly-retained native resources. Fail closed; publisher stays neutral.
+        if (!summary.CleanupSucceeded)
+        {
+            AppLog.Warn("ControllerOwnership", "Owned physical input recovery blocked; dead DirectInput session cleanup is unproven.", null,
+                ("Event", "OwnedPhysicalRecoveryBlocked"), ("Reason", "CleanupUnproven"));
+            return;
+        }
+
+        AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.", ("Event", "OwnedPhysicalRecoveryRequested"));
+        _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, _startupCancellationTokenSource.Token);
+    }
+
+    private async Task RecoverOwnedControllerPhysicalInputAsync(
+        Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await physical.RecoverLostInputAsync(cancellationToken).ConfigureAwait(false);
+            AppLog.Info("ControllerOwnership", "Owned physical input recovery completed.",
+                ("Result", result.Outcome), ("Reason", result.Reason), ("HiddenTarget", result.HiddenTarget ?? "None"));
+            // 11: raw Steam/BPM state may have changed while input was down and PR7 correctly refused
+            // forward mutation on a non-running source. Re-run the existing reconcile exactly once.
+            if (result.IsOwned && result.Reason != "RecoveryNotNeeded")
+                RequestControllerPresentationReconcile("PhysicalInputRecovered");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            AppLog.Error("ControllerOwnership", "Owned physical input recovery threw; Runtime remains available.", exception);
+        }
     }
 
     private async Task StartOverlayWarmupAsync()
@@ -669,6 +734,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception) { AppLog.Warn("Overlay", "Overlay warm-up task failed during shutdown.", exception); }
             _overlayStartup = null;
         }
+        // PR8 section 15: drain the in-flight owned-DirectInput recovery BEFORE the presentation
+        // reconcile, because a successful recovery requests a "PhysicalInputRecovered" reconcile as
+        // its final action. BeginProcessShutdown already blocks any new recovery from being scheduled.
+        try { await _ownedControllerRecovery.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("ControllerOwnership", "Owned physical input recovery failed during shutdown.", exception); }
         // PR7 section 19.1: no new reconcile can be scheduled after BeginProcessShutdown cancelled
         // the token; drain the last in-flight one before tearing down the presentation owner.
         try { await _presentationReconcile.ConfigureAwait(false); }

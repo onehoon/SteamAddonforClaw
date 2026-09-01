@@ -347,7 +347,7 @@ public sealed class MsiClawAddonPresentationTests
         h.Snapshot = WantsXbox();
         var b = h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default); // queues on the gate
 
-        h.Xbox360Publishers[0].StopGate.SetResult();
+        h.Xbox360Publishers[0].StopGate!.SetResult();
         Assert.Equal(PresentationReconcileOutcome.Switched, (await a).Outcome);   // A committed Deck
         var rb = await b;
 
