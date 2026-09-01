@@ -82,6 +82,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     private readonly Func<string, ControllerDeviceInfo?> _resolvePnpDevice;
     private readonly IMsiClawPreparedInputSource _inputSource;
     private readonly Func<string, AddonHidHideBaselineResult> _applyHidHideTarget;
+    private readonly Func<string?> _captureExistingOwnedHiddenTarget;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly TimeSpan _directInputSettleWindow;
     private readonly TimeSpan _directInputSettleInterval;
@@ -100,6 +101,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         Func<string, ControllerDeviceInfo?> resolvePnpDevice,
         IMsiClawPreparedInputSource inputSource,
         Func<string, AddonHidHideBaselineResult> applyHidHideTarget,
+        Func<string?> captureExistingOwnedHiddenTarget,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         TimeSpan? directInputSettleWindow = null,
         TimeSpan? directInputSettleInterval = null)
@@ -111,6 +113,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         _resolvePnpDevice = resolvePnpDevice;
         _inputSource = inputSource;
         _applyHidHideTarget = applyHidHideTarget;
+        _captureExistingOwnedHiddenTarget = captureExistingOwnedHiddenTarget;
         _delay = delay ?? Task.Delay;
         _directInputSettleWindow = directInputSettleWindow ?? TimeSpan.FromSeconds(3);
         _directInputSettleInterval = directInputSettleInterval ?? TimeSpan.FromMilliseconds(150);
@@ -223,6 +226,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             await SafeStopAsync().ConfigureAwait(false);
             return Fail("HidHideTargetNotPrimaryCollection", modeWriteIssued, null);
         }
+        // Remember the exact verified target now, so a later partial/verification failure in the
+        // persistent apply cannot lose it -- the official Enable-and-Restart release must still be
+        // able to clear exactly this entry (work order PR5 review).
+        _ownedHiddenTarget ??= target;
         AddonHidHideBaselineResult baseline;
         try
         {
@@ -255,7 +262,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var target = _ownedHiddenTarget;
+            // Prefer the exact target verified this process; otherwise recover the one already-proven
+            // owned target from the persistent HidHide configuration (previous-boot target + a
+            // current acquisition failure, or a partial persistent apply).
+            var target = _ownedHiddenTarget ?? _captureExistingOwnedHiddenTarget();
             _releasedForEnable = true;
             if (_ownsInputSource)
             {
@@ -310,10 +320,16 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
 
             if (selection.IsSelected)
                 return selection.Descriptor;
-            if (selection.Status == MsiClawDirectInputSelectionStatus.Indeterminate)
+
+            // NotFound and the explicitly-transient "unresolved identity" descriptor shape (the
+            // enumerator tolerating an inspection/topology lookup miss right after PID re-enumeration)
+            // are normal PnP settle states -- retry them inside the bounded window. Proven-invalid
+            // topology (multiple physical/PnP identities, insufficient buttons) stays fail-closed.
+            var retryableSettle = selection.Status == MsiClawDirectInputSelectionStatus.NotFound
+                || (selection.Status == MsiClawDirectInputSelectionStatus.Indeterminate && selection.Reason == "PhysicalIdentityUnverified");
+            if (!retryableSettle)
             {
-                // Ambiguity is not a normal PnP delay -- fail immediately, do not keep retrying.
-                AppLog.Warn("ControllerOwnership", "DirectInput selection ambiguous.", null, ("Reason", selection.Reason));
+                AppLog.Warn("ControllerOwnership", "DirectInput selection is not safely retryable.", null, ("Reason", selection.Reason));
                 return null;
             }
             if (Stopwatch.GetTimestamp() >= deadline)

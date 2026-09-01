@@ -355,6 +355,45 @@ public sealed class AddonControllerHidHideBaselineTests
             Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary).Outcome);
     }
 
+    [Fact]
+    public void TryGetSingleExistingOwnedTarget_returns_the_one_compliant_owned_primary_target()
+    {
+        var client = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [PrimaryPid1902Collection], Active = true, Inverse = false };
+        Assert.Equal(PrimaryPid1902Collection, Baseline(client).TryGetSingleExistingOwnedTarget(IsPrimary));
+    }
+
+    [Theory]
+    [InlineData(0)] // zero targets
+    [InlineData(2)] // multiple targets
+    public void TryGetSingleExistingOwnedTarget_returns_null_unless_exactly_one(int count)
+    {
+        var hidden = count switch
+        {
+            0 => new List<string>(),
+            2 => [PrimaryPid1902Collection, OtherPrimaryPid1902Collection],
+            _ => [PrimaryPid1902Collection],
+        };
+        var client = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = hidden, Active = true };
+        Assert.Null(Baseline(client).TryGetSingleExistingOwnedTarget(IsPrimary));
+    }
+
+    [Fact]
+    public void TryGetSingleExistingOwnedTarget_returns_null_for_a_foreign_or_non_primary_entry()
+    {
+        var foreign = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [OtherHidden], Active = true };
+        Assert.Null(Baseline(foreign).TryGetSingleExistingOwnedTarget(IsPrimary));
+        var nonPrimary = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [Pid1902Collection], Active = true };
+        Assert.Null(Baseline(nonPrimary).TryGetSingleExistingOwnedTarget(IsPrimary));
+    }
+
+    [Fact]
+    public void TryGetSingleExistingOwnedTarget_returns_null_when_the_baseline_is_not_compliant()
+    {
+        // The exact target is present but HidHide is inactive -> not a proven owned baseline.
+        var client = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [PrimaryPid1902Collection], Active = false };
+        Assert.Null(Baseline(client).TryGetSingleExistingOwnedTarget(IsPrimary));
+    }
+
     private sealed class FakeHidHideClient : IHidHideClient
     {
         public HidHideInspectionStatus? Status { get; set; }

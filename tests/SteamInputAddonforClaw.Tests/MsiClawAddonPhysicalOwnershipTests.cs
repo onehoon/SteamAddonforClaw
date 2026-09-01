@@ -152,7 +152,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.False(h.InputSource.StartCalled);
     }
 
-    // ---- 26.3 ambiguous DirectInput fails immediately ----
+    // ---- 26.3 ambiguous DirectInput fails immediately; transient unresolved identity is retried ----
 
     [Fact]
     public async Task Ambiguous_directinput_fails_immediately_without_retrying()
@@ -161,8 +161,18 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var result = await h.Build().AcquireAsync(default);
 
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
-        Assert.Equal(1, h.DirectInputEnumerateCalls);
+        Assert.Equal(1, h.DirectInputEnumerateCalls); // MultiplePhysicalIdentities is proven-invalid
         Assert.Empty(h.HidHideApplied);
+    }
+
+    [Fact]
+    public async Task Transiently_unverified_directinput_identity_is_retried_then_acquired()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, DirectInputUnverifiedAttempts = 3 };
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.True(h.DirectInputEnumerateCalls > 3);
     }
 
     // ---- 26.4 descriptor is a different physical MSI Claw ----
@@ -329,6 +339,33 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
+    public async Task Release_remembers_the_verified_target_even_when_the_persistent_apply_fails()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, HidHideOutcome = AddonHidHideBaselineOutcome.VerificationFailed };
+        var owner = h.Build();
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.AcquireAsync(default)).Outcome);
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Equal(PrimaryPnp, release.HiddenTarget); // held from the verified descriptor, not the failed apply
+    }
+
+    [Fact]
+    public async Task Release_recovers_a_previous_boot_target_when_this_acquisition_never_owned()
+    {
+        const string prior = @"HID\VID_0DB0&PID_1902&MI_00&COL01\prev";
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, DirectInputMissingAttempts = int.MaxValue, ExistingOwnedTarget = prior };
+        var owner = h.Build();
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.AcquireAsync(default)).Outcome);
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Equal(prior, release.HiddenTarget); // recovered from persistent HidHide
+    }
+
+    [Fact]
     public async Task Release_without_a_prior_acquisition_and_already_stock_pid_is_a_noop_success()
     {
         var h = new Harness { InitialMode = MsiClawNativeMode.XInput };
@@ -386,7 +423,9 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public string FinalPhysKey { get; set; } = PhysKey;
         public bool SwitchSucceeds { get; set; } = true;
         public int DirectInputMissingAttempts { get; set; }
+        public int DirectInputUnverifiedAttempts { get; set; }
         public bool DirectInputAmbiguous { get; set; }
+        public string? ExistingOwnedTarget { get; set; }
         public string DirectInputPnp { get; set; } = PrimaryPnp;
         public string DirectInputPnpPhysKey { get; set; } = PhysKey;
         public AddonHidHideBaselineOutcome HidHideOutcome { get; set; } = AddonHidHideBaselineOutcome.Success;
@@ -426,6 +465,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                     return [Descriptor(Guid.NewGuid()), Descriptor(Guid.NewGuid(), physId: "OTHER")];
                 if (DirectInputEnumerateCalls <= DirectInputMissingAttempts)
                     return [];
+                if (DirectInputEnumerateCalls <= DirectInputMissingAttempts + DirectInputUnverifiedAttempts)
+                    return [Descriptor(Guid.NewGuid(), unverified: true)]; // PID1902 present, identity not yet resolved
                 return [Descriptor(Guid.NewGuid())];
             },
             instanceId => instanceId == DirectInputPnp ? PnpDevice(DirectInputPnpPhysKey) : null,
@@ -435,6 +476,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 HidHideApplied.Add(target);
                 return new AddonHidHideBaselineResult(HidHideOutcome, HidHideOutcome.ToString(), AddonHidHideBaselineSnapshot.Unknown);
             },
+            () => ExistingOwnedTarget,
             delay: (_, _) => Task.CompletedTask,
             directInputSettleWindow: TimeSpan.FromMilliseconds(200),
             directInputSettleInterval: TimeSpan.FromMilliseconds(1));
@@ -449,11 +491,11 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             return new(NativeStateCaptureStatus.Success, snapshot, "ok");
         }
 
-        private DirectInputDeviceDescriptor Descriptor(Guid instanceGuid, string? physId = null) => new(
+        private DirectInputDeviceDescriptor Descriptor(Guid instanceGuid, string? physId = null, bool unverified = false) => new(
             instanceGuid, Guid.NewGuid(), "MSI Claw Controller", 0x0DB0, 0x1902,
-            DevicePath: @"\\?\hid#vid_0db0&pid_1902",
-            PnpInstanceId: DirectInputPnp,
-            PhysicalIdentity: physId ?? "msi-claw-phys",
+            DevicePath: unverified ? null : @"\\?\hid#vid_0db0&pid_1902",
+            PnpInstanceId: unverified ? null : DirectInputPnp,
+            PhysicalIdentity: unverified ? null : physId ?? "msi-claw-phys",
             UsagePage: 0x0001, Usage: 0x0005, ButtonCount: 17, AxisCount: 6);
 
         private static ControllerDeviceInfo PnpDevice(string physKey)

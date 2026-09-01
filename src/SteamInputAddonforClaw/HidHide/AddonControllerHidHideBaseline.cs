@@ -125,6 +125,26 @@ internal sealed class AddonControllerHidHideBaseline
         return InspectDisabledModeBaseline(owned);
     }
 
+    /// <summary>Read-only. Recovers the one exact Addon-owned primary PID1902 hidden target from the
+    /// persistent HidHide configuration when it is present and the whole baseline is proven compliant
+    /// for that single target (work order PR5 review). Returns <see langword="null"/> for zero, more
+    /// than one, a validator-rejected, or a non-compliant configuration -- the caller must not treat
+    /// an arbitrary hidden entry as owned.</summary>
+    internal string? TryGetSingleExistingOwnedTarget(Func<string, bool> ownedTargetValidator)
+    {
+        ArgumentNullException.ThrowIfNull(ownedTargetValidator);
+        if (!TryInspect(out var inspection, out _))
+            return null;
+
+        var hidden = Normalize(inspection.HiddenDeviceEntries?.ToArray() ?? []);
+        if (hidden.Count != 1 || !ownedTargetValidator(hidden[0]))
+            return null;
+
+        return InspectDisabledModeBaseline([hidden[0]]).Outcome == AddonHidHideBaselineOutcome.AlreadyCompliant
+            ? hidden[0]
+            : null;
+    }
+
     /// <summary>Persistently applies the Disabled-mode Addon baseline and verifies it by read-back.
     /// Idempotent: a call when already compliant performs no mutation.</summary>
     internal AddonHidHideBaselineResult ApplyDisabledModeBaseline(IReadOnlyCollection<string> requestedHiddenTargets)

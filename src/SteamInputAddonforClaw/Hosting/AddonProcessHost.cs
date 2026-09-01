@@ -382,7 +382,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             instanceId => controllerDevices.EnumeratePresentDevices().FirstOrDefault(device =>
                 string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase)),
             directInputInputSource,
-            target => hidHideBaseline.ApplyDisabledModeBaseline([target]));
+            target => hidHideBaseline.ApplyDisabledModeBaseline([target]),
+            () => hidHideBaseline.TryGetSingleExistingOwnedTarget(
+                Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
         _physicalOwnership = owner;
 
         try
