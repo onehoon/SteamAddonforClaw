@@ -269,6 +269,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.")),
             _runtimeHost.EvaluateUserTermination,
             () => IsConflictingControllerEnvironment(startupComposition.ControllerEnvironmentAssessmentProvider),
+            async token => (await composition.StatusProvider.CaptureAsync(token).ConfigureAwait(false)).Prerequisites,
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
@@ -426,24 +427,23 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
-    /// <summary>A fresh check (evaluated at transition-request time, not startup) for a known
-    /// third-party controller manager that must not coexist with Addon controller authority
-    /// (work order PR3 section 6.2/13). Reuses the existing environment detector; adds no new scanner.
-    /// Only the explicit conflicting kinds block -- <c>None</c>/<c>Indeterminate</c> do not.</summary>
-    private static bool IsConflictingControllerEnvironment(Status.IControllerEnvironmentAssessmentProvider provider)
+    /// <summary>A fresh check (evaluated at transition-request time, not startup) that no other
+    /// controller manager may coexist with Addon controller authority (work order PR3 section
+    /// 6.2/13). This is the one-shot ENTRY admission for the Disable path, so it fails closed:
+    /// entering exclusive Addon authority is allowed only when the existing detector positively
+    /// proves <see cref="Status.ControllerManagerKind.None"/>. An unresolved (<c>Indeterminate</c>)
+    /// read or a throwing assessment blocks and lets the user retry. Reuses the existing environment
+    /// detector; adds no new scanner. The Enable-and-Restart release path never consults this.</summary>
+    internal static bool IsConflictingControllerEnvironment(Status.IControllerEnvironmentAssessmentProvider provider)
     {
         try
         {
-            return provider.Capture().Manager.Kind is
-                Status.ControllerManagerKind.ClawTweaks or
-                Status.ControllerManagerKind.HandheldCompanion or
-                Status.ControllerManagerKind.Winhanced or
-                Status.ControllerManagerKind.Multiple;
+            return provider.Capture().Manager.Kind != Status.ControllerManagerKind.None;
         }
         catch (Exception exception)
         {
-            AppLog.Warn("CenterM.Authority", "Controller-environment conflict check failed; not classifying a conflict.", exception);
-            return false;
+            AppLog.Warn("CenterM.Authority", "Controller-environment admission could not be verified; blocking Addon authority entry.", exception);
+            return true;
         }
     }
 

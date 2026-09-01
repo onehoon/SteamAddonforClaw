@@ -358,9 +358,13 @@ public sealed partial class DevicePage : UserControl
                 CenterMStartupInfoBar.Severity = result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
                     ? InfoBarSeverity.Informational
                     : InfoBarSeverity.Warning;
-                CenterMStartupInfoBar.Message = result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
-                    ? "The controller authority change was cancelled. Nothing was changed."
-                    : result.FailureMessage ?? "The controller authority change could not be completed.";
+                // Always prefer the backend's authoritative message: a cancelled elevation prompt on
+                // Disable/Enable can still have left verified startup/HidHide preparation in place, so
+                // the UI must not invent a "nothing changed" claim (PR3 review).
+                CenterMStartupInfoBar.Message = result.FailureMessage
+                    ?? (result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
+                        ? "The controller authority change was cancelled."
+                        : "The controller authority change could not be completed.");
                 CenterMStartupInfoBar.IsOpen = true;
             }
         }

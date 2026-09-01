@@ -2,9 +2,12 @@ using System.Reflection;
 using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Hosting;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
+using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.Status;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -172,6 +175,39 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, (await first).Outcome);
     }
 
+    [Fact]
+    public async Task Disable_stops_before_any_mutation_when_a_controller_prerequisite_is_known_not_ready()
+    {
+        // A first-time / incomplete install can have HidHide available while USBIP2 or libVIIPER is
+        // missing. Committing the next boot to Addon authority then would be a broken handheld.
+        var h = new Harness(this) { StartEnabled = true, PrerequisitesReady = false };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart: restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Empty(h.Order);            // no startup:true, no HidHide mutation, no Center M mutation
+        Assert.Equal(0, restart.Calls);
+        Assert.False(h.Hid.Active);
+    }
+
+    [Fact]
+    public async Task Disable_helper_cancel_after_preparation_keeps_the_prepared_state_and_never_says_nothing_changed()
+    {
+        var h = new Harness(this) { StartEnabled = true, CenterMHelperCancels = true };
+
+        var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Cancelled, result.Outcome);
+        // The ordered persistent preparation ran and is deliberately left in place (no rollback).
+        Assert.Equal(new[] { "startup:true", "hidhide:disable", "centerm:false" }, h.Order);
+        Assert.True(h.Hid.Active);
+        Assert.DoesNotContain("restart", h.Order);
+        Assert.NotNull(result.FailureMessage);
+        Assert.DoesNotContain("nothing", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("remain in place", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ---- Enable and Restart ----
 
     [Fact]
@@ -226,6 +262,44 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Empty(h.Order);
     }
 
+    [Fact]
+    public async Task Enable_helper_cancel_after_baseline_clear_reports_the_cleared_state_not_nothing_changed()
+    {
+        var h = new Harness(this) { StartEnabled = false, CenterMHelperCancels = true };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Active = true;
+
+        var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Cancelled, result.Outcome);
+        Assert.Equal(new[] { "hidhide:enable", "centerm:true" }, h.Order);
+        Assert.False(h.Hid.Active); // baseline was already cleared
+        Assert.NotNull(result.FailureMessage);
+        Assert.DoesNotContain("nothing", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cleared", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---- Third-party controller-manager admission (Disable entry gate, fail-closed) ----
+
+    [Fact]
+    public void Admission_allows_entry_only_when_the_detector_positively_proves_no_manager()
+        => Assert.False(AddonProcessHost.IsConflictingControllerEnvironment(
+            new StubEnvironmentProvider(ControllerManagerKind.None)));
+
+    [Theory]
+    [InlineData("ClawTweaks")]
+    [InlineData("HandheldCompanion")]
+    [InlineData("Winhanced")]
+    [InlineData("Multiple")]
+    [InlineData("Indeterminate")]
+    public void Admission_blocks_entry_for_any_detected_or_unresolved_manager(string kind)
+        => Assert.True(AddonProcessHost.IsConflictingControllerEnvironment(
+            new StubEnvironmentProvider(Enum.Parse<ControllerManagerKind>(kind))));
+
+    [Fact]
+    public void Admission_blocks_entry_when_the_assessment_throws()
+        => Assert.True(AddonProcessHost.IsConflictingControllerEnvironment(new ThrowingEnvironmentProvider()));
+
     // ---- Architecture guards ----
 
     [Fact]
@@ -266,6 +340,8 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool StartEnabled { get; init; }
         public bool StartupSucceeds { get; init; } = true;
         public bool CenterMHelperCompletes { get; init; } = true;
+        public bool CenterMHelperCancels { get; init; }
+        public bool PrerequisitesReady { get; init; } = true;
         public bool ConflictingEnvironment { get; init; }
         public UserTerminationDecision Safety { get; init; } = new(true, UserTerminationBlockReason.None);
         public Func<Task>? BeforeCenterMMutation { get; set; }
@@ -294,12 +370,20 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
             Hid.OrderSink = Order;
             var baseline = new AddonControllerHidHideBaseline(Hid, AddonExe);
 
+            static PrerequisiteAssessment Ready(PrerequisiteKind kind) => new(kind, PrerequisiteStatus.Ready, "ready");
+            var prerequisites = PrerequisitesReady
+                ? new RuntimePrerequisiteAssessment(Ready(PrerequisiteKind.HidHide), Ready(PrerequisiteKind.UsbIpWin2), Ready(PrerequisiteKind.Viiper))
+                : new RuntimePrerequisiteAssessment(Ready(PrerequisiteKind.HidHide),
+                    new PrerequisiteAssessment(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "not installed"),
+                    Ready(PrerequisiteKind.Viiper));
+
             var r = restart ?? new FakeRestart { Result = WindowsRestartRequestResult.Requested };
             r.Order = Order;
             return new CenterMRebootAuthorityTransition(
                 centerM, coordinator, baseline,
                 () => Safety,
                 () => ConflictingEnvironment,
+                _ => Task.FromResult(prerequisites),
                 r);
         }
 
@@ -309,6 +393,8 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
             {
                 if (h.BeforeCenterMMutation is { } wait) await wait().ConfigureAwait(false);
                 h.Order.Add($"centerm:{enabled.ToString().ToLowerInvariant()}");
+                if (h.CenterMHelperCancels)
+                    return new(CenterMStartupHelperOutcome.Cancelled, false, false, false, false, h.Roots.Service, null);
                 if (!h.CenterMHelperCompletes)
                     return new(CenterMStartupHelperOutcome.HelperUnavailable, false, false, false, false, h.Roots.Service, "helper failed");
                 h.Roots.Server = h.Roots.Updater = enabled;
@@ -324,6 +410,21 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool Updater;
         public CenterMFoundationServiceMode Service;
         public FrontendCenterMStartupState Classify() => CenterMStartupControl.Classify(Server, Updater, Service);
+    }
+
+    private sealed class StubEnvironmentProvider(ControllerManagerKind kind) : IControllerEnvironmentAssessmentProvider
+    {
+        public ControllerEnvironmentAssessmentSnapshot Capture() => new(
+            Array.Empty<ControllerSoftwareStatus>(),
+            new ControllerManagerClassification(kind, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate),
+            new ControllerEnvironmentCompatibilityAssessment(
+                ControllerEnvironmentCompatibilityStatus.Indeterminate,
+                ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate));
+    }
+
+    private sealed class ThrowingEnvironmentProvider : IControllerEnvironmentAssessmentProvider
+    {
+        public ControllerEnvironmentAssessmentSnapshot Capture() => throw new InvalidOperationException("assessment unavailable");
     }
 
     private sealed class FakeStartupManager(List<string> order, Func<bool> ok) : IWindowsStartupManager

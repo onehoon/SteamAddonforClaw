@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Lifecycle;
+using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw.CenterMStartup;
@@ -67,6 +68,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly AddonControllerHidHideBaseline _hidHideBaseline;
     private readonly Func<UserTerminationDecision> _lowerLevelRuntimeSafety;
     private readonly Func<bool> _conflictingControllerEnvironment;
+    private readonly Func<CancellationToken, Task<RuntimePrerequisiteAssessment>> _capturePrerequisites;
     private readonly IWindowsRestartRequester _restartRequester;
     private int _inProgress;
 
@@ -76,6 +78,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         AddonControllerHidHideBaseline hidHideBaseline,
         Func<UserTerminationDecision> lowerLevelRuntimeSafety,
         Func<bool> conflictingControllerEnvironment,
+        Func<CancellationToken, Task<RuntimePrerequisiteAssessment>> capturePrerequisites,
         IWindowsRestartRequester restartRequester)
     {
         _centerMStartup = centerMStartup;
@@ -83,6 +86,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _hidHideBaseline = hidHideBaseline;
         _lowerLevelRuntimeSafety = lowerLevelRuntimeSafety;
         _conflictingControllerEnvironment = conflictingControllerEnvironment;
+        _capturePrerequisites = capturePrerequisites;
         _restartRequester = restartRequester;
     }
 
@@ -124,7 +128,19 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         if (!_lowerLevelRuntimeSafety().CanTerminate)
             return Fail(snapshot, "Controller authority cannot change while a routing, native-mode, or recovery operation is in progress. Try again once it finishes.");
         if (_conflictingControllerEnvironment())
-            return Fail(snapshot, "A conflicting controller manager is active. Disable or remove it before switching controller authority to Steam Addon for Claw.");
+            return Fail(snapshot, "A conflicting or unverified controller-manager environment prevents entering Addon controller authority. Close or remove other controller software, then retry Disable and Restart.");
+
+        // Disable is the point where the next boot is committed to Addon controller authority, so a
+        // known-missing/unusable virtual-controller prerequisite (USBIP2, libVIIPER, HidHide) must
+        // stop the transition before any persistent mutation (work order PR3 section 6.2 item 6).
+        // This reuses the existing Runtime prerequisite fact -- no new scanner.
+        var prerequisites = await _capturePrerequisites(cancellationToken).ConfigureAwait(false);
+        if (!prerequisites.IsRoutingReady)
+            return Fail(snapshot,
+                $"Required controller components are not ready, so MSI Center M was not disabled. " +
+                $"HidHide={prerequisites.HidHide.Status}, UsbIpWin2={prerequisites.UsbIpWin2.Status}, Viiper={prerequisites.Viiper.Status}. " +
+                $"Complete first-time setup, then retry Disable and Restart.");
+
         var inspection = _hidHideBaseline.InspectDisabledModeBaseline([]);
         if (inspection.Outcome is AddonHidHideBaselineOutcome.Conflict or AddonHidHideBaselineOutcome.Unavailable)
             return Fail(snapshot, $"HidHide is not in a safe state for Addon controller isolation: {inspection.Reason}.");
@@ -149,7 +165,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         var mutation = await _centerMStartup.SetEnabledAsync(false, CancellationToken.None).ConfigureAwait(false);
         AppLog.Info("CenterM.Authority", "Center M startup mutation.", ("Outcome", mutation.Outcome), ("State", mutation.Snapshot.State));
         if (!mutation.Succeeded)
-            return mutation; // Cancelled / Failed already carry the real latest snapshot.
+            return IncompleteMutation(mutation, centerMEnabled: false);
 
         // 4. Immediate restart.
         return RequestRestart(mutation.Snapshot);
@@ -179,7 +195,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         var mutation = await _centerMStartup.SetEnabledAsync(true, CancellationToken.None).ConfigureAwait(false);
         AppLog.Info("CenterM.Authority", "Center M startup mutation.", ("Outcome", mutation.Outcome), ("State", mutation.Snapshot.State));
         if (!mutation.Succeeded)
-            return mutation;
+            return IncompleteMutation(mutation, centerMEnabled: true);
 
         // The mandatory-Runtime policy (PR2.5) stops applying automatically now that the roots read
         // back exactly Enabled -- no separate "release" state.
@@ -200,6 +216,23 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         AppLog.Warn("CenterM.Authority", "Authority transition verified but Windows restart could not be started.", null, ("State", snapshot.State));
         return new(FrontendCenterMStartupMutationOutcome.Failed, snapshot,
             "The controller authority configuration was changed, but Windows restart could not be started. Restart Windows manually to apply the change.");
+    }
+
+    /// <summary>A Center M startup mutation that did not succeed (typically a cancelled Windows
+    /// elevation prompt) after the ordered persistent preparation already ran. PR3 deliberately
+    /// leaves the verified startup-registration / HidHide-baseline preparation in place (section 8),
+    /// so a <see cref="FrontendCenterMStartupMutationOutcome.Cancelled"/> result must not be allowed
+    /// to read as "nothing changed" -- give it the real partial-state context.</summary>
+    private static FrontendCenterMStartupMutationResult IncompleteMutation(FrontendCenterMStartupMutationResult mutation, bool centerMEnabled)
+    {
+        if (mutation.Outcome != FrontendCenterMStartupMutationOutcome.Cancelled)
+            return mutation;
+        return mutation with
+        {
+            FailureMessage = centerMEnabled
+                ? "MSI Center M enable was cancelled at the Windows elevation prompt. The Addon HidHide controller baseline was already cleared and remains cleared; retry Enable and Restart."
+                : "MSI Center M disable was cancelled at the Windows elevation prompt. The Addon startup registration and HidHide controller baseline were already applied and remain in place; retry Disable and Restart, or choose Enable and Restart to revert.",
+        };
     }
 
     private static FrontendCenterMStartupMutationResult Fail(FrontendCenterMStartupSnapshot snapshot, string reason) =>
