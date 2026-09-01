@@ -229,11 +229,15 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             lock (_sync)
             {
-                _state = message.State.Value;
                 if (message.State == OverlayState.Ready)
                 {
+                    _state = OverlayState.Hidden;
                     _readyState = true;
                     _ready.TrySetResult();
+                }
+                else
+                {
+                    _state = message.State.Value;
                 }
                 if (message.State is OverlayState.Visible or OverlayState.Hidden)
                     _acknowledgement?.TrySetResult();
@@ -278,7 +282,6 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
             throw new FrontendProtocolException("Overlay handshake was rejected.");
 
         await SendStateAsync(pipe, OverlayState.Ready, linked.Token).ConfigureAwait(false);
-        await SendStateAsync(pipe, OverlayState.Hidden, linked.Token).ConfigureAwait(false);
         while (!linked.IsCancellationRequested)
         {
             var message = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);

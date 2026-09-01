@@ -64,8 +64,58 @@ public sealed class OverlayTransportTests
         Assert.Equal(OverlayState.Visible, server.State);
         Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
         Assert.Equal(OverlayState.Hidden, server.State);
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        Assert.Equal(OverlayState.Visible, server.State);
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
+        Assert.Equal(OverlayState.Hidden, server.State);
         Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
         await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Overlay_client_sends_ready_without_an_unsolicited_hidden_state()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var run = client.RunAsync(_ => Task.CompletedTask);
+        await pipe.WaitForConnectionAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        using var writeGate = new SemaphoreSlim(1, 1);
+
+        var hello = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
+        Assert.Equal(OverlayWireMessageKind.Handshake, hello.Kind);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None);
+
+        var ready = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
+        Assert.Equal(OverlayState.Ready, ready.State);
+        using var noExtraState = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => OverlayWireCodec.ReadAsync(pipe, noExtraState.Token));
+
+        await client.DisposeAsync();
+        try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+    }
+
+    [Fact]
+    public async Task Immediate_show_after_ready_is_acknowledged_by_the_real_visible_state()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await OverlayWireCodec.WriteAsync(client, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(client, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.State, State: OverlayState.Ready), writeGate, CancellationToken.None);
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+
+        var show = server.SendCommandAsync(OverlayCommand.Show);
+        var command = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
+        Assert.Equal(OverlayCommand.Show, command.Command);
+        await OverlayWireCodec.WriteAsync(client, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.State, State: OverlayState.Visible), writeGate, CancellationToken.None);
+
+        Assert.True(await show.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(OverlayState.Visible, server.State);
     }
 
     [Fact]
@@ -79,6 +129,7 @@ public sealed class OverlayTransportTests
         {
             var run = first.RunAsync(_ => Task.CompletedTask);
             Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+            Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
             await first.DisposeAsync();
             try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
         }
