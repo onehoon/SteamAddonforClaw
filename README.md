@@ -1,5 +1,12 @@
 # Steam Addon for Claw
 
+> [!WARNING]
+> **Under active development — do not install or use.**
+> This project is unreleased and unstable. It changes controller, driver, and
+> Windows startup state on your machine, and the current architecture is being
+> reworked. Installing or running it now can leave your controller or system in
+> an inconsistent state. There is no supported release yet.
+
 Steam Addon for Claw brings Steam Input and Steam Deck-style controller integration to the built-in controller on supported MSI Claw handhelds.
 
 When a Steam game or Steam Big Picture session needs the controller, the Addon can temporarily route the built-in MSI controller through a virtual Steam Deck controller. When routing is no longer needed, the Claw returns to its normal native Windows controller mode.
