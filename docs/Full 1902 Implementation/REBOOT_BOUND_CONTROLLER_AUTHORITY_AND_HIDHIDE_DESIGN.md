@@ -1,232 +1,274 @@
 # Reboot-Bound Controller Authority and HidHide Design
 
 > **Status:** Design / implementation planning document  
-> **Scope:** MSI Center M Enabled/Disabled authority transitions, boot-time PID1902 acquisition, HidHide ownership, and initial virtual-controller presentation selection  
+> **Scope:** MSI Center M Enabled/Disabled authority transitions, persistent PID1902 ownership, mandatory Addon Runtime lifetime, HidHide ownership, and virtual presentation selection  
 > **Product direction:** Full PID1902 implementation / MSI Center M replacement controller architecture  
-> **Implementation state:** This document describes the intended design. It does not claim that the described transition flow is already implemented or hardware-validated.
+> **Implementation state:** This document describes the intended design. It does not claim that every described runtime or recovery path is already implemented or hardware-validated.
 
 ---
 
 ## 1. Executive summary
 
-The MSI Center M Enabled/Disabled setting should be treated as a **reboot-bound system mode**, not as a live controller-mode switch.
+MSI Center M Enabled/Disabled is a **reboot-bound controller-authority mode**, not a live controller-mode toggle.
 
-The core product contract is:
+The current product contract is:
 
 ```text
 MSI Center M Enabled
     → MSI / stock controller authority
-    → physical controller returns to PID1901
+    → desired physical mode = PID1901
     → Addon controller stack is passive
 
 MSI Center M Disabled
-    → Addon controller authority
-    → physical controller is acquired as PID1902 after boot
-    → DirectInput + HidHide + VIIPER are owned by the Addon
-    → exactly one virtual controller presentation is attached
+    → Addon Runtime is the mandatory controller authority
+    → desired physical mode = PID1902
+    → HidHide controller isolation persists
+    → one VIIPER runtime owns the virtual-controller layer
+    → exactly one virtual presentation is attached/live
 ```
 
-Changing between these modes requires an immediate Windows restart.
+The most important refinement is:
 
-There is no supported `Restart Later` state.
+> **Center M Disabled is a durable authority choice, not merely an application runtime option.**
+>
+> **The Addon must continue to own the controller until the user explicitly chooses Enable Center M and Restart.**
 
-The user-facing actions should therefore be:
+Therefore Windows shutdown/restart is **not** an authority-release boundary.
+
+While Center M remains Disabled:
 
 ```text
-Disable MSI Center M
-    → confirm "Disable and Restart"
-    → configure the next-boot Addon-owned environment
-    → reboot immediately
-
-Enable MSI Center M
-    → confirm "Enable and Restart"
-    → restore the next-boot MSI-owned environment
-    → reboot immediately
+Windows shutdown/restart
+    → do not intentionally restore PID1901
+    → keep persistent HidHide configuration
+    → next Addon Runtime startup inspects the actual physical PID
+    → PID1902: keep it
+    → PID1901: switch to PID1902
 ```
 
-This hard reboot boundary deliberately removes the need to support a complicated live ownership handoff between Center M and the Addon in the same Windows session.
+PID1901 restoration belongs to explicit authority release:
 
-The design goal is:
+```text
+Enable Center M and Restart
+```
 
-> **Configuration changes happen before reboot. Controller authority changes happen after reboot.**
-
-This gives the project a much simpler and safer lifecycle contract than trying to match HHC/ClawTweaks-style live enable/disable behavior.
+or another explicit stock-restoration path such as uninstall cleanup.
 
 ---
 
-## 2. Why authority changes should require reboot
+## 2. Why the reboot boundary still matters
 
-A live transition from MSI ownership to Addon ownership creates many unnecessary transitional states:
+The reboot requirement remains important for **intentional authority changes**.
 
-- Center M startup configuration is Disabled but Center M processes are still alive;
-- `MSI_Center_M_Server_ControlMode` may still hold or mutate controller state;
-- physical mode may change while MSI components are still shutting down;
-- PID1901 → PID1902 PnP re-enumeration may overlap Center M teardown;
-- HidHide may be changing while the physical controller is being re-enumerated;
-- a virtual controller could be exposed before physical isolation is complete;
-- the Addon may need to distinguish between expected and conflicting native-mode changes;
-- rollback becomes harder if only part of the transition succeeds.
-
-These states are possible to support, but they do not provide enough product value to justify the extra controller authority and recovery complexity.
-
-Instead, use Windows restart as the ownership boundary:
+Do not implement:
 
 ```text
-Current Windows session
-    → configure desired next-boot mode only
-    → do not perform live controller takeover
-    → reboot
-
-Next Windows session
-    → start directly in the selected authority model
+Center M Enabled
+→ kill MSI stack
+→ immediately switch to PID1902
+→ start Addon controller ownership
 ```
 
-This removes an entire category of transitional races without weakening real handheld lifecycle safety.
+inside the same normal Windows session merely because HHC or ClawTweaks can support live switching.
 
-The project should still handle real runtime failures after ownership has been established, including:
+The supported product transition is intentionally simpler:
 
-- sleep / hibernate / resume;
-- physical device loss;
-- PnP re-enumeration;
-- PID1902 → PID1901 drift while Addon-owned;
-- DirectInput session failure;
-- HidHide drift;
-- Center M runtime resurrection;
-- crash / restart / shutdown.
+```text
+Current authority mode
+    ↓
+configure persistent next-boot state
+    ↓
+mandatory Windows restart
+    ↓
+next session starts under exactly one controller authority
+```
 
-The reboot requirement is specifically for **intentional authority changes**, not for ordinary runtime recovery.
+This removes most transitional states involving:
+
+- current-session Center M process teardown;
+- Center M controller child-process races;
+- live PID1901 → PID1902 handoff while the OEM stack is still running;
+- HidHide mutation while both authorities are alive;
+- same-session rollback complexity.
+
+The reboot boundary applies to **authority changes**, not to every process restart or Windows lifecycle event.
 
 ---
 
-## 3. Controller authority is exclusive
+## 3. Two authority modes
 
-When Center M is Disabled, the Addon is not a cooperative secondary controller manager.
+### 3.1 Center M Enabled
 
-It is the primary controller authority.
+```text
+Center M startup roots = Enabled / Automatic
+Desired controller authority = MSI / Stock
+Desired physical PID = PID1901
+Addon DirectInput ownership = none
+Addon physical HidHide ownership = none
+Addon VIIPER controller presentation = none
+```
 
-The intended ownership model is:
+Steam/BPM must not override this authority decision.
+
+Independent Addon device features such as TDP, CPU Boost, Power Mode, fan control, telemetry, and other non-controller features may continue where supported.
+
+### 3.2 Center M Disabled
+
+```text
+Center M startup roots = Disabled
+Desired controller authority = Addon
+Desired physical PID = PID1902
+Addon Runtime = mandatory
+HidHide Addon baseline = persistent
+VIIPER Runtime = active while the Addon controller Runtime is alive
+```
+
+Presentation policy:
+
+```text
+Steam/BPM inactive → Xbox360
+Steam/BPM active   → SteamDeck
+```
+
+Steam/BPM selects presentation only. It never decides whether the physical controller is owned.
+
+---
+
+## 4. Center M Disabled means the Runtime is mandatory
+
+The controller owner is the background Addon Runtime, not the frontend window.
+
+The frontend/UI may be opened and closed normally:
+
+```text
+Frontend window closes
+→ controller Runtime continues
+
+QAM closes
+→ controller Runtime continues
+
+UI is not visible
+→ controller Runtime continues
+```
+
+But while Center M is Disabled, the product must not offer an ordinary action that intentionally stops the controller Runtime and leaves Windows running without another controller authority.
+
+Therefore the Disabled-mode product contract is:
+
+```text
+intentional Runtime exit = not supported
+Disable Addon startup = not supported
+Quit controller background host = not supported
+```
+
+If the user wants to stop Addon controller ownership, the supported path is:
+
+```text
+Enable Center M and Restart
+```
+
+### 4.1 Startup registration becomes mandatory
+
+The existing background startup task should no longer be treated as an optional preference while Center M is Disabled.
+
+```text
+Center M Enabled
+→ Launch at startup may remain a normal user preference where appropriate
+
+Center M Disabled
+→ Addon Runtime startup task MUST be enabled
+→ UI setting should be forced/locked on
+```
+
+Disable transition must verify that the Addon Runtime will start on the next logon before it disables the Center M startup roots.
+
+### 4.2 Start simple: no new service/supervisor yet
+
+The final product should recover from unexpected Runtime death because a hidden PID1902 controller without a live virtual presentation is a real user-impacting failure.
+
+However, the first implementation should remain simple.
+
+Do **not** add a new Windows service, watchdog daemon, supervisor process, heartbeat protocol, restart epoch, or generalized keepalive state machine merely to complete the first ownership POCs.
+
+Initial contract:
 
 ```text
 Center M Disabled
-    ↓
-Addon owns controller policy
-    ↓
-PID1902
-DirectInput
-HidHide controller isolation
-VIIPER runtime
-Virtual controller presentation
+→ existing Addon background startup task is mandatory
+→ intentional Runtime exit is blocked
+→ unexpected Runtime death is a known recovery requirement
 ```
 
-The runtime should not continuously reason about whether another controller manager owns part of the stack.
+Automatic crash restart/keepalive can be added as a focused hardening PR after the basic controller ownership path is hardware-proven.
 
-That would recreate the old coexistence architecture and make the new product direction unnecessarily complicated.
-
-### 3.1 Admission policy for other controller managers
-
-Coexistence with HHC, ClawTweaks, or another controller middleware should not be supported in Addon Controller Mode.
-
-Before the user is allowed to switch to Center M Disabled / Addon-owned mode, the transition may perform a simple preflight check for known conflicting controller software.
-
-If a conflicting controller manager is active/configured:
-
-```text
-Do not enter Addon Controller Mode.
-Do not attempt runtime coexistence.
-Ask the user to disable/remove the conflicting controller manager first.
-```
-
-This is not a runtime ownership system.
-
-It is only an admission gate.
-
-Once Addon Controller Mode is active after reboot:
-
-```text
-Addon state is the desired controller state.
-```
+The architecture must leave room for that recovery, but early POCs should not be blocked on a new supervisor design.
 
 ---
 
-## 4. HidHide should be Addon-owned in Disabled mode
+## 5. HidHide is persistent Disabled-mode configuration
 
-In the old Steam-session routing architecture, HidHide was a temporary resource borrowed during a routing session and rolled back at the end of that session.
-
-That model no longer matches the product.
-
-In the Full PID1902 architecture:
-
-```text
-Center M Disabled
-→ HidHide controller isolation is part of the persistent Addon-owned controller configuration.
-```
-
-The lifetime of the HidHide configuration is therefore the lifetime of the **Center M Disabled product mode**, not the lifetime of one Steam session and not the lifetime of one Addon process.
-
-Expected state while Center M is Disabled:
+While Center M is Disabled:
 
 ```text
 HidHide Installed     = yes
 Inverse mode          = off
 HidHide Active        = on
 Addon executable      = whitelisted
-Addon-owned PID1902 primary gamepad collection = hidden
+Addon-owned PID1902 primary gamepad collection = hidden when known
 ```
 
-This state is allowed to persist across:
+This configuration persists across:
 
-- Addon exit;
+- Addon Runtime restart;
 - Windows shutdown;
-- Windows reboot;
-- normal Addon restart.
+- Windows restart;
+- normal logoff/logon;
+- crash recovery.
 
-The configuration is removed when the user explicitly switches back to Center M Enabled or uninstalls the Addon.
+It is removed when Addon controller authority is explicitly released, such as:
+
+```text
+Enable Center M and Restart
+uninstall / explicit stock restoration
+```
+
+Do not treat persistent Disabled-mode HidHide configuration as a stale routing-session lease.
 
 ---
 
-## 5. Prefer deterministic Addon HidHide baseline over coexistence
+## 6. Exclusive authority and conflicting controller software
 
-When Addon Controller Mode is active, the Addon should not carry complex runtime logic such as:
+Addon Controller Mode is not a coexistence mode with HHC, ClawTweaks, or another controller middleware.
 
-```text
-Which hidden entry belongs to another app?
-Which whitelist entry belongs to another app?
-Who enabled HidHide Active?
-Can we temporarily borrow Active?
-Should we restore another controller manager's previous state?
-```
+Before entering Disabled mode, perform a simple admission check.
 
-That is the wrong authority model for this product direction.
-
-Instead:
+If a known conflicting controller manager or unsupported foreign HidHide controller configuration is detected:
 
 ```text
-Before entering Addon Controller Mode:
-    reject unsupported/conflicting controller environments
-
-After entering Addon Controller Mode:
-    HidHide controller configuration follows the Addon baseline
+Do not enter Addon Controller Mode.
+Do not attempt runtime coexistence.
+Ask the user to disable/remove the conflicting controller stack first.
 ```
 
-The exact implementation should remain intentionally narrow and deterministic.
+After admission:
 
-Do not build a generalized HidHide multi-owner manager.
+```text
+Addon controller state is the desired state.
+```
+
+Do not build a generalized multi-owner HidHide/controller authority framework.
 
 ---
 
-## 6. Disable flow: configure first, then reboot
+## 7. Disable flow — configure next boot, then restart
 
-The Disable action should be implemented as a reboot-bound transition.
-
-### 6.1 User interaction
-
-The user selects:
+User action:
 
 ```text
 Disable MSI Center M
 ```
 
-The Addon shows a blocking confirmation dialog such as:
+Confirmation:
 
 ```text
 Disable MSI Center M and switch controller authority
@@ -239,562 +281,460 @@ Windows must restart to apply this change.
 
 There is no `Restart Later` option.
 
-If the user chooses Cancel:
+### 7.1 Preflight
+
+Before persistent mutation, verify at minimum:
 
 ```text
-No persistent configuration is changed.
-```
-
-If the user chooses Disable and Restart, the Addon begins the transition.
-
-### 6.2 Preflight
-
-Before changing persistent configuration, verify at minimum:
-
-```text
-Supported MSI Claw hardware
-Required elevated helper path available
+supported MSI Claw
 HidHide available/configurable
-VIIPER prerequisites available as required by product install state
-No unsupported conflicting controller manager environment
+required helper/elevation path available
+Addon background Runtime startup can be enabled/verified
+VIIPER prerequisites available as required by install state
+no unsupported conflicting controller manager environment
 ```
 
-A preflight failure means:
+Failure:
 
 ```text
-Do not change authority mode.
-Do not reboot.
-Report the blocking reason.
+do not change authority mode
+do not reboot
+report the blocking reason
 ```
 
-### 6.3 Configure HidHide for next boot
+### 7.2 Persistent mutation order
 
-Before reboot, prepare the Addon-owned HidHide baseline.
-
-At minimum:
+Recommended simple flow:
 
 ```text
-InverseWhitelist = false
-Addon executable is whitelisted
-HidHide Active = true
+1. ensure/verify mandatory Addon Runtime startup task
+2. apply/verify Disabled-mode HidHide baseline
+3. disable/verify MSI_Center_M_Server task
+4. disable/verify MSI_Center_M_Updater task
+5. disable/verify MSI Foundation Service startup
+6. request immediate Windows restart
 ```
 
-If a previously known exact Addon-owned PID1902 primary gamepad collection exists, it may remain/additionally be present in the blocked list so the next PID1902 enumeration is immediately cloaked.
+### 7.3 No live takeover in the current session
 
-If no trusted exact PID1902 collection identity is known yet, do **not** invent a broad VID/PID-based hidden target merely to pre-cloak the first boot.
-
-The exact target can be resolved after PID1902 appears on the next boot.
-
-### 6.4 Disable Center M startup roots
-
-Configure:
+Do not perform:
 
 ```text
-Scheduled Task: MSI_Center_M_Server   = Disabled
-Scheduled Task: MSI_Center_M_Updater  = Disabled
-Service: MSI Foundation Service       = Disabled
+PID1901 → PID1902
+DirectInput acquisition
+virtual-controller attach
+controller publisher startup
 ```
 
-The mutation must be read back and verified.
+as part of the Disable button action.
 
-### 6.5 Do not perform live controller takeover
+The current Windows session remains MSI-owned until reboot.
 
-During the current Windows session, the Disable transition must **not** do any of the following:
-
-```text
-Do not switch PID1901 → PID1902.
-Do not acquire DirectInput.
-Do not attach Xbox360.
-Do not attach Steam Deck.
-Do not start controller publishers.
-Do not try to create a live Addon controller session.
-```
-
-The current session remains MSI-owned until reboot.
-
-### 6.6 Center M process termination is not required for this transition
-
-Because the current session does not perform controller takeover, existing Center M processes do not need to be killed merely to finish the Disable action.
-
-The desired sequence is intentionally simpler:
-
-```text
-Disable persistent startup roots
-Configure HidHide next-boot baseline
-Verify
-Reboot
-```
-
-This eliminates the need to synchronize current-session Center M teardown with PID1902 acquisition.
-
-### 6.7 Reboot is mandatory
-
-After all persistent mutations have been verified:
-
-```text
-Request immediate Windows restart.
-```
-
-The transition is not considered successfully applied until the reboot boundary is crossed and the next startup verifies the Disabled configuration.
-
-If the reboot request itself fails, the application must not silently return to normal operation while pretending the transition is complete.
-
-The UI should remain in a clear restart-required / transition-not-complete state or attempt safe rollback according to the final implementation policy.
-
-Avoid introducing an elaborate transaction engine solely for this path, but do not report success when the required reboot could not be initiated.
-
----
-
-## 7. First boot after Center M Disable
-
-The first Disabled boot and every later Disabled boot should use the same controller ownership logic.
-
-Do not introduce a separate `FirstBootAfterDisable` state unless real hardware demonstrates a requirement that cannot be derived from current system state.
-
-The durable user intent is simply:
-
-```text
-Center M startup configuration = Disabled
-```
-
-The boot-time controller runtime should converge to the same desired state on every boot.
+Existing Center M processes therefore do not need to be killed merely to complete the Disable transition.
 
 ---
 
 ## 8. Disabled boot startup sequence
 
-Recommended high-level sequence:
+The first Disabled boot and every later Disabled boot use the same logic.
+
+Do not add a `FirstBootAfterDisable` authority state unless real hardware proves it is required.
+
+Recommended startup:
 
 ```text
-Windows login
+Windows logon
     ↓
-Addon auto-start
+mandatory Addon Runtime starts
     ↓
-Verify supported MSI Claw
+verify supported MSI Claw
     ↓
-Verify Center M startup configuration == Disabled
+verify Center M startup roots == Disabled
     ↓
-Verify expected Addon HidHide baseline
+verify expected Addon HidHide baseline
     ↓
-Start Steam / BPM observation
+start Steam/BPM observation
     ↓
-Initialize canonical VIIPER runtime
-    ├─ Xbox360  CREATED / DETACHED
-    └─ SteamDeck CREATED / DETACHED
+initialize canonical VIIPER Runtime
+    ├─ Xbox360 created / detached
+    └─ SteamDeck created / detached
     ↓
-Inspect physical controller mode
+inspect current physical PID
     ↓
-Reconcile physical controller to PID1902
+reconcile to desired PID1902
     ↓
-Acquire DirectInput
+DirectInput acquire
     ↓
-Resolve exact PID1902 primary gamepad collection
+resolve/verify exact PID1902 primary gamepad collection
     ↓
-Ensure HidHide target is blocked
+reconcile HidHide isolation
     ↓
-Verify physical isolation
+verify physical isolation
     ↓
-Capture current desired presentation
+read freshest Steam/BPM state
     ↓
-Attach exactly one virtual controller
+attach exactly one virtual presentation
 ```
 
-The important ordering contract is:
+Critical rule:
 
-> **Do not attach any virtual controller until PID1902 input and HidHide isolation are both verified.**
+> **No virtual controller may be attached before physical PID1902 ownership and HidHide isolation are verified.**
 
 ---
 
-## 9. Boot-time PID handling
+## 9. Boot-time PID policy: desired state, not forced round-trip
 
-### 9.1 If the physical controller is PID1901
-
-This is expected after a normal Windows boot.
-
-Sequence:
+Center M Disabled means:
 
 ```text
-Strongly identify supported MSI Claw
-→ switch same device to PID1902 / DirectInput mode
-→ wait for bounded PnP stabilization
+DesiredPhysicalPID = PID1902
+```
+
+Startup should inspect current reality.
+
+### Current PID1902
+
+```text
+verify same supported MSI Claw
+→ keep PID1902
+→ do NOT force PID1902 → PID1901 → PID1902
+→ acquire DirectInput
+→ verify/reconcile HidHide
+```
+
+### Current PID1901
+
+```text
+verify same supported MSI Claw
+→ switch PID1901 → PID1902
+→ bounded PnP settle
 → verify same physical identity
 → acquire DirectInput
+→ verify/reconcile HidHide
 ```
 
-### 9.2 If the physical controller is already PID1902
+### Temporarily missing
 
-Do not force an unnecessary round trip through PID1901.
+Use bounded startup/PnP stabilization.
 
-Sequence:
-
-```text
-Verify supported same physical MSI Claw
-→ acquire DirectInput
-→ continue isolation reconciliation
-```
-
-### 9.3 If the physical controller is temporarily missing
-
-At immediate login, PnP/WMI may not yet be ready.
-
-Use a bounded startup stabilization window consistent with the existing product philosophy.
-
-Do not introduce an infinite boot polling loop.
-
-If the supported controller does not become identifiable within the bounded admission window:
-
-```text
 Do not mutate ambiguous hardware.
-Do not attach a virtual controller.
-Remain fail-closed/passive and surface the failure.
+
+Do not attach a virtual controller until the supported physical controller is proven.
+
+This policy intentionally does **not** depend on whether firmware preserves PID1902 across a reboot.
+
+```text
+Current = 1902 → keep
+Current = 1901 → switch
 ```
+
+is sufficient.
 
 ---
 
 ## 10. First-boot HidHide behavior
 
-The first Disabled boot may not yet have an exact persisted PID1902 collection identity.
+The first Disabled boot may not yet have a trusted exact PID1902 collection identity.
 
-That is acceptable.
-
-Safe first-boot sequence:
+Safe sequence:
 
 ```text
 HidHide Active = true
 Addon whitelisted
-Virtual devices = both detached
+VIIPER devices = detached
 
-PID1901 → PID1902
-→ wait for PnP settle
-→ resolve exact PID1902 primary gamepad collection
-→ add exact blocked device entry
-→ verify HidHide isolation
+reconcile physical controller to PID1902
+→ PnP settle
+→ resolve exact primary PID1902 gamepad collection
+→ add/verify exact hidden-device entry
+→ verify physical isolation
 → only then attach virtual controller
 ```
 
-During the short interval before the hidden entry is added:
+Until the hidden entry is established:
 
 ```text
-Physical PID1902 may be visible
-Virtual controller is NOT attached
+physical PID1902 may be visible
+virtual controller remains detached
 ```
 
-Therefore the design avoids the dangerous state:
+This avoids a physical + virtual double-input window.
 
-```text
-visible physical controller
-+
-visible virtual controller
-```
-
-which would create a real double-input window.
+After the exact PID1902 entry is learned and persisted, subsequent boots can use the existing HidHide rule immediately.
 
 ---
 
-## 11. Subsequent Disabled boots
+## 11. Windows shutdown/restart while Center M remains Disabled
 
-After the exact PID1902 collection has been established and left in the persistent Addon HidHide baseline, subsequent boots become simpler.
+Windows shutdown/restart is **not** an authority-release request.
 
-Example:
+Therefore do not perform an intentional physical mode switch merely because the OS is shutting down.
 
-```text
-Windows boot
-Physical controller starts PID1901
-HidHide Addon baseline already active
-PID1902 target already registered
-
-Addon starts
-→ PID1901 → PID1902
-→ PID1902 enumerates into an already configured HidHide rule
-→ physical gamepad is cloaked immediately
-→ DirectInput remains available to the whitelisted Addon
-→ verify isolation
-→ attach desired virtual presentation
-```
-
-This is one of the primary reasons to keep the Addon HidHide baseline persistent across reboot.
-
-Do not remove and recreate the same PID1902 hidden entry on every ordinary shutdown/startup cycle.
-
----
-
-## 12. Normal Addon exit while Center M remains Disabled
-
-Center M Disabled is a durable product mode, but physical controller ownership still belongs to the running Addon process.
-
-Therefore normal Addon shutdown should leave the machine in a safe physical state.
-
-Recommended normal shutdown:
+Recommended shutdown/restart behavior:
 
 ```text
-Active virtual presentation
+active virtual presentation
 → neutral
-→ publisher stop
-→ detach
-
-DirectInput session
-→ release
-
-Physical MSI Claw
-→ restore PID1901
-
-VIIPER
-→ teardown
-
-Addon exits
+→ stop publisher
+→ detach/teardown virtual output as required
+→ release process-owned DirectInput/native handles
+→ keep persistent HidHide Disabled-mode configuration
+→ DO NOT issue PID1902 → PID1901 solely for shutdown/restart
+→ Windows exits
 ```
 
-The persistent HidHide configuration may remain in place:
+The physical device may remain PID1902, or firmware/Windows may later enumerate it as PID1901.
 
-```text
-Addon whitelist stays configured
-PID1902 hidden entry stays configured
-HidHide Active stays configured for Disabled mode
-```
+The next Addon Runtime startup does not care which occurred. It reconciles current reality to desired PID1902.
 
-Because the physical controller has been restored to PID1901, the PID1902 hidden entry is dormant until the next Addon-owned startup.
-
-This gives the next boot/startup a pre-cloak path without leaving the user with a hidden PID1902 controller after a clean Addon shutdown.
+This removes unnecessary PID/PnP churn at every system restart.
 
 ---
 
-## 13. Crash / restart behavior
+## 12. Controlled Addon Runtime restart while Disabled
 
-A crash may leave runtime state partially owned.
+A controlled Addon process restart caused by update/relaunch is also not an authority release.
 
-On the next Addon startup, the durable product intent is still:
+Desired authority remains Addon.
+
+```text
+Runtime stops
+→ do not intentionally restore PID1901 merely for process restart
+→ persistent HidHide remains
+→ new Runtime starts
+→ inspect actual PID
+→ keep/reclaim PID1902
+→ rebuild DirectInput + VIIPER presentation
+```
+
+This path must still neutralize/retire process-owned virtual state safely before exit.
+
+---
+
+## 13. Intentional Runtime exit while Windows stays running
+
+This is **not a supported normal user action** while Center M is Disabled.
+
+Do not design a normal path such as:
+
+```text
+Exit Addon
+→ restore PID1901
+→ leave Center M Disabled
+→ Windows continues
+```
+
+That creates a third unsupported authority state.
+
+Instead:
 
 ```text
 Center M Disabled
-→ Addon should own the controller once the runtime is healthy again
+→ user cannot intentionally stop the controller Runtime
 ```
 
-Startup should reconcile current reality instead of assuming a particular previous state.
-
-Possible current physical states include:
+If the user wants the Addon controller Runtime to stop, the UI should direct them to:
 
 ```text
-PID1901
-PID1902
-temporarily missing during PnP
+Enable Center M and Restart
 ```
 
-The startup reconcile should:
-
-```text
-verify Disabled authority mode
-→ verify safe/known physical identity
-→ recover or normalize stale transient runtime state
-→ establish PID1902
-→ acquire DirectInput
-→ reconcile Addon HidHide baseline
-→ initialize fresh VIIPER runtime
-→ attach presentation based on current Steam/BPM fact
-```
-
-Persistent HidHide configuration is not inherently stale just because a previous process exited unexpectedly.
-
-The old Steam-session rule of "startup means remove stale HidHide routing state" must therefore be revisited for the Full PID1902 architecture.
+The frontend itself may close; only the controller Runtime is mandatory.
 
 ---
 
-## 14. Presentation selection must be dynamic at first attach
+## 14. Unexpected Runtime death
 
-The first virtual controller after boot must **not** be hard-coded to Xbox360.
-
-The normal/default policy remains:
+Unexpected Runtime death is a real reliability failure because it may leave:
 
 ```text
-Steam/BPM inactive → Xbox360
-Steam/BPM active   → Steam Deck
+physical PID1902 hidden by HidHide
+virtual presentation gone
 ```
 
-But the Addon may start at the same time Steam is starting directly into Big Picture Mode, or a Steam game may become active while physical controller ownership is still being acquired.
+The final product must recover automatically.
 
-Therefore the correct policy is:
+However, keep initial implementation simple:
 
-> **Choose the first presentation from the freshest available Steam/BPM state immediately before the first attach.**
+- do not add a new Windows service/supervisor in the first ownership POCs;
+- make the existing logon startup task mandatory while Disabled;
+- block intentional Runtime stop;
+- make restart/reconcile idempotent so a later keepalive mechanism can simply restart the Runtime;
+- add automatic crash restart as a focused hardening step after the baseline path works on hardware.
 
-Do not decide the presentation at the beginning of the ownership acquisition sequence and carry that stale decision forward.
+When Runtime restarts after a crash:
+
+```text
+Center M Disabled
+→ inspect current physical state
+→ PID1902: reacquire
+→ PID1901: reclaim PID1902
+→ reconcile HidHide
+→ create fresh VIIPER Runtime
+→ restore current desired X360/Deck presentation
+```
+
+Do not require a stock PID1901 recovery round-trip first unless real hardware evidence proves one is required.
 
 ---
 
-## 15. Boot-time Steam/BPM observation
+## 15. Steam/BPM presentation selection
 
-Steam/BPM observation is now a read-only fact source for presentation policy.
-
-It is no longer the authority that decides whether the physical controller should be owned.
-
-Therefore observation can begin early in startup and independently of physical controller acquisition.
-
-Conceptually:
-
-```text
-Startup
-├─ observe RunningAppID / Steam session / BPM
-│
-└─ acquire Addon controller ownership
-```
-
-Once the physical controller is ready and isolated:
-
-```text
-capture latest presentation desire
-```
-
-Decision:
+Steam/BPM observation is a read-only fact source for presentation policy.
 
 ```text
 Steam game active OR BPM active
-    → Steam Deck
+    → SteamDeck
 
 otherwise
     → Xbox360
 ```
 
-If the product retains a user-level Steam routing/presentation toggle, it may remain a presentation eligibility input:
+The first presentation must be chosen from the freshest state immediately before first attach.
+
+Do not hard-code boot to Xbox360 and then immediately switch if BPM was already active.
+
+Normal presentation transition:
 
 ```text
-SteamPresentationEnabled
-AND (Steam game active OR BPM active)
-    → Steam Deck
-
-otherwise
-    → Xbox360
+current presentation
+→ neutral
+→ stop publisher
+→ detach
+→ attach target
+→ send target neutral state
+→ start target publisher
 ```
 
-This setting must not control physical PID1902 ownership while Center M is Disabled.
+Throughout normal X360 ↔ SteamDeck switching:
+
+```text
+PID1902 unchanged
+DirectInput unchanged
+HidHide unchanged
+VIIPER server/bus unchanged
+```
 
 ---
 
-## 16. First attach ordering
+## 16. Runtime PID1902 drift
 
-Recommended final acquisition boundary:
-
-```text
-Physical PID1902 verified
-DirectInput acquired
-HidHide exact physical target verified hidden
-Canonical VIIPER dual runtime Ready
-Xbox360 detached
-SteamDeck detached
-    ↓
-Acquire presentation mutation gate
-    ↓
-Read latest Steam/BPM state
-    ↓
-Choose desired presentation
-    ↓
-Attach selected device
-    ↓
-Send neutral state
-    ↓
-Start selected publisher
-    ↓
-Release presentation gate
-```
-
-After startup, later Steam/BPM events use the same desired-vs-current presentation reconcile path.
-
-Do not create a separate startup-only controller switching architecture.
-
----
-
-## 17. Do not over-engineer startup presentation races
-
-A Steam/BPM event may occur while the first controller presentation is being attached.
-
-The product does not need epochs, multi-phase commit barriers, or a generalized presentation state machine solely for that narrow interleaving.
-
-Use simple convergence:
-
-```text
-Read latest desired state before attach
-Perform one serialized presentation mutation
-If a state-change event occurred during the mutation,
-run normal presentation reconcile afterward
-```
-
-The final invariant is what matters:
-
-```text
-DesiredPresentation == CurrentPresentation
-```
-
-This is sufficient for realistic handheld lifecycle behavior.
-
----
-
-## 18. Runtime PID1902 drift after Disabled boot
-
-The reboot boundary simplifies intentional mode changes, but the runtime must still handle real faults.
-
-While Center M is Disabled and the Addon owns the controller:
+While Center M is Disabled:
 
 ```text
 same physical MSI Claw PID1902 → PID1901
 ```
 
-is not an ownership transfer to respect.
+is owned-state drift, not an authority transfer to respect.
 
-It is owned-state drift.
-
-Recommended recovery:
+Recovery:
 
 ```text
-neutral active virtual presentation
-→ retire stale DirectInput session / publisher
+neutral virtual output
+→ retire stale physical input session
 → verify same strong physical identity
-→ verify Center M remains configured Disabled
-→ quiesce any conflicting Center M runtime if it unexpectedly resurrected
-→ reclaim same device to PID1902
-→ wait PnP settle
+→ verify Center M remains Disabled
+→ quiesce conflicting Center M runtime if it resurrected
+→ reclaim PID1902
+→ bounded PnP settle
 → reacquire DirectInput
 → reconcile HidHide
-→ resume desired current presentation
+→ resume current desired presentation
 ```
 
-The old `ExternalNativeTakeover → YieldCurrentSteamSession` policy is not part of this architecture.
+Do not restore the old `ExternalNativeTakeover → yield current Steam session` policy.
 
 ---
 
-## 19. Center M runtime resurrection after Disabled boot
+## 17. Physical device loss / PnP re-enumeration
+
+Real PnP loss is supported lifecycle behavior.
+
+If the physical controller temporarily disappears:
+
+```text
+DesiredAuthority = Addon
+VirtualPresentation = attached but neutral if VIIPER itself is healthy
+PhysicalInput = unavailable
+```
+
+Wait for relevant PnP arrival rather than issuing repeated mode commands against an absent device.
+
+On return:
+
+```text
+same device + PID1902
+→ reacquire DirectInput / repair HidHide
+
+same device + PID1901
+→ reclaim PID1902 / reacquire / repair
+
+different or ambiguous device
+→ do not mutate
+→ fail closed
+```
+
+---
+
+## 18. Sleep / hibernate / resume
+
+Center M Disabled authority survives sleep/hibernate.
+
+Do not intentionally restore PID1901 merely for suspend.
+
+Before suspend:
+
+```text
+neutral virtual output
+quiesce process-owned I/O as required
+```
+
+After resume:
+
+```text
+Center M still Disabled
+→ desired physical PID remains 1902
+→ inspect current physical state
+→ PID1902: reacquire/reconcile
+→ PID1901: reclaim PID1902
+→ missing: wait for PnP
+→ ambiguous: fail closed
+→ choose current X360/Deck presentation from current Steam/BPM state
+```
+
+Do not assume pre-suspend device handles remain valid.
+
+---
+
+## 19. Center M runtime resurrection
 
 A normal Disabled boot should prevent Center M startup roots from launching.
 
-If a Center M controller process nevertheless appears later, that is a runtime integrity failure, not a normal coexistence state.
-
-The Addon may use targeted process quiescence/recovery while Disabled.
-
-Prefer exact known conflicting roots and verified child retirement.
-
-Do not build a broad MSI process killer.
-
-The runtime recovery policy is independent from the Disable transition itself:
+If a conflicting Center M controller runtime appears later:
 
 ```text
-Disable transition before reboot
-    → no current-session kill required
-
-Unexpected Center M resurrection during Addon-owned runtime
-    → targeted quiesce + controller reconcile
+CenterMRuntimeDetectedWhileDisabled
+→ targeted quiesce of known relevant MSI processes
+→ controller reconcile
 ```
+
+Do not build a broad MSI process killer or high-frequency PID/process polling loop.
+
+Use actual lifecycle signals: DirectInput loss, PnP change, resume, detected known runtime, or explicit reconciliation.
 
 ---
 
-## 20. Enable flow: restore stock authority, then reboot
+## 20. Enable flow — explicit authority release
 
-Switching back to Center M Enabled is also reboot-bound.
+This is the primary normal path that changes desired physical state back to PID1901.
 
-### 20.1 User interaction
-
-The user selects:
+User action:
 
 ```text
 Enable MSI Center M
 ```
 
-Show a blocking confirmation dialog such as:
+Confirmation:
 
 ```text
 Restore MSI Center M controller authority.
@@ -806,768 +746,413 @@ Windows must restart to apply this change.
 
 There is no `Restart Later` option.
 
-### 20.2 Current-session controller teardown
-
-Because the Addon currently owns the controller in Disabled mode, it must first return the current session to a safe stock physical state before reboot.
-
 Recommended order:
 
 ```text
-active virtual presentation
-→ neutral
-→ stop publisher
-→ detach
-
-DirectInput
-→ release
-
-Physical MSI Claw
-→ PID1901
-→ verify stock mode
-
-VIIPER
-→ teardown
+1. neutral active virtual presentation
+2. stop publisher
+3. detach virtual controller
+4. release DirectInput
+5. restore same physical MSI Claw to PID1901
+6. verify PID1901 stock mode
+7. teardown VIIPER Runtime
+8. remove/verify Addon Disabled-mode HidHide controller baseline
+9. enable/verify MSI_Center_M_Server task
+10. enable/verify MSI_Center_M_Updater task
+11. set/verify MSI Foundation Service = Automatic
+12. release mandatory Addon startup lock/policy as appropriate
+13. request immediate Windows restart
 ```
 
-### 20.3 Remove Addon controller HidHide baseline
-
-Remove the Addon controller configuration used for Disabled mode.
-
-At minimum:
-
-```text
-remove Addon PID1902 blocked target(s)
-remove Addon controller whitelist entry if no longer required
-set HidHide Active to the clean Enabled-mode baseline
-verify no Addon controller isolation remains
-```
-
-The final exact Enabled-mode HidHide cleanup policy should be deterministic and must not leave the stock PID1901 controller dependent on the Addon.
-
-### 20.4 Re-enable Center M startup roots
-
-Configure:
-
-```text
-Scheduled Task: MSI_Center_M_Server   = Enabled
-Scheduled Task: MSI_Center_M_Updater  = Enabled
-Service: MSI Foundation Service       = Automatic
-```
-
-Read back and verify the exact configuration.
-
-### 20.5 Reboot immediately
-
-After successful teardown and persistent configuration change:
-
-```text
-Restart Windows immediately.
-```
-
-Next boot should start in:
+Next boot:
 
 ```text
 Center M Enabled
-→ MSI / stock controller authority
+→ MSI / stock owner
 → Addon controller stack passive
 ```
 
 ---
 
-## 21. No mode change without reboot
+## 21. Uninstall / explicit stock restoration
 
-The UI contract should be explicit:
+Uninstall is an exceptional explicit authority-release path.
 
-```text
-Cancel
-→ no change
+If Center M is Disabled, uninstall cleanup must not leave a hidden PID1902 controller without the Addon Runtime.
 
-Disable and Restart
-→ commit Disabled next-boot configuration
-→ reboot
-
-Enable and Restart
-→ commit Enabled next-boot configuration
-→ reboot
-```
-
-Do not support:
+Before removing the product, establish a stock-safe state:
 
 ```text
-Apply without reboot
-Restart later
-Temporary live Disabled mode
-Temporary live Enabled mode
+virtual output retired
+DirectInput released
+PID1901 restored and verified
+Addon HidHide controller baseline removed
+mandatory Addon startup registration removed
+Center M startup policy restored according to supported uninstall contract
 ```
 
-This is an intentional product simplification.
+Do not treat ordinary Windows restart as equivalent to uninstall.
 
 ---
 
-## 22. Failure handling during mode transition
+## 22. Failure handling during authority transition
 
-The transition should remain simple, but must not report success if the persistent configuration is incomplete.
-
-General rule:
+Keep transition logic explicit and small.
 
 ```text
-Perform required persistent mutations
+perform required persistent mutations
 → read back / verify
 → only then request reboot
 ```
 
-If a required mutation fails:
+If mutation fails:
 
 ```text
-Do not reboot as though the transition succeeded.
-Do not claim the new authority mode is active.
-Surface a clear failure.
+do not reboot as though success occurred
+do not claim the new authority mode is active
+surface the blocking reason
 ```
 
-If practical, restore the previous known-safe configuration when a transition fails partway through.
-
-Do not create a large generalized transaction framework solely for this feature.
-
-A small, explicit ordered transition with readback verification is preferred.
+Do not build a generalized transaction framework unless real failures prove the simple ordered approach insufficient.
 
 ---
 
-## 23. Authority state after reboot is determined from actual configuration
+## 23. Authority source of truth
 
-Do not rely on an extra duplicated application boolean such as:
-
-```text
-AddonControllerModeEnabled=true
-```
-
-if the actual Center M startup configuration already defines authority.
-
-Preferred authority interpretation:
+Do not add a second persisted boolean if actual Center M startup configuration already defines the authority mode.
 
 ```text
-Center M startup roots exactly Disabled
-→ desired controller authority = Addon
+Center M roots exactly Enabled / Automatic
+→ desired authority = MSI / Stock
 
-Center M startup roots exactly Enabled / Automatic
-→ desired controller authority = MSI / Stock
+Center M roots exactly Disabled
+→ desired authority = Addon
 
-Mixed / Partial configuration
+Partial / mixed
 → invalid / needs repair
+→ do not silently pick an owner
 ```
 
-This keeps one persistent authority source of truth.
-
-A partial state must not silently choose one controller owner.
+Mandatory Runtime startup registration is a required invariant of Disabled mode, not a separate authority source.
 
 ---
 
-## 24. Recommended steady-state invariants
+## 24. Steady-state invariants
 
-### Center M Enabled
+### Enabled
 
 ```text
 CenterMStartupConfiguration = Enabled
-Physical controller         = MSI / stock path
-Desired PID                 = PID1901
-Addon DirectInput owner     = no
-Addon physical HidHide      = no
-Addon VIIPER presentation   = no
+DesiredPhysicalPID          = PID1901
+Controller owner             = MSI / Stock
+Addon DirectInput            = none
+Addon physical HidHide       = none
+Addon virtual presentation   = none
 ```
 
-### Center M Disabled, Addon running
+### Disabled, healthy Runtime
 
 ```text
 CenterMStartupConfiguration = Disabled
-Physical controller         = same supported MSI Claw
-Desired PID                 = PID1902
+Addon Runtime               = running / mandatory
+DesiredPhysicalPID          = PID1902
+Physical MSI Claw           = same supported device
 DirectInput                 = healthy
 HidHide                     = Addon baseline active
-Physical primary gamepad    = isolated
-VIIPER runtime              = healthy
+Physical gamepad            = isolated
+VIIPER Runtime              = healthy
 Xbox360 logical device      = created
 SteamDeck logical device    = created
 Exactly one presentation    = attached/live
 ```
 
-Presentation:
+### Disabled during Windows shutdown/restart
 
 ```text
-Steam/BPM inactive → Xbox360
-Steam/BPM active   → SteamDeck
+Desired authority = Addon
+Desired PID       = PID1902
+Persistent HidHide baseline remains
+No deliberate PID1901 restore solely for OS shutdown/restart
 ```
 
-### Center M Disabled, Addon intentionally not running after clean shutdown
-
-Recommended safe physical state:
-
-```text
-Physical controller = PID1901
-Virtual presentation = none
-VIIPER runtime = none
-Persistent Addon HidHide PID1902 rule may remain dormant
-```
-
----
-
-## 25. Architectural consequences for existing code
-
-Several existing components were built for the old Steam-session-bound routing model.
-
-They should be treated as sources of useful low-level primitives, not as preservation constraints.
-
-### Existing behavior that likely needs semantic replacement
-
-Examples include:
-
-- route-scoped HidHide acquisition and rollback;
-- startup cleanup that assumes Addon-owned HidHide state is stale merely because the previous routing session ended unexpectedly;
-- Steam activity as physical controller ownership authority;
-- route entry/exit driving PID1901 ↔ PID1902;
-- `ExternalNativeTakeover` causing Steam-session yield;
-- Game Bar/X360 presentation logic assuming an outer Steam Deck route.
-
-### Existing behavior worth reusing where appropriate
-
-Examples include:
-
-- strong MSI Claw physical identity checks;
-- bounded PnP stabilization;
-- PID1901 ↔ PID1902 native-mode primitives;
-- DirectInput input source;
-- exact MSI PID1902 primary HID collection resolution;
-- HidHide inspect/add/remove/active primitives;
-- HidHide verification logic;
-- canonical VIIPER runtime and typed device lifecycle;
-- X360 and Steam Deck publishers/mappers;
-- Steam RunningAppID event observation;
-- BPM event observation;
-- suspend/resume hooks;
-- recovery logging and fail-close behavior where it protects real lifecycle safety.
-
-Do not preserve old orchestration merely because tests currently encode it.
-
----
-
-## 26. Recommended implementation sequence
-
-A clean implementation sequence would be:
-
-### PR A — Reboot-bound authority transition
-
-Implement only the persistent mode-change boundary:
-
-```text
-Disable and Restart
-Enable and Restart
-Center M startup configuration readback
-mandatory reboot UX
-no Restart Later path
-```
-
-Include HidHide baseline preparation/cleanup as required for the selected mode, but do not implement live PID1902 controller ownership as part of the Disable transition.
-
-### PR B — Disabled boot admission and PID1902 ownership
-
-On startup when Center M is verified Disabled:
-
-```text
-verify supported hardware
-verify Disabled-mode HidHide baseline
-initialize dual VIIPER runtime detached
-PID1901 → PID1902 if needed
-acquire DirectInput
-resolve exact physical HID target
-ensure/verify isolation
-```
-
-Still no automatic presentation switching beyond the first selected presentation if PR size requires separation.
-
-### PR C — First dynamic presentation attach
-
-After physical ownership is ready:
-
-```text
-fresh Steam/BPM snapshot
-→ X360 or SteamDeck
-→ attach exactly one
-→ start corresponding publisher
-```
-
-### PR D — Runtime presentation reconcile
-
-Wire later Steam/BPM state changes to:
-
-```text
-X360 ↔ SteamDeck
-```
-
-without changing physical PID1902 ownership, DirectInput, HidHide, or VIIPER server/bus ownership.
-
-### PR E — Owned-state recovery
-
-Add real lifecycle recovery for:
-
-```text
-PID1902 → PID1901 drift
-physical device loss / re-arrival
-DirectInput session failure
-HidHide drift
-Center M runtime resurrection
-resume
-```
-
-### Cleanup
-
-Remove obsolete Steam-session physical routing contracts and dead coexistence policies once the new controller owner is proven.
-
----
-
-## 27. Hardware validation matrix
-
-The eventual implementation should be validated on supported MSI Claw hardware with at least the following cases.
-
-### Authority transition
-
-```text
-Enabled → Disable and Restart
-Disabled → Enable and Restart
-Cancel from each confirmation
-persistent configuration mutation failure
-reboot request failure
-```
-
-### First Disabled boot
-
-```text
-physical starts PID1901
-physical unexpectedly already PID1902
-PID1902 exact HidHide entry already known
-PID1902 exact HidHide entry not yet known
-Steam not running
-Steam desktop running
-Steam game already active
-Steam starting directly into BPM
-Steam/BPM becomes active during controller acquisition
-```
-
-### Subsequent Disabled boots
-
-Verify:
-
-```text
-persistent HidHide baseline survives reboot
-PID1902 is cloaked before virtual attach
-no physical + virtual double-input window
-exactly one virtual presentation becomes visible
-```
-
-### Enabled restoration
-
-Verify:
-
-```text
-virtual controller disappears
-physical controller returns PID1901
-Addon-owned HidHide controller isolation is removed
-Center M startup roots are restored
-Center M behaves normally after reboot
-```
-
-### Runtime lifecycle
-
-Later recovery PRs must additionally validate:
-
-```text
-sleep / resume
-hibernate / resume
-physical unplug-equivalent PnP disappearance/re-enumeration
-PID1902 → PID1901 drift
-DirectInput fault
-Addon crash / restart
-Windows shutdown / restart
-```
-
----
-
-## 28. Final design summary
-
-The intended product rule is simple:
-
-> **Center M Enabled/Disabled is not a live toggle. It selects the controller authority for the next Windows boot.**
-
-Changing authority requires reboot.
-
-```text
-Enable / Disable request
-        ↓
-configure persistent next-boot state
-        ↓
-mandatory restart
-        ↓
-next boot enters exactly one controller authority model
-```
-
-For Addon-owned mode:
+There is no normal steady state:
 
 ```text
 Center M Disabled
-        ↓
-Addon owns HidHide baseline
-        ↓
-Addon acquires PID1902 / DirectInput after boot
-        ↓
-physical isolation verified
-        ↓
-VIIPER already owns both detached typed devices
-        ↓
-fresh Steam/BPM fact selects first presentation
-        ↓
-Xbox360 OR SteamDeck attached
++ Windows running
++ Addon controller Runtime intentionally absent
 ```
-
-The most important simplifications are:
-
-1. **No live Center M ↔ Addon authority handoff.**
-2. **No Restart Later mode.**
-3. **No runtime coexistence with another controller authority.**
-4. **HidHide is part of the persistent Addon controller configuration while Center M is Disabled.**
-5. **Virtual presentation is attached only after physical isolation is verified.**
-6. **The first presentation is selected from the latest Steam/BPM state, not hard-coded to Xbox360.**
-7. **Steam/BPM changes virtual presentation only; they never decide physical PID1902 ownership.**
-
-This should be the baseline contract for the next Full PID1902 implementation work.
 
 ---
 
-## 29. Refined small-PR implementation sequence
+## 25. Architectural consequences for current code
 
-The broad sequence in section 26 remains useful as a conceptual roadmap, but implementation should be split more aggressively into small, reviewable contracts.
+Useful low-level primitives may remain:
 
-The project is still pre-release, so there is no benefit in preserving obsolete Steam-route orchestration merely to reduce short-term diff size. Prefer a clean dependency chain where each PR proves one layer before the next layer becomes active.
+- strong MSI Claw physical identity;
+- bounded PnP stabilization;
+- native PID switch/readback;
+- DirectInput input source;
+- exact primary PID1902 collection resolution;
+- HidHide inspect/mutation/verification;
+- canonical dual-device VIIPER Runtime;
+- X360 and SteamDeck publishers/mappers;
+- Steam RunningAppID/BPM observation;
+- suspend/resume hooks;
+- targeted Center M suppression primitives.
 
-Where practical, target roughly **100–400 LOC per PR**. This is a guideline, not a hard limit; correctness and a clear ownership boundary matter more than artificial LOC targets.
+Old policy semantics may be replaced:
 
-The recommended refined order is:
+- Steam-session physical ownership;
+- route-end PID1901 restoration;
+- route-scoped HidHide leases;
+- startup cleanup that assumes all Addon HidHide state is stale;
+- `ExternalNativeTakeover → yield`;
+- route-bound Center M guard lifetime;
+- normal Addon process exit as a supported Disabled-mode authority release.
+
+Do not add compatibility wrappers merely to preserve unreleased architecture.
+
+---
+
+## 26. Simple small-PR implementation sequence
+
+Keep each PR focused and reviewable. Roughly 100–400 LOC is a useful target where practical, not a hard limit.
+
+Current sequence:
 
 ```text
-Persistent dual VIIPER devices        [completed foundation]
+Persistent dual VIIPER devices              [completed]
         ↓
-PR2  Addon-owned HidHide baseline
+PR2  Addon-owned persistent HidHide baseline
         ↓
-PR3  Reboot-bound authority transition
+PR3  Mandatory Runtime / startup contract
         ↓
-PR4  Disabled-boot admission
+PR4  Reboot-bound Center M authority transition
         ↓
-PR5  PID1902 + DirectInput ownership
+PR5  Disabled-boot admission
         ↓
-PR6  First presentation attach
+PR6  PID1902 + DirectInput ownership
         ↓
-PR7  Runtime X360 ↔ SteamDeck switching
+PR7  First presentation attach
         ↓
-PR8  Shutdown / Enabled-mode restoration
+PR8  Runtime X360 ↔ SteamDeck switching
+        ↓
+PR9+ Owned-state recovery / keepalive hardening / cleanup
 ```
 
-### 29.1 PR2 — Addon-Owned HidHide Baseline Foundation
+### PR2 — HidHide baseline
+
+No scope change from the existing PR2 work order.
+
+```text
+persistent HidHide baseline only
+no PID switch
+no Center M mutation
+no reboot
+no Runtime lifetime wiring
+no VIIPER attach
+```
+
+### PR3 — Mandatory Runtime / startup contract
+
+Keep this small.
 
 Goal:
 
-> Establish the new persistent HidHide semantics independently of Center M mutation, PID switching, VIIPER presentation, and UI.
-
-This PR should replace the old conceptual model of "borrow HidHide for a Steam route, then roll it back" with a narrow primitive representing the Addon controller baseline.
-
-Conceptual operations may be as small as:
-
 ```text
-Inspect()
-ApplyDisabledModeBaseline()
-ApplyEnabledModeBaseline()
+Center M Disabled mode requires the existing Addon background Runtime startup task
 ```
 
-Do not create a generalized HidHide ownership framework or a multi-owner state machine.
+Implement the product contract only:
 
-Disabled-mode baseline should represent the deterministic Addon controller configuration, including the required Addon whitelist, non-inverse mode, Active state, and exact known Addon-owned PID1902 targets when they exist.
+- expose/verify whether the Addon background startup task is enabled;
+- provide the narrow operation required to force/verify it for Disabled-mode transition;
+- prevent/disable user-facing "turn off startup" / intentional controller Runtime exit semantics while Disabled when wiring exists;
+- keep frontend close independent from Runtime lifetime.
 
-Enabled-mode baseline should represent the clean stock-compatible state expected when Addon controller authority is not active.
+Do **not** add a Windows service or supervisor in this PR.
 
-Strictly out of scope:
+Do **not** implement PID1902 ownership here.
 
-```text
-PID1901 / PID1902 switching
-DirectInput acquisition
-Center M startup mutation
-Windows reboot
-VIIPER attach/detach
-X360 publisher
-Steam Deck publisher
-Steam/BPM policy
-Device-page UI changes
-runtime recovery
-```
+### PR4 — Reboot-bound authority transition
 
-Tests should focus only on deterministic HidHide inspect/apply/readback behavior and failure classification.
-
-### 29.2 PR3 — Reboot-Bound Authority Transition
-
-Goal:
-
-> Make Enable/Disable a mandatory reboot-bound product transition by composing the already-existing Center M startup control with the PR2 HidHide baseline.
-
-Disable path:
+Compose:
 
 ```text
-user selects Disable
-→ blocking confirmation
-→ [Cancel] or [Disable and Restart]
-→ apply/verify Disabled-mode HidHide baseline
-→ disable/verify Center M startup roots
-→ request immediate reboot
+PR2 HidHide baseline
++ PR3 mandatory Runtime startup
++ existing Center M startup control
++ mandatory reboot UX
 ```
 
-Enable path:
+No live PID takeover.
+
+### PR5 — Disabled-boot admission
+
+Validate current boot facts only.
+
+No physical mutation or virtual attach.
+
+### PR6 — PID1902 + DirectInput ownership
 
 ```text
-user selects Enable
-→ blocking confirmation
-→ [Cancel] or [Enable and Restart]
-→ apply/verify Enabled-mode HidHide baseline as appropriate for this stage
-→ enable/verify Center M startup roots
-→ request immediate reboot
+current 1902 → keep
+current 1901 → switch to 1902
+PnP settle
+DirectInput acquire
+exact HidHide target reconcile
+physical isolation verify
 ```
 
-There must be no supported `Restart Later` path.
+Both virtual devices remain detached.
 
-This PR should not perform physical controller ownership changes.
+### PR7 — first presentation attach
 
-Strictly out of scope:
+Fresh Steam/BPM snapshot immediately before attach.
+
+### PR8 — runtime presentation switching
+
+X360 ↔ SteamDeck only; no physical ownership churn.
+
+### PR9+ — recovery and product hardening
+
+Focused follow-ups may cover:
+
+- unexpected Runtime death auto-restart / lightweight keepalive;
+- PID1902 → PID1901 owned-state drift;
+- physical disappearance/re-arrival;
+- DirectInput loss;
+- HidHide drift;
+- Center M resurrection;
+- suspend/resume;
+- obsolete old-routing cleanup.
+
+Do not force all hardening into the first ownership PRs.
+
+---
+
+## 27. Validation priorities
+
+### Authority transition
+
+- Cancel leaves configuration unchanged.
+- Disable and Restart enables/verifies mandatory Addon Runtime startup before disabling Center M roots.
+- Enable and Restart restores PID1901 before restoring MSI authority.
+- No Restart Later path.
+
+### Disabled boot
+
+- current PID1902 is retained without a 1901 round-trip;
+- current PID1901 is switched to 1902;
+- exact HidHide physical target is verified before virtual attach;
+- Steam already in BPM selects Deck on first attach;
+- ordinary state selects X360.
+
+### Windows restart while Disabled
+
+- no intentional PID1901 command is issued solely because Windows is restarting;
+- persistent HidHide baseline survives;
+- next startup reconciles current PID to 1902;
+- controller becomes usable again without an unnecessary stock round-trip.
+
+### Runtime lifecycle
+
+Later hardening must validate:
+
+- unexpected process crash and restart;
+- sleep/resume;
+- hibernate/resume;
+- PID drift;
+- physical PnP disappearance/re-arrival;
+- Center M resurrection.
+
+### Enable restoration
+
+- virtual controller retired;
+- DirectInput released;
+- PID1901 restored and verified;
+- Addon HidHide controller isolation removed;
+- Center M startup roots restored;
+- normal stock controller works after reboot.
+
+---
+
+## 28. Review rules
+
+Review future PRs against the real product lifecycle.
+
+Blocking examples:
+
+- Disabled mode allows the user to intentionally stop the only controller Runtime and leave Windows running;
+- Disabled transition can complete without guaranteeing next-logon Addon Runtime startup;
+- Windows restart unnecessarily forces PID1901 and introduces avoidable PnP churn;
+- current PID1902 is needlessly round-tripped through PID1901 on startup;
+- virtual controller attaches before physical isolation;
+- Enable transition leaves PID1902/HidHide ownership behind;
+- real PnP/resume/crash failures cannot converge to a usable controller.
+
+Do not block for theoretical instruction-level races that do not map to supported handheld lifecycle behavior.
+
+Do not add extra manager/state/epoch abstractions unless they protect a realistic failure path.
+
+---
+
+## 29. Final design summary
+
+The controller authority model is intentionally simple:
 
 ```text
-PID1901 → PID1902
-PID1902 → PID1901 as a new runtime ownership implementation
-DirectInput acquisition
-virtual-controller attach
-Steam/BPM presentation selection
-Center M current-session controller takeover
-runtime owned-state recovery
+                    MSI CENTER M SETTING
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+           ENABLED                   DISABLED
+              │                         │
+       MSI / STOCK OWNER          ADDON RUNTIME OWNER
+              │                         │
+           PID1901                  PID1902 desired
+                                        │
+                                     HidHide
+                                        │
+                                     VIIPER
+                                  ┌─────┴─────┐
+                                  │           │
+                                X360       SteamDeck
+                               normal      Steam/BPM
 ```
 
-The purpose is to make the reboot boundary itself authoritative before controller acquisition is introduced.
-
-### 29.3 PR4 — Disabled-Boot Admission
-
-Goal:
-
-> Decide whether the current boot is allowed to enter Addon controller ownership, without yet mutating the physical controller or exposing a virtual controller.
-
-The admission decision should be based on current facts, not an additional persisted authority boolean.
-
-Conceptually require:
+Disabled mode lifetime:
 
 ```text
-supported MSI Claw
-AND Center M startup roots exactly Disabled
-AND expected Disabled-mode HidHide baseline valid
-AND recovery state safe
-AND canonical dual VIIPER runtime ready with both devices detached
+Disable and Restart
+        ↓
+Addon Runtime becomes mandatory
+        ↓
+PID1902 remains desired
+        ↓
+Windows shutdown/restart does NOT release authority
+        ↓
+next Runtime startup reconciles actual PID to 1902
+        ↓
+...
+        ↓
+Enable Center M and Restart
+        ↓
+PID1901 restored
+Addon HidHide ownership removed
+MSI authority restored
 ```
 
-Result should be intentionally small, for example conceptually:
+Final principles:
 
-```text
-Stock / Passive
-AddonReady
-FailedClosed
-```
-
-Do not invent a large authority manager or state machine merely for this gate.
-
-Strictly out of scope:
-
-```text
-PID switching
-DirectInput acquisition
-HidHide physical-target mutation after PID1902 appears
-X360 attach
-SteamDeck attach
-publisher startup
-runtime presentation switching
-```
-
-### 29.4 PR5 — Disabled Boot → PID1902 + DirectInput
-
-Goal:
-
-> Convert a successful Disabled-boot admission into real physical controller ownership while keeping both virtual presentations detached.
-
-Expected sequence:
-
-```text
-AddonReady
-→ capture strong physical MSI Claw identity
-→ if already PID1902, keep it
-→ if PID1901, switch the same device to PID1902
-→ bounded PnP stabilization
-→ verify same strong physical identity
-→ acquire exact DirectInput session
-→ resolve exact PID1902 primary HID collection
-→ reconcile/ensure Addon HidHide baseline for that exact target
-→ verify physical isolation
-```
-
-The final PR5 invariant is:
-
-```text
-Physical MSI Claw = PID1902
-DirectInput = healthy
-HidHide isolation = verified
-Xbox360 = detached
-SteamDeck = detached
-```
-
-Do not attach a virtual controller in this PR.
-
-That separation is intentional: PID/PnP/DirectInput/HidHide failures should be reviewable independently from virtual presentation behavior.
-
-### 29.5 PR6 — First Presentation Attach
-
-Goal:
-
-> Expose the first virtual controller only after physical ownership and isolation are already proven.
-
-Immediately before first attach, capture the freshest current presentation desire:
-
-```text
-Steam game active OR BPM active
-    → SteamDeck
-
-otherwise
-    → Xbox360
-```
-
-If a retained user setting controls Steam presentation eligibility, it may participate here, but it must not affect PID1902 ownership.
-
-Expected attach boundary:
-
-```text
-PID1902 healthy
-DirectInput healthy
-HidHide verified
-VIIPER dual runtime Ready
-both virtual devices detached
-    ↓
-read latest Steam/BPM state
-    ↓
-attach exactly one selected device
-    ↓
-send neutral state
-    ↓
-start matching publisher
-```
-
-This PR does **not** need runtime X360 ↔ SteamDeck switching yet.
-
-It only proves that boot can expose the correct first presentation from the current facts.
-
-### 29.6 PR7 — Runtime X360 ↔ SteamDeck Switching
-
-Goal:
-
-> Make Steam/BPM changes select presentation without changing physical controller ownership.
-
-Required transition pattern:
-
-```text
-current presentation
-→ neutral
-→ stop current publisher
-→ detach current device
-→ attach target device
-→ send target neutral state
-→ start target publisher
-```
-
-Reverse direction uses the same path.
-
-The critical invariant is that presentation changes do **not** touch:
-
-```text
-PID1902
-DirectInput session
-HidHide physical isolation
-VIIPER server
-VIIPER bus
-physical controller authority
-```
-
-Hardware stress validation should repeatedly switch X360 ↔ SteamDeck and verify that those lower layers remain unchanged. A practical repeated-switch test such as 100 transitions is appropriate for POC validation if hardware time permits.
-
-Do not add epochs, barriers, or another generalized state machine solely to defend against theoretical event interleavings. Use the existing serialized presentation mutation concept and converge to latest desired state.
-
-### 29.7 PR8 — Shutdown / Enabled-Mode Restoration
-
-Goal:
-
-> Complete the clean lifecycle boundary after the owned startup path has been proven.
-
-Normal Addon shutdown while Center M remains Disabled should converge to a safe physical state:
-
-```text
-active virtual presentation
-→ neutral
-→ publisher stop
-→ detach
-→ DirectInput release
-→ restore PID1901
-→ VIIPER teardown
-```
-
-The persistent Disabled-mode HidHide configuration may remain dormant across normal shutdown/reboot so that the next PID1902 enumeration can be pre-cloaked.
-
-Center M Enable transition must ultimately ensure:
-
-```text
-virtual presentation retired
-DirectInput released
-physical MSI Claw restored to PID1901
-Addon controller HidHide baseline removed/cleaned
-Center M startup roots Enabled / Automatic
-mandatory Windows reboot requested
-```
-
-Do not merge unrelated owned-state recovery into this PR if it would make the change difficult to review.
-
-Real fault recovery for PID1902 drift, PnP disappearance/re-arrival, DirectInput loss, HidHide drift, Center M resurrection, suspend/resume, and crash recovery may follow as additional focused PRs after the basic owned lifecycle is proven.
-
-### 29.8 Review rules for this sequence
-
-Each PR should be reviewed against its own contract rather than the final feature set.
-
-Do not block an early foundation PR because a later PR has not yet implemented its behavior.
-
-Examples:
-
-```text
-PR2 does not switch PID1902               → expected
-PR3 does not acquire DirectInput           → expected
-PR4 does not attach a controller           → expected
-PR5 leaves both virtual devices detached   → expected
-PR6 does not auto-switch after startup     → expected
-```
-
-At the same time, each PR must avoid accidentally activating behavior assigned to a later stage.
-
-Examples:
-
-```text
-PR2 must not mutate Center M or PID state
-PR3 must not perform live controller takeover
-PR4 must not mutate physical controller state
-PR5 must not attach a virtual presentation
-PR6 must not recreate physical ownership during presentation selection
-PR7 must not route PID ownership through Steam/BPM
-```
-
-The project is unreleased, so obsolete Steam-session orchestration does not need compatibility wrappers. If a later implementation step proves that an old route coordinator, yield policy, test seam, or compatibility layer conflicts with the Full PID1902 architecture, remove or rewrite it rather than layering a second authority model on top.
-
-The guiding implementation principle remains:
-
-> **One contract per PR, one controller authority, one physical desired state, one presentation owner, one teardown path — without defensive complexity for theoretical races.**
+1. **Center M Disabled means the Addon Runtime is the controller authority, not merely an optional app.**
+2. **The frontend may close; the controller Runtime must remain.**
+3. **PID1902 is the desired physical state for the entire Disabled-mode lifetime.**
+4. **Windows shutdown/restart is not an authority-release boundary and should not deliberately force PID1901.**
+5. **Startup keeps PID1902 if already present and switches PID1901 only when necessary.**
+6. **HidHide remains persistent across reboot.**
+7. **Steam/BPM only chooses X360 vs SteamDeck.**
+8. **Explicit Enable Center M / uninstall is the normal PID1901 restoration boundary.**
+9. **Unexpected Runtime death is a real recovery requirement, but initial POCs should not add a new service/supervisor prematurely.**
+10. **Start simple: mandatory existing background startup first, lightweight keepalive hardening later.**
