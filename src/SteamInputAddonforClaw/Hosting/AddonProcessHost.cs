@@ -94,6 +94,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // owned-session completion. Serialized inside the physical owner's own gate; tracked only so
     // controlled teardown drains it BEFORE the presentation reconcile it may itself request.
     private Task _ownedControllerRecovery = Task.CompletedTask;
+    // PR10: one Runtime-owned, event-driven Windows Device Arrival observer. Non-null once a physical
+    // owner has actually committed; it only wakes the existing recovery entrypoint, which re-proves
+    // the strong MSI Claw identity itself. Disposed at BeginProcessShutdown before recovery drains.
+    private Controllers.Detection.WindowsDeviceArrivalWatcher? _deviceArrivalWatcher;
 
     internal AddonProcessHost(string[]? updateRestartArguments,
         Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
@@ -425,6 +429,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return;
             }
 
+            // PR10: the owner has committed a real strong identity + exact hidden target, so a later
+            // physical disappearance can be recovered on a real Device Arrival even after the bounded
+            // PR8/PR9 attempt has already failed closed.
+            StartControllerDeviceArrivalWatcher();
+
             var snapshot = _runtimeHost!.CapturePresentationSnapshot();
             var presentationResult = await presentation.AttachInitialAsync(source, snapshot, _startupCancellationTokenSource.Token).ConfigureAwait(false);
             AppLog.Info("ControllerPresentation", "First presentation attach completed.",
@@ -511,19 +520,59 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return;
         }
 
-        AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.", ("Event", "OwnedPhysicalRecoveryRequested"));
-        _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, _startupCancellationTokenSource.Token);
+        RequestOwnedControllerRecovery(physical, "UnexpectedDirectInputCompletion");
+    }
+
+    private void StartControllerDeviceArrivalWatcher()
+    {
+        if (_deviceArrivalWatcher is not null) return;
+        var watcher = new Controllers.Detection.WindowsDeviceArrivalWatcher();
+        watcher.DeviceArrived += OnControllerDeviceArrived;
+        _deviceArrivalWatcher = watcher;
+        watcher.Start(); // logs DeviceArrivalWatcherStarted / DeviceArrivalWatcherUnavailable; no polling fallback
+    }
+
+    /// <summary>PR10 section 7: a Windows Device Arrival is only a wake-up. Do almost no work here --
+    /// the physical owner re-proves the strong MSI Claw identity, exact target, and Center M authority
+    /// itself, so an unrelated USB/BT/network arrival can never gain controller authority.</summary>
+    private void OnControllerDeviceArrived()
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        var physical = _physicalOwnership;
+        if (physical is null) return;
+        // A live owned session is healthy -- an unrelated arrival must not cause native/HidHide/DI work.
+        if (physical.LiveInputSource is { IsRunning: true }) return;
+
+        AppLog.Info("ControllerOwnership", "Controller device arrival observed.", ("Event", "ControllerDeviceArrivalObserved"));
+        RequestOwnedControllerRecovery(physical, "DeviceArrival");
+    }
+
+    /// <summary>The one owned-controller recovery scheduling seam, shared by the unexpected
+    /// DirectInput completion (PR8) and the PR10 Device Arrival trigger. The physical owner's own
+    /// gate remains the serialization authority.</summary>
+    private void RequestOwnedControllerRecovery(Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical, string trigger)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        // Coalesce concurrent triggers to one in-flight attempt. A completed result -- including a
+        // fail-closed PhysicalDeviceMissing -- leaves the task completed, so the next real Device
+        // Arrival still gets through and re-enters RecoverLostInputAsync.
+        if (!_ownedControllerRecovery.IsCompleted) return;
+
+        AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.",
+            ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", trigger));
+        _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, trigger, _startupCancellationTokenSource.Token);
     }
 
     private async Task RecoverOwnedControllerPhysicalInputAsync(
         Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical,
+        string trigger,
         CancellationToken cancellationToken)
     {
         try
         {
             var result = await physical.RecoverLostInputAsync(cancellationToken).ConfigureAwait(false);
             AppLog.Info("ControllerOwnership", "Owned physical input recovery completed.",
-                ("Result", result.Outcome), ("Reason", result.Reason), ("HiddenTarget", result.HiddenTarget ?? "None"));
+                ("Trigger", trigger), ("Result", result.Outcome), ("Reason", result.Reason), ("HiddenTarget", result.HiddenTarget ?? "None"));
             // 11: raw Steam/BPM state may have changed while input was down and PR7 correctly refused
             // forward mutation on a non-running source. Re-run the existing reconcile exactly once.
             if (result.IsOwned && result.Reason != "RecoveryNotNeeded")
@@ -532,7 +581,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception exception)
         {
-            AppLog.Error("ControllerOwnership", "Owned physical input recovery threw; Runtime remains available.", exception);
+            AppLog.Error("ControllerOwnership", "Owned physical input recovery threw; Runtime remains available.", exception,
+                ("Trigger", trigger));
         }
     }
 
@@ -711,6 +761,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _tdpPowerLifecycleWatcher = null;
         _intelFpsPowerSource?.Dispose(); _intelFpsPowerSource = null;
         _intelFpsRuntime.BeginShutdown();
+        // PR10 section 15: stop the Device Arrival watcher before recovery drains -- no WMI callback
+        // may reach OnControllerDeviceArrived after this, and _processShutdownStarted is already set
+        // so no new arrival-triggered recovery can be scheduled.
+        _deviceArrivalWatcher?.Dispose();
+        _deviceArrivalWatcher = null;
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
     }

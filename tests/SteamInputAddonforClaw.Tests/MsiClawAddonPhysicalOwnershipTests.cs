@@ -664,6 +664,83 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(PrimaryPnp, release.HiddenTarget); // owned target evidence retained through the failure
     }
 
+    // ---------- PR10: physical device loss / PnP return recovery (work order section 20) ----------
+
+    [Fact] // 20.1 -- mandatory: proves _ownsInputSource no longer means "was never committed"
+    public async Task Recovery_re_enters_after_an_earlier_device_not_found_failure()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryCaptureStatus = NativeStateCaptureStatus.DeviceNotFound;
+
+        var first = await owner.RecoverLostInputAsync(default);
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, first.Outcome);
+        Assert.Contains("PhysicalDeviceMissing", first.Reason);
+        Assert.Null(owner.LiveInputSource);
+
+        h.RecoveryCaptureStatus = null; // the same physical MSI Claw safely returned
+        h.Events.Clear();
+        var second = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(second.IsOwned);
+        Assert.Equal("OwnedPhysicalInputRecovered", second.Reason);
+        Assert.False(second.ModeWriteIssued);
+        Assert.Same(h.InputSource, owner.LiveInputSource);
+        Assert.Equal(
+            new[] { "NativeCapture", "DescriptorResolve", "HidHideApply", "InputStart", "FirstValidState" },
+            h.Events);
+    }
+
+    [Fact] // 20.6 -- return as PID1901 after an earlier absence still reuses the PR9 one-shot reclaim
+    public async Task Recovery_re_enters_as_pid1901_after_device_not_found_and_reclaims_once()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryCaptureStatus = NativeStateCaptureStatus.DeviceNotFound;
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.RecoverLostInputAsync(default)).Outcome);
+
+        h.RecoveryCaptureStatus = null;
+        h.RecoveryMode = MsiClawNativeMode.XInput;                 // returned as PID1901
+        h.RecoveryModeAfterReclaim = MsiClawNativeMode.DirectInput;
+        h.Events.Clear();
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(recovery.IsOwned);
+        Assert.Equal("OwnedPhysicalStateDriftReclaimed", recovery.Reason);
+        Assert.True(recovery.ModeWriteIssued);
+        Assert.Equal(1, h.RecoverySwitchCalls);
+    }
+
+    [Fact] // 20.2 -- re-entry still refuses when ownership was never committed
+    public async Task Repeated_recovery_still_refuses_when_ownership_was_never_committed()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, DirectInputMissingAttempts = int.MaxValue };
+        var owner = h.Build();
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.AcquireAsync(default)).Outcome);
+        h.Recovering = true;
+
+        Assert.Equal("OwnerNotCommitted", (await owner.RecoverLostInputAsync(default)).Reason);
+        Assert.Equal("OwnerNotCommitted", (await owner.RecoverLostInputAsync(default)).Reason); // still, on retry
+        Assert.Equal(0, h.SwitchCalls);
+        Assert.Empty(h.HidHideApplied);
+    }
+
+    [Fact] // 20.8 -- a changed exact target on return stays fail-closed, no migration
+    public async Task Recovery_after_device_not_found_with_a_changed_exact_target_fails_closed()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryCaptureStatus = NativeStateCaptureStatus.DeviceNotFound;
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.RecoverLostInputAsync(default)).Outcome);
+
+        h.RecoveryCaptureStatus = null;
+        h.RecoveryPnp = OtherPrimaryPnp; // same strong identity, different exact primary collection
+        h.Events.Clear();
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("RecoveredTargetChanged", recovery.Reason);
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.Equal(new[] { PrimaryPnp }, h.HidHideApplied);
+    }
+
     [Theory] // 21.5
     [InlineData("DeviceNotFound")]
     [InlineData("Indeterminate")]
@@ -838,6 +915,31 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             "owned physical recovery must be drained before the presentation reconcile");
         // No polling / timer / recovery-manager framework.
         foreach (var forbidden in new[] { "ControllerRecoveryManager", "PhysicalRecoveryManager", "RecoveryTimer", "PeriodicTimer" })
+            Assert.DoesNotContain(forbidden, host, StringComparison.Ordinal);
+    }
+
+    [Fact] // PR10 sections 6-8 / 15 -- host wiring for the Device Arrival PnP-return trigger
+    public void Host_wires_the_device_arrival_watcher_and_shares_one_recovery_seam()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
+
+        // One Runtime-owned watcher, started only once a physical owner has committed.
+        Assert.Contains("new Controllers.Detection.WindowsDeviceArrivalWatcher()", host, StringComparison.Ordinal);
+        Assert.Contains("watcher.DeviceArrived += OnControllerDeviceArrived;", host, StringComparison.Ordinal);
+        // Both triggers funnel through one scheduling seam.
+        Assert.Contains("RequestOwnedControllerRecovery(physical, \"UnexpectedDirectInputCompletion\")", host, StringComparison.Ordinal);
+        Assert.Contains("RequestOwnedControllerRecovery(physical, \"DeviceArrival\")", host, StringComparison.Ordinal);
+        // A live owned source ignores unrelated arrivals with no native/HidHide/DI work.
+        Assert.Contains("physical.LiveInputSource is { IsRunning: true }", host, StringComparison.Ordinal);
+        // Shutdown stops the watcher before recovery drains.
+        Assert.True(
+            host.IndexOf("_deviceArrivalWatcher?.Dispose();", StringComparison.Ordinal)
+            < host.IndexOf("await _ownedControllerRecovery.ConfigureAwait(false);", StringComparison.Ordinal),
+            "the Device Arrival watcher must be disposed before the recovery drain");
+        // No PnP polling / manager.
+        foreach (var forbidden in new[] { "PnPRecoveryManager", "PnpRecoveryManager", "PeriodicTimer" })
             Assert.DoesNotContain(forbidden, host, StringComparison.Ordinal);
     }
 
