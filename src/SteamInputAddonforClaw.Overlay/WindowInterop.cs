@@ -16,14 +16,23 @@ internal static class WindowInterop
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoSendChanging = 0x0400;
     private const uint SwpNoZOrder = 0x0004;
+    private const uint WmMouseActivate = 0x0021;
+    private const uint WmActivate = 0x0006;
+    private const uint WmClose = 0x0010;
+    private const uint WmDestroy = 0x0002;
+    private const uint WmNcDestroy = 0x0082;
+    private const nint MaNoActivate = 3;
     private const uint WsExNoActivate = 0x08000000;
     private const uint WsExToolWindow = 0x00000080;
+    private static readonly SubclassProc OverlayWindowProc = HandleOverlayWindowMessage;
+    private static nint _subclassedHwnd;
 
     internal static nint GetWindowHandle(OverlayWindow window) => WindowNative.GetWindowHandle(window);
 
     internal static void Configure(OverlayWindow window, out OverlayRect rect, out uint dpi, out string monitorText)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
+        EnsureWindowSubclass(hwnd);
         var foreground = GetForegroundWindow();
         var monitor = foreground == IntPtr.Zero
             ? MonitorFromPoint(new POINT(), MonitorDefaultToPrimary)
@@ -129,6 +138,52 @@ internal static class WindowInterop
         }
     }
 
+    private static void EnsureWindowSubclass(nint hwnd)
+    {
+        if (_subclassedHwnd == hwnd) return;
+        if (SetWindowSubclass(hwnd, OverlayWindowProc, (UIntPtr)1, UIntPtr.Zero))
+        {
+            _subclassedHwnd = hwnd;
+            OverlayLog.Info("Window", "Overlay message subclass installed.", ("OverlayHwnd", hwnd));
+            return;
+        }
+
+        var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not install the Overlay window message subclass.");
+        OverlayLog.Error("Window", "Overlay message subclass installation failed.", exception, ("Operation", "SetWindowSubclass"), ("OverlayHwnd", hwnd));
+    }
+
+    private static nint HandleOverlayWindowMessage(
+        nint hwnd,
+        uint message,
+        nint wParam,
+        nint lParam,
+        nuint idSubclass,
+        nuint referenceData)
+    {
+        switch (message)
+        {
+            case WmMouseActivate:
+                OverlayLog.Info("Input", "WM_MOUSEACTIVATE received.", ("OverlayHwnd", hwnd), ("Result", MaNoActivate));
+                return MaNoActivate;
+            case WmActivate:
+                OverlayLog.Info("Window", "WM_ACTIVATE received.", ("OverlayHwnd", hwnd), ("State", (long)wParam & 0xffff));
+                break;
+            case WmClose:
+                OverlayLog.Info("Window", "WM_CLOSE received.", ("OverlayHwnd", hwnd));
+                break;
+            case WmDestroy:
+                OverlayLog.Info("Window", "WM_DESTROY received.", ("OverlayHwnd", hwnd));
+                break;
+            case WmNcDestroy:
+                OverlayLog.Info("Window", "WM_NCDESTROY received.", ("OverlayHwnd", hwnd));
+                RemoveWindowSubclass(hwnd, OverlayWindowProc, (UIntPtr)idSubclass);
+                if (_subclassedHwnd == hwnd) _subclassedHwnd = IntPtr.Zero;
+                break;
+        }
+
+        return DefSubclassProc(hwnd, message, wParam, lParam);
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetForegroundWindow();
 
@@ -152,6 +207,17 @@ internal static class WindowInterop
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
+
+    private delegate nint SubclassProc(nint hwnd, uint message, nint wParam, nint lParam, nuint idSubclass, nuint referenceData);
+
+    [DllImport("comctl32.dll")]
+    private static extern bool SetWindowSubclass(nint hwnd, SubclassProc procedure, UIntPtr idSubclass, UIntPtr referenceData);
+
+    [DllImport("comctl32.dll")]
+    private static extern bool RemoveWindowSubclass(nint hwnd, SubclassProc procedure, UIntPtr idSubclass);
+
+    [DllImport("comctl32.dll")]
+    private static extern nint DefSubclassProc(nint hwnd, uint message, nint wParam, nint lParam);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { internal int X; internal int Y; }

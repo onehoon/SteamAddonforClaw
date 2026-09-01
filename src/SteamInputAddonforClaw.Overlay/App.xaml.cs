@@ -20,7 +20,7 @@ public partial class App : Application
         OverlayLog.Info("App", "DispatcherQueue acquired.");
         _window = new OverlayWindow();
         OverlayLog.Info("App", "OverlayWindow constructed.", ("Hwnd", _window.HandleForDiagnostics));
-        _window.Closed += (_, _) => { OverlayLog.Info("App", "Application exit requested."); Exit(); };
+        _window.Closed += (_, _) => { OverlayLog.Info("Window", "Closed received."); Exit(); };
         OverlayLog.Info("Window", "Initial hidden preparation started.");
         _window.PrepareHidden();
         OverlayLog.Info("Window", "Initial hidden preparation completed.");
