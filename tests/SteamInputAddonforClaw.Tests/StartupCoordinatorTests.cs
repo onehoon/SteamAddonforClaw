@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
@@ -647,6 +648,186 @@ public sealed class StartupCoordinatorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.RunAsync(cancellation.Token));
 
         Assert.Equal(1, evaluator.CallCount);
+    }
+
+    // ---- PR4: authority-aware startup branch (work order sections 7-9/17/26) ----
+
+    private static FrontendCenterMStartupSnapshot Roots(FrontendCenterMStartupState state) => new(state, false, false, false, null);
+
+    [Fact]
+    public async Task DisabledRoots_RunReadOnlyAdmission_NeverStockBaselineOrRecoveryMutation()
+    {
+        var events = new List<string>();
+        // A stale journal is present: the Disabled path must not read, clean, or delete it.
+        var store = new FakeRecoveryJournalStore(events, exists: true);
+        var waiter = new FakeEnvironmentWaiter(events);
+        var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new ThrowingEnvironmentDetector(), waiter, new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
+            disabledBootAdmission: admission, captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.ShouldStartRuntime);
+        Assert.True(result.DisabledBootAdmission!.IsReady);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, result.CenterMStartupState);
+        Assert.False(result.LegacyRoutingAllowed);
+        Assert.Equal(["UpdateGate", "EnvironmentWaiter", "Admission"], events);
+        Assert.DoesNotContain("Baseline", events);
+        Assert.DoesNotContain("Discard", events);
+        Assert.Equal(0, store.DeleteCallCount);
+        Assert.Equal([ControllerEnvironmentMode.StockCenterM], waiter.Modes);
+    }
+
+    [Fact]
+    public async Task DisabledRoots_TopologyNotStable_BlocksBeforeEvaluatingFacts()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new ThrowingEnvironmentDetector(), new FixedEnvironmentWaiter(events, ControllerEnvironmentReadiness.Indeterminate),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
+            disabledBootAdmission: admission, captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(DisabledBootAdmissionOutcome.Blocked, result.DisabledBootAdmission!.Outcome);
+        Assert.Equal(0, admission.EvaluateCount);
+        Assert.True(result.ShouldStartRuntime); // mandatory Runtime stays alive
+        Assert.False(result.LegacyRoutingAllowed);
+        Assert.DoesNotContain("Baseline", events);
+    }
+
+    [Fact]
+    public async Task DisabledRoots_AdmissionBlocked_KeepsRuntimeAliveWithNoMutation()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new ThrowingEnvironmentDetector(), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
+            disabledBootAdmission: new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Blocked),
+            captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(DisabledBootAdmissionOutcome.Blocked, result.DisabledBootAdmission!.Outcome);
+        Assert.True(result.ShouldStartRuntime);
+        Assert.DoesNotContain("Baseline", events);
+        Assert.Equal(0, store.DeleteCallCount);
+    }
+
+    [Theory]
+    [InlineData("Partial")]
+    [InlineData("Unavailable")]
+    public async Task PartialOrUnavailableRoots_SelectNoControllerOwner(string state)
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new ThrowingEnvironmentDetector(), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
+            disabledBootAdmission: admission, captureCenterMStartup: () => Roots(Enum.Parse<FrontendCenterMStartupState>(state)));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.ShouldStartRuntime);
+        Assert.Null(result.DisabledBootAdmission);
+        Assert.Equal(Enum.Parse<FrontendCenterMStartupState>(state), result.CenterMStartupState);
+        Assert.False(result.LegacyRoutingAllowed);
+        Assert.Equal(0, admission.EvaluateCount);
+        Assert.DoesNotContain("Baseline", events);
+    }
+
+    [Fact]
+    public async Task EnabledRoots_RunExistingStockPath_AdmissionNeverEvaluated()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
+            disabledBootAdmission: admission, captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Enabled));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Contains("Baseline", events);
+        Assert.Equal(0, admission.EvaluateCount);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
+        Assert.True(result.LegacyRoutingAllowed);
+        Assert.True(result.RecoverySafe);
+    }
+
+    [Fact]
+    public async Task NoCaptureDelegate_PreservesLegacyStockPath()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Contains("Baseline", events);
+        Assert.True(result.LegacyRoutingAllowed);
+    }
+
+    [Fact]
+    public void DisabledBootAdmission_TakesNoPhysicalOwnershipDependency()
+    {
+        var parameterTypes = typeof(DisabledBootControllerAdmission)
+            .GetConstructors().Single().GetParameters().Select(p => p.ParameterType.FullName ?? "");
+        Assert.All(parameterTypes, name =>
+        {
+            Assert.DoesNotContain("DirectInput", name);
+            Assert.DoesNotContain("Viiper", name, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("NativeState", name);
+            Assert.DoesNotContain("Routing", name);
+        });
+
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src/SteamInputAddonforClaw/Startup/DisabledBootControllerAdmission.cs"));
+        foreach (var forbidden in new[] { "SwitchModeAsync", "MsiClawInputSource", "DirectInput", "ApplyDisabledModeBaseline", "AddHiddenDevice", "AttachXbox360", "AttachSteamDeck", "CanonicalViiperRuntime" })
+            Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RuntimeComposition_GatesLegacyRoutingAndResumeBaselineOnAuthorityState()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src/SteamInputAddonforClaw/Runtime/AddonRuntimeComposition.cs"));
+        // The old Steam-session routing owner is only created when legacy routing is allowed...
+        Assert.Contains("legacyRoutingAllowed", source, StringComparison.Ordinal);
+        Assert.Contains("? AddonRoutingRuntime.Create(", source, StringComparison.Ordinal);
+        // ...and the legacy XInput restoration baseline becomes a no-op otherwise (resume hole, section 19).
+        Assert.Contains("!legacyRoutingAllowed || stockCenterMBaseline is null", source, StringComparison.Ordinal);
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("repo root");
+    }
+
+    private sealed class FakeDisabledBootAdmission(List<string> events, DisabledBootAdmissionOutcome outcome) : IDisabledBootControllerAdmission
+    {
+        public int EvaluateCount { get; private set; }
+        public DisabledBootControllerAdmissionResult Evaluate()
+        {
+            EvaluateCount++;
+            events.Add("Admission");
+            return outcome switch
+            {
+                DisabledBootAdmissionOutcome.Ready => DisabledBootControllerAdmissionResult.Ready,
+                DisabledBootAdmissionOutcome.NotApplicable => DisabledBootControllerAdmissionResult.NotApplicable,
+                _ => DisabledBootControllerAdmissionResult.Blocked("test"),
+            };
+        }
     }
 
     private sealed class SequencedHardwareEvaluator(IEnumerable<HardwareCompatibilityAssessment> results, bool repeatLast = false) : IHardwareCompatibilityEvaluator

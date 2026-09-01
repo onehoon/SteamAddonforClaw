@@ -37,6 +37,10 @@ internal static class AddonRuntimeCompositionFactory
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
         bool hardwareSupported,
+        // PR4: false once Center M startup roots are exactly Disabled/Partial/Unavailable. The old
+        // Steam-session physical routing owner and the legacy stock XInput resume baseline must not
+        // run in those authority states (work order PR4 sections 17-19).
+        bool legacyRoutingAllowed,
         WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
         Action? routingReconcileCompleted = null,
@@ -52,7 +56,12 @@ internal static class AddonRuntimeCompositionFactory
         if (bigPictureStateChanged is not null) steamRuntime.BigPictureStateChanged += bigPictureStateChanged;
         var startupRegistrationResult = startupSettings.Repair();
 
-        if (recoverySafe)
+        if (!legacyRoutingAllowed)
+        {
+            steamRuntime.StartActualObservation();
+            AppLog.Info("Routing", "Legacy Steam-session physical routing is not selected in this Center M authority state; actual game observation remains active.", ("Action", "ActualObservation"));
+        }
+        else if (recoverySafe)
         {
             steamRuntime.StartRoutingObservation();
         }
@@ -75,19 +84,25 @@ internal static class AddonRuntimeCompositionFactory
                 new ViiperRuntimeInspector()),
             () => steamRuntime.State,
             () => recoverySafetyState.Current == RecoverySafety.Safe);
-        var routingRuntime = AddonRoutingRuntime.Create(
-            handheldDeviceAdapter,
-            statusProvider,
-            recoveryManager,
-            powerGate,
-            recoverySafetyState,
-            startupSettings,
-            hardwareSupported,
-            winGSuppressionGuard,
-            wingMappingPreference: startupSettings);
+        var routingRuntime = legacyRoutingAllowed
+            ? AddonRoutingRuntime.Create(
+                handheldDeviceAdapter,
+                statusProvider,
+                recoveryManager,
+                powerGate,
+                recoverySafetyState,
+                startupSettings,
+                hardwareSupported,
+                winGSuppressionGuard,
+                wingMappingPreference: startupSettings)
+            : null;
+        if (!legacyRoutingAllowed)
+            AppLog.Info("Routing", "Legacy Steam-session routing runtime was not created for this Center M authority state.", ("Action", "Passive"));
 
-        Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
-            ? _ => Task.FromResult(false)
+        // PR4 section 19: sleep/resume while Center M is Disabled must not call the legacy XInput
+        // restoration baseline. A non-legacy authority state gets a no-op that reports success.
+        Func<CancellationToken, Task<bool>> establishBaseline = (!legacyRoutingAllowed || stockCenterMBaseline is null)
+            ? _ => Task.FromResult(!legacyRoutingAllowed)
             : async token => (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
 
         var runtimeHost = new AddonRuntimeHost(
