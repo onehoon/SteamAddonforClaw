@@ -36,6 +36,10 @@ public sealed class ElevationConfigurationTests
         // PR10 addendum section 15: an already-compliant task is proven read-only, with no rewrite.
         Assert.Contains("if (current is not null && IsCompliant(current, configuration))", source);
         Assert.Contains("StartupTaskWriteOutcome.AccessDenied", source);
+        // review [P1]: the mandatory handheld Runtime task must be battery-safe with no execution limit.
+        Assert.Contains("settings.DisallowStartIfOnBatteries = false;", source);
+        Assert.Contains("settings.StopIfGoingOnBatteries = false;", source);
+        Assert.Contains("settings.ExecutionTimeLimit = WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit;", source);
     }
 
     [Fact]

@@ -147,10 +147,13 @@ internal sealed class AddonControllerHidHideBaseline
         if (!TryInspect(out var inspection, out var unavailable))
             return unavailable;
 
-        var hidden = Normalize(inspection.HiddenDeviceEntries?.ToArray() ?? []);
-        IReadOnlyCollection<string> keep = hidden.Count == 1 && ownedTargetValidator(hidden[0])
-            ? [hidden[0]]
-            : [];
+        // Retain the one validator-matching Addon-owned candidate even when unrelated non-owned
+        // hidden entries coexist (review [P1]); only fall back to the zero-target baseline when there
+        // is no unambiguous owned candidate. Every non-owned entry is still normalized away.
+        var ownedCandidates = Normalize(inspection.HiddenDeviceEntries?.ToArray() ?? [])
+            .Where(ownedTargetValidator)
+            .ToArray();
+        IReadOnlyCollection<string> keep = ownedCandidates.Length == 1 ? [ownedCandidates[0]] : [];
         return ApplyDisabledModeBaseline(keep);
     }
 

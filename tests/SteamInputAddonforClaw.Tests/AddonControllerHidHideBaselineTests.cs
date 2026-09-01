@@ -446,6 +446,36 @@ public sealed class AddonControllerHidHideBaselineTests
         Assert.Null(Baseline(client).TryGetSingleExistingOwnedTarget(IsPrimary));
     }
 
+    [Fact] // review [P1]: keep the one persisted owned target even when an unrelated hidden entry coexists
+    public void NormalizingExistingOwnedTarget_retains_the_owned_target_and_wipes_unrelated_entries()
+    {
+        var client = new FakeHidHideClient
+        {
+            Whitelist = [CliByName, ClientByName, AddonExe],
+            Hidden = [PrimaryPid1902Collection, OtherHidden], // owned primary + unrelated foreign
+            Active = true,
+        };
+        var result = Baseline(client).ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(IsPrimary);
+
+        Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
+        Assert.Equal([PrimaryPid1902Collection], client.Hidden);
+    }
+
+    [Fact] // two owned-primary candidates is ambiguous -> fall back to the zero-target baseline
+    public void NormalizingExistingOwnedTarget_with_two_owned_candidates_wipes_to_zero_targets()
+    {
+        var client = new FakeHidHideClient
+        {
+            Whitelist = [CliByName, ClientByName, AddonExe],
+            Hidden = [PrimaryPid1902Collection, OtherPrimaryPid1902Collection],
+            Active = true,
+        };
+        var result = Baseline(client).ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(IsPrimary);
+
+        Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
+        Assert.Empty(client.Hidden);
+    }
+
     private sealed class FakeHidHideClient : IHidHideClient
     {
         public HidHideInspectionStatus? Status { get; set; }

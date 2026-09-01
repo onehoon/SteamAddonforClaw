@@ -19,7 +19,8 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
 
     private OwnedStartupTaskState Compliant() =>
         new(Enabled: true, ActionPath: _exe, ActionArguments: "--background",
-            LogonTriggerUserId: User, LogonType: 3, RunLevel: 0);
+            LogonTriggerUserId: User, LogonType: 3, RunLevel: 0,
+            DisallowStartIfOnBatteries: false, StopIfGoingOnBatteries: false, ExecutionTimeLimit: "PT0S");
 
     private WindowsTaskSchedulerStartupManager Manager(FakeTaskStore store, FakeElevated? elevated = null) =>
         new(() => _exe, () => User, store, elevated);
@@ -71,7 +72,7 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         {
             Current = null,
             NextRegister = StartupTaskWriteOutcome.Registered,
-            RegisteredReadback = new OwnedStartupTaskState(true, @"C:\wrong.exe", "--background", User, 3, 0),
+            RegisteredReadback = new OwnedStartupTaskState(true, @"C:\wrong.exe", "--background", User, 3, 0, false, false, "PT0S"),
         };
 
         Assert.False(Manager(store, new FakeElevated()).Synchronize(true).Success);
@@ -85,6 +86,9 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     [InlineData("runlevel")]
     [InlineData("logontype")]
     [InlineData("trigger-user")]
+    [InlineData("battery-disallow")]  // review [P1]: default battery policy blocks a battery boot
+    [InlineData("battery-stop")]
+    [InlineData("execution-limit")]   // review [P1]: default finite (72h) limit terminates the Runtime
     public void A_drifted_task_is_repaired(string drift)
     {
         var c = Compliant();
@@ -95,6 +99,9 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             "path" => c with { ActionPath = @"C:\Windows\other.exe" },
             "runlevel" => c with { RunLevel = 1 },
             "logontype" => c with { LogonType = 2 },
+            "battery-disallow" => c with { DisallowStartIfOnBatteries = true },
+            "battery-stop" => c with { StopIfGoingOnBatteries = true },
+            "execution-limit" => c with { ExecutionTimeLimit = "PT72H" },
             _ => c with { LogonTriggerUserId = @"OTHER\user" },
         };
         var store = new FakeTaskStore { Current = drifted, NextRegister = StartupTaskWriteOutcome.Registered };
@@ -161,6 +168,19 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         Assert.Equal(0, elevated.Calls);
     }
 
+    [Fact] // review [P1]: the newly registered desired task is battery-safe and has no execution limit
+    public void A_newly_registered_task_records_battery_safe_settings_and_no_execution_limit()
+    {
+        var store = new FakeTaskStore { Current = null, NextRegister = StartupTaskWriteOutcome.Registered };
+
+        Assert.True(Manager(store, new FakeElevated()).Synchronize(true).Success);
+
+        Assert.NotNull(store.LastRegistered);
+        Assert.False(store.LastRegistered!.DisallowStartIfOnBatteries);
+        Assert.False(store.LastRegistered.StopIfGoingOnBatteries);
+        Assert.Equal("PT0S", store.LastRegistered.ExecutionTimeLimit);
+    }
+
     [Fact]
     public void Disable_deletes_the_owned_task()
     {
@@ -199,11 +219,14 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         public StartupTaskWriteOutcome Register(ScheduledTaskConfiguration configuration)
         {
             RegisterCalls++;
+            LastRegistered = new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId, 3, 0,
+                DisallowStartIfOnBatteries: false, StopIfGoingOnBatteries: false, ExecutionTimeLimit: "PT0S");
             if (NextRegister == StartupTaskWriteOutcome.Registered)
-                Current = RegisteredReadback
-                    ?? new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId, 3, 0);
+                Current = RegisteredReadback ?? LastRegistered;
             return NextRegister;
         }
+
+        public OwnedStartupTaskState? LastRegistered;
 
         public void Delete() { DeleteCalls++; Current = null; }
     }

@@ -22,7 +22,12 @@ internal sealed record OwnedStartupTaskState(
     string ActionArguments,
     string LogonTriggerUserId,
     int LogonType,
-    int RunLevel);
+    int RunLevel,
+    // PR10 review [P1]: the mandatory persistent handheld Runtime must survive being on battery and
+    // must have no scheduler execution-time limit.
+    bool DisallowStartIfOnBatteries,
+    bool StopIfGoingOnBatteries,
+    string ExecutionTimeLimit);
 
 /// <summary>Narrow seam over the Task Scheduler COM API for the one Addon-owned task, so the
 /// register/verify policy can be unit tested without a real scheduler.</summary>
@@ -142,13 +147,20 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         catch (Exception exception) { AppLog.Warn("TaskScheduler", "Startup task read failed.", exception); return null; }
     }
 
+    internal const string NoExecutionTimeLimit = "PT0S";
+
     internal static bool IsCompliant(OwnedStartupTaskState state, ScheduledTaskConfiguration configuration) =>
         state.Enabled
         && PathEquals(state.ActionPath, configuration.ExecutablePath)
         && string.Equals(state.ActionArguments.Trim(), "--background", StringComparison.Ordinal)
         && state.LogonType == TaskLogonInteractiveToken
         && state.RunLevel == 0
-        && string.Equals(state.LogonTriggerUserId, configuration.UserId, StringComparison.OrdinalIgnoreCase);
+        && string.Equals(state.LogonTriggerUserId, configuration.UserId, StringComparison.OrdinalIgnoreCase)
+        // A battery-restricted or execution-time-limited task is NOT a valid persistent handheld
+        // Runtime guarantee -- treat it as drift and repair it (review [P1]).
+        && !state.DisallowStartIfOnBatteries
+        && !state.StopIfGoingOnBatteries
+        && string.Equals(state.ExecutionTimeLimit, NoExecutionTimeLimit, StringComparison.OrdinalIgnoreCase);
 
     internal static ScheduledTaskConfiguration CreateTaskConfiguration(string stableExecutablePath, string currentUserId) =>
         new(TaskName, stableExecutablePath, currentUserId);
@@ -222,7 +234,13 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
                 }
             }
 
-            return new OwnedStartupTaskState(enabled, actionPath, actionArguments, logonTriggerUserId, logonType, runLevel);
+            dynamic settings = definition.Settings;
+            bool disallowOnBatteries = (bool)settings.DisallowStartIfOnBatteries;
+            bool stopGoingOnBatteries = (bool)settings.StopIfGoingOnBatteries;
+            string executionTimeLimit = (string)(settings.ExecutionTimeLimit ?? string.Empty);
+
+            return new OwnedStartupTaskState(enabled, actionPath, actionArguments, logonTriggerUserId, logonType, runLevel,
+                disallowOnBatteries, stopGoingOnBatteries, executionTimeLimit);
         }
         catch (Exception exception)
         {
@@ -242,6 +260,13 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
             taskDefinition.Principal.UserId = configuration.UserId;
             taskDefinition.Principal.LogonType = WindowsTaskSchedulerStartupManager.TaskLogonInteractiveToken;
             taskDefinition.Principal.RunLevel = 0;
+
+            // A persistent handheld Runtime must start and keep running on battery, with no scheduler
+            // execution-time limit (review [P1]).
+            dynamic settings = taskDefinition.Settings;
+            settings.DisallowStartIfOnBatteries = false;
+            settings.StopIfGoingOnBatteries = false;
+            settings.ExecutionTimeLimit = WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit;
 
             dynamic logonTrigger = taskDefinition.Triggers.Create(TaskTriggerLogon);
             logonTrigger.UserId = configuration.UserId;
