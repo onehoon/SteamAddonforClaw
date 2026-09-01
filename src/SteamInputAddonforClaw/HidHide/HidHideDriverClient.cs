@@ -94,6 +94,31 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
         }
     }
 
+    public bool SupportsInverseWhitelistMutation => true;
+
+    // HidHide control contract: IOCTL_SET_WHITELIST_INVERSE (function 2055), the odd/set half of the
+    // 2054 get pair -- same one-byte-boolean + read-back-verify shape as SetActive (function 2053).
+    // Verified against DS4Windows HidHideAPIDevice.cs, reference SHA
+    // 3579450dc8f50a74d9532e711249589c732c460b.
+    public bool SetInverseWhitelist(bool inverse)
+    {
+        try
+        {
+            lock (ControlDeviceGate)
+            {
+                using var device = _nativeApi.Open(GenericRead | GenericWrite);
+                Invoke(device, Ioctl(2055), [inverse ? (byte)1 : (byte)0], null, out _);
+            }
+            var inspection = Inspect();
+            return inspection.IsConfigurationReadable && inspection.IsInverseWhitelist == inverse;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHide", "HidHide inverse-whitelist mutation failed.", exception, ("Inverse", inverse), ("Action", "PreserveJournal"));
+            return false;
+        }
+    }
+
     private bool UpdateHiddenDevices(string deviceEntry, bool add)
     {
         if (string.IsNullOrWhiteSpace(deviceEntry)) return false;

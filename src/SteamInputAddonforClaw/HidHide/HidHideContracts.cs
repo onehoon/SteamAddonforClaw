@@ -25,4 +25,14 @@ internal interface IHidHideClient
     bool AddHiddenDevice(string deviceEntry);
     bool RemoveHiddenDevice(string deviceEntry);
     bool SetActive(bool active) => true;
+    /// <summary>Sets HidHide's whitelist-inverse mode and verifies it by read-back. Defaults to
+    /// <see langword="false"/> (fail-closed) so any client without a real, supported inverse-mode
+    /// control path forces callers that need <c>Inverse == false</c> to fail closed rather than
+    /// proceed on an unverified assumption (Addon HidHide baseline work order section 6).</summary>
+    bool SetInverseWhitelist(bool inverse) => false;
+    /// <summary>Whether this client has a real, verified in-process path for
+    /// <see cref="SetInverseWhitelist"/>. Defaults to <see langword="false"/> so a caller that needs
+    /// <c>Inverse == false</c> classifies an inverse-whitelist machine as an unsupported conflict up
+    /// front rather than attempting a mutation that cannot work.</summary>
+    bool SupportsInverseWhitelistMutation => false;
 }
