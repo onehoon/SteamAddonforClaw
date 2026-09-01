@@ -1112,9 +1112,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             return new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable,
                 FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M startup control is unavailable.");
 
-        var result = await _centerMStartup.SetEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
-        StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return result;
+        // Deliberately NO StateInvalidated broadcast here (PR #430 review): the returned result
+        // already carries the authoritative read-back snapshot, and this feature has no QAM surface.
+        // A self-generated invalidation would queue DevicePage.RefreshAsync(), which re-renders with
+        // restartRequired:false and would wipe the "Restart Windows to apply this change." notice
+        // right after a successful Enable/Disable -- the one cue that the new startup ownership is
+        // not active until reboot (work order PR1 sections 11/12).
+        return await _centerMStartup.SetEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
     }
 
     private static FrontendTdpSnapshot MapTdpSnapshot(TdpRuntimeSnapshot snapshot) => new(
