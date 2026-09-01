@@ -30,9 +30,16 @@ public sealed class ElevationConfigurationTests
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Install", "StartupRegistration.cs"));
 
-        Assert.Contains("taskDefinition.Principal.LogonType = TaskLogonInteractiveToken;", source);
+        Assert.Contains("taskDefinition.Principal.LogonType = WindowsTaskSchedulerStartupManager.TaskLogonInteractiveToken;", source);
         Assert.Contains("taskDefinition.Principal.RunLevel = 0;", source);
         Assert.Contains("action.Arguments = \"--background\";", source);
+        // PR10 addendum section 15: an already-compliant task is proven read-only, with no rewrite.
+        Assert.Contains("if (current is not null && IsCompliant(current, configuration))", source);
+        Assert.Contains("StartupTaskWriteOutcome.AccessDenied", source);
+        // review [P1]: the mandatory handheld Runtime task must be battery-safe with no execution limit.
+        Assert.Contains("settings.DisallowStartIfOnBatteries = false;", source);
+        Assert.Contains("settings.StopIfGoingOnBatteries = false;", source);
+        Assert.Contains("settings.ExecutionTimeLimit = WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit;", source);
     }
 
     [Fact]

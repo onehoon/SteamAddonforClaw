@@ -35,4 +35,10 @@ internal interface IHidHideClient
     /// <c>Inverse == false</c> classifies an inverse-whitelist machine as an unsupported conflict up
     /// front rather than attempting a mutation that cannot work.</summary>
     bool SupportsInverseWhitelistMutation => false;
+    /// <summary>Atomically replaces the ENTIRE Applications whitelist with exactly the given entries,
+    /// verified by read-back. The only normalization path for a raw whitelist entry that cannot be
+    /// converted back to a DOS path (so it can never be identified/removed individually) -- review
+    /// [P1]. Defaults to <see langword="false"/> (fail-closed) so a client without a verified
+    /// exact-replace path forces the caller to fail closed rather than proceed unverified.</summary>
+    bool ReplaceApplications(IReadOnlyCollection<string> executablePaths) => false;
 }

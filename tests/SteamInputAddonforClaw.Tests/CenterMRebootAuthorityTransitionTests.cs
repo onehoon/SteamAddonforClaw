@@ -22,6 +22,8 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
 {
     private const string AddonExe = @"C:\Program Files\SteamInputAddonForClaw\SteamInputAddonforClaw.exe";
+    private const string OfficialCli = @"C:\Program Files\Nefarius Software Solutions\HidHide\x64\HidHideCLI.exe";
+    private const string OfficialClient = @"C:\Program Files\Nefarius Software Solutions\HidHide\x64\HidHideClient.exe";
     private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
 
     public CenterMRebootAuthorityTransitionTests()
@@ -108,16 +110,42 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Equal(new[] { "startup:true", "hidhide:disable" }, h.Order);
     }
 
-    [Fact]
-    public async Task Disable_is_blocked_up_front_by_a_hidhide_conflict()
+    [Fact] // PR10 addendum: a foreign whitelist entry is normalized away, not a conflict...
+    public async Task Disable_normalizes_a_foreign_whitelist_entry_instead_of_blocking()
     {
         var h = new Harness(this) { StartEnabled = true };
         h.Hid.Whitelist.Add(@"C:\Program Files\ClawTweaks\ClawTweaks.exe");
         h.Hid.Active = true;
         var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
 
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.DoesNotContain(h.Hid.Whitelist, e => e.Contains("ClawTweaks", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact] // ...but a state that cannot be normalized through the verified control path still blocks
+    public async Task Disable_normalizes_an_unresolved_hidhide_whitelist_entry_via_exact_replace()
+    {
+        var h = new Harness(this) { StartEnabled = true };
+        h.Hid.HasUnresolvedWhitelist = true;
+        h.Hid.Active = true;
+        var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.False(h.Hid.HasUnresolvedWhitelist);
+    }
+
+    [Fact] // review [P1]: unresolved is no longer a pre-emptive admission conflict -- a client with no
+           // real exact-replace path fails closed at the normalization mutation instead.
+    public async Task Disable_fails_closed_when_the_unresolved_entry_cannot_be_replaced()
+    {
+        var h = new Harness(this) { StartEnabled = true };
+        h.Hid.HasUnresolvedWhitelist = true;
+        h.Hid.Active = true;
+        h.Hid.FailReplaceApplications = true;
+        var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
+
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
-        Assert.Empty(h.Order);
+        Assert.DoesNotContain("centerm:false", h.Order);
     }
 
     [Fact]
@@ -296,11 +324,16 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     [Fact]
     public async Task Enable_stops_before_center_m_when_the_baseline_cannot_be_cleared()
     {
-        var h = new Harness(this) { StartEnabled = false };
+        const string ownedTarget = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&abcdef&0&0000";
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", ownedTarget),
+        };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Active = true;
-        h.Hid.KeepHiddenOnRemove = true; // removal cannot be verified -> not compliant
-        h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00\7&ABCDEF&0&0000");
+        h.Hid.KeepHiddenOnRemove = true; // the owned target removal cannot be verified -> not compliant
+        h.Hid.Hidden.Add(ownedTarget);
         var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
 
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
@@ -469,7 +502,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                 new FakeStartupManager(Order, () => StartupSucceeds), isLaunchAtWindowsStartupRequired: () => true);
 
             Hid.OrderSink = Order;
-            var baseline = new AddonControllerHidHideBaseline(Hid, AddonExe);
+            var baseline = new AddonControllerHidHideBaseline(Hid, AddonExe, () => [OfficialCli, OfficialClient]);
 
             static PrerequisiteAssessment Ready(PrerequisiteKind kind) => new(kind, PrerequisiteStatus.Ready, "ready");
             var prerequisites = PrerequisitesReady
@@ -568,12 +601,24 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool Inverse { get; set; }
         public bool FailAddApplication { get; set; }
         public bool KeepHiddenOnRemove { get; set; }
+        public bool HasUnresolvedWhitelist { get; set; }
+        public bool FailReplaceApplications { get; set; }
 
         public HidHideInspection Inspect() => new(
             Inverse ? HidHideInspectionStatus.InverseWhitelist
                 : Active ? HidHideInspectionStatus.Available : HidHideInspectionStatus.Disabled,
             new HashSet<string>(Whitelist, StringComparer.OrdinalIgnoreCase),
-            Hidden.ToList(), Whitelist.ToList(), Active, Inverse, HasUnresolvedApplicationWhitelistEntries: false);
+            Hidden.ToList(), Whitelist.ToList(), Active, Inverse, HasUnresolvedApplicationWhitelistEntries: HasUnresolvedWhitelist);
+
+        public bool ReplaceApplications(IReadOnlyCollection<string> executablePaths)
+        {
+            RecordOnce("hidhide:disable");
+            if (FailReplaceApplications) return false;
+            Whitelist.Clear();
+            Whitelist.AddRange(executablePaths);
+            HasUnresolvedWhitelist = false;
+            return true;
+        }
 
         public bool AddApplication(string executablePath)
         {

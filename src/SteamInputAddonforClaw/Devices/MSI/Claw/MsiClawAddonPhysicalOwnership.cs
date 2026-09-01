@@ -329,10 +329,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
 
     private async Task<MsiClawPhysicalOwnershipResult> RecoverLostInputCoreAsync(CancellationToken cancellationToken)
     {
-        // 10.2. Require the ownership evidence a successful PR5 acquisition committed. Never recover a
-        //       session that was never owned.
-        if (!_ownsInputSource
-            || _ownedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong } ownedIdentity
+        // 10.2 / PR10. "Ownership was committed" is proven by the retained strong physical identity +
+        //       exact hidden target that a successful acquisition/recovery stored (and never cleared),
+        //       NOT by a currently-live session. This lets recovery re-enter after an earlier
+        //       DeviceNotFound failure -- e.g. when a real Windows Device Arrival fires minutes later.
+        //       The released-for-Center-M-enable gate is already enforced by RecoverLostInputAsync.
+        if (_ownedPhysicalIdentity is not { Confidence: MsiClawIdentityConfidence.Strong } ownedIdentity
             || _ownedHiddenTarget is not { } ownedTarget
             || !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(ownedTarget))
             return RecoveryFail("OwnerNotCommitted", _ownedHiddenTarget);

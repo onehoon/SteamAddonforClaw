@@ -50,7 +50,9 @@ internal static class AddonRuntimeCompositionFactory
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
-        var startupRegistration = new WindowsTaskSchedulerStartupManager();
+        // PR10 addendum section 16: a first, access-denied task creation from the normal Runtime
+        // process falls back to one bounded elevated child that creates exactly this one task.
+        var startupRegistration = WindowsTaskSchedulerStartupManager.WithElevatedRepair();
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration, isLaunchAtWindowsStartupRequired);
         var steamRuntime = new SteamSessionRuntime(startupSettings);
         if (bigPictureStateChanged is not null) steamRuntime.BigPictureStateChanged += bigPictureStateChanged;

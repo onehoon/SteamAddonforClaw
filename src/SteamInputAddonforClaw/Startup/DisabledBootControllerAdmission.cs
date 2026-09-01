@@ -40,8 +40,10 @@ internal sealed record DisabledBootControllerAdmissionResult(DisabledBootAdmissi
 
 internal interface IDisabledBootControllerAdmission
 {
-    /// <summary>Read-only. Performs no physical mode command, HidHide mutation, VIIPER attach, or
-    /// recovery-journal retirement (work order PR4 sections 9-14).</summary>
+    /// <summary>Performs no physical mode command, VIIPER attach, or recovery-journal retirement. It
+    /// DOES normalize + read-back verify the persistent Addon HidHide baseline (PR10 addendum section
+    /// 7): every Disabled boot proves the Addon isolation baseline can be established NOW rather than
+    /// blocking on stale third-party HidHide configuration.</summary>
     DisabledBootControllerAdmissionResult Evaluate();
 }
 
@@ -55,7 +57,7 @@ internal sealed class DisabledBootControllerAdmission(
     IControllerEnvironmentAssessmentProvider environmentAssessmentProvider,
     IRuntimePrerequisiteInspector prerequisiteInspector,
     Func<RecoveryResult> loadRecoveryJournal,
-    Func<AddonHidHideBaselineResult> inspectHidHideBaseline) : IDisabledBootControllerAdmission
+    Func<AddonHidHideBaselineResult> normalizeHidHideBaseline) : IDisabledBootControllerAdmission
 {
     public DisabledBootControllerAdmissionResult Evaluate()
     {
@@ -109,20 +111,22 @@ internal sealed class DisabledBootControllerAdmission(
         if (recovery.Status != RecoveryStatus.NoRecoveryNeeded)
             return DisabledBootControllerAdmissionResult.Blocked($"RecoveryJournal={recovery.Status}");
 
-        // 4. The PR3 zero-target persistent HidHide baseline must already be proven compliant.
-        //    "Applicable" (could be applied) is NOT compliant, and PR4 must not apply it (section 14).
+        // 4. Normalize + read-back verify the persistent Addon HidHide baseline on THIS boot. A user
+        //    or another program may have changed HidHide while the Addon was not running, so a stale
+        //    "was compliant last shutdown" assumption is not trusted (PR10 addendum section 7). Only a
+        //    proven-compliant (Success / AlreadyCompliant) baseline admits Full1902.
         AddonHidHideBaselineResult baseline;
         try
         {
-            baseline = inspectHidHideBaseline();
+            baseline = normalizeHidHideBaseline();
         }
         catch (Exception exception)
         {
-            AppLog.Warn("ControllerAdmission", "HidHide baseline inspection failed.", exception);
-            return DisabledBootControllerAdmissionResult.Blocked("HidHideBaselineInspectionUnavailable");
+            AppLog.Warn("ControllerAdmission", "HidHide baseline normalization failed.", exception);
+            return DisabledBootControllerAdmissionResult.Blocked("HidHideBaselineNormalizationUnavailable");
         }
-        if (baseline.Outcome != AddonHidHideBaselineOutcome.AlreadyCompliant)
-            return DisabledBootControllerAdmissionResult.Blocked($"HidHideBaseline={baseline.Outcome}");
+        if (!baseline.IsCompliant)
+            return DisabledBootControllerAdmissionResult.Blocked($"HidHideBaseline={baseline.Outcome}:{baseline.Reason}");
 
         AppLog.Info("ControllerAdmission", "Disabled-boot controller admission ready.",
             ("Result", "Ready"), ("Manager", manager), ("PrerequisitesReady", true),
