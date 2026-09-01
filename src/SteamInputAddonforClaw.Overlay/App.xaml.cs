@@ -61,7 +61,7 @@ public partial class App : Application
         {
             _client = new NamedPipeOverlayClient(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
             OverlayLog.Info("Transport", "Overlay command loop starting.");
-            await _client.RunAsync(HandleCommandAsync).ConfigureAwait(false);
+            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -73,6 +73,46 @@ public partial class App : Application
         finally
         {
             if (_client is not null) await _client.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    // OQ4: semantic navigation from the Runtime capture path. Marshal UI work through the existing
+    // DispatcherQueue only -- no HWND activation/focus, no SendInput synthesis, no local controller
+    // reads. Back at the current root POC surface requests the existing DismissRequested path so the
+    // full capture -> close -> B-release -> resume flow can be hardware-tested.
+    private Task HandleNavigationAsync(OverlayNavigationAction action)
+    {
+        OverlayLog.Debug("Navigation", $"{action} received.");
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                _window?.ShowNavigationDiagnostic(action.ToString());
+                if (action == OverlayNavigationAction.Back)
+                    _ = SendBackDismissAsync();
+            }
+            catch (Exception exception)
+            {
+                OverlayLog.Error("Navigation", $"{action} handler failed.", exception);
+            }
+        }))
+        {
+            OverlayLog.Warn("Navigation", $"Could not enqueue navigation action {action}.");
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task SendBackDismissAsync()
+    {
+        try
+        {
+            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+            OverlayLog.Info("Navigation", "Back requested root dismissal.");
+            await _client.SendDismissRequestedAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Error("Transport", "Back dismissal request failed; Overlay remains Runtime-owned.", exception);
         }
     }
 

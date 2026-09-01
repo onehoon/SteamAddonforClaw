@@ -8,6 +8,7 @@
                 <TextBlock Text="Addon Quick Settings" FontSize="28" FontWeight="SemiBold" />
                 <TextBlock Text="Overlay POC-A" FontSize="18" />
                 <TextBlock x:Name="GeometryText" TextWrapping="Wrap" />
+                <TextBlock x:Name="NavigationDiagnosticText" TextWrapping="Wrap" FontFamily="Consolas" />
             </StackPanel>
         </Grid>
     </Grid>

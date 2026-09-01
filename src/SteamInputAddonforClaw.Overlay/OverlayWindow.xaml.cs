@@ -104,6 +104,16 @@ public sealed partial class OverlayWindow : Window
         }
     }
 
+    private int _navigationDiagnosticCount;
+
+    // OQ4 POC: reflect the last semantic navigation action in one diagnostic text field so the
+    // capture -> navigate -> close path can be observed on hardware. No real control tree yet.
+    internal void ShowNavigationDiagnostic(string action)
+    {
+        _navigationDiagnosticCount++;
+        NavigationDiagnosticText.Text = $"nav #{_navigationDiagnosticCount}: {action}";
+    }
+
     private void ConfigureWindow()
     {
         WindowInterop.Configure(this, out var rect, out _lastConfiguredDpi, out var monitorText);
