@@ -14,6 +14,7 @@ public sealed partial class OverlayWindow : Window
     private const double HiddenOpacity = 0.90;
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(150);
+    private uint _lastConfiguredDpi;
 
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
 
@@ -41,6 +42,7 @@ public sealed partial class OverlayWindow : Window
         if (!initialStatePrepared || !AnimationsEnabled())
         {
             TrySetVisibleVisualState();
+            LogSurfaceBounds("Show.Visible");
             return;
         }
 
@@ -53,12 +55,14 @@ public sealed partial class OverlayWindow : Window
         {
             await AnimateAsync(-ContentSlideDistanceDip, 0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
             TrySetVisibleVisualState();
+            LogSurfaceBounds("Show.Visible");
             OverlayLog.Info("Animation", "Show animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
         }
         catch (Exception exception)
         {
             OverlayLog.Error("Animation", "Show animation failed; keeping Overlay visible.", exception);
             TrySetVisibleVisualState();
+            LogSurfaceBounds("Show.Visible.AnimationFallback");
         }
     }
 
@@ -102,9 +106,48 @@ public sealed partial class OverlayWindow : Window
 
     private void ConfigureWindow()
     {
-        WindowInterop.Configure(this, out var rect, out var dpi, out var monitorText);
-        var scale = dpi / 96.0;
-        GeometryText.Text = $"{monitorText}\nWorkArea: {rect.X},{rect.Y} {rect.Width}x{rect.Height}\nDPI / Scale: {dpi} / {scale:0.##}\nPanel DIP / physical width: {OverlayWindowGeometry.PocPanelWidthDip:0} / {rect.Width}px";
+        WindowInterop.Configure(this, out var rect, out _lastConfiguredDpi, out var monitorText);
+        var scale = _lastConfiguredDpi / 96.0;
+        GeometryText.Text = $"{monitorText}\nWorkArea: {rect.X},{rect.Y} {rect.Width}x{rect.Height}\nDPI / Scale: {_lastConfiguredDpi} / {scale:0.##}\nPanel DIP / physical width: {OverlayWindowGeometry.PocPanelWidthDip:0} / {rect.Width}px";
+    }
+
+    private void LogSurfaceBounds(string reason)
+    {
+        try
+        {
+            if (!WindowInterop.TryGetDiagnosticBounds(this, out var native)) return;
+            var xamlRoot = AnimationViewport.XamlRoot;
+            if (xamlRoot is null)
+            {
+                OverlayLog.Warn("Geometry", "Overlay XAML bounds unavailable; continuing without the snapshot.",
+                    null, ("Operation", "XamlRoot"), ("OverlayHwnd", HandleForDiagnostics));
+                return;
+            }
+
+            var scale = xamlRoot.RasterizationScale;
+            OverlayLog.Info("Geometry", "Overlay surface bounds snapshot",
+                ("Reason", reason), ("OverlayHwnd", HandleForDiagnostics), ("Dpi", _lastConfiguredDpi),
+                ("RasterizationScale", scale),
+                ("WindowLeft", native.WindowRect.X), ("WindowTop", native.WindowRect.Y),
+                ("WindowWidth", native.WindowRect.Width), ("WindowHeight", native.WindowRect.Height),
+                ("ClientWidth", native.ClientWidth), ("ClientHeight", native.ClientHeight),
+                ("ClientScreenX", native.ClientScreenX), ("ClientScreenY", native.ClientScreenY),
+                ("ClientInsetLeft", native.ClientInsetLeft), ("ClientInsetTop", native.ClientInsetTop),
+                ("ClientInsetRight", native.ClientInsetRight), ("ClientInsetBottom", native.ClientInsetBottom),
+                ("AnimationViewportWidthDip", AnimationViewport.ActualWidth),
+                ("AnimationViewportHeightDip", AnimationViewport.ActualHeight),
+                ("AnimationViewportWidthPhysical", AnimationViewport.ActualWidth * scale),
+                ("AnimationViewportHeightPhysical", AnimationViewport.ActualHeight * scale),
+                ("OpaquePanelWidthDip", OpaquePanel.ActualWidth),
+                ("OpaquePanelHeightDip", OpaquePanel.ActualHeight),
+                ("OpaquePanelWidthPhysical", OpaquePanel.ActualWidth * scale),
+                ("OpaquePanelHeightPhysical", OpaquePanel.ActualHeight * scale));
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Geometry", "Overlay surface bounds snapshot failed; continuing without diagnostics.", exception,
+                ("Operation", "LogSurfaceBounds"), ("Reason", reason));
+        }
     }
 
     private void SetVisibleVisualState() => SetVisualState(0, 1.0);

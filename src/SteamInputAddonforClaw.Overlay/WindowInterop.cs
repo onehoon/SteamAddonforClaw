@@ -14,6 +14,17 @@ internal readonly record struct OverlayOutsideClick(
     OverlayRect WindowBounds,
     nint ForegroundHwnd);
 
+internal readonly record struct OverlayNativeBounds(
+    OverlayRect WindowRect,
+    int ClientWidth,
+    int ClientHeight,
+    int ClientScreenX,
+    int ClientScreenY,
+    int ClientInsetLeft,
+    int ClientInsetTop,
+    int ClientInsetRight,
+    int ClientInsetBottom);
+
 internal static class WindowInterop
 {
     private const int GwlExStyle = -20;
@@ -45,6 +56,54 @@ internal static class WindowInterop
     private static int _dismissSignaled;
 
     internal static nint GetWindowHandle(OverlayWindow window) => WindowNative.GetWindowHandle(window);
+
+    internal static bool TryGetDiagnosticBounds(OverlayWindow window, out OverlayNativeBounds bounds)
+    {
+        bounds = default;
+        nint hwnd = IntPtr.Zero;
+        try
+        {
+            hwnd = WindowNative.GetWindowHandle(window);
+            if (!GetWindowRect(hwnd, out var windowRect))
+            {
+                LogDiagnosticBoundsFailure(hwnd, "GetWindowRect");
+                return false;
+            }
+
+            if (!GetClientRect(hwnd, out var clientRect))
+            {
+                LogDiagnosticBoundsFailure(hwnd, "GetClientRect");
+                return false;
+            }
+
+            var clientOrigin = new POINT();
+            if (!ClientToScreen(hwnd, ref clientOrigin))
+            {
+                LogDiagnosticBoundsFailure(hwnd, "ClientToScreen");
+                return false;
+            }
+
+            var clientWidth = clientRect.Right - clientRect.Left;
+            var clientHeight = clientRect.Bottom - clientRect.Top;
+            bounds = new OverlayNativeBounds(
+                new OverlayRect(windowRect.Left, windowRect.Top, windowRect.Right - windowRect.Left, windowRect.Bottom - windowRect.Top),
+                clientWidth,
+                clientHeight,
+                clientOrigin.X,
+                clientOrigin.Y,
+                clientOrigin.X - windowRect.Left,
+                clientOrigin.Y - windowRect.Top,
+                windowRect.Right - (clientOrigin.X + clientWidth),
+                windowRect.Bottom - (clientOrigin.Y + clientHeight));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Geometry", "Overlay diagnostic bounds read failed; continuing without the snapshot.", exception,
+                ("Operation", "TryGetDiagnosticBounds"), ("OverlayHwnd", hwnd));
+            return false;
+        }
+    }
 
     internal static void Configure(OverlayWindow window, out OverlayRect rect, out uint dpi, out string monitorText)
     {
@@ -282,6 +341,11 @@ internal static class WindowInterop
     private static bool IsInside(RECT rect, POINT point) =>
         point.X >= rect.Left && point.X < rect.Right && point.Y >= rect.Top && point.Y < rect.Bottom;
 
+    private static void LogDiagnosticBoundsFailure(nint hwnd, string operation) =>
+        OverlayLog.Warn("Geometry", "Overlay diagnostic bounds read failed; continuing without the snapshot.",
+            new Win32Exception(Marshal.GetLastWin32Error(), $"Could not complete {operation}."),
+            ("Operation", operation), ("OverlayHwnd", hwnd));
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetForegroundWindow();
 
@@ -333,6 +397,12 @@ internal static class WindowInterop
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(nint hwnd, out RECT rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(nint hwnd, out RECT rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ClientToScreen(nint hwnd, ref POINT point);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { internal int X; internal int Y; }
