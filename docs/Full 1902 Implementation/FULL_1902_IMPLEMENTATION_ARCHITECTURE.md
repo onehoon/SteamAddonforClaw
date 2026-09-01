@@ -1,9 +1,126 @@
 # Full PID1902 Implementation — Controller Ownership Architecture
 
 > **Status:** Design / implementation planning document  
-> **Scope:** Future architecture for MSI Claw controller ownership when MSI Center M is disabled  
+> **Scope:** Future architecture for MSI Claw controller ownership and MSI Center M replacement  
 > **Implementation state:** This document does **not** claim that the described architecture is implemented or hardware-validated.  
 > **Important:** The application is still pre-release. Existing Steam-session routing behavior is not a compatibility contract and must not constrain the new product direction.
+
+---
+
+## Project direction
+
+Steam Addon for Claw is changing from a Steam-routing add-on that coexists with MSI Center M into an integrated MSI Claw control platform.
+
+The project should take authority over the major controller and device-control responsibilities that MSI Center M previously provided through the Center M application and MSI Game Bar widget, while preserving the existing Steam user experience for Steam games and Steam Big Picture Mode.
+
+The intended product direction is:
+
+> **When MSI Center M is Disabled, Steam Addon for Claw becomes the primary authority for the MSI Claw controller and the supported device-control features that were previously provided by MSI Center M.**
+>
+> **When MSI Center M is Enabled, the Addon leaves the physical controller on the MSI/stock path and continues to provide only the Addon features that do not require controller ownership.**
+>
+> **Steam routing remains a supported product feature, but Steam/BPM no longer decides whether the Addon owns the physical controller. Steam/BPM only selects the active virtual controller presentation while the Addon already owns the physical controller.**
+
+This means the Addon should progressively replace the relevant MSI Center M responsibilities, including:
+
+- the normal Xbox 360 controller presentation used outside Steam;
+- physical controller mode ownership and input acquisition;
+- controller isolation and virtual-controller presentation;
+- TDP control;
+- CPU Boost control;
+- Windows power mode control;
+- fan control / fan curve when implemented and validated;
+- physical vibration-strength control when implemented and validated;
+- other supported board-specific MSI Claw device settings that previously required the Center M application or Game Bar widget.
+
+The controller model is:
+
+```text
+MSI Center M Enabled
+    → MSI / stock controller authority
+    → Addon does not take PID / DirectInput / HidHide / VIIPER controller ownership
+    → TDP / CPU Boost / Power / Fan / other independent Addon features may still operate
+
+MSI Center M Disabled
+    → Addon controller authority
+    → physical MSI Claw stays PID1902 / DirectInput while Addon owns it
+    → physical gamepad collection stays isolated through HidHide
+    → one long-lived VIIPER runtime owns the virtual-controller layer
+    → Xbox360 is the normal/default presentation
+    → Steam game / Steam Big Picture selects Steam Deck presentation
+```
+
+The important distinction is between **physical controller authority** and **virtual presentation policy**:
+
+```text
+Physical controller authority
+    Center M Enabled  → MSI / Stock
+    Center M Disabled → Addon
+
+Virtual presentation while Addon owns the controller
+    Steam/BPM inactive → Xbox360
+    Steam/BPM active   → SteamDeck
+```
+
+The existing Steam routing experience is therefore retained from the user's perspective, but its internal role changes fundamentally.
+
+Old meaning:
+
+```text
+Steam active
+→ acquire physical controller
+→ PID1902
+→ Steam Deck
+
+Steam inactive
+→ release physical controller
+→ PID1901
+```
+
+New meaning:
+
+```text
+Center M Disabled
+→ physical controller already owned as persistent PID1902
+
+Steam inactive
+→ Xbox360 presentation
+
+Steam active / BPM
+→ SteamDeck presentation
+```
+
+Normal Xbox360 ↔ SteamDeck presentation changes must not require PID1901 ↔ PID1902 switching, DirectInput reacquisition, HidHide teardown/rebuild, or VIIPER runtime recreation.
+
+This project direction should be used as the primary design and review lens for all future controller work.
+
+Existing code may be reused when it provides proven low-level primitives or real lifecycle safety, but **existing orchestration is not authoritative merely because it already exists**. If an old Steam-session coordinator, external-takeover yield policy, route-bound ownership model, or compatibility layer conflicts with this direction, it may be simplified, repurposed, or removed.
+
+The final product identity can be summarized as:
+
+> **MSI Center M replacement for controller and core device-control responsibilities, plus first-class Steam integration.**
+
+The target architecture should remain understandable in one diagram:
+
+```text
+                     MSI CENTER M SETTING
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+          ENABLED                       DISABLED
+             │                             │
+      MSI / STOCK OWNER                ADDON OWNER
+             │                             │
+   controller stack untouched        PID1902 / DirectInput
+   by Addon                           HidHide isolation
+             │                             │
+   independent Device features       one VIIPER runtime
+   may still operate                      │
+                                    ┌─────┴─────┐
+                                    │           │
+                                  Xbox360    SteamDeck
+                                  Default     Steam/BPM
+```
 
 ---
 
@@ -122,7 +239,7 @@ It should not add epochs, barriers, generalized authority frameworks, or multipl
 
 There are two top-level controller modes.
 
-## 3.1 MSI Center M Enabled — Stock controller mode
+### 3.1 MSI Center M Enabled — Stock controller mode
 
 When MSI Center M startup configuration is Enabled, the Addon must remain passive with respect to the controller stack.
 
@@ -141,7 +258,7 @@ Addon controller mutations:
     VIIPER controller     = none
 ```
 
-The Addon may still provide unrelated features such as:
+The Addon may still provide unrelated or independent features such as:
 
 - TDP control;
 - CPU Boost;
@@ -150,20 +267,16 @@ The Addon may still provide unrelated features such as:
 - telemetry;
 - other device/system features that do not require controller ownership.
 
-This is intentionally close to the current passive behavior when no Steam route is active, except that **Steam becoming active must no longer cause controller takeover while Center M remains Enabled**.
+Steam becoming active must no longer cause physical controller takeover while Center M remains Enabled.
 
-### Invariant
+#### Invariant
 
 ```text
 CenterMEnabled
 → AddonMustNotOwnPhysicalController
 ```
 
-If the Addon sees PID1901, PID1902, Center M processes, or MSI controller activity while Center M is Enabled, it should not reinterpret those facts as permission to take controller ownership.
-
----
-
-## 3.2 MSI Center M Disabled — Addon controller mode
+### 3.2 MSI Center M Disabled — Addon controller mode
 
 When MSI Center M startup configuration is Disabled, the user's product choice means:
 
@@ -182,7 +295,7 @@ Steam Deck logical device       = created
 Exactly one virtual device      = attached/live
 ```
 
-Normal/default virtual presentation:
+Normal/default presentation:
 
 ```text
 Xbox360 = attached + live
@@ -196,7 +309,7 @@ Xbox360 = detached + waiting
 SteamDeck = attached + live
 ```
 
-### Invariant
+#### Invariant
 
 ```text
 CenterMDisabled
@@ -205,9 +318,7 @@ CenterMDisabled
 → DesiredPhysicalMode = PID1902
 ```
 
-PID1901 is not an alternate acceptable steady state in Addon-owned mode.
-
-It is a recoverable drift state.
+PID1901 is not an alternate acceptable steady state in Addon-owned mode. It is a recoverable drift state.
 
 ---
 
@@ -383,8 +494,6 @@ MSI_Center_M_Updater       task disabled
 MSI Foundation Service     startup disabled
 ```
 
-This prevents the ordinary boot/logon startup roots from starting Center M.
-
 ### Layer 2 — MainUI launch prevention
 
 The repository already contains a Center M MainUI routing guard / helper ownership mechanism that was built to prevent a newly launched real `MSI Center M.exe` from becoming operational during a route.
@@ -403,11 +512,9 @@ Addon controller ownership ends
 
 The prevention mechanism is not the controller authority itself. It protects the authority.
 
-### Layer 3 — actual runtime quiesce / targeted process termination
+### Layer 3 — runtime quiesce / targeted process termination
 
 If Center M runtime is already alive or somehow resurrects despite startup policy / MainUI prevention, the Addon may terminate the known conflicting runtime while Center M is Disabled.
-
-This is a product-policy consequence of exclusive ownership, not a speculative watchdog feature.
 
 ### Layer 4 — physical-state reconciliation
 
@@ -427,8 +534,6 @@ while Addon is running:
         force PID1902
         kill anything suspicious
 ```
-
-This creates unnecessary polling, repeated mutation pressure, and a second authority system.
 
 The repository already has or can naturally receive meaningful lifecycle triggers:
 
@@ -451,8 +556,6 @@ A low-rate process watchdog should only be added if hardware evidence shows a Ce
 
 The current MSI Claw DirectInput source polls input frequently and stops the owned session when `ReadState()` fails.
 
-That behavior is useful in the new architecture.
-
 A real PID1902 disappearance or device loss naturally produces:
 
 ```text
@@ -460,8 +563,6 @@ DirectInput session
     ↓ ReadState failure / device loss
 physical input completion callback
 ```
-
-This is a better signal than adding a separate high-frequency PID watchdog.
 
 The policy after that signal must change.
 
@@ -517,8 +618,6 @@ HHC's controller subsystem treats arrival/removal as a normal lifecycle:
 - it hydrates already-present gaming devices during startup;
 - it tracks expected power-cycle removals separately;
 - it selects/reconnects controllers after the device returns.
-
-The useful lesson is not HHC's exact class structure.
 
 The useful lesson is:
 
@@ -581,23 +680,13 @@ active virtual logical device remains attached
 input report becomes neutral
 ```
 
-Example:
-
-```text
-Xbox360 attached
-physical controller disappears
-→ send neutral Xbox360 report
-→ keep Xbox360 device attached
-→ wait for physical recovery
-```
-
-Why:
+This:
 
 - avoids unnecessary virtual controller slot churn;
 - reduces controller-disconnect/reconnect behavior inside games;
-- preserves the selected presentation while the physical source is being recovered.
+- preserves the selected presentation while the physical source is recovered.
 
-This must remain bounded by safety:
+Safety requirements:
 
 - no stale button/axis state may remain live;
 - rumble must be neutralized/stopped;
@@ -632,8 +721,6 @@ Addon starts
 → show Restart required / Center M runtime still active
 ```
 
-Do not take PID1902 in this state merely because the persisted startup configuration is Disabled.
-
 ### 12.3 Startup — Center M Disabled and runtime quiescent
 
 ```text
@@ -644,8 +731,6 @@ Addon starts
 → recovery state safe
 → establish Addon controller ownership
 ```
-
-Detailed acquisition sequence is described below.
 
 ---
 
@@ -677,19 +762,13 @@ The exact function names may change, but the lifecycle order should be approxima
 21. report Addon-owned controller state Ready
 ```
 
-### Notes
-
-- Xbox360 and Steam Deck should both be created for the long-lived VIIPER runtime, but they must **not** both be attached.
-- Do not change PID or HidHide when switching between Xbox360 and Steam Deck.
-- The physical controller identity remains the underlying authority regardless of selected presentation.
+Xbox360 and Steam Deck should both be created for the long-lived VIIPER runtime, but they must **not** both be attached.
 
 ---
 
 ## 14. VIIPER process-lifetime model
 
-The current canonical VIIPER layer already contains useful dual-device primitives and tests.
-
-The future production contract should become:
+Future production contract:
 
 ```text
 VIIPER server         = process-lifetime while Addon owns controller
@@ -703,14 +782,14 @@ Both logical devices should start detached.
 Default steady state:
 
 ```text
-Xbox360  = Attached + Live
+Xbox360   = Attached + Live
 SteamDeck = Detached + Waiting
 ```
 
 Steam/BPM state:
 
 ```text
-Xbox360  = Detached + Waiting
+Xbox360   = Detached + Waiting
 SteamDeck = Attached + Live
 ```
 
@@ -724,28 +803,13 @@ Attached(Xbox360) XOR Attached(SteamDeck) == true
 
 except short controlled transition boundaries where both are detached.
 
-Both being attached simultaneously is invalid.
-
-### Do not create separate VIIPER runtimes
-
-Do not create:
-
-- one server for Xbox360;
-- another server for Steam Deck;
-- separate buses for each presentation;
-- remove/recreate the full VIIPER runtime for every presentation switch.
-
-The target is one runtime and lightweight attach/detach switching.
+Do not create separate VIIPER runtimes or buses for the two presentations.
 
 ---
 
 ## 15. Presentation switching
 
-Presentation switching must operate entirely above the persistent physical ownership layer.
-
 ### Xbox360 → Steam Deck
-
-Recommended sequence:
 
 ```text
 Xbox360 live
@@ -753,7 +817,7 @@ Xbox360 live
 → stop/join Xbox360 publisher
 → detach Xbox360
 → attach SteamDeck
-→ send/establish neutral SteamDeck state
+→ establish neutral SteamDeck state
 → start SteamDeck publisher
 → live SteamDeck
 ```
@@ -766,7 +830,7 @@ SteamDeck live
 → stop/join SteamDeck publisher
 → detach SteamDeck
 → attach Xbox360
-→ send/establish neutral Xbox360 state
+→ establish neutral Xbox360 state
 → start Xbox360 publisher
 → live Xbox360
 ```
@@ -781,13 +845,11 @@ Center M prevention remains armed
 VIIPER server/bus remain alive
 ```
 
-This is the performance benefit of the new architecture.
-
 ---
 
 ## 16. Steam/BPM becomes a presentation selector only
 
-The automatic policy should eventually be:
+Automatic policy:
 
 ```text
 Steam game active OR Steam Big Picture active
@@ -805,24 +867,20 @@ Steam detection must not decide:
 - whether the Addon owns the physical controller;
 - whether Center M should be allowed to reclaim native mode.
 
-Those decisions belong to the Center M / controller-ownership contract.
-
 ---
 
 ## 17. Recovery when PID1902 becomes PID1901
 
 This is a normal recoverable ownership drift while Center M is Disabled.
 
-### Trigger
-
-Possible signals:
+Possible triggers:
 
 - DirectInput `ReadState` failure;
 - PnP removal of owned PID1902 collection;
 - stable native-state probe showing same physical MSI Claw as PID1901;
 - resume reconciliation showing same-device PID1901.
 
-### Recovery sequence
+Recovery sequence:
 
 ```text
 1. latch physical-source unavailable
@@ -841,30 +899,9 @@ Possible signals:
 14. clear recoverable drift state
 ```
 
-### Do not yield
-
 There is no `yield until Steam session end` policy in this mode.
 
-The Addon remains the desired authority.
-
-### Do not endlessly fight a live competitor
-
-The correct ordering is:
-
-```text
-remove/quiesce conflicting Center M runtime
-THEN reclaim PID1902
-```
-
-not:
-
-```text
-Addon forces 1902
-Center M forces 1901
-Addon forces 1902
-Center M forces 1901
-...
-```
+Do not endlessly fight a live competitor. Quiesce the conflicting Center M runtime **before** reclaiming PID1902.
 
 ---
 
@@ -893,15 +930,11 @@ If a different physical controller appears, do not mutate it.
 
 If identity is ambiguous, fail closed.
 
-This is a real lifecycle requirement and should be supported.
-
 ---
 
 ## 19. Strong physical identity requirement
 
 All reclaim operations that can mutate native mode must prove they are acting on the intended MSI Claw.
-
-The current repository's physical identity work (container / resolved physical root / strong physical device key) should be retained where useful.
 
 Allowed recovery:
 
@@ -928,34 +961,25 @@ surface failure
 fail closed
 ```
 
-Do not add complexity to support unsupported multi-session or multi-user scenarios.
-
 ---
 
 ## 20. HidHide ownership
 
 The physical MSI Claw gamepad collection must remain hidden from ordinary applications while the Addon owns PID1902, preventing double input alongside the virtual Xbox360/Steam Deck.
 
-Important MSI topology rule from current research:
+Important topology rule:
 
 > Hide the exact gamepad collection, not the entire PID1902 device tree.
 
-For supported A2VM/EX work, the current exact MSI Claw DirectInput gamepad collection targeting should remain the starting point.
+Reuse the existing ownership-aware HidHide primitives where they fit:
 
-Do not casually generalize to hiding every `PID_1902` node, because other MSI Claw families/topologies may place keyboard or consumer-control collections under the same product ID.
-
-### Reconciliation
-
-The current physical isolation implementation already contains useful ownership-aware behavior:
-
-- verify HidHide configuration is readable;
-- verify Addon whitelist;
-- track Addon-owned hidden entries;
-- re-add an owned entry if it drifted away;
-- restore/repair HidHide Active state only when safe;
-- refuse ambiguous/foreign blocked-entry states.
-
-Reuse this behavior where it fits the new long-lived ownership model.
+- readable-configuration validation;
+- Addon whitelist ownership;
+- journaled hidden entries;
+- repair of missing Addon-owned entries;
+- safe Active-state repair;
+- safe rollback;
+- refusal of ambiguous/foreign blocked states.
 
 Do not implement a second independent HidHide authority.
 
@@ -963,7 +987,7 @@ Do not implement a second independent HidHide authority.
 
 During an unexpected PID1902 → PID1901 drift, PID1901 may briefly become visible to Windows while the virtual controller remains attached.
 
-Do not preemptively create a second complicated PID1901 hiding policy unless real hardware testing shows user-visible double-input/slot damage during the reclaim interval.
+Do not preemptively create a second complicated PID1901 hiding policy unless real hardware testing shows user-visible double-input or slot damage during the reclaim interval.
 
 Initial policy:
 
@@ -974,8 +998,6 @@ reclaim PID1902 quickly
 restore normal isolation
 ```
 
-Add additional PID1901 suppression only with evidence.
-
 ---
 
 ## 21. Center M process termination philosophy
@@ -984,9 +1006,7 @@ Center M Disabled is an explicit user choice to not use Center M as controller a
 
 Therefore targeted Center M process termination in Addon-owned mode is allowed and may be required.
 
-This is different from the old coexistence architecture.
-
-### Principles
+Principles:
 
 - terminate only known MSI Center M identities relevant to the conflict;
 - do not kill unrelated MSI software broadly;
@@ -996,9 +1016,7 @@ This is different from the old coexistence architecture.
 - do not create a constant high-frequency kill loop;
 - use actual resurrection/drift events to trigger reconciliation.
 
-### Initial target set
-
-The HHC Claw Center watcher provides a defensible starting set:
+Initial target set from the HHC Claw Center watcher:
 
 ```text
 MSI_Center_M_Server
@@ -1011,9 +1029,9 @@ If hardware evidence proves additional controller-owning children survive and co
 
 ---
 
-## 22. What happens if Center M is manually launched while Addon owns the controller?
+## 22. Manual Center M launch while Addon owns the controller
 
-Expected product behavior when Center M is Disabled:
+Expected behavior when Center M is Disabled:
 
 ```text
 user launches MSI Center M from Start menu
@@ -1025,9 +1043,7 @@ user launches MSI Center M from Start menu
 
 The Addon must not silently yield controller authority merely because the user managed to start a disabled Center M executable.
 
-The configuration switch is the user's authority decision.
-
-If the user actually wants Center M ownership again, they should Enable Center M through the Addon UI and reboot/apply the supported transition.
+If the user wants Center M ownership again, they should Enable Center M through the supported Addon UI transition.
 
 ---
 
@@ -1049,7 +1065,7 @@ active virtual presentation neutral
 → complete recovery journal
 ```
 
-Final invariant after successful normal shutdown:
+Final invariant:
 
 ```text
 Addon process absent
@@ -1057,10 +1073,6 @@ Addon process absent
 ```
 
 Do not intentionally leave the user's physical controller hidden in PID1902 after the application has exited.
-
-This remains true even if Center M startup is Disabled.
-
-The next Addon start may reacquire PID1902.
 
 ---
 
@@ -1079,7 +1091,7 @@ Addon starts after crash
 → mark recovery safe
 ```
 
-Then evaluate the current product policy again:
+Then re-evaluate product policy:
 
 ```text
 Center M Enabled
@@ -1091,9 +1103,7 @@ Center M Disabled + runtime quiescent
     → attach default Xbox360
 ```
 
-Do not optimize crash recovery by assuming that because the final desired state is PID1902 there is no need to converge through a proven safe recovery boundary.
-
-Recovery correctness is more important than avoiding one extra native-mode transition after an abnormal termination.
+Do not optimize abnormal recovery by skipping the safe recovery boundary merely because the eventual desired state is PID1902.
 
 ---
 
@@ -1111,11 +1121,9 @@ quiesce input/publisher as required
 preserve only ownership state that can be safely reconciled after resume
 ```
 
-The exact native PID behavior during suspend can remain implementation-dependent if existing hardware-proven behavior is safer, but resume must not assume the old device handles remain valid.
+Resume must not assume old device handles remain valid.
 
 ### Resume reconciliation
-
-First re-evaluate the top-level authority:
 
 ```text
 Center M now Enabled?
@@ -1150,9 +1158,7 @@ Steam/BPM state should only be consulted after physical ownership is healthy, to
 
 ## 26. Presentation selector after resume/recovery
 
-Whenever physical ownership becomes healthy again, determine desired virtual presentation from current policy, not stale pre-fault assumptions alone.
-
-Conceptually:
+Whenever physical ownership becomes healthy again, determine desired virtual presentation from current policy:
 
 ```text
 if Steam game active or BPM active:
@@ -1180,7 +1186,7 @@ Avoid creating separate long-lived authorities such as:
 - `PnpRecoveryManager`;
 - `PresentationRecoveryManager`.
 
-The design should converge important lifecycle triggers through one controller-owner reconciliation path.
+Important lifecycle triggers should converge through one controller-owner reconciliation path.
 
 Conceptually:
 
@@ -1215,15 +1221,13 @@ The reconcile operation evaluates the same facts every time:
 10. Which presentation should be attached/live?
 ```
 
-Then converge toward the desired state.
-
-This can be implemented using existing narrow primitives. It does not imply building a generalized declarative state-machine framework.
+This does not imply building a generalized declarative state-machine framework.
 
 ---
 
 ## 28. Desired-state classification
 
-Useful conceptual states are small and product-facing.
+Useful conceptual states should remain small and product-facing.
 
 ### Stock
 
@@ -1278,8 +1282,6 @@ Do not multiply these into dozens of persistent enum states unless implementatio
 
 The architecture change does **not** mean all existing code should be discarded.
 
-Several low-level primitives are directly useful:
-
 ### Native state / identity
 
 - MSI native-state capture;
@@ -1327,7 +1329,7 @@ Reuse proven primitives where they simplify the new design.
 
 ## 30. Existing orchestration/policy likely to be replaced or removed
 
-The following concepts should be treated as candidates for deletion/rewrite, not preserved architecture:
+Treat the following as candidates for deletion/rewrite, not preserved architecture:
 
 ```text
 Steam session starts physical ownership
@@ -1340,11 +1342,9 @@ Steam route as outer owner of Xbox360 temporary presentation
 physical PID rollback solely because Steam becomes inactive
 ```
 
-Similarly, if `RoutingPipelineRuntimeCoordinator` or `AddonRoutingRuntime` remains useful only after extensive semantic distortion, consider replacing/simplifying it rather than adding a second controller ownership layer around it.
+If `RoutingPipelineRuntimeCoordinator` or `AddonRoutingRuntime` remains useful only after extensive semantic distortion, consider replacing/simplifying it rather than adding a second controller ownership layer around it.
 
-The final architecture should use names and contracts that describe what the product now does.
-
-Renaming can happen after behavior is stable; do not block the POC solely for naming cleanup.
+Renaming can happen after behavior is stable; do not block POCs solely for naming cleanup.
 
 ---
 
@@ -1378,11 +1378,7 @@ It means there should be **one top-level authority**, not multiple managers each
 
 ## 32. Center M Enabled transition
 
-The UI startup-control POC intentionally applies the configuration and requires reboot.
-
-For the final product, enabling Center M should mean the Addon relinquishes future controller authority.
-
-Preferred simple product flow remains:
+Preferred simple flow:
 
 ```text
 User selects Enable Center M
@@ -1393,8 +1389,6 @@ User selects Enable Center M
 ```
 
 Do not immediately start Center M and simultaneously tear down the live Addon controller stack unless a later product requirement explicitly needs same-session mode switching.
-
-A reboot boundary remains simpler and safer.
 
 After reboot:
 
@@ -1407,7 +1401,7 @@ Center M Enabled
 
 ## 33. Center M Disabled transition
 
-Preferred product flow:
+Preferred flow:
 
 ```text
 User selects Disable Center M
@@ -1417,7 +1411,7 @@ User selects Disable Center M
 → tell user restart required
 ```
 
-The current POC deliberately does not kill current-session Center M processes at button-click time.
+The current startup-control POC deliberately does not kill current-session Center M processes at button-click time.
 
 That remains acceptable if controller ownership does not begin until after the effective runtime is quiescent / rebooted.
 
@@ -1431,7 +1425,7 @@ Center M Disabled
 → Xbox360 becomes default presentation
 ```
 
-Later, if the final UX intentionally supports immediate same-session transition, that should be designed as a separate explicit lifecycle, not smuggled into the startup-setting operation.
+If immediate same-session transition is added later, design it as a separate explicit lifecycle rather than hiding it inside the startup-setting operation.
 
 ---
 
@@ -1495,7 +1489,7 @@ Validate:
 - DirectInput acquisition succeeds;
 - exact physical gamepad collection is hidden;
 - Xbox360 virtual controller attaches;
-- controls work normally in Windows/gamepad testers;
+- controls work normally;
 - Steam Deck logical device exists but remains detached;
 - no duplicate physical controller is user-visible;
 - rumble behavior is known/recorded even if not yet final.
@@ -1506,7 +1500,7 @@ Validate:
 
 - no PID mutation by Addon;
 - no HidHide controller ownership;
-- no VIIPER virtual controller created/attached for controller routing;
+- no VIIPER controller presentation takeover;
 - stock MSI controller remains usable;
 - unrelated Addon features still work.
 
@@ -1590,8 +1584,6 @@ Keep POCs small enough to review and reason about. Prefer <500 LOC per PR when p
 
 ### PR1 — Center M startup control POC
 
-Status at time of this document: separate POC work exists / is being evaluated.
-
 Scope:
 
 - Device-page Center M card;
@@ -1673,8 +1665,6 @@ otherwise → Xbox360
 
 Steam becomes presentation policy only.
 
-Do not reconnect physical routing policy to Steam state.
-
 ### PR6+ — cleanup and simplification
 
 After the new architecture is hardware-proven:
@@ -1716,7 +1706,7 @@ CenterM Disabled + old runtime still alive / restart pending
 - switch X360 → Deck with neutral ordering;
 - switch Deck → X360 with neutral ordering;
 - never both attached in stable state;
-- teardown removes/retire both safely.
+- teardown retires both safely.
 
 ### Native drift tests
 
@@ -1776,8 +1766,6 @@ different/ambiguous device returns
 ## 38. Logging / diagnostics requirements
 
 The new architecture should make controller ownership understandable from logs without requiring a debugger.
-
-Recommended event categories:
 
 ### Authority
 
@@ -1844,7 +1832,7 @@ For manual POC measurements, log timestamps around:
 switch requested
 source neutral accepted
 source detached
- destination attached
+destination attached
 destination first live input
 ```
 
@@ -1853,8 +1841,6 @@ This allows measurement of actual controller blackout.
 ---
 
 ## 39. UI semantics
-
-The user-facing meaning should remain simple.
 
 ### Device page — MSI Center M card
 
@@ -1865,7 +1851,7 @@ MSI Center M
 
 Enabled
   MSI Center M owns the stock controller.
-  Steam Addon controller routing is inactive.
+  Steam Addon controller ownership is inactive.
 
 Disabled
   Steam Addon owns the MSI Claw controller while the app is running.
@@ -1892,13 +1878,11 @@ When Enabled:
 Controller owner: MSI / Stock
 ```
 
-Do not expose internal state-machine details unless useful for diagnostics.
-
 ---
 
-## 40. Relation to future Center M replacement features
+## 40. Relation to Center M replacement features
 
-This architecture is also the foundation for moving more Center M hardware features into the Addon.
+This architecture is the foundation for moving more Center M hardware features into the Addon.
 
 The Device page can evolve into the MSI Claw hardware-control surface for features such as:
 
@@ -1920,13 +1904,11 @@ Center M Disabled
 → Steam Addon becomes the Claw control/controller platform
 ```
 
-Do not mix physical motor-strength settings with virtual presentation routing semantics merely because both involve vibration.
+Physical motor-strength settings belong to device/hardware authority; virtual X360/SteamDeck rumble transport belongs to the controller/presentation path. Keep those responsibilities distinct even though both involve vibration.
 
 ---
 
-## 41. Open implementation questions that require hardware evidence
-
-The architecture is decided at the policy level, but several details should be validated rather than guessed.
+## 41. Open implementation questions requiring hardware evidence
 
 ### 41.1 Exact Center M kill set
 
@@ -1952,7 +1934,7 @@ Do not add a second PID1901 hiding scheme without evidence.
 
 Revalidate the complete rumble path with the new default Xbox360 presentation.
 
-The architecture must eventually support the desired physical vibration-strength control independent of whether X360 or Steam Deck is selected.
+The architecture must eventually support physical vibration-strength control independent of whether X360 or Steam Deck is selected.
 
 ### 41.5 Resume native mode
 
@@ -1977,6 +1959,7 @@ Ask:
 9. Is ambiguous identity handled fail-closed?
 10. Is the implementation introducing extra authority/state only for theoretical races?
 11. Is old Steam-session orchestration being retained because it is still useful, or only because it already exists?
+12. Does the change advance the Center M replacement + Steam integration direction rather than preserve obsolete coexistence behavior?
 
 A PR should not be blocked for theoretical scheduler interleavings that do not map to realistic handheld lifecycle behavior.
 
@@ -2007,8 +1990,8 @@ A PR **should** be blocked for realistic failures such as:
                 │                             │
     no PID/HidHide/VIIPER takeover      physical PID1902
                 │                       DirectInput acquired
-        other Addon features            HidHide isolation
-             still work                 Center M suppressed
+      Addon Device features             HidHide isolation
+       may still operate                Center M suppressed
                                               │
                                       one VIIPER runtime
                                               │
@@ -2061,23 +2044,25 @@ Addon-owned PID1902
 
 ## 44. Final design principles
 
-1. **Center M Enabled/Disabled is the controller authority decision.**
-2. **Steam/BPM is only a virtual presentation selector.**
-3. **PID1902 is persistent for the entire Addon-owned runtime.**
-4. **DirectInput and HidHide are persistent physical ownership infrastructure, not Steam-session resources.**
-5. **Xbox360 is the default presentation; Steam Deck is the Steam/BPM presentation.**
-6. **Both virtual logical devices may be created once, but exactly one is attached/live.**
-7. **PID1901 during Addon ownership is recoverable drift, not a reason to yield.**
-8. **A resurrected Center M runtime may be terminated because Disabled means the user chose Addon ownership.**
-9. **Do not fight a live competitor endlessly: quiesce it first, then reclaim PID1902.**
-10. **Physical device disappearance is recoverable; neutralize output and rebind on PnP return.**
-11. **Strong physical identity gates native-mode mutation.**
-12. **Ambiguous ownership fails closed.**
-13. **Normal Addon shutdown restores a usable stock physical controller.**
-14. **Crash recovery proves safety before starting a new ownership session.**
-15. **Reuse proven low-level primitives, not obsolete policy semantics.**
-16. **Do not preserve old Steam-routing orchestration merely because it exists.**
-17. **Prefer one clear owner, one reconcile path, and one teardown path over layered managers.**
-18. **Protect real handheld lifecycle failures without building machinery for purely theoretical races.**
+1. **The product direction is MSI Center M replacement for controller/core Device Control responsibilities plus first-class Steam integration.**
+2. **Center M Enabled/Disabled is the physical controller authority decision.**
+3. **Steam/BPM is only a virtual presentation selector once Addon ownership exists.**
+4. **PID1902 is persistent for the entire Addon-owned runtime.**
+5. **DirectInput and HidHide are persistent physical ownership infrastructure, not Steam-session resources.**
+6. **Xbox360 is the default presentation; Steam Deck is the Steam/BPM presentation.**
+7. **Both virtual logical devices may be created once, but exactly one is attached/live.**
+8. **PID1901 during Addon ownership is recoverable drift, not a reason to yield.**
+9. **A resurrected Center M runtime may be terminated because Disabled means the user chose Addon ownership.**
+10. **Do not fight a live competitor endlessly: quiesce it first, then reclaim PID1902.**
+11. **Physical device disappearance is recoverable; neutralize output and rebind on PnP return.**
+12. **Strong physical identity gates native-mode mutation.**
+13. **Ambiguous ownership fails closed.**
+14. **Normal Addon shutdown restores a usable stock physical controller.**
+15. **Crash recovery proves safety before starting a new ownership session.**
+16. **Reuse proven low-level primitives, not obsolete policy semantics.**
+17. **Do not preserve old Steam-routing orchestration merely because it exists.**
+18. **Prefer one clear owner, one reconcile path, and one teardown path over layered managers.**
+19. **Protect real handheld lifecycle failures without building machinery for purely theoretical races.**
+20. **Controller and Device features should progressively move under Addon authority as they are implemented and hardware-validated, rather than retaining Center M merely to provide those functions.**
 
 This is the intended direction for the Full PID1902 implementation track.
