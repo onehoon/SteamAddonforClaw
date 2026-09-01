@@ -10,6 +10,29 @@ internal enum AddonPresentationKind { Xbox360, SteamDeck }
 /// <summary>The one in-memory PR6 first-attach result. Not persisted.</summary>
 internal sealed record InitialPresentationResult(bool Succeeded, AddonPresentationKind? Presentation, string Reason);
 
+internal enum PresentationReconcileOutcome
+{
+    /// <summary>The active presentation already matches the current raw Steam/BPM policy and its
+    /// publisher is healthy -- no native call, no publisher restart.</summary>
+    NoChange,
+    /// <summary>The active typed device + publisher were changed to the other kind.</summary>
+    Switched,
+    /// <summary>There was no active presentation; the currently-desired one was attached.</summary>
+    Attached,
+    /// <summary>A native/publisher step could not be proven safe. No fallback to the other or previous
+    /// presentation; PID / DirectInput / HidHide untouched.</summary>
+    Failed,
+    /// <summary>A precondition (owner disposed, VIIPER not Ready, PR5 source not running) was not met;
+    /// no forward mutation was attempted.</summary>
+    Blocked,
+}
+
+/// <summary>The in-memory result of one PR7 runtime presentation reconcile. Not persisted.</summary>
+internal sealed record PresentationReconcileResult(PresentationReconcileOutcome Outcome, AddonPresentationKind? Presentation, string Reason)
+{
+    internal bool Succeeded => Outcome is PresentationReconcileOutcome.NoChange or PresentationReconcileOutcome.Switched or PresentationReconcileOutcome.Attached;
+}
+
 /// <summary>A narrow abstraction over the two canonical VIIPER input publishers so the presentation
 /// owner can be tested without the production worker thread. Production adapters forward verbatim to
 /// <see cref="CanonicalXbox360InputPublisher"/> / <see cref="CanonicalSteamDeckInputPublisher"/>.</summary>
@@ -26,6 +49,15 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// typed device, sends neutral, and starts exactly one matching publisher on the supplied PR5
     /// input source. No fallback to the other presentation on failure.</summary>
     Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, SteamPresentationSnapshot snapshot, CancellationToken cancellationToken);
+
+    /// <summary>PR7: reconcile the attached typed device + publisher to the current raw Steam/BPM
+    /// policy. The freshest snapshot is captured AFTER the owner gate is acquired (work order PR7
+    /// section 7/18), so queued/overlapping Steam events never apply stale desired state. Changes
+    /// only virtual attachment/publisher state -- PID1902, the PR5 DirectInput source, the persistent
+    /// HidHide baseline, and the canonical VIIPER server/bus are untouched. No fallback to the other
+    /// presentation on failure; no polling; no retry loop.</summary>
+    Task<PresentationReconcileResult> ReconcileDesiredPresentationAsync(
+        IMsiClawPreparedInputSource source, Func<SteamPresentationSnapshot> captureSnapshot, CancellationToken cancellationToken);
 
     /// <summary>The official Center M Enable-and-Restart step: stop/join the publisher, neutral+detach
     /// the selected typed device, then tear the canonical VIIPER runtime down to its closed state.
@@ -97,6 +129,65 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             return selected == AddonPresentationKind.Xbox360
                 ? await AttachXbox360Async(source).ConfigureAwait(false)
                 : await AttachSteamDeckAsync(source).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<PresentationReconcileResult> ReconcileDesiredPresentationAsync(
+        IMsiClawPreparedInputSource source, Func<SteamPresentationSnapshot> captureSnapshot, CancellationToken cancellationToken)
+    {
+        // Honor caller/shutdown cancellation only BEFORE the first presentation mutation.
+        cancellationToken.ThrowIfCancellationRequested();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed)
+                return Blocked("OwnerDisposed");
+            if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
+                return Blocked("ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"));
+            if (source is null || !source.IsRunning)
+                return Blocked("LiveInputSourceNotRunning");
+
+            // Fresh raw fact at the actual mutation boundary (section 18): a switch queued behind an
+            // earlier one must converge to the state that is current now, not when its event fired.
+            var snapshot = captureSnapshot();
+            var desired = snapshot.WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
+
+            if (_activeKind == desired && _publisher is { IsRunning: true })
+            {
+                AppLog.Debug("ControllerPresentation", "Runtime presentation reconcile: no change.", ("Event", "PresentationReconcileNoChange"),
+                    ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive), ("CurrentPresentation", desired));
+                return new(PresentationReconcileOutcome.NoChange, desired, "AlreadyDesired");
+            }
+
+            var previous = _activeKind;
+            AppLog.Info("ControllerPresentation", "Runtime presentation switch started.", ("Event", "PresentationSwitchStarted"),
+                ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive),
+                ("PreviousPresentation", previous?.ToString() ?? "None"), ("DesiredPresentation", desired));
+
+            if (previous is not null && !await RetireActivePresentationCoreAsync("SwitchTo:" + desired).ConfigureAwait(false))
+            {
+                // Hard cleanup barrier -- the current presentation could not be proven retired. Do
+                // NOT attach the target; ownership evidence is retained.
+                return new(PresentationReconcileOutcome.Failed, previous, "RetireCurrentPresentationFailed");
+            }
+
+            var attach = desired == AddonPresentationKind.Xbox360
+                ? await AttachXbox360Async(source).ConfigureAwait(false)
+                : await AttachSteamDeckAsync(source).ConfigureAwait(false);
+            if (!attach.Succeeded)
+            {
+                // The previous presentation (if any) is already safely retired. No fallback / rollback
+                // to it or to any alternate presentation (section 15.3); both typed devices stay
+                // detached and a later real Steam/BPM event may reconcile again.
+                AppLog.Warn("ControllerPresentation", "Runtime presentation switch failed at target attach.", null,
+                    ("Event", "PresentationSwitchFailed"), ("DesiredPresentation", desired), ("Reason", attach.Reason));
+                return new(PresentationReconcileOutcome.Failed, null, "TargetAttachFailed:" + attach.Reason);
+            }
+
+            AppLog.Info("ControllerPresentation", "Runtime presentation switch completed.", ("Event", "PresentationSwitchCompleted"),
+                ("CurrentPresentation", desired), ("PreviousPresentation", previous?.ToString() ?? "None"));
+            return new(previous is null ? PresentationReconcileOutcome.Attached : PresentationReconcileOutcome.Switched, desired, "Reconciled");
         }
         finally { _gate.Release(); }
     }
@@ -188,56 +279,67 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     public Task<bool> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken) => RetireAsync("CenterMEnable");
 
+    /// <summary>Retire ONLY the current active presentation (stop/join publisher -&gt; canonical
+    /// detach primitive -&gt; clear managed fields). The canonical VIIPER runtime (server / bus / both
+    /// typed device objects) stays alive and Ready -- this is the PR7 X360 &lt;-&gt; Deck switch step.
+    /// Assumes <see cref="_gate"/> is already held; never reacquires it (work order PR7 section 14).</summary>
+    private async Task<bool> RetireActivePresentationCoreAsync(string reason)
+    {
+        // 1. Stop + JOIN the publisher. A join failure is a hard barrier: never detach a device
+        //    underneath a possibly-live publisher (section 13/15.1).
+        if (_publisher is { } publisher)
+        {
+            try
+            {
+                await publisher.StopAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("ControllerPresentation", "Presentation publisher could not be joined; ownership retained.", exception, ("Reason", reason));
+                return false;
+            }
+            if (publisher.IsRunning)
+            {
+                AppLog.Error("ControllerPresentation", "Presentation publisher still running after StopAsync; ownership retained.", null, ("Reason", reason));
+                return false;
+            }
+            _publisher = null;
+        }
+
+        // 2. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
+        if (_activeKind == AddonPresentationKind.Xbox360)
+        {
+            var detach = _viiper!.DetachXbox360();
+            if (detach != USBDeviceDetachResult.Success)
+            {
+                AppLog.Error("ControllerPresentation", "Xbox360 detach did not succeed; ownership retained.", null, ("Result", detach), ("Reason", reason));
+                return false;
+            }
+        }
+        else if (_activeKind == AddonPresentationKind.SteamDeck || _deckSession is not null)
+        {
+            if (_deckSession is { } session && session.State is CanonicalSteamDeckSessionState.Active or CanonicalSteamDeckSessionState.CleanupPending)
+            {
+                if (!session.DetachDevice())
+                {
+                    AppLog.Error("ControllerPresentation", "Steam Deck detach did not succeed; ownership retained.", null, ("State", session.State), ("Reason", reason));
+                    return false;
+                }
+            }
+            _deckSession?.Dispose();
+            _deckSession = null;
+        }
+        _activeKind = null;
+        return true;
+    }
+
     private async Task<bool> RetireAsync(string reason)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            // 1. Stop + JOIN the publisher. A join failure is a hard barrier: never detach a device
-            //    underneath a possibly-live publisher (section 12.3).
-            if (_publisher is { } publisher)
-            {
-                try
-                {
-                    await publisher.StopAsync().ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    AppLog.Error("ControllerPresentation", "Presentation publisher could not be joined; ownership retained.", exception, ("Reason", reason));
-                    return false;
-                }
-                if (publisher.IsRunning)
-                {
-                    AppLog.Error("ControllerPresentation", "Presentation publisher still running after StopAsync; ownership retained.", null, ("Reason", reason));
-                    return false;
-                }
-                _publisher = null;
-            }
-
-            // 2. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
-            if (_activeKind == AddonPresentationKind.Xbox360)
-            {
-                var detach = _viiper!.DetachXbox360();
-                if (detach != USBDeviceDetachResult.Success)
-                {
-                    AppLog.Error("ControllerPresentation", "Xbox360 detach did not succeed; ownership retained.", null, ("Result", detach), ("Reason", reason));
-                    return false;
-                }
-            }
-            else if (_activeKind == AddonPresentationKind.SteamDeck || _deckSession is not null)
-            {
-                if (_deckSession is { } session && session.State is CanonicalSteamDeckSessionState.Active or CanonicalSteamDeckSessionState.CleanupPending)
-                {
-                    if (!session.DetachDevice())
-                    {
-                        AppLog.Error("ControllerPresentation", "Steam Deck detach did not succeed; ownership retained.", null, ("State", session.State), ("Reason", reason));
-                        return false;
-                    }
-                }
-                _deckSession?.Dispose();
-                _deckSession = null;
-            }
-            _activeKind = null;
+            if (!await RetireActivePresentationCoreAsync(reason).ConfigureAwait(false))
+                return false;
 
             // 3. Tear the canonical VIIPER runtime down to its proven-safe closed state.
             if (_viiper is { State: not (CanonicalViiperRuntimeState.Closed or CanonicalViiperRuntimeState.Unsafe) } runtime)
@@ -286,6 +388,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         AppLog.Warn("ControllerPresentation", "Initial presentation failed.", null,
             ("Event", "InitialPresentationFailed"), ("Stage", stage), ("Reason", reason), ("Presentation", kind?.ToString() ?? "None"));
         return new(false, kind, reason);
+    }
+
+    private PresentationReconcileResult Blocked(string reason)
+    {
+        AppLog.Info("ControllerPresentation", "Runtime presentation reconcile blocked.", ("Event", "PresentationReconcileNoChange"),
+            ("CurrentPresentation", _activeKind?.ToString() ?? "None"), ("Reason", reason));
+        return new(PresentationReconcileOutcome.Blocked, _activeKind, reason);
     }
 
     private sealed class PublisherAdapter : IAddonPresentationPublisher
