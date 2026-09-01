@@ -190,6 +190,167 @@ public sealed class MsiClawAddonPresentationTests
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
     }
 
+    // ---- OQ4 section 5 / 17.1: Overlay-capture pause / resume ----
+
+    [Fact]
+    public async Task Xbox360_overlay_pause_stops_publisher_writes_neutral_without_detach_then_resumes_same_publisher()
+    {
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher();
+        var owner = Build(native, xbox360, new FakePublisher());
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+
+        var pause = await owner.PauseForOverlayAsync(default);
+
+        Assert.Equal(OverlayPauseOutcome.Paused, pause.Outcome);
+        Assert.True(owner.IsOverlayPaused);
+        Assert.True(xbox360.StopCalled);
+        Assert.False(xbox360.IsRunning);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation);
+        Assert.Contains("SetXbox360DeviceState", native.Calls); // neutral written
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+
+        var resume = await owner.ResumeAfterOverlayAsync(new FakeSource(), default);
+
+        Assert.Equal(OverlayResumeOutcome.Resumed, resume.Outcome);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.True(xbox360.IsRunning);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SteamDeck_overlay_pause_stops_publisher_writes_neutral_without_detach_then_resumes_same_publisher()
+    {
+        var native = new FakeNative();
+        var deck = new FakePublisher();
+        var owner = Build(native, new FakePublisher(), deck);
+        await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+        native.Calls.Clear();
+
+        var pause = await owner.PauseForOverlayAsync(default);
+
+        Assert.Equal(OverlayPauseOutcome.Paused, pause.Outcome);
+        Assert.True(deck.StopCalled);
+        Assert.False(deck.IsRunning);
+        Assert.Equal(AddonPresentationKind.SteamDeck, owner.ActivePresentation);
+        Assert.Contains("SetSteamDeckDeviceState", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+
+        var resume = await owner.ResumeAfterOverlayAsync(new FakeSource(), default);
+
+        Assert.Equal(OverlayResumeOutcome.Resumed, resume.Outcome);
+        Assert.True(deck.IsRunning);
+        Assert.Equal(AddonPresentationKind.SteamDeck, owner.ActivePresentation);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Reconcile_while_overlay_paused_is_blocked_without_attach_or_detach()
+    {
+        var native = new FakeNative();
+        var owner = Build(native, new FakePublisher(), new FakePublisher());
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await owner.PauseForOverlayAsync(default)).Outcome);
+        native.Calls.Clear();
+
+        var reconcile = await owner.ReconcileDesiredPresentationAsync(new FakeSource(), WantsDeck, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Blocked, reconcile.Outcome);
+        Assert.Equal("OverlayCaptureActive", reconcile.Reason);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation);
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Overlay_pause_fails_when_publisher_cannot_be_joined_and_never_neutralizes_or_detaches()
+    {
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher { StopThrows = true };
+        var owner = Build(native, xbox360, new FakePublisher());
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+
+        var pause = await owner.PauseForOverlayAsync(default);
+
+        Assert.Equal(OverlayPauseOutcome.PublisherNotStopped, pause.Outcome);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation);
+        Assert.DoesNotContain("SetXbox360DeviceState", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Overlay_pause_with_rejected_neutral_write_fails_closed_through_the_owner_without_fallback()
+    {
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher();
+        var deck = new FakePublisher();
+        var owner = Build(native, xbox360, deck);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        native.StateResults.Enqueue(false); // the pause neutral write is rejected
+
+        var pause = await owner.PauseForOverlayAsync(default);
+
+        Assert.Equal(OverlayPauseOutcome.NeutralRejectedPresentationRetired, pause.Outcome);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.Null(owner.ActivePresentation);
+        Assert.Contains("DetachUSBDeviceEx", native.Calls); // current presentation retired
+        Assert.False(deck.Started); // no alternate presentation fallback
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Overlay_resume_with_unavailable_source_leaves_output_neutral_and_allows_a_later_reconcile()
+    {
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher();
+        var owner = Build(native, xbox360, new FakePublisher());
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await owner.PauseForOverlayAsync(default)).Outcome);
+
+        var resume = await owner.ResumeAfterOverlayAsync(new FakeSource { Running = false }, default);
+
+        Assert.Equal(OverlayResumeOutcome.LeftNeutral, resume.Outcome);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.False(xbox360.IsRunning);
+
+        // A later normal reconcile is no longer blocked by the (now cleared) Overlay pause.
+        var reconcile = await owner.ReconcileDesiredPresentationAsync(new FakeSource(), WantsXbox, default);
+        Assert.NotEqual(PresentationReconcileOutcome.Blocked, reconcile.Outcome);
+        Assert.NotEqual("OverlayCaptureActive", reconcile.Reason);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Center_M_release_while_overlay_paused_still_stops_detaches_and_tears_viiper_down()
+    {
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher();
+        var owner = Build(native, xbox360, new FakePublisher());
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await owner.PauseForOverlayAsync(default)).Outcome);
+        native.Calls.Clear();
+
+        var released = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(released);
+        Assert.Null(owner.ActivePresentation);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.True(native.Calls.IndexOf("DetachUSBDeviceEx") < native.Calls.IndexOf("CloseUSBServer"));
+        Assert.Contains("CloseUSBServer", native.Calls);
+        await owner.DisposeAsync();
+    }
+
     // ---- 25.12 / 25.13 architecture guards ----
 
     [Fact]
