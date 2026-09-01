@@ -7,6 +7,13 @@ using WinRT.Interop;
 
 namespace SteamInputAddonforClaw.Overlay;
 
+internal readonly record struct OverlayOutsideClick(
+    string MessageName,
+    int PointerX,
+    int PointerY,
+    OverlayRect WindowBounds,
+    nint ForegroundHwnd);
+
 internal static class WindowInterop
 {
     private const int GwlExStyle = -20;
@@ -21,11 +28,21 @@ internal static class WindowInterop
     private const uint WmClose = 0x0010;
     private const uint WmDestroy = 0x0002;
     private const uint WmNcDestroy = 0x0082;
+    private const uint WmLButtonDown = 0x0201;
+    private const uint WmRButtonDown = 0x0204;
+    private const uint WmMButtonDown = 0x0207;
+    private const uint WmXButtonDown = 0x020B;
+    private const int WhMouseLl = 14;
     private const nint MaNoActivate = 3;
     private const uint WsExNoActivate = 0x08000000;
     private const uint WsExToolWindow = 0x00000080;
     private static readonly SubclassProc OverlayWindowProc = HandleOverlayWindowMessage;
+    private static readonly LowLevelMouseProc OutsideClickHook = HandleLowLevelMouseMessage;
     private static nint _subclassedHwnd;
+    private static nint _outsideClickHwnd;
+    private static nint _outsideClickHook;
+    private static Action<OverlayOutsideClick>? _outsideClickCallback;
+    private static int _dismissSignaled;
 
     internal static nint GetWindowHandle(OverlayWindow window) => WindowNative.GetWindowHandle(window);
 
@@ -138,6 +155,46 @@ internal static class WindowInterop
         }
     }
 
+    internal static void ArmOutsideClickDismissal(OverlayWindow window, Action<OverlayOutsideClick> callback)
+    {
+        DisarmOutsideClickDismissal();
+        var hwnd = WindowNative.GetWindowHandle(window);
+        _outsideClickHwnd = hwnd;
+        _outsideClickCallback = callback;
+        Volatile.Write(ref _dismissSignaled, 0);
+        _outsideClickHook = SetWindowsHookEx(WhMouseLl, OutsideClickHook, GetModuleHandle(null), 0);
+        if (_outsideClickHook == IntPtr.Zero)
+        {
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not install the Overlay outside-click hook.");
+            _outsideClickHwnd = IntPtr.Zero;
+            _outsideClickCallback = null;
+            OverlayLog.Warn("Input", "Outside-click watcher installation failed; Overlay remains usable.", exception,
+                ("Operation", "SetWindowsHookEx"), ("OverlayHwnd", hwnd));
+            return;
+        }
+
+        OverlayLog.Info("Input", "Outside-click watcher armed.", ("OverlayHwnd", hwnd));
+    }
+
+    internal static void DisarmOutsideClickDismissal()
+    {
+        var hook = Interlocked.Exchange(ref _outsideClickHook, IntPtr.Zero);
+        if (hook != IntPtr.Zero)
+        {
+            if (!UnhookWindowsHookEx(hook))
+            {
+                var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not remove the Overlay outside-click hook.");
+                OverlayLog.Warn("Input", "Outside-click watcher removal failed.", exception, ("Operation", "UnhookWindowsHookEx"));
+            }
+            else
+                OverlayLog.Info("Input", "Outside-click watcher disarmed.");
+        }
+
+        _outsideClickHwnd = IntPtr.Zero;
+        _outsideClickCallback = null;
+        Volatile.Write(ref _dismissSignaled, 0);
+    }
+
     private static void EnsureWindowSubclass(nint hwnd)
     {
         if (_subclassedHwnd == hwnd) return;
@@ -163,10 +220,16 @@ internal static class WindowInterop
         switch (message)
         {
             case WmMouseActivate:
-                OverlayLog.Info("Input", "WM_MOUSEACTIVATE received.", ("OverlayHwnd", hwnd), ("Result", MaNoActivate));
+                var mouseActivateForeground = GetForegroundWindow();
+                OverlayLog.Info("Input", "WM_MOUSEACTIVATE received.",
+                    ("OverlayHwnd", hwnd), ("Result", MaNoActivate),
+                    ("ForegroundHwnd", mouseActivateForeground), ("IsOverlayForeground", mouseActivateForeground == hwnd));
                 return MaNoActivate;
             case WmActivate:
-                OverlayLog.Info("Window", "WM_ACTIVATE received.", ("OverlayHwnd", hwnd), ("State", (long)wParam & 0xffff));
+                var activateForeground = GetForegroundWindow();
+                OverlayLog.Info("Window", "WM_ACTIVATE received.",
+                    ("OverlayHwnd", hwnd), ("State", (long)wParam & 0xffff),
+                    ("ForegroundHwnd", activateForeground), ("IsOverlayForeground", activateForeground == hwnd));
                 break;
             case WmClose:
                 OverlayLog.Info("Window", "WM_CLOSE received.", ("OverlayHwnd", hwnd));
@@ -183,6 +246,41 @@ internal static class WindowInterop
 
         return DefSubclassProc(hwnd, message, wParam, lParam);
     }
+
+    private static nint HandleLowLevelMouseMessage(int code, nint wParam, nint lParam)
+    {
+        if (code >= 0 && IsSupportedButtonDown((uint)wParam))
+        {
+            var hwnd = _outsideClickHwnd;
+            var callback = _outsideClickCallback;
+            if (hwnd != IntPtr.Zero && callback is not null && GetWindowRect(hwnd, out var rect))
+            {
+                var mouse = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                if (!IsInside(rect, mouse.Point) && Interlocked.CompareExchange(ref _dismissSignaled, 1, 0) == 0)
+                {
+                    callback(new OverlayOutsideClick(MouseMessageName((uint)wParam), mouse.Point.X, mouse.Point.Y,
+                        new OverlayRect(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top), GetForegroundWindow()));
+                }
+            }
+        }
+
+        return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+    }
+
+    private static bool IsSupportedButtonDown(uint message) =>
+        message is WmLButtonDown or WmRButtonDown or WmMButtonDown or WmXButtonDown;
+
+    private static string MouseMessageName(uint message) => message switch
+    {
+        WmLButtonDown => "WM_LBUTTONDOWN",
+        WmRButtonDown => "WM_RBUTTONDOWN",
+        WmMButtonDown => "WM_MBUTTONDOWN",
+        WmXButtonDown => "WM_XBUTTONDOWN",
+        _ => $"0x{message:X}"
+    };
+
+    private static bool IsInside(RECT rect, POINT point) =>
+        point.X >= rect.Left && point.X < rect.Right && point.Y >= rect.Top && point.Y < rect.Bottom;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetForegroundWindow();
@@ -208,6 +306,8 @@ internal static class WindowInterop
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
 
+    private delegate nint LowLevelMouseProc(int code, nint wParam, nint lParam);
+
     private delegate nint SubclassProc(nint hwnd, uint message, nint wParam, nint lParam, nuint idSubclass, nuint referenceData);
 
     [DllImport("comctl32.dll")]
@@ -219,8 +319,33 @@ internal static class WindowInterop
     [DllImport("comctl32.dll")]
     private static extern nint DefSubclassProc(nint hwnd, uint message, nint wParam, nint lParam);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint SetWindowsHookEx(int hookType, LowLevelMouseProc procedure, nint moduleHandle, uint threadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(nint hook);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint CallNextHookEx(nint hook, int code, nint wParam, nint lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint GetModuleHandle(string? moduleName);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(nint hwnd, out RECT rect);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { internal int X; internal int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT
+    {
+        internal POINT Point;
+        internal uint MouseData;
+        internal uint Flags;
+        internal uint Time;
+        internal nint DwExtraInfo;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { internal int Left; internal int Top; internal int Right; internal int Bottom; }

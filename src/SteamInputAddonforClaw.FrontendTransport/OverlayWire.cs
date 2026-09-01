@@ -7,11 +7,11 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 
 internal static class OverlayTransportProtocol
 {
-    internal const int CurrentVersion = 1;
+    internal const int CurrentVersion = 2;
     internal const int MaxFrameBytes = 64 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, State, ProtocolError }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, State, DismissRequested, ProtocolError }
 internal enum OverlayCommand { Show, Hide, Shutdown }
 internal enum OverlayState { Ready, Visible, Hidden }
 
@@ -98,6 +98,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private OverlayState _state = OverlayState.Hidden;
     private int _started;
     private int _disposed;
+
+    internal event Action<NamedPipeOverlayServer>? DismissRequested;
 
     internal NamedPipeOverlayServer(string pipeName)
         : this(pipeName, () => new NamedPipeServerStream(
@@ -224,7 +226,16 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         while (!connection.IsCancellationRequested)
         {
             var message = await OverlayWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false);
-            if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion || message.Kind != OverlayWireMessageKind.State || message.State is null)
+            if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
+                throw new FrontendProtocolException("Invalid Overlay state message.");
+
+            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.State is null && message.Error is null)
+            {
+                DismissRequested?.Invoke(this);
+                continue;
+            }
+
+            if (message.Kind != OverlayWireMessageKind.State || message.State is null)
                 throw new FrontendProtocolException("Invalid Overlay state message.");
 
             lock (_sync)
@@ -299,6 +310,14 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
 
     private async Task SendStateAsync(Stream pipe, OverlayState state, CancellationToken token) =>
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.State, State: state), _writeGate, token).ConfigureAwait(false);
+
+    internal async Task SendDismissRequestedAsync(CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
+        await OverlayWireCodec.WriteAsync(pipe,
+            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.DismissRequested), _writeGate, token).ConfigureAwait(false);
+    }
 
     public ValueTask DisposeAsync()
     {

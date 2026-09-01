@@ -465,6 +465,25 @@ Keep the solution narrow: held-control release, not a generalized synchronizatio
 
 ## 12. Overlay process lifecycle
 
+### 12.1 Mouse transient-surface contract
+
+The Overlay is a transient mouse surface while it is visible:
+
+```text
+click inside Overlay
+→ Overlay remains visible
+→ click is delivered to the XAML surface
+
+click outside Overlay
+→ Overlay detects the local geometry hit-test
+→ Overlay sends a semantic dismissal request to Runtime
+→ Runtime remains the visibility authority and performs the normal Hide path
+```
+
+The outside click is not consumed by the Overlay, so the underlying desktop or
+application can receive it. This contract does not claim that controller Back,
+physical-button handling, or production Quick Settings controls are implemented.
+
 Preferred baseline: **warm hidden process**.
 
 ```text

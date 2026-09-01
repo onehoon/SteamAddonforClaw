@@ -119,6 +119,105 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Dismiss_requested_round_trips_without_mutating_overlay_state()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var dismissal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.DismissRequested += _ => dismissal.TrySetResult();
+        var run = client.RunAsync(_ => Task.CompletedTask);
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        Assert.Equal(OverlayState.Visible, server.State);
+        await client.SendDismissRequestedAsync();
+        await dismissal.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(OverlayState.Visible, server.State);
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Dismiss_requested_does_not_complete_an_in_flight_show_acknowledgement()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var showReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseShow = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dismissal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.DismissRequested += _ => dismissal.TrySetResult();
+        var run = client.RunAsync(async command =>
+        {
+            if (command == OverlayCommand.Show)
+            {
+                showReceived.TrySetResult();
+                await releaseShow.Task;
+            }
+        });
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        var show = server.SendCommandAsync(OverlayCommand.Show);
+        await showReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await client.SendDismissRequestedAsync();
+        await dismissal.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(await Task.WhenAny(show, Task.Delay(100)) == show);
+
+        releaseShow.TrySetResult();
+        Assert.True(await show.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Runtime_routes_dismissal_through_one_hide_transition()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var commands = new List<OverlayCommand>();
+        var hideHandled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Process? StartTestProcess(ProcessStartInfo _) => Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe", Arguments = "/c timeout /t 30 /nobreak >nul",
+            UseShellExecute = false, CreateNoWindow = true
+        });
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(command =>
+            {
+                lock (commands) commands.Add(command);
+                if (command == OverlayCommand.Hide) hideHandled.TrySetResult();
+                return Task.CompletedTask;
+            });
+
+            await controller.ToggleForPocAsync();
+            await client.SendDismissRequestedAsync();
+            await hideHandled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(100);
+            lock (commands) Assert.Equal([OverlayCommand.Show, OverlayCommand.Hide], commands);
+
+            await controller.DisposeAsync();
+            await run.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Disconnect_allows_a_later_overlay_client_to_reconnect()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";

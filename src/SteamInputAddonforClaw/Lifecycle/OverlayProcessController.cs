@@ -99,6 +99,55 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         finally { _transition.Release(); }
     }
 
+    private void OnDismissRequested(NamedPipeOverlayServer source) => _ = Task.Run(() => HandleDismissRequestedAsync(source));
+
+    private async Task HandleDismissRequestedAsync(NamedPipeOverlayServer source)
+    {
+        await _transition.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            NamedPipeOverlayServer? server;
+            bool visible;
+            lock (_sync)
+            {
+                server = _server;
+                visible = _visible;
+            }
+
+            bool stopping;
+            lock (_sync) stopping = _stopping;
+            if (stopping || !visible || !ReferenceEquals(server, source)) return;
+
+            var pid = GetProcessId(process: null);
+            AppLog.Info("Overlay", "Overlay dismiss request received.", ("PID", pid));
+            var requested = Stopwatch.StartNew();
+            AppLog.Info("Overlay", "Overlay command requested.",
+                ("Command", OverlayCommand.Hide), ("Reason", "OutsideClick"), ("PID", pid));
+            if (!await source.SendCommandAsync(OverlayCommand.Hide).ConfigureAwait(false))
+            {
+                AppLog.Warn("Overlay", "Overlay dismiss Hide was not acknowledged; retiring the current Overlay session.",
+                    null, ("Command", OverlayCommand.Hide), ("Reason", "OutsideClick"),
+                    ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds), ("Action", "RetireSession"));
+                await StopCurrentAsync().ConfigureAwait(false);
+                return;
+            }
+
+            lock (_sync)
+            {
+                if (ReferenceEquals(_server, source)) _visible = false;
+            }
+            AppLog.Info("Overlay", "Overlay command acknowledged.",
+                ("Command", OverlayCommand.Hide), ("Reason", "OutsideClick"),
+                ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AppLog.Warn("Overlay", "Overlay dismiss handling failed; the next explicit toggle may relaunch it.", exception);
+            await StopCurrentAsync().ConfigureAwait(false);
+        }
+        finally { _transition.Release(); }
+    }
+
     internal void BeginShutdown()
     {
         lock (_sync) _stopping = true;
@@ -159,6 +208,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             return false;
         }
         lock (_sync) { _server = server; _process = process; _visible = false; }
+        server.DismissRequested += OnDismissRequested;
         AppLog.Info("Overlay", "Overlay process started.", ("PID", process.Id), ("Path", _executablePath));
         process.EnableRaisingEvents = true;
         process.Exited += OnProcessExited;
@@ -200,6 +250,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         lock (_sync) { server = _server; process = _process; _server = null; _process = null; _visible = false; }
         if (server is not null)
         {
+            server.DismissRequested -= OnDismissRequested;
             if (sendShutdown)
             {
                 var shutdown = Stopwatch.StartNew();
