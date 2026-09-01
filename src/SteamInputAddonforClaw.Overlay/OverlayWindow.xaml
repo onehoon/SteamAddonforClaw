@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid x:Name="AnimationViewport">
-        <Grid x:Name="OpaquePanel" Background="#FFFF00FF" Padding="28">
+        <Grid x:Name="OpaquePanel" Background="#FFF3F3F3" Padding="28">
             <StackPanel x:Name="AnimatedContent" Spacing="16">
                 <TextBlock Text="Addon Quick Settings" FontSize="28" FontWeight="SemiBold" />
                 <TextBlock Text="Overlay POC-A" FontSize="18" />
