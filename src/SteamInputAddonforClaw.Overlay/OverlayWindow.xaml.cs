@@ -15,6 +15,8 @@ public sealed partial class OverlayWindow : Window
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(150);
 
+    internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
+
     public OverlayWindow() => InitializeComponent();
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
@@ -35,6 +37,7 @@ public sealed partial class OverlayWindow : Window
             OverlayLog.Error("Animation", "Show animation initial state failed; keeping Overlay visible.", exception);
         }
         WindowInterop.ShowWithoutActivation(this);
+        WindowInterop.ArmOutsideClickDismissal(this, outsideClick => OutsideClickDismissRequested?.Invoke(outsideClick));
         if (!initialStatePrepared || !AnimationsEnabled())
         {
             TrySetVisibleVisualState();
@@ -61,6 +64,7 @@ public sealed partial class OverlayWindow : Window
 
     internal async Task HideForPocAsync()
     {
+        WindowInterop.DisarmOutsideClickDismissal();
         if (AnimationsEnabled())
         {
             var stopwatch = Stopwatch.StartNew();

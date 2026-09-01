@@ -19,12 +19,40 @@ public partial class App : Application
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         OverlayLog.Info("App", "DispatcherQueue acquired.");
         _window = new OverlayWindow();
+        _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
         OverlayLog.Info("App", "OverlayWindow constructed.", ("Hwnd", _window.HandleForDiagnostics));
         _window.Closed += (_, _) => { OverlayLog.Info("Window", "Closed received."); Exit(); };
         OverlayLog.Info("Window", "Initial hidden preparation started.");
         _window.PrepareHidden();
         OverlayLog.Info("Window", "Initial hidden preparation completed.");
         _ = ConnectAndRunAsync();
+    }
+
+    private void OnOutsideClickDismissRequested(OverlayOutsideClick outsideClick)
+    {
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() => _ = SendDismissRequestedAsync(outsideClick)))
+            OverlayLog.Warn("Input", "Could not enqueue outside-click dismissal request.");
+    }
+
+    private async Task SendDismissRequestedAsync(OverlayOutsideClick outsideClick)
+    {
+        OverlayLog.Info("Input", "Outside click dismissal requested",
+            ("OverlayHwnd", _window?.HandleForDiagnostics),
+            ("Message", outsideClick.MessageName),
+            ("PointerX", outsideClick.PointerX), ("PointerY", outsideClick.PointerY),
+            ("WindowLeft", outsideClick.WindowBounds.X), ("WindowTop", outsideClick.WindowBounds.Y),
+            ("WindowRight", outsideClick.WindowBounds.X + outsideClick.WindowBounds.Width),
+            ("WindowBottom", outsideClick.WindowBounds.Y + outsideClick.WindowBounds.Height),
+            ("ForegroundHwnd", outsideClick.ForegroundHwnd));
+        try
+        {
+            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+            await _client.SendDismissRequestedAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Error("Transport", "Outside click dismissal request failed; Overlay remains Runtime-owned.", exception);
+        }
     }
 
     private async Task ConnectAndRunAsync()
