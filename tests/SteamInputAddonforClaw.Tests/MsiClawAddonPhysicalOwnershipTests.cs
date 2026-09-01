@@ -265,6 +265,83 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Null(owner.LiveInputSource);
     }
 
+    // ---- fresh authority read at the actual mutation boundary ----
+
+    [Fact]
+    public async Task Authority_flips_before_the_mode_write_fails_closed()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.XInput, Authority = FrontendCenterMStartupState.Enabled };
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Contains("AuthorityChangedBeforeModeWrite", result.Reason);
+        Assert.Equal(0, h.SwitchCalls);
+        Assert.Equal(1, h.AuthorityReads); // exactly one fresh read, at the boundary
+    }
+
+    [Fact]
+    public async Task Authority_flips_before_directinput_acquire_on_an_already_1902_boot_fails_closed()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, Authority = FrontendCenterMStartupState.Partial };
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Contains("AuthorityChangedBeforeDirectInputAcquire", result.Reason);
+        Assert.False(h.InputSource.StartCalled);
+        Assert.Empty(h.HidHideApplied);
+    }
+
+    // ---- PR5 section 16: Enable-and-Restart release seam ----
+
+    [Fact]
+    public async Task Release_for_center_m_enable_stops_directinput_then_restores_pid1901_and_returns_the_target()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        var owner = h.Build();
+        var acquired = await owner.AcquireAsync(default);
+        Assert.True(acquired.IsOwned);
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Equal(PrimaryPnp, release.HiddenTarget);
+        Assert.True(h.InputSource.StopCalled);
+        Assert.Equal(new[] { MsiClawNativeMode.XInput }, h.SwitchTargets); // PID1902 -> PID1901, once
+        Assert.Null(owner.LiveInputSource);
+
+        // A subsequent acquisition is refused -- ownership was released for the official enable path.
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.AcquireAsync(default)).Outcome);
+    }
+
+    [Fact]
+    public async Task Release_when_pid1901_restore_cannot_be_verified_reports_failure()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, SwitchFailsForRelease = true };
+        var owner = h.Build();
+        await owner.AcquireAsync(default);
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.False(release.Succeeded);
+        Assert.Contains("Pid1901Restore", release.Reason);
+        Assert.Equal(PrimaryPnp, release.HiddenTarget); // still surfaced so the caller does not lose it
+        Assert.True(h.InputSource.StopCalled);
+    }
+
+    [Fact]
+    public async Task Release_without_a_prior_acquisition_and_already_stock_pid_is_a_noop_success()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.XInput };
+        var owner = h.Build();
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Null(release.HiddenTarget);
+        Assert.Equal(0, h.SwitchCalls);
+        Assert.False(h.InputSource.StopCalled);
+    }
+
     // ---- 30 architecture guard ----
 
     [Fact]
@@ -322,9 +399,13 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public List<string> EnabledBaselineCalls { get; } = [];
         public FakeInputSource InputSource { get; } = new();
 
+        public int AuthorityReads { get; private set; }
+        public bool SwitchFailsForRelease { get; set; }
+
         public MsiClawAddonPhysicalOwnership Build() => new(
-            () => Authority,
-            _ => Task.FromResult(Capture(SwitchCalls == 0 ? InitialMode : MsiClawNativeMode.DirectInput,
+            () => { AuthorityReads++; return Authority; },
+            _ => Task.FromResult(Capture(
+                SwitchCalls == 0 ? InitialMode : LastSwitchTarget,
                 SwitchCalls == 0 ? InitialConfidence : MsiClawIdentityConfidence.Strong,
                 SwitchCalls == 0 ? PhysKey : FinalPhysKey)),
             (target, _, _) =>
@@ -332,10 +413,11 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 SwitchCalls++;
                 LastSwitchTarget = target;
                 SwitchTargets.Add(target);
+                var ok = target == MsiClawNativeMode.XInput ? !SwitchFailsForRelease : SwitchSucceeds;
                 return Task.FromResult(new MsiClawModeTransitionResult(
-                    SwitchSucceeds ? MsiClawModeTransitionStatus.Succeeded : MsiClawModeTransitionStatus.WriteFailed,
-                    MsiClawNativeMode.XInput, target, 0x1901, 0x1902, SwitchSucceeds, SwitchSucceeds, SwitchSucceeds, SwitchSucceeds, SwitchSucceeds, 0,
-                    SwitchSucceeds ? "ok" : "WriteFailed"));
+                    ok ? MsiClawModeTransitionStatus.Succeeded : MsiClawModeTransitionStatus.WriteFailed,
+                    MsiClawNativeMode.XInput, target, 0x1901, 0x1902, ok, ok, ok, ok, ok, 0,
+                    ok ? "ok" : "WriteFailed"));
             },
             () =>
             {

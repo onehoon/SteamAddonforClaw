@@ -239,9 +239,50 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
 
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.Snapshot.State);
-        Assert.Equal(new[] { "hidhide:enable", "centerm:true", "restart" }, h.Order);
+        Assert.Equal(new[] { "physical-release", "hidhide:enable", "centerm:true", "restart" }, h.Order);
         Assert.False(h.Hid.Active);
         Assert.Empty(h.Hid.Whitelist);
+    }
+
+    [Fact]
+    public async Task Enable_after_pr5_ownership_releases_then_clears_the_exact_persisted_target()
+    {
+        const string ownedTarget = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&abcdef&0&0000";
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", ownedTarget),
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(ownedTarget);
+        h.Hid.Active = true;
+
+        var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        // physical release (DI stop + PID1901 restore) runs before HidHide is cleared.
+        Assert.Equal(new[] { "physical-release", "hidhide:enable", "centerm:true", "restart" }, h.Order);
+        Assert.DoesNotContain(ownedTarget, h.Hid.Hidden); // the exact PR5 target was cleared, not treated as foreign
+        Assert.Empty(h.Hid.Whitelist);
+        Assert.False(h.Hid.Active);
+    }
+
+    [Fact]
+    public async Task Enable_fails_when_physical_ownership_cannot_be_released()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "Pid1901RestoreUnverified", "target"),
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Active = true;
+
+        var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Equal(new[] { "physical-release" }, h.Order); // stopped before HidHide clear
+        Assert.Contains(AddonExe, h.Hid.Whitelist); // untouched
     }
 
     [Fact]
@@ -289,7 +330,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
 
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Cancelled, result.Outcome);
-        Assert.Equal(new[] { "hidhide:enable", "centerm:true" }, h.Order);
+        Assert.Equal(new[] { "physical-release", "hidhide:enable", "centerm:true" }, h.Order);
         Assert.False(h.Hid.Active); // baseline was already cleared
         Assert.NotNull(result.FailureMessage);
         Assert.DoesNotContain("nothing", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
@@ -364,6 +405,8 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool PrerequisitesReady { get; init; } = true;
         public bool RecoverySafe { get; init; } = true;
         public bool ConflictingEnvironment { get; init; }
+        public SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult PhysicalRelease { get; init; } =
+            SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
         public UserTerminationDecision Safety { get; init; } = new(true, UserTerminationBlockReason.None);
         public Func<Task>? BeforeCenterMMutation { get; set; }
 
@@ -405,6 +448,11 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                 () => Safety,
                 () => ConflictingEnvironment,
                 _ => Task.FromResult((prerequisites, RecoverySafe)),
+                _ =>
+                {
+                    Order.Add("physical-release");
+                    return Task.FromResult(PhysicalRelease);
+                },
                 r);
         }
 

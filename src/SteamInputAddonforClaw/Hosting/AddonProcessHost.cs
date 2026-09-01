@@ -284,6 +284,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 var status = await composition.StatusProvider.CaptureAsync(token).ConfigureAwait(false);
                 return (status.Prerequisites, status.RecoverySafe);
             },
+            // PR5: late-bound -- the physical owner is created after this transition owner, only for a
+            // Disabled boot. A boot with no owner releases nothing and clears the [] baseline.
+            async token => _physicalOwnership is { } owner
+                ? await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
+                : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned,
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,

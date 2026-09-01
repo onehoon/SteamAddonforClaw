@@ -33,9 +33,18 @@ internal sealed record MsiClawPhysicalOwnershipResult(
         new(MsiClawPhysicalOwnershipOutcome.NotApplicable, reason, false, null);
 }
 
+/// <summary>Result of the narrow PR5 release seam the official Center M Enable-and-Restart path
+/// runs before it clears HidHide (work order PR5 section 16). <see cref="HiddenTarget"/> is the exact
+/// PID1902 primary gamepad collection PR5 persisted, so the authority transition clears exactly that
+/// entry rather than <c>[]</c>.</summary>
+internal sealed record PhysicalOwnershipReleaseResult(bool Succeeded, string Reason, string? HiddenTarget)
+{
+    internal static PhysicalOwnershipReleaseResult NothingOwned { get; } = new(true, "NoPhysicalOwnership", null);
+}
+
 internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
 {
-    /// <summary>One-shot startup acquisition. Reads the shared Center M authority again immediately
+    /// <summary>One-shot startup acquisition. Re-reads the shared Center M authority immediately
     /// before the first physical mutation, reconciles the same physical MSI Claw to PID1902, acquires
     /// verified DirectInput, and persists/verifies the exact HidHide target. Attaches no virtual
     /// controller.</summary>
@@ -44,6 +53,12 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
     /// <summary>The process-owned live DirectInput source after a successful acquisition (PR6 consumes
     /// the SAME source). Null before success or after teardown.</summary>
     IMsiClawPreparedInputSource? LiveInputSource { get; }
+
+    /// <summary>The official Center M Enable-and-Restart release: retire the process-owned DirectInput
+    /// session, then restore the same strongly-verified physical MSI Claw to PID1901. Runs through the
+    /// same owner gate as acquisition, so the two can never interleave. Does NOT clear HidHide or
+    /// enable Center M roots -- the authority transition does that next with the returned target.</summary>
+    Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -73,6 +88,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _ownsInputSource;
+    private string? _ownedHiddenTarget;
+    private bool _releasedForEnable;
     private int _disposed;
 
     internal MsiClawAddonPhysicalOwnership(
@@ -107,6 +124,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         try
         {
             if (Volatile.Read(ref _disposed) != 0) return Fail("OwnerDisposed", false, null);
+            if (_releasedForEnable) return Fail("ReleasedForCenterMEnable", false, null);
             if (_ownsInputSource) return new(MsiClawPhysicalOwnershipOutcome.Owned, "AlreadyOwned", false, null);
             return await AcquireCoreAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -117,12 +135,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     {
         AppLog.Info("ControllerOwnership", "Physical ownership started.", ("Event", "PhysicalOwnershipStarted"));
 
-        // 1. Fresh Center M authority re-check at the actual mutation boundary.
-        var authority = _captureCenterMStartupState();
-        if (authority != FrontendCenterMStartupState.Disabled)
-            return Fail("AuthorityNotDisabled:" + authority, false, null);
-
-        // 2-4. Stable current native state + strong initial physical identity.
+        // 1-4. Stable current native state + strong initial physical identity. The authoritative
+        //      fresh Center M authority read happens at the ACTUAL first mutation boundary below --
+        //      not here -- because CaptureStableCurrentSnapshotAsync can wait a bounded PnP window
+        //      during which the user could run Enable and Restart.
         var initialCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
         if (!TryReadIdentity(initialCapture, out var initialMode, out var initialIdentity, out var reason))
             return Fail("InitialNativeState:" + reason, false, null);
@@ -132,10 +148,13 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             ("Mode", initialMode), ("IdentityConfidence", initialIdentity.Confidence),
             ("ModeWriteRequired", initialMode == MsiClawNativeMode.XInput));
 
-        // 5. PID1901 -> PID1902 once, for the same strong physical MSI Claw.
+        // 5. PID1901 -> PID1902 once, for the same strong physical MSI Claw. The mode write is the
+        //    first physical mutation, so the single required fresh authority read is immediately here.
         var modeWriteIssued = false;
         if (initialMode == MsiClawNativeMode.XInput)
         {
+            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+                return Fail("AuthorityChangedBeforeModeWrite", false, null);
             var transition = await _switchMode(MsiClawNativeMode.DirectInput, initialIdentity, cancellationToken).ConfigureAwait(false);
             modeWriteIssued = true;
             if (!transition.Succeeded)
@@ -173,6 +192,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             ("PnpInstanceId", descriptor.PnpInstanceId), ("SamePhysicalIdentity", true));
 
         // 11. Acquire DirectInput and require a first valid state before any HidHide target mutation.
+        //     For an already-PID1902 boot no mode write ran, so DirectInput acquire is the first
+        //     process-owned controller mutation -- do the one fresh authority read here instead.
+        if (!modeWriteIssued && _captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+            return Fail("AuthorityChangedBeforeDirectInputAcquire", false, null);
         var start = _inputSource.StartPrepared(descriptor);
         if (!start.Started || !_inputSource.IsRunning)
             return Fail("DirectInputStartFailed:" + start.Status, modeWriteIssued, null);
@@ -221,9 +244,49 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
 
         // 14-15. Retain the live DirectInput source for the process lifetime.
         _ownsInputSource = true;
+        _ownedHiddenTarget = target;
         AppLog.Info("ControllerOwnership", "Physical ownership acquired.", ("Result", "Owned"),
             ("ModeWriteIssued", modeWriteIssued), ("HiddenTarget", target));
         return new(MsiClawPhysicalOwnershipOutcome.Owned, "PhysicalOwnershipVerified", modeWriteIssued, target);
+    }
+
+    public async Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var target = _ownedHiddenTarget;
+            _releasedForEnable = true;
+            if (_ownsInputSource)
+            {
+                await _inputSource.StopAsync().ConfigureAwait(false);
+                if (_inputSource.IsRunning)
+                    return new(false, "DirectInputStillRunning", target);
+                _ownsInputSource = false;
+            }
+
+            // Restore the same strongly-verified physical MSI Claw to PID1901. Center M roots are
+            // about to become Enabled, so PID1901 is now the desired stock authority.
+            var current = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
+            if (!TryReadIdentity(current, out var mode, out var identity, out var reason))
+                return new(false, "ReleaseNativeState:" + reason, target);
+            if (mode == MsiClawNativeMode.DirectInput)
+            {
+                var switched = await _switchMode(MsiClawNativeMode.XInput, identity, cancellationToken).ConfigureAwait(false);
+                if (!switched.Succeeded)
+                    return new(false, "Pid1901RestoreFailed:" + switched.Status + ":" + switched.Reason, target);
+                var verified = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
+                if (!TryReadIdentity(verified, out var finalMode, out var finalIdentity, out var verifyReason)
+                    || finalMode != MsiClawNativeMode.XInput
+                    || !identity.StronglyMatches(finalIdentity))
+                    return new(false, "Pid1901RestoreUnverified:" + verifyReason, target);
+            }
+
+            AppLog.Info("ControllerOwnership", "Physical ownership released for Center M enable.",
+                ("Event", "PhysicalOwnershipReleased"), ("HiddenTarget", target ?? "None"));
+            return new(true, "Released", target);
+        }
+        finally { _gate.Release(); }
     }
 
     private async Task<DirectInputDeviceDescriptor?> ResolveDirectInputDescriptorAsync(CancellationToken cancellationToken)

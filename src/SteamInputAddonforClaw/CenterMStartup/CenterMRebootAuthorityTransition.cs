@@ -83,6 +83,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly Func<UserTerminationDecision> _lowerLevelRuntimeSafety;
     private readonly Func<bool> _conflictingControllerEnvironment;
     private readonly Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> _captureAdmission;
+    private readonly Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> _releasePhysicalOwnership;
     private readonly IWindowsRestartRequester _restartRequester;
     private int _inProgress;
 
@@ -93,6 +94,10 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         Func<UserTerminationDecision> lowerLevelRuntimeSafety,
         Func<bool> conflictingControllerEnvironment,
         Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> captureAdmission,
+        // PR5 section 16: retire the process-owned DirectInput session and restore the same physical
+        // MSI Claw to PID1901 BEFORE HidHide is cleared. Returns the exact PR5-persisted target so the
+        // clear step operates on it rather than []. Null-owner boots return NothingOwned.
+        Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> releasePhysicalOwnership,
         IWindowsRestartRequester restartRequester)
     {
         _centerMStartup = centerMStartup;
@@ -101,6 +106,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _lowerLevelRuntimeSafety = lowerLevelRuntimeSafety;
         _conflictingControllerEnvironment = conflictingControllerEnvironment;
         _captureAdmission = captureAdmission;
+        _releasePhysicalOwnership = releasePhysicalOwnership;
         _restartRequester = restartRequester;
     }
 
@@ -207,10 +213,16 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
             return Fail(snapshot, "Controller authority cannot change while a routing, native-mode, or recovery operation is in progress. Try again once it finishes.");
         cancellationToken.ThrowIfCancellationRequested();
 
-        // At PR3 the only persistent Addon controller state is the zero-target HidHide baseline plus
-        // the mandatory startup policy. A later PID1902 PR extends the FRONT of this path with the
-        // virtual/DirectInput/PID1901 release before HidHide is cleared.
-        var clear = _hidHideBaseline.ApplyEnabledModeBaseline([]);
+        // PR5 section 16: retire the process-owned DirectInput session and restore the same physical
+        // MSI Claw to PID1901 before clearing HidHide. A null-owner boot returns NothingOwned.
+        var release = await _releasePhysicalOwnership(cancellationToken).ConfigureAwait(false);
+        AppLog.Info("CenterM.Authority", "Physical ownership release for enable.", ("Succeeded", release.Succeeded), ("Reason", release.Reason), ("HiddenTarget", release.HiddenTarget ?? "None"));
+        if (!release.Succeeded)
+            return Fail(snapshot, $"The Addon controller ownership could not be released, so MSI Center M was not enabled: {release.Reason}.");
+
+        // Clear exactly the PR5-persisted target (or [] on a boot with no owned target).
+        string[] clearTargets = release.HiddenTarget is null ? [] : [release.HiddenTarget];
+        var clear = _hidHideBaseline.ApplyEnabledModeBaseline(clearTargets);
         AppLog.Info("CenterM.Authority", "HidHide baseline clear.", ("Outcome", clear.Outcome), ("Reason", clear.Reason));
         if (!clear.IsCompliant)
             return Fail(snapshot, $"The Addon HidHide controller baseline could not be cleared, so MSI Center M was not enabled: {clear.Reason}. Existing HidHide state was left untouched.");
