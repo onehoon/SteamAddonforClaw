@@ -17,8 +17,9 @@ public partial class App : Application
     private UiShutdownCoordinator? _shutdownCoordinator;
     private bool _activationPending;
     // OQ3-A: a Runtime CloseRequested that arrives before MainWindow exists is honored once the
-    // window is constructed, without activating it first.
-    private bool _pendingClose;
+    // window is constructed, without activating it first. Recorded synchronously on the read-loop
+    // thread so the startup continuation cannot construct/activate the window ahead of it.
+    private int _pendingClose;
     private int _shuttingDown;
 
     public App() => InitializeComponent();
@@ -65,7 +66,7 @@ public partial class App : Application
             _mainWindow = CreateMainWindowWithDiagnostics(_frontendClient, bootstrap);
             _mainWindow.Closed += OnMainWindowClosed;
             AppLog.Info("Frontend", "MainWindow initialized.");
-            if (_pendingClose)
+            if (Volatile.Read(ref _pendingClose) != 0)
             {
                 AppLog.Info("Frontend", "Pending Runtime close honored before activation.");
                 _mainWindow.Close();
@@ -138,6 +139,10 @@ public partial class App : Application
 
     private void OnFrontendCloseRequested(object? sender, EventArgs args)
     {
+        // Record the pending-close fact synchronously on the read-loop thread: the startup
+        // continuation runs on the same dispatcher and must not construct/activate MainWindow ahead
+        // of an already-arrived CloseRequested (OQ3-A startup contract).
+        Interlocked.Exchange(ref _pendingClose, 1);
         AppLog.Info("Frontend", "Runtime close requested.", ("HasDispatcher", _dispatcherQueue is not null), ("HasMainWindow", _mainWindow is not null));
         if (_dispatcherQueue?.TryEnqueue(CloseForRuntimeRequestOnUiThread) == true) return;
         AppLog.Error("Frontend", "Runtime close request dispatch failed; leaving UI alive for the Runtime-side timeout.",
@@ -147,13 +152,8 @@ public partial class App : Application
     private void CloseForRuntimeRequestOnUiThread()
     {
         if (Volatile.Read(ref _shuttingDown) != 0) return;
-        if (_mainWindow is null)
-        {
-            _pendingClose = true;
-            AppLog.Info("Frontend", "Runtime close deferred until MainWindow construction.");
-            return;
-        }
-        _mainWindow.Close();
+        // A not-yet-constructed window is handled by the pending-close check after construction.
+        if (_mainWindow is not null) _mainWindow.Close();
     }
 
     private void ActivateOrDeferOnUiThread()
