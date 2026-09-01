@@ -27,6 +27,7 @@ The product identity is:
 
 > **MSI Center M replacement for controller and core Device Control responsibilities, plus first-class Steam integration.**
 
+Center M Disabled 동안 UI만 disposable이고, Runtime + Tray는 persistent platform process다.
 ---
 
 ## 1. Core authority contract
