@@ -6,464 +6,308 @@ Implementation work order for the second small code PR in the **Full PID1902 Imp
 
 This PR is **foundation only**.
 
-It establishes a persistent, deterministic HidHide configuration primitive for the future **Addon Controller Mode** but does **not** yet connect that primitive to MSI Center M Enable/Disable, Windows reboot, PID1902 acquisition, DirectInput, VIIPER presentation, Steam/BPM policy, or runtime controller recovery.
+It establishes the persistent, deterministic HidHide configuration primitive required by future Addon Controller Mode.
 
-Before implementation, read and treat the following as current design authorities:
+It does **not** yet activate controller authority, change MSI Center M, change PID, acquire DirectInput, attach VIIPER devices, enforce Runtime lifetime, or request a reboot.
+
+Before implementation, read the current design authorities:
 
 - `docs/Full 1902 Implementation/FULL_1902_IMPLEMENTATION_ARCHITECTURE.md`
 - `docs/Full 1902 Implementation/REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md`
 - `docs/work-order/PR1_PERSISTENT_DUAL_VIIPER_DEVICES_WORK_ORDER.md`
-- current `main` implementation of:
-  - `HidHideContracts.cs`
-  - `HidHideDriverClient.cs`
-  - `MsiClawHidHideBaselineStage.cs`
-  - `MsiClawPhysicalIsolationStage.cs`
-  - `StartupHidHideRecoveryCleaner.cs`
-  - existing HidHide tests
+- current `main` HidHide implementation/tests.
 
-The project is pre-release. Existing Steam-route-scoped HidHide semantics are **not** a compatibility requirement if they conflict with the new controller-authority architecture.
+The architecture has now clarified that:
 
-However, this PR must remain deliberately small. Do not perform the broader routing cleanup here.
+```text
+Center M Disabled
+→ Addon Runtime is the mandatory controller authority
+→ PID1902 is the desired physical state for the entire Disabled-mode lifetime
+→ HidHide configuration persists across Runtime restart and Windows restart
+→ Windows shutdown/restart does not intentionally restore PID1901
+→ PID1901 is restored on explicit authority release such as Enable Center M
+```
+
+**PR2 must not implement any of that runtime/PID lifecycle.**
+
+PR2 only provides the persistent HidHide primitive that those later PRs will call.
 
 ---
 
 ## 1. Goal
 
-Introduce one narrow Addon-owned HidHide baseline component that can deterministically represent and apply the future persistent controller-isolation configuration used while MSI Center M is Disabled.
+Introduce one small Addon-owned HidHide baseline component that can inspect, apply, verify, and clear the deterministic controller-isolation configuration required by future Addon Controller Mode.
 
-Conceptual desired Disabled-mode baseline:
+Desired Disabled-mode baseline:
 
 ```text
-HidHide installed / readable
+HidHide installed/readable
 Inverse whitelist = false
 HidHide Active    = true
 Addon executable  = whitelisted
-Known Addon-owned PID1902 primary gamepad collection(s) = hidden
+Known exact Addon-owned PID1902 primary gamepad collection(s) = hidden
 ```
 
-The baseline must be **persistent configuration**, not a Steam-session lease.
+The configuration is persistent.
 
-Its lifetime is intended to become:
+It must not behave like an old Steam-route lease that automatically rolls back when a routing session or process ends.
+
+Conceptually:
 
 ```text
-Center M Disabled mode
-    ↓
-HidHide Addon baseline persists
-    ↓
-Addon exit / restart / Windows reboot do not automatically remove it
-    ↓
-Center M Enable or uninstall later removes/restores the Addon controller baseline
+Apply Disabled baseline
+→ configuration remains
+→ later Windows/Runtime lifecycle does not automatically remove it
+
+Clear baseline
+→ future explicit authority-release flow can return to stock-compatible state
 ```
 
-PR2 does not yet decide *when* this mode becomes active.
-
-It only provides the deterministic primitive that later PRs will call.
+PR2 does not decide when either operation is invoked in production.
 
 ---
 
-## 2. Product architecture context
+## 2. Architecture constraints
 
-The target product contract is:
+### One persistent baseline, not another authority layer
 
-```text
-Center M Enabled
-    → MSI / stock controller authority
-    → Addon controller stack passive
+Do not add:
 
-Center M Disabled
-    → Addon controller authority
-    → persistent PID1902 / DirectInput while Addon is running
-    → HidHide controller isolation owned by Addon
-    → one persistent VIIPER runtime
-    → X360 or Steam Deck presentation selected independently from physical ownership
-```
+- `HidHideAuthorityManager`;
+- multi-owner lease tracking;
+- routing epochs/barriers;
+- controller-authority state machines;
+- generic policy engines;
+- a new recovery journal for persistent configuration.
 
-The important architectural rule for this PR is:
-
-> **HidHide is part of the Addon controller configuration, not a temporary Steam-route resource.**
-
-Do not design PR2 around `RoutingSessionId`, Steam session start/end, presentation state, or `ExternalNativeTakeover`.
-
----
-
-## 3. Why a new narrow baseline primitive is needed
-
-Current main contains HidHide logic built for the previous Steam-route model.
-
-### `MsiClawHidHideBaselineStage`
-
-It normalizes HidHide before a route by manipulating global HidHide configuration and then reports a non-restoring routing baseline.
-
-### `MsiClawPhysicalIsolationStage`
-
-It is route/recovery-session oriented:
-
-- requires a current physical DirectInput identity;
-- journals hidden-device additions;
-- may temporarily enable HidHide Active;
-- treats those mutations as session-owned;
-- rolls them back when the routing session ends.
-
-That lifecycle is intentionally different from the new Full PID1902 design.
-
-Do **not** try to make PR2 work by adding another mode flag throughout those old stages.
-
-Preferred direction:
+Prefer one focused type depending primarily on:
 
 ```text
-old route-scoped stages remain temporarily for old orchestration
-
-new small persistent HidHide baseline primitive
-    → future reboot-bound controller authority flow uses this
+IHidHideClient
+Addon executable path
+zero or more exact requested hidden-device entries
 ```
 
-Later cleanup PRs may remove obsolete route-scoped code after the new controller owner is proven.
-
----
-
-## 4. PR2 design principle: one deterministic Addon baseline
-
-When this primitive is asked to apply the Addon-owned baseline, the result should be deterministic.
-
-The component should answer three simple questions:
+Possible API shape only:
 
 ```text
-1. Is HidHide safe/readable enough to use?
-2. Does current configuration match the Addon-owned baseline?
-3. Can we apply or clear that baseline and verify the result?
-```
-
-Do not introduce a generalized HidHide ownership framework.
-
-Do not introduce:
-
-- HidHide authority manager;
-- multi-owner lease manager;
-- epoch/barrier state;
-- global controller-environment state machine;
-- generic policy engine;
-- persisted transaction journal for this foundation PR.
-
-A small focused type is preferred.
-
-Conceptual API shape only — exact names may follow repository conventions:
-
-```csharp
-InspectAddonBaseline(...)
-ApplyAddonBaseline(...)
+Inspect(...)
+ApplyDisabledBaseline(...)
 ClearAddonBaseline(...)
 ```
 
-or equivalent.
+Use repository naming conventions if a simpler name fits better.
 
-The implementation should remain directly testable with `IHidHideClient` or a similarly small fakeable dependency.
+### Persistent state is not transient recovery state
+
+Do not represent this baseline through `RoutingRecoverySessionId` or another old Steam-route ownership token.
+
+```text
+Persistent Addon Controller HidHide baseline
+!=
+Transient routing-session mutation
+```
+
+Do not broadly rewrite the startup recovery cleaner in PR2. Later startup/recovery PRs will migrate that policy.
 
 ---
 
-## 5. Baseline inputs
+## 3. Inputs
 
-PR2 must not discover or switch PID1902 itself.
+PR2 must not discover or switch PID1902.
 
-The baseline primitive should accept the exact inputs it needs from callers.
+The primitive accepts exact caller-provided targets.
 
-At minimum:
+Required inputs:
 
 ```text
 Addon executable path
-Optional known exact PID1902 hidden-device entry / entries
+optional exact PID1902 hidden-device entries
 ```
 
-The caller may provide zero known PID1902 targets.
-
-This is required for the first Center M Disable flow, where HidHide can be prepared before reboot even if an exact PID1902 collection identity has not yet been safely established.
-
-Valid foundation state:
+Both are valid:
 
 ```text
-Inverse = false
-Active = true
-Addon whitelisted
-Known PID1902 target count = 0
+knownTargets = []
 ```
 
-Later boot acquisition will resolve the exact PID1902 primary collection and call the same baseline primitive again with that exact target.
+and:
 
-Do not invent a broad `VID_0DB0&PID_1902` wildcard target.
+```text
+knownTargets = [exactPrimaryPid1902GamepadCollection]
+```
 
-Do not hide an ambiguous physical device.
+Zero targets are required for the future first Disable transition, where HidHide can be prepared before the exact PID1902 collection has been observed safely.
 
----
+Do not fabricate:
 
-## 6. Exact hidden-device policy
-
-When one or more exact PID1902 hidden-device entries are supplied, the Addon baseline should contain exactly the required Addon controller target(s) according to the design contract.
-
-For current supported MSI Claw controller work, prefer the exact **primary DirectInput gamepad collection** identity already used by existing MSI Claw physical-isolation code.
-
-Do not broaden the target to:
-
-- every `PID_1902` child;
+- `VID_0DB0&PID_1902` wildcard hiding;
+- every PID1902 child;
 - every MSI HID device;
-- every game controller on the machine;
-- PID1901;
-- virtual VIIPER controllers.
+- PID1901 hiding;
+- virtual VIIPER targets.
 
-PR2 does not need to resolve the target itself.
-
-Target resolution belongs to the later PID1902 / DirectInput boot-acquisition PR.
+Exact target discovery belongs to a later PID1902/DirectInput PR.
 
 ---
 
-## 7. Addon Controller Mode is exclusive — but admission and ownership are separate
+## 4. Exclusive Addon Controller Mode and foreign configuration
 
-The product direction is that Addon Controller Mode does not support coexistence with HHC, ClawTweaks, or another controller manager.
+The final product does not support runtime coexistence with HHC, ClawTweaks, or another controller middleware while Addon Controller Mode is active.
 
-However, PR2 should not become a generic process detector or controller-software scanner.
+PR2 itself must not become a process scanner.
 
-The HidHide primitive only needs to classify whether the current HidHide configuration is safe to take into the deterministic Addon baseline.
+Its responsibility is only to determine whether HidHide configuration is safe to place into the deterministic Addon baseline.
 
-### Required fail-closed conditions
+Fail closed when current HidHide state cannot be safely understood or normalized, including as applicable:
 
-At minimum, do not blindly mutate when:
+- not installed;
+- access denied;
+- configuration unreadable;
+- unresolved raw whitelist entries;
+- unsupported inverse-whitelist state;
+- unsupported foreign whitelist entries;
+- unsupported foreign hidden-device entries.
 
-- HidHide is not installed;
-- HidHide configuration cannot be read;
-- access is denied;
-- raw application whitelist entries cannot be resolved safely;
-- inverse-whitelist state cannot be made known-safe;
-- another unsupported/foreign HidHide configuration would make deterministic Addon ownership unsafe.
+Do not silently delete unknown foreign controller state simply because the driver allows it.
 
-The higher-level known-controller-software admission gate for HHC/ClawTweaks may be implemented in a later transition PR.
-
-PR2 should expose enough reason information for a future caller to refuse the mode transition cleanly.
-
----
-
-## 8. Foreign HidHide configuration policy
-
-For the Full PID1902 product mode, the Addon is the primary controller authority.
-
-Do not build runtime coexistence behavior that tries to preserve arbitrary foreign controller middleware configuration while the Addon owns the MSI Claw.
-
-At the same time, PR2 should not silently destroy unknown foreign HidHide state merely because it can.
-
-Use a simple admission rule:
+Use admission semantics:
 
 ```text
-Before Addon Controller Mode is committed:
-    if current HidHide configuration contains unsupported foreign ownership/state
-    → report Conflict / Unsafe
-    → caller must not enter Addon Controller Mode
+unsupported foreign state before Addon mode
+→ Conflict / Unsafe
+→ future caller must refuse the mode transition
 ```
 
-Once the future reboot-bound transition has admitted the machine into Addon Controller Mode, later calls may reconcile to the deterministic Addon baseline.
-
-For PR2 tests, define clearly what counts as acceptable baseline input vs a foreign/conflicting state.
-
-Examples of likely conflict evidence:
-
-- foreign application whitelist entries not explicitly accepted by the Addon controller baseline;
-- foreign hidden-device entries unrelated to the exact Addon controller target(s);
-- unresolved raw whitelist entries;
-- inverse-whitelist mode when PR2 cannot safely normalize it.
-
-Do not add a multi-owner preservation map.
+Do not build a foreign-state preservation map or multi-owner merge policy.
 
 ---
 
-## 9. Whitelist policy
+## 5. Whitelist policy
 
-The future Addon-owned baseline must include the exact executable(s) that legitimately need to see the hidden physical PID1902 controller.
+Disabled-mode baseline must include the exact executable(s) that legitimately need to read the hidden physical MSI Claw controller.
 
-For PR2, keep the required whitelist intentionally narrow.
+For PR2, keep this narrow.
 
 At minimum:
 
 ```text
-current Addon executable path
+current Addon Runtime executable path
 ```
 
-If current architecture proves that another **Addon-owned** executable must directly access the hidden physical controller, include it only with a concrete current requirement.
+Only add another Addon-owned executable if current architecture proves it directly requires physical PID1902 access.
 
-Do not automatically carry forward unrelated trusted-official applications merely because the old routing baseline did so.
+Do not carry unrelated old routing whitelist entries forward solely for compatibility.
 
-Do not preserve a foreign whitelist entry solely for compatibility with another controller manager.
-
-Normalize/canonicalize paths using existing HidHide path conversion behavior and existing repository conventions.
-
-Any unresolved raw whitelist entry must remain a fail-closed condition rather than being silently dropped and overwritten.
+Unresolved raw whitelist entries must fail closed rather than being silently dropped and overwritten.
 
 ---
 
-## 10. Inverse-whitelist policy
+## 6. Inverse-whitelist policy
 
-Desired Addon baseline:
+Desired baseline:
 
 ```text
 IsInverseWhitelist = false
 ```
 
-Current `IHidHideClient` can inspect inverse mode but, at the time this work order was written, exposes mutations for:
+Before editing, verify the current HidHide control contract.
 
-- application whitelist;
-- hidden-device list;
-- Active state;
+If current in-process HidHide API safely supports setting inverse mode:
 
-and does not expose a dedicated inverse-mode setter.
+- add only the smallest typed mutation primitive necessary;
+- keep it in the existing HidHide client boundary;
+- verify by readback;
+- add focused client tests.
 
-Before editing, verify current main and the existing HidHide driver control contract.
-
-If the existing HidHide driver/API already supports safely setting inverse mode through the same control device:
-
-- add the **smallest typed mutation primitive necessary**;
-- perform readback verification;
-- keep it inside the existing HidHide client boundary;
-- add focused native-client tests.
-
-If current supported API cannot safely normalize inverse mode in this PR:
+If the supported API cannot safely normalize inverse mode:
 
 ```text
 inverse mode detected
-→ baseline admission fails closed
-→ no destructive mutation
+→ fail closed
+→ do not guess IOCTL behavior
 ```
 
-Do not guess IOCTL behavior.
-
-Do not shell out to a second HidHide CLI just to bypass the existing driver client unless there is no supported in-process path and the design is explicitly revised.
+Do not shell out to a second CLI merely to bypass the existing driver client unless the architecture is explicitly revised.
 
 ---
 
-## 11. Active-state policy
+## 7. Active-state policy
 
-Desired Addon baseline:
+Desired Disabled baseline:
 
 ```text
 HidHide Active = true
 ```
 
-`ApplyAddonBaseline` must ensure and verify Active=true.
+`ApplyDisabledBaseline` must ensure and verify it.
 
-This is persistent configuration.
+Active=true is persistent controller configuration.
 
-Do not treat Active=true as a temporary lease that must be restored when the current method/runtime ends.
+It must not be treated as a temporary lease that is reverted when the object or current Runtime is disposed.
 
-`ClearAddonBaseline` should establish the future clean stock/Enabled-mode baseline defined by this PR, but it must not be invoked automatically on ordinary Addon process disposal.
-
-PR2 itself does not wire `ClearAddonBaseline` to shutdown, Enable, or uninstall.
+PR2 does not wire cleanup to process shutdown.
 
 ---
 
-## 12. Persistent semantics
+## 8. Apply behavior
 
-This PR must explicitly break from the old route-session assumption.
+Keep ordering explicit and reviewable.
 
-Applying the baseline must **not** create semantics like:
-
-```text
-Apply
-→ process exits
-→ rollback automatically
-```
-
-Expected behavior:
-
-```text
-Apply Addon baseline
-→ configuration remains in HidHide
-→ caller/process can end
-→ Windows can reboot
-→ configuration is still the desired persistent baseline
-```
-
-Likewise, tests must not assert automatic rollback at `Dispose()`.
-
-Do not reuse `RoutingRecoverySessionId` as the authority for this configuration.
-
-Do not record the persistent baseline as a stale route mutation that startup cleanup should immediately remove.
-
----
-
-## 13. Relationship with the existing startup recovery cleaner
-
-Current startup recovery logic was designed to remove proven stale HidHide mutations from an old routing session.
-
-PR2 must **not** broadly rewrite `StartupHidHideRecoveryCleaner` yet.
-
-But the new persistent baseline must be architected so it is not inherently represented as an old transient route journal entry.
-
-In other words:
-
-```text
-Persistent Addon Controller Mode baseline
-!=
-Transient routing-session recovery mutation
-```
-
-If a minimal test or comment is needed to prevent PR2 from accidentally writing persistent baseline mutations into the existing transient recovery journal, add it.
-
-Do not perform the full startup-recovery semantic migration in this PR.
-
-That belongs to later Disabled-boot/recovery work.
-
----
-
-## 14. Apply operation ordering
-
-Keep ordering explicit and easy to review.
-
-A reasonable high-level apply sequence is:
+Recommended high-level flow:
 
 ```text
 1. Inspect current HidHide configuration
-2. Validate configuration is readable and admission-safe
-3. Validate/normalize inverse mode to false, or fail closed if unsupported
+2. Verify readable/admission-safe state
+3. Require/normalize non-inverse mode
 4. Establish exact Addon whitelist baseline
-5. Establish supplied exact hidden-device target baseline
+5. Establish supplied exact hidden-device target(s)
 6. Set Active = true
 7. Re-inspect
 8. Verify complete desired baseline
-9. Return Success only after readback matches
+9. Return success only after readback matches
 ```
 
-Exact ordering may change if the current HidHide driver contract has a stronger safety requirement, but explain any deviation in code/tests.
-
-Do not report success based only on mutation method return values.
+Do not rely only on mutation method return values.
 
 Readback verification is required.
 
----
-
-## 15. Clear operation ordering
-
-PR2 should provide the narrow inverse primitive that the future Center M Enable transition can call.
-
-Conceptual Enabled/stock cleanup target:
+Apply must be idempotent.
 
 ```text
-Addon-owned hidden PID1902 target(s) removed
-Addon controller whitelist entry removed if it exists only for controller ownership
-HidHide Active returned to the defined clean baseline
-Inverse mode in known-safe normal mode
+already compliant
+→ no destructive churn
+→ Success / AlreadyCompliant
 ```
-
-Because PR2 is a foundation and no actual reboot-bound authority transition is wired yet, keep cleanup deterministic and testable.
-
-Do not attempt to restore arbitrary pre-existing foreign controller-manager state.
-
-The future product contract is not “restore whatever happened to be there.”
-
-It is “leave Addon Controller Mode and return to the supported stock controller environment.”
-
-If foreign/conflicting configuration appears during clear and prevents a safe deterministic result, fail closed and report the reason.
 
 ---
 
-## 16. Result contract
+## 9. Clear behavior
 
-Use a small explicit result model rather than exceptions leaking into callers for normal known failure classifications.
+Provide the narrow inverse primitive required by the future explicit stock-authority transition.
 
-Conceptually useful outcomes:
+Conceptual cleanup target:
+
+```text
+Addon-owned PID1902 hidden target(s) removed
+Addon controller whitelist entry removed when no longer required
+HidHide Active returned to the supported clean Enabled-mode baseline
+non-inverse state known/verified
+```
+
+Do not attempt to restore arbitrary historical foreign-controller configuration.
+
+The target product contract is deterministic stock-compatible cleanup, not a generic snapshot/restore engine.
+
+PR2 only provides/tests the primitive. It does not call it from Center M Enable, uninstall, or shutdown.
+
+---
+
+## 10. Result contract
+
+Use a small explicit result model for expected conditions.
+
+Useful conceptual outcomes:
 
 ```text
 Success
@@ -474,428 +318,270 @@ MutationFailed
 VerificationFailed
 ```
 
-Do not create a large error taxonomy.
+Do not create a large failure taxonomy.
 
-Include a stable reason string/enum sufficient for:
+Expose enough stable reason information for:
 
-- tests;
+- unit tests;
 - logs;
-- future UI error reporting;
-- future reboot-transition admission decisions.
+- future transition UX;
+- future Disabled-boot admission.
 
-Unexpected exceptions from the HidHide client should be converted into fail-closed results and logged through existing diagnostics conventions.
-
----
-
-## 17. Idempotence
-
-The baseline operations must be idempotent.
-
-Examples:
-
-```text
-Apply when already compliant
-→ no destructive churn
-→ Success / AlreadyCompliant
-
-Apply same exact target twice
-→ one target remains
-
-Clear when already clear
-→ Success / AlreadyCompliant
-```
-
-Do not remove/re-add entries merely to prove ownership if current state already matches the desired deterministic baseline.
-
-This matters because future boot reconciliation may call the same primitive repeatedly.
+Unexpected exceptions should become fail-closed results and use existing logging conventions.
 
 ---
 
-## 18. No PID1902 discovery in PR2
+## 11. Existing code relationship
 
-PR2 must not add MSI Claw PnP scanning simply to populate hidden-device entries.
+Current route-scoped components may remain temporarily:
 
-The API must work with:
+- `MsiClawHidHideBaselineStage`;
+- `MsiClawPhysicalIsolationStage`;
+- old routing/recovery tests.
 
-```text
-knownTargets = []
-```
+Do not spread a new `persistentMode` boolean through those old stages merely to preserve both architectures.
 
-and:
-
-```text
-knownTargets = [exactPrimaryPid1902Collection]
-```
-
-Later PR5 will own:
+Preferred migration posture:
 
 ```text
-PID1901 → PID1902
-PnP settle
-DirectInput acquire
-exact primary collection resolve
-→ call HidHide baseline reconcile with exact target
+old route-scoped implementation remains temporarily
+new persistent baseline primitive exists independently
+later ownership PRs use the new primitive
+later cleanup removes obsolete route semantics
 ```
 
-Keep those responsibilities separate.
+The project is unreleased, so no compatibility layer is required once old policy becomes dead.
 
 ---
 
-## 19. Logging
+## 12. In scope
 
-Use existing HidHide / controller diagnostics categories.
+Implement only:
 
-Useful bounded events include conceptually:
-
-```text
-AddonHidHideBaseline inspection completed
-AddonHidHideBaseline already compliant
-AddonHidHideBaseline apply started
-AddonHidHideBaseline applied and verified
-AddonHidHideBaseline conflict detected
-AddonHidHideBaseline verification failed
-AddonHidHideBaseline cleared and verified
-```
-
-Useful fields:
-
-```text
-Active
-Inverse
-WhitelistCount
-HiddenTargetCount
-RequestedTargetCount
-Result
-Reason
-```
-
-Do not log on a timer.
-
-Do not add per-input/per-frame logging.
-
----
-
-## 20. In scope
-
-Implement only the following:
-
-- a focused Addon-owned persistent HidHide baseline primitive;
-- deterministic inspection of whether current HidHide state is compatible with the Addon baseline;
-- persistent apply of the Addon baseline;
-- deterministic clear/stock cleanup primitive for future Enable transition use;
+- focused persistent Addon HidHide baseline primitive;
+- inspect/compliance classification;
+- persistent apply;
+- deterministic clear primitive;
 - exact Addon executable whitelist handling;
-- optional exact supplied PID1902 hidden target handling;
-- HidHide Active=true handling for Addon baseline;
-- normal/non-inverse baseline handling;
-- minimal inverse-mode mutation support only if the existing verified HidHide control contract safely supports it; otherwise fail closed;
-- readback verification after mutations;
-- idempotent behavior;
-- clear failure/result reasons;
+- zero or more exact caller-supplied PID1902 hidden targets;
+- Active=true Disabled baseline;
+- non-inverse baseline handling;
+- minimal verified inverse-mode mutation support only if required/safe;
+- readback verification;
+- idempotence;
+- bounded logging/reasons;
 - focused unit tests;
-- minimal `HidHideDriverClient` extension/tests only where required by the baseline contract.
+- minimal `HidHideDriverClient` extension only when necessary.
+
+Target roughly **100–400 LOC of production changes plus focused tests where practical**.
+
+If the PR grows because it starts changing controller ownership or UI, split it.
 
 ---
 
-## 21. Explicitly out of scope
+## 13. Explicitly out of scope
 
-Do **not** implement any of the following in PR2:
+### Runtime authority/lifetime
 
-### Controller physical ownership
+Do not implement:
 
-- PID1901 → PID1902 switching;
-- PID1902 → PID1901 switching;
-- native MSI controller mode mutation;
-- DirectInput acquire/read/publisher;
-- physical device PnP stabilization;
+- mandatory Addon Runtime startup;
+- startup-task policy changes;
+- intentional Runtime-exit blocking;
+- process supervisor/watchdog;
+- crash auto-restart;
+- UI/frontend lifetime changes.
+
+Those begin in PR3/later hardening.
+
+### Physical controller
+
+Do not implement:
+
+- PID1901 → PID1902;
+- PID1902 → PID1901;
+- native mode mutation;
+- PnP stabilization;
+- DirectInput acquisition;
 - exact PID1902 target discovery.
 
-### MSI Center M transition
+### Center M / reboot
 
-- enabling/disabling Center M scheduled tasks;
-- service StartType changes;
+Do not implement:
+
+- Center M task/service mutation;
 - Center M process kill/quiesce;
-- Center M UI changes;
-- `Disable and Restart` / `Enable and Restart` flow;
-- Windows reboot requests.
+- Disable and Restart / Enable and Restart UX;
+- Windows restart requests.
 
-### VIIPER / presentation
+### VIIPER / Steam
 
-- Xbox360 attach;
-- Steam Deck attach;
+Do not implement:
+
+- X360 attach;
+- SteamDeck attach;
 - publisher start/stop;
 - X360 ↔ Deck switching;
-- Steam game detection changes;
-- BPM selection changes.
+- RunningAppID/BPM policy changes.
 
-### Controller features
+### Recovery / other features
 
-- rumble;
-- gyro;
-- WING/OEM1 mapping;
-- M1/M2 policy;
-- controller profiles.
+Do not implement:
 
-### Runtime recovery
-
-- sleep/resume recovery;
-- PID1902 → PID1901 reclaim;
-- physical device loss/re-arrival;
+- sleep/resume ownership recovery;
+- PID drift reclaim;
+- PnP re-arrival recovery;
 - DirectInput fault recovery;
 - Center M resurrection recovery;
-- full crash-journal migration.
-
-### Legacy cleanup
-
-- removing old routing coordinator/state machines;
-- deleting `MsiClawPhysicalIsolationStage`;
-- deleting `MsiClawHidHideBaselineStage`;
-- rewriting all old HidHide tests;
-- broad routing refactor.
-
-Those are later PRs.
+- rumble;
+- gyro;
+- WING/OEM1/M1/M2 policy;
+- broad old-routing cleanup.
 
 ---
 
-## 22. Expected code size / reviewability
-
-Target roughly **100–400 LOC of production + focused test changes where practical**.
-
-This is a guideline, not a hard numeric requirement, but if the PR starts growing because it is also modifying PID routing, Center M, reboot UX, Steam policy, or recovery orchestration, stop and split it.
-
-The PR should be understandable as:
-
-> “Introduce and prove the persistent Addon HidHide baseline primitive.”
-
-Nothing more.
-
----
-
-## 23. Suggested implementation location
-
-Prefer keeping the new primitive under the existing HidHide/controller domain rather than routing policy.
-
-Possible naming examples only:
-
-```text
-HidHide/AddonControllerHidHideBaseline.cs
-HidHide/PersistentHidHideBaseline.cs
-```
-
-Do not create a new top-level `Managers` layer.
-
-Do not make the type depend on Steam routing abstractions.
-
-It should depend primarily on:
-
-```text
-IHidHideClient
-Addon executable path / requested exact target set
-```
-
-plus only minimal diagnostics helpers.
-
----
-
-## 24. Test requirements
-
-Add focused deterministic tests.
+## 14. Test requirements
 
 At minimum cover:
 
-### Inspection / admission
+### Inspection
 
-- HidHide not installed → Unavailable/fail closed;
-- access/configuration unavailable → fail closed;
-- unresolved raw whitelist entry → conflict/fail closed;
-- inverse mode unsupported/unfixable → fail closed;
-- compliant baseline → reported compliant;
-- foreign whitelist entry → conflict according to defined Addon authority policy;
-- foreign hidden-device entry → conflict according to defined Addon authority policy.
+- not installed → unavailable/fail closed;
+- access/config unavailable → fail closed;
+- unresolved raw whitelist → conflict;
+- unsupported inverse mode → conflict/fail closed;
+- compliant baseline → compliant;
+- unsupported foreign whitelist/hidden state → conflict.
 
-### Apply with no known PID1902 target
-
-Input:
-
-```text
-Addon path known
-requested hidden targets = []
-```
+### Apply with zero targets
 
 Verify:
 
 ```text
 Addon whitelist present
 Active = true
-Inverse = false / verified safe
+non-inverse state verified
 no fabricated PID1902 target
-complete readback success
 ```
 
-### Apply with exact PID1902 target
+### Apply with exact target
 
 Verify:
 
 ```text
 exact target added once
-no broad wildcard target
+no wildcard/broad target
 Addon whitelist present
 Active = true
-final inspection matches desired baseline
+complete readback matches
 ```
 
 ### Idempotence
 
 - apply twice;
-- apply when already compliant;
-- clear twice;
-- exact hidden target already present.
+- apply already-compliant state;
+- exact target already present;
+- clear twice.
 
-### Mutation failures
+### Failure/readback
 
-For each mutation used by the implementation, verify the operation fails closed when:
+Verify fail closed when:
 
-- mutation reports false;
-- mutation applies but readback does not match;
+- mutation reports failure;
+- mutation appears successful but readback differs;
 - post-mutation inspection becomes unavailable;
-- unexpected foreign state appears in verification.
+- unexpected conflicting state appears.
 
-Do not add timing/race tests for instruction-level interleavings that the product does not need to support.
+### Clear
 
-### Clear baseline
+Verify Addon-owned target/whitelist cleanup and the defined clean baseline by readback.
 
-Verify the future stock-cleanup primitive:
-
-```text
-Addon hidden targets removed
-Addon controller whitelist removed as defined
-Active matches defined clean baseline
-readback verified
-```
-
-and fails closed when deterministic cleanup cannot be verified.
+Do not add artificial timing/race tests unrelated to real HidHide behavior.
 
 ---
 
-## 25. Existing tests / compatibility
+## 15. Acceptance criteria
 
-Keep existing tests passing unless they encode behavior directly incompatible with the new foundation and the changed code path truly replaces that contract.
+PR2 is complete when:
 
-PR2 should not require a broad rewrite of route-scoped isolation tests because those old stages remain temporarily in the repository.
-
-Do not add compatibility code solely to preserve unreleased architecture.
-
-If a test fails because the new baseline is intentionally independent from routing sessions, update only the tests that directly exercise the changed/new primitive.
-
----
-
-## 26. Failure policy
-
-The foundation must fail closed.
-
-If the desired baseline cannot be proven:
-
-```text
-Do not report compliant.
-Do not let the future caller assume controller isolation is safe.
-Return a clear failure/conflict reason.
-```
-
-A failed apply must never be interpreted by future callers as permission to attach a virtual controller.
-
-PR2 itself does not attach anything, but its result contract must make this future safety boundary explicit.
-
-Do not add automatic retries unless a current HidHide operation has an established, realistic transient failure that already requires them.
-
-Do not add theoretical race-defense machinery.
-
----
-
-## 27. Acceptance criteria
-
-PR2 is complete only when all of the following are true:
-
-1. A small production primitive exists for inspecting, applying, and clearing the persistent Addon HidHide baseline.
+1. One small persistent Addon HidHide baseline primitive exists.
 2. It is independent from Steam routing sessions.
-3. It does not use `RoutingRecoverySessionId` as the persistent ownership authority.
-4. It accepts zero or more exact hidden PID1902 target entries from its caller.
-5. It never invents a broad PID1902 wildcard target.
-6. It ensures the Addon executable whitelist entry required by the baseline.
-7. It ensures HidHide Active=true for the Addon baseline.
-8. It requires/normalizes non-inverse mode only through a verified supported HidHide control path; otherwise it fails closed.
-9. It performs readback verification before returning success.
+3. It does not use routing recovery-session identity as persistent authority.
+4. It accepts zero or more exact hidden PID1902 targets from callers.
+5. It never invents broad PID1902 hiding.
+6. It ensures the required Addon whitelist entry.
+7. It ensures HidHide Active=true for Disabled baseline.
+8. It handles non-inverse mode only through a verified supported path or fails closed.
+9. It performs readback verification before success.
 10. It is idempotent.
-11. Unsupported foreign/conflicting HidHide state is rejected rather than turned into runtime coexistence logic.
-12. It does not perform PID switching, DirectInput acquisition, Center M mutation, reboot, VIIPER attach, or Steam/BPM work.
-13. Existing old routing stages are not broadly refactored/deleted in this PR.
-14. Focused tests cover happy path, conflict, failure, verification, zero-target first-boot preparation, exact-target application, clear, and idempotence.
-15. Full Debug/Release build and test suite remain clean.
+11. Unsupported foreign state is rejected rather than turned into coexistence logic.
+12. It does not touch Runtime lifetime, PID, DirectInput, Center M, reboot, VIIPER presentation, or Steam/BPM.
+13. Old route-scoped stages are not broadly rewritten/deleted.
+14. Focused tests cover compliant/conflict/failure/zero-target/exact-target/clear/idempotence cases.
+15. Repository Debug/Release builds and tests are clean.
 
 ---
 
-## 28. Validation commands
+## 16. Validation
 
-Run the repository-standard validation plus focused HidHide tests.
-
-At minimum:
+Run repository-standard validation, including at minimum:
 
 ```text
 dotnet build -c Debug
 dotnet build -c Release
 dotnet test -c Debug
 dotnet test -c Release
+git diff --check
 ```
 
-Also run focused tests for:
+No MSI Claw hardware validation is required to merge this **foundation-only** PR if it is not production-wired to mutate/hide the live controller.
 
-- the new persistent baseline primitive;
-- `HidHideDriverClient` if its mutation surface changes;
-- any existing HidHide contract tests touched by this PR.
-
-Run `git diff --check` before opening the PR.
-
-No MSI Claw hardware validation is required to merge this **foundation-only** PR if the implementation performs no PID switch and does not hide a live physical controller through production wiring.
-
-Hardware validation becomes required when a later PR wires this baseline into the reboot-bound authority transition / Disabled boot path.
+Hardware validation begins when later PRs connect this baseline to actual Disabled-mode transition and PID1902 acquisition.
 
 ---
 
-## 29. PR description requirements
+## 17. PR description requirements
 
-The PR description should state clearly:
+State clearly:
 
-- this is **PR2: Addon-Owned HidHide Baseline Foundation**;
-- it implements the persistent HidHide configuration primitive only;
-- the primitive is not yet production-wired to Center M Disable/Enable;
-- no PID1901/PID1902 mutation occurs;
-- no DirectInput acquisition occurs;
-- no virtual controller is attached;
-- no reboot is requested;
-- Steam/BPM behavior is unchanged;
-- old route-scoped HidHide orchestration remains temporarily untouched;
-- full test/build results.
+- **PR2: Addon-Owned HidHide Baseline Foundation**;
+- persistent HidHide primitive only;
+- not production-wired to Center M Disable/Enable yet;
+- no Runtime lifetime enforcement;
+- no PID mutation;
+- no DirectInput;
+- no virtual controller attach;
+- no reboot;
+- no Steam/BPM behavior change;
+- old route-scoped HidHide orchestration remains temporarily;
+- build/test results.
 
-Do not claim that Full PID1902 controller ownership is implemented after this PR.
+Do not claim Full PID1902 ownership is implemented.
 
 ---
 
-## 30. Final implementation rule
-
-Keep this PR conceptually small:
+## 18. Updated small-PR sequence
 
 ```text
-PR1
-Persistent dual VIIPER devices
-    ↓
-PR2
-Persistent Addon-owned HidHide baseline
-    ↓
-PR3
-Reboot-bound Center M authority transition
-    ↓
-PR4+
-Disabled boot admission / PID1902 / DirectInput / presentation
+PR1  Persistent dual VIIPER devices                 [done]
+  ↓
+PR2  Persistent Addon-owned HidHide baseline        [this work order]
+  ↓
+PR3  Mandatory Runtime / startup contract
+  ↓
+PR4  Reboot-bound Center M authority transition
+  ↓
+PR5  Disabled-boot admission
+  ↓
+PR6  PID1902 + DirectInput ownership
+  ↓
+PR7  First presentation attach
+  ↓
+PR8  Runtime X360 ↔ SteamDeck switching
+  ↓
+PR9+ Owned-state recovery / crash keepalive / cleanup
 ```
 
 The final PR2 invariant is:
 
-> **The repository has one tested, persistent, deterministic HidHide baseline primitive ready for future Addon Controller Mode, but PR2 itself does not yet change controller authority or expose a virtual controller.**
+> **The repository has one tested persistent HidHide baseline primitive ready for Addon Controller Mode, while controller authority and Runtime lifetime remain completely unchanged until later PRs.**
