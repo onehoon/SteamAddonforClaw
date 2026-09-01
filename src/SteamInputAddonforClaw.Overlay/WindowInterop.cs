@@ -83,6 +83,13 @@ internal static class WindowInterop
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not show the Overlay window.");
     }
 
+    internal static void Hide(OverlayWindow window)
+    {
+        var hwnd = WindowNative.GetWindowHandle(window);
+        if (!SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SwpNoActivate | SwpNoSendChanging | 0x0001 | 0x0002 | 0x0080))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not hide the Overlay window.");
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetForegroundWindow();
 

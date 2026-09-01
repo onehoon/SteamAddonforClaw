@@ -58,6 +58,12 @@ public static class FrontendPipeEndpoint
         var desktop = CreateForCurrentUser();
         return $"{desktop}.Qam";
     }
+
+    public static string CreateOverlayForCurrentUser()
+    {
+        var desktop = CreateForCurrentUser();
+        return $"{desktop}.Overlay";
+    }
 }
 
 public class FrontendTransportException(string message, Exception? inner = null) : Exception(message, inner);

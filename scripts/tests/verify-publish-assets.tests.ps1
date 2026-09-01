@@ -13,7 +13,8 @@ function New-Fixture {
         (Join-Path $root 'Dependencies\UsbIpWin2'),
         (Join-Path $root 'Dependencies\Viiper'),
         (Join-Path $root 'ui\Views'),
-        (Join-Path $root 'qam\Frontend')
+        (Join-Path $root 'qam\Frontend'),
+        (Join-Path $root 'overlay')
     )
     New-Item -ItemType Directory -Force -Path $directories | Out-Null
 
@@ -41,6 +42,12 @@ function New-Fixture {
         'ui\Microsoft.UI.Xaml.winmd' = 'winmd payload'
         'qam\SteamInputAddonforClaw.QamHost.exe' = 'qam executable'
         'qam\Frontend\qam.js' = 'qam frontend'
+        'overlay\SteamInputAddonforClaw.Overlay.exe' = 'overlay executable'
+        'overlay\SteamInputAddonforClaw.Overlay.dll' = 'overlay managed payload'
+        'overlay\SteamInputAddonforClaw.Overlay.pri' = 'overlay application pri'
+        'overlay\App.xbf' = 'overlay app xbf'
+        'overlay\OverlayWindow.xbf' = 'overlay window xbf'
+        'overlay\Microsoft.UI.Xaml.winmd' = 'overlay winmd payload'
     }
 
     foreach ($entry in $files.GetEnumerator()) {

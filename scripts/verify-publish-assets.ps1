@@ -33,7 +33,11 @@ $requiredAssets = @(
     'ui\Views\SettingsPage.xbf',
     'ui\Views\DeveloperPage.xbf',
     'qam\SteamInputAddonforClaw.QamHost.exe',
-    'qam\Frontend\qam.js'
+    'qam\Frontend\qam.js',
+    'overlay\SteamInputAddonforClaw.Overlay.exe',
+    'overlay\SteamInputAddonforClaw.Overlay.pri',
+    'overlay\App.xbf',
+    'overlay\OverlayWindow.xbf'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
@@ -72,7 +76,7 @@ if (Test-Path -LiteralPath $qamSdkProjection -PathType Leaf) {
 }
 
 $runtimePayloadNames = @('System.Private.CoreLib.dll', 'coreclr.dll', 'hostpolicy.dll')
-foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), (Join-Path $PublishDirectory 'qam'))) {
+foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), (Join-Path $PublishDirectory 'qam'), (Join-Path $PublishDirectory 'overlay'))) {
     $runtimePayload = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Name -in $runtimePayloadNames })
     if ($runtimePayload.Count -gt 0) {
         throw "Framework-dependent publish contains runtime payload in '$directory': $($runtimePayload.Name -join ', ')"
@@ -98,6 +102,14 @@ if ($uiManagedPayload.Count -eq 0 -or $uiPriPayload.Count -eq 0 -or $uiWinmdPayl
 $applicationPri = Join-Path $uiDirectory 'SteamInputAddonforClaw.UI.pri'
 if (-not (Test-Path -LiteralPath $applicationPri -PathType Leaf)) {
     throw 'UI publish output is missing the external UI application PRI: SteamInputAddonforClaw.UI.pri'
+}
+
+$overlayDirectory = Join-Path $PublishDirectory 'overlay'
+$overlayManagedPayload = @(Get-ChildItem -LiteralPath $overlayDirectory -Recurse -File -Filter '*.dll')
+$overlayPriPayload = @(Get-ChildItem -LiteralPath $overlayDirectory -Recurse -File -Filter '*.pri')
+$overlayWinmdPayload = @(Get-ChildItem -LiteralPath $overlayDirectory -Recurse -File -Filter '*.winmd')
+if ($overlayManagedPayload.Count -eq 0 -or $overlayPriPayload.Count -eq 0 -or $overlayWinmdPayload.Count -eq 0) {
+    throw 'Overlay publish output is missing its framework-dependent managed or WinUI/Windows App SDK payload.'
 }
 
 $runtimeRootXaml = @(Get-ChildItem -LiteralPath $PublishDirectory -File | Where-Object { $_.Extension -in @('.xbf', '.pri') })
