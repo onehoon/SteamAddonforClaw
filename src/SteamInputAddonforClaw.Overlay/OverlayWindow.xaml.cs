@@ -1,28 +1,182 @@
+using System.Diagnostics;
+using System.Numerics;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Hosting;
+using Windows.UI.ViewManagement;
+using SteamInputAddonforClaw.Overlay.Diagnostics;
 
 namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow : Window
 {
+    private const double HiddenOpacity = 0.90;
+    private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(150);
+    private double _slideDistanceDip = OverlayWindowGeometry.PocPanelWidthDip;
+
     public OverlayWindow() => InitializeComponent();
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
 
     internal void PrepareHidden() => ConfigureWindow();
 
-    internal void ShowForPoc()
+    internal async Task ShowForPocAsync()
     {
-        ConfigureWindow();
+        var slideDistanceDip = ConfigureWindow();
+        var initialStatePrepared = true;
+        try
+        {
+            SetVisualState(-slideDistanceDip, HiddenOpacity);
+        }
+        catch (Exception exception)
+        {
+            initialStatePrepared = false;
+            OverlayLog.Error("Animation", "Show animation initial state failed; keeping Overlay visible.", exception);
+        }
         WindowInterop.ShowWithoutActivation(this);
+        if (!initialStatePrepared || !AnimationsEnabled())
+        {
+            TrySetVisibleVisualState();
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        OverlayLog.Info("Animation", "Show animation started",
+            ("DurationMs", ShowDuration.TotalMilliseconds),
+            ("StartOpacity", HiddenOpacity), ("EndOpacity", 1.0),
+            ("SlideDistanceDip", slideDistanceDip));
+        try
+        {
+            await AnimateAsync(-slideDistanceDip, 0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
+            TrySetVisibleVisualState();
+            OverlayLog.Info("Animation", "Show animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Error("Animation", "Show animation failed; keeping Overlay visible.", exception);
+            TrySetVisibleVisualState();
+        }
     }
 
-    internal void HideForPoc() => WindowInterop.Hide(this);
+    internal async Task HideForPocAsync()
+    {
+        var slideDistanceDip = GetSlideDistanceDip();
+        if (AnimationsEnabled())
+        {
+            var stopwatch = Stopwatch.StartNew();
+            OverlayLog.Info("Animation", "Hide animation started",
+                ("DurationMs", HideDuration.TotalMilliseconds),
+                ("StartOpacity", 1.0), ("EndOpacity", HiddenOpacity),
+                ("SlideDistanceDip", slideDistanceDip));
+            try
+            {
+                await AnimateAsync(0, -slideDistanceDip, 1.0, HiddenOpacity, HideDuration, easeIn: true);
+                OverlayLog.Info("Animation", "Hide animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
+            }
+            catch (Exception exception)
+            {
+                OverlayLog.Error("Animation", "Hide animation failed; hiding Overlay immediately.", exception);
+            }
+        }
 
-    private void ConfigureWindow()
+        try
+        {
+            WindowInterop.Hide(this);
+        }
+        finally
+        {
+            try
+            {
+                SetHiddenVisualState();
+            }
+            catch (Exception exception)
+            {
+                OverlayLog.Error("Animation", "Could not reset hidden visual state.", exception);
+            }
+        }
+    }
+
+    private double ConfigureWindow()
     {
         WindowInterop.Configure(this, out var rect, out var dpi, out var monitorText);
         var scale = dpi / 96.0;
         GeometryText.Text = $"{monitorText}\nWorkArea: {rect.X},{rect.Y} {rect.Width}x{rect.Height}\nDPI / Scale: {dpi} / {scale:0.##}\nPanel DIP / physical width: {OverlayWindowGeometry.PocPanelWidthDip:0} / {rect.Width}px";
+        return _slideDistanceDip = GetSlideDistanceDip(rect.Width, dpi);
+    }
+
+    private double GetSlideDistanceDip() => _slideDistanceDip;
+
+    private static double GetSlideDistanceDip(int physicalWidth, uint dpi) =>
+        physicalWidth * 96.0 / Math.Max(1, dpi);
+
+    private void SetVisibleVisualState() => SetVisualState(0, 1.0);
+
+    private void SetHiddenVisualState() => SetVisualState(0, 1.0);
+
+    private void TrySetVisibleVisualState()
+    {
+        try
+        {
+            SetVisibleVisualState();
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Error("Animation", "Could not commit the visible visual state.", exception);
+        }
+    }
+
+    private void SetVisualState(double translationX, double opacity)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(AnimatedPanel);
+        visual.Offset = new Vector3((float)translationX, 0, 0);
+        visual.Opacity = (float)opacity;
+    }
+
+    private async Task AnimateAsync(
+        double startTranslationX,
+        double endTranslationX,
+        double startOpacity,
+        double endOpacity,
+        TimeSpan duration,
+        bool easeIn)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(AnimatedPanel);
+        var compositor = visual.Compositor;
+        var easing = compositor.CreateCubicBezierEasingFunction(
+            easeIn ? new Vector2(0.42f, 0.0f) : new Vector2(0.0f, 0.0f),
+            easeIn ? new Vector2(1.0f, 1.0f) : new Vector2(0.58f, 1.0f));
+        var offset = compositor.CreateVector3KeyFrameAnimation();
+        offset.Duration = duration;
+        offset.InsertKeyFrame(0.0f, new Vector3((float)startTranslationX, 0, 0));
+        offset.InsertKeyFrame(1.0f, new Vector3((float)endTranslationX, 0, 0), easing);
+        var opacity = compositor.CreateScalarKeyFrameAnimation();
+        opacity.Duration = duration;
+        opacity.InsertKeyFrame(0.0f, (float)startOpacity);
+        opacity.InsertKeyFrame(1.0f, (float)endOpacity, easing);
+
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        batch.Completed += (_, _) => completion.TrySetResult();
+        visual.StartAnimation(nameof(visual.Offset), offset);
+        visual.StartAnimation(nameof(visual.Opacity), opacity);
+        batch.End();
+        await completion.Task;
+        visual.StopAnimation(nameof(visual.Offset));
+        visual.StopAnimation(nameof(visual.Opacity));
+    }
+
+    private static bool AnimationsEnabled()
+    {
+        try
+        {
+            return new UISettings().AnimationsEnabled;
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Animation", "Could not read the system animation preference; keeping animations enabled.", exception);
+            return true;
+        }
     }
 
     private void OnCloseClicked(object sender, RoutedEventArgs args) => Close();
