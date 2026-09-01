@@ -10,10 +10,10 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow : Window
 {
+    private const double ContentSlideDistanceDip = 32.0;
     private const double HiddenOpacity = 0.90;
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(150);
-    private double _slideDistanceDip = OverlayWindowGeometry.PocPanelWidthDip;
 
     public OverlayWindow() => InitializeComponent();
 
@@ -23,11 +23,11 @@ public sealed partial class OverlayWindow : Window
 
     internal async Task ShowForPocAsync()
     {
-        var slideDistanceDip = ConfigureWindow();
+        ConfigureWindow();
         var initialStatePrepared = true;
         try
         {
-            SetVisualState(-slideDistanceDip, HiddenOpacity);
+            SetVisualState(-ContentSlideDistanceDip, HiddenOpacity);
         }
         catch (Exception exception)
         {
@@ -45,10 +45,10 @@ public sealed partial class OverlayWindow : Window
         OverlayLog.Info("Animation", "Show animation started",
             ("DurationMs", ShowDuration.TotalMilliseconds),
             ("StartOpacity", HiddenOpacity), ("EndOpacity", 1.0),
-            ("SlideDistanceDip", slideDistanceDip));
+            ("ContentSlideDistanceDip", ContentSlideDistanceDip));
         try
         {
-            await AnimateAsync(-slideDistanceDip, 0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
+            await AnimateAsync(-ContentSlideDistanceDip, 0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
             TrySetVisibleVisualState();
             OverlayLog.Info("Animation", "Show animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
         }
@@ -61,17 +61,16 @@ public sealed partial class OverlayWindow : Window
 
     internal async Task HideForPocAsync()
     {
-        var slideDistanceDip = GetSlideDistanceDip();
         if (AnimationsEnabled())
         {
             var stopwatch = Stopwatch.StartNew();
             OverlayLog.Info("Animation", "Hide animation started",
                 ("DurationMs", HideDuration.TotalMilliseconds),
                 ("StartOpacity", 1.0), ("EndOpacity", HiddenOpacity),
-                ("SlideDistanceDip", slideDistanceDip));
+                ("ContentSlideDistanceDip", ContentSlideDistanceDip));
             try
             {
-                await AnimateAsync(0, -slideDistanceDip, 1.0, HiddenOpacity, HideDuration, easeIn: true);
+                await AnimateAsync(0, -ContentSlideDistanceDip, 1.0, HiddenOpacity, HideDuration, easeIn: true);
                 OverlayLog.Info("Animation", "Hide animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
             }
             catch (Exception exception)
@@ -97,18 +96,12 @@ public sealed partial class OverlayWindow : Window
         }
     }
 
-    private double ConfigureWindow()
+    private void ConfigureWindow()
     {
         WindowInterop.Configure(this, out var rect, out var dpi, out var monitorText);
         var scale = dpi / 96.0;
         GeometryText.Text = $"{monitorText}\nWorkArea: {rect.X},{rect.Y} {rect.Width}x{rect.Height}\nDPI / Scale: {dpi} / {scale:0.##}\nPanel DIP / physical width: {OverlayWindowGeometry.PocPanelWidthDip:0} / {rect.Width}px";
-        return _slideDistanceDip = GetSlideDistanceDip(rect.Width, dpi);
     }
-
-    private double GetSlideDistanceDip() => _slideDistanceDip;
-
-    private static double GetSlideDistanceDip(int physicalWidth, uint dpi) =>
-        physicalWidth * 96.0 / Math.Max(1, dpi);
 
     private void SetVisibleVisualState() => SetVisualState(0, 1.0);
 
@@ -128,7 +121,7 @@ public sealed partial class OverlayWindow : Window
 
     private void SetVisualState(double translationX, double opacity)
     {
-        var visual = ElementCompositionPreview.GetElementVisual(AnimatedPanel);
+        var visual = ElementCompositionPreview.GetElementVisual(AnimatedContent);
         visual.Offset = new Vector3((float)translationX, 0, 0);
         visual.Opacity = (float)opacity;
     }
@@ -141,7 +134,7 @@ public sealed partial class OverlayWindow : Window
         TimeSpan duration,
         bool easeIn)
     {
-        var visual = ElementCompositionPreview.GetElementVisual(AnimatedPanel);
+        var visual = ElementCompositionPreview.GetElementVisual(AnimatedContent);
         var compositor = visual.Compositor;
         var easing = compositor.CreateCubicBezierEasingFunction(
             easeIn ? new Vector2(0.42f, 0.0f) : new Vector2(0.0f, 0.0f),
@@ -179,5 +172,4 @@ public sealed partial class OverlayWindow : Window
         }
     }
 
-    private void OnCloseClicked(object sender, RoutedEventArgs args) => Close();
 }
