@@ -94,6 +94,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // owned-session completion. Serialized inside the physical owner's own gate; tracked only so
     // controlled teardown drains it BEFORE the presentation reconcile it may itself request.
     private Task _ownedControllerRecovery = Task.CompletedTask;
+    // PR10 review [P1]: a single "a Device Arrival landed while a recovery was in flight" bit, so the
+    // only real arrival signal is never lost to coalescing. Consumed for exactly one follow-up.
+    private int _pendingOwnedControllerArrival;
     // PR10: one Runtime-owned, event-driven Windows Device Arrival observer. Non-null once a physical
     // owner has actually committed; it only wakes the existing recovery entrypoint, which re-proves
     // the strong MSI Claw identity itself. Disposed at BeginProcessShutdown before recovery drains.
@@ -553,10 +556,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void RequestOwnedControllerRecovery(Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical, string trigger)
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
-        // Coalesce concurrent triggers to one in-flight attempt. A completed result -- including a
-        // fail-closed PhysicalDeviceMissing -- leaves the task completed, so the next real Device
-        // Arrival still gets through and re-enters RecoverLostInputAsync.
-        if (!_ownedControllerRecovery.IsCompleted) return;
+
+        // Coalesce concurrent triggers to one in-flight attempt. A real Device Arrival that lands
+        // while an attempt is still inside its bounded settle window must NOT be dropped (PR10
+        // section 8.2): retain a single pending-arrival bit and consume it for exactly one follow-up
+        // once the current attempt finishes, if the source is still down. No epoch/manager.
+        if (!_ownedControllerRecovery.IsCompleted)
+        {
+            if (trigger == "DeviceArrival")
+                Interlocked.Exchange(ref _pendingOwnedControllerArrival, 1);
+            return;
+        }
 
         AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.",
             ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", trigger));
@@ -583,6 +593,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Error("ControllerOwnership", "Owned physical input recovery threw; Runtime remains available.", exception,
                 ("Trigger", trigger));
+        }
+        finally
+        {
+            // A Device Arrival was observed while this attempt was in flight -- run exactly one
+            // follow-up if the owned source is still not running.
+            if (Volatile.Read(ref _processShutdownStarted) == 0
+                && Interlocked.Exchange(ref _pendingOwnedControllerArrival, 0) != 0
+                && physical.LiveInputSource is not { IsRunning: true })
+            {
+                AppLog.Info("ControllerOwnership", "Owned physical input recovery requested.",
+                    ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", "DeferredDeviceArrival"));
+                _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, "DeferredDeviceArrival", _startupCancellationTokenSource.Token);
+            }
         }
     }
 

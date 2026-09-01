@@ -79,8 +79,6 @@ internal sealed record AddonHidHideBaselineResult(
 /// </summary>
 internal sealed class AddonControllerHidHideBaseline
 {
-    private static readonly string[] OfficialApplicationFileNames = ["HidHideCLI.exe", "HidHideClient.exe"];
-
     private readonly IHidHideClient _client;
     private readonly string _addonExecutablePath;
     private readonly Func<IReadOnlyList<string>> _officialApplicationPathsResolver;
@@ -107,11 +105,14 @@ internal sealed class AddonControllerHidHideBaseline
         if (!TryInspect(out var inspection, out var unavailable))
             return unavailable;
 
-        var conflict = FindNormalizationConflict(inspection);
+        var conflict = FindDisabledModeConflict(inspection);
         if (conflict is not null)
             return Result(AddonHidHideBaselineOutcome.Conflict, conflict, inspection, targets.Count);
 
-        var outcome = IsDisabledCompliant(inspection, targets) ? AddonHidHideBaselineOutcome.AlreadyCompliant : AddonHidHideBaselineOutcome.Applicable;
+        if (!TryResolveOfficialApplicationPaths(out var cliPath, out var clientPath))
+            return Unavailable("OfficialHidHidePathUnresolved", targets.Count);
+
+        var outcome = IsDisabledCompliant(inspection, targets, cliPath, clientPath) ? AddonHidHideBaselineOutcome.AlreadyCompliant : AddonHidHideBaselineOutcome.Applicable;
         var result = Result(outcome, outcome == AddonHidHideBaselineOutcome.AlreadyCompliant ? "DisabledModeBaselineCompliant" : "DisabledModeBaselineApplicable", inspection, targets.Count);
         Log("inspection completed", result);
         return result;
@@ -182,7 +183,7 @@ internal sealed class AddonControllerHidHideBaseline
         if (!TryInspect(out var inspection, out var unavailable))
             return unavailable;
 
-        var conflict = FindNormalizationConflict(inspection);
+        var conflict = FindDisabledModeConflict(inspection);
         if (conflict is not null)
         {
             var conflictResult = Result(AddonHidHideBaselineOutcome.Conflict, conflict, inspection, targets.Count);
@@ -190,7 +191,14 @@ internal sealed class AddonControllerHidHideBaseline
             return conflictResult;
         }
 
-        if (IsDisabledCompliant(inspection, targets))
+        // The two trusted canonical official paths are resolved up front; an unresolvable required
+        // path is a prerequisite gap (Unavailable), NOT a config repair -- this PR does not
+        // reinstall/repair the HidHide package. Whitelist entries are matched to these paths, never
+        // by filename (review [P1]).
+        if (!TryResolveOfficialApplicationPaths(out var cliPath, out var clientPath))
+            return Unavailable("OfficialHidHidePathUnresolved", targets.Count);
+
+        if (IsDisabledCompliant(inspection, targets, cliPath, clientPath))
         {
             var compliant = Result(AddonHidHideBaselineOutcome.AlreadyCompliant, "DisabledModeBaselineCompliant", inspection, targets.Count);
             Log("already compliant", compliant);
@@ -203,34 +211,25 @@ internal sealed class AddonControllerHidHideBaseline
         if (inspection.IsInverseWhitelist && !TryMutate(() => _client.SetInverseWhitelist(false), out var inverseFailure))
             return Fail(inverseFailure, "DisabledModeInverseNormalizeFailed", targets.Count);
 
-        // 2. Remove every whitelist entry that is neither an official HidHide application nor the Addon.
+        // 2. Remove every whitelist entry that is not one of the two trusted official paths or the
+        //    Addon -- this also removes a stale registration from an old HidHide install location.
         var initialWhitelistCount = inspection.ApplicationWhitelist.Count;
         var removedWhitelist = 0;
-        foreach (var entry in inspection.ApplicationWhitelist.Where(entry => !IsOfficialApplicationEntry(entry) && !PathEquals(entry, _addonExecutablePath)).ToArray())
+        bool IsExpectedOfficial(string entry) => PathEquals(entry, cliPath) || PathEquals(entry, clientPath);
+        foreach (var entry in inspection.ApplicationWhitelist.Where(entry => !IsExpectedOfficial(entry) && !PathEquals(entry, _addonExecutablePath)).ToArray())
         {
             if (!TryMutate(() => _client.RemoveApplication(entry), out var removeFailure))
                 return Fail(removeFailure, "DisabledModeForeignWhitelistRemoveFailed", targets.Count);
             removedWhitelist++;
         }
 
-        // 3. Ensure both official HidHide application entries are present; resolve canonical paths for
-        //    any that are missing. An unresolvable required path is a prerequisite gap (Unavailable),
-        //    NOT a config repair -- this PR does not reinstall/repair the HidHide package itself.
-        var (cliPath, clientPath) = ResolveOfficialApplicationPaths();
-        if (!inspection.ApplicationWhitelist.Any(entry => IsOfficialApplicationEntry(entry, "HidHideCLI.exe")))
-        {
-            if (cliPath is null)
-                return Unavailable("OfficialHidHideCliPathUnresolved", targets.Count);
-            if (!TryMutate(() => _client.AddApplication(cliPath), out var cliFailure))
-                return Fail(cliFailure, "DisabledModeOfficialCliAddFailed", targets.Count);
-        }
-        if (!inspection.ApplicationWhitelist.Any(entry => IsOfficialApplicationEntry(entry, "HidHideClient.exe")))
-        {
-            if (clientPath is null)
-                return Unavailable("OfficialHidHideClientPathUnresolved", targets.Count);
-            if (!TryMutate(() => _client.AddApplication(clientPath), out var clientFailure))
-                return Fail(clientFailure, "DisabledModeOfficialClientAddFailed", targets.Count);
-        }
+        // 3. Ensure both trusted canonical official paths are whitelisted.
+        if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, cliPath))
+            && !TryMutate(() => _client.AddApplication(cliPath), out var cliFailure))
+            return Fail(cliFailure, "DisabledModeOfficialCliAddFailed", targets.Count);
+        if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, clientPath))
+            && !TryMutate(() => _client.AddApplication(clientPath), out var clientFailure))
+            return Fail(clientFailure, "DisabledModeOfficialClientAddFailed", targets.Count);
 
         // 4. Exact Addon whitelist entry.
         if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, _addonExecutablePath))
@@ -263,9 +262,9 @@ internal sealed class AddonControllerHidHideBaseline
         // 8-9. Re-inspect and verify the complete desired baseline by exact read-back.
         if (!TryInspect(out var verification, out var verifyUnavailable))
             return verifyUnavailable;
-        if (FindNormalizationConflict(verification) is { } postConflict)
+        if (FindDisabledModeConflict(verification) is { } postConflict)
             return Fail(Result(AddonHidHideBaselineOutcome.Conflict, postConflict, verification, targets.Count), postConflict, targets.Count);
-        if (!IsDisabledCompliant(verification, targets))
+        if (!IsDisabledCompliant(verification, targets, cliPath, clientPath))
             return Fail(Result(AddonHidHideBaselineOutcome.VerificationFailed, "DisabledModeBaselineVerificationFailed", verification, targets.Count), "DisabledModeBaselineVerificationFailed", targets.Count);
 
         var applied = Result(AddonHidHideBaselineOutcome.Success, "DisabledModeBaselineAppliedAndVerified", verification, targets.Count);
@@ -290,7 +289,7 @@ internal sealed class AddonControllerHidHideBaseline
         if (!TryInspect(out var inspection, out var unavailable))
             return unavailable;
 
-        var conflict = FindNormalizationConflict(inspection);
+        var conflict = FindEnabledModeConflict(inspection);
         if (conflict is not null)
         {
             var conflictResult = Result(AddonHidHideBaselineOutcome.Conflict, conflict, inspection, targets.Count);
@@ -325,7 +324,7 @@ internal sealed class AddonControllerHidHideBaseline
 
         if (!TryInspect(out var verification, out var verifyUnavailable))
             return verifyUnavailable;
-        if (FindNormalizationConflict(verification) is { } postConflict)
+        if (FindEnabledModeConflict(verification) is { } postConflict)
             return Fail(Result(AddonHidHideBaselineOutcome.Conflict, postConflict, verification, targets.Count), postConflict, targets.Count);
         if (!IsEnabledCompliant(verification, targets))
             return Fail(Result(AddonHidHideBaselineOutcome.VerificationFailed, "EnabledModeBaselineVerificationFailed", verification, targets.Count), "EnabledModeBaselineVerificationFailed", targets.Count);
@@ -337,7 +336,7 @@ internal sealed class AddonControllerHidHideBaseline
 
     // ---- classification helpers ----
 
-    private string? FindNormalizationConflict(HidHideInspection inspection)
+    private string? FindDisabledModeConflict(HidHideInspection inspection)
     {
         if (inspection.HasUnresolvedApplicationWhitelistEntries) return "UnresolvedWhitelistEntry";
         // An inverse-whitelist machine is a conflict only when this client has no verified path to
@@ -346,10 +345,20 @@ internal sealed class AddonControllerHidHideBaseline
         return null;
     }
 
-    private bool IsDisabledCompliant(HidHideInspection inspection, IReadOnlyList<string> targets) =>
+    /// <summary>Enable/release must NOT be blocked merely because unrelated current HidHide state
+    /// exists -- a stale third-party/unresolved entry is left for its owner to reconcile, never a
+    /// reason to trap a user in Addon authority (review [P1] / PR10 addendum section 12). Only global
+    /// <c>Inverse=false</c> (which release must still prove) can block.</summary>
+    private string? FindEnabledModeConflict(HidHideInspection inspection)
+    {
+        if (inspection.IsInverseWhitelist && !_client.SupportsInverseWhitelistMutation) return "InverseWhitelistUnsupported";
+        return null;
+    }
+
+    private bool IsDisabledCompliant(HidHideInspection inspection, IReadOnlyList<string> targets, string cliPath, string clientPath) =>
         !inspection.IsInverseWhitelist
         && inspection.IsActive
-        && WhitelistIsExactly(inspection, includeAddon: true)
+        && WhitelistIsExactlyDisabled(inspection, cliPath, clientPath)
         && HiddenIsExactly(inspection, targets);
 
     private bool IsEnabledCompliant(HidHideInspection inspection, IReadOnlyList<string> targets) =>
@@ -361,17 +370,17 @@ internal sealed class AddonControllerHidHideBaseline
         && !inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, _addonExecutablePath))
         && !(inspection.HiddenDeviceEntries ?? []).Any(entry => targets.Any(target => string.Equals(target, entry, StringComparison.OrdinalIgnoreCase)));
 
-    private bool WhitelistIsExactly(HidHideInspection inspection, bool includeAddon)
+    /// <summary>The Disabled Applications whitelist must be exactly the two trusted canonical official
+    /// paths plus the Addon executable -- compared by resolved path, never by filename (review [P1]).</summary>
+    private bool WhitelistIsExactlyDisabled(HidHideInspection inspection, string cliPath, string clientPath)
     {
         var entries = inspection.ApplicationWhitelist;
-        var hasAddon = entries.Any(entry => PathEquals(entry, _addonExecutablePath));
-        var onlyBaseline = entries.All(entry => IsOfficialApplicationEntry(entry) || PathEquals(entry, _addonExecutablePath));
-        return OfficialApplicationsPresent(inspection) && onlyBaseline && (includeAddon ? hasAddon : !hasAddon);
+        bool IsBaseline(string entry) => PathEquals(entry, cliPath) || PathEquals(entry, clientPath) || PathEquals(entry, _addonExecutablePath);
+        return entries.Any(entry => PathEquals(entry, cliPath))
+            && entries.Any(entry => PathEquals(entry, clientPath))
+            && entries.Any(entry => PathEquals(entry, _addonExecutablePath))
+            && entries.All(IsBaseline);
     }
-
-    private static bool OfficialApplicationsPresent(HidHideInspection inspection) =>
-        inspection.ApplicationWhitelist.Any(entry => IsOfficialApplicationEntry(entry, "HidHideCLI.exe"))
-        && inspection.ApplicationWhitelist.Any(entry => IsOfficialApplicationEntry(entry, "HidHideClient.exe"));
 
     private static bool HiddenIsExactly(HidHideInspection inspection, IReadOnlyList<string> targets)
     {
@@ -380,19 +389,10 @@ internal sealed class AddonControllerHidHideBaseline
             && targets.All(target => hidden.Any(entry => string.Equals(entry, target, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static bool IsOfficialApplicationEntry(string entry)
-    {
-        try { return OfficialApplicationFileNames.Contains(Path.GetFileName(entry), StringComparer.OrdinalIgnoreCase); }
-        catch { return false; }
-    }
-
-    private static bool IsOfficialApplicationEntry(string entry, string fileName)
-    {
-        try { return string.Equals(Path.GetFileName(entry), fileName, StringComparison.OrdinalIgnoreCase); }
-        catch { return false; }
-    }
-
-    private (string? Cli, string? Client) ResolveOfficialApplicationPaths()
+    /// <summary>Resolves the two trusted, canonical official HidHide application paths from the
+    /// verified installation (the whitelist's own filename-only entries are never trusted as proof --
+    /// review [P1]). Both must resolve for a Disabled-mode operation to proceed.</summary>
+    private bool TryResolveOfficialApplicationPaths(out string cliPath, out string clientPath)
     {
         IReadOnlyList<string> resolved;
         try { resolved = _officialApplicationPathsResolver() ?? []; }
@@ -401,8 +401,16 @@ internal sealed class AddonControllerHidHideBaseline
             AppLog.Warn("HidHideBaseline", "Official HidHide application path resolution threw.", exception);
             resolved = [];
         }
-        string? Pick(string fileName) => resolved.FirstOrDefault(path => IsOfficialApplicationEntry(path, fileName));
-        return (Pick("HidHideCLI.exe"), Pick("HidHideClient.exe"));
+        string? Pick(string fileName) => resolved.FirstOrDefault(path =>
+        {
+            try { return string.Equals(Path.GetFileName(path), fileName, StringComparison.OrdinalIgnoreCase); }
+            catch { return false; }
+        });
+        var cli = Pick("HidHideCLI.exe");
+        var client = Pick("HidHideClient.exe");
+        cliPath = cli ?? string.Empty;
+        clientPath = client ?? string.Empty;
+        return cli is not null && client is not null;
     }
 
     private bool TryInspect(out HidHideInspection inspection, out AddonHidHideBaselineResult unavailable)

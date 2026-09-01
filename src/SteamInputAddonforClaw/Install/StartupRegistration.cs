@@ -101,12 +101,16 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
 
         AppLog.Info("TaskScheduler", "Startup task repair required.", ("TaskFound", current is not null), ("RepairRequired", true));
 
-        // 2. Ordinary (non-elevated) registration.
+        // 2. Ordinary (non-elevated) registration -- proven only by an exact non-elevated readback,
+        //    the same contract the elevated path uses (PR10 addendum section 15, review [P1]). This
+        //    task is the mandatory next-logon Runtime guarantee before Center M can be disabled.
         var write = _taskStore.Register(configuration);
         if (write == StartupTaskWriteOutcome.Registered)
         {
-            AppLog.Info("TaskScheduler", "Startup task registered.");
-            return StartupRegistrationResult.Enabled();
+            var rereadAfterWrite = SafeRead();
+            var writeVerified = rereadAfterWrite is not null && IsCompliant(rereadAfterWrite, configuration);
+            AppLog.Info("TaskScheduler", "Startup task registered.", ("ReadbackVerified", writeVerified));
+            return writeVerified ? StartupRegistrationResult.Enabled() : StartupRegistrationResult.Failed();
         }
         if (write == StartupTaskWriteOutcome.Failed)
             return StartupRegistrationResult.Failed();

@@ -64,6 +64,20 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         Assert.Equal(0, elevated.Calls);
     }
 
+    [Fact] // review [P1]: a non-elevated write that reports Registered is still proven by readback
+    public void A_non_elevated_registration_that_reads_back_drifted_fails()
+    {
+        var store = new FakeTaskStore
+        {
+            Current = null,
+            NextRegister = StartupTaskWriteOutcome.Registered,
+            RegisteredReadback = new OwnedStartupTaskState(true, @"C:\wrong.exe", "--background", User, 3, 0),
+        };
+
+        Assert.False(Manager(store, new FakeElevated()).Synchronize(true).Success);
+        Assert.Equal(1, store.RegisterCalls);
+    }
+
     [Theory] // drift: any of these must not read as compliant
     [InlineData("args")]
     [InlineData("disabled")]
@@ -175,6 +189,7 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     {
         public OwnedStartupTaskState? Current;
         public StartupTaskWriteOutcome NextRegister = StartupTaskWriteOutcome.Registered;
+        public OwnedStartupTaskState? RegisteredReadback; // what a "Registered" write actually leaves behind
         public int RegisterCalls;
         public int DeleteCalls;
         public int ReadCalls;
@@ -185,7 +200,8 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         {
             RegisterCalls++;
             if (NextRegister == StartupTaskWriteOutcome.Registered)
-                Current = new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId, 3, 0);
+                Current = RegisteredReadback
+                    ?? new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId, 3, 0);
             return NextRegister;
         }
 

@@ -13,11 +13,14 @@ public sealed class AddonControllerHidHideBaselineTests
     private const string AddonExe = @"C:\Program Files\SteamInputAddonForClaw\SteamInputAddonforClaw.exe";
     private const string AddonExeMixedCase = @"c:\program files\steaminputaddonforclaw\steaminputaddonforclaw.exe";
     private const string ForeignExe = @"C:\Program Files\ClawTweaks\ClawTweaks.exe";
+    // The resolver returns these two canonical paths; a compliant whitelist must contain EXACTLY
+    // these, compared by resolved path (never by filename -- review [P1]).
     private const string OfficialCli = @"C:\Program Files\Nefarius Software Solutions\HidHide\x64\HidHideCLI.exe";
     private const string OfficialClient = @"C:\Program Files\Nefarius Software Solutions\HidHide\x64\HidHideClient.exe";
-    // Filename-only entries, exactly as the real HidHide Applications list stores them.
-    private const string CliByName = "HidHideCLI.exe";
-    private const string ClientByName = "HidHideClient.exe";
+    private const string CliByName = OfficialCli;
+    private const string ClientByName = OfficialClient;
+    // A stale registration from an OLD HidHide install location -- same filename, different path.
+    private const string StaleCli = @"C:\Old\HidHide\HidHideCLI.exe";
     private const string Pid1902Collection = @"HID\VID_0DB0&PID_1902&MI_00\7&ABCDEF&0&0000";
     private const string OtherHidden = @"HID\VID_0DB0&PID_1902&MI_03\7&ABCDEF&0&0003";
 
@@ -109,8 +112,8 @@ public sealed class AddonControllerHidHideBaselineTests
 
         Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
         Assert.Equal(3, client.Whitelist.Count);
-        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFileName(e), CliByName, StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFileName(e), ClientByName, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(OfficialCli), StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(OfficialClient), StringComparison.OrdinalIgnoreCase));
         Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), AddonExe, StringComparison.OrdinalIgnoreCase));
         Assert.Empty(client.Hidden);
         Assert.True(client.Active);
@@ -130,10 +133,21 @@ public sealed class AddonControllerHidHideBaselineTests
 
         Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
         Assert.DoesNotContain(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(ForeignExe), StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFileName(e), CliByName, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(OfficialCli), StringComparison.OrdinalIgnoreCase));
         Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), AddonExe, StringComparison.OrdinalIgnoreCase));
         Assert.Equal([Pid1902Collection], client.Hidden);
         Assert.True(client.Active);
+    }
+
+    [Fact] // review [P1]: a stale registration at an OLD install path is removed; the canonical one is added
+    public void Apply_removes_a_stale_same_named_official_entry_and_adds_the_resolved_canonical_path()
+    {
+        var client = new FakeHidHideClient { Whitelist = [StaleCli, OfficialClient, AddonExe], Hidden = [Pid1902Collection], Active = true };
+        var result = Baseline(client).ApplyDisabledModeBaseline([Pid1902Collection]);
+
+        Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
+        Assert.DoesNotContain(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(StaleCli), StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(OfficialCli), StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact] // section 4.1: a missing official whose canonical path cannot be resolved is a prerequisite gap
@@ -143,7 +157,7 @@ public sealed class AddonControllerHidHideBaselineTests
         var result = Baseline(client, resolveOfficials: false).ApplyDisabledModeBaseline([]);
 
         Assert.Equal(AddonHidHideBaselineOutcome.Unavailable, result.Outcome);
-        Assert.Contains("OfficialHidHideCliPathUnresolved", result.Reason);
+        Assert.Contains("OfficialHidHidePathUnresolved", result.Reason);
     }
 
     // ---- Apply with an exact PID1902 target ----
@@ -276,8 +290,8 @@ public sealed class AddonControllerHidHideBaselineTests
 
         Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
         Assert.DoesNotContain(client.Whitelist, e => string.Equals(Path.GetFullPath(e), AddonExe, StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFileName(e), CliByName, StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFileName(e), ClientByName, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(OfficialCli), StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(OfficialClient), StringComparison.OrdinalIgnoreCase));
         Assert.Empty(client.Hidden);
         Assert.False(client.Active);
         Assert.False(client.Inverse);
@@ -315,6 +329,24 @@ public sealed class AddonControllerHidHideBaselineTests
     {
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = [Pid1902Collection], Active = true, KeepHiddenOnRemove = true };
         Assert.Equal(AddonHidHideBaselineOutcome.VerificationFailed, Baseline(client).ApplyEnabledModeBaseline([Pid1902Collection]).Outcome);
+    }
+
+    [Fact] // review [P1]: an unresolved third-party entry must not trap the user in Addon authority
+    public void Clear_succeeds_with_an_unresolved_third_party_whitelist_entry_present()
+    {
+        var client = new FakeHidHideClient
+        {
+            Whitelist = [CliByName, ClientByName, AddonExe],
+            Hidden = [Pid1902Collection],
+            Active = true,
+            HasUnresolvedWhitelistEntries = true, // a stale third-party entry that can no longer be converted
+        };
+        var result = Baseline(client).ApplyEnabledModeBaseline([Pid1902Collection]);
+
+        Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
+        Assert.DoesNotContain(client.Whitelist, e => string.Equals(Path.GetFullPath(e), AddonExe, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(client.Hidden, e => string.Equals(e, Pid1902Collection, StringComparison.OrdinalIgnoreCase));
+        Assert.False(client.Active);
     }
 
     // ---- Persistence / independence from routing recovery ----
