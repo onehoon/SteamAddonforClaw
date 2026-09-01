@@ -118,6 +118,29 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Device_page_owns_an_msi_center_m_startup_card_above_tdp_with_explicit_buttons()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+
+        // Center M ownership lives on the Device page, above TDP Control (work order PR1 section 3).
+        Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal) >= 0);
+        Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal)
+            < xaml.IndexOf("x:Name=\"TdpExpander\"", StringComparison.Ordinal));
+
+        // Explicit Enable/Disable buttons, not an inverted toggle (work order PR1 section 4).
+        Assert.Contains("x:Name=\"CenterMStartupEnableButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CenterMStartupDisableButton\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Disable MSI Center M", xaml, StringComparison.Ordinal);
+
+        // Informational-only restart message; no "Restart now" action in PR1 (Addendum D).
+        Assert.Contains("Restart Windows to apply this change.", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("Restart now", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("restartRequired: result.Succeeded", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Profile_feature_order_expander_state_and_resolution_contract_are_explicit()
     {
         var root = FindRepositoryRoot();

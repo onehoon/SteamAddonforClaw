@@ -255,7 +255,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // reconciles, so the frontend and the Runtime never observe two different owners.
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
-            intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport);
+            intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
+            // MSI Center M startup Enable/Disable (work order PR1). Gated on the SAME startup
+            // hardware-support fact as OEM1 mapping above -- a non-Claw machine reports the feature
+            // unavailable rather than offering it.
+            centerMStartup: new SteamInputAddonforClaw.CenterMStartup.CenterMStartupControl(startupResult.HardwareSupported));
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();

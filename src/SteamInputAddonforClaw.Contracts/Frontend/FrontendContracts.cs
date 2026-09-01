@@ -147,6 +147,55 @@ public sealed record FrontendSteamInputRoutingMutationResult(FrontendSteamInputR
     public bool Succeeded => Outcome == FrontendSteamInputRoutingMutationOutcome.Succeeded;
 }
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
+
+/// <summary>Whether MSI Center M is configured to start with Windows, judged ONLY from the three
+/// startup roots this feature owns (work order PR1): the <c>MSI_Center_M_Server</c> and
+/// <c>MSI_Center_M_Updater</c> Scheduled Tasks' enabled state and the <c>MSI Foundation Service</c>
+/// configured startup type. <see cref="Partial"/> is any mixed state -- it is surfaced, never
+/// auto-repaired. <see cref="Unavailable"/> means a meaningful startup-configuration snapshot could
+/// not be produced (feature not applicable to the detected hardware, the startup components could not
+/// be identified, or Task Scheduler / SCM state could not be read) -- it is NOT used merely because a
+/// privileged mutation helper failed to start or its UAC prompt was cancelled (PR1 Addendum E).
+/// A <see cref="Disabled"/> configuration does NOT imply Center M is absent from the current Windows
+/// session; the clean baseline only begins after a reboot (work order PR1 section 12).</summary>
+public enum FrontendCenterMStartupState { Enabled, Disabled, Partial, Unavailable }
+
+/// <summary>Narrowly Center-M-startup-specific snapshot (work order PR1 section 5/6) -- not a
+/// generalized Windows service/task administration contract. The three booleans are the actual read
+/// Windows state of each root; <see cref="State"/> is their classification. For the Foundation
+/// Service, <see cref="FoundationServiceEnabled"/> reflects the configured startup type
+/// (<c>Automatic</c>/<c>Manual</c> =&gt; enabled, <c>Disabled</c> =&gt; disabled) -- never whether the
+/// service is currently Running (work order PR1 section 7 / Addendum F).</summary>
+public sealed record FrontendCenterMStartupSnapshot(
+    FrontendCenterMStartupState State,
+    bool ServerTaskEnabled,
+    bool UpdaterTaskEnabled,
+    bool FoundationServiceEnabled,
+    string? FailureMessage)
+{
+    public static readonly FrontendCenterMStartupSnapshot Unavailable =
+        new(FrontendCenterMStartupState.Unavailable, false, false, false, null);
+}
+
+/// <summary>Outcome of one Enable/Disable action over the three startup roots (work order PR1
+/// section 8/9, PR1 Addendum E). Never collapsed to a bool -- <see cref="Cancelled"/> (the user
+/// dismissed the elevation prompt before the mutation completed) must be distinguishable from
+/// <see cref="Failed"/> (the mutation was attempted but read-back did not verify the requested
+/// configuration) and from <see cref="Unavailable"/> (the feature itself cannot be operated).</summary>
+public enum FrontendCenterMStartupMutationOutcome { Succeeded, Cancelled, Failed, Unavailable }
+
+/// <summary>Result of a Center M startup Enable/Disable. <see cref="Snapshot"/> is always the latest
+/// actual three-root Windows state -- after <see cref="FrontendCenterMStartupMutationOutcome.Cancelled"/>
+/// or <see cref="FrontendCenterMStartupMutationOutcome.Failed"/> it carries the real resulting state
+/// (often <see cref="FrontendCenterMStartupState.Partial"/>), never a fabricated "requested"
+/// state.</summary>
+public sealed record FrontendCenterMStartupMutationResult(
+    FrontendCenterMStartupMutationOutcome Outcome,
+    FrontendCenterMStartupSnapshot Snapshot,
+    string? FailureMessage)
+{
+    public bool Succeeded => Outcome == FrontendCenterMStartupMutationOutcome.Succeeded;
+}
 public sealed record FrontendVibrationTestResult(bool Succeeded, string Reason, string? LogFilePath);
 /// <param name="Oem1MappingAvailable">Whether the Center M (OEM1) mapping feature exists at all on
 /// this machine. It is the runtime's single startup hardware-support result (a supported MSI Claw),
@@ -245,6 +294,15 @@ public interface IAddonFrontendControl
         Task.FromException<FrontendSettingsSnapshot>(new NotSupportedException("WING mapping is unavailable."));
     Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default);
     Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default);
+    /// <summary>Captures the current MSI Center M startup configuration (work order PR1). Read-only:
+    /// opening the Device page and capturing this must not mutate any Windows state.</summary>
+    Task<FrontendCenterMStartupSnapshot> CaptureCenterMStartupAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendCenterMStartupSnapshot.Unavailable);
+    /// <summary>Writes all three MSI Center M startup roots to the requested state and returns the
+    /// read-back-verified result (work order PR1 section 8). Does NOT stop/start the running Center M
+    /// session -- the new state becomes the baseline only after a Windows restart.</summary>
+    Task<FrontendCenterMStartupMutationResult> SetCenterMStartupEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M startup control is unavailable."));
     Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendVibrationTestResult(false, "Vibration test is unavailable.", null));
     /// <summary>Opens the dedicated Vibration Test diagnostic session: creates the session log file
