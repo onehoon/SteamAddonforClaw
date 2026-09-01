@@ -1,0 +1,13 @@
+<Window
+    x:Class="SteamInputAddonforClaw.Overlay.OverlayWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Background="#FF20242B" Padding="28">
+        <StackPanel Spacing="16">
+            <TextBlock Text="Addon Quick Settings" FontSize="28" FontWeight="SemiBold" />
+            <TextBlock Text="Overlay POC-A" FontSize="18" />
+            <TextBlock x:Name="GeometryText" TextWrapping="Wrap" />
+            <Button Content="Close POC" Click="OnCloseClicked" HorizontalAlignment="Left" />
+        </StackPanel>
+    </Grid>
+</Window>

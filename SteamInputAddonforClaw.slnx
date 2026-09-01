@@ -7,6 +7,7 @@
   <Project Path="src/SteamInputAddonforClaw.FrontendTransport/SteamInputAddonforClaw.FrontendTransport.csproj" />
   <Project Path="src/SteamInputAddonforClaw.QamHost/SteamInputAddonforClaw.QamHost.csproj" />
   <Project Path="src/SteamInputAddonforClaw.UI/SteamInputAddonforClaw.UI.csproj" />
+  <Project Path="src/SteamInputAddonforClaw.Overlay/SteamInputAddonforClaw.Overlay.csproj" />
   <Project Path="src/SteamInputAddonforClaw.TdpHelper/SteamInputAddonforClaw.TdpHelper.csproj" />
   <Project Path="tests/SteamInputAddonforClaw.Tests/SteamInputAddonforClaw.Tests.csproj" />
 </Solution>
