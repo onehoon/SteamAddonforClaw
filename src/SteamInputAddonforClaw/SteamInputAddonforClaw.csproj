@@ -22,6 +22,9 @@
     <!-- Dormant OEM1 helper binary: not linked, just built and copied alongside this app's output
          so CenterMHelperStaging can find and stage it at runtime. See CopyCenterMHelperOutput. -->
     <ProjectReference Include="..\SteamInputAddonforClaw.CenterMHelper\SteamInputAddonforClaw.CenterMHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <!-- Privileged MSI Center M startup Enable/Disable helper (work order PR1): not linked, built and
+         copied alongside this app's output so CenterMStartupHelperClient can spawn it with runas. -->
+    <ProjectReference Include="..\SteamInputAddonforClaw.CenterMStartupHelper\SteamInputAddonforClaw.CenterMStartupHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 
   <Target Name="PublishTdpHelper" BeforeTargets="CopyTdpHelperOutput">
@@ -35,6 +38,19 @@
     <Error Text="TDP helper publish output not found." Condition="!Exists('%(TdpHelperOutput.Identity)')" />
     <Copy SourceFiles="@(TdpHelperOutput)" DestinationFolder="$(OutDir)" />
     <Copy SourceFiles="@(TdpHelperOutput)" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != ''" />
+  </Target>
+
+  <Target Name="PublishCenterMStartupHelper" BeforeTargets="CopyCenterMStartupHelperOutput">
+    <MSBuild Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMStartupHelper\SteamInputAddonforClaw.CenterMStartupHelper.csproj" Targets="Publish" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=false;PublishSingleFile=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMStartupHelper\bin\$(Configuration)\net10.0\win-x64\publish\" />
+  </Target>
+
+  <Target Name="CopyCenterMStartupHelperOutput" AfterTargets="Build;Publish">
+    <ItemGroup>
+      <CenterMStartupHelperOutput Include="..\SteamInputAddonforClaw.CenterMStartupHelper\bin\$(Configuration)\net10.0\win-x64\publish\SteamInputAddonforClaw.CenterMStartupHelper.exe" />
+    </ItemGroup>
+    <Error Text="MSI Center M startup helper publish output not found." Condition="!Exists('%(CenterMStartupHelperOutput.Identity)')" />
+    <Copy SourceFiles="@(CenterMStartupHelperOutput)" DestinationFolder="$(OutDir)" />
+    <Copy SourceFiles="@(CenterMStartupHelperOutput)" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != ''" />
   </Target>
 
   <!-- The staged/renamed helper is built via its own NativeAOT Publish target rather than just
