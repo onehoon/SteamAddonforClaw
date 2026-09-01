@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Linq;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
 using Xunit;
@@ -48,6 +49,108 @@ public sealed class OverlayTransportTests
 
         Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);
         Assert.Contains("version", response.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Pre_navigation_v2_peer_is_rejected_by_the_overlay_server()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await OverlayWireCodec.WriteAsync(client, new(2, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        var response = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
+
+        Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);
+    }
+
+    [Fact]
+    public async Task Server_delivers_a_semantic_navigation_frame_to_a_visible_overlay()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var actions = new List<OverlayNavigationAction>();
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = client.RunAsync(_ => Task.CompletedTask, action =>
+        {
+            lock (actions) actions.Add(action);
+            received.TrySetResult();
+            return Task.CompletedTask;
+        });
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        Assert.True(await server.SendNavigationAsync(OverlayNavigationAction.NavigateDown));
+        await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        lock (actions) Assert.Equal([OverlayNavigationAction.NavigateDown], actions);
+        Assert.Equal(OverlayState.Visible, server.State);
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Hidden_or_unready_overlay_does_not_accept_navigation_delivery()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+
+        // No client connected yet -> unready.
+        Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.Accept));
+
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var run = client.RunAsync(_ => Task.CompletedTask, _ => Task.CompletedTask);
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+
+        // Ready but still Hidden (no Show yet).
+        Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.Accept));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
+        // Back to Hidden -> rejected again.
+        Assert.False(await server.SendNavigationAsync(OverlayNavigationAction.Accept));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Command_and_navigation_frames_stay_intact_through_the_shared_write_gate()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var actions = new List<OverlayNavigationAction>();
+        var all = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = client.RunAsync(_ => Task.CompletedTask, action =>
+        {
+            lock (actions)
+            {
+                actions.Add(action);
+                if (actions.Count == 6) all.TrySetResult();
+            }
+            return Task.CompletedTask;
+        });
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+
+        var everyAction = Enum.GetValues<OverlayNavigationAction>();
+        await Task.WhenAll(everyAction.Select(a => server.SendNavigationAsync(a)));
+        await all.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        lock (actions) Assert.Equal(everyAction.OrderBy(x => x), actions.OrderBy(x => x));
+
+        // Connection still usable for a normal command after the navigation burst.
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
+        Assert.Equal(OverlayState.Hidden, server.State);
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

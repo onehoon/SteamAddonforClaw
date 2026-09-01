@@ -7,18 +7,23 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 
 internal static class OverlayTransportProtocol
 {
-    internal const int CurrentVersion = 2;
+    // Version 3 (OQ4): adds the Runtime -> Overlay Navigation message and OverlayNavigationAction.
+    // Semantic, edge-driven navigation only -- no ControllerState / buttons / sticks / raw reports
+    // ever cross this wire. A v2 peer must fail the handshake rather than silently ignore Navigation.
+    internal const int CurrentVersion = 3;
     internal const int MaxFrameBytes = 64 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, State, DismissRequested, ProtocolError }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError }
 internal enum OverlayCommand { Show, Hide, Shutdown }
+internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back }
 internal enum OverlayState { Ready, Visible, Hidden }
 
 internal sealed record OverlayWireMessage(
     int ProtocolVersion,
     OverlayWireMessageKind Kind,
     OverlayCommand? Command = null,
+    OverlayNavigationAction? Navigation = null,
     OverlayState? State = null,
     string? Error = null);
 
@@ -172,6 +177,30 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         finally { _commandGate.Release(); }
     }
 
+    // OQ4: fire-and-forget semantic navigation. No acknowledgement round-trip, no queue, no retry.
+    // Only delivered while the connection is Ready and the surface is Visible; uses the same server
+    // write gate as commands so navigation and command frames cannot interleave bytes.
+    internal async Task<bool> SendNavigationAsync(OverlayNavigationAction action, CancellationToken token = default)
+    {
+        NamedPipeServerStream? pipe;
+        lock (_sync)
+        {
+            if (!_readyState || _state != OverlayState.Visible) return false;
+            pipe = _activePipe;
+        }
+        if (pipe is null) return false;
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.Navigation, Navigation: action), _writeGate, linked.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
+        {
+            return false;
+        }
+    }
+
     private async Task AcceptLoopAsync()
     {
         while (!_lifetime.IsCancellationRequested)
@@ -229,7 +258,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
             if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                 throw new FrontendProtocolException("Invalid Overlay state message.");
 
-            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.State is null && message.Error is null)
+            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null)
             {
                 DismissRequested?.Invoke(this);
                 continue;
@@ -281,6 +310,9 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     internal NamedPipeOverlayClient(string pipeName) => _pipeName = pipeName;
 
     internal async Task RunAsync(Func<OverlayCommand, Task> commandHandler, CancellationToken token = default)
+        => await RunAsync(commandHandler, null, token).ConfigureAwait(false);
+
+    internal async Task RunAsync(Func<OverlayCommand, Task> commandHandler, Func<OverlayNavigationAction, Task>? navigationHandler, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -296,7 +328,17 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         while (!linked.IsCancellationRequested)
         {
             var message = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
-            if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion || message.Kind != OverlayWireMessageKind.Command || message.Command is null)
+            if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
+                throw new FrontendProtocolException("Invalid Overlay message.");
+            if (message.Kind == OverlayWireMessageKind.Navigation)
+            {
+                if (message.Navigation is null || message.Command is not null || message.State is not null || message.Error is not null)
+                    throw new FrontendProtocolException("Invalid Overlay navigation message.");
+                if (navigationHandler is not null)
+                    await navigationHandler(message.Navigation.Value).ConfigureAwait(false);
+                continue;
+            }
+            if (message.Kind != OverlayWireMessageKind.Command || message.Command is null || message.Navigation is not null)
                 throw new FrontendProtocolException("Invalid Overlay command message.");
             await commandHandler(message.Command.Value).ConfigureAwait(false);
             if (message.Command == OverlayCommand.Show)
