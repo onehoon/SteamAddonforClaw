@@ -66,7 +66,9 @@ internal static class AppLog
     public static void Info(string category, string message, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Info, category, message, null, fields);
     public static void Warn(string category, string message, Exception? exception = null, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Warn, category, message, exception, fields);
     public static void Error(string message, Exception exception) => Error("App", message, exception);
-    public static void Error(string category, string message, Exception exception, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Error, category, message, exception, fields);
+    // Exception is optional, mirroring Warn: an error-severity event (e.g. "ownership retained after a
+    // failed teardown/detach") is not always the result of a thrown exception.
+    public static void Error(string category, string message, Exception? exception, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Error, category, message, exception, fields);
     public static void Fatal(string category, string message, Exception exception) => Write(AppLogLevel.Fatal, category, message, exception, []);
 
     private static void Write(AppLogLevel level, string category, string message, Exception? exception, IReadOnlyList<(string Key, object? Value)> fields)

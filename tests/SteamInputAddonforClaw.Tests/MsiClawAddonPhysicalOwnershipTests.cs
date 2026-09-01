@@ -19,6 +19,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     private const string PhysKey = @"USB\VID_0DB0\SERIAL123";
     private const string OtherPhysKey = @"USB\VID_0DB0\SERIAL999";
     private const string PrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&abcdef&0&0000";
+    private const string OtherPrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&999999&0&0000";
     private const string NonPrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_03\7&abcdef&0&0003";
 
     // ---- 25.1 already PID1902 ----
@@ -406,6 +407,269 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.False(h.InputSource.StopCalled);
     }
 
+    // ================= PR8: owned DirectInput session recovery (work order section 21) =================
+
+    private static async Task<(MsiClawAddonPhysicalOwnership Owner, Harness Harness)> AcquiredThenLost(Harness h)
+    {
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+        h.InputSource.SimulateSessionLoss();
+        h.Recovering = true;
+        h.Events.Clear();
+        return (owner, h);
+    }
+
+    [Fact] // 21.1
+    public async Task Recovery_of_the_same_pid1902_reacquires_the_same_source_with_no_mode_write()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(recovery.IsOwned);
+        Assert.Equal("OwnedPhysicalInputRecovered", recovery.Reason);
+        Assert.Equal(PrimaryPnp, recovery.HiddenTarget);
+        Assert.Same(h.InputSource, owner.LiveInputSource);
+        Assert.True(h.InputSource.IsRunning);
+        Assert.Equal(2, h.InputSource.StartCallCount); // the SAME source, started again
+        Assert.Equal(0, h.SwitchCalls);
+    }
+
+    [Fact] // 21.2 -- mandatory ordering
+    public async Task Recovery_verifies_hidhide_before_restarting_directinput()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+
+        await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(
+            new[] { "NativeCapture", "DescriptorResolve", "HidHideApply", "InputStart", "FirstValidState" },
+            h.Events);
+    }
+
+    [Fact] // 21.3
+    public async Task Recovery_onto_a_different_strong_identity_fails_with_no_hidhide_no_start_no_mode_write()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryPhysKey = OtherPhysKey;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("PhysicalIdentityMismatch", recovery.Reason);
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.DoesNotContain("InputStart", h.Events);
+        Assert.Equal(0, h.SwitchCalls);
+    }
+
+    [Fact] // 21.4 -- PID1901 detected, never reclaimed in PR8
+    public async Task Recovery_detecting_pid1901_drift_fails_closed_with_zero_mode_write()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryMode = MsiClawNativeMode.XInput;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Equal("OwnedPhysicalStateDriftPid1901", recovery.Reason);
+        Assert.Equal(0, h.SwitchCalls);
+        Assert.DoesNotContain("InputStart", h.Events);
+    }
+
+    [Theory] // 21.5
+    [InlineData("DeviceNotFound")]
+    [InlineData("Indeterminate")]
+    public async Task Recovery_with_missing_or_ambiguous_native_state_makes_no_mutation(string status)
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryCaptureStatus = Enum.Parse<NativeStateCaptureStatus>(status);
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("PhysicalDeviceMissing", recovery.Reason);
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.DoesNotContain("InputStart", h.Events);
+        Assert.Equal(0, h.SwitchCalls);
+    }
+
+    [Fact] // 21.6
+    public async Task Recovery_when_the_exact_target_changed_does_not_migrate_or_restart()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryPnp = OtherPrimaryPnp;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("RecoveredTargetChanged", recovery.Reason);
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.DoesNotContain("InputStart", h.Events);
+        Assert.Equal(new[] { PrimaryPnp }, h.HidHideApplied); // only the original acquisition
+    }
+
+    [Theory] // 21.7
+    [InlineData("Conflict")]
+    [InlineData("Unavailable")]
+    [InlineData("MutationFailed")]
+    [InlineData("VerificationFailed")]
+    public async Task Recovery_blocked_by_hidhide_does_not_restart_directinput(string outcome)
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryHidHideOutcome = Enum.Parse<AddonHidHideBaselineOutcome>(outcome);
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("HidHideReconcileFailed", recovery.Reason);
+        Assert.DoesNotContain("InputStart", h.Events);
+        Assert.Null(owner.LiveInputSource);
+    }
+
+    [Fact] // 21.8
+    public async Task Recovery_directinput_start_failure_leaves_output_neutral_without_pid_or_hidhide_teardown()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.InputSource.StartResult = MsiClawInputStartStatus.AcquireFailed;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("DirectInputStartFailed", recovery.Reason);
+        Assert.Null(owner.LiveInputSource);
+        Assert.Equal(0, h.SwitchCalls);
+    }
+
+    [Fact] // 21.9
+    public async Task Recovery_first_valid_state_failure_stops_the_partial_session_and_stays_not_live()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.InputSource.FirstValidState = false;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("FirstValidStateNotObserved", recovery.Reason);
+        Assert.True(h.InputSource.StopCalled);
+        Assert.Null(owner.LiveInputSource);
+    }
+
+    [Fact] // 21.10
+    public async Task Recovery_is_a_noop_when_the_source_is_still_running()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+        h.Recovering = true;
+        h.Events.Clear();
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(recovery.IsOwned);
+        Assert.Equal("RecoveryNotNeeded", recovery.Reason);
+        Assert.Empty(h.Events);
+        Assert.Same(h.InputSource, owner.LiveInputSource);
+    }
+
+    [Fact] // 21.11
+    public async Task Explicit_release_still_works_after_a_failed_recovery()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryMode = MsiClawNativeMode.XInput; // force recovery failure
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.RecoverLostInputAsync(default)).Outcome);
+
+        h.Recovering = false;
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Equal(PrimaryPnp, release.HiddenTarget); // owned target evidence retained through the failure
+    }
+
+    [Fact] // section 10.8
+    public async Task Recovery_fails_closed_when_center_m_is_no_longer_exactly_disabled()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryAuthority = FrontendCenterMStartupState.Enabled;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("AuthorityNotDisabled", recovery.Reason);
+        Assert.DoesNotContain("HidHideApply", h.Events);
+        Assert.DoesNotContain("InputStart", h.Events);
+    }
+
+    [Fact] // section 9
+    public async Task Recovery_is_refused_after_release_for_center_m_enable()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        var owner = h.Build();
+        await owner.AcquireAsync(default);
+        await owner.ReleaseForCenterMEnableAsync(default);
+        h.InputSource.SimulateSessionLoss();
+        h.Recovering = true;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("ReleasedForCenterMEnable", recovery.Reason);
+    }
+
+    [Fact] // section 9 -- recovery before ownership was ever committed
+    public async Task Recovery_without_a_committed_acquisition_is_refused()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, DirectInputMissingAttempts = int.MaxValue };
+        var owner = h.Build();
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.AcquireAsync(default)).Outcome);
+        h.Recovering = true;
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Equal("OwnerNotCommitted", recovery.Reason);
+    }
+
+    [Fact] // work order sections 7 / 11 / 15 / 22 -- host wiring for the owned-input completion callback
+    public void Host_wires_the_owned_input_completion_callback_and_drains_recovery_first_on_shutdown()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
+
+        // The one completion signal is subscribed at the existing construction seam.
+        Assert.Contains("directInputInputSource.TestCompleted += OnOwnedControllerPhysicalInputCompleted;", host, StringComparison.Ordinal);
+        // Expected stop and pre-commit startup completions do not schedule recovery.
+        Assert.Contains("summary.StopReason == Devices.MSI.Claw.MsiClawInputStopReason.Stopped", host, StringComparison.Ordinal);
+        Assert.Contains("!summary.CleanupSucceeded", host, StringComparison.Ordinal);
+        // Successful recovery requests the existing PR7 reconcile -- no duplicated Steam/BPM policy.
+        Assert.Contains("RequestControllerPresentationReconcile(\"PhysicalInputRecovered\")", host, StringComparison.Ordinal);
+        // Shutdown drains the recovery BEFORE the presentation reconcile it may itself request.
+        Assert.True(
+            host.IndexOf("await _ownedControllerRecovery.ConfigureAwait(false);", StringComparison.Ordinal)
+            < host.IndexOf("await _presentationReconcile.ConfigureAwait(false);", StringComparison.Ordinal),
+            "owned physical recovery must be drained before the presentation reconcile");
+        // No polling / timer / recovery-manager framework.
+        foreach (var forbidden in new[] { "ControllerRecoveryManager", "PhysicalRecoveryManager", "RecoveryTimer", "PeriodicTimer" })
+            Assert.DoesNotContain(forbidden, host, StringComparison.Ordinal);
+    }
+
+    [Fact] // work order sections 13 / 23 -- no legacy authority / recovery-framework surface
+    public void Recovery_code_introduces_no_legacy_takeover_or_recovery_framework_symbols()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPhysicalOwnership.cs"));
+
+        Assert.Contains("RecoverLostInputAsync", source, StringComparison.Ordinal);
+        foreach (var forbidden in new[]
+        {
+            "ExternalNativeTakeover", "ConfirmExternalNativeTakeover", "retryCurrentSessionAfterSafeCleanup",
+            "ApplyEnabledModeBaseline", "ControllerRecoveryManager", "PhysicalRecoveryManager",
+            "Timer", "epoch", "generation", "RecoveryBarrier",
+        })
+            Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
+    }
+
     // ---- 30 architecture guard ----
 
     [Fact]
@@ -463,6 +727,16 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public string DirectInputPnpPhysKey { get; set; } = PhysKey;
         public AddonHidHideBaselineOutcome HidHideOutcome { get; set; } = AddonHidHideBaselineOutcome.Success;
 
+        // ---- PR8 recovery knobs (only consulted once Recovering is set) ----
+        public bool Recovering { get; set; }
+        public MsiClawNativeMode? RecoveryMode { get; set; }
+        public NativeStateCaptureStatus? RecoveryCaptureStatus { get; set; }
+        public string? RecoveryPhysKey { get; set; }
+        public string? RecoveryPnp { get; set; }
+        public AddonHidHideBaselineOutcome? RecoveryHidHideOutcome { get; set; }
+        public FrontendCenterMStartupState? RecoveryAuthority { get; set; }
+        public List<string> Events { get; } = [];
+
         public int SwitchCalls { get; private set; }
         public MsiClawNativeMode LastSwitchTarget { get; private set; }
         public List<MsiClawNativeMode> SwitchTargets { get; } = [];
@@ -474,12 +748,32 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public int AuthorityReads { get; private set; }
         public bool SwitchFailsForRelease { get; set; }
 
-        public MsiClawAddonPhysicalOwnership Build() => new(
-            () => { AuthorityReads++; return Authority; },
-            _ => Task.FromResult(Capture(
-                SwitchCalls == 0 ? InitialMode : LastSwitchTarget,
-                SwitchCalls == 0 ? InitialConfidence : MsiClawIdentityConfidence.Strong,
-                SwitchCalls == 0 ? PhysKey : FinalPhysKey)),
+        private string EffectivePnp => Recovering && RecoveryPnp is not null ? RecoveryPnp : DirectInputPnp;
+
+        public MsiClawAddonPhysicalOwnership Build()
+        {
+            InputSource.Events = Events;
+            return new(
+            () =>
+            {
+                AuthorityReads++;
+                return Recovering && RecoveryAuthority is { } authority ? authority : Authority;
+            },
+            _ =>
+            {
+                if (Recovering)
+                {
+                    Events.Add("NativeCapture");
+                    return Task.FromResult(Capture(
+                        RecoveryMode ?? MsiClawNativeMode.DirectInput,
+                        MsiClawIdentityConfidence.Strong,
+                        RecoveryPhysKey ?? FinalPhysKey));
+                }
+                return Task.FromResult(Capture(
+                    SwitchCalls == 0 ? InitialMode : LastSwitchTarget,
+                    SwitchCalls == 0 ? InitialConfidence : MsiClawIdentityConfidence.Strong,
+                    SwitchCalls == 0 ? PhysKey : FinalPhysKey));
+            },
             (target, _, _) =>
             {
                 SwitchCalls++;
@@ -494,6 +788,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             () =>
             {
                 DirectInputEnumerateCalls++;
+                if (Recovering) Events.Add("DescriptorResolve");
                 if (DirectInputAmbiguous)
                     return [Descriptor(Guid.NewGuid()), Descriptor(Guid.NewGuid(), physId: "OTHER")];
                 if (DirectInputEnumerateCalls <= DirectInputMissingAttempts)
@@ -502,22 +797,29 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                     return [Descriptor(Guid.NewGuid(), unverified: true)]; // PID1902 present, identity not yet resolved
                 return [Descriptor(Guid.NewGuid())];
             },
-            instanceId => instanceId == DirectInputPnp ? PnpDevice(DirectInputPnpPhysKey) : null,
+            instanceId => instanceId == EffectivePnp
+                ? PnpDevice(EffectivePnp, Recovering ? RecoveryPhysKey ?? DirectInputPnpPhysKey : DirectInputPnpPhysKey)
+                : null,
             InputSource,
             target =>
             {
                 HidHideApplied.Add(target);
-                return new AddonHidHideBaselineResult(HidHideOutcome, HidHideOutcome.ToString(), AddonHidHideBaselineSnapshot.Unknown);
+                if (Recovering) Events.Add("HidHideApply");
+                var outcome = Recovering && RecoveryHidHideOutcome is { } recoveryOutcome ? recoveryOutcome : HidHideOutcome;
+                return new AddonHidHideBaselineResult(outcome, outcome.ToString(), AddonHidHideBaselineSnapshot.Unknown);
             },
             () => ExistingOwnedTarget,
             delay: (_, _) => Task.CompletedTask,
             directInputSettleWindow: TimeSpan.FromMilliseconds(200),
             directInputSettleInterval: TimeSpan.FromMilliseconds(1));
+        }
 
         private NativeStateCaptureResult Capture(MsiClawNativeMode mode, MsiClawIdentityConfidence confidence, string physKey)
         {
-            if (InitialCaptureStatus != NativeStateCaptureStatus.Success)
+            if (!Recovering && InitialCaptureStatus != NativeStateCaptureStatus.Success)
                 return new(InitialCaptureStatus, null, InitialCaptureStatus.ToString());
+            if (Recovering && RecoveryCaptureStatus is { } status && status != NativeStateCaptureStatus.Success)
+                return new(status, null, status.ToString());
             var payload = new MsiClawNativeStatePayload(mode, "inst", "USB\\parent", null, 0x1902, confidence, physKey);
             var snapshot = new DeviceNativeStateSnapshot(new HandheldDeviceId("msi.claw"), 1, DateTimeOffset.UtcNow,
                 JsonSerializer.SerializeToElement(payload));
@@ -527,15 +829,15 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         private DirectInputDeviceDescriptor Descriptor(Guid instanceGuid, string? physId = null, bool unverified = false) => new(
             instanceGuid, Guid.NewGuid(), "MSI Claw Controller", 0x0DB0, 0x1902,
             DevicePath: unverified ? null : @"\\?\hid#vid_0db0&pid_1902",
-            PnpInstanceId: unverified ? null : DirectInputPnp,
+            PnpInstanceId: unverified ? null : EffectivePnp,
             PhysicalIdentity: unverified ? null : physId ?? "msi-claw-phys",
             UsagePage: 0x0001, Usage: 0x0005, ButtonCount: 17, AxisCount: 6);
 
-        private static ControllerDeviceInfo PnpDevice(string physKey)
+        private static ControllerDeviceInfo PnpDevice(string instanceId, string physKey)
         {
             var serial = physKey[(physKey.LastIndexOf('\\') + 1)..];
             return new ControllerDeviceInfo(
-                InstanceId: PrimaryPnp,
+                InstanceId: instanceId,
                 ContainerId: null,
                 ParentInstanceId: $@"USB\VID_0DB0&PID_1902&MI_00\6&xyz&0&0000",
                 AncestorInstanceIds: [$@"USB\VID_0DB0&PID_1902\{serial}"],
@@ -551,21 +853,30 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public MsiClawInputStartStatus StartResult { get; set; } = MsiClawInputStartStatus.Started;
         public bool FirstValidState { get; set; } = true;
         public bool StartCalled { get; private set; }
+        public int StartCallCount { get; private set; }
         public bool StopCalled { get; private set; }
         public bool DisposeCalled { get; private set; }
         public bool IsRunning { get; private set; }
+        public List<string>? Events { get; set; }
 
         public event EventHandler<SteamInputAddonforClaw.Input.ControllerState>? StateChanged { add { } remove { } }
+
+        /// <summary>Simulate an unexpected owned-session termination: the poll loop has already
+        /// neutralized state and cleaned up, so the source is simply no longer running.</summary>
+        public void SimulateSessionLoss() => IsRunning = false;
 
         public MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor)
         {
             StartCalled = true;
+            StartCallCount++;
+            Events?.Add("InputStart");
             if (StartResult == MsiClawInputStartStatus.Started) IsRunning = true;
             return new MsiClawInputStartResult(StartResult, StartResult.ToString());
         }
 
         public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken)
         {
+            Events?.Add("FirstValidState");
             if (!FirstValidState) IsRunning = true; // still running, just never valid
             return Task.FromResult(FirstValidState);
         }

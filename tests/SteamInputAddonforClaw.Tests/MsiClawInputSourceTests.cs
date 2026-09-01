@@ -265,6 +265,23 @@ public sealed class MsiClawInputSourceTests
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
     }
 
+    [Fact] // PR8 work order section 22.1: the completion callback the Full-1902 owner subscribes to
+    public async Task UnexpectedCompletion_ObservesNeutralStateAndAStoppedSource()
+    {
+        var device = new FakeDevice(new InvalidOperationException("Read failed"));
+        var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
+        var observed = new TaskCompletionSource<(ControllerState State, bool IsRunning, MsiClawInputStopReason StopReason)>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        source.TestCompleted += (_, summary) => observed.TrySetResult((source.LatestState, source.IsRunning, summary.StopReason));
+
+        Assert.True(source.Start().Started);
+        var snapshot = await observed.Task.WaitAsync(AwaitTimeout);
+
+        Assert.NotEqual(MsiClawInputStopReason.Stopped, snapshot.StopReason);
+        Assert.False(snapshot.IsRunning);
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), snapshot.State);
+    }
+
     [Fact]
     public async Task ShortButtonArray_StopsDiagnosticInsteadOfPollingNeutralState()
     {
