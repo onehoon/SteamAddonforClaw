@@ -6,6 +6,8 @@ public sealed partial class OverlayWindow : Window
 {
     public OverlayWindow() => InitializeComponent();
 
+    internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
+
     internal void PrepareHidden() => ConfigureWindow();
 
     internal void ShowForPoc()

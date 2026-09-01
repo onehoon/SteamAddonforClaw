@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
+using SteamInputAddonforClaw.Overlay.Diagnostics;
 using WinRT.Interop;
 
 namespace SteamInputAddonforClaw.Overlay;
@@ -18,6 +19,8 @@ internal static class WindowInterop
     private const uint WsExNoActivate = 0x08000000;
     private const uint WsExToolWindow = 0x00000080;
 
+    internal static nint GetWindowHandle(OverlayWindow window) => WindowNative.GetWindowHandle(window);
+
     internal static void Configure(OverlayWindow window, out OverlayRect rect, out uint dpi, out string monitorText)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
@@ -26,11 +29,19 @@ internal static class WindowInterop
             ? MonitorFromPoint(new POINT(), MonitorDefaultToPrimary)
             : MonitorFromWindow(foreground, MonitorDefaultToNearest);
         if (monitor == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not select a target monitor.");
+        {
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not select a target monitor.");
+            OverlayLog.Error("Geometry", "Target monitor selection failed.", exception, ("Operation", "MonitorFromWindow"));
+            throw exception;
+        }
 
         var info = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref info))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the target monitor work area.");
+        {
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the target monitor work area.");
+            OverlayLog.Error("Geometry", "Target monitor information read failed.", exception, ("Operation", "GetMonitorInfo"));
+            throw exception;
+        }
 
         var workWidth = Math.Max(0, info.rcWork.Right - info.rcWork.Left);
         var workHeight = Math.Max(0, info.rcWork.Bottom - info.rcWork.Top);
@@ -44,12 +55,18 @@ internal static class WindowInterop
                 workHeight,
                 SwpNoActivate | SwpNoSendChanging | SwpNoZOrder))
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window on the target monitor.");
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window on the target monitor.");
+            OverlayLog.Error("Geometry", "Provisional Overlay placement failed.", exception, ("Operation", "SetWindowPos.Provisional"));
+            throw exception;
         }
 
         dpi = GetDpiForWindow(hwnd);
         if (dpi == 0)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the target-monitor DPI.");
+        {
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the target-monitor DPI.");
+            OverlayLog.Error("Geometry", "Target-monitor DPI read failed.", exception, ("Operation", "GetDpiForWindow"));
+            throw exception;
+        }
 
         rect = OverlayWindowGeometry.Calculate(
             info.rcWork.Left,
@@ -73,21 +90,43 @@ internal static class WindowInterop
         }
 
         if (!SetWindowPos(hwnd, HwndTopmost, rect.X, rect.Y, rect.Width, rect.Height, SwpNoActivate | SwpNoSendChanging))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window.");
+        {
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window.");
+            OverlayLog.Error("Geometry", "Final Overlay placement failed.", exception, ("Operation", "SetWindowPos.Final"));
+            throw exception;
+        }
+
+        OverlayLog.Info("Geometry", "Overlay geometry applied",
+            ("OverlayHwnd", hwnd), ("ForegroundHwnd", foreground),
+            ("MonitorLeft", info.rcMonitor.Left), ("MonitorTop", info.rcMonitor.Top),
+            ("MonitorRight", info.rcMonitor.Right), ("MonitorBottom", info.rcMonitor.Bottom),
+            ("WorkLeft", info.rcWork.Left), ("WorkTop", info.rcWork.Top),
+            ("WorkRight", info.rcWork.Right), ("WorkBottom", info.rcWork.Bottom),
+            ("Dpi", dpi), ("Scale", dpi / 96.0),
+            ("PanelWidthDip", OverlayWindowGeometry.PocPanelWidthDip),
+            ("PanelWidthPx", rect.Width), ("PanelHeightPx", rect.Height));
     }
 
     internal static void ShowWithoutActivation(OverlayWindow window)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
         if (!SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0, SwpNoActivate | SwpNoSendChanging | 0x0001 | 0x0002 | 0x0040))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not show the Overlay window.");
+        {
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not show the Overlay window.");
+            OverlayLog.Error("Window", "Overlay show operation failed.", exception, ("Operation", "SetWindowPos.Show"), ("OverlayHwnd", hwnd));
+            throw exception;
+        }
     }
 
     internal static void Hide(OverlayWindow window)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
         if (!SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SwpNoActivate | SwpNoSendChanging | 0x0001 | 0x0002 | 0x0080))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not hide the Overlay window.");
+        {
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not hide the Overlay window.");
+            OverlayLog.Error("Window", "Overlay hide operation failed.", exception, ("Operation", "SetWindowPos.Hide"), ("OverlayHwnd", hwnd));
+            throw exception;
+        }
     }
 
     [DllImport("user32.dll", SetLastError = true)]
