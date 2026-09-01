@@ -591,6 +591,33 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(PrimaryPnp, recovery.HiddenTarget); // exact owned target unchanged
     }
 
+    [Fact] // review: a reclaim that succeeds then fails LATER in the tail must adopt the fresh PID1902
+           // identity so a PR10 deferred Device Arrival retry continues the same-mode PR8 tail.
+    public async Task Reclaim_that_fails_after_the_switch_still_lets_a_later_same_mode_retry_recover()
+    {
+        var (owner, h) = await AcquiredThenLostAsPid1901(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryPhysKey = @"USB\VID_0DB0\PID1901_ROOT_B";
+        h.RecoveryPhysKeyAfterReclaim = @"USB\VID_0DB0\PID1902_ROOT_C";
+        h.RecoveryPnp = OtherPrimaryPnp; // recovery #1: reclaim succeeds, then the tail fails (target changed)
+
+        var first = await owner.RecoverLostInputAsync(default);
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, first.Outcome);
+        Assert.Contains("RecoveredTargetChanged", first.Reason);
+        Assert.True(first.ModeWriteIssued);
+
+        // The controller is now PID1902 / root C. A later retry (e.g. PR10 deferred arrival) sees the
+        // current same-mode identity, NOT the stale pre-drift one.
+        h.RecoveryPnp = null;
+        h.Events.Clear();
+        var second = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(second.IsOwned);
+        Assert.Equal("OwnedPhysicalInputRecovered", second.Reason); // same-mode PR8 tail
+        Assert.False(second.ModeWriteIssued);
+        Assert.Equal(1, h.RecoverySwitchCalls); // NO second mode write
+        Assert.Same(h.InputSource, owner.LiveInputSource);
+    }
+
     [Theory] // 21.3
     [InlineData("Enabled")]
     [InlineData("Partial")]

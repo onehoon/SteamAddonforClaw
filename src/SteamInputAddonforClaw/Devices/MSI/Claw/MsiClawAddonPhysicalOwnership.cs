@@ -420,6 +420,13 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             if (reclaimedMode != MsiClawNativeMode.DirectInput)
                 return RecoveryFail("OwnedPhysicalStateDriftReclaimFinalModeNotPid1902:" + reclaimedMode, ownedTarget, true);
             finalPid1902Identity = reclaimedIdentity;
+            // Prior ownership was already committed before the loss. The controlled cross-mode
+            // transition + this fresh Strong PID1902 capture now define the CURRENT same-mode PID1902
+            // identity -- adopt it immediately so a later PR10 deferred Device Arrival that retries
+            // after a subsequent recovery-tail failure compares the current identity, not the stale
+            // pre-drift one (review). The exact committed HidHide target is unchanged and still
+            // protects the rest of the recovery tail.
+            _ownedPhysicalIdentity = reclaimedIdentity;
             AppLog.Info("ControllerOwnership", "Owned physical PID1902 reclaim completed.",
                 ("Event", "OwnedPhysicalPid1902ReclaimCompleted"), ("FinalMode", "PID1902"),
                 ("FinalIdentityConfidence", reclaimedIdentity.Confidence), ("CrossModeTransitionVerified", true));
@@ -503,12 +510,9 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
 
         // 10.10 / PR11 section 8.4. Commit. The exact hidden target is unchanged; the existing
         //        publisher is already reading this same source and resumes receiving live snapshots.
-        //        After a PID1901->PID1902 reclaim, refresh the in-memory current PID1902 identity to
-        //        the fresh final identity (in-memory ownership evidence only) now that the whole
-        //        exact-target / HidHide / first-valid proof has passed.
+        //        (After a PID1901->PID1902 reclaim, _ownedPhysicalIdentity was already refreshed to
+        //        the fresh Strong PID1902 identity right after the post-reclaim capture verified.)
         _ownsInputSource = true;
-        if (modeWriteIssued)
-            _ownedPhysicalIdentity = finalPid1902Identity;
         var successReason = modeWriteIssued ? "OwnedPhysicalStateDriftReclaimed" : "OwnedPhysicalInputRecovered";
         AppLog.Info("ControllerOwnership", "Owned physical input recovery succeeded.",
             ("Event", "OwnedPhysicalRecoverySucceeded"), ("Reason", successReason),
