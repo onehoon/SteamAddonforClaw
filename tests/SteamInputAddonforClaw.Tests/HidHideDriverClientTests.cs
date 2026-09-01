@@ -155,6 +155,39 @@ public sealed class HidHideDriverClientTests
         Assert.Equal((byte)(active ? 1 : 0), Assert.Single(device.ActivePayloads));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SetInverseWhitelist_UsesOneByteBooleanAndVerifiesState(bool inverse)
+    {
+        var device = new FakeDevice([], []) { Active = true, Inverse = !inverse };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.SetInverseWhitelist(inverse));
+        Assert.Equal(inverse, device.Inverse);
+        Assert.Equal((byte)(inverse ? 1 : 0), Assert.Single(device.InversePayloads));
+    }
+
+    [Fact]
+    public void SetInverseWhitelist_FailsClosedWhenReadbackDoesNotMatch()
+    {
+        var device = new FakeDevice([], []) { Active = true, Inverse = true, IgnoreInverseWrites = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.False(client.SetInverseWhitelist(false));
+        Assert.True(device.Inverse);
+    }
+
+    [Fact]
+    public void SetInverseWhitelist_UsesTheVerifiedIoctlFunction()
+    {
+        var device = new FakeDevice([], []) { Active = true, Inverse = true };
+        new HidHideDriverClient(new FakeNative(device), Converter()).SetInverseWhitelist(false);
+
+        // (DeviceType 32769 << 16) | (FileReadData 1 << 14) | (2055 << 2)
+        Assert.Contains((32769u << 16) | (1u << 14) | (2055u << 2), device.WrittenControlCodes);
+    }
+
     [Fact]
     public void AddHiddenDevice_ExistingExactEntryDoesNotWrite()
     {
@@ -441,8 +474,10 @@ public sealed class HidHideDriverClientTests
         public List<string> Whitelist { get; } = whitelist;
         public List<string> Blacklist { get; } = blacklist;
         public bool Active { get; set; }
-        public bool Inverse { get; init; }
+        public bool Inverse { get; set; }
+        public bool IgnoreInverseWrites { get; init; }
         public List<byte> ActivePayloads { get; } = [];
+        public List<byte> InversePayloads { get; } = [];
         public List<uint> WrittenFunctions { get; } = [];
         public List<uint> WrittenControlCodes { get; } = [];
         public uint? QuerySizeOverride { get; init; }
@@ -475,6 +510,14 @@ public sealed class HidHideDriverClientTests
                 ActivePayloads.Add(input is { Length: 1 } ? input[0] : byte.MaxValue);
                 if (input is not { Length: 1 }) { bytesReturned = 0; return false; }
                 Active = input[0] != 0; bytesReturned = 0; return true;
+            }
+            if (function == 2055)
+            {
+                WrittenControlCodes.Add(code);
+                InversePayloads.Add(input is { Length: 1 } ? input[0] : byte.MaxValue);
+                if (input is not { Length: 1 }) { bytesReturned = 0; return false; }
+                if (!IgnoreInverseWrites) Inverse = input[0] != 0;
+                bytesReturned = 0; return true;
             }
             if (function == 2049)
             {
