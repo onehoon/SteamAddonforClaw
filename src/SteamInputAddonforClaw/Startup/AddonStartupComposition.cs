@@ -69,9 +69,10 @@ internal static class AddonStartupCompositionFactory
                 controllerEnvironmentAssessmentProvider,
                 prerequisiteInspector,
                 runtimeRecoveryManager.LoadJournal,
-                // PR5 section 14: also admit a later boot whose persistent HidHide state carries the
-                // one exact Addon-owned primary PID1902 gamepad collection PR5 persisted.
-                () => addonHidHideBaseline.InspectDisabledModeBaselineAllowingExistingOwnedTarget(
+                // PR10 addendum section 7: normalize + verify the persistent HidHide baseline on every
+                // Disabled boot, keeping the one exact Addon-owned primary PID1902 gamepad collection
+                // if it is already persisted so a normal boot does not churn the owned target.
+                () => addonHidHideBaseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(
                     MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
 
         var coordinator = new StartupCoordinator(
