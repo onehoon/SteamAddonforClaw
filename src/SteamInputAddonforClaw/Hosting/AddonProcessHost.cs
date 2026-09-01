@@ -81,9 +81,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeShutdownPrepared;
     private Task? _deferredRuntimeStartup;
     private Task? _overlayStartup;
-    // PR5: the process-lifetime Full PID1902 physical owner. Non-null only after a Disabled boot that
-    // PR4 admitted; owns one live DirectInput session which PR6 will consume.
+    // PR5: the process-lifetime Full PID1902 physical owner. Non-null only after an exact Disabled
+    // boot; owns one live DirectInput session which PR6 consumes.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? _physicalOwnership;
+    // PR6: the process-lifetime Full-1902 virtual-presentation owner (one canonical VIIPER runtime +
+    // exactly one attached typed device + its publisher). Retired before _physicalOwnership.
+    private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPresentation? _presentationOwnership;
 
     internal AddonProcessHost(string[]? updateRestartArguments,
         Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
@@ -284,11 +287,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 var status = await composition.StatusProvider.CaptureAsync(token).ConfigureAwait(false);
                 return (status.Prerequisites, status.RecoverySafe);
             },
-            // PR5: late-bound -- the physical owner is created after this transition owner, only for a
-            // Disabled boot. A boot with no owner releases nothing and clears the [] baseline.
-            async token => _physicalOwnership is { } owner
-                ? await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
-                : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned,
+            // PR5/PR6: late-bound -- the owners are created after this transition owner, only for a
+            // Disabled boot. PR6 section 17: the virtual presentation is retired and canonical VIIPER
+            // is torn down BEFORE PR5 physical release; a virtual-release failure prevents everything
+            // downstream (DirectInput stop, PID1901 restore, HidHide clear, Center M roots, restart).
+            async token =>
+            {
+                if (_presentationOwnership is { } presentation && !await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false))
+                    return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", null);
+                return _physicalOwnership is { } owner
+                    ? await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
+                    : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
+            },
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
@@ -308,6 +318,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
+
+        // PR6 section 16: run the whole Disabled-mode controller startup sequence -- VIIPER init ->
+        // PR5 physical acquire -> first presentation attach -- BEFORE the frontend transport accepts
+        // external requests, so a user cannot request Enable-and-Restart mid-commit. Failure still
+        // continues to frontend startup so the repair/Enable path stays available. Bounded by the
+        // existing native/PnP/DirectInput operations; other Center M states add no delay.
+        await TryStartDisabledModeControllerAsync(startupComposition, startupResult).ConfigureAwait(false);
+
         try
         {
             AppLog.Debug("FrontendTransport", "Frontend named-pipe server starting.", ("PipeName", pipeName));
@@ -339,23 +357,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         _overlayStartup = StartOverlayWarmupAsync();
 
-        await TryAcquirePhysicalOwnershipAsync(startupComposition, startupResult).ConfigureAwait(false);
-
         _startupComposition = null;
     }
 
-    /// <summary>PR5: the first real physical ownership operation. Runs only for an exact Center M
-    /// Disabled boot that PR4 positively admitted. Reconciles the same physical MSI Claw to PID1902,
-    /// acquires verified DirectInput, and persists/verifies the exact HidHide target -- attaching no
-    /// virtual controller. A failure keeps the mandatory Runtime/tray/frontend alive.</summary>
-    private async Task TryAcquirePhysicalOwnershipAsync(AddonStartupComposition startupComposition, StartupResult startupResult)
+    /// <summary>PR5/PR6: the whole Disabled-mode controller startup sequence. Runs only for an exact
+    /// Center M Disabled boot. Order (work order PR6 section 5.1): construct PR5 physical owner ->
+    /// init canonical VIIPER -> require VIIPER Ready -> PR5 AcquireAsync -> require Owned + live input
+    /// -> fresh Steam/BPM snapshot -> attach exactly one X360/SteamDeck presentation. Any failure
+    /// keeps the mandatory Runtime/tray/frontend alive; PID1902 is never rolled back here.</summary>
+    private async Task TryStartDisabledModeControllerAsync(AddonStartupComposition startupComposition, StartupResult startupResult)
     {
         if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)
             return;
 
-        // Construct the narrow owner on ANY exact Disabled boot -- even a Blocked one -- so
+        // Construct the narrow PR5 owner on ANY exact Disabled boot -- even a Blocked one -- so
         // Enable-and-Restart can always release existing PID1902 / persisted PR5 HidHide ownership.
-        // Only AcquireAsync is admission-gated.
         var owner = CreatePhysicalOwnership(startupComposition);
         if (owner is null)
             return;
@@ -370,15 +386,53 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         try
         {
-            var result = await owner.AcquireAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            // PR6 section 5: canonical VIIPER must be positively Ready before any new PID takeover.
+            var viiper = LoadAndInitializeCanonicalViiper();
+            var presentation = new Devices.MSI.Claw.MsiClawAddonPresentation(viiper);
+            _presentationOwnership = presentation;
+            AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
+                ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));
+            if (presentation.ViiperState != VirtualOutput.Viiper.CanonicalViiperRuntimeState.Ready)
+            {
+                AppLog.Warn("ControllerPresentation", "Canonical VIIPER is not Ready; no new physical takeover this boot.", null,
+                    ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));
+                return;
+            }
+
+            var acquired = await owner.AcquireAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
             AppLog.Info("ControllerOwnership", "Physical ownership acquisition completed.",
-                ("Result", result.Outcome), ("Reason", result.Reason), ("ModeWriteIssued", result.ModeWriteIssued), ("HiddenTarget", result.HiddenTarget ?? "None"));
+                ("Result", acquired.Outcome), ("Reason", acquired.Reason), ("ModeWriteIssued", acquired.ModeWriteIssued), ("HiddenTarget", acquired.HiddenTarget ?? "None"));
+            if (!acquired.IsOwned)
+            {
+                await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+                return;
+            }
+
+            var source = owner.LiveInputSource;
+            if (source is null || !source.IsRunning)
+            {
+                AppLog.Warn("ControllerPresentation", "PR5 live input source is not running; no presentation attach.", null);
+                await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+                return;
+            }
+
+            var snapshot = _runtimeHost!.CapturePresentationSnapshot();
+            var presentationResult = await presentation.AttachInitialAsync(source, snapshot, _startupCancellationTokenSource.Token).ConfigureAwait(false);
+            AppLog.Info("ControllerPresentation", "First presentation attach completed.",
+                ("Succeeded", presentationResult.Succeeded), ("Presentation", presentationResult.Presentation?.ToString() ?? "None"), ("Reason", presentationResult.Reason));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
         catch (Exception exception)
         {
-            AppLog.Error("ControllerOwnership", "Physical ownership acquisition threw; Runtime remains available.", exception);
+            AppLog.Error("ControllerOwnership", "Disabled-mode controller startup threw; Runtime remains available.", exception);
         }
+    }
+
+    private VirtualOutput.Viiper.CanonicalViiperRuntime? LoadAndInitializeCanonicalViiper()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
+        var native = Routing.AddonRoutingRuntime.TryLoadViiper(path);
+        return native is null ? null : VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
     }
 
     private Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? CreatePhysicalOwnership(AddonStartupComposition startupComposition)
@@ -609,6 +663,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             try { await _overlayStartup.ConfigureAwait(false); }
             catch (Exception exception) { AppLog.Warn("Overlay", "Overlay warm-up task failed during shutdown.", exception); }
             _overlayStartup = null;
+        }
+        if (_presentationOwnership is not null)
+        {
+            // PR6 section 18: retire the virtual presentation + tear down canonical VIIPER BEFORE the
+            // physical DirectInput handle. PID1902 / HidHide are durable and untouched.
+            try { await _presentationOwnership.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Presentation teardown failed during shutdown.", exception); }
+            _presentationOwnership = null;
         }
         if (_physicalOwnership is not null)
         {

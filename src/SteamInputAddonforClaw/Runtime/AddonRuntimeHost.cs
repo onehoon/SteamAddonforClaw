@@ -148,6 +148,10 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
 
     internal uint ActualRunningAppId => _steamRuntime.ActualRunningAppId;
 
+    /// <summary>PR6: one raw Steam/BPM read for the first virtual-presentation decision, so
+    /// <c>AddonProcessHost</c> does not reach into Steam internals.</summary>
+    internal Steam.SteamPresentationSnapshot CapturePresentationSnapshot() => _steamRuntime.CapturePresentationSnapshot();
+
     internal RoutingRuntimeStatusSnapshot CaptureRoutingStatus() => _routingRuntime?.CaptureStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
     internal Task<bool> HandleGameBarForegroundChangedAsync(bool isForeground, CancellationToken cancellationToken = default) =>
         _routingRuntime?.HandleGameBarForegroundChangedAsync(isForeground, cancellationToken) ?? Task.FromResult(false);

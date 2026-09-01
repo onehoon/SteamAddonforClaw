@@ -337,6 +337,7 @@ public sealed class MsiClawPhysicalInputStageTests
     private sealed class FakeInput : IMsiClawPreparedInputSource
     {
         public event EventHandler<ControllerState>? StateChanged = delegate { };
+        public SteamInputAddonforClaw.Input.ControllerState LatestState => default;
         public bool IsRunning { get; set; }
         public bool FirstValidStateObserved { get; set; } = true;
         public int StartPreparedCount { get; private set; }

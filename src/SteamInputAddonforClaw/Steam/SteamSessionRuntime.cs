@@ -4,6 +4,14 @@ using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw.Steam;
 
+/// <summary>One raw, read-only Steam/BPM fact for the Full-1902 first-presentation decision (work
+/// order PR6 section 8). Deliberately NOT derived from <c>EffectiveSteamSessionSource</c> -- the
+/// user's old routing preference and Developer Test Mode must not influence it.</summary>
+internal readonly record struct SteamPresentationSnapshot(uint RunningAppId, bool BigPictureActive)
+{
+    internal bool WantsSteamDeck => RunningAppId != 0 || BigPictureActive;
+}
+
 /// <summary>
 /// Owns the concrete Steam/Big Picture session-observation source graph that previously was
 /// constructed and held directly by <c>App.xaml.cs</c>: the running-AppID registry source, the
@@ -72,6 +80,14 @@ internal sealed class SteamSessionRuntime : IDisposable
         _sessionWatcher.Start();
         StartActualObservation();
         _effectiveSource.Refresh();
+    }
+
+    /// <summary>One-shot raw Steam/BPM read for the Full-1902 first-presentation decision (work order
+    /// PR6 section 8). Nudges the Big Picture watcher's inactive-only one-shot scan; adds no polling.</summary>
+    internal SteamPresentationSnapshot CapturePresentationSnapshot()
+    {
+        _bigPictureWatcher.Refresh();
+        return new(_runningAppIdSource.GetRunningAppId(), _bigPictureWatcher.IsActive);
     }
 
     /// <summary>Explicit resume refresh: session watcher first, then the effective source.</summary>
