@@ -12,9 +12,11 @@ $ErrorActionPreference = 'Stop'
 $runtimeProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw\SteamInputAddonforClaw.csproj'
 $uiProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.UI\SteamInputAddonforClaw.UI.csproj'
 $qamProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.QamHost\SteamInputAddonforClaw.QamHost.csproj'
+$overlayProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.Overlay\SteamInputAddonforClaw.Overlay.csproj'
 $runtimeOutput = [System.IO.Path]::GetFullPath($PublishDirectory)
 $uiOutput = Join-Path $runtimeOutput 'ui'
 $qamOutput = Join-Path $runtimeOutput 'qam'
+$overlayOutput = Join-Path $runtimeOutput 'overlay'
 
 if (Test-Path -LiteralPath $runtimeOutput) {
     Remove-Item -LiteralPath $runtimeOutput -Recurse -Force
@@ -22,6 +24,7 @@ if (Test-Path -LiteralPath $runtimeOutput) {
 New-Item -ItemType Directory -Path $runtimeOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $uiOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $qamOutput -Force | Out-Null
+New-Item -ItemType Directory -Path $overlayOutput -Force | Out-Null
 
 $commonArguments = @(
     '--configuration', $Configuration,
@@ -42,4 +45,7 @@ if ($LASTEXITCODE -ne 0) { throw "UI publish failed with exit code $LASTEXITCODE
 dotnet publish $qamProject @commonArguments '--output' $qamOutput
 if ($LASTEXITCODE -ne 0) { throw "QamHost publish failed with exit code $LASTEXITCODE." }
 
-Write-Host "Published Runtime and external UI layout at $runtimeOutput with version $Version."
+dotnet publish $overlayProject @commonArguments '--output' $overlayOutput
+if ($LASTEXITCODE -ne 0) { throw "Overlay publish failed with exit code $LASTEXITCODE." }
+
+Write-Host "Published Runtime, external UI, QAM, and Overlay layout at $runtimeOutput with version $Version."

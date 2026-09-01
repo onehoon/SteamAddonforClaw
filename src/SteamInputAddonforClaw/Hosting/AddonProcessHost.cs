@@ -55,6 +55,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private NamedPipeAddonFrontendServer? _qamFrontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly QamHostProcessController _qamHostController;
+    private readonly OverlayProcessController _overlayController;
     private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
     private readonly GameBarForegroundPresentationDelivery _gameBarDelivery;
     private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
@@ -79,6 +80,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
     private Task? _deferredRuntimeStartup;
+    private Task? _overlayStartup;
 
     internal AddonProcessHost(string[]? updateRestartArguments,
         Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
@@ -105,6 +107,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _intelFpsRuntime = new(_profileStore, _profileMutationGate, fpsLimiter, marker: fpsMarker);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
+        _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
         _gameBarDelivery = new GameBarForegroundPresentationDelivery(
             foreground => _runtimeHost?.HandleGameBarForegroundChangedAsync(foreground) ?? Task.FromResult(false));
@@ -301,11 +304,26 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 await _qamFrontendServer.DisposeAsync().ConfigureAwait(false);
             _qamFrontendServer = null;
         }
-        _frontendLauncher.MarkRuntimeReady();
+        _overlayStartup = StartOverlayWarmupAsync();
         _startupComposition = null;
     }
 
+    private async Task StartOverlayWarmupAsync()
+    {
+        try
+        {
+            await _overlayController.StartAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Overlay POC startup failed; continuing without Overlay.", exception);
+        }
+    }
+
     internal void RequestFrontendOpen(FrontendOpenReason reason) => _frontendLauncher.RequestOpen(reason);
+
+    internal void ToggleOverlayForPoc() => _ = _overlayController.ToggleForPocAsync();
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
 
@@ -415,7 +433,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try
         {
             _trayHostWindow = new NativeTrayHostWindow();
-            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, exit, EvaluateUserTermination);
+            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, exit, EvaluateUserTermination, ToggleOverlayForPoc);
             return true;
         }
         catch (Exception exception)
@@ -433,6 +451,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
         _frontendLauncher.StopAcceptingRequests();
+        _overlayController.BeginShutdown();
         _gameBarDelivery.StopAccepting();
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
@@ -461,6 +480,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception) { AppLog.Error("Startup", "Deferred Runtime startup work failed.", exception); }
             _deferredRuntimeStartup = null;
         }
+        if (_overlayStartup is not null)
+        {
+            try { await _overlayStartup.ConfigureAwait(false); }
+            catch (Exception exception) { AppLog.Warn("Overlay", "Overlay warm-up task failed during shutdown.", exception); }
+            _overlayStartup = null;
+        }
+        await _overlayController.DisposeAsync().ConfigureAwait(false);
         if (_frontendServer is not null)
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);

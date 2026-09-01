@@ -19,10 +19,23 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="SteamInputAddonforClaw.Tests" />
   </ItemGroup>
+
+  <Target Name="CopyMissingWinUIPublishAssets" AfterTargets="Publish">
+    <ItemGroup>
+      <_MissingXbf Include="$(OutDir)**\*.xbf" />
+      <_MissingApplicationPri Include="$(OutDir)$(AssemblyName).pri" Condition="Exists('$(OutDir)$(AssemblyName).pri')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_MissingXbf)" DestinationFolder="$(PublishDir)%(RecursiveDir)" SkipUnchangedFiles="true" Condition="'@(_MissingXbf)' != ''" />
+    <Copy SourceFiles="@(_MissingApplicationPri)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" Condition="'@(_MissingApplicationPri)' != ''" />
+  </Target>
 </Project>
