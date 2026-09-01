@@ -24,12 +24,18 @@ internal sealed class CenterMStartupControl
         _helper = helper;
     }
 
-    /// <summary>Any mixed state is <see cref="FrontendCenterMStartupState.Partial"/> -- never
-    /// auto-repaired; the next explicit Enable/Disable simply rewrites all three (section 7).</summary>
-    internal static FrontendCenterMStartupState Classify(bool server, bool updater, bool service) =>
-        server && updater && service ? FrontendCenterMStartupState.Enabled
-        : !server && !updater && !service ? FrontendCenterMStartupState.Disabled
+    /// <summary>Enabled requires the service to be exactly <see cref="CenterMFoundationServiceMode.Automatic"/>
+    /// (Manual/Other is not the reboot baseline); Disabled requires exactly
+    /// <see cref="CenterMFoundationServiceMode.Disabled"/>. Anything else is
+    /// <see cref="FrontendCenterMStartupState.Partial"/> -- surfaced, never auto-repaired
+    /// (section 7 / PR #430 review).</summary>
+    internal static FrontendCenterMStartupState Classify(bool server, bool updater, CenterMFoundationServiceMode service) =>
+        server && updater && service == CenterMFoundationServiceMode.Automatic ? FrontendCenterMStartupState.Enabled
+        : !server && !updater && service == CenterMFoundationServiceMode.Disabled ? FrontendCenterMStartupState.Disabled
         : FrontendCenterMStartupState.Partial;
+
+    private static bool FoundationEnabledFlag(CenterMFoundationServiceMode service) =>
+        service == CenterMFoundationServiceMode.Automatic;
 
     internal FrontendCenterMStartupSnapshot Capture()
     {
@@ -44,7 +50,7 @@ internal sealed class CenterMStartupControl
 
         var state = Classify(server, updater, service);
         AppLog.Info("CenterM.Startup", "Startup state captured.", ("State", state), ("Server", server), ("Updater", updater), ("Service", service));
-        return new FrontendCenterMStartupSnapshot(state, server, updater, service, null);
+        return new FrontendCenterMStartupSnapshot(state, server, updater, FoundationEnabledFlag(service), null);
     }
 
     internal async Task<FrontendCenterMStartupMutationResult> SetEnabledAsync(bool enabled, CancellationToken cancellationToken)
@@ -77,7 +83,8 @@ internal sealed class CenterMStartupControl
                     helperResult.Error ?? "The MSI Center M startup configuration could not be changed.");
 
             default:
-                if (helperResult.Ok && snapshot.State == (enabled ? FrontendCenterMStartupState.Enabled : FrontendCenterMStartupState.Disabled))
+                var target = enabled ? FrontendCenterMStartupState.Enabled : FrontendCenterMStartupState.Disabled;
+                if (helperResult.Ok && snapshot.State == target)
                 {
                     AppLog.Info("CenterM.Startup", enabled ? "Enable verified. Restart required." : "Disable verified. Restart required.");
                     return new FrontendCenterMStartupMutationResult(
@@ -94,18 +101,19 @@ internal sealed class CenterMStartupControl
     private FrontendCenterMStartupSnapshot ReadSnapshotAfterMutation(CenterMStartupHelperResult helperResult)
     {
         if (_reader.TryRead(out var server, out var updater, out var service, out _))
-            return new FrontendCenterMStartupSnapshot(Classify(server, updater, service), server, updater, service, null);
+            return new FrontendCenterMStartupSnapshot(Classify(server, updater, service), server, updater, FoundationEnabledFlag(service), null);
 
-        // The non-elevated re-read failed; fall back to what the helper last observed (only
-        // meaningful when the helper actually ran).
-        if (helperResult.Outcome == CenterMStartupHelperOutcome.Completed)
+        // The non-elevated re-read failed; fall back to the helper's observation ONLY when it
+        // actually read all three roots (SnapshotAvailable). Placeholder fields after a helper/read
+        // failure are "not observed", never "observed disabled" (Addendum E / PR #430 review).
+        if (helperResult.Outcome == CenterMStartupHelperOutcome.Completed && helperResult.SnapshotAvailable)
         {
             var s = helperResult.ServerTaskEnabled;
             var u = helperResult.UpdaterTaskEnabled;
-            var f = helperResult.FoundationServiceEnabled;
-            return new FrontendCenterMStartupSnapshot(Classify(s, u, f), s, u, f, null);
+            var mode = helperResult.FoundationServiceMode;
+            return new FrontendCenterMStartupSnapshot(Classify(s, u, mode), s, u, FoundationEnabledFlag(mode), null);
         }
 
-        return FrontendCenterMStartupSnapshot.Unavailable;
+        return FrontendCenterMStartupSnapshot.Unavailable with { FailureMessage = helperResult.Error };
     }
 }

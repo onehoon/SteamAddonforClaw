@@ -23,8 +23,8 @@ public sealed class CenterMStartupFrontendTests : IDisposable
     [Fact]
     public async Task Successful_mutation_does_not_self_invalidate_and_wipe_the_restart_notice()
     {
-        var control = CreateControl(available: true, server: false, updater: false, service: false,
-            helper: new FakeInvoker { Result = new(CenterMStartupHelperOutcome.Completed, Ok: true, false, false, false, null) });
+        var control = CreateControl(available: true, server: false, updater: false, service: CenterMFoundationServiceMode.Disabled,
+            helper: new FakeInvoker { Result = Helper(ok: true, false, false, CenterMFoundationServiceMode.Disabled) });
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
 
@@ -38,8 +38,8 @@ public sealed class CenterMStartupFrontendTests : IDisposable
     [Fact]
     public async Task Failed_mutation_also_does_not_self_invalidate()
     {
-        var control = CreateControl(available: true, server: true, updater: false, service: false,
-            helper: new FakeInvoker { Result = new(CenterMStartupHelperOutcome.Completed, Ok: true, false, false, false, null) });
+        var control = CreateControl(available: true, server: true, updater: false, service: CenterMFoundationServiceMode.Disabled,
+            helper: new FakeInvoker { Result = Helper(ok: true, false, false, CenterMFoundationServiceMode.Disabled) });
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
 
@@ -52,12 +52,15 @@ public sealed class CenterMStartupFrontendTests : IDisposable
     [Fact]
     public async Task Capture_flows_through_the_frontend()
     {
-        var control = CreateControl(available: true, server: true, updater: true, service: true, helper: new FakeInvoker());
+        var control = CreateControl(available: true, server: true, updater: true, service: CenterMFoundationServiceMode.Automatic, helper: new FakeInvoker());
         var snapshot = await control.CaptureCenterMStartupAsync();
         Assert.Equal(FrontendCenterMStartupState.Enabled, snapshot.State);
     }
 
-    private InProcessAddonFrontendControl CreateControl(bool available, bool server, bool updater, bool service, ICenterMStartupHelperInvoker helper)
+    private static CenterMStartupHelperResult Helper(bool ok, bool server, bool updater, CenterMFoundationServiceMode service)
+        => new(CenterMStartupHelperOutcome.Completed, ok, true, server, updater, service, null);
+
+    private InProcessAddonFrontendControl CreateControl(bool available, bool server, bool updater, CenterMFoundationServiceMode service, ICenterMStartupHelperInvoker helper)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -73,7 +76,7 @@ public sealed class CenterMStartupFrontendTests : IDisposable
             centerMStartup: centerM);
     }
 
-    private static CenterMStartupStateReader ReaderFor(bool server, bool updater, bool service) =>
+    private static CenterMStartupStateReader ReaderFor(bool server, bool updater, CenterMFoundationServiceMode service) =>
         new(name => name == CenterMStartupStateReader.ServerTaskName ? server
             : name == CenterMStartupStateReader.UpdaterTaskName ? updater
             : null,
@@ -87,7 +90,8 @@ public sealed class CenterMStartupFrontendTests : IDisposable
 
     private sealed class FakeInvoker : ICenterMStartupHelperInvoker
     {
-        public CenterMStartupHelperResult Result { get; set; } = new(CenterMStartupHelperOutcome.Completed, true, true, true, true, null);
+        public CenterMStartupHelperResult Result { get; set; } =
+            new(CenterMStartupHelperOutcome.Completed, true, true, true, true, CenterMFoundationServiceMode.Automatic, null);
         public Task<CenterMStartupHelperResult> SetEnabledAsync(bool enabled, CancellationToken cancellationToken) => Task.FromResult(Result);
     }
 

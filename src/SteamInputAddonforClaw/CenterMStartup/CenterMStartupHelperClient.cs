@@ -19,9 +19,14 @@ internal enum CenterMStartupHelperOutcome
 internal sealed record CenterMStartupHelperResult(
     CenterMStartupHelperOutcome Outcome,
     bool Ok,
+    /// <summary>True only when the helper actually observed all three roots. When false the
+    /// three values below are placeholders ("not observed"), NOT "observed disabled" -- callers must
+    /// treat that as <see cref="Contracts.Frontend.FrontendCenterMStartupState.Unavailable"/>
+    /// (Addendum E), never as a real Disabled snapshot.</summary>
+    bool SnapshotAvailable,
     bool ServerTaskEnabled,
     bool UpdaterTaskEnabled,
-    bool FoundationServiceEnabled,
+    CenterMFoundationServiceMode FoundationServiceMode,
     string? Error);
 
 /// <summary>Runs one privileged MSI Center M startup mutation via
@@ -76,7 +81,8 @@ internal sealed class CenterMStartupHelperClient : ICenterMStartupHelperInvoker
         catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
         {
             AppLog.Info("CenterM.Startup", "Startup helper elevation was cancelled by the user.");
-            return new CenterMStartupHelperResult(CenterMStartupHelperOutcome.Cancelled, false, false, false, false, null);
+            return new CenterMStartupHelperResult(CenterMStartupHelperOutcome.Cancelled, false, false, false, false,
+                CenterMFoundationServiceMode.Unavailable, null);
         }
         catch (Exception exception)
         {
@@ -101,9 +107,11 @@ internal sealed class CenterMStartupHelperClient : ICenterMStartupHelperInvoker
             if (response is null)
                 return Unavailable("The MSI Center M startup helper did not return a result.");
 
+            var mode = Enum.TryParse<CenterMFoundationServiceMode>(response.FoundationServiceMode, out var parsed)
+                ? parsed : CenterMFoundationServiceMode.Unavailable;
             return new CenterMStartupHelperResult(CenterMStartupHelperOutcome.Completed,
-                response.Ok, response.ServerTaskEnabled, response.UpdaterTaskEnabled,
-                response.FoundationServiceEnabled, response.Error);
+                response.Ok, response.SnapshotAvailable, response.ServerTaskEnabled, response.UpdaterTaskEnabled,
+                mode, response.Error);
         }
         catch (Exception exception)
         {
@@ -119,8 +127,11 @@ internal sealed class CenterMStartupHelperClient : ICenterMStartupHelperInvoker
     }
 
     private static CenterMStartupHelperResult Unavailable(string message) =>
-        new(CenterMStartupHelperOutcome.HelperUnavailable, false, false, false, false, message);
+        new(CenterMStartupHelperOutcome.HelperUnavailable, false, false, false, false,
+            CenterMFoundationServiceMode.Unavailable, message);
 
     private sealed record Request(string Operation, bool Enabled = false);
-    private sealed record Response(bool Ok, bool ServerTaskEnabled, bool UpdaterTaskEnabled, bool FoundationServiceEnabled, string? Error);
+    private sealed record Response(
+        bool Ok, bool SnapshotAvailable, bool ServerTaskEnabled, bool UpdaterTaskEnabled,
+        string FoundationServiceMode, string? Error);
 }

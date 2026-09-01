@@ -51,20 +51,9 @@ catch (Exception exception)
 }
 await writer.WriteLineAsync(JsonSerializer.Serialize(response));
 
-static Response Capture()
-{
-    var server = ReadTaskEnabled(ServerTaskName);
-    var updater = ReadTaskEnabled(UpdaterTaskName);
-    var service = ReadServiceEnabled();
-    var missing = new List<string>();
-    if (server is null) missing.Add(ServerTaskName);
-    if (updater is null) missing.Add(UpdaterTaskName);
-    if (service is null) missing.Add(FoundationServiceName);
-    return new Response(
-        missing.Count == 0,
-        server ?? false, updater ?? false, service ?? false,
-        missing.Count == 0 ? null : "Unreadable: " + string.Join(", ", missing));
-}
+static Response Capture() => Build(
+    ReadTaskEnabled(ServerTaskName), ReadTaskEnabled(UpdaterTaskName), ReadServiceMode(),
+    enabled: null, wrote: null);
 
 static Response SetEnabled(bool enabled)
 {
@@ -73,18 +62,35 @@ static Response SetEnabled(bool enabled)
     if (!TrySetTaskEnabled(UpdaterTaskName, enabled)) failures.Add(UpdaterTaskName);
     if (!TrySetServiceStartup(enabled)) failures.Add(FoundationServiceName);
 
-    // Section 8 / Addendum F: success is decided by reading the resulting Windows state back, never
-    // by whether the setter calls threw.
-    var server = ReadTaskEnabled(ServerTaskName);
-    var updater = ReadTaskEnabled(UpdaterTaskName);
-    var service = ReadServiceEnabled();
-    var verified = server == enabled && updater == enabled && service == enabled;
-    var message = verified
-        ? null
-        : failures.Count > 0
-            ? "Write failed: " + string.Join(", ", failures)
+    // Section 8 / Addendum F: success is decided by reading the resulting Windows state back (the
+    // exact configured mode -- Automatic for Enable, Disabled for Disable), never by whether the
+    // setter calls threw.
+    return Build(ReadTaskEnabled(ServerTaskName), ReadTaskEnabled(UpdaterTaskName), ReadServiceMode(),
+        enabled: enabled, wrote: failures);
+}
+
+static Response Build(bool? server, bool? updater, ServiceMode service, bool? enabled, List<string>? wrote)
+{
+    // "Not observed" (null / Unavailable) is never treated as "observed disabled" (Addendum E).
+    var snapshotAvailable = server is not null && updater is not null && service != ServiceMode.Unavailable;
+
+    bool verified;
+    string? message;
+    if (enabled is bool target)
+    {
+        var expectedService = target ? ServiceMode.Automatic : ServiceMode.Disabled;
+        verified = server == target && updater == target && service == expectedService;
+        message = verified ? null
+            : wrote is { Count: > 0 } ? "Write failed: " + string.Join(", ", wrote)
             : "Read-back did not match the requested configuration.";
-    return new Response(verified, server ?? false, updater ?? false, service ?? false, message);
+    }
+    else
+    {
+        verified = snapshotAvailable;
+        message = snapshotAvailable ? null : "One or more MSI Center M startup components could not be read.";
+    }
+
+    return new Response(verified, snapshotAvailable, server ?? false, updater ?? false, service.ToString(), message);
 }
 
 // ---- Scheduled Tasks (Task Scheduler COM, matched by name anywhere in the tree) ----
@@ -137,16 +143,22 @@ static dynamic? SearchFolder(dynamic folder, string taskName)
 }
 
 // ---- MSI Foundation Service startup type ----
-static bool? ReadServiceEnabled()
+// The exact configured mode is preserved -- Manual is NOT "enabled" for this feature, whose Enable
+// target is specifically Automatic (review: do not collapse to StartType != Disabled).
+static ServiceMode ReadServiceMode()
 {
     try
     {
         using var controller = new ServiceController(FoundationServiceName);
-        // Configured start type is the authority, never Running/Stopped (Addendum F).
-        return controller.StartType != ServiceStartMode.Disabled;
+        return controller.StartType switch
+        {
+            ServiceStartMode.Automatic => ServiceMode.Automatic,
+            ServiceStartMode.Disabled => ServiceMode.Disabled,
+            _ => ServiceMode.Other,
+        };
     }
-    catch (InvalidOperationException) { return null; }
-    catch (Win32Exception) { return null; }
+    catch (InvalidOperationException) { return ServiceMode.Unavailable; }
+    catch (Win32Exception) { return ServiceMode.Unavailable; }
 }
 
 static bool TrySetServiceStartup(bool enabled)
@@ -174,7 +186,7 @@ static bool TrySetServiceStartup(bool enabled)
     finally { CloseServiceHandle(manager); }
 }
 
-static Response Failure(string reason) => new(false, false, false, false, reason);
+static Response Failure(string reason) => new(false, false, false, false, ServiceMode.Unavailable.ToString(), reason);
 
 [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
 static extern IntPtr OpenSCManager(string? machineName, string? databaseName, uint access);
@@ -190,5 +202,13 @@ static extern bool ChangeServiceConfig(IntPtr service, uint serviceType, uint st
 [DllImport("advapi32.dll", SetLastError = true)]
 static extern bool CloseServiceHandle(IntPtr handle);
 
+// Wire-serialised by name; the Runtime keeps a matching enum (CenterMFoundationServiceMode).
+internal enum ServiceMode { Automatic, Disabled, Other, Unavailable }
 internal sealed record Request(string Operation, bool Enabled = false);
-internal sealed record Response(bool Ok, bool ServerTaskEnabled, bool UpdaterTaskEnabled, bool FoundationServiceEnabled, string? Error);
+internal sealed record Response(
+    bool Ok,
+    bool SnapshotAvailable,
+    bool ServerTaskEnabled,
+    bool UpdaterTaskEnabled,
+    string FoundationServiceMode,
+    string? Error);
