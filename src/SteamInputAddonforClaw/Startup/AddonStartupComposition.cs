@@ -69,7 +69,10 @@ internal static class AddonStartupCompositionFactory
                 controllerEnvironmentAssessmentProvider,
                 prerequisiteInspector,
                 runtimeRecoveryManager.LoadJournal,
-                () => addonHidHideBaseline.InspectDisabledModeBaseline([]));
+                // PR5 section 14: also admit a later boot whose persistent HidHide state carries the
+                // one exact Addon-owned primary PID1902 gamepad collection PR5 persisted.
+                () => addonHidHideBaseline.InspectDisabledModeBaselineAllowingExistingOwnedTarget(
+                    MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
 
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(updateRestartArguments),

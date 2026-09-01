@@ -81,6 +81,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeShutdownPrepared;
     private Task? _deferredRuntimeStartup;
     private Task? _overlayStartup;
+    // PR5: the process-lifetime Full PID1902 physical owner. Non-null only after a Disabled boot that
+    // PR4 admitted; owns one live DirectInput session which PR6 will consume.
+    private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? _physicalOwnership;
 
     internal AddonProcessHost(string[]? updateRestartArguments,
         Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
@@ -330,7 +333,64 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _qamFrontendServer = null;
         }
         _overlayStartup = StartOverlayWarmupAsync();
+
+        await TryAcquirePhysicalOwnershipAsync(startupComposition, startupResult).ConfigureAwait(false);
+
         _startupComposition = null;
+    }
+
+    /// <summary>PR5: the first real physical ownership operation. Runs only for an exact Center M
+    /// Disabled boot that PR4 positively admitted. Reconciles the same physical MSI Claw to PID1902,
+    /// acquires verified DirectInput, and persists/verifies the exact HidHide target -- attaching no
+    /// virtual controller. A failure keeps the mandatory Runtime/tray/frontend alive.</summary>
+    private async Task TryAcquirePhysicalOwnershipAsync(AddonStartupComposition startupComposition, StartupResult startupResult)
+    {
+        if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)
+            return;
+        if (startupResult.DisabledBootAdmission?.IsReady != true)
+        {
+            AppLog.Info("ControllerOwnership", "Physical ownership not started; Disabled-boot admission is not Ready.",
+                ("Admission", startupResult.DisabledBootAdmission?.Outcome.ToString() ?? "None"));
+            return;
+        }
+        if (startupComposition.HandheldDeviceAdapter.NativeState is not Devices.MSI.Claw.MsiClawNativeStateManager nativeState)
+        {
+            AppLog.Warn("ControllerOwnership", "Physical ownership not started; MSI Claw native-state manager is unavailable.", null);
+            return;
+        }
+
+        var controllerDevices = new Controllers.Detection.WindowsControllerDeviceEnumerator();
+        var directInputInputSource = new Devices.MSI.Claw.MsiClawInputSource(() => new Input.DirectInput.VorticeDirectInputDeviceEnumerator(IntPtr.Zero));
+        var hidHideBaseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
+            new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
+            Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable."));
+
+        var owner = new Devices.MSI.Claw.MsiClawAddonPhysicalOwnership(
+            () => _centerMStartupControl!.Capture().State,
+            token => nativeState.CaptureStableCurrentSnapshotAsync(token, allowTransientDeviceNotFound: true),
+            (target, identity, token) => nativeState.SwitchModeAsync(target, identity, token),
+            () =>
+            {
+                using var enumerator = new Input.DirectInput.VorticeDirectInputDeviceEnumerator(IntPtr.Zero);
+                return enumerator.EnumerateGameControllers();
+            },
+            instanceId => controllerDevices.EnumeratePresentDevices().FirstOrDefault(device =>
+                string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase)),
+            directInputInputSource,
+            target => hidHideBaseline.ApplyDisabledModeBaseline([target]));
+        _physicalOwnership = owner;
+
+        try
+        {
+            var result = await owner.AcquireAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            AppLog.Info("ControllerOwnership", "Physical ownership acquisition completed.",
+                ("Result", result.Outcome), ("Reason", result.Reason), ("ModeWriteIssued", result.ModeWriteIssued), ("HiddenTarget", result.HiddenTarget ?? "None"));
+        }
+        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            AppLog.Error("ControllerOwnership", "Physical ownership acquisition threw; Runtime remains available.", exception);
+        }
     }
 
     private async Task StartOverlayWarmupAsync()
@@ -530,6 +590,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             try { await _overlayStartup.ConfigureAwait(false); }
             catch (Exception exception) { AppLog.Warn("Overlay", "Overlay warm-up task failed during shutdown.", exception); }
             _overlayStartup = null;
+        }
+        if (_physicalOwnership is not null)
+        {
+            // PR5 section 17: release the process-owned DirectInput session only. PID1902 and the
+            // persistent HidHide target are durable state and are deliberately left intact.
+            try { await _physicalOwnership.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception exception) { AppLog.Warn("ControllerOwnership", "Physical ownership teardown failed during shutdown.", exception); }
+            _physicalOwnership = null;
         }
         await _overlayController.DisposeAsync().ConfigureAwait(false);
         if (_frontendServer is not null)

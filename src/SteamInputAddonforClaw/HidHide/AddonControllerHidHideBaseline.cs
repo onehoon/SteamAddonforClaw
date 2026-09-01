@@ -106,6 +106,25 @@ internal sealed class AddonControllerHidHideBaseline
         return result;
     }
 
+    /// <summary>Read-only startup admission classification (work order PR5 section 14). Accepts the
+    /// two persistent shapes a Disabled boot may legitimately be in: the PR3 zero-target foundation,
+    /// or a later boot where PR5 has persisted exactly one hidden target that the caller's validator
+    /// confirms is an Addon-owned primary PID1902 gamepad collection. Everything else -- a foreign or
+    /// unresolved whitelist entry, more than one hidden target, or a hidden target the validator
+    /// rejects -- still fails closed exactly as <see cref="InspectDisabledModeBaseline"/> would.</summary>
+    internal AddonHidHideBaselineResult InspectDisabledModeBaselineAllowingExistingOwnedTarget(Func<string, bool> ownedTargetValidator)
+    {
+        ArgumentNullException.ThrowIfNull(ownedTargetValidator);
+        if (!TryInspect(out var inspection, out var unavailable))
+            return unavailable;
+
+        var hidden = Normalize(inspection.HiddenDeviceEntries?.ToArray() ?? []);
+        IReadOnlyCollection<string> owned = hidden.Count == 1 && ownedTargetValidator(hidden[0])
+            ? [hidden[0]]
+            : [];
+        return InspectDisabledModeBaseline(owned);
+    }
+
     /// <summary>Persistently applies the Disabled-mode Addon baseline and verifies it by read-back.
     /// Idempotent: a call when already compliant performs no mutation.</summary>
     internal AddonHidHideBaselineResult ApplyDisabledModeBaseline(IReadOnlyCollection<string> requestedHiddenTargets)

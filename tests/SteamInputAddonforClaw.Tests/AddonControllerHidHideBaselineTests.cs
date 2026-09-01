@@ -298,6 +298,63 @@ public sealed class AddonControllerHidHideBaselineTests
     public void Constructor_rejects_a_non_qualified_executable_path()
         => Assert.Throws<ArgumentException>(() => new AddonControllerHidHideBaseline(new FakeHidHideClient(), "SteamInputAddonforClaw.exe"));
 
+    // ---- PR5 section 14/28: startup admission accepting one existing Addon-owned exact target ----
+
+    private const string PrimaryPid1902Collection = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&ABCDEF&0&0000";
+    private const string OtherPrimaryPid1902Collection = @"HID\VID_0DB0&PID_1902&MI_00&COL01\9&FEDCBA&0&0000";
+
+    private static bool IsPrimary(string target) =>
+        SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(target);
+
+    [Fact]
+    public void AllowingOwnedTarget_zero_target_first_boot_is_admitted()
+    {
+        var client = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [], Active = true, Inverse = false };
+        Assert.Equal(AddonHidHideBaselineOutcome.AlreadyCompliant,
+            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary).Outcome);
+    }
+
+    [Fact]
+    public void AllowingOwnedTarget_one_exact_previously_owned_primary_target_is_admitted()
+    {
+        var client = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [PrimaryPid1902Collection], Active = true, Inverse = false };
+        var result = Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary);
+        Assert.Equal(AddonHidHideBaselineOutcome.AlreadyCompliant, result.Outcome);
+        Assert.Empty(client.MutationCalls);
+    }
+
+    [Fact]
+    public void AllowingOwnedTarget_foreign_hidden_entry_still_blocks()
+    {
+        var client = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [OtherHidden], Active = true };
+        Assert.Equal(AddonHidHideBaselineOutcome.Conflict,
+            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary).Outcome);
+    }
+
+    [Fact]
+    public void AllowingOwnedTarget_more_than_one_hidden_target_blocks()
+    {
+        var client = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [PrimaryPid1902Collection, OtherPrimaryPid1902Collection], Active = true };
+        Assert.Equal(AddonHidHideBaselineOutcome.Conflict,
+            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary).Outcome);
+    }
+
+    [Fact]
+    public void AllowingOwnedTarget_non_primary_pid1902_hidden_target_blocks()
+    {
+        var client = new FakeHidHideClient { Whitelist = [AddonExe], Hidden = [Pid1902Collection], Active = true };
+        Assert.Equal(AddonHidHideBaselineOutcome.Conflict,
+            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary).Outcome);
+    }
+
+    [Fact]
+    public void AllowingOwnedTarget_foreign_whitelist_entry_still_blocks()
+    {
+        var client = new FakeHidHideClient { Whitelist = [AddonExe, ForeignExe], Hidden = [PrimaryPid1902Collection], Active = true };
+        Assert.Equal(AddonHidHideBaselineOutcome.Conflict,
+            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary).Outcome);
+    }
+
     private sealed class FakeHidHideClient : IHidHideClient
     {
         public HidHideInspectionStatus? Status { get; set; }
