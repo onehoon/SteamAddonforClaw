@@ -211,11 +211,16 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         // release path (section 7.3).
         if (!_lowerLevelRuntimeSafety().CanTerminate)
             return Fail(snapshot, "Controller authority cannot change while a routing, native-mode, or recovery operation is in progress. Try again once it finishes.");
+
+        // Caller/frontend cancellation is honored only BEFORE the first mutation. The physical
+        // release stops the live DirectInput session and can issue PID1902 -> PID1901, so from here
+        // the Runtime owns completion even if the frontend pipe disconnects (same one-way mutation
+        // boundary the Disable path already uses -- CancellationToken.None for the ordered sequence).
         cancellationToken.ThrowIfCancellationRequested();
 
         // PR5 section 16: retire the process-owned DirectInput session and restore the same physical
         // MSI Claw to PID1901 before clearing HidHide. A null-owner boot returns NothingOwned.
-        var release = await _releasePhysicalOwnership(cancellationToken).ConfigureAwait(false);
+        var release = await _releasePhysicalOwnership(CancellationToken.None).ConfigureAwait(false);
         AppLog.Info("CenterM.Authority", "Physical ownership release for enable.", ("Succeeded", release.Succeeded), ("Reason", release.Reason), ("HiddenTarget", release.HiddenTarget ?? "None"));
         if (!release.Succeeded)
             return Fail(snapshot, $"The Addon controller ownership could not be released, so MSI Center M was not enabled: {release.Reason}.");
