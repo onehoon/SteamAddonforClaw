@@ -35,6 +35,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
 
     internal async Task<bool> StartAsync(CancellationToken cancellationToken = default)
     {
+        var startupRequested = Stopwatch.StartNew();
+        AppLog.Debug("Overlay", "Overlay warm start requested.", ("Path", _executablePath));
         await _transition.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -45,7 +47,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
                     ("Path", _executablePath));
                 return false;
             }
-            return await StartAsyncUnderTransitionAsync(cancellationToken).ConfigureAwait(false);
+            var started = await StartAsyncUnderTransitionAsync(cancellationToken).ConfigureAwait(false);
+            AppLog.Info("Overlay", started ? "Overlay warm start completed." : "Overlay warm start did not become ready.",
+                ("ElapsedMs", startupRequested.ElapsedMilliseconds), ("Path", _executablePath));
+            return started;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -73,15 +78,18 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             }
             if (server is null) return;
             var command = show ? OverlayCommand.Show : OverlayCommand.Hide;
+            var pid = GetProcessId(process: null);
+            var requested = Stopwatch.StartNew();
+            AppLog.Info("Overlay", "Overlay command requested.", ("Command", command), ("PID", pid));
             if (!await server.SendCommandAsync(command).ConfigureAwait(false))
             {
                 AppLog.Warn("Overlay", "Overlay POC command was not acknowledged; retiring the current Overlay session.",
-                    null, ("Command", command));
+                    null, ("Command", command), ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds), ("Action", "RetireSession"));
                 await StopCurrentAsync().ConfigureAwait(false);
                 return;
             }
             lock (_sync) _visible = show;
-            AppLog.Info("Overlay", $"Overlay POC {(show ? "shown" : "hidden")}.");
+            AppLog.Info("Overlay", "Overlay command acknowledged.", ("Command", command), ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -125,7 +133,9 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     {
         if (!File.Exists(_executablePath)) return false;
         var server = _serverFactory(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
+        var startup = Stopwatch.StartNew();
         await server.StartAsync(cancellationToken).ConfigureAwait(false);
+        AppLog.Info("Overlay", "Overlay server ready; launch about to begin.", ("Path", _executablePath));
         Process? process;
         try
         {
@@ -149,6 +159,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             return false;
         }
         lock (_sync) { _server = server; _process = process; _visible = false; }
+        AppLog.Info("Overlay", "Overlay process started.", ("PID", process.Id), ("Path", _executablePath));
         process.EnableRaisingEvents = true;
         process.Exited += OnProcessExited;
         if (!await server.WaitForReadyAsync(ReadyTimeout, cancellationToken).ConfigureAwait(false))
@@ -156,13 +167,27 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             await StopCurrentAsync().ConfigureAwait(false);
             return false;
         }
+        AppLog.Info("Overlay", "Overlay Ready confirmed.", ("PID", process.Id), ("ElapsedMs", startup.ElapsedMilliseconds));
         return true;
     }
 
     private async void OnProcessExited(object? sender, EventArgs args)
     {
         if (_disposed != 0) return;
-        AppLog.Warn("Overlay", "Overlay process exited; Overlay POC is disabled until the next explicit toggle.");
+        var process = sender as Process;
+        bool visible;
+        bool stopping;
+        int? pid = null;
+        int? exitCode = null;
+        lock (_sync)
+        {
+            visible = _visible;
+            stopping = _stopping;
+            try { pid = process?.Id; } catch { }
+            try { exitCode = process?.HasExited == true ? process.ExitCode : null; } catch { }
+        }
+        AppLog.Warn("Overlay", "Overlay process exited; Overlay POC is disabled until the next explicit toggle.", null,
+            ("PID", pid), ("ExitCode", exitCode), ("WasVisible", visible), ("Stopping", stopping));
         await _transition.WaitAsync().ConfigureAwait(false);
         try { await StopCurrentAsync().ConfigureAwait(false); }
         finally { _transition.Release(); }
@@ -175,7 +200,13 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         lock (_sync) { server = _server; process = _process; _server = null; _process = null; _visible = false; }
         if (server is not null)
         {
-            if (sendShutdown) await server.SendCommandAsync(OverlayCommand.Shutdown).ConfigureAwait(false);
+            if (sendShutdown)
+            {
+                var shutdown = Stopwatch.StartNew();
+                var sent = await server.SendCommandAsync(OverlayCommand.Shutdown).ConfigureAwait(false);
+                AppLog.Info("Overlay", sent ? "Overlay graceful shutdown requested." : "Overlay graceful shutdown command unavailable.",
+                    ("PID", GetProcessId(process)), ("Sent", sent), ("ElapsedMs", shutdown.ElapsedMilliseconds));
+            }
             await server.DisposeAsync().ConfigureAwait(false);
         }
         if (process is null) return;
@@ -186,10 +217,24 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             {
                 var exited = process.WaitForExitAsync();
                 if (await Task.WhenAny(exited, Task.Delay(ShutdownTimeout)).ConfigureAwait(false) != exited && !process.HasExited)
+                {
+                    AppLog.Warn("Overlay", "Overlay graceful shutdown timed out; process tree termination requested.", null, ("PID", process.Id));
                     process.Kill(entireProcessTree: true);
+                    AppLog.Warn("Overlay", "Overlay process tree termination completed.", null, ("PID", process.Id));
+                }
+                else
+                    AppLog.Info("Overlay", "Overlay process exited gracefully.", ("PID", process.Id));
             }
         }
         catch (Exception exception) { AppLog.Warn("Overlay", "Overlay process cleanup failed.", exception); }
         finally { process.Dispose(); }
+    }
+
+    private int? GetProcessId(Process? process)
+    {
+        lock (_sync)
+        {
+            try { return (process ?? _process)?.Id; } catch { return null; }
+        }
     }
 }
