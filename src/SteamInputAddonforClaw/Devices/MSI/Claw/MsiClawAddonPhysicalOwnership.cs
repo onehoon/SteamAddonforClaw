@@ -280,6 +280,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             var current = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
             if (!TryReadIdentity(current, out var mode, out var identity, out var reason))
                 return new(false, "ReleaseNativeState:" + reason, target);
+            if (mode is not (MsiClawNativeMode.XInput or MsiClawNativeMode.DirectInput))
+                return new(false, "UnsupportedReleaseMode:" + mode, target);
             if (mode == MsiClawNativeMode.DirectInput)
             {
                 var switched = await _switchMode(MsiClawNativeMode.XInput, identity, cancellationToken).ConfigureAwait(false);

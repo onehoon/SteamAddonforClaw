@@ -352,16 +352,41 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)
             return;
+
+        // Construct the narrow owner on ANY exact Disabled boot -- even a Blocked one -- so
+        // Enable-and-Restart can always release existing PID1902 / persisted PR5 HidHide ownership.
+        // Only AcquireAsync is admission-gated.
+        var owner = CreatePhysicalOwnership(startupComposition);
+        if (owner is null)
+            return;
+        _physicalOwnership = owner;
+
         if (startupResult.DisabledBootAdmission?.IsReady != true)
         {
-            AppLog.Info("ControllerOwnership", "Physical ownership not started; Disabled-boot admission is not Ready.",
+            AppLog.Info("ControllerOwnership", "Physical acquisition not started; Disabled-boot admission is not Ready. Release seam stays available.",
                 ("Admission", startupResult.DisabledBootAdmission?.Outcome.ToString() ?? "None"));
             return;
         }
+
+        try
+        {
+            var result = await owner.AcquireAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            AppLog.Info("ControllerOwnership", "Physical ownership acquisition completed.",
+                ("Result", result.Outcome), ("Reason", result.Reason), ("ModeWriteIssued", result.ModeWriteIssued), ("HiddenTarget", result.HiddenTarget ?? "None"));
+        }
+        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            AppLog.Error("ControllerOwnership", "Physical ownership acquisition threw; Runtime remains available.", exception);
+        }
+    }
+
+    private Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? CreatePhysicalOwnership(AddonStartupComposition startupComposition)
+    {
         if (startupComposition.HandheldDeviceAdapter.NativeState is not Devices.MSI.Claw.MsiClawNativeStateManager nativeState)
         {
-            AppLog.Warn("ControllerOwnership", "Physical ownership not started; MSI Claw native-state manager is unavailable.", null);
-            return;
+            AppLog.Warn("ControllerOwnership", "Physical ownership unavailable; MSI Claw native-state manager is unavailable.", null);
+            return null;
         }
 
         var controllerDevices = new Controllers.Detection.WindowsControllerDeviceEnumerator();
@@ -370,7 +395,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
             Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable."));
 
-        var owner = new Devices.MSI.Claw.MsiClawAddonPhysicalOwnership(
+        return new Devices.MSI.Claw.MsiClawAddonPhysicalOwnership(
             () => _centerMStartupControl!.Capture().State,
             token => nativeState.CaptureStableCurrentSnapshotAsync(token, allowTransientDeviceNotFound: true),
             (target, identity, token) => nativeState.SwitchModeAsync(target, identity, token),
@@ -385,19 +410,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             target => hidHideBaseline.ApplyDisabledModeBaseline([target]),
             () => hidHideBaseline.TryGetSingleExistingOwnedTarget(
                 Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
-        _physicalOwnership = owner;
-
-        try
-        {
-            var result = await owner.AcquireAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
-            AppLog.Info("ControllerOwnership", "Physical ownership acquisition completed.",
-                ("Result", result.Outcome), ("Reason", result.Reason), ("ModeWriteIssued", result.ModeWriteIssued), ("HiddenTarget", result.HiddenTarget ?? "None"));
-        }
-        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
-        catch (Exception exception)
-        {
-            AppLog.Error("ControllerOwnership", "Physical ownership acquisition threw; Runtime remains available.", exception);
-        }
     }
 
     private async Task StartOverlayWarmupAsync()

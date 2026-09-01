@@ -366,6 +366,33 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
+    public async Task Blocked_boot_release_recovers_the_persisted_target_without_any_acquisition()
+    {
+        const string prior = @"HID\VID_0DB0&PID_1902&MI_00&COL01\prev";
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput, ExistingOwnedTarget = prior };
+        var owner = h.Build(); // AcquireAsync is never called on a Blocked boot
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Equal(prior, release.HiddenTarget);
+        Assert.Equal(new[] { MsiClawNativeMode.XInput }, h.SwitchTargets); // PID1902 -> PID1901
+    }
+
+    [Fact]
+    public async Task Release_fails_closed_on_an_unsupported_native_mode()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.Other, ExistingOwnedTarget = PrimaryPnp };
+        var owner = h.Build();
+
+        var release = await owner.ReleaseForCenterMEnableAsync(default);
+
+        Assert.False(release.Succeeded);
+        Assert.Contains("UnsupportedReleaseMode", release.Reason);
+        Assert.Equal(0, h.SwitchCalls); // no PID1901 write against an unknown mode
+    }
+
+    [Fact]
     public async Task Release_without_a_prior_acquisition_and_already_stock_pid_is_a_noop_success()
     {
         var h = new Harness { InitialMode = MsiClawNativeMode.XInput };
@@ -406,10 +433,16 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         })
             Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
 
-        // The production gate: PR5 ownership starts only for exact Center M Disabled + admission Ready.
+        // The production gate: acquisition starts only for exact Disabled + admission Ready, but the
+        // release seam is constructed on ANY exact Disabled boot (including a Blocked one).
         var host = File.ReadAllText(Path.Combine(dir.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
         Assert.Contains("startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled", host, StringComparison.Ordinal);
+        Assert.Contains("var owner = CreatePhysicalOwnership(startupComposition);", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.DisabledBootAdmission?.IsReady != true", host, StringComparison.Ordinal);
+        Assert.True(
+            host.IndexOf("_physicalOwnership = owner;", StringComparison.Ordinal)
+            < host.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal),
+            "the release seam must be assigned before the acquisition admission gate");
     }
 
     // ---- harness ----
