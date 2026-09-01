@@ -134,16 +134,20 @@ public sealed class UiArchitectureTests
         Assert.Contains("x:Name=\"CenterMStartupDisableButton\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Disable MSI Center M", xaml, StringComparison.Ordinal);
 
-        // Informational-only restart message; no "Restart now" action in PR1 (Addendum D).
-        Assert.Contains("Restart Windows to apply this change.", codeBehind, StringComparison.Ordinal);
+        // PR3: the buttons confirm a reboot-bound transition and restart immediately -- the labels
+        // say so, and there is no "Restart Later" / deferred-restart mode.
+        Assert.Contains("and Restart", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("Restart Later", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("Restart now", codeBehind, StringComparison.Ordinal);
 
-        // The reboot requirement is sticky for the UI process: set on success, gated only on the
-        // field (not a render parameter), and never reset, so ordinary refreshes / tab navigation
-        // cannot erase it while the old Center M session is still running (PR #430 review).
-        Assert.Contains("if (result.Succeeded) _centerMRestartRequired = true;", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("CenterMStartupPresentation.ResolveInfoBar(snapshot.State, _centerMRestartRequired)", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("_centerMRestartRequired = false", codeBehind, StringComparison.Ordinal);
+        // PR3: no sticky UI restart flag -- the info bar is a pure function of the latest snapshot
+        // state (the successful transition ends the session by restarting Windows).
+        Assert.DoesNotContain("_centerMRestartRequired", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CenterMStartupPresentation.ResolveInfoBar(snapshot.State)", codeBehind, StringComparison.Ordinal);
+
+        // PR3: the UI never starts the OS restart itself -- that is the Runtime transition owner's job.
+        Assert.DoesNotContain("shutdown.exe", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("shutdown", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

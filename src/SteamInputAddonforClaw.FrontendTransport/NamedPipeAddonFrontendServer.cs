@@ -162,8 +162,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileFpsLimitDcAsync(FrontendWireCodec.Decode<SetGameProfileFpsLimitDcRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFpsLimitDcRequest>(p).Fps, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureCenterMStartup
         ? FrontendWireCodec.Payload(await _inner.CaptureCenterMStartupAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.SetCenterMStartupEnabled
-        ? FrontendWireCodec.Payload(await _inner.SetCenterMStartupEnabledAsync(FrontendWireCodec.Decode<SetCenterMStartupEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.RequestCenterMAuthorityTransition
+        ? FrontendWireCodec.Payload(await _inner.RequestCenterMAuthorityTransitionAsync(FrontendWireCodec.Decode<RequestCenterMAuthorityTransitionRequest>(p).CenterMEnabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.OpenFanProbe
         ? FrontendWireCodec.Payload(await _inner.OpenFanProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RunFanProbe

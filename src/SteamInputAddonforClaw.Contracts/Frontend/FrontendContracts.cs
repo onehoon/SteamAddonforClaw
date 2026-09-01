@@ -303,11 +303,18 @@ public interface IAddonFrontendControl
     /// opening the Device page and capturing this must not mutate any Windows state.</summary>
     Task<FrontendCenterMStartupSnapshot> CaptureCenterMStartupAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendCenterMStartupSnapshot.Unavailable);
-    /// <summary>Writes all three MSI Center M startup roots to the requested state and returns the
-    /// read-back-verified result (work order PR1 section 8). Does NOT stop/start the running Center M
-    /// session -- the new state becomes the baseline only after a Windows restart.</summary>
-    Task<FrontendCenterMStartupMutationResult> SetCenterMStartupEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M startup control is unavailable."));
+    /// <summary>Requests a reboot-bound MSI Center M controller-authority transition (work order PR3):
+    /// the Runtime verifies mandatory startup, applies/clears the persistent Addon HidHide baseline,
+    /// mutates and read-back-verifies the three Center M startup roots, and then immediately requests
+    /// a Windows restart. It never performs a live same-session physical-controller takeover.
+    /// <see cref="FrontendCenterMStartupMutationOutcome.Succeeded"/> means the persistent target was
+    /// verified AND the restart request was issued; if only the restart request failed the result is
+    /// <see cref="FrontendCenterMStartupMutationOutcome.Failed"/> with the real snapshot and a
+    /// manual-restart message.</summary>
+    /// <param name="centerMEnabled"><see langword="true"/> = Enable and Restart (restore MSI/stock
+    /// authority); <see langword="false"/> = Disable and Restart (switch authority to the Addon).</param>
+    Task<FrontendCenterMStartupMutationResult> RequestCenterMAuthorityTransitionAsync(bool centerMEnabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable."));
     Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendVibrationTestResult(false, "Vibration test is unavailable.", null));
     /// <summary>Opens the dedicated Vibration Test diagnostic session: creates the session log file

@@ -4,37 +4,29 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>PR #430 review: a successful MSI Center M startup mutation followed by a normal
-/// authoritative refresh (StateInvalidated event, or Activate() on tab re-entry) must keep showing
-/// "Restart Windows to apply this change." -- the old Center M session is deliberately still running,
-/// so the reboot instruction is the only cue that the new state is not active yet.</summary>
+/// <summary>PR3: the Device-page MSI Center M info bar is a pure function of the latest snapshot
+/// state -- there is no sticky "restart required" flag. The reboot-bound transition either starts a
+/// Windows restart (so the running session ends) or fails loudly; nothing outlives it in the UI.</summary>
 public sealed class CenterMStartupPresentationTests
 {
     [Theory]
     [InlineData(FrontendCenterMStartupState.Enabled)]
     [InlineData(FrontendCenterMStartupState.Disabled)]
-    [InlineData(FrontendCenterMStartupState.Partial)]
-    [InlineData(FrontendCenterMStartupState.Unavailable)]
-    public void Restart_required_flag_wins_over_every_snapshot_state(FrontendCenterMStartupState state)
+    public void A_settled_state_shows_no_infobar(FrontendCenterMStartupState state)
         => Assert.Equal(
-            DevicePage.CenterMStartupInfoBarKind.RestartRequired,
-            DevicePage.CenterMStartupPresentation.ResolveInfoBar(state, restartRequired: true));
+            DevicePage.CenterMStartupInfoBarKind.None,
+            DevicePage.CenterMStartupPresentation.ResolveInfoBar(state));
 
     [Fact]
-    public void Without_the_flag_a_settled_state_shows_no_infobar()
-    {
-        Assert.Equal(DevicePage.CenterMStartupInfoBarKind.None,
-            DevicePage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Enabled, restartRequired: false));
-        Assert.Equal(DevicePage.CenterMStartupInfoBarKind.None,
-            DevicePage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Disabled, restartRequired: false));
-    }
-
-    [Fact]
-    public void Without_the_flag_mixed_and_unreadable_states_still_surface()
+    public void Mixed_and_unreadable_states_still_surface()
     {
         Assert.Equal(DevicePage.CenterMStartupInfoBarKind.Partial,
-            DevicePage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Partial, restartRequired: false));
+            DevicePage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Partial));
         Assert.Equal(DevicePage.CenterMStartupInfoBarKind.Unavailable,
-            DevicePage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Unavailable, restartRequired: false));
+            DevicePage.CenterMStartupPresentation.ResolveInfoBar(FrontendCenterMStartupState.Unavailable));
     }
+
+    [Fact]
+    public void No_restart_required_kind_exists_anymore()
+        => Assert.DoesNotContain("RestartRequired", Enum.GetNames<DevicePage.CenterMStartupInfoBarKind>());
 }

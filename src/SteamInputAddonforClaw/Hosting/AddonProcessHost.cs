@@ -255,6 +255,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
         }
+        // PR3: the reboot-bound Center M controller-authority transition. Composes the already-merged
+        // narrow owners -- the shared CenterMStartupControl, the composition's single
+        // StartupSettingsCoordinator, and the persistent PR2 HidHide baseline (production-wired here
+        // for the first time) -- plus the RAW lower-level Runtime safety decision (not
+        // AddonProcessHost.EvaluateUserTermination, whose ControllerAuthorityMandatory outer rule
+        // must never block the official Enable-and-Restart release path).
+        var centerMAuthorityTransition = new SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition(
+            _centerMStartupControl,
+            composition.StartupSettings,
+            new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
+                new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
+                Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.")),
+            _runtimeHost.EvaluateUserTermination,
+            () => IsConflictingControllerEnvironment(startupComposition.ControllerEnvironmentAssessmentProvider),
+            new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
@@ -268,7 +283,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
             // MSI Center M startup Enable/Disable (work order PR1). The one shared reader -- also
             // consulted by the mandatory Runtime termination / launch-at-startup policy (PR2.5).
-            centerMStartup: _centerMStartupControl);
+            centerMStartup: _centerMStartupControl,
+            centerMAuthorityTransition: centerMAuthorityTransition);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
@@ -406,6 +422,27 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Warn("Lifecycle", "MSI Center M startup state read for the mandatory Runtime policy failed; not classifying mandatory.", exception);
+            return false;
+        }
+    }
+
+    /// <summary>A fresh check (evaluated at transition-request time, not startup) for a known
+    /// third-party controller manager that must not coexist with Addon controller authority
+    /// (work order PR3 section 6.2/13). Reuses the existing environment detector; adds no new scanner.
+    /// Only the explicit conflicting kinds block -- <c>None</c>/<c>Indeterminate</c> do not.</summary>
+    private static bool IsConflictingControllerEnvironment(Status.IControllerEnvironmentAssessmentProvider provider)
+    {
+        try
+        {
+            return provider.Capture().Manager.Kind is
+                Status.ControllerManagerKind.ClawTweaks or
+                Status.ControllerManagerKind.HandheldCompanion or
+                Status.ControllerManagerKind.Winhanced or
+                Status.ControllerManagerKind.Multiple;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("CenterM.Authority", "Controller-environment conflict check failed; not classifying a conflict.", exception);
             return false;
         }
     }

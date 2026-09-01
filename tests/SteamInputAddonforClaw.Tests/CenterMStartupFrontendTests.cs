@@ -10,62 +10,80 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>PR #430 review: a successful MSI Center M startup mutation must NOT raise a global
-/// <see cref="IAddonFrontendControl.StateInvalidated"/>. That notification queues
-/// <c>DevicePage.RefreshAsync()</c>, which re-renders with <c>restartRequired: false</c> and would
-/// erase the "Restart Windows to apply this change." notice immediately after the button click
-/// showed it -- the one cue that the new startup state is not active until reboot.</summary>
+/// <summary>PR3: the frontend delegates the reboot-bound authority transition straight to the
+/// Runtime-owned transition owner and returns its authoritative result verbatim. It must NOT raise a
+/// global <see cref="IAddonFrontendControl.StateInvalidated"/> -- that would queue
+/// <c>DevicePage.RefreshAsync()</c> and race the just-returned snapshot; the feature has no QAM
+/// surface and a successful transition restarts Windows anyway (PR #430 review, carried forward).</summary>
 [Collection("AppLog")]
 public sealed class CenterMStartupFrontendTests : IDisposable
 {
     private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
 
-    [Fact]
-    public async Task Successful_mutation_does_not_self_invalidate_and_wipe_the_restart_notice()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Transition_request_flows_through_to_the_owner_verbatim(bool centerMEnabled)
     {
-        var control = CreateControl(available: true, server: false, updater: false, service: CenterMFoundationServiceMode.Disabled,
-            helper: new FakeInvoker { Result = Helper(ok: true, false, false, CenterMFoundationServiceMode.Disabled) });
+        var owner = new FakeTransition
+        {
+            Result = new(FrontendCenterMStartupMutationOutcome.Succeeded,
+                new FrontendCenterMStartupSnapshot(FrontendCenterMStartupState.Disabled, false, false, false, null), null),
+        };
+        var control = CreateControl(owner);
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
 
-        var result = await control.SetCenterMStartupEnabledAsync(false);
+        var result = await control.RequestCenterMAuthorityTransitionAsync(centerMEnabled);
 
-        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
-        Assert.Equal(FrontendCenterMStartupState.Disabled, result.Snapshot.State);
+        Assert.Same(owner.Result, result);
+        Assert.Equal(centerMEnabled, owner.LastRequest);
         Assert.Equal(0, invalidations);
     }
 
     [Fact]
-    public async Task Failed_mutation_also_does_not_self_invalidate()
+    public async Task Failed_transition_also_does_not_self_invalidate()
     {
-        var control = CreateControl(available: true, server: true, updater: false, service: CenterMFoundationServiceMode.Disabled,
-            helper: new FakeInvoker { Result = Helper(ok: true, false, false, CenterMFoundationServiceMode.Disabled) });
+        var owner = new FakeTransition
+        {
+            Result = new(FrontendCenterMStartupMutationOutcome.Failed, FrontendCenterMStartupSnapshot.Unavailable, "nope"),
+        };
+        var control = CreateControl(owner);
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
 
-        var result = await control.SetCenterMStartupEnabledAsync(false);
+        var result = await control.RequestCenterMAuthorityTransitionAsync(false);
 
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
         Assert.Equal(0, invalidations);
     }
 
     [Fact]
+    public async Task Transition_is_unavailable_when_no_owner_is_wired()
+    {
+        var control = CreateControl(owner: null);
+
+        var result = await control.RequestCenterMAuthorityTransitionAsync(false);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Unavailable, result.Outcome);
+    }
+
+    [Fact]
     public async Task Capture_flows_through_the_frontend()
     {
-        var control = CreateControl(available: true, server: true, updater: true, service: CenterMFoundationServiceMode.Automatic, helper: new FakeInvoker());
+        var centerM = new CenterMStartupControl(true, ReaderFor(true, true, CenterMFoundationServiceMode.Automatic), new FakeInvoker());
+        var control = CreateControl(owner: null, centerM: centerM);
+
         var snapshot = await control.CaptureCenterMStartupAsync();
+
         Assert.Equal(FrontendCenterMStartupState.Enabled, snapshot.State);
     }
 
-    private static CenterMStartupHelperResult Helper(bool ok, bool server, bool updater, CenterMFoundationServiceMode service)
-        => new(CenterMStartupHelperOutcome.Completed, ok, true, server, updater, service, null);
-
-    private InProcessAddonFrontendControl CreateControl(bool available, bool server, bool updater, CenterMFoundationServiceMode service, ICenterMStartupHelperInvoker helper)
+    private InProcessAddonFrontendControl CreateControl(ICenterMRebootAuthorityTransition? owner, CenterMStartupControl? centerM = null)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
-        var centerM = new CenterMStartupControl(available, ReaderFor(server, updater, service), helper);
         return new InProcessAddonFrontendControl(
             coordinator,
             new ThrowingSystemStatusProvider(),
@@ -73,7 +91,8 @@ public sealed class CenterMStartupFrontendTests : IDisposable
             new DeveloperTestModeState(),
             "",
             captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false),
-            centerMStartup: centerM);
+            centerMStartup: centerM,
+            centerMAuthorityTransition: owner);
     }
 
     private static CenterMStartupStateReader ReaderFor(bool server, bool updater, CenterMFoundationServiceMode service) =>
@@ -88,11 +107,23 @@ public sealed class CenterMStartupFrontendTests : IDisposable
         if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, recursive: true);
     }
 
+    private sealed class FakeTransition : ICenterMRebootAuthorityTransition
+    {
+        public FrontendCenterMStartupMutationResult Result { get; set; } =
+            new(FrontendCenterMStartupMutationOutcome.Succeeded, FrontendCenterMStartupSnapshot.Unavailable, null);
+        public bool? LastRequest { get; private set; }
+
+        public Task<FrontendCenterMStartupMutationResult> RequestAsync(bool centerMEnabled, CancellationToken cancellationToken)
+        {
+            LastRequest = centerMEnabled;
+            return Task.FromResult(Result);
+        }
+    }
+
     private sealed class FakeInvoker : ICenterMStartupHelperInvoker
     {
-        public CenterMStartupHelperResult Result { get; set; } =
-            new(CenterMStartupHelperOutcome.Completed, true, true, true, true, CenterMFoundationServiceMode.Automatic, null);
-        public Task<CenterMStartupHelperResult> SetEnabledAsync(bool enabled, CancellationToken cancellationToken) => Task.FromResult(Result);
+        public Task<CenterMStartupHelperResult> SetEnabledAsync(bool enabled, CancellationToken cancellationToken) =>
+            Task.FromResult(new CenterMStartupHelperResult(CenterMStartupHelperOutcome.Completed, true, true, true, true, CenterMFoundationServiceMode.Automatic, null));
     }
 
     private sealed class FakeStartupManager : IWindowsStartupManager
