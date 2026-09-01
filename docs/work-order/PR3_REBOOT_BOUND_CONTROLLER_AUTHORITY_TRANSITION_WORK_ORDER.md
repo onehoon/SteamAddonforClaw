@@ -840,7 +840,11 @@ If the restart request fails after persistent mutation, return `Failed` with the
 
 ---
 
-## 12. Device-page UX changes
+## 12. Center M card UX changes
+
+> **Later change (PR #442):** the Center M Enable/Disable card moved from the Device tab to the top
+> of the **Controller** tab. Everything in this section still applies -- only the host page changed.
+> Read "Device page" below as "Controller page".
 
 The current PR1-era UI intentionally allows a startup-root mutation and then keeps a sticky:
 
@@ -1239,7 +1243,7 @@ Do not create artificial scheduler/interleaving stress tests for PR3.
 
 PR3 is complete only when all of the following are true:
 
-1. Device-page Center M Enable/Disable now means a confirmed reboot-bound authority transition, not a restart-later startup-root edit.
+1. The Center M Enable/Disable card (Device tab; moved to the Controller tab in PR #442) now means a confirmed reboot-bound authority transition, not a restart-later startup-root edit.
 2. There is no `Restart Later` path.
 3. UI Cancel performs zero persistent mutation.
 4. Runtime owns the ordered transition and final restart request.
