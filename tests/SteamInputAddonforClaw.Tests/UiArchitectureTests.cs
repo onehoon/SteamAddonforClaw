@@ -151,6 +151,22 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Settings_page_re_reads_the_authoritative_snapshot_on_every_entry()
+    {
+        var root = FindRepositoryRoot();
+        var settings = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml.cs"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+
+        // A PR3 reboot-bound authority transition can persist a new launch-at-startup value even when
+        // it returns Cancelled/Failed, and it raises no StateInvalidated -- so the Settings page must
+        // re-read bootstrap on activation instead of trusting its once-from-bootstrap render.
+        Assert.Contains("internal async Task ActivateAsync()", settings, StringComparison.Ordinal);
+        Assert.Contains("await _frontend.GetBootstrapAsync()", settings, StringComparison.Ordinal);
+        Assert.Contains("RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage)", settings, StringComparison.Ordinal);
+        Assert.Contains("if (page == MainNavigationPage.Settings) _ = SettingsContent.ActivateAsync();", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Profile_feature_order_expander_state_and_resolution_contract_are_explicit()
     {
         var root = FindRepositoryRoot();

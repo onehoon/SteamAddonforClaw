@@ -208,6 +208,11 @@ public sealed partial class MainWindow : Window
         ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
         FanHardwareProbeContent.Visibility = page == MainNavigationPage.FanHardwareProbe ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
+        // The Settings page is initialized once from bootstrap, but a reboot-bound authority
+        // transition (PR3) can change the persisted launch-at-startup value even when it later
+        // returns Cancelled/Failed, and it deliberately raises no StateInvalidated. Re-read on
+        // every entry so the toggle never shows a stale bootstrap value.
+        if (page == MainNavigationPage.Settings) _ = SettingsContent.ActivateAsync();
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how
