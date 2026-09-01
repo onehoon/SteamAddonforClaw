@@ -269,7 +269,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.")),
             _runtimeHost.EvaluateUserTermination,
             () => IsConflictingControllerEnvironment(startupComposition.ControllerEnvironmentAssessmentProvider),
-            async token => (await composition.StatusProvider.CaptureAsync(token).ConfigureAwait(false)).Prerequisites,
+            async token =>
+            {
+                var status = await composition.StatusProvider.CaptureAsync(token).ConfigureAwait(false);
+                return (status.Prerequisites, status.RecoverySafe);
+            },
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,

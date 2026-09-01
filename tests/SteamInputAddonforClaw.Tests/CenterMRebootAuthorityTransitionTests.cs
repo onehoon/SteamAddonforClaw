@@ -192,6 +192,23 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
+    public async Task Disable_stops_before_any_mutation_when_controller_recovery_is_not_verified_safe()
+    {
+        // StartupCoordinator can bring the Runtime up with RecoverySafe=false when stale route-scoped
+        // recovery could not be retired. Establishing the persistent PR2 baseline then would let the
+        // next-boot cleaner undo it.
+        var h = new Harness(this) { StartEnabled = true, RecoverySafe = false };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart: restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Empty(h.Order);
+        Assert.Equal(0, restart.Calls);
+        Assert.False(h.Hid.Active);
+    }
+
+    [Fact]
     public async Task Disable_helper_cancel_after_preparation_keeps_the_prepared_state_and_never_says_nothing_changed()
     {
         var h = new Harness(this) { StartEnabled = true, CenterMHelperCancels = true };
@@ -327,6 +344,9 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Contains("\"shutdown.exe\", \"/r /t 0\"", source);
         Assert.DoesNotContain("/r /f", source);
         Assert.DoesNotContain("/f /t", source);
+        // A started process is not an accepted restart: the seam must verify the command result.
+        Assert.Contains("WaitForExit", source);
+        Assert.Contains("ExitCode", source);
     }
 
     // ---- Harness ----
@@ -342,6 +362,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool CenterMHelperCompletes { get; init; } = true;
         public bool CenterMHelperCancels { get; init; }
         public bool PrerequisitesReady { get; init; } = true;
+        public bool RecoverySafe { get; init; } = true;
         public bool ConflictingEnvironment { get; init; }
         public UserTerminationDecision Safety { get; init; } = new(true, UserTerminationBlockReason.None);
         public Func<Task>? BeforeCenterMMutation { get; set; }
@@ -383,7 +404,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                 centerM, coordinator, baseline,
                 () => Safety,
                 () => ConflictingEnvironment,
-                _ => Task.FromResult(prerequisites),
+                _ => Task.FromResult((prerequisites, RecoverySafe)),
                 r);
         }
 

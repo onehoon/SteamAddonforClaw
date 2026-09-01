@@ -24,13 +24,27 @@ internal sealed class WindowsRestartRequester : IWindowsRestartRequester
     {
         try
         {
-            var started = Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0")
+            using var started = Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
             });
             if (started is null) return WindowsRestartRequestResult.Failed;
-            started.Dispose();
+
+            // A started process only proves shutdown.exe launched, not that "/r /t 0" was accepted.
+            // shutdown.exe exits immediately once it has accepted or rejected the request, so a
+            // non-zero exit code (privilege/policy failure) or an unexpectedly long run means the
+            // restart was NOT scheduled -- report Failed so the caller shows the manual-restart path.
+            if (!started.WaitForExit(milliseconds: 5000))
+            {
+                AppLog.Warn("CenterM.Authority", "Windows restart command did not complete within the expected window.");
+                return WindowsRestartRequestResult.Failed;
+            }
+            if (started.ExitCode != 0)
+            {
+                AppLog.Warn("CenterM.Authority", "Windows restart command failed.", null, ("ExitCode", started.ExitCode));
+                return WindowsRestartRequestResult.Failed;
+            }
             return WindowsRestartRequestResult.Requested;
         }
         catch (Exception exception)
@@ -68,7 +82,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly AddonControllerHidHideBaseline _hidHideBaseline;
     private readonly Func<UserTerminationDecision> _lowerLevelRuntimeSafety;
     private readonly Func<bool> _conflictingControllerEnvironment;
-    private readonly Func<CancellationToken, Task<RuntimePrerequisiteAssessment>> _capturePrerequisites;
+    private readonly Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> _captureAdmission;
     private readonly IWindowsRestartRequester _restartRequester;
     private int _inProgress;
 
@@ -78,7 +92,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         AddonControllerHidHideBaseline hidHideBaseline,
         Func<UserTerminationDecision> lowerLevelRuntimeSafety,
         Func<bool> conflictingControllerEnvironment,
-        Func<CancellationToken, Task<RuntimePrerequisiteAssessment>> capturePrerequisites,
+        Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> captureAdmission,
         IWindowsRestartRequester restartRequester)
     {
         _centerMStartup = centerMStartup;
@@ -86,7 +100,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _hidHideBaseline = hidHideBaseline;
         _lowerLevelRuntimeSafety = lowerLevelRuntimeSafety;
         _conflictingControllerEnvironment = conflictingControllerEnvironment;
-        _capturePrerequisites = capturePrerequisites;
+        _captureAdmission = captureAdmission;
         _restartRequester = restartRequester;
     }
 
@@ -130,15 +144,24 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         if (_conflictingControllerEnvironment())
             return Fail(snapshot, "A conflicting or unverified controller-manager environment prevents entering Addon controller authority. Close or remove other controller software, then retry Disable and Restart.");
 
-        // Disable is the point where the next boot is committed to Addon controller authority, so a
-        // known-missing/unusable virtual-controller prerequisite (USBIP2, libVIIPER, HidHide) must
+        // Disable is the point where the next boot is committed to Addon controller authority, so it
+        // must not run on top of an unverified controller state. Both facts are already captured by
+        // the one Runtime status snapshot -- no new authority is introduced here.
+        var admission = await _captureAdmission(cancellationToken).ConfigureAwait(false);
+
+        // RecoverySafe=false means stale route-scoped recovery could not be safely retired (e.g. the
+        // validated recovery journal still exists). Establishing the persistent PR2 baseline now would
+        // let the next-boot StartupHidHideRecoveryCleaner mistake it for the old mutation and undo it.
+        if (!admission.RecoverySafe)
+            return Fail(snapshot,
+                "Controller recovery is not in a verified safe state, so MSI Center M was not disabled. Resolve controller recovery and retry Disable and Restart.");
+
+        // A known-missing/unusable virtual-controller prerequisite (USBIP2, libVIIPER, HidHide) must
         // stop the transition before any persistent mutation (work order PR3 section 6.2 item 6).
-        // This reuses the existing Runtime prerequisite fact -- no new scanner.
-        var prerequisites = await _capturePrerequisites(cancellationToken).ConfigureAwait(false);
-        if (!prerequisites.IsRoutingReady)
+        if (!admission.Prerequisites.IsRoutingReady)
             return Fail(snapshot,
                 $"Required controller components are not ready, so MSI Center M was not disabled. " +
-                $"HidHide={prerequisites.HidHide.Status}, UsbIpWin2={prerequisites.UsbIpWin2.Status}, Viiper={prerequisites.Viiper.Status}. " +
+                $"HidHide={admission.Prerequisites.HidHide.Status}, UsbIpWin2={admission.Prerequisites.UsbIpWin2.Status}, Viiper={admission.Prerequisites.Viiper.Status}. " +
                 $"Complete first-time setup, then retry Disable and Restart.");
 
         var inspection = _hidHideBaseline.InspectDisabledModeBaseline([]);
