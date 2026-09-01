@@ -1236,3 +1236,338 @@ The most important simplifications are:
 7. **Steam/BPM changes virtual presentation only; they never decide physical PID1902 ownership.**
 
 This should be the baseline contract for the next Full PID1902 implementation work.
+
+---
+
+## 29. Refined small-PR implementation sequence
+
+The broad sequence in section 26 remains useful as a conceptual roadmap, but implementation should be split more aggressively into small, reviewable contracts.
+
+The project is still pre-release, so there is no benefit in preserving obsolete Steam-route orchestration merely to reduce short-term diff size. Prefer a clean dependency chain where each PR proves one layer before the next layer becomes active.
+
+Where practical, target roughly **100–400 LOC per PR**. This is a guideline, not a hard limit; correctness and a clear ownership boundary matter more than artificial LOC targets.
+
+The recommended refined order is:
+
+```text
+Persistent dual VIIPER devices        [completed foundation]
+        ↓
+PR2  Addon-owned HidHide baseline
+        ↓
+PR3  Reboot-bound authority transition
+        ↓
+PR4  Disabled-boot admission
+        ↓
+PR5  PID1902 + DirectInput ownership
+        ↓
+PR6  First presentation attach
+        ↓
+PR7  Runtime X360 ↔ SteamDeck switching
+        ↓
+PR8  Shutdown / Enabled-mode restoration
+```
+
+### 29.1 PR2 — Addon-Owned HidHide Baseline Foundation
+
+Goal:
+
+> Establish the new persistent HidHide semantics independently of Center M mutation, PID switching, VIIPER presentation, and UI.
+
+This PR should replace the old conceptual model of "borrow HidHide for a Steam route, then roll it back" with a narrow primitive representing the Addon controller baseline.
+
+Conceptual operations may be as small as:
+
+```text
+Inspect()
+ApplyDisabledModeBaseline()
+ApplyEnabledModeBaseline()
+```
+
+Do not create a generalized HidHide ownership framework or a multi-owner state machine.
+
+Disabled-mode baseline should represent the deterministic Addon controller configuration, including the required Addon whitelist, non-inverse mode, Active state, and exact known Addon-owned PID1902 targets when they exist.
+
+Enabled-mode baseline should represent the clean stock-compatible state expected when Addon controller authority is not active.
+
+Strictly out of scope:
+
+```text
+PID1901 / PID1902 switching
+DirectInput acquisition
+Center M startup mutation
+Windows reboot
+VIIPER attach/detach
+X360 publisher
+Steam Deck publisher
+Steam/BPM policy
+Device-page UI changes
+runtime recovery
+```
+
+Tests should focus only on deterministic HidHide inspect/apply/readback behavior and failure classification.
+
+### 29.2 PR3 — Reboot-Bound Authority Transition
+
+Goal:
+
+> Make Enable/Disable a mandatory reboot-bound product transition by composing the already-existing Center M startup control with the PR2 HidHide baseline.
+
+Disable path:
+
+```text
+user selects Disable
+→ blocking confirmation
+→ [Cancel] or [Disable and Restart]
+→ apply/verify Disabled-mode HidHide baseline
+→ disable/verify Center M startup roots
+→ request immediate reboot
+```
+
+Enable path:
+
+```text
+user selects Enable
+→ blocking confirmation
+→ [Cancel] or [Enable and Restart]
+→ apply/verify Enabled-mode HidHide baseline as appropriate for this stage
+→ enable/verify Center M startup roots
+→ request immediate reboot
+```
+
+There must be no supported `Restart Later` path.
+
+This PR should not perform physical controller ownership changes.
+
+Strictly out of scope:
+
+```text
+PID1901 → PID1902
+PID1902 → PID1901 as a new runtime ownership implementation
+DirectInput acquisition
+virtual-controller attach
+Steam/BPM presentation selection
+Center M current-session controller takeover
+runtime owned-state recovery
+```
+
+The purpose is to make the reboot boundary itself authoritative before controller acquisition is introduced.
+
+### 29.3 PR4 — Disabled-Boot Admission
+
+Goal:
+
+> Decide whether the current boot is allowed to enter Addon controller ownership, without yet mutating the physical controller or exposing a virtual controller.
+
+The admission decision should be based on current facts, not an additional persisted authority boolean.
+
+Conceptually require:
+
+```text
+supported MSI Claw
+AND Center M startup roots exactly Disabled
+AND expected Disabled-mode HidHide baseline valid
+AND recovery state safe
+AND canonical dual VIIPER runtime ready with both devices detached
+```
+
+Result should be intentionally small, for example conceptually:
+
+```text
+Stock / Passive
+AddonReady
+FailedClosed
+```
+
+Do not invent a large authority manager or state machine merely for this gate.
+
+Strictly out of scope:
+
+```text
+PID switching
+DirectInput acquisition
+HidHide physical-target mutation after PID1902 appears
+X360 attach
+SteamDeck attach
+publisher startup
+runtime presentation switching
+```
+
+### 29.4 PR5 — Disabled Boot → PID1902 + DirectInput
+
+Goal:
+
+> Convert a successful Disabled-boot admission into real physical controller ownership while keeping both virtual presentations detached.
+
+Expected sequence:
+
+```text
+AddonReady
+→ capture strong physical MSI Claw identity
+→ if already PID1902, keep it
+→ if PID1901, switch the same device to PID1902
+→ bounded PnP stabilization
+→ verify same strong physical identity
+→ acquire exact DirectInput session
+→ resolve exact PID1902 primary HID collection
+→ reconcile/ensure Addon HidHide baseline for that exact target
+→ verify physical isolation
+```
+
+The final PR5 invariant is:
+
+```text
+Physical MSI Claw = PID1902
+DirectInput = healthy
+HidHide isolation = verified
+Xbox360 = detached
+SteamDeck = detached
+```
+
+Do not attach a virtual controller in this PR.
+
+That separation is intentional: PID/PnP/DirectInput/HidHide failures should be reviewable independently from virtual presentation behavior.
+
+### 29.5 PR6 — First Presentation Attach
+
+Goal:
+
+> Expose the first virtual controller only after physical ownership and isolation are already proven.
+
+Immediately before first attach, capture the freshest current presentation desire:
+
+```text
+Steam game active OR BPM active
+    → SteamDeck
+
+otherwise
+    → Xbox360
+```
+
+If a retained user setting controls Steam presentation eligibility, it may participate here, but it must not affect PID1902 ownership.
+
+Expected attach boundary:
+
+```text
+PID1902 healthy
+DirectInput healthy
+HidHide verified
+VIIPER dual runtime Ready
+both virtual devices detached
+    ↓
+read latest Steam/BPM state
+    ↓
+attach exactly one selected device
+    ↓
+send neutral state
+    ↓
+start matching publisher
+```
+
+This PR does **not** need runtime X360 ↔ SteamDeck switching yet.
+
+It only proves that boot can expose the correct first presentation from the current facts.
+
+### 29.6 PR7 — Runtime X360 ↔ SteamDeck Switching
+
+Goal:
+
+> Make Steam/BPM changes select presentation without changing physical controller ownership.
+
+Required transition pattern:
+
+```text
+current presentation
+→ neutral
+→ stop current publisher
+→ detach current device
+→ attach target device
+→ send target neutral state
+→ start target publisher
+```
+
+Reverse direction uses the same path.
+
+The critical invariant is that presentation changes do **not** touch:
+
+```text
+PID1902
+DirectInput session
+HidHide physical isolation
+VIIPER server
+VIIPER bus
+physical controller authority
+```
+
+Hardware stress validation should repeatedly switch X360 ↔ SteamDeck and verify that those lower layers remain unchanged. A practical repeated-switch test such as 100 transitions is appropriate for POC validation if hardware time permits.
+
+Do not add epochs, barriers, or another generalized state machine solely to defend against theoretical event interleavings. Use the existing serialized presentation mutation concept and converge to latest desired state.
+
+### 29.7 PR8 — Shutdown / Enabled-Mode Restoration
+
+Goal:
+
+> Complete the clean lifecycle boundary after the owned startup path has been proven.
+
+Normal Addon shutdown while Center M remains Disabled should converge to a safe physical state:
+
+```text
+active virtual presentation
+→ neutral
+→ publisher stop
+→ detach
+→ DirectInput release
+→ restore PID1901
+→ VIIPER teardown
+```
+
+The persistent Disabled-mode HidHide configuration may remain dormant across normal shutdown/reboot so that the next PID1902 enumeration can be pre-cloaked.
+
+Center M Enable transition must ultimately ensure:
+
+```text
+virtual presentation retired
+DirectInput released
+physical MSI Claw restored to PID1901
+Addon controller HidHide baseline removed/cleaned
+Center M startup roots Enabled / Automatic
+mandatory Windows reboot requested
+```
+
+Do not merge unrelated owned-state recovery into this PR if it would make the change difficult to review.
+
+Real fault recovery for PID1902 drift, PnP disappearance/re-arrival, DirectInput loss, HidHide drift, Center M resurrection, suspend/resume, and crash recovery may follow as additional focused PRs after the basic owned lifecycle is proven.
+
+### 29.8 Review rules for this sequence
+
+Each PR should be reviewed against its own contract rather than the final feature set.
+
+Do not block an early foundation PR because a later PR has not yet implemented its behavior.
+
+Examples:
+
+```text
+PR2 does not switch PID1902               → expected
+PR3 does not acquire DirectInput           → expected
+PR4 does not attach a controller           → expected
+PR5 leaves both virtual devices detached   → expected
+PR6 does not auto-switch after startup     → expected
+```
+
+At the same time, each PR must avoid accidentally activating behavior assigned to a later stage.
+
+Examples:
+
+```text
+PR2 must not mutate Center M or PID state
+PR3 must not perform live controller takeover
+PR4 must not mutate physical controller state
+PR5 must not attach a virtual presentation
+PR6 must not recreate physical ownership during presentation selection
+PR7 must not route PID ownership through Steam/BPM
+```
+
+The project is unreleased, so obsolete Steam-session orchestration does not need compatibility wrappers. If a later implementation step proves that an old route coordinator, yield policy, test seam, or compatibility layer conflicts with the Full PID1902 architecture, remove or rewrite it rather than layering a second authority model on top.
+
+The guiding implementation principle remains:
+
+> **One contract per PR, one controller authority, one physical desired state, one presentation owner, one teardown path — without defensive complexity for theoretical races.**
