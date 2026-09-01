@@ -123,15 +123,29 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact] // ...but a state that cannot be normalized through the verified control path still blocks
-    public async Task Disable_is_blocked_up_front_by_an_unresolvable_hidhide_state()
+    public async Task Disable_normalizes_an_unresolved_hidhide_whitelist_entry_via_exact_replace()
     {
         var h = new Harness(this) { StartEnabled = true };
         h.Hid.HasUnresolvedWhitelist = true;
         h.Hid.Active = true;
         var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
 
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.False(h.Hid.HasUnresolvedWhitelist);
+    }
+
+    [Fact] // review [P1]: unresolved is no longer a pre-emptive admission conflict -- a client with no
+           // real exact-replace path fails closed at the normalization mutation instead.
+    public async Task Disable_fails_closed_when_the_unresolved_entry_cannot_be_replaced()
+    {
+        var h = new Harness(this) { StartEnabled = true };
+        h.Hid.HasUnresolvedWhitelist = true;
+        h.Hid.Active = true;
+        h.Hid.FailReplaceApplications = true;
+        var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
+
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
-        Assert.Empty(h.Order);
+        Assert.DoesNotContain("centerm:false", h.Order);
     }
 
     [Fact]
@@ -588,12 +602,23 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool FailAddApplication { get; set; }
         public bool KeepHiddenOnRemove { get; set; }
         public bool HasUnresolvedWhitelist { get; set; }
+        public bool FailReplaceApplications { get; set; }
 
         public HidHideInspection Inspect() => new(
             Inverse ? HidHideInspectionStatus.InverseWhitelist
                 : Active ? HidHideInspectionStatus.Available : HidHideInspectionStatus.Disabled,
             new HashSet<string>(Whitelist, StringComparer.OrdinalIgnoreCase),
             Hidden.ToList(), Whitelist.ToList(), Active, Inverse, HasUnresolvedApplicationWhitelistEntries: HasUnresolvedWhitelist);
+
+        public bool ReplaceApplications(IReadOnlyCollection<string> executablePaths)
+        {
+            RecordOnce("hidhide:disable");
+            if (FailReplaceApplications) return false;
+            Whitelist.Clear();
+            Whitelist.AddRange(executablePaths);
+            HasUnresolvedWhitelist = false;
+            return true;
+        }
 
         public bool AddApplication(string executablePath)
         {

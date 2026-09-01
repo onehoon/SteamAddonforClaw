@@ -214,30 +214,39 @@ internal sealed class AddonControllerHidHideBaseline
         if (inspection.IsInverseWhitelist && !TryMutate(() => _client.SetInverseWhitelist(false), out var inverseFailure))
             return Fail(inverseFailure, "DisabledModeInverseNormalizeFailed", targets.Count);
 
-        // 2. Remove every whitelist entry that is not one of the two trusted official paths or the
-        //    Addon -- this also removes a stale registration from an old HidHide install location.
+        // 2-4. Converge the Applications whitelist to exactly {cli, client, addon}.
         var initialWhitelistCount = inspection.ApplicationWhitelist.Count;
         var removedWhitelist = 0;
-        bool IsExpectedOfficial(string entry) => PathEquals(entry, cliPath) || PathEquals(entry, clientPath);
-        foreach (var entry in inspection.ApplicationWhitelist.Where(entry => !IsExpectedOfficial(entry) && !PathEquals(entry, _addonExecutablePath)).ToArray())
+        if (inspection.HasUnresolvedApplicationWhitelistEntries)
         {
-            if (!TryMutate(() => _client.RemoveApplication(entry), out var removeFailure))
-                return Fail(removeFailure, "DisabledModeForeignWhitelistRemoveFailed", targets.Count);
-            removedWhitelist++;
+            // A raw entry HidHide cannot convert back to a DOS path can never be identified/removed
+            // individually -- the only normalization path is an atomic exact replace (review [P1]).
+            if (!TryMutate(() => _client.ReplaceApplications([cliPath, clientPath, _addonExecutablePath]), out var replaceFailure))
+                return Fail(replaceFailure, "DisabledModeWhitelistNormalizeFailed", targets.Count);
+            removedWhitelist = inspection.RawApplicationWhitelist?.Count ?? initialWhitelistCount;
         }
+        else
+        {
+            // Remove every whitelist entry that is not one of the two trusted official paths or the
+            // Addon -- this also removes a stale registration from an old HidHide install location.
+            bool IsExpectedOfficial(string entry) => PathEquals(entry, cliPath) || PathEquals(entry, clientPath);
+            foreach (var entry in inspection.ApplicationWhitelist.Where(entry => !IsExpectedOfficial(entry) && !PathEquals(entry, _addonExecutablePath)).ToArray())
+            {
+                if (!TryMutate(() => _client.RemoveApplication(entry), out var removeFailure))
+                    return Fail(removeFailure, "DisabledModeForeignWhitelistRemoveFailed", targets.Count);
+                removedWhitelist++;
+            }
 
-        // 3. Ensure both trusted canonical official paths are whitelisted.
-        if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, cliPath))
-            && !TryMutate(() => _client.AddApplication(cliPath), out var cliFailure))
-            return Fail(cliFailure, "DisabledModeOfficialCliAddFailed", targets.Count);
-        if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, clientPath))
-            && !TryMutate(() => _client.AddApplication(clientPath), out var clientFailure))
-            return Fail(clientFailure, "DisabledModeOfficialClientAddFailed", targets.Count);
-
-        // 4. Exact Addon whitelist entry.
-        if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, _addonExecutablePath))
-            && !TryMutate(() => _client.AddApplication(_addonExecutablePath), out var addonFailure))
-            return Fail(addonFailure, "DisabledModeAddonWhitelistAddFailed", targets.Count);
+            if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, cliPath))
+                && !TryMutate(() => _client.AddApplication(cliPath), out var cliFailure))
+                return Fail(cliFailure, "DisabledModeOfficialCliAddFailed", targets.Count);
+            if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, clientPath))
+                && !TryMutate(() => _client.AddApplication(clientPath), out var clientFailure))
+                return Fail(clientFailure, "DisabledModeOfficialClientAddFailed", targets.Count);
+            if (!inspection.ApplicationWhitelist.Any(entry => PathEquals(entry, _addonExecutablePath))
+                && !TryMutate(() => _client.AddApplication(_addonExecutablePath), out var addonFailure))
+                return Fail(addonFailure, "DisabledModeAddonWhitelistAddFailed", targets.Count);
+        }
 
         // 5. Remove every hidden device entry that is not a requested exact target.
         var initialHiddenCount = (inspection.HiddenDeviceEntries ?? []).Count;
@@ -341,7 +350,8 @@ internal sealed class AddonControllerHidHideBaseline
 
     private string? FindDisabledModeConflict(HidHideInspection inspection)
     {
-        if (inspection.HasUnresolvedApplicationWhitelistEntries) return "UnresolvedWhitelistEntry";
+        // review [P1]: an unresolved raw whitelist entry is normalized away (via ReplaceApplications)
+        // rather than blocking admission -- it is no longer treated as a conflict.
         // An inverse-whitelist machine is a conflict only when this client has no verified path to
         // normalize it. When the path exists, Apply attempts it and fails closed if it cannot confirm.
         if (inspection.IsInverseWhitelist && !_client.SupportsInverseWhitelistMutation) return "InverseWhitelistUnsupported";
@@ -360,6 +370,7 @@ internal sealed class AddonControllerHidHideBaseline
 
     private bool IsDisabledCompliant(HidHideInspection inspection, IReadOnlyList<string> targets, string cliPath, string clientPath) =>
         !inspection.IsInverseWhitelist
+        && !inspection.HasUnresolvedApplicationWhitelistEntries
         && inspection.IsActive
         && WhitelistIsExactlyDisabled(inspection, cliPath, clientPath)
         && HiddenIsExactly(inspection, targets);

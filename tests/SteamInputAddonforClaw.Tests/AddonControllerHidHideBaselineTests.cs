@@ -55,11 +55,13 @@ public sealed class AddonControllerHidHideBaselineTests
         Assert.Equal(AddonHidHideBaselineOutcome.Unavailable, result.Outcome);
     }
 
-    [Fact]
-    public void Inspect_unresolved_raw_whitelist_entry_is_still_a_conflict()
+    [Fact] // review [P1]: an unresolved raw entry is normalized (via ReplaceApplications), not a conflict
+    public void Inspect_unresolved_raw_whitelist_entry_is_applicable_not_a_conflict()
     {
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], HasUnresolvedWhitelistEntries = true };
-        Assert.Equal(AddonHidHideBaselineOutcome.Conflict, Baseline(client).InspectDisabledModeBaseline([]).Outcome);
+        var result = Baseline(client).InspectDisabledModeBaseline([]);
+        Assert.Equal(AddonHidHideBaselineOutcome.Applicable, result.Outcome);
+        Assert.False(result.IsCompliant);
     }
 
     [Fact] // PR10 addendum: the real blocker -- CLI + Client + Addon must NOT read as a foreign conflict
@@ -273,11 +275,48 @@ public sealed class AddonControllerHidHideBaselineTests
         Assert.Equal(AddonHidHideBaselineOutcome.Unavailable, Baseline(client).ApplyDisabledModeBaseline([]).Outcome);
     }
 
-    [Fact]
-    public void Apply_where_an_unresolved_entry_appears_during_verification_is_conflict()
+    [Fact] // review [P1]: an unresolved entry surviving verification is a read-back mismatch, not a conflict
+    public void Apply_where_an_unresolved_entry_appears_during_verification_fails_closed()
     {
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName], Active = false, UnresolvedOnReinspect = true };
-        Assert.Equal(AddonHidHideBaselineOutcome.Conflict, Baseline(client).ApplyDisabledModeBaseline([]).Outcome);
+        Assert.Equal(AddonHidHideBaselineOutcome.VerificationFailed, Baseline(client).ApplyDisabledModeBaseline([]).Outcome);
+    }
+
+    [Fact] // review [P1]: an unresolved raw entry is normalized via the exact-replace path and succeeds
+    public void Apply_normalizes_an_unresolved_raw_whitelist_entry_via_replace_applications()
+    {
+        var client = new FakeHidHideClient
+        {
+            Whitelist = ["\\Device\\HarddiskVolume3\\Old\\stale-uninstalled.exe"],
+            HasUnresolvedWhitelistEntries = true,
+            Active = false,
+        };
+        var result = Baseline(client).ApplyDisabledModeBaseline([Pid1902Collection]);
+
+        Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
+        Assert.Equal(1, client.ReplaceApplicationsCalls);
+        Assert.Equal(0, client.MutationCalls.Count(call => call is "AddApplication" or "RemoveApplication"));
+        Assert.Equal(3, client.Whitelist.Count);
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(OfficialCli), StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), Path.GetFullPath(OfficialClient), StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(client.Whitelist, e => string.Equals(Path.GetFullPath(e), AddonExe, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal([Pid1902Collection], client.Hidden);
+    }
+
+    [Fact] // review [P1]: a failed exact-replace fails closed
+    public void Apply_fails_closed_when_replace_applications_reports_failure()
+    {
+        var client = new FakeHidHideClient
+        {
+            Whitelist = ["\\Device\\HarddiskVolume3\\Old\\stale-uninstalled.exe"],
+            HasUnresolvedWhitelistEntries = true,
+            Active = false,
+            FailReplaceApplications = true,
+        };
+        var result = Baseline(client).ApplyDisabledModeBaseline([]);
+
+        Assert.Equal(AddonHidHideBaselineOutcome.MutationFailed, result.Outcome);
+        Assert.Equal(1, client.ReplaceApplicationsCalls);
     }
 
     // ---- Clear (Enabled-mode / release) baseline ----
@@ -493,6 +532,8 @@ public sealed class AddonControllerHidHideBaselineTests
         public bool KeepHiddenOnRemove { get; init; }
         public bool UnavailableAfterFirstInspect { get; init; }
         public bool UnresolvedOnReinspect { get; init; }
+        public bool FailReplaceApplications { get; init; }
+        public int ReplaceApplicationsCalls { get; private set; }
         public List<string> MutationCalls { get; } = [];
 
         private int _inspectCount;
@@ -516,6 +557,15 @@ public sealed class AddonControllerHidHideBaselineTests
                 Active,
                 Inverse,
                 HasUnresolvedApplicationWhitelistEntries: HasUnresolvedWhitelistEntries || (UnresolvedOnReinspect && _inspectCount > 1));
+        }
+
+        public bool ReplaceApplications(IReadOnlyCollection<string> executablePaths)
+        {
+            ReplaceApplicationsCalls++;
+            if (FailReplaceApplications) return false;
+            Whitelist = executablePaths.ToList();
+            HasUnresolvedWhitelistEntries = false; // the raw stale entry no longer exists after an exact replace
+            return true;
         }
 
         public bool AddApplication(string executablePath)

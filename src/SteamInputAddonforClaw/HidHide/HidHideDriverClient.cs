@@ -96,6 +96,32 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
 
     public bool SupportsInverseWhitelistMutation => true;
 
+    // The only exact-replace path for a raw whitelist entry that cannot be converted back to a DOS
+    // path -- individual AddApplication/RemoveApplication cannot target it (review [P1]).
+    public bool ReplaceApplications(IReadOnlyCollection<string> executablePaths)
+    {
+        try
+        {
+            var desired = executablePaths
+                .Select(_pathConverter.ToFullImageName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            lock (ControlDeviceGate)
+            {
+                using var device = _nativeApi.Open(GenericRead | GenericWrite);
+                WriteMultiString(device, Ioctl(2049), desired);
+                var verified = ReadMultiString(device, Ioctl(2048));
+                return verified.Count == desired.Length
+                    && desired.All(expected => verified.Contains(expected, StringComparer.OrdinalIgnoreCase));
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHide", "HidHide whitelist replacement failed.", exception, ("Action", "FailClosed"));
+            return false;
+        }
+    }
+
     // HidHide control contract: IOCTL_SET_WHITELIST_INVERSE (function 2055), the odd/set half of the
     // 2054 get pair -- same one-byte-boolean + read-back-verify shape as SetActive (function 2053).
     // Verified against DS4Windows HidHideAPIDevice.cs, reference SHA
