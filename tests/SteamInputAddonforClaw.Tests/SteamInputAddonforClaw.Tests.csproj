@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.QamHost\SteamInputAddonforClaw.QamHost.csproj" />
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.UI\SteamInputAddonforClaw.UI.csproj" />
+    <ProjectReference Include="..\..\src\SteamInputAddonforClaw.Overlay\SteamInputAddonforClaw.Overlay.csproj" />
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" />
   </ItemGroup>
 </Project>
