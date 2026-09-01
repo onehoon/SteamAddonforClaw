@@ -7,19 +7,6 @@
         <StackPanel Spacing="16">
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="Device" />
 
-            <InfoBar x:Name="CenterMStartupInfoBar" IsClosable="False" IsOpen="False" Severity="Informational" />
-            <ctcontrols:SettingsCard x:Name="CenterMStartupCard" Header="MSI Center M"
-                Description="Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE7FC;" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <TextBlock x:Name="CenterMStartupStatusText" VerticalAlignment="Center" Text="Status: —" />
-                    <Button x:Name="CenterMStartupEnableButton" Content="Enable" Click="CenterMStartupEnableButton_Click" />
-                    <Button x:Name="CenterMStartupDisableButton" Content="Disable" Click="CenterMStartupDisableButton_Click" />
-                </StackPanel>
-            </ctcontrols:SettingsCard>
-
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control"
                 Description="Configure processor power limits for plugged-in and battery operation.">

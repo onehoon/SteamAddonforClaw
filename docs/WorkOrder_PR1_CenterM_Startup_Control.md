@@ -34,7 +34,12 @@ session. This PR's contract is different: change startup configuration → reque
 lifecycle boundary → new Center M state. No immediate teardown is required, and this avoids a
 controller-mode transition mid-session while the new PID1902/X360 architecture does not exist yet.
 
-## 3. Device page UI
+## 3. Center M card placement
+
+> **Later change (PR #442):** the card was moved to the **top of the Controller tab** (above *Steam
+> Input Routing*). Enabling/disabling MSI Center M switches controller authority (PID1902 ↔ stock),
+> which is a controller concern rather than a power/TDP one. The rest of this section describes the
+> original PR1 placement; the card contents, behaviour, and contract are unchanged by the move.
 
 Add the card at the top of the existing Device page, **before TDP Control**. The Device page already
 owns physical-device/system features (TDP Control, CPU Boost, Windows Power Mode); Center M ownership
@@ -220,6 +225,11 @@ minimum contract plumbing to keep the solution compiling. Center M startup contr
 reboot-requiring administrative setting and stays on the full Device page.
 
 ## C. Existing UI architecture tests may be updated
+
+> **Later change (PR #442):** the card now lives at the top of the **Controller** page, so the
+> `UiArchitectureTests` guard asserts `CenterMStartupCard` precedes `SteamInputRoutingExpander` in
+> `ControllerPage.xaml` (and is absent from `DevicePage.xaml`), and
+> `CenterMStartupPresentationTests` reference `ControllerPage.CenterMStartupPresentation`.
 
 Adding the MSI Center M card above TDP Control legitimately changes DevicePage structure. Updates to
 `UiArchitectureTests` ordering/string assertions are allowed when required by the new card. Preserve

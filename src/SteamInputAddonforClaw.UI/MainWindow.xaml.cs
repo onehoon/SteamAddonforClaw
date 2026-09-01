@@ -213,6 +213,9 @@ public sealed partial class MainWindow : Window
         // returns Cancelled/Failed, and it deliberately raises no StateInvalidated. Re-read on
         // every entry so the toggle never shows a stale bootstrap value.
         if (page == MainNavigationPage.Settings) _ = SettingsContent.ActivateAsync();
+        // The Controller page hosts the MSI Center M controller-authority card, which the reboot-bound
+        // transition (PR3) changes without a StateInvalidated broadcast -- re-read on every entry.
+        if (page == MainNavigationPage.Controller) ControllerContent.Activate();
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how

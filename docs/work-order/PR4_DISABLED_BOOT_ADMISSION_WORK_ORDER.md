@@ -278,6 +278,10 @@ This is a runtime fact, not a second source of authority.
 
 ## 5. Make `CenterMStartupControl` available to startup before the stock baseline
 
+> **Later change (PR #442):** the Center M Enable/Disable card moved from the Device tab to the top
+> of the **Controller** tab. Where this document says "Device page" / "Device-page capture" for the
+> Center M startup control, read "Controller page". Backend behaviour is unchanged.
+
 Today `AddonProcessHost` constructs the shared `CenterMStartupControl` only during Runtime initialization, after `StartupCoordinator.RunAsync()` has already completed.
 
 PR4 needs the same real startup-root fact earlier.
@@ -1372,7 +1376,7 @@ Verify:
 From the Enabled baseline:
 
 ```text
-Device page
+Controller page
 → Disable and Restart
 ```
 

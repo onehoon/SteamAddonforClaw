@@ -1331,10 +1331,10 @@ Preferred foundation behavior:
 
 - acquisition result is Runtime-internal;
 - logs expose success/failure details;
-- Device page continues to show Center M authority state;
+- the Center M authority card continues to show Center M authority state (moved to the Controller tab in PR #442);
 - PR3 `Enable and Restart` remains the escape/release path.
 
-Do not turn PR5 into a Device-page redesign.
+Do not turn PR5 into a Center M card / Controller-page redesign.
 
 Do not bump named-pipe protocol unless implementation truly needs a new frontend field.
 
