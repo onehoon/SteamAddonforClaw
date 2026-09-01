@@ -32,9 +32,11 @@ internal enum CanonicalViiperRuntimeTeardownPhase
 }
 
 /// <summary>
-/// The one process/runtime-lifetime canonical VIIPER owner (PR2): one <see cref="ICanonicalViiperNativeApi"/>,
-/// one USB server, one caller-owned bus, and one persistent Steam Deck logical device. Xbox360
-/// primitives remain dormant for future reuse; no Xbox360 device is created during startup.
+/// The one process/runtime-lifetime canonical VIIPER owner: one <see cref="ICanonicalViiperNativeApi"/>,
+/// one USB server, one caller-owned bus, and BOTH persistent typed logical devices -- the Steam Deck
+/// and the Xbox360 -- created during normal production initialization and left DETACHED (Persistent
+/// Dual VIIPER Devices work order). Neither is attached here; a later presentation-ownership PR
+/// chooses and attaches exactly one.
 /// Owns only native VIIPER lifecycle: it does NOT own Steam
 /// policy, routing eligibility, physical PID1901/PID1902 switching, HidHide, PnP policy, the
 /// controller input publisher, feedback authority, Game Bar policy, or OEM1 -- those remain
@@ -133,9 +135,9 @@ internal sealed class CanonicalViiperRuntime
     internal bool SetDeckOutputCallback(SteamDeckOutputCallback? callback) =>
         State == CanonicalViiperRuntimeState.Ready && _native.SetSteamDeckOutputCallback(DeckDeviceHandle, callback);
 
-    // ---- Xbox360 route primitives over the already-persistent detached-ready handle. The current
-    // Game Bar presentation path consumes these primitives. They invent no presentation policy of
-    // their own (e.g. whether Attached is expected); AddonRoutingRuntime owns that policy. ----
+    // ---- Xbox360 route primitives over the already-persistent detached-ready handle. A future
+    // presentation-ownership PR consumes these primitives. They invent no presentation policy of
+    // their own (e.g. whether Attached is expected); the presentation owner owns that policy. ----
 
     internal bool TryGetXbox360AttachmentState(out USBDeviceAttachmentState state)
     {
@@ -189,10 +191,13 @@ internal sealed class CanonicalViiperRuntime
         State == CanonicalViiperRuntimeState.Ready && _xbox360Created && _native.SetXbox360DeviceState(Xbox360DeviceHandle, state);
 
     /// <summary>
-    /// Production staged initialization: NewUSBServer -&gt; CreateUSBBus -&gt;
-    /// CreateSteamDeckDevice(autoAttach=false) -&gt; GetUSBDeviceIdentity -&gt;
-    /// GetUSBDeviceAttachmentState(Deck)==Detached -&gt; Ready. Dormant Xbox360
-    /// primitives are not part of production readiness. Any staged failure
+    /// Production staged initialization, one deterministic ownership chain:
+    /// NewUSBServer -&gt; CreateUSBBus -&gt; CreateSteamDeckDevice(autoAttach=false) -&gt;
+    /// GetUSBDeviceIdentity(Deck) -&gt; GetUSBDeviceAttachmentState(Deck)==Detached -&gt;
+    /// CreateXbox360Device(autoAttach=false) -&gt; GetUSBDeviceIdentity(Xbox360) -&gt;
+    /// GetUSBDeviceAttachmentState(Xbox360)==Detached -&gt; Ready. BOTH typed devices are created for
+    /// the runtime lifetime and left detached; neither is attached and no publisher is started here.
+    /// Any staged failure
     /// unwinds only the known-safe resources already acquired, in reverse order, and stops the
     /// moment a native result is not known-safe (no destructive cleanup past that point). Callers
     /// must fail routing closed rather than fall back to a second/legacy ownership path (work
@@ -206,7 +211,7 @@ internal sealed class CanonicalViiperRuntime
     /// ownership is never silently discarded -- <see cref="TeardownAsync"/> can resume cleanup
     /// later for the CleanupPending case.
     /// </summary>
-    internal static CanonicalViiperRuntime? TryInitialize(ICanonicalViiperNativeApi native, string loopbackAddress, bool createXbox360ForTests = false)
+    internal static CanonicalViiperRuntime? TryInitialize(ICanonicalViiperNativeApi native, string loopbackAddress)
     {
         ArgumentNullException.ThrowIfNull(native);
 
@@ -291,40 +296,50 @@ internal sealed class CanonicalViiperRuntime
                 return runtime;
         }
 
-        // Production startup intentionally stops here. The optional seam exists only so the
-        // dormant Xbox360 primitive tests can exercise a genuinely created handle without
-        // reintroducing Xbox360 creation into the product startup path.
-        if (createXbox360ForTests)
+        // Xbox360 is the second typed device of the persistent dual-device graph -- created here for
+        // the runtime lifetime, detached, exactly like the Deck above. Zero VID/PID/subtype -> VIIPER's
+        // own canonical Xbox360 default identity (045E:028E, subtype 1).
+        if (!native.CreateXbox360Device(serverHandle, out var xbox360Handle, busId, autoAttachLocalhost: false, idVendor: 0, idProduct: 0, xinputSubType: 0))
         {
-            if (!native.CreateXbox360Device(serverHandle, out var xbox360Handle, busId, autoAttachLocalhost: false, idVendor: 0, idProduct: 0, xinputSubType: 0))
-                return UnwindDeckThenBusServer(runtime);
-            runtime.Xbox360DeviceHandle = xbox360Handle;
-            runtime._xbox360Created = true;
-            if (!native.GetUSBDeviceIdentity(xbox360Handle, out var xbox360IdentityBusId, out var xbox360LogicalDeviceId) || xbox360IdentityBusId != busId)
+            LogInitFailure("CreateXbox360DeviceFailed");
+            return UnwindDeckThenBusServer(runtime);
+        }
+        runtime.Xbox360DeviceHandle = xbox360Handle;
+        runtime._xbox360Created = true;
+
+        if (!native.GetUSBDeviceIdentity(xbox360Handle, out var xbox360IdentityBusId, out var xbox360LogicalDeviceId) || xbox360IdentityBusId != busId)
+        {
+            LogInitFailure("Xbox360IdentityFailed");
+            return UnwindXbox360ThenDeckThenBusServer(runtime);
+        }
+        runtime.Xbox360LogicalDeviceId = xbox360LogicalDeviceId;
+
+        if (!native.GetUSBDeviceAttachmentState(xbox360Handle, out var xbox360AttachmentState))
+        {
+            LogInitFailure("Xbox360AttachmentStateQueryFailed");
+            runtime.MarkUnsafe("Xbox360AttachmentStateQueryFailed");
+            return runtime;
+        }
+        switch (xbox360AttachmentState)
+        {
+            case USBDeviceAttachmentState.Detached:
+                break; // known-safe: continue to Ready below.
+            case USBDeviceAttachmentState.Attached:
+                LogInitFailure("Xbox360InitialAttachmentStateNotDetached");
+                if (!runtime.TryDetachXbox360IfAttached(xbox360AttachmentState)) return runtime;
                 return UnwindXbox360ThenDeckThenBusServer(runtime);
-            runtime.Xbox360LogicalDeviceId = xbox360LogicalDeviceId;
-            if (!native.GetUSBDeviceAttachmentState(xbox360Handle, out var xbox360AttachmentState))
-            {
-                runtime.MarkUnsafe("Xbox360AttachmentStateQueryFailed");
-                return runtime;
-            }
-            if (xbox360AttachmentState != USBDeviceAttachmentState.Detached)
-            {
-                if (xbox360AttachmentState == USBDeviceAttachmentState.Attached)
-                {
-                    LogInitFailure("Xbox360InitialAttachmentStateNotDetached");
-                    if (!runtime.TryDetachXbox360IfAttached(xbox360AttachmentState))
-                        return runtime;
-                    return UnwindXbox360ThenDeckThenBusServer(runtime);
-                }
+            case USBDeviceAttachmentState.OutcomeUnknown:
+            default:
+                LogInitFailure($"Xbox360InitialAttachmentState{(int)xbox360AttachmentState}");
                 runtime.MarkUnsafe($"Xbox360InitialAttachmentState{(int)xbox360AttachmentState}");
                 return runtime;
-            }
         }
 
         runtime.State = CanonicalViiperRuntimeState.Ready;
         AppLog.Debug("SteamOutput", "Persistent canonical VIIPER runtime ready.",
-            ("ServerHandleOwned", true), ("BusId", busId), ("DeckLogicalDeviceId", deckLogicalDeviceId), ("Xbox360Created", false));
+            ("ServerHandleOwned", true), ("BusId", busId),
+            ("DeckLogicalDeviceId", deckLogicalDeviceId), ("DeckInitialAttachment", "Detached"),
+            ("Xbox360LogicalDeviceId", xbox360LogicalDeviceId), ("Xbox360InitialAttachment", "Detached"));
         return runtime;
     }
 
