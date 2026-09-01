@@ -248,6 +248,7 @@ public sealed class M1M2DiagnosticCoordinatorTests
     {
         public event EventHandler<ControllerState>? StateChanged = delegate { };
         public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
+        public SteamInputAddonforClaw.Input.ControllerState LatestState => default;
         public bool IsRunning { get; private set; }
         public int StartCount { get; private set; }
         public MsiClawInputStartResult Start() { StartCount++; IsRunning = true; events?.Add("Start"); return new(MsiClawInputStartStatus.Started, "Started"); }

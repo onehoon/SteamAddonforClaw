@@ -33,8 +33,10 @@ public sealed record MsiClawInputTestSummary(
 
 public enum MsiClawInputStopReason { Stopped, ReadStateFailed, InvalidButtonLayout, InitialStateNotReady }
 
-internal interface IMsiClawPreparedInputSource : IAsyncDisposable
+internal interface IMsiClawPreparedInputSource : IAsyncDisposable, IControllerStateSnapshotSource
 {
+    // PR6: exposes the already-existing MsiClawInputSource snapshot contract without a down-cast --
+    // the Full-1902 presentation publisher consumes the SAME PR5 physical source.
     event EventHandler<ControllerState>? StateChanged;
     bool IsRunning { get; }
     MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor);
