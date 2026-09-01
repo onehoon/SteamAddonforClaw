@@ -39,7 +39,8 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
         var enumerator = new SequenceEnumerator(
             [source],
             [source, pidPresentWrongTopology],
-            [source, pidPresentCorrectTopology]);
+            [source, pidPresentCorrectTopology],
+            [pidPresentCorrectTopology]); // PR11 section 5: the transition completes only once the old PID is gone
         var writer = new RecordingWriter();
         var controller = new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(5), TimeSpan.Zero);
 
@@ -95,12 +96,12 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
         var directInput = Topology(container, "USB\\VID_0DB0&PID_1902\\ROOT_C", 0x1902, 0xFFF0, 0x0040);
 
         var enter = new MsiClawModeController(
-            new SequenceEnumerator([xinput], [xinput, directInput]),
+            new SequenceEnumerator([xinput], [xinput, directInput], [directInput]),
             new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero);
         Assert.True((await enter.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(xinput), CancellationToken.None)).Succeeded);
 
         var restore = new MsiClawModeController(
-            new SequenceEnumerator([directInput], [directInput, xinput]),
+            new SequenceEnumerator([directInput], [directInput, xinput], [xinput]),
             new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero);
         Assert.True((await restore.SwitchModeAsync(MsiClawNativeMode.XInput, MsiClawPhysicalIdentity.From(directInput), CancellationToken.None)).Succeeded);
 
