@@ -58,7 +58,7 @@ public partial class App : Application
             OverlayLog.Error("Command", $"{command} handler failed.", exception);
             completion.TrySetException(exception);
         }
-        else if (!_dispatcherQueue.TryEnqueue(() =>
+        else if (!_dispatcherQueue.TryEnqueue(async () =>
         {
             try
             {
@@ -66,10 +66,10 @@ public partial class App : Application
                 switch (command)
                 {
                     case OverlayCommand.Show:
-                        _window.ShowForPoc();
+                        await _window.ShowForPocAsync();
                         break;
                     case OverlayCommand.Hide:
-                        _window.HideForPoc();
+                        await _window.HideForPocAsync();
                         break;
                     case OverlayCommand.Shutdown:
                         _window.Close();
