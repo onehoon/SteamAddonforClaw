@@ -148,6 +148,12 @@ public sealed class UiArchitectureTests
         // PR3: the UI never starts the OS restart itself -- that is the Runtime transition owner's job.
         Assert.DoesNotContain("shutdown.exe", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("shutdown", xaml, StringComparison.Ordinal);
+
+        // PR3: a failed/cancelled Disable that left preparation behind (roots still Enabled) must
+        // re-expose "Enable and Restart" -- the cleanup path the backend message advertises -- even
+        // though a plain Enabled snapshot would otherwise disable the redundant Enable button.
+        Assert.Contains("!centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CenterMStartupEnableButton.IsEnabled = true;", codeBehind, StringComparison.Ordinal);
     }
 
     [Fact]

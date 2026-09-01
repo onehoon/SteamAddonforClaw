@@ -355,6 +355,13 @@ public sealed partial class DevicePage : UserControl
             }
             else
             {
+                // A failed/cancelled Disable can leave verified startup/HidHide preparation behind
+                // while the Center M roots are still Enabled. The backend explicitly offers
+                // "Enable and Restart" as the cleanup path, so expose it here even though a plain
+                // Enabled snapshot would normally disable the redundant Enable button (PR3 review).
+                if (!centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled)
+                    CenterMStartupEnableButton.IsEnabled = true;
+
                 CenterMStartupInfoBar.Severity = result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
                     ? InfoBarSeverity.Informational
                     : InfoBarSeverity.Warning;
