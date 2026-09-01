@@ -137,7 +137,13 @@ public sealed class UiArchitectureTests
         // Informational-only restart message; no "Restart now" action in PR1 (Addendum D).
         Assert.Contains("Restart Windows to apply this change.", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("Restart now", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("restartRequired: result.Succeeded", codeBehind, StringComparison.Ordinal);
+
+        // The reboot requirement is sticky for the UI process: set on success, gated only on the
+        // field (not a render parameter), and never reset, so ordinary refreshes / tab navigation
+        // cannot erase it while the old Center M session is still running (PR #430 review).
+        Assert.Contains("if (result.Succeeded) _centerMRestartRequired = true;", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CenterMStartupPresentation.ResolveInfoBar(snapshot.State, _centerMRestartRequired)", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("_centerMRestartRequired = false", codeBehind, StringComparison.Ordinal);
     }
 
     [Fact]

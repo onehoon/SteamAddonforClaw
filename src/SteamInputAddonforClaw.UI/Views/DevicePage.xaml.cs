@@ -25,6 +25,10 @@ public sealed partial class DevicePage : UserControl
     private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
     private FrontendCenterMStartupSnapshot _centerMStartupSnapshot = FrontendCenterMStartupSnapshot.Unavailable;
     private bool _centerMStartupBusy;
+    // Sticky for the lifetime of this UI process: set by a successful Enable/Disable, never reset
+    // here, so no later RefreshAsync() (StateInvalidated event, or Activate() on tab re-entry) can
+    // erase the "Restart Windows to apply this change." notice (PR #430 review).
+    private bool _centerMRestartRequired;
     private FrontendPowerModeSnapshot _powerModeSnapshot = FrontendPowerModeSnapshot.Unavailable;
     private int? _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft;
     private CancellationTokenSource? _tdpEditDebounce;
@@ -249,8 +253,15 @@ public sealed partial class DevicePage : UserControl
     /// <summary>Renders the MSI Center M startup card from the authoritative snapshot (work order
     /// PR1 section 3/4). Explicit Enable/Disable buttons -- no inverted toggle; the button matching
     /// the already-active configuration is disabled. Real Windows state is the only source of truth,
-    /// so nothing is persisted here.</summary>
-    private void RenderCenterMStartup(FrontendCenterMStartupSnapshot snapshot, bool restartRequired = false)
+    /// so nothing is persisted here.
+    ///
+    /// Once <see cref="_centerMRestartRequired"/> is set (a successful mutation this page session),
+    /// the "Restart Windows to apply this change." notice takes precedence over every other InfoBar
+    /// state and survives all later authoritative refreshes -- ordinary <c>StateInvalidated</c>
+    /// events and tab navigation must never erase the reboot requirement while the old Center M
+    /// session is deliberately still running (PR #430 review). It clears only when the UI process
+    /// restarts.</summary>
+    private void RenderCenterMStartup(FrontendCenterMStartupSnapshot snapshot)
     {
         _centerMStartupSnapshot = snapshot;
 
@@ -276,27 +287,46 @@ public sealed partial class DevicePage : UserControl
         CenterMStartupEnableButton.IsEnabled = operable && snapshot.State != FrontendCenterMStartupState.Enabled;
         CenterMStartupDisableButton.IsEnabled = operable && snapshot.State != FrontendCenterMStartupState.Disabled;
 
-        if (restartRequired)
+        switch (CenterMStartupPresentation.ResolveInfoBar(snapshot.State, _centerMRestartRequired))
         {
-            CenterMStartupInfoBar.Severity = InfoBarSeverity.Informational;
-            CenterMStartupInfoBar.Message = "Restart Windows to apply this change.";
-            CenterMStartupInfoBar.IsOpen = true;
+            case CenterMStartupInfoBarKind.RestartRequired:
+                CenterMStartupInfoBar.Severity = InfoBarSeverity.Informational;
+                CenterMStartupInfoBar.Message = "Restart Windows to apply this change.";
+                CenterMStartupInfoBar.IsOpen = true;
+                break;
+            case CenterMStartupInfoBarKind.Partial:
+                CenterMStartupInfoBar.Severity = InfoBarSeverity.Warning;
+                CenterMStartupInfoBar.Message = "MSI Center M startup configuration is inconsistent. Choose Enable or Disable to repair it.";
+                CenterMStartupInfoBar.IsOpen = true;
+                break;
+            case CenterMStartupInfoBarKind.Unavailable:
+                CenterMStartupInfoBar.Severity = InfoBarSeverity.Warning;
+                CenterMStartupInfoBar.Message = snapshot.FailureMessage ?? "MSI Center M startup control is unavailable.";
+                CenterMStartupInfoBar.IsOpen = true;
+                break;
+            default:
+                CenterMStartupInfoBar.IsOpen = false;
+                break;
         }
-        else if (snapshot.State == FrontendCenterMStartupState.Partial)
+    }
+
+    internal enum CenterMStartupInfoBarKind { None, RestartRequired, Partial, Unavailable }
+
+    /// <summary>Pure InfoBar-precedence rule for the MSI Center M startup card, extracted so it can be
+    /// tested without a XAML root (PR #430 review). A sticky restart-required flag wins over every
+    /// snapshot-derived state, so a later authoritative refresh with a settled Enabled/Disabled state
+    /// still shows the reboot instruction.</summary>
+    internal static class CenterMStartupPresentation
+    {
+        internal static CenterMStartupInfoBarKind ResolveInfoBar(FrontendCenterMStartupState state, bool restartRequired)
         {
-            CenterMStartupInfoBar.Severity = InfoBarSeverity.Warning;
-            CenterMStartupInfoBar.Message = "MSI Center M startup configuration is inconsistent. Choose Enable or Disable to repair it.";
-            CenterMStartupInfoBar.IsOpen = true;
-        }
-        else if (snapshot.State == FrontendCenterMStartupState.Unavailable)
-        {
-            CenterMStartupInfoBar.Severity = InfoBarSeverity.Warning;
-            CenterMStartupInfoBar.Message = snapshot.FailureMessage ?? "MSI Center M startup control is unavailable.";
-            CenterMStartupInfoBar.IsOpen = true;
-        }
-        else
-        {
-            CenterMStartupInfoBar.IsOpen = false;
+            if (restartRequired) return CenterMStartupInfoBarKind.RestartRequired;
+            return state switch
+            {
+                FrontendCenterMStartupState.Partial => CenterMStartupInfoBarKind.Partial,
+                FrontendCenterMStartupState.Unavailable => CenterMStartupInfoBarKind.Unavailable,
+                _ => CenterMStartupInfoBarKind.None,
+            };
         }
     }
 
@@ -313,7 +343,8 @@ public sealed partial class DevicePage : UserControl
         {
             var result = await _frontend.SetCenterMStartupEnabledAsync(enabled);
             _centerMStartupBusy = false;
-            RenderCenterMStartup(result.Snapshot, restartRequired: result.Succeeded);
+            if (result.Succeeded) _centerMRestartRequired = true;
+            RenderCenterMStartup(result.Snapshot);
             if (!result.Succeeded)
             {
                 CenterMStartupInfoBar.Severity = result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
