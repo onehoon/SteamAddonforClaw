@@ -113,6 +113,41 @@ public sealed class DisabledBootControllerAdmissionTests
             DisabledBootAdmissionOutcome.Blocked,
             Build(recovery: new RecoveryResult(Enum.Parse<RecoveryStatus>(status), "x")).Evaluate().Outcome);
 
+    // ---- production wiring: a real assessment provider must actually observe the managers ----
+
+    [Theory]
+    [InlineData("ClawTweaks")]
+    [InlineData("HandheldCompanion")]
+    public void A_real_assessment_that_detects_a_manager_cannot_yield_ready(string kindName)
+    {
+        var kind = Enum.Parse<ControllerSoftwareKind>(kindName);
+        // Feed the actual ControllerEnvironmentAssessmentProvider + ControllerManagerClassifier, not a
+        // hand-set Manager.Kind, so this also guards the classifier path.
+        var assessment = new ControllerEnvironmentAssessmentProvider(
+            [new FakeSoftwareProvider(new ControllerSoftwareStatus(kind, kindName,
+                SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running, "detected"))]);
+        var admission = new DisabledBootControllerAdmission(
+            assessment, new StubInspector(Ready), () => new RecoveryResult(RecoveryStatus.NoRecoveryNeeded, "none"),
+            () => new AddonHidHideBaselineResult(AddonHidHideBaselineOutcome.AlreadyCompliant, "r", AddonHidHideBaselineSnapshot.Unknown));
+
+        Assert.Equal(DisabledBootAdmissionOutcome.Blocked, admission.Evaluate().Outcome);
+    }
+
+    [Fact]
+    public void Production_startup_composition_wires_the_real_conflict_detectors()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Startup/AddonStartupComposition.cs"));
+        Assert.Contains("new ClawTweaksSoftwareStatusProvider(", source, StringComparison.Ordinal);
+        Assert.Contains("new HandheldCompanionSoftwareStatusProvider(", source, StringComparison.Ordinal);
+    }
+
+    private sealed class FakeSoftwareProvider(ControllerSoftwareStatus status) : IControllerSoftwareStatusProvider
+    {
+        public ControllerSoftwareStatus Capture() => status;
+    }
+
     private sealed class StubEnvironment(Func<ControllerEnvironmentAssessmentSnapshot> capture) : IControllerEnvironmentAssessmentProvider
     {
         public ControllerEnvironmentAssessmentSnapshot Capture() => capture();

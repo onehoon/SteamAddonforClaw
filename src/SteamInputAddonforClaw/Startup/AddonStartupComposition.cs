@@ -35,8 +35,13 @@ internal static class AddonStartupCompositionFactory
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
         var controllerSoftwareProviders = new IControllerSoftwareStatusProvider[]
         {
-            // HHC/ClawTweaks coexistence detection is intentionally not part of the supported production controller environment.
-            new MsiCenterMSoftwareStatusProvider()
+            new MsiCenterMSoftwareStatusProvider(),
+            // PR4: the Disabled-boot admission and the PR3 conflict gate both treat
+            // Manager.Kind == None as "positively no known controller manager". Wire the real conflict
+            // detectors so that holds -- the absence of a provider must never read as the absence of
+            // the manager. (Winhanced has no production detector yet and is deliberately not faked.)
+            new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
+            new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector()),
         };
         var controllerEnvironmentAssessmentProvider = new ControllerEnvironmentAssessmentProvider(controllerSoftwareProviders);
         var recoveryJournalStore = new RecoveryJournalStore(AddonDataPaths.RecoveryJournalPath);
