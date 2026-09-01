@@ -250,6 +250,234 @@ public sealed class MsiClawAddonPresentationTests
         Assert.DoesNotContain("BigPictureStateChanged", presentationSource, StringComparison.Ordinal);
     }
 
+    // ================= PR7: runtime Xbox360 <-> SteamDeck presentation switching =================
+
+    [Fact]
+    public async Task Reconcile_xbox360_to_steamdeck_stops_joins_publisher_then_detaches_then_attaches_deck()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Native.Calls.Clear();
+        h.Snapshot = WantsDeck();
+
+        var result = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Switched, result.Outcome);
+        Assert.Equal(AddonPresentationKind.SteamDeck, h.Owner.ActivePresentation);
+        Assert.True(h.Xbox360Publishers[0].StopCalled);
+        // X360 publisher stop precedes X360 native detach; deck attach follows the detach.
+        Assert.True(h.Native.Calls.IndexOf("DetachUSBDeviceEx") >= 0);
+        Assert.True(h.Native.Calls.IndexOf("DetachUSBDeviceEx") < h.Native.Calls.IndexOf("AttachUSBDeviceEx"));
+        Assert.Single(h.DeckPublishers);
+        Assert.True(h.DeckPublishers[0].Started);
+        // no VIIPER server/bus/device recreation
+        Assert.DoesNotContain("NewUSBServer", h.Native.Calls);
+        Assert.DoesNotContain("CreateUSBBus", h.Native.Calls);
+        Assert.DoesNotContain("CreateSteamDeckDevice", h.Native.Calls);
+        Assert.DoesNotContain("CreateXbox360Device", h.Native.Calls);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Reconcile_steamdeck_to_xbox360_inverse_order_and_final_state()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsDeck(), default);
+        h.Snapshot = WantsXbox();
+
+        var result = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Switched, result.Outcome);
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation);
+        Assert.True(h.DeckPublishers[0].StopCalled);
+        Assert.Single(h.Xbox360Publishers);
+        Assert.True(h.Xbox360Publishers[0].Started);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Reconcile_is_a_noop_when_the_active_presentation_already_matches_policy()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Native.Calls.Clear();
+        h.Snapshot = WantsXbox();
+
+        var result = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.NoChange, result.Outcome);
+        Assert.Empty(h.Native.Calls); // no attach/detach/state
+        Assert.Single(h.Xbox360Publishers); // publisher not restarted
+        await h.Owner.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData(1234u, true)]   // game + BPM -> Deck
+    [InlineData(1234u, false)]  // game only -> Deck
+    [InlineData(0u, true)]      // BPM only -> Deck
+    public async Task Reconcile_or_semantics_keeps_deck_and_only_returns_to_xbox360_when_both_inactive(uint appId, bool bpm)
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsDeck(), default);
+        h.Native.Calls.Clear();
+
+        h.Snapshot = new SteamPresentationSnapshot(appId, bpm);
+        Assert.Equal(PresentationReconcileOutcome.NoChange, (await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default)).Outcome);
+        Assert.Equal(AddonPresentationKind.SteamDeck, h.Owner.ActivePresentation);
+
+        h.Snapshot = new SteamPresentationSnapshot(0, false);
+        Assert.Equal(PresentationReconcileOutcome.Switched, (await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default)).Outcome);
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Reconcile_queued_behind_another_captures_the_fresh_desired_state_inside_the_gate()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default); // active = Xbox360
+
+        // Reconcile A: wants Deck -> retires X360; its publisher StopAsync blocks while A holds the gate.
+        h.Snapshot = WantsDeck();
+        h.Xbox360Publishers[0].StopGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var a = h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        // While A is stuck retiring X360, the actual Steam state flips back (game closed).
+        await Task.Delay(30);
+        h.Snapshot = WantsXbox();
+        var b = h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default); // queues on the gate
+
+        h.Xbox360Publishers[0].StopGate.SetResult();
+        Assert.Equal(PresentationReconcileOutcome.Switched, (await a).Outcome);   // A committed Deck
+        var rb = await b;
+
+        // B entered the gate AFTER A, captured the current (Xbox) fact, and converged back.
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation);
+        Assert.Contains(rb.Outcome, new[] { PresentationReconcileOutcome.Switched, PresentationReconcileOutcome.NoChange });
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Reconcile_current_publisher_join_failure_never_detaches_or_attaches()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Xbox360Publishers[0].StopThrows = true;
+        h.Native.Calls.Clear();
+        h.Snapshot = WantsDeck();
+
+        var result = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Failed, result.Outcome);
+        Assert.DoesNotContain("DetachUSBDeviceEx", h.Native.Calls);
+        Assert.DoesNotContain("AttachUSBDeviceEx", h.Native.Calls);
+        Assert.Empty(h.DeckPublishers);
+    }
+
+    [Fact]
+    public async Task Reconcile_target_attach_failure_leaves_both_detached_with_no_fallback()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Native.Calls.Clear();
+        h.Snapshot = WantsDeck();
+        h.Native.AttachResults.Enqueue(USBDeviceAttachResult.RetryableFailure); // deck attach fails
+
+        var result = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Failed, result.Outcome);
+        Assert.Null(h.Owner.ActivePresentation);                 // both detached
+        Assert.True(h.Xbox360Publishers[0].StopCalled);          // old presentation was safely retired
+        Assert.False(h.DeckPublishers.Count > 0 && h.DeckPublishers[^1].Started);
+
+        // A later genuine event can attach the then-desired presentation (no timer / retry loop).
+        h.Snapshot = WantsXbox();
+        var recover = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+        Assert.Equal(PresentationReconcileOutcome.Attached, recover.Outcome);
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Reconcile_blocks_when_live_input_source_stopped()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Native.Calls.Clear();
+        h.Source.Running = false;
+        h.Snapshot = WantsDeck();
+
+        var result = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Blocked, result.Outcome);
+        Assert.Empty(h.Native.Calls);
+        Assert.Empty(h.DeckPublishers);
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation); // current not retired
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Reconcile_blocks_after_viiper_teardown()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        await h.Owner.ReleaseForCenterMEnableAsync(default); // VIIPER now Closed
+        h.Native.Calls.Clear();
+        h.Snapshot = WantsDeck();
+
+        var result = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Blocked, result.Outcome);
+        Assert.Empty(h.Native.Calls);
+    }
+
+    [Fact]
+    public void Reconcile_source_takes_no_physical_dependency_and_the_host_wires_events()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var owner = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPresentation.cs"));
+        var host = File.ReadAllText(Path.Combine(dir.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
+
+        // PR7 section 27.20: the switch code must not touch physical mode / persistent HidHide primitives.
+        foreach (var forbidden in new[] { "SwitchModeAsync", "ApplyDisabledModeBaseline", "AddHiddenDevice", "MsiClawNativeStateManager", "HidHideDriverClient" })
+            Assert.DoesNotContain(forbidden, owner, StringComparison.Ordinal);
+
+        // Event-driven only: raw RunningAppID + BPM callbacks request the reconcile; no timer/poll.
+        Assert.Contains("RequestControllerPresentationReconcile(\"RunningAppIdChanged\")", host, StringComparison.Ordinal);
+        Assert.Contains("bigPictureStateChanged: OnBigPictureStateChanged", host, StringComparison.Ordinal);
+        Assert.Contains("_qamHostController.OnBigPictureStateChanged(active)", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Timer(", host, StringComparison.Ordinal);
+
+        // The reconcile is drained before the presentation owner is torn down (section 19.1).
+        Assert.True(
+            host.IndexOf("await _presentationReconcile.ConfigureAwait(false)", StringComparison.Ordinal)
+            < host.IndexOf("_presentationOwnership.DisposeAsync", StringComparison.Ordinal));
+    }
+
+    private sealed class SwitchHarness
+    {
+        public FakeNative Native { get; } = new();
+        public FakeSource Source { get; } = new();
+        public SteamPresentationSnapshot Snapshot { get; set; } = new(0, false);
+        public List<FakePublisher> Xbox360Publishers { get; } = [];
+        public List<FakePublisher> DeckPublishers { get; } = [];
+        public MsiClawAddonPresentation Owner { get; }
+
+        public Func<SteamPresentationSnapshot> Capture => () => Snapshot;
+
+        public SwitchHarness()
+        {
+            var runtime = CanonicalViiperRuntime.TryInitialize(Native, "127.0.0.1:3242");
+            Assert.NotNull(runtime);
+            Owner = new MsiClawAddonPresentation(
+                runtime,
+                deckSessionFactory: r => new CanonicalSteamDeckSession(r),
+                xbox360PublisherFactory: (_, _, fault) => { var p = new FakePublisher { Fault = fault }; Xbox360Publishers.Add(p); return p; },
+                deckPublisherFactory: (_, _, fault) => { var p = new FakePublisher { Fault = fault }; DeckPublishers.Add(p); return p; });
+        }
+    }
+
     // ---- fakes ----
 
     private sealed class FakeSource : IMsiClawPreparedInputSource
@@ -270,6 +498,7 @@ public sealed class MsiClawAddonPresentationTests
         public bool StopCalled { get; private set; }
         public bool StartThrows { get; set; }
         public bool StopThrows { get; set; }
+        public TaskCompletionSource? StopGate { get; set; }
         public Action<Exception>? Fault { get; set; }
         private bool _running;
         public bool IsRunning => _running;
@@ -279,12 +508,12 @@ public sealed class MsiClawAddonPresentationTests
             Started = true;
             _running = true;
         }
-        public Task StopAsync()
+        public async Task StopAsync()
         {
             StopCalled = true;
+            if (StopGate is not null) await StopGate.Task.ConfigureAwait(false);
             if (StopThrows) throw new InvalidOperationException("join failed");
             _running = false;
-            return Task.CompletedTask;
         }
     }
 

@@ -87,6 +87,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // PR6: the process-lifetime Full-1902 virtual-presentation owner (one canonical VIIPER runtime +
     // exactly one attached typed device + its publisher). Retired before _physicalOwnership.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPresentation? _presentationOwnership;
+    // PR7: the most recently requested runtime X360 <-> SteamDeck presentation reconcile. Serialized
+    // inside the presentation owner's own gate; tracked only so controlled teardown can await it.
+    private Task _presentationReconcile = Task.CompletedTask;
 
     internal AddonProcessHost(string[]? updateRestartArguments,
         Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
@@ -238,7 +241,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 startupResult.HardwareSupported,
                 startupResult.LegacyRoutingAllowed,
                 winGSuppressionGuard: _winGSuppressionGuard,
-                bigPictureStateChanged: _qamHostController.OnBigPictureStateChanged,
+                // PR7: forward the raw BPM bool to QAM unchanged, then request a Full-1902 runtime
+                // presentation reconcile (BPM is half of the X360 <-> SteamDeck policy).
+                bigPictureStateChanged: OnBigPictureStateChanged,
                 routingReconcileCompleted: null,
                 // PR2.5: while Center M startup config is exactly Disabled, launch-at-startup is a
                 // mandatory-ON policy the Repair()/setter enforce -- not a user preference.
@@ -664,6 +669,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception) { AppLog.Warn("Overlay", "Overlay warm-up task failed during shutdown.", exception); }
             _overlayStartup = null;
         }
+        // PR7 section 19.1: no new reconcile can be scheduled after BeginProcessShutdown cancelled
+        // the token; drain the last in-flight one before tearing down the presentation owner.
+        try { await _presentationReconcile.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Runtime presentation reconcile failed during shutdown.", exception); }
         if (_presentationOwnership is not null)
         {
             // PR6 section 18: retire the virtual presentation + tear down canonical VIIPER BEFORE the
@@ -750,6 +759,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnActualRunningAppIdChanged(uint appId)
     {
         _qamHostController.OnActualRunningAppIdChanged(appId);
+
+        // PR7 section 8: request the Full-1902 X360 <-> SteamDeck reconcile up front, so it does not
+        // wait behind the unrelated CPU Boost / Power Mode / Resolution / TDP / FPS profile work
+        // below. The switch itself runs asynchronously, serialized by the presentation owner's gate.
+        RequestControllerPresentationReconcile("RunningAppIdChanged");
+
         try
         {
             _cpuBoostRuntime.Reconcile(appId);
@@ -783,6 +798,54 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         try { _intelFpsRuntime.Reconcile(appId, "ActualRunningAppIdChanged"); }
         catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "FPS game-profile reconcile failed after Actual RunningAppID changed.", exception, ("RunningAppID", appId)); }
+    }
+
+    private void OnBigPictureStateChanged(bool active)
+    {
+        _qamHostController.OnBigPictureStateChanged(active);
+        RequestControllerPresentationReconcile("BigPictureChanged");
+    }
+
+    /// <summary>PR7: schedule one asynchronous Full-1902 presentation reconcile. Event-driven only --
+    /// no timer, no polling. The desired X360/SteamDeck kind is captured fresh AFTER the presentation
+    /// owner's gate is acquired, so overlapping RunningAppID/BPM events never apply stale state.</summary>
+    private void RequestControllerPresentationReconcile(string trigger)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        var presentation = _presentationOwnership;
+        var physical = _physicalOwnership;
+        if (presentation is null || physical is null) return;
+
+        AppLog.Debug("ControllerPresentation", "Runtime presentation reconcile requested.", ("Event", "PresentationReconcileRequested"), ("Trigger", trigger));
+        _presentationReconcile = ReconcileControllerPresentationAsync(presentation, physical, trigger, _startupCancellationTokenSource.Token);
+    }
+
+    private async Task ReconcileControllerPresentationAsync(
+        Devices.MSI.Claw.IMsiClawAddonPresentation presentation,
+        Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership physical,
+        string trigger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var source = physical.LiveInputSource;
+            if (source is null)
+            {
+                AppLog.Info("ControllerPresentation", "Runtime presentation reconcile skipped; no live PR5 input source.", ("Trigger", trigger));
+                return;
+            }
+            var result = await presentation.ReconcileDesiredPresentationAsync(
+                source,
+                () => _runtimeHost!.CapturePresentationSnapshot(),
+                cancellationToken).ConfigureAwait(false);
+            AppLog.Info("ControllerPresentation", "Runtime presentation reconcile completed.",
+                ("Trigger", trigger), ("Outcome", result.Outcome), ("Presentation", result.Presentation?.ToString() ?? "None"), ("Reason", result.Reason));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            AppLog.Error("ControllerPresentation", "Runtime presentation reconcile threw; Runtime remains available.", exception, ("Trigger", trigger));
+        }
     }
 
     private void OnPowerResumeObserved()
