@@ -34,6 +34,8 @@ internal static class WindowInterop
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoSendChanging = 0x0400;
     private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpFrameChanged = 0x0020;
+    private const uint WmNcCalcSize = 0x0083;
     private const uint WmMouseActivate = 0x0021;
     private const uint WmActivate = 0x0006;
     private const uint WmClose = 0x0010;
@@ -174,7 +176,7 @@ internal static class WindowInterop
             presenter.IsMinimizable = false;
         }
 
-        if (!SetWindowPos(hwnd, HwndTopmost, rect.X, rect.Y, rect.Width, rect.Height, SwpNoActivate | SwpNoSendChanging))
+        if (!SetWindowPos(hwnd, HwndTopmost, rect.X, rect.Y, rect.Width, rect.Height, SwpNoActivate | SwpNoSendChanging | SwpFrameChanged))
         {
             var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window.");
             OverlayLog.Error("Geometry", "Final Overlay placement failed.", exception, ("Operation", "SetWindowPos.Final"));
@@ -278,6 +280,15 @@ internal static class WindowInterop
     {
         switch (message)
         {
+            case WmNcCalcSize:
+                if (wParam != IntPtr.Zero)
+                {
+                    // This Overlay intentionally has no usable non-client frame, so the
+                    // entire HWND rectangle is its client area.
+                    return IntPtr.Zero;
+                }
+
+                break;
             case WmMouseActivate:
                 var mouseActivateForeground = GetForegroundWindow();
                 OverlayLog.Info("Input", "WM_MOUSEACTIVATE received.",
