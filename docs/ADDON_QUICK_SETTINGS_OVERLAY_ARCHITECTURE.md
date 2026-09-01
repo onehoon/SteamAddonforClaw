@@ -2,15 +2,15 @@
 
 > **Status:** Current design baseline / implementation planning document  
 > **Date:** 2026-09-01  
-> **Scope:** A dedicated Addon-owned handheld Quick Settings overlay that replaces the need to use Xbox Game Bar as the Addon's quick-settings surface.  
-> **Implementation state:** This document defines the intended architecture. It does **not** claim that the overlay process, input-capture path, or Full PID1902 integration is already implemented or hardware-validated.  
-> **Important:** Final WING/OEM1 button assignment is intentionally deferred. The overlay architecture must not depend on which physical MSI button ultimately toggles it.
+> **Scope:** Addon-owned handheld Quick Settings overlay, its process/IPC boundary, controller-input capture contract, coexistence with the existing Steam QAM integration, and Full PID1902 lifecycle rules.  
+> **Implementation state:** Design only. This document does **not** claim that the new Overlay process, Overlay transport, capture path, or Full PID1902 presentation integration is implemented or hardware-validated.  
+> **Important:** Final WING/OEM1 button assignment remains intentionally deferred. The overlay architecture must not depend on which physical MSI button ultimately toggles it.
 
 ---
 
 ## 1. Design authorities
 
-Read this document together with the current controller architecture and work orders:
+Read this document together with:
 
 - `docs/Full 1902 Implementation/FULL_1902_IMPLEMENTATION_ARCHITECTURE.md`
 - `docs/Full 1902 Implementation/REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md`
@@ -20,10 +20,11 @@ Read this document together with the current controller architecture and work or
 - `docs/VIIPER_INTEGRATION.md`
 - `docs/VIIPER_MIGRATION_TODO.md`
 
-Current source seams relevant to this design include:
+Relevant current source seams include:
 
 - `src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs`
 - `src/SteamInputAddonforClaw/Lifecycle/QamHostProcessController.cs`
+- `src/SteamInputAddonforClaw.QamHost/Program.cs`
 - `src/SteamInputAddonforClaw.QamHost/QamFrontendBridge.cs`
 - `src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendServer.cs`
 - `src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs`
@@ -34,46 +35,52 @@ Current source seams relevant to this design include:
 - `src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckInputPublisher.cs`
 - `src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckOutputStage.cs`
 
-The project is pre-release. Do not preserve obsolete Game Bar or Steam-QAM integration behavior merely for compatibility if it conflicts with the new product direction.
+The project is pre-release. Obsolete Game Bar/X360 presentation experiments are not compatibility requirements.
 
 ---
 
 ## 2. Product goal
 
-Provide a native Addon-owned handheld Quick Settings panel that can be opened over a game without changing controller identity or handing UI ownership to Xbox Game Bar or Steam GamepadUI.
+Provide a native Addon-owned handheld Quick Settings panel that can appear over a game without changing controller identity and without depending on Xbox Game Bar or Steam GamepadUI as its renderer.
 
-The intended user experience is deliberately simple:
+Intended UX:
 
 ```text
 Game / Windows desktop
         ↓
-physical quick-settings button
+physical Quick Settings button
         ↓
 Addon Quick Settings panel appears on the left
         ↓
-controller navigation changes TDP / CPU Boost / FPS / Power Mode / future device controls
+controller navigation changes TDP / CPU Boost / FPS / Power Mode / future controls
         ↓
 close panel
         ↓
-return immediately to the same game/controller presentation
+return immediately to the same game and the same selected virtual presentation
 ```
 
-The overlay is a **transient UI surface**, not a controller presentation, not a controller authority, and not another hardware owner.
+The Addon Overlay is a **transient UI surface**. It is not:
 
-Its existence must not change:
+- controller authority;
+- a third virtual presentation;
+- a PID mode;
+- a DirectInput owner;
+- a HidHide owner;
+- a VIIPER owner;
+- a replacement feature authority for TDP/CPU/FPS/etc.
+
+Overlay visibility must never by itself change:
 
 - Center M authority;
-- desired physical PID;
-- DirectInput ownership;
-- HidHide ownership;
+- PID1901/PID1902;
+- DirectInput acquisition;
+- HidHide configuration;
 - VIIPER server/bus ownership;
-- which virtual controller is selected by the Full PID1902 presentation policy.
+- X360 vs SteamDeck selection.
 
 ---
 
-## 3. Core design decision
-
-The current preferred architecture is:
+## 3. Current preferred process architecture
 
 ```text
 SteamInputAddonforClaw.exe
@@ -83,156 +90,136 @@ SteamInputAddonforClaw.exe
     ├─ ControllerState
     ├─ HidHide
     ├─ VIIPER presentation owner
-    ├─ Device/Profile feature authorities
+    ├─ TDP / CPU / FPS / profile feature authorities
     ├─ overlay capture authority
-    └─ overlay process lifecycle / IPC endpoint
-             │
-             │ dedicated QAM/overlay IPC
-             ▼
-SteamInputAddonforClaw.Overlay.exe
-    dedicated WinUI 3 process
-    ├─ one left-side opaque Quick Settings window
-    ├─ controller-driven logical navigation
-    └─ presentation only; no hardware ownership
+    └─ UI process/IPC orchestration
 
 SteamInputAddonforClaw.UI.exe
-    existing settings frontend
-    └─ remains unchanged in its normal lifetime model
+    existing WinUI settings frontend
+    └─ ordinary disposable main UI
+
+SteamInputAddonforClaw.QamHost.exe
+    existing Steam GamepadUI/CEF integration
+    └─ Steam QAM frontend only
+
+SteamInputAddonforClaw.Overlay.exe
+    new dedicated WinUI 3 process
+    └─ Addon-owned native Quick Settings panel
 ```
 
-The overlay should be a **separate executable/process** from both the headless Runtime and the existing main WinUI frontend.
+The new Overlay should be a **separate executable/process** from both the Runtime and the existing main UI.
 
-This is preferred over adding `OverlayWindow` to `SteamInputAddonforClaw.UI.exe` because the current main UI has a clean and already-established lifecycle:
+Do not turn `SteamInputAddonforClaw.UI.exe` into a persistent hidden multi-window host merely to add Quick Settings. The existing main UI currently has a clean lifecycle:
 
 ```text
 MainWindow closes
-→ frontend pipe disconnects
+→ frontend connection disposed
 → UI process exits
 ```
 
-Changing the main UI into a hidden persistent UI host only to support QAM would broaden its lifecycle responsibilities and couple QAM reliability to the main settings frontend.
-
-A dedicated process keeps those concerns isolated.
+Preserve that lifecycle.
 
 ---
 
-## 4. Why a dedicated overlay process is preferred
+## 4. Why the Overlay should remain a separate process
 
-### 4.1 Preserve the current main UI unchanged
+### 4.1 Preserve the main UI lifecycle
 
-The existing frontend is already disposable and separate from the Runtime. That is an important Full PID1902 property.
+The main settings application should not be rewritten around permanent background WinUI lifetime merely because a low-latency QAM surface is needed.
 
-The overlay should not require rewriting the existing UI shutdown, single-instance, activation, diagnostic-session, or frontend-disconnect lifecycle simply to keep one hidden QAM window alive.
-
-Preferred boundary:
+Preferred ownership:
 
 ```text
+Runtime process
+→ durable controller/device authority
+
 Main UI process
-→ ordinary settings application lifecycle
+→ normal settings UI lifetime
 
 Overlay process
-→ persistent/warm quick-settings presentation lifecycle
+→ warm disposable Quick Settings presentation
 
-Runtime process
-→ durable controller/device authority lifecycle
+Steam QamHost process
+→ Steam-side QAM integration lifetime
 ```
 
-### 4.2 Failure isolation
+### 4.2 Real failure isolation
 
-A Quick Settings frontend will eventually contain:
+Quick Settings will contain XAML controls, navigation logic, live snapshots, slider/toggle mutations, and future device controls.
 
-- many XAML controls;
-- navigation state;
-- live device/profile values;
-- slider/toggle/dropdown mutations;
-- animations or transitions;
-- controller-focused visual state.
+A fatal Overlay XAML/dispatcher failure must not terminate:
 
-A fatal XAML/dispatcher/UI failure in this surface should not terminate the main settings UI and must never terminate the controller Runtime.
+- the controller Runtime;
+- the main settings UI;
+- the existing Steam QAM integration.
 
-Desired failure boundary:
+Desired boundary:
 
 ```text
 Overlay.exe crashes
-    ↓
-Runtime survives
-Main UI survives or remains independently launchable
-current controller presentation remains owned by Runtime
-Runtime cancels any active overlay capture
+→ Runtime survives
+→ current presentation ownership remains with Runtime
+→ active Overlay capture is canceled safely
+→ Main UI remains independently launchable
+→ Steam QamHost remains independently managed
 ```
-
-This is a real reliability benefit, not theoretical process isolation.
 
 ### 4.3 Independent iteration
 
-The overlay is likely to receive substantial UI iteration after the base controller platform is stable.
+The Overlay is expected to receive substantial layout/navigation tuning. Keeping it independent lets those changes evolve without continuously touching the main UI startup/close path.
 
-Keeping it separate means Quick Settings layout/navigation changes can be reviewed without rewriting the main settings application's established startup/close path.
+### 4.4 Explicit cost
 
-### 4.4 The cost is explicit
+A warm second WinUI process consumes memory. That cost is accepted only if real MSI Claw measurements show acceptable hidden idle CPU, memory, and show latency.
 
-A separate warm WinUI process consumes additional memory compared with hosting the overlay in the existing UI process.
-
-That cost must be measured on real MSI Claw hardware rather than assumed away.
-
-The architecture chooses isolation and immediate-show latency first, with an explicit POC performance gate before the feature is treated as final.
+Do not assume it is free; measure it.
 
 ---
 
 ## 5. Renderer and UI technology
 
-### 5.1 Preferred technology: WinUI 3 + minimal Win32 HWND interop
+### Preferred technology
 
-The overlay should use WinUI 3 because:
-
-- the project already ships a WinUI 3 frontend;
-- the required UI is ordinary controls, not a high-frequency HUD renderer;
-- sliders, toggles, dropdowns, icons, localization, scrolling, and layout are all normal XAML concerns;
-- the overlay is opaque and rectangular;
-- no per-pixel transparent composition surface is required;
-- no custom Direct2D/DirectComposition renderer is needed for this product shape.
-
-The Win32 portion should remain small and only handle top-level window behavior that WinUI alone does not express conveniently.
-
-Conceptually:
+Use:
 
 ```text
-WinUI 3 XAML controls
-        +
+WinUI 3 XAML
++
 ordinary top-level HWND
-        +
-minimal Win32 style/position calls
++
+minimal Win32 window-style/position interop
 ```
 
-### 5.2 Explicitly not required
+Reasons:
 
-Do not introduce the following merely because the feature is called an overlay:
+- the repository already uses WinUI 3;
+- the panel is ordinary controls, not an always-on performance HUD;
+- the panel is opaque and rectangular;
+- sliders/toggles/dropdowns/icons/scrolling/localization fit XAML naturally;
+- no per-pixel transparent desktop surface is required.
+
+### Explicitly out of scope initially
+
+Do not add merely because this feature is called an overlay:
 
 - WPF as a second UI framework;
-- `Windows.UI.Composition` as a separate rendering architecture;
-- Direct2D renderer;
-- DirectComposition renderer;
-- DXGI injection;
-- game-process DLL injection;
-- hidden owner-window framework;
-- click-through fullscreen transparent canvas;
+- Direct2D custom controls;
+- DirectComposition renderer architecture;
+- DXGI/game injection;
+- fullscreen transparent canvas;
+- click-through region framework;
+- hidden owner-window hierarchy;
 - swappable `IOverlayHost` renderer abstraction;
 - native rendering helper process;
-- a general-purpose overlay engine.
+- generalized HUD/compositor engine.
 
-Those designs solve a broader HUD/compositor problem than this feature has.
-
-If real hardware proves an ordinary WinUI HWND cannot meet the required game compatibility or latency, revisit the smallest proven deficiency later. Do not pre-build the fallback architecture.
+If real supported-game evidence proves ordinary WinUI HWND behavior inadequate, solve that proven deficiency later.
 
 ---
 
 ## 6. Visual/window contract
 
-The Quick Settings window is intentionally simple.
-
-### 6.1 Geometry
-
-Target layout:
+Target shape:
 
 ```text
 ┌───────────────┬─────────────────────────────────────────────┐
@@ -252,144 +239,116 @@ Requirements:
 
 - left aligned;
 - opaque background;
-- top aligned to the monitor working area;
-- bottom aligned exactly to the monitor working area;
-- must not cover the taskbar;
-- width is a Quick Settings design dimension determined by actual control/icon layout;
-- no requirement for full-screen transparency behind the panel;
-- no requirement for arbitrary-shaped or floating window regions.
+- rectangular window;
+- top = monitor working-area top;
+- bottom = monitor working-area bottom;
+- taskbar is never intentionally covered;
+- width determined later from actual icon/control layout;
+- no transparency/acrylic/blur requirement.
 
-### 6.2 Use the monitor working area
-
-Do not hard-code taskbar height or assume the primary monitor.
-
-On show, resolve the intended monitor and use its current working area (`rcWork` conceptually):
+Use the selected monitor's current work area rather than hard-coding taskbar dimensions:
 
 ```text
 X      = WorkArea.Left
 Y      = WorkArea.Top
-Width  = QamPanelWidth
+Width  = OverlayPanelWidth
 Height = WorkArea.Bottom - WorkArea.Top
 ```
 
-This naturally respects a normal taskbar located at the bottom, top, left, or right.
-
-For the supported handheld product environment, a single internal display is the dominant case, but implementation should use the real monitor working area rather than embedding that assumption in geometry code.
-
-### 6.3 Target monitor
-
-Preferred selection when opening:
+Preferred monitor resolution on every Show:
 
 1. monitor containing the current foreground game/window;
-2. otherwise the monitor containing the active shell/foreground window;
+2. otherwise foreground/shell monitor;
 3. otherwise primary monitor.
 
-Do not add a persistent multi-monitor policy manager for the unsupported/pathological cases. A fresh monitor lookup on every show is enough.
+Do not build a persistent multi-monitor policy manager for unsupported edge cases.
 
-### 6.4 Window characteristics
-
-The intended top-level window behavior is approximately:
+Target top-level behavior:
 
 ```text
 borderless
-not resizable by user
+not user-resizable
 not shown in taskbar
-TopMost
-WS_EX_NOACTIVATE or equivalent no-activation behavior
-SWP_NOACTIVATE when positioning/showing
+topmost
+WS_EX_NOACTIVATE or equivalent
+SWP_NOACTIVATE when shown/positioned
 ```
 
-Exact Win32/AppWindow implementation details belong in the implementation work order/POC.
-
-The important product behavior is:
-
-> Showing Quick Settings must not intentionally steal foreground ownership from the game.
+The game should remain foreground when the controller opens Quick Settings.
 
 ---
 
-## 7. Focus and controller-navigation model
-
-The overlay must not depend on ordinary keyboard focus or foreground-window activation for controller navigation.
-
-### 7.1 Runtime owns physical controller input
+## 7. Physical input and controller navigation
 
 Under Full PID1902 Addon authority:
 
 ```text
-physical MSI Claw PID1902
-        ↓
+MSI Claw PID1902
+      ↓
 DirectInput
-        ↓
+      ↓
 ControllerState
-        ↓
+      ↓
 Addon Runtime
 ```
 
-The overlay process must not open another DirectInput session for the same controller.
+The Overlay process must **not**:
 
-The overlay process must not read back the virtual X360/SteamDeck controller through XInput/GameInput as its navigation source.
+- open a second DirectInput session;
+- read the virtual X360 controller through XInput;
+- read the virtual SteamDeck controller back through GameInput/XInput;
+- become controller-input authority.
 
-The Runtime already owns the canonical physical input truth. Reuse it.
+Runtime already owns the canonical physical-input truth.
 
-### 7.2 Do not stream raw ControllerState over IPC
+### No high-rate raw-state IPC
 
-The canonical publishers run against `IControllerStateSnapshotSource.LatestState` at high cadence. The existing Steam Deck publisher is a dedicated ~250 Hz production path.
+Do not stream the publisher's ~250 Hz `ControllerState` snapshots over JSON/named pipe.
 
-Do **not** turn the overlay IPC into:
-
-```text
-ControllerState 250 Hz
-→ JSON/named pipe
-→ Overlay.exe
-```
-
-The Quick Settings UI only needs semantic navigation events.
-
-### 7.3 Semantic overlay navigation
-
-While overlay capture is active, Runtime should translate physical state edges/repeat into low-rate UI commands, conceptually:
+Runtime should translate input into low-rate semantic events, for example:
 
 ```text
-D-pad / left stick up     → NavigateUp
-D-pad / left stick down   → NavigateDown
-D-pad / left stick left   → AdjustLeft / NavigateLeft
-D-pad / left stick right  → AdjustRight / NavigateRight
-A                         → Accept
-B                         → Back / Close according to current page depth
-LB                        → PreviousSection
-RB                        → NextSection
-physical overlay button   → CloseOverlay
+NavigateUp
+NavigateDown
+NavigateLeft
+NavigateRight
+AdjustLeft
+AdjustRight
+Accept
+Back
+PreviousSection
+NextSection
+CloseOverlay
 ```
 
-Exact bindings can evolve with UI design, but the transport should carry semantic commands rather than raw reports.
+Exact bindings are a UI decision. The architecture contract is semantic navigation, not raw reports.
 
-### 7.4 Logical selection, not foreground focus
+### Logical selection
 
-Because the overlay is intended to avoid activating itself, controller navigation should maintain an explicit **logical selected item** in the overlay UI and render its selected/highlighted state.
-
-Do not require `Window.Activate()` simply so XAML keyboard focus can move.
-
-A normal WinUI focus primitive may still be used internally if it can operate without breaking the foreground contract, but the architecture must not depend on the game losing foreground ownership.
+Because the window should not intentionally become foreground, controller navigation should support a logical selected item/highlight model rather than requiring normal activated keyboard focus.
 
 ---
 
-## 8. Overlay capture is not a third virtual presentation
+## 8. Overlay capture is orthogonal to presentation selection
 
-This is the most important controller invariant in this document.
-
-Full PID1902 presentation policy is:
+Full PID1902 presentation policy remains:
 
 ```text
 Steam/BPM inactive → Xbox360
 Steam/BPM active   → SteamDeck
 ```
 
-Opening Quick Settings must **not** create another presentation selection rule.
-
-Wrong design:
+Overlay policy is separate:
 
 ```text
-SteamDeck active
+Overlay hidden → current presentation live
+Overlay active → same current presentation remains selected but game-facing input is neutral
+```
+
+Wrong:
+
+```text
+SteamDeck
 → Overlay opens
 → detach SteamDeck
 → attach X360
@@ -398,59 +357,40 @@ SteamDeck active
 → reattach SteamDeck
 ```
 
-That recreates the historical nested Game Bar presentation lifecycle that Full PID1902 explicitly intends to replace.
-
-Correct design:
+Correct:
 
 ```text
-current presentation = Xbox360 or SteamDeck
-        ↓
-Overlay opens
-        ↓
-same presentation remains structurally selected/attached
-        ↓
-game-facing input becomes neutral while overlay owns navigation
-        ↓
-Overlay closes
-        ↓
-same presentation resumes live input
+current presentation = X360 OR SteamDeck
+→ Overlay opens
+→ same presentation remains structurally selected/attached
+→ current presentation neutral
+→ controller navigates Overlay
+→ Overlay closes
+→ release gate
+→ same presentation resumes live input
 ```
 
-No overlay open/close operation should mutate:
-
-- PID1901/PID1902;
-- DirectInput acquisition;
-- HidHide target/configuration;
-- VIIPER server;
-- VIIPER bus;
-- X360/SteamDeck selection;
-- Steam/BPM state.
+Overlay open/close must not mutate PID, DirectInput, HidHide, VIIPER server/bus, Steam/BPM state, or presentation selection.
 
 ---
 
-## 9. Neutral-output contract while the overlay is open
+## 9. Neutral-output contract
 
-### 9.1 Initial policy: full game-input neutralization
+Initial policy: **full controller neutralization to the game while Overlay capture is active.**
 
-For the first implementation, while Quick Settings is consuming controller navigation, the game-facing virtual controller should receive neutral input.
-
-This is preferred over selective passthrough because it is predictable and avoids a second mapping policy.
+Do not begin with per-button passthrough.
 
 ```text
 Overlay hidden
 → physical ControllerState publishes normally
 
-Overlay visible/capture active
+Overlay capture active
 → physical ControllerState feeds OverlayInputRouter
-→ selected virtual presentation remains attached
-→ game-facing virtual output stays neutral
+→ current selected virtual presentation remains attached
+→ game-facing output remains neutral
 ```
 
-Do not start by implementing per-button passthrough rules.
-
-### 9.2 Reuse the presentation owner's pause/neutral concept
-
-Current Steam Deck code already contains a concrete pause primitive:
+The existing Steam Deck pause primitive demonstrates the desired ordering:
 
 ```text
 stop publisher
@@ -458,462 +398,406 @@ stop publisher
 → mark presentation paused
 ```
 
-and a corresponding resume primitive.
+But the final Full PID1902 implementation must route this through the **one presentation owner** so the same overlay capture concept works for both X360 and SteamDeck.
 
-That existing stage demonstrates the desired safety ordering, but the final custom overlay must not be permanently coupled specifically to `CanonicalSteamDeckOutputStage` because Full PID1902 also uses X360 as the non-Steam presentation.
-
-The final owner should expose the smallest presentation-agnostic operation needed by overlay capture, conceptually:
-
-```text
-PauseCurrentPresentationForOverlayAsync()
-ResumeCurrentPresentationAfterOverlayAsync()
-```
-
-Exact naming is not mandated.
-
-Do not create a second presentation manager solely for the overlay. This behavior belongs on/through the one Full PID1902 presentation owner.
+Do not create a second presentation manager solely for Overlay.
 
 ---
 
-## 10. Open sequence
+## 10. Open contract
 
-The open path must avoid the most user-visible failure: controller input becoming neutral when no usable overlay actually appeared.
+Avoid stranding game input neutral when no usable Overlay appeared.
 
 Preferred sequence:
 
 ```text
-physical overlay toggle event
+physical ToggleAddonQuickSettings event
         ↓
-Runtime verifies OverlayHost process/IPC is ready
+Runtime verifies Overlay process/IPC ready
         ↓
-if main settings UI is visible/running, request its normal close
+retire another visible local control surface if required
         ↓
-verify the mutually-exclusive UI surface condition is satisfied
+Runtime sends Show + fresh snapshot
         ↓
-Runtime sends Show with fresh Quick Settings snapshot
+Overlay selects monitor/WorkArea and shows no-activate
         ↓
-Overlay resolves monitor + WorkArea and shows the window no-activate
+Overlay acknowledges Visible
         ↓
-Overlay acknowledges Visible/Ready
-        ↓
-Runtime enters OverlayCapture
+Runtime commits OverlayCapture
         ↓
 current virtual presentation neutralizes
         ↓
-Runtime semantic navigation is delivered to Overlay
+semantic controller navigation begins
 ```
 
-If the overlay process cannot start/connect/show:
+If Overlay start/connect/show fails:
 
 ```text
-no capture commit
-no persistent neutral output
-game/controller remains live
-log feature-local failure
+OverlayCapture does not commit
+current presentation stays live
+Runtime/controller continues normally
+feature-local error is logged
 ```
 
-The physical WING/OEM trigger is expected to be an MSI semantic/WMI button path rather than an ordinary face-button state, so waiting for a visible acknowledgement before full controller capture should not require adding a complex pre-show controller barrier.
-
-If hardware evidence later proves the trigger leaks into ordinary virtual input, solve that concrete trigger path narrowly.
+Do not add an epoch/barrier framework for theoretical crossings.
 
 ---
 
-## 11. Close sequence and release-to-resume
+## 11. Close and release-to-resume contract
 
-Closing Quick Settings must not replay the close/Accept/navigation input into the game.
-
-Preferred sequence:
+Closing must not leak the close/navigation input into the game.
 
 ```text
 Close requested
-    ↓
-Overlay stops accepting navigation mutation
-    ↓
-Overlay hides window
-    ↓
-Runtime keeps current virtual presentation neutral
-    ↓
-wait until controls consumed by overlay are released / neutral
-    ↓
-clear OverlayCapture
-    ↓
-resume live publication on the SAME current presentation
+→ stop accepting Overlay navigation mutations
+→ hide Overlay window
+→ keep current presentation neutral
+→ wait until controls consumed by Overlay are released/neutral
+→ clear OverlayCapture
+→ resume live publication on the SAME current presentation
 ```
 
-This release-to-resume latch is required for practical handheld UX.
+This release gate is required because otherwise a held `B`, D-pad direction, or physical QAM trigger can immediately leak into the game when publication resumes.
 
-Example without the latch:
-
-```text
-B closes overlay
-→ virtual publication resumes while B is still held
-→ game also receives B
-```
-
-That is a normal user-visible failure and should be prevented.
-
-Do not add epochs/barriers for hypothetical instruction-level crossings. A simple held-control release gate around the real close path is sufficient.
+Keep the solution narrow: held-control release, not a generalized synchronization framework.
 
 ---
 
 ## 12. Overlay process lifecycle
 
-### 12.1 Preferred baseline: warm hidden process
-
-Quick Settings should feel immediate.
-
-Preferred lifecycle:
+Preferred baseline: **warm hidden process**.
 
 ```text
-Addon Runtime becomes ready
-        ↓
-start Overlay.exe
-        ↓
-initialize Windows App SDK / XAML
-        ↓
-connect overlay/QAM transport
-        ↓
-create window
-        ↓
-hide window
-        ↓
-remain idle/warm
+Runtime ready
+→ start Overlay.exe
+→ initialize Windows App SDK/XAML
+→ connect .Overlay endpoint
+→ create window hidden
+→ remain idle
 ```
 
-Then:
+Normal user path:
 
 ```text
-button press → Show
-close        → Hide
-button press → Show
+button → Show
+close  → Hide
+button → Show
 ```
 
-Do not create/destroy the process and XAML application for every panel toggle.
+Do not cold-start Windows App SDK + XAML + process + pipe on every QAM button press unless measurements later prove that approach acceptable.
 
-### 12.2 No supervisor/watchdog in the initial design
-
-A warm overlay process can crash. That does not justify a general process supervisor.
-
-Initial recovery:
+### Hidden-process crash
 
 ```text
-Overlay process dies while hidden
-→ Runtime/controller unaffected
-→ next overlay request may start a fresh Overlay.exe
+Overlay.exe dies while hidden
+→ controller unaffected
+→ Steam QamHost unaffected
+→ Main UI unaffected
+→ next Overlay request may start a fresh process
 ```
 
-and:
+No watchdog required initially.
+
+### Active-process crash
 
 ```text
-Overlay process dies while capture active
-→ Runtime observes process/IPC disconnect
-→ cancel overlay capture
-→ release-to-resume current presentation safely
+Overlay visible
++ current presentation neutral
++ Overlay.exe/pipe dies
+→ Runtime cancels OverlayCapture
+→ waits consumed controls release when relevant
+→ resumes current presentation if underlying controller state is healthy
 ```
 
-No heartbeat protocol is required merely to detect a named-pipe/process disconnect.
-
-### 12.3 Runtime shutdown
-
-On controlled Runtime shutdown:
-
-```text
-stop accepting overlay open requests
-→ if capture active, retire capture/neutral state safely
-→ request Overlay.exe shutdown
-→ bounded graceful wait
-→ terminate disposable overlay process only if required
-→ continue normal Runtime/controller teardown
-```
-
-Overlay cleanup must never become the owner of controller teardown.
+A real controller safety fault still wins; Overlay crash recovery must not override Full PID1902 fail-close.
 
 ---
 
-## 13. Existing QAM process/transport foundation to reuse
+## 13. IPC architecture — three dedicated endpoints
 
-Current main already has useful infrastructure that changes the preferred implementation approach.
+This is a frozen correction to the earlier draft.
 
-### 13.1 There are already separate desktop and QAM endpoints
+### 13.1 Current implementation facts
 
-`FrontendPipeEndpoint` currently exposes:
-
-```text
-CreateForCurrentUser()
-CreateQamForCurrentUser()
-```
-
-`AddonProcessHost` already creates two independent `NamedPipeAddonFrontendServer` instances:
+Current Runtime already has separate desktop and Steam-QAM endpoints:
 
 ```text
-Desktop frontend endpoint
-QAM frontend endpoint
+CreateForCurrentUser()    → desktop frontend
+CreateQamForCurrentUser() → existing Steam QamHost
 ```
 
-This means the new overlay does **not** need to make the desktop frontend pipe multi-client and does **not** need to invent a third full settings transport merely because it is a separate process.
+`AddonProcessHost` owns separate `NamedPipeAddonFrontendServer` instances for them.
 
-### 13.2 Current QamHost is already out-of-process and failure-local
+Each server currently accepts one connected frontend at a time. That is appropriate for its dedicated frontend.
 
-`SteamInputAddonforClaw.QamHost` is intentionally a separate process that talks to the Runtime through the dedicated QAM endpoint.
+### 13.2 Existing Steam QamHost continuously owns `.Qam` while connected
 
-Its current implementation is Steam GamepadUI/CEF-specific, but the process-isolation principle is directly reusable:
+The existing `SteamInputAddonforClaw.QamHost.exe` creates `QamFrontendBridge`, calls `ConnectAsync()`, and keeps that bridge for the QamHost process lifetime.
+
+Therefore:
+
+> **QamHost process running/connected means `.Qam` remains occupied even when the Steam QAM panel is not visibly open.**
+
+Steam-QAM panel visibility and QamHost pipe ownership are different facts.
+
+Do not attempt to share the single-connection `.Qam` endpoint between the warm Overlay process and QamHost.
+
+Do not stop/restart QamHost merely to lend its pipe to Overlay.
+
+QamHost owns a Steam CDP/GamepadUI injection lifecycle; repeatedly tearing that down for every Addon Overlay toggle would be unnecessary coupling and failure surface.
+
+### 13.3 Final endpoint split
+
+Use:
 
 ```text
-QAM/frontend UI failure
-→ no controller/VIIPER ownership transfer
-→ Runtime remains authoritative
+Runtime
+├─ .Frontend → SteamInputAddonforClaw.UI.exe
+├─ .Qam      → SteamInputAddonforClaw.QamHost.exe
+└─ .Overlay  → SteamInputAddonforClaw.Overlay.exe
 ```
 
-### 13.3 Reuse the QAM endpoint concept, not the Steam CEF implementation
-
-The new custom overlay should be a new WinUI frontend process, not a WinUI layer added into the current CEF JavaScript QamHost.
-
-Preferred migration direction:
+Add a narrow endpoint factory conceptually equivalent to:
 
 ```text
-current:
-SteamInputAddonforClaw.QamHost.exe
-→ Steam CEF/GamepadUI integration
-→ dedicated .Qam Runtime endpoint
-
-future:
-SteamInputAddonforClaw.Overlay.exe
-→ native WinUI Quick Settings
-→ reuse the dedicated QAM/overlay Runtime endpoint concept
+CreateOverlayForCurrentUser()
 ```
 
-Do not run the old Steam QamHost and the new OverlayHost as competing clients for the same single-instance QAM pipe.
+with the same CurrentUserOnly/local-user security boundary.
 
-Cutover must give one production owner to that endpoint.
+### 13.4 Separate pipe does not mean separate feature authority
 
-### 13.4 Typed Runtime control can be reused
-
-Because the overlay is C#, it can use the existing typed frontend transport/contracts instead of recreating a JavaScript bridge.
-
-However, the overlay UI should expose only the subset of operations it actually needs.
-
-A small overlay-side wrapper such as:
+All three frontends ultimately call the **same Runtime-owned feature instances**.
 
 ```text
-OverlayRuntimeClient
+Main UI ──────┐
+Steam QAM ────┼──→ Runtime TDP / CPU / FPS / Profile / Power authorities
+Addon Overlay ┘
 ```
 
-is reasonable if it simply narrows the existing typed client to Quick Settings operations.
+There must not be:
 
-Do not create a second TDP/CPU/FPS/Power implementation inside the overlay.
+- `OverlayTdpManager`;
+- `QamTdpManager`;
+- duplicate profile stores;
+- duplicate EC helpers;
+- duplicate hardware writers;
+- frontend-owned persistence.
 
-### 13.5 Low-rate navigation notifications still need a narrow seam
+The processes and pipes are separate only for UI/process lifetime isolation.
 
-The current general frontend transport primarily supports RPC plus `StateInvalidated` notification.
+### 13.5 Overlay transport should be narrow
 
-Overlay navigation needs low-rate Runtime → Overlay semantic events.
+Overlay needs:
 
-The implementation may extend the existing QAM endpoint with a small overlay-navigation notification seam, but must preserve these rules:
+- initial/fresh Quick Settings snapshots;
+- mutations through existing Runtime authorities;
+- authoritative mutation results;
+- state invalidation/refresh;
+- low-rate semantic navigation notifications;
+- Show/Hide/Shutdown lifecycle messages or equivalent process control.
 
-- no raw 250 Hz controller-state stream;
-- no generalized event bus;
-- no duplicate controller input reader;
-- desktop frontend does not need to receive overlay navigation;
-- pipe disconnect remains sufficient evidence that the overlay frontend disappeared.
+It does **not** need the entire developer/setup/diagnostics desktop frontend API.
 
-Exact wire shape is intentionally left for the implementation work order because the product contract is the semantic command flow, not a specific serializer/class hierarchy.
+A small Overlay-side typed wrapper is acceptable if it narrows the existing contract rather than duplicating feature logic.
+
+Do not create a generalized event bus.
 
 ---
 
-## 14. Main UI and Quick Settings are mutually exclusive
+## 14. Steam QAM and Addon Overlay coexistence
 
-The product should not show the main settings UI and Quick Settings overlay at the same time.
+The existing Steam QAM integration is **not removed by this architecture**.
 
-Desired visible-surface rule:
-
-```text
-MainUIVisible XOR OverlayVisible
-```
-
-This is a UX/product rule, not a new global authority state machine.
-
-### 14.1 Opening Overlay while main UI is open
+The two processes may be alive simultaneously:
 
 ```text
-overlay button pressed
-        ↓
-request normal Main UI close
-        ↓
-wait for Main UI to retire its frontend session
-        ↓
-show Overlay
+QamHost.exe    connected to .Qam
+Overlay.exe    connected to .Overlay
 ```
 
-Do not immediately hard-kill the main UI merely for normal handoff; it may own a transient diagnostic session that its established shutdown path already cleans up.
+That is expected and safe because the endpoints are independent.
 
-If the UI cannot close cleanly, fail the overlay open request rather than creating two simultaneous control surfaces. The game-facing controller must remain usable.
+### 14.1 What must be mutually exclusive
 
-### 14.2 Opening main UI while Overlay is visible
+The requirement is about **visible Quick Settings surfaces**, not process lifetime:
 
 ```text
-tray / shortcut / frontend-open request
-        ↓
-close Overlay
-        ↓
-complete release-to-resume
-        ↓
-launch/show existing Main UI normally
+Steam QAM panel visible
+        XOR
+Addon Overlay visible
 ```
 
-The existing main UI process lifecycle should remain unchanged.
+Do not interpret this as:
 
-### 14.3 Why this helps
+```text
+QamHost process running
+        XOR
+Overlay process running
+```
 
-Mutual exclusion removes a large class of unnecessary UI-level coordination problems:
+Both helper/frontends may remain loaded/warm.
 
-- two visible TDP sliders fighting each other;
-- two user edits racing visually;
-- overlay and main UI showing different transient draft values;
-- need for a cross-frontend edit authority manager.
+### 14.2 Never use process liveness as Steam-QAM visibility
 
-Underlying Runtime feature implementations remain the only actual setting/hardware authorities.
+QamHost remains connected while its injected QAM integration is loaded. Therefore:
+
+```text
+QamHost alive != Steam QAM panel visible
+```
+
+Any implementation that needs strict visual mutual exclusion must use a real Steam-QAM surface visibility/control signal, not `Process.HasExited` or pipe connection state.
+
+The exact Steam-QAM visible/close seam should be validated against the current injected `qam.js`/GamepadUI behavior before its work order is frozen.
+
+Do not invent a polling loop or generalized Steam UI state manager merely for this.
+
+### 14.3 Opening Addon Overlay while Steam QAM is visibly open
+
+Desired product behavior:
+
+```text
+Addon Overlay requested
+→ retire/close visible Steam QAM surface through the narrow supported Steam-QAM seam
+→ keep QamHost process and .Qam connection alive
+→ show Addon Overlay
+```
+
+Do **not** terminate QamHost as the normal close mechanism.
+
+### 14.4 Opening Steam QAM while Addon Overlay is visible
+
+Desired behavior:
+
+```text
+Steam QAM requested
+→ hide/retire Addon Overlay
+→ complete Overlay release-to-resume
+→ then allow/open Steam QAM
+```
+
+The exact physical-button policy remains deferred, but whichever route requests Steam QAM must not intentionally leave both surfaces visible.
+
+### 14.5 Main UI coexistence
+
+Main settings UI and Addon Overlay should also remain mutually exclusive visible surfaces:
+
+```text
+Main UI visible
+        XOR
+Addon Overlay visible
+```
+
+Main UI process lifetime should remain unchanged. If Overlay is requested while Main UI is open, use the Main UI's normal close path. If Main UI is requested while Overlay is open, retire Overlay capture first and then launch/show Main UI normally.
 
 ---
 
 ## 15. Settings/device-feature ownership
 
-The overlay is presentation only.
+All UI surfaces are clients of Runtime authorities.
 
-All mutations must still flow into existing Runtime-owned feature authorities, for example:
+Examples:
 
 ```text
 Overlay TDP control
-    ↓
-Runtime TdpRuntime
-    ↓
-existing hardware/persistence path
+→ Runtime TdpRuntime
+→ existing hardware/persistence path
 ```
 
 ```text
-Overlay CPU Boost
-    ↓
-Runtime CpuBoostRuntime
+Steam QAM CPU Boost
+→ Runtime CpuBoostRuntime
 ```
 
 ```text
-Overlay Power Mode
-    ↓
-Runtime PowerModeRuntime
+Main UI Power Mode
+→ Runtime PowerModeRuntime
 ```
 
 ```text
 Overlay FPS limit
-    ↓
-Runtime IntelFrameLimiterRuntime / profile authority
+→ Runtime Intel FPS/profile authority
 ```
 
-Do not implement:
-
-- `OverlayTdpManager`;
-- `OverlayCpuBoostManager`;
-- overlay-owned settings files;
-- overlay-owned EC/driver/native helper access;
-- duplicate profile mutation logic.
-
-Where existing frontend DTOs already accurately represent the same fact, prefer reuse over creating a second semantically identical model.
+Do not infer mutation success from local UI state. Runtime returns the authoritative result/readback.
 
 ---
 
-## 16. Device mode vs active-game profile behavior
+## 16. Device vs active-game behavior
 
-The current Steam QAM bridge distinguishes device-level mutation in BPM/no-game from active-game profile mutation during a game.
+The current Steam QAM bridge distinguishes BPM/no-game device mutations from active-game profile mutations.
 
-The custom Quick Settings design should preserve the product meaning rather than blindly preserve the current JavaScript bridge implementation.
+The new Overlay should preserve **product meaning**, not blindly copy the existing JavaScript bridge's UI.
 
-A future overlay page may show, for example:
+Possible future UX:
 
 ```text
 no active game
 → Device controls
 
 active recognized game/profile
-→ current game profile controls
+→ current-game profile controls
 ```
 
-or another explicitly designed UI model.
+This specific presentation is not frozen here.
 
-That UX is not frozen by this architecture document.
+Frozen rule:
 
-What **is** frozen:
-
-- the Overlay never becomes the data authority;
 - active game/device facts come from Runtime;
-- mutation result/readback comes from Runtime;
-- the UI should not infer success because a control changed visually.
+- persistence belongs to Runtime;
+- hardware mutation belongs to Runtime;
+- Overlay does not create a second policy authority.
 
 ---
 
 ## 17. Game Bar policy
 
-### 17.1 Game Bar is not the new overlay host
+Xbox Game Bar is not the new Addon Quick Settings host.
 
-The custom Addon Quick Settings panel replaces the need to use Xbox Game Bar as the Addon's handheld quick-settings surface.
-
-Opening Quick Settings must never trigger:
+Opening Addon Quick Settings must not trigger:
 
 ```text
 Win+G
-Xbox Game Bar foreground
+Game Bar foreground
 GameBarForegroundWatcher presentation selection
 SteamDeck → X360 presentation switch
 ```
 
-The historical Game Bar/X360 nested presentation experiment remains historical and is not part of this architecture.
+The historical nested Game Bar/X360 presentation experiment remains historical.
 
-### 17.2 Native Game Bar activation from the chosen Addon quick-settings button must be suppressed
+Once a physical MSI button is assigned to Addon Quick Settings in Addon-owned mode, that button's native Game Bar action must not also fire.
 
-Once a physical MSI button is assigned as the Addon Quick Settings button in Addon-owned controller mode, its native MSI/Win+G path must not also open Game Bar.
-
-This is a concrete double-action bug to prevent:
+Bad:
 
 ```text
 physical QAM button
-→ Addon Overlay opens
+→ Addon Overlay
 AND
-→ Xbox Game Bar opens
+→ Xbox Game Bar
 ```
 
-The existing Win+G suppression foundation should be reused where applicable rather than introducing another keyboard-hook authority.
+Reuse the existing Win+G suppression foundation where applicable instead of adding another independent keyboard-hook authority.
 
-### 17.3 Do not uninstall/disable Xbox Game Bar globally
+Do not globally uninstall Xbox Game Bar or apply broad Windows policy simply to implement this feature.
 
-The product requirement is to prevent the Addon-owned button path from invoking Game Bar while the Addon owns that interaction.
-
-Do not require globally uninstalling Xbox Game Bar or applying broad Windows policy changes merely to implement this feature.
-
-### 17.4 Center M Enabled / stock authority boundary
-
-This document primarily defines the Full PID1902 Addon-owned mode.
-
-Whether stock/Center M Enabled mode should also suppress a physical button's native Game Bar behavior is a separate product-policy decision and should follow the final button/authority contract.
-
-Do not silently broaden Addon button ownership into MSI-stock authority merely because the hook exists.
+Center M Enabled/stock-authority behavior remains a separate product-policy boundary and follows the final button/authority decision.
 
 ---
 
-## 18. WING / OEM1 mapping is intentionally deferred
+## 18. WING/OEM1 mapping remains deferred
 
-The overlay architecture must expose one semantic operation:
+Overlay architecture exposes one semantic operation:
 
 ```text
 ToggleAddonQuickSettings()
 ```
 
-The physical-button policy decides what invokes it.
+Do not bake WING/OEM1 into Overlay IPC or capture logic.
 
-Do not bake WING or OEM1 assumptions into `Overlay.exe`, the IPC protocol, or the presentation capture logic.
-
-### 18.1 Latest candidate discussed, not final
-
-The latest ergonomic candidate is:
+Latest ergonomic candidate discussed, **not frozen**:
 
 ```text
-Center M Disabled / Addon-owned controller
+Center M Disabled / Addon controller authority
 
                          Non-Steam / X360      Steam/BPM / SteamDeck
 --------------------------------------------------------------------
@@ -922,171 +806,78 @@ OEM1 (right)             Addon Overlay          Addon Overlay
 Game Bar                 not invoked            not invoked
 ```
 
-Rationale:
+Reasons this candidate is attractive:
 
-- left button preserves the Steam-button position during Steam usage;
-- right button behaves like a persistent handheld Quick Access key;
-- Quick Settings remains available in both Steam and non-Steam contexts;
-- Steam Button does not need to be sacrificed;
-- Steam Quick Access physical binding becomes less important because Addon Quick Settings replaces its primary quick-control role.
+- Steam usage preserves left-side Steam-button semantics;
+- the right hardware key behaves like a handheld Quick Access button;
+- Addon Quick Settings is available in Steam and non-Steam contexts;
+- Steam Button does not need to be sacrificed.
 
-This table is **not a frozen contract** yet.
+But this mapping can change without changing Overlay architecture.
 
-Possible final button policy changes must not require redesigning the overlay process architecture.
-
-### 18.2 Avoid single/double timing just to fit both Steam and overlay on one button
-
-A QAM surface should appear immediately.
-
-Do not choose a design that delays every normal QAM open simply to wait for a double-press timeout unless later product testing demonstrates a compelling reason.
-
-A stable one-button/one-primary-action rule is preferred for the overlay trigger.
+Avoid delaying every QAM open behind a double-press timeout merely to fit two primary actions onto one button unless hardware/UX testing later justifies it.
 
 ---
 
-## 19. Steam Button and Steam Quick Access primitives
+## 19. Steam Button and Steam Quick Access remain valid capabilities
 
-The custom Addon overlay does not require deleting the existing Steam Deck synthetic system-button primitives.
-
-Current code already has:
+The custom Overlay does not require deleting existing SteamDeck synthetic system-button support:
 
 ```text
 RequestSteamPulse()
 RequestQuickAccessPulse()
 ```
 
-on the canonical Steam Deck path.
+The existing Steam QAM integration also remains supported by this architecture.
 
-Even if a future physical-button default stops exposing Steam Quick Access directly, the internal capability may remain useful.
+Even if final physical defaults stop mapping a dedicated button directly to Steam Quick Access, retain the primitive until a later focused cleanup proves it unused.
 
-Do not delete it as part of the initial overlay work unless a later cleanup PR proves it is dead after the product migration.
-
-Likewise, do not make Overlay visibility change the Steam/BPM presentation selection.
+Do not couple Overlay visibility to SteamDeck system-button lifecycle.
 
 ---
 
-## 20. Presentation and overlay state interaction
+## 20. Presentation change while Overlay is open
 
-The conceptual state is intentionally small.
+A normal real-world event may occur while Overlay is open: Steam/BPM state changes.
 
-Stable controller state:
+Rule:
 
-```text
-CurrentPresentation = Xbox360 | SteamDeck
-OverlayCapture      = Off | On
-```
-
-These are orthogonal facts.
-
-Examples:
-
-```text
-Xbox360 + OverlayCapture Off
-→ normal non-Steam controller
-
-Xbox360 + OverlayCapture On
-→ Xbox360 remains selected; output neutral; overlay consumes navigation
-
-SteamDeck + OverlayCapture Off
-→ normal Steam controller
-
-SteamDeck + OverlayCapture On
-→ SteamDeck remains selected; output neutral; overlay consumes navigation
-```
-
-Do not encode combined states such as:
-
-```text
-SteamDeckOverlayMode
-XboxOverlayMode
-GameBarOverlayMode
-```
-
-The presentation owner knows the presentation. Overlay capture only gates whether live physical input is currently published to it.
-
----
-
-## 21. Presentation change while Overlay is open
-
-A real product event can occur while the overlay is open: Steam/BPM state may change.
-
-The desired rule remains simple:
-
-> Overlay capture stays authoritative for user input while visible; the Full PID1902 presentation owner may reconcile the desired presentation, but no live physical input is published to the game until overlay capture ends.
+> Overlay capture continues to own user input while visible; the Full PID1902 presentation owner may reconcile its desired X360/SteamDeck selection, but the newly selected presentation remains neutral until Overlay capture ends.
 
 Example:
 
 ```text
-Overlay open on Xbox360
+Overlay open while X360 selected
 → Steam game becomes active
-→ presentation owner changes desired output to SteamDeck according to normal Full PID1902 policy
-→ new current presentation remains neutral because OverlayCapture is still active
+→ Full PID1902 owner selects SteamDeck normally
+→ SteamDeck remains neutral because OverlayCapture is active
 → Overlay closes
 → release gate completes
-→ SteamDeck resumes live input
+→ SteamDeck becomes live
 ```
 
-Do not add a special overlay presentation state machine.
-
-The presentation owner's normal serialization/reconcile path remains authoritative.
-
-This path should be implemented only when the Full PID1902 X360↔SteamDeck owner exists; do not bolt it onto obsolete route-scoped policy prematurely.
+Do not create `SteamDeckOverlayMode` / `XboxOverlayMode` combined states.
 
 ---
 
-## 22. Overlay crash while active
+## 21. Physical input loss while Overlay is open
 
-This is a required real failure path.
-
-Failure:
+If PID1902/DirectInput disappears:
 
 ```text
-Overlay visible
-→ current virtual output neutral
-→ Overlay.exe crashes / pipe disconnects
+Runtime detects physical loss
+→ existing Full PID1902 reconcile/fail-close owns recovery
+→ virtual output remains safe/neutral
+→ Overlay does not attempt reacquisition
 ```
 
-Required Runtime response:
+Initial implementation may close Overlay after a real physical-input failure if that provides the simplest reliable UX.
 
-```text
-detect overlay process/IPC loss
-→ mark overlay surface unavailable
-→ stop semantic navigation delivery
-→ cancel overlay capture
-→ wait for overlay-consumed controls to release where needed
-→ resume live input on the current presentation
-```
-
-If the underlying physical source or presentation is independently unsafe at that moment, preserve the existing Full PID1902 fail-closed behavior instead of forcing a resume.
-
-Overlay recovery must never override a real controller safety fault.
-
-Do not auto-switch to another virtual controller because the UI process crashed.
+Do not add Overlay-specific PnP recovery machinery.
 
 ---
 
-## 23. Physical input loss while Overlay is open
-
-If PID1902/DirectInput disappears while the overlay is open:
-
-```text
-Overlay remains a UI surface only
-Runtime sees physical input loss
-→ existing controller reconcile/fail-close owns recovery
-→ virtual presentation stays neutral
-```
-
-The overlay may display an unavailable/controller-disconnected status if useful, but it must not attempt physical reacquisition.
-
-When safe physical input returns and Full PID1902 reconcile succeeds, the overlay may continue or be closed according to the final UX decision.
-
-Initial implementation may simply close the overlay after a real controller failure if that produces a simpler reliable contract.
-
-Do not add overlay-specific PnP recovery machinery.
-
----
-
-## 24. Sleep / hibernate / resume
+## 22. Sleep / hibernate / resume
 
 Quick Settings is not an authority boundary.
 
@@ -1094,468 +885,322 @@ Before suspend:
 
 ```text
 if Overlay visible
-→ hide/retire overlay interaction
-→ keep controller lifecycle governed by the Full PID1902 suspend contract
+→ hide/retire Overlay interaction
+→ controller suspend lifecycle continues under Full PID1902 owner
 ```
 
 After resume:
 
 ```text
-Runtime reconciles controller authority / PID / DirectInput / HidHide / VIIPER first
-→ Overlay process/window may be recreated/reconnected if needed
-→ remain hidden
+Runtime reconciles controller authority/PID/DirectInput/HidHide/VIIPER first
+→ Overlay process may reconnect/recreate if necessary
+→ Overlay remains hidden
 ```
 
-Do not automatically reopen Quick Settings after resume merely because it was visible before suspend.
+Do not automatically reopen stale Quick Settings after resume.
 
-That avoids stale monitor handles, stale UI state, and surprising post-resume foreground UI.
-
-No separate overlay resume manager is needed.
+No Overlay-specific resume state machine is needed.
 
 ---
 
-## 25. Runtime restart and authority lifetime
+## 23. Runtime restart/shutdown
 
-Under Center M Disabled, Runtime is mandatory and controller authority survives controlled Runtime restart according to the Full PID1902 design.
+Under Center M Disabled, Runtime is the mandatory controller authority.
 
-Overlay behavior is subordinate:
+Overlay and QamHost are subordinate UI/helper processes.
+
+Controlled Runtime restart:
 
 ```text
-controlled Runtime restart
-→ Overlay hides/exits or loses pipe
-→ controller Runtime performs its normal controlled restart teardown/reconcile
+retire active Overlay capture
+→ Overlay/QamHost lose or close their Runtime IPC as appropriate
+→ Runtime performs normal controller teardown/restart contract
 → new Runtime starts
-→ new Overlay process may be started warm/hidden
+→ UI helper processes reconnect/restart according to their own lifecycle
 ```
 
-Overlay must never attempt to keep old controller state alive across Runtime restart.
+Overlay must not attempt to preserve controller ownership across Runtime restart.
 
-The Runtime is the authority boundary.
-
----
-
-## 26. Opaque UI means no composition-specific requirement
-
-The current design explicitly does **not** require:
-
-- transparency;
-- acrylic behind the game;
-- blur of the game;
-- click-through regions;
-- per-pixel alpha;
-- a fullscreen transparent top-level window.
-
-The panel can use a normal solid WinUI background.
-
-This materially reduces implementation risk and is one reason the preferred solution is ordinary WinUI 3 rather than WPF/DirectComposition/native rendering.
-
-Visual polish may still use normal WinUI colors, shadows, rounded control surfaces, and transitions as long as those remain ordinary UI concerns.
+On Runtime shutdown, failure to close a disposable Overlay process must never become controller teardown authority.
 
 ---
 
-## 27. Input support priority
+## 24. Performance/POC requirements
 
-Initial input priority:
-
-1. physical MSI controller;
-2. optional touch/pointer if it works naturally with the no-activate window contract;
-3. keyboard/mouse only if useful later.
-
-Controller operation is the product requirement.
-
-Do not weaken the no-focus game UX merely to obtain ordinary keyboard navigation in the first implementation.
-
-If pointer/touch activation causes the game to lose foreground, treat that as a separate UX tradeoff rather than changing controller navigation architecture.
-
----
-
-## 28. Performance requirements and POC gate
-
-The overlay is not an always-on HUD. Its important performance properties are different.
-
-### 28.1 Measure, do not assume
-
-Before finalizing the WinUI-process choice, measure on actual supported MSI Claw hardware:
+Measure on supported MSI Claw hardware:
 
 ```text
 Overlay.exe hidden idle CPU
-Overlay.exe hidden working set / private bytes
-Overlay.exe first initialization cost
+Overlay.exe hidden Working Set / Private Bytes
+first initialization cost
 warm hidden → first visible frame latency
 Show → Hide → Show latency
-foreground game focus before/after Show
-frametime/VRR effect while hidden
-frametime/VRR effect while visible
+game foreground before/after Show
+frametime/VRR impact while hidden
+frametime/VRR impact while visible
 ```
 
-### 28.2 Desired behavior
+Hidden state should have:
 
-Hidden:
+- no controller polling loop in Overlay;
+- no animation loop;
+- no high-rate telemetry loop unless a visible control explicitly needs it;
+- negligible CPU activity.
 
-```text
-no controller-state polling loop in UI
-no animation loop
-no high-rate telemetry loop unless explicitly required by visible controls
-negligible CPU activity
-```
+Visible state should use normal WinUI rendering and low-rate snapshot/notification updates.
 
-Visible:
-
-```text
-normal WinUI rendering
-low-rate value updates
-controller semantic events only
-```
-
-### 28.3 Cold start is not the normal toggle path
-
-A cold process/XAML start every time the user presses QAM is not the desired UX.
-
-The warm hidden model exists specifically to remove:
-
-```text
-process creation
-Windows App SDK initialization
-XAML initialization
-pipe handshake
-window construction
-```
-
-from the normal button-to-panel path.
-
-If memory measurements later make a warm process unacceptable, revisit a lazy-start/cache strategy with evidence. Do not prematurely optimize away responsiveness.
+Cold-starting the entire process on every button press is not the preferred default.
 
 ---
 
-## 29. Fullscreen/game compatibility target
+## 25. Fullscreen compatibility target
 
-An ordinary topmost desktop HWND cannot promise universal coverage over every true exclusive-fullscreen presentation mode.
-
-Initial product target:
+Initial target:
 
 ```text
 Windowed games                      required
 Borderless fullscreen               required
-modern flip-model / optimized mode  hardware validation required
+modern flip/fullscreen-optimized    hardware validation required
 true legacy exclusive fullscreen    best effort / not guaranteed initially
 ```
 
-Do not add game injection, graphics API hooks, or a custom swap-chain overlay only to defend against unsupported/rare fullscreen modes before real Claw testing establishes a meaningful problem.
-
-If a concrete supported game mode consistently prevents the window from being visible, document that evidence and solve the specific rendering/windowing problem later.
+Do not add graphics injection or a custom swap-chain overlay to defend against rare/unsupported fullscreen modes without actual product evidence.
 
 ---
 
-## 30. Packaging
+## 26. Packaging
 
-A new WinUI executable must not accidentally duplicate an entire unnecessary Windows App SDK payload in the release package.
-
-The implementation work order should inspect the current publish layout and prefer reuse/shared placement of runtime assets where supported by the unpackaged WinUI deployment model.
+The separate executable is an internal product component, not a second installer.
 
 Goals:
 
-- one installer/release package;
-- main Runtime remains `SteamInputAddonforClaw.exe`;
-- main settings UI remains separately packaged as today;
-- Overlay.exe is included as an internal product component;
-- no second user-facing installer;
-- no duplicate application registration merely because the process is separate.
+- one installer;
+- Runtime remains the main platform process;
+- existing main UI packaging remains stable;
+- existing Steam QamHost remains packaged for Steam QAM;
+- new Overlay.exe is packaged as another internal component;
+- avoid accidentally duplicating unnecessary Windows App SDK payloads.
 
-Do not change framework/runtime deployment strategy without measuring the resulting package and validating WinUI startup on a clean machine.
+Inspect actual publish/package output before freezing deployment layout.
 
 ---
 
-## 31. Security and IPC scope
+## 27. Security and product scope
 
-The existing frontend endpoints are user-scoped and use `PipeOptions.CurrentUserOnly`.
+All UI endpoints remain local/current-user only.
 
-Preserve the same local-user boundary for the overlay/QAM endpoint.
+For `.Overlay`, preserve the same `PipeOptions.CurrentUserOnly` boundary used by existing frontend transport.
 
-The supported product model remains:
+Supported product scope remains:
 
 ```text
 1 Windows user
 1 interactive session
 ```
 
-Do not add multi-session routing, session arbitration, service brokers, or cross-user QAM ownership for unsupported Fast User Switching/RDP scenarios.
-
-The overlay must not accept arbitrary external commands through a global/public endpoint.
+Do not introduce Fast User Switching/RDP/multi-session arbitration, service brokers, or cross-user UI authority.
 
 ---
 
-## 32. Logging
+## 28. Logging
 
-Logging should be low-rate and lifecycle-oriented.
-
-Useful events:
+Useful low-rate lifecycle events:
 
 ```text
-OverlayHost process start/exit
-Overlay IPC connected/disconnected
-Overlay Show requested / visible confirmed
-Overlay Hide requested / hidden confirmed
-Overlay capture entered/exited
-capture canceled because frontend disconnected
-main UI ↔ overlay handoff
-selected monitor/work-area summary at Show
-mutation failure returned from Runtime
+Overlay process start/exit
+.Overlay IPC connected/disconnected
+Show requested / Visible confirmed
+Hide requested / Hidden confirmed
+OverlayCapture entered/exited
+capture canceled due to Overlay disconnect
+Steam QAM surface → Addon Overlay handoff
+Addon Overlay → Steam QAM surface handoff
+Main UI ↔ Overlay handoff
+selected WorkArea summary
+Runtime mutation failure
 ```
 
-Do not log every navigation event at Info level.
-
-Do not log raw ControllerState at 250 Hz.
-
-High-rate diagnostic logging should require explicit developer diagnostics and must not be part of normal production behavior.
+Do not log raw controller state or every navigation event at Info level.
 
 ---
 
-## 33. Main UI / Overlay surface handoff failure policy
-
-### Overlay requested while Main UI refuses/fails to close
-
-Preferred fail-safe:
-
-```text
-leave game/controller live
-keep Overlay hidden
-report/log UI handoff failure
-```
-
-Do not create simultaneous mutation surfaces by default.
-
-### Main UI requested while Overlay cannot close cleanly
-
-Runtime should first retire overlay capture safely.
-
-If the overlay process is hung, process termination is acceptable **after** Runtime has reclaimed overlay input authority, because Overlay.exe is disposable UI. The exact bounded timeout belongs in the work order.
-
-Controller safety must not depend on the overlay responding to a close message.
-
----
-
-## 34. State refresh model
-
-Quick Settings needs fresh values without becoming a polling-heavy monitoring application.
+## 29. State refresh model
 
 Preferred model:
 
 ```text
-Show
-→ capture one fresh aggregate Quick Settings snapshot
+Overlay Show
+→ one fresh aggregate Quick Settings snapshot
 
-Runtime feature changes
-→ low-rate StateInvalidated / targeted change notification
+Runtime feature change
+→ low-rate StateInvalidated / targeted notification
 → refresh relevant values
 
 user mutation
-→ Runtime returns authoritative mutation result + resulting snapshot/value
+→ Runtime authoritative result/readback
 ```
 
-Do not add a constant high-frequency state polling loop merely because the panel is visible.
+Do not create a constant high-frequency polling loop merely because Overlay is visible.
 
-Some values may genuinely need periodic refresh if a later UI card displays rapidly changing telemetry. Add that only for the specific card and only at a rate justified by the user experience.
-
-This Quick Settings architecture is not the ClawHUD telemetry architecture.
+This is Quick Settings, not ClawHUD telemetry.
 
 ---
 
-## 35. Recommended first Quick Settings scope
+## 30. First feature scope
 
-The architecture supports the existing device/profile controls, but the first UI should stay intentionally small.
-
-Reasonable first-wave candidates are features already owned by Runtime and useful during gameplay:
+Reasonable first controls, because Runtime already owns them:
 
 - TDP;
 - CPU Boost;
 - Windows Power Mode;
 - Intel FPS Limit;
-- current game profile enable/state where meaningful;
-- later fan/fan-curve controls once their production runtime contract is ready;
-- later resolution/refresh controls only if their in-game mutation policy is proven safe.
+- current game profile enable/state where useful;
+- fan/fan curve after its production runtime contract exists;
+- resolution/refresh only after in-game mutation policy is proven safe.
 
-The architecture does not require all of these in the first PR.
-
-Do not delay the window/input POC until every feature card is designed.
+Do not block the window/input POC on complete feature-card design.
 
 ---
 
-## 36. Recommended implementation sequence
-
-This is a design roadmap, not yet a set of executable work orders.
+## 31. Recommended implementation sequence
 
 ### OQ1 — Window/process POC
 
-Goal: prove the rendering/window choice without touching controller publication.
+Create a minimal `SteamInputAddonforClaw.Overlay.exe`:
 
-```text
-new WinUI Overlay.exe
-single opaque left panel
-working-area positioning
-TopMost / no-activate behavior
-Show/Hide command
-hidden idle mode
-```
+- WinUI 3;
+- one opaque left panel;
+- WorkArea positioning;
+- topmost/no-activate behavior;
+- Show/Hide;
+- hidden idle mode.
 
-Validate:
-
-- game remains foreground;
-- panel appears above target borderless/flip-model games;
-- taskbar is not covered;
-- DPI/layout correct on supported Claw display;
-- memory/CPU/latency acceptable.
+Validate focus, taskbar avoidance, DPI, representative games, memory, CPU, and latency.
 
 No controller neutralization yet.
 
-### OQ2 — Process lifecycle + existing QAM endpoint migration
+### OQ2 — Dedicated `.Overlay` transport and warm lifecycle
 
-Goal: establish the dedicated overlay frontend boundary.
+- add `CreateOverlayForCurrentUser()` or equivalent;
+- add a dedicated Overlay named-pipe server/client;
+- keep `.Frontend` unchanged;
+- keep `.Qam` unchanged and owned by existing Steam QamHost;
+- warm-start Overlay hidden;
+- make Overlay disconnect feature-local;
+- do not make existing transport multi-client.
 
-- reuse the existing dedicated QAM endpoint concept;
-- do not modify desktop frontend into multi-client transport;
-- replace/retire the current Steam CEF QamHost production owner when cutover occurs;
-- keep main UI lifecycle unchanged;
-- implement warm hidden process lifecycle;
-- process/pipe disconnect remains feature-local.
+### OQ3 — Visible-surface coexistence
 
-No new controller authority.
+- preserve QamHost process and `.Qam` connection while Addon Overlay is used;
+- identify/validate a narrow real Steam-QAM visible/close/open seam;
+- prevent Steam QAM panel and Addon Overlay from being intentionally visible simultaneously;
+- keep Main UI and Addon Overlay mutually exclusive;
+- do not use process liveness as Steam-QAM visibility.
 
-### OQ3 — Overlay capture / neutral publication
-
-Goal: make controller navigation safe.
+### OQ4 — Overlay capture / neutral publication
 
 - Runtime owns `OverlayCapture`;
-- current presentation pause/neutral through the one presentation owner;
-- semantic controller commands;
-- opening-button suppression as needed;
+- pause/neutral current presentation through the one Full PID1902 presentation owner;
+- semantic controller commands only;
 - release-to-resume latch;
-- crash/disconnect capture cancellation.
+- Overlay crash/disconnect cancels capture;
+- Overlay open/close never switches X360/SteamDeck.
 
-Do not switch X360/SteamDeck because the overlay opens.
+### OQ5 — Actual Quick Settings controls
 
-### OQ4 — Quick Settings feature controls
+Add a small first set through existing Runtime feature authorities. No duplicate feature managers.
 
-Goal: add the actual useful cards through existing Runtime authorities.
+### OQ6 — Physical button / Game Bar policy
 
-Start with a small set such as TDP / CPU Boost / Power Mode / FPS.
+After Overlay itself is proven:
 
-No duplicate managers.
+- bind final WING/OEM1 policy to `ToggleAddonQuickSettings()`;
+- ensure selected Addon QAM button does not also invoke Game Bar;
+- preserve Steam Button according to final mapping decision;
+- decide whether/how direct Steam Quick Access remains mapped.
 
-### OQ5 — Main UI mutual exclusion
-
-Goal: polished surface handoff.
-
-- Overlay request closes Main UI first;
-- Main UI request closes Overlay first;
-- no simultaneous visible control surfaces;
-- safe failure behavior.
-
-This may be combined with OQ2 if the diff stays small and clear.
-
-### OQ6 — Physical button policy / Game Bar replacement
-
-Only after the overlay itself is proven:
-
-- bind the selected WING/OEM1 policy to `ToggleAddonQuickSettings()`;
-- ensure native Game Bar activation does not accompany that button;
-- preserve Steam Button according to the final mapping decision;
-- update/remove obsolete Steam-QAM/GameBar assumptions in documentation/UI.
-
-Do not let the unresolved physical-button choice block the earlier window/process POC.
-
-### OQ7 — lifecycle hardware validation and cleanup
+### OQ7 — Hardware lifecycle validation
 
 Validate:
 
-- suspend/resume;
-- overlay process crash hidden/visible;
+- rapid repeated Show/Hide;
+- release-to-resume leakage;
+- Steam/BPM transition while Overlay open;
+- Overlay crash hidden and visible;
+- QamHost remains stable while Overlay is repeatedly used;
+- switching visible surface Steam QAM ↔ Addon Overlay;
+- sleep/hibernate/resume;
 - Runtime controlled restart;
-- Steam/BPM transition while overlay is visible;
-- physical input loss/re-enumeration while overlay is visible;
-- release-to-resume input leakage;
-- repeated rapid Show/Hide under real handheld usage.
-
-Only after the new path is proven should obsolete historical Game Bar/QamHost code be removed in focused cleanup PRs.
+- physical input loss/PnP re-enumeration;
+- presentation failure.
 
 ---
 
-## 37. Relationship to the current Full PID1902 roadmap
+## 32. Relationship to Full PID1902 roadmap
 
-This design must not derail the current controller-authority PR sequence.
+Overlay UI work must not derail the controller-authority sequence.
 
-The Full PID1902 foundation still owns, in order, the difficult controller work:
+Full PID1902 remains responsible for:
 
 ```text
 persistent HidHide
 mandatory Runtime lifetime
-authority transition
+reboot-bound authority transition
 Disabled-boot admission
 PID1902 / DirectInput ownership
 first presentation
-X360 ↔ SteamDeck presentation switching
+X360 ↔ SteamDeck selection
 real lifecycle recovery
 ```
 
-The overlay window/process POC can be developed independently because it is UI-only.
+The WinUI shell/IPC POC can happen independently.
 
-However, **production controller capture/neutralization should integrate with the final Full PID1902 presentation owner**, not cement new dependencies on the old Steam-route-scoped lifecycle that Full PID1902 is replacing.
-
-In other words:
-
-```text
-UI shell POC          can happen early
-Runtime capture seam  should target the new owner architecture
-```
+Production capture/neutralization must integrate with the **final Full PID1902 presentation owner**, not harden dependencies on obsolete route-scoped Game Bar/X360 logic.
 
 ---
 
-## 38. Anti-overengineering rules
+## 33. Anti-overengineering rules
 
-Apply the repository's normal review policy.
-
-Do not add complexity for purely theoretical races.
-
-Do not introduce, without concrete product evidence:
+Do not introduce without concrete product need:
 
 - `OverlayAuthorityManager`;
-- `OverlayStateMachineFramework`;
-- render-host abstraction hierarchy;
+- generalized UI-surface arbitration framework;
+- render-host hierarchy;
 - overlay epoch/barrier system;
 - heartbeat supervisor;
-- process service;
+- service/process watchdog;
 - multi-user session broker;
-- duplicated TDP/profile authority;
+- duplicate TDP/profile authority;
 - controller-state message bus;
-- generalized UI-surface arbitration framework.
+- multi-client rewrite of the existing `.Qam` or `.Frontend` pipes.
 
 Protect realistic failures:
 
-- Overlay process crashes while game input is neutral;
-- Overlay cannot show after the user requests it;
+- Overlay process dies while controller output is neutral;
+- Overlay cannot show after request;
+- Steam QAM/Overlay visual handoff fails;
 - Main UI/Overlay handoff fails;
-- Runtime shuts down/restarts;
+- Runtime restart/shutdown;
 - sleep/hibernate/resume;
 - physical device loss;
 - presentation failure;
-- actual setting mutation failure.
+- real setting mutation failure.
 
-A simple owner/disconnect/release path is preferred when it safely covers those real lifecycle cases.
+Keep one controller owner, one presentation owner, and one Runtime feature authority per feature.
 
 ---
 
-## 39. POC acceptance checklist
-
-Before declaring the basic WinUI overlay architecture validated, hardware testing should prove at least:
+## 34. POC acceptance checklist
 
 ### Window
 
-- [ ] opens on the correct display;
-- [ ] uses working-area height and does not cover the taskbar;
-- [ ] remains left-aligned after reopen;
-- [ ] does not unexpectedly resize the game;
-- [ ] does not intentionally activate itself / steal game foreground;
-- [ ] visible above representative borderless/fullscreen-optimized games;
-- [ ] clean repeated Show/Hide.
+- [ ] correct display selected;
+- [ ] left aligned;
+- [ ] WorkArea height used;
+- [ ] taskbar not covered;
+- [ ] game foreground not intentionally stolen;
+- [ ] visible over representative borderless/fullscreen-optimized games;
+- [ ] repeated Show/Hide clean.
 
 ### Performance
 
@@ -1564,156 +1209,170 @@ Before declaring the basic WinUI overlay architecture validated, hardware testin
 - [ ] warm Show latency recorded;
 - [ ] visible frametime impact checked;
 - [ ] hidden frametime/VRR impact checked;
-- [ ] no high-rate IPC from controller state.
+- [ ] no raw high-rate controller IPC.
+
+### IPC coexistence
+
+- [ ] Main UI can own `.Frontend` while QamHost owns `.Qam`;
+- [ ] Overlay can own `.Overlay` at the same time;
+- [ ] QamHost does not need to disconnect for Overlay to work;
+- [ ] Overlay does not connect to `.Qam`;
+- [ ] QamHost remains connected while its Steam QAM panel is merely hidden;
+- [ ] process liveness is not treated as QAM visibility.
 
 ### Controller capture
 
-- [ ] game input neutral while overlay active;
+- [ ] current presentation becomes neutral while Addon Overlay active;
 - [ ] D-pad/stick navigation does not also move the game;
-- [ ] Accept/Back do not leak into the game;
-- [ ] close button does not leak on resume;
-- [ ] same virtual presentation remains selected before/after overlay;
+- [ ] Accept/Back do not leak;
+- [ ] close trigger does not leak after resume;
+- [ ] same presentation remains selected before/after Overlay;
 - [ ] no PID/HidHide/DirectInput churn.
 
-### Failure
+### Visible-surface coexistence
 
-- [ ] killing Overlay.exe while hidden does not affect controller Runtime;
-- [ ] killing Overlay.exe while visible restores safe game input if underlying controller state is healthy;
-- [ ] failed overlay startup leaves controller live;
+- [ ] Addon Overlay request can retire a visible Steam QAM surface without killing QamHost;
+- [ ] Steam QAM request retires Addon Overlay first;
+- [ ] Main UI and Addon Overlay are not intentionally visible together;
+- [ ] failed handoff leaves controller usable.
+
+### Failure/lifecycle
+
+- [ ] killing Overlay hidden does not affect Runtime/QamHost;
+- [ ] killing Overlay visible safely releases capture when controller state is otherwise healthy;
+- [ ] failed Overlay startup leaves controller live;
 - [ ] Runtime shutdown does not hang on Overlay;
-- [ ] resume does not unexpectedly reopen stale Overlay UI.
-
-### UI coexistence
-
-- [ ] opening Overlay closes/retires Main UI first;
-- [ ] opening Main UI closes/retires Overlay first;
-- [ ] both control surfaces are never intentionally visible together.
+- [ ] suspend/resume does not reopen stale Overlay;
+- [ ] physical controller loss uses existing Full PID1902 fail-close/reconcile.
 
 ---
 
-## 40. Current decisions vs deferred decisions
+## 35. Current decisions vs deferred decisions
 
 ### Current design baseline
 
-The following are current architecture decisions:
-
-1. Quick Settings is Addon-owned, not Xbox Game Bar-hosted.
-2. Use a dedicated `SteamInputAddonforClaw.Overlay.exe` process.
-3. Use WinUI 3 for the UI.
-4. Use minimal Win32 HWND interop only for top-level window behavior.
-5. The panel is opaque, rectangular, and left-side.
-6. Vertical size is the monitor working area; taskbar is not covered.
-7. Width is a UI design dimension based on actual content.
-8. Overlay process is preferably warm/hidden for low toggle latency.
-9. Main settings UI and Quick Settings are mutually exclusive visible surfaces.
+1. Quick Settings is Addon-owned, not Game Bar-hosted.
+2. Add `SteamInputAddonforClaw.Overlay.exe` as a dedicated WinUI 3 process.
+3. Main `SteamInputAddonforClaw.UI.exe` retains its existing lifecycle.
+4. Existing `SteamInputAddonforClaw.QamHost.exe` and Steam QAM remain supported.
+5. Use **three dedicated UI endpoints**: `.Frontend`, `.Qam`, `.Overlay`.
+6. Existing `.Qam` remains exclusively for QamHost; Overlay does not borrow or replace it.
+7. QamHost and Overlay may both remain alive/connected simultaneously.
+8. Steam QAM panel and Addon Overlay must not be intentionally visible simultaneously.
+9. QamHost process/pipe liveness is not Steam-QAM panel visibility.
 10. Runtime remains the only controller/device/settings authority.
 11. Runtime owns physical `ControllerState`.
-12. Overlay receives semantic navigation, not raw high-rate controller reports.
-13. Opening Overlay never changes X360/SteamDeck selection.
-14. Current selected virtual presentation is neutral while Overlay captures navigation.
-15. Closing uses release-to-resume to prevent input leakage.
-16. Overlay process/IPC loss while capture is active cancels capture safely.
-17. Existing dedicated QAM endpoint/transport foundation should be reused rather than making the desktop frontend pipe multi-client.
-18. The current Steam CEF `QamHost` implementation is a migration source/legacy frontend, not the desired final renderer.
+12. Overlay receives semantic controller navigation, not raw high-rate reports.
+13. Overlay open/close never selects X360 vs SteamDeck.
+14. Current selected presentation is neutral while Overlay captures controller navigation.
+15. Release-to-resume prevents held input from leaking back into the game.
+16. Overlay process/IPC loss while active cancels capture safely.
+17. Panel is opaque, rectangular, left-side, and uses monitor WorkArea height.
+18. Use minimal Win32 HWND interop; do not build a custom compositor/HUD renderer initially.
 19. Game Bar foreground is not a presentation-selection event.
-20. The physical button assigned to Addon Quick Settings must not simultaneously invoke native Game Bar.
+20. The final physical button assigned to Addon Quick Settings must not simultaneously invoke Game Bar.
 
 ### Deferred product decisions
 
-The following are deliberately not frozen here:
-
 - final WING vs OEM1 assignment;
-- exact normal/non-Steam WING user-mapping catalog after Full PID1902;
-- whether Steam Quick Access remains user-selectable after custom QAM ships;
+- final non-Steam WING user-mapping catalog;
+- whether Steam Quick Access remains directly user-mappable after Addon Overlay ships;
+- exact Steam-QAM panel visibility/close/open integration seam;
 - exact first-page card order;
 - exact panel width;
-- exact controller focus visuals;
-- touch/mouse support priority;
-- whether an active physical-input failure closes the panel or leaves an unavailable panel visible;
-- final removal timing for the old Steam CEF QamHost and dormant Game Bar/X360 experiment code.
+- exact logical focus visuals;
+- touch/mouse priority;
+- exact physical-input-failure Overlay UX;
+- cleanup timing for obsolete historical Game Bar/X360 presentation code.
 
-These decisions can change without changing the architecture above.
+These may change without redesigning the process/controller architecture.
 
 ---
 
-## 41. Final target architecture
+## 36. Final target architecture
 
 ```text
-                    FULL PID1902 ADDON RUNTIME
-                              │
-           ┌──────────────────┼────────────────────┐
-           │                  │                    │
-     Physical owner      Feature owners      UI orchestration
-   PID1902/DirectInput   TDP/CPU/FPS/etc.   Overlay capture
-           │                  │                    │
-           └──────────┬───────┘                    │
-                      │                            │
-                ControllerState                    │
-                      │                            │
-         ┌────────────┴────────────┐               │
-         │                         │               │
- Presentation owner          OverlayInputRouter    │
-         │                         │               │
- X360 OR SteamDeck            semantic commands   │
-         │                         │               │
- live when hidden                  └──────┬────────┘
- neutral when overlay active              │
-                                          │ dedicated QAM/overlay IPC
-                                          ▼
-                           SteamInputAddonforClaw.Overlay.exe
-                                  WinUI 3 opaque panel
-                                  left WorkArea surface
-                                  no controller authority
+                         FULL PID1902 ADDON RUNTIME
+                                  │
+        ┌─────────────────────────┼─────────────────────────┐
+        │                         │                         │
+ Controller authority       Feature authorities       UI orchestration
+ PID1902 / DirectInput      TDP / CPU / FPS / etc.   Overlay capture
+        │                         │                         │
+        └──────────────┬──────────┘                         │
+                       │                                    │
+                 ControllerState                            │
+                       │                                    │
+        ┌──────────────┴──────────────┐                     │
+        │                             │                     │
+ Presentation owner             OverlayInputRouter          │
+ X360 OR SteamDeck              semantic commands          │
+        │                             │                     │
+ live when Overlay hidden             └──────────┬──────────┘
+ neutral when Overlay active                     │
+                                                 │
+                    ┌────────────────────────────┼────────────────────────────┐
+                    │                            │                            │
+                .Frontend                      .Qam                       .Overlay
+                    │                            │                            │
+                    ▼                            ▼                            ▼
+        SteamInputAddonforClaw.UI.exe   SteamInputAddonforClaw.QamHost.exe  SteamInputAddonforClaw.Overlay.exe
+        normal settings frontend        Steam GamepadUI/CEF QAM             WinUI native Quick Settings
 ```
 
-Main settings UI remains separate:
+Process/IPC coexistence:
 
 ```text
-SteamInputAddonforClaw.UI.exe
-        ↕ existing desktop frontend endpoint
-Addon Runtime
+UI.exe      may own .Frontend
+QamHost.exe may own .Qam
+Overlay.exe may own .Overlay
+
+all simultaneously
 ```
 
-Visible UI policy:
+Visible-surface policy:
 
 ```text
-Main UI visible
-        XOR
-Quick Settings visible
+Steam QAM visible XOR Addon Overlay visible
+Main UI visible   XOR Addon Overlay visible
 ```
 
-Controller presentation policy remains independent:
+Controller presentation remains independent:
 
 ```text
 Steam/BPM inactive → X360
 Steam/BPM active   → SteamDeck
 ```
 
-Overlay policy is orthogonal:
+Overlay remains orthogonal:
 
 ```text
-Overlay hidden → current presentation live
-Overlay shown  → current presentation neutral + controller drives Quick Settings
+Overlay hidden → selected presentation live
+Overlay shown  → selected presentation neutral + controller navigates Addon Quick Settings
 ```
 
 ---
 
-## 42. Final design principles
+## 37. Final design principles
 
 1. **Quick Settings is a UI surface, not a controller presentation.**
-2. **Opening Quick Settings must not switch X360 ↔ SteamDeck.**
-3. **Runtime keeps all physical/controller/device authority.**
-4. **Overlay.exe owns only WinUI presentation and transient logical selection.**
-5. **Use the existing separate QAM transport concept rather than destabilizing the desktop frontend pipe.**
-6. **Do not stream high-rate ControllerState to the UI process.**
-7. **Neutralize the current presentation while the controller is navigating Quick Settings.**
-8. **Release held overlay controls before returning live input to the game.**
-9. **Overlay crash must never strand a healthy controller in permanent neutral state.**
-10. **Main UI and Overlay remain mutually exclusive without creating a generalized UI authority manager.**
-11. **Use a normal opaque WinUI HWND; do not build a compositor/HUD engine without evidence.**
-12. **Respect the monitor WorkArea so the taskbar is never intentionally covered.**
-13. **Game Bar is not the Addon's new quick-settings host and is not a presentation-selection event.**
-14. **The final physical button mapping is a replaceable policy above the overlay architecture.**
-15. **Measure hidden memory, idle CPU, show latency, foreground behavior, and game compatibility on real MSI Claw hardware before calling the renderer choice final.**
-16. **Protect realistic handheld lifecycle failures, not theoretical instruction-level races.**
-17. **Prefer one controller owner, one presentation owner, one settings authority per feature, and one disposable overlay frontend.**
+2. **Opening Addon Overlay must never switch X360 ↔ SteamDeck merely because it is visible.**
+3. **Runtime keeps all controller/device/settings authority.**
+4. **Overlay.exe owns only native WinUI presentation and transient logical selection.**
+5. **Steam QamHost remains a separate supported frontend and keeps its own `.Qam` connection.**
+6. **Overlay gets its own `.Overlay` endpoint; never borrow `.Qam`.**
+7. **QamHost and Overlay may be loaded simultaneously; only their visible Quick Settings surfaces are mutually exclusive.**
+8. **Do not kill/restart QamHost as the normal way to show Addon Overlay.**
+9. **Do not use QamHost process/pipe liveness as Steam-QAM visibility.**
+10. **Do not stream high-rate ControllerState to any UI process.**
+11. **Neutralize the currently selected presentation while Addon Overlay owns controller navigation.**
+12. **Release Overlay-consumed controls before returning live input to the game.**
+13. **Overlay crash must not strand a healthy controller in permanent neutral state.**
+14. **Main UI lifecycle stays unchanged.**
+15. **Use a normal opaque WinUI HWND; do not build a compositor/HUD engine without evidence.**
+16. **Use monitor WorkArea so the taskbar is not intentionally covered.**
+17. **Game Bar is not the Addon's Quick Settings host and not a presentation-selection event.**
+18. **Physical WING/OEM1 assignment remains a replaceable product policy above this architecture.**
+19. **Measure real hidden memory, idle CPU, show latency, focus behavior, and game compatibility before calling the renderer choice final.**
+20. **Protect realistic handheld lifecycle failures without adding theoretical-race machinery.**
+21. **Prefer one controller owner, one presentation owner, one Runtime feature authority per feature, and separate disposable UI clients.**
