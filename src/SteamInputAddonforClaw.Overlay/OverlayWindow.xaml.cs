@@ -255,17 +255,29 @@ public sealed partial class OverlayWindow : Window
 
     internal void NavigateDown() => MoveRowSelection(up: false);
 
-    internal void AdjustSelectedRow(int delta) => _rowSelection.AdjustSelected(delta);
+    // If the selected row became unselectable, the selection method normalizes to another row and
+    // reports it; on that same press we only refresh the highlight and skip the adjust/activate so
+    // the fallback row is never mutated under a stale highlight.
+    internal void AdjustSelectedRow(int delta)
+    {
+        if (_rowSelection.AdjustSelected(delta)) RefreshRowSelectionAfterMove();
+    }
 
-    internal void ActivateSelectedRow() => _rowSelection.ActivateSelected();
+    internal void ActivateSelectedRow()
+    {
+        if (_rowSelection.ActivateSelected()) RefreshRowSelectionAfterMove();
+    }
 
     private void MoveRowSelection(bool up)
     {
         if (up ? _rowSelection.MovePrevious() : _rowSelection.MoveNext())
-        {
-            ApplyRowSelectionVisual();
-            BringSelectedRowIntoView();
-        }
+            RefreshRowSelectionAfterMove();
+    }
+
+    private void RefreshRowSelectionAfterMove()
+    {
+        ApplyRowSelectionVisual();
+        BringSelectedRowIntoView();
     }
 
     // s.12: deterministic tab-change ordering -- tab visuals, then show the page and reset the

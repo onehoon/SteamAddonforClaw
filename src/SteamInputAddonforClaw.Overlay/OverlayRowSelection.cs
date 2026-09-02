@@ -29,18 +29,28 @@ internal sealed class OverlayRowSelection
 
     internal bool MoveNext() => Move(1);
 
-    internal void ActivateSelected()
+    // Returns true when normalization moved the selection instead of activating: the caller must
+    // refresh the highlight and must NOT treat this same controller press as an activation of the
+    // newly-selected row (the user still sees the old row highlighted).
+    internal bool ActivateSelected()
     {
-        NormalizeSelection();
+        if (NormalizeSelection())
+            return true;
+
         if (Current is { Activate: { } activate } row && row.IsSelectable())
             activate();
+        return false;
     }
 
-    internal void AdjustSelected(int delta)
+    // Same contract as ActivateSelected for Left/Right adjustment.
+    internal bool AdjustSelected(int delta)
     {
-        NormalizeSelection();
+        if (NormalizeSelection())
+            return true;
+
         if (Current is { Adjust: { } adjust } row && row.IsSelectable())
             adjust(delta);
+        return false;
     }
 
     private OverlayRowCapabilities? Current =>
@@ -48,22 +58,26 @@ internal sealed class OverlayRowSelection
 
     private bool Move(int direction)
     {
-        NormalizeSelection();
+        var changed = NormalizeSelection();
         var start = _selectedIndex is { } index ? index + direction : 0;
         var next = FirstSelectableFrom(start, direction);
         if (next is null || next == _selectedIndex)
-            return false;
+            return changed;
         _selectedIndex = next;
         return true;
     }
 
-    // If the selected row vanished or became unselectable since the last action, snap back to
-    // the first selectable row (or clear). Bounded and local -- no subscription machinery.
-    private void NormalizeSelection()
+    // If the selected row vanished or became unselectable since the last action, snap back to the
+    // first selectable row (or clear). Returns true when that actually moved the selection so the
+    // caller can refresh the highlight. Bounded and local -- no subscription machinery.
+    private bool NormalizeSelection()
     {
         if (_selectedIndex is { } index && index >= 0 && index < _rows.Count && _rows[index].IsSelectable())
-            return;
+            return false;
+
+        var before = _selectedIndex;
         _selectedIndex = FirstSelectableFrom(0, 1);
+        return before != _selectedIndex;
     }
 
     private int? FirstSelectableFrom(int start, int direction)

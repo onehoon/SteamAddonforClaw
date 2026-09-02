@@ -81,7 +81,7 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
-    public void SelectionNormalizesWhenTheCurrentRowBecomesUnselectable()
+    public void MoveReportsNormalizationAsAnObservableSelectionChange()
     {
         var secondSelectable = true;
         var rows = new[] { Row(selectable: false), new OverlayRowCapabilities(() => secondSelectable), Row() };
@@ -91,9 +91,47 @@ public sealed class OverlayRowSelectionTests
 
         secondSelectable = false;
 
-        // Next action re-evaluates IsSelectable and snaps to the first selectable row (index 2).
-        Assert.False(selection.MoveNext());
+        // Up/Down re-evaluates IsSelectable, snaps to the first selectable row (index 2), and
+        // reports true so the caller refreshes the visible highlight.
+        Assert.True(selection.MoveNext());
         Assert.Equal(2, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void ActivateAndAdjustDoNotDispatchToTheFallbackRowOnTheSameInput()
+    {
+        var firstSelectable = true;
+        var fallbackActivations = 0;
+        var fallbackDeltas = new List<int>();
+        var rows = new[]
+        {
+            new OverlayRowCapabilities(() => firstSelectable, () => Assert.Fail("stale row activated"), _ => Assert.Fail("stale row adjusted")),
+            new OverlayRowCapabilities(() => true, () => fallbackActivations++, fallbackDeltas.Add),
+        };
+        var selection = new OverlayRowSelection();
+        selection.SetRows(rows);
+        Assert.Equal(0, selection.SelectedIndex);
+
+        firstSelectable = false;
+
+        // Accept: normalization moves selection to row 1 and reports true; row 1 is NOT activated.
+        Assert.True(selection.ActivateSelected());
+        Assert.Equal(1, selection.SelectedIndex);
+        Assert.Equal(0, fallbackActivations);
+
+        // A second Accept now actually activates the (already visible) row 1.
+        Assert.False(selection.ActivateSelected());
+        Assert.Equal(1, fallbackActivations);
+
+        // Adjust follows the same rule after another forced normalization.
+        selection.SetRows(rows);
+        firstSelectable = true; // row 0 selectable again -> SetRows reselects it
+        selection.SetRows(rows);
+        firstSelectable = false;
+        Assert.True(selection.AdjustSelected(+1));
+        Assert.Empty(fallbackDeltas);
+        Assert.False(selection.AdjustSelected(+1));
+        Assert.Equal(new[] { 1 }, fallbackDeltas);
     }
 
     [Fact]
