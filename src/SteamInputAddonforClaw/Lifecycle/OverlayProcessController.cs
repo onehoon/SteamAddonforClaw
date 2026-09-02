@@ -20,6 +20,13 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private bool _stopping;
     private int _disposed;
 
+    // OQ4 section 10: the process/window/transport owner no longer independently finishes a visible
+    // Hide on outside-click -- it validates and raises one narrow signal to AddonProcessHost, which
+    // runs the unified Overlay-capture retirement path (stop navigation -> Hide -> release gate ->
+    // resume). VisibleSessionLost fires only for the concrete crash/disconnect-while-visible case.
+    internal event Action? OverlayDismissRequested;
+    internal event Action? VisibleSessionLost;
+
     internal OverlayProcessController(string runtimeBaseDirectory, string logDirectory,
         Func<ProcessStartInfo, Process?>? startProcess = null,
         Func<string, NamedPipeOverlayServer>? serverFactory = null)
@@ -75,6 +82,21 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     // Overlay is already hidden. A failed Hide reuses the existing bounded session retirement.
     internal Task<bool> EnsureHiddenAsync() => SetVisibilityAsync(requestedShow: false);
 
+    // OQ4 section 8.1: Runtime -> Overlay semantic navigation. Fire-and-forget, no acknowledgement;
+    // the server only delivers it while the connection is Ready and the surface is Visible.
+    internal async Task<bool> SendNavigationAsync(OverlayNavigationAction action)
+    {
+        NamedPipeOverlayServer? server;
+        lock (_sync) server = _server;
+        if (server is null) return false;
+        try { return await server.SendNavigationAsync(action).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Overlay navigation send failed; Overlay remains Runtime-owned.", exception, ("Action", action));
+            return false;
+        }
+    }
+
     private async Task<bool> SetVisibilityAsync(bool? requestedShow)
     {
         await _transition.WaitAsync().ConfigureAwait(false);
@@ -116,53 +138,17 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         finally { _transition.Release(); }
     }
 
-    private void OnDismissRequested(NamedPipeOverlayServer source) => _ = Task.Run(() => HandleDismissRequestedAsync(source));
-
-    private async Task HandleDismissRequestedAsync(NamedPipeOverlayServer source)
+    // OQ4 section 10: validate the dismissal is for the current visible session, then hand it to
+    // AddonProcessHost. The controller no longer sends Hide itself -- that would bypass the
+    // release-to-resume gate now that controller capture exists.
+    private void OnDismissRequested(NamedPipeOverlayServer source)
     {
-        await _transition.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            NamedPipeOverlayServer? server;
-            bool visible;
-            lock (_sync)
-            {
-                server = _server;
-                visible = _visible;
-            }
-
-            bool stopping;
-            lock (_sync) stopping = _stopping;
-            if (stopping || !visible || !ReferenceEquals(server, source)) return;
-
-            var pid = GetProcessId(process: null);
-            AppLog.Info("Overlay", "Overlay dismiss request received.", ("PID", pid));
-            var requested = Stopwatch.StartNew();
-            AppLog.Info("Overlay", "Overlay command requested.",
-                ("Command", OverlayCommand.Hide), ("Reason", "OutsideClick"), ("PID", pid));
-            if (!await source.SendCommandAsync(OverlayCommand.Hide).ConfigureAwait(false))
-            {
-                AppLog.Warn("Overlay", "Overlay dismiss Hide was not acknowledged; retiring the current Overlay session.",
-                    null, ("Command", OverlayCommand.Hide), ("Reason", "OutsideClick"),
-                    ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds), ("Action", "RetireSession"));
-                await StopCurrentAsync().ConfigureAwait(false);
-                return;
-            }
-
-            lock (_sync)
-            {
-                if (ReferenceEquals(_server, source)) _visible = false;
-            }
-            AppLog.Info("Overlay", "Overlay command acknowledged.",
-                ("Command", OverlayCommand.Hide), ("Reason", "OutsideClick"),
-                ("PID", pid), ("ElapsedMs", requested.ElapsedMilliseconds));
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            AppLog.Warn("Overlay", "Overlay dismiss handling failed; the next explicit toggle may relaunch it.", exception);
-            await StopCurrentAsync().ConfigureAwait(false);
-        }
-        finally { _transition.Release(); }
+        bool relevant;
+        lock (_sync) relevant = !_stopping && _visible && ReferenceEquals(_server, source);
+        if (!relevant) return;
+        AppLog.Info("Overlay", "Overlay dismiss request received; routing to Runtime capture retirement.",
+            ("PID", GetProcessId(process: null)), ("Reason", "OutsideClick"));
+        OverlayDismissRequested?.Invoke();
     }
 
     internal void BeginShutdown()
@@ -255,6 +241,11 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         }
         AppLog.Warn("Overlay", "Overlay process exited; Overlay POC is disabled until the next explicit toggle.", null,
             ("PID", pid), ("ExitCode", exitCode), ("WasVisible", visible), ("Stopping", stopping));
+        // OQ4 section 10.1: an unexpected exit while the surface was visible -- the Runtime must
+        // retire any active capture (no Hide needed, the surface is gone). A normal StopCurrentAsync
+        // detaches this handler first, so this only fires for real crash/disconnect.
+        if (visible && !stopping)
+            VisibleSessionLost?.Invoke();
         await _transition.WaitAsync().ConfigureAwait(false);
         try { await StopCurrentAsync().ConfigureAwait(false); }
         finally { _transition.Release(); }

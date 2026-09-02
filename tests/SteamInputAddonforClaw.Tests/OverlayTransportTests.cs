@@ -277,42 +277,52 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
-    public async Task Runtime_routes_dismissal_through_one_hide_transition()
+    public async Task Dismiss_request_raises_the_runtime_signal_and_the_controller_does_not_send_hide_itself()
     {
+        // OQ4 section 10: the controller no longer finishes a visible Hide on outside-click -- it
+        // validates the dismissal and raises OverlayDismissRequested; AddonProcessHost runs the
+        // unified capture-retirement path (which then calls EnsureHiddenAsync).
         var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
         var overlayDirectory = Path.Combine(root, "overlay");
         Directory.CreateDirectory(overlayDirectory);
         File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
         var commands = new List<OverlayCommand>();
-        var hideHandled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dismissSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        // `pause` with a redirected-but-never-written stdin blocks reliably; `timeout` exits early
+        // when stdin is not a console, which would race the process-exit path into this test.
         Process? StartTestProcess(ProcessStartInfo _) => Process.Start(new ProcessStartInfo
         {
-            FileName = "cmd.exe", Arguments = "/c timeout /t 30 /nobreak >nul",
-            UseShellExecute = false, CreateNoWindow = true
+            FileName = "cmd.exe", Arguments = "/c pause",
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true
         });
 
         try
         {
             await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
                 StartTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.OverlayDismissRequested += () => dismissSignal.TrySetResult();
             await using var client = new NamedPipeOverlayClient(pipeName);
             var run = client.RunAsync(command =>
             {
                 lock (commands) commands.Add(command);
-                if (command == OverlayCommand.Hide) hideHandled.TrySetResult();
                 return Task.CompletedTask;
             });
 
-            await controller.ToggleForPocAsync();
+            Assert.True(await controller.ShowAsync());
+            Assert.True(controller.IsVisible);
             await client.SendDismissRequestedAsync();
-            await hideHandled.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            await Task.Delay(100);
-            lock (commands) Assert.Equal([OverlayCommand.Show, OverlayCommand.Hide], commands);
+            await dismissSignal.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(200);
+
+            // The controller raised the signal but issued no Hide of its own; the overlay is still
+            // visible until the Runtime runs the unified retirement path.
+            lock (commands) Assert.Equal([OverlayCommand.Show], commands);
+            Assert.True(controller.IsVisible);
 
             await controller.DisposeAsync();
-            await run.WaitAsync(TimeSpan.FromSeconds(5));
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
         }
         finally
         {

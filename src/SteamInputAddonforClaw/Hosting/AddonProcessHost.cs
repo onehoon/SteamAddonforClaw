@@ -60,6 +60,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // opposite Main UI <-> Overlay visibility transitions at the same time. Not a surface manager.
     private readonly SemaphoreSlim _visibleSurfaceTransition = new(1, 1);
     private static readonly TimeSpan MainUiCloseTimeout = TimeSpan.FromSeconds(6);
+    // OQ4 section 4: one in-memory Overlay-capture fact + the one active semantic input router.
+    // Not another controller authority. Never persisted, never restored across process restart.
+    private bool _overlayCaptureActive;
+    private OverlayControllerInputRouter? _overlayInputRouter;
     private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
     private readonly GameBarForegroundPresentationDelivery _gameBarDelivery;
     private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
@@ -136,6 +140,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
         _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
+        _overlayController.OverlayDismissRequested += () => _ = HandleOverlayCloseReasonAsync("OutsideClick", surfaceAlreadyGone: false);
+        _overlayController.VisibleSessionLost += () => _ = HandleOverlayCloseReasonAsync("VisibleSessionLost", surfaceAlreadyGone: true);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
         _gameBarDelivery = new GameBarForegroundPresentationDelivery(
             foreground => _runtimeHost?.HandleGameBarForegroundChangedAsync(foreground) ?? Task.FromResult(false));
@@ -522,6 +528,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             ("Event", "OwnedPhysicalInputLost"), ("StopReason", summary.StopReason),
             ("ReadFailures", summary.ReadFailures), ("CleanupSucceeded", summary.CleanupSucceeded));
 
+        // OQ4 section 14: real PID1902 DirectInput loss while Overlay capture is active -- notify the
+        // router synchronously so any release waiter completes as SourceUnavailable, then retire the
+        // visible Overlay session and clear capture WITHOUT resuming a publisher against the dead
+        // source. Existing PR8/PR10 recovery continues below.
+        _overlayInputRouter?.NotifySourceUnavailable();
+        if (_overlayCaptureActive || _overlayController.IsVisible)
+            _ = HandleOverlayCloseReasonAsync("PhysicalInputLost", surfaceAlreadyGone: false);
+
         // 7.4: the dead DirectInput device/enumerator cleanup is not proven -- do not acquire another
         // session on top of possibly-retained native resources. Fail closed; publisher stays neutral.
         // This is a native-resource safety boundary for the REST of this Runtime lifetime, not just
@@ -655,10 +669,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         await _visibleSurfaceTransition.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_overlayController.IsVisible)
+            // OQ4 section 11.2: an Overlay-capture / visible Overlay is retired through the SAME
+            // unified safe retirement helper before the Main UI is launched.
+            if (_overlayCaptureActive || _overlayController.IsVisible)
             {
                 AppLog.Info("UiSurface", "Overlay Hide requested before Main UI open.", ("Reason", reason));
-                await _overlayController.EnsureHiddenAsync().ConfigureAwait(false);
+                await RetireOverlayCaptureUnderTransitionAsync("MainUiOpen", surfaceAlreadyGone: false).ConfigureAwait(false);
                 if (_overlayController.IsVisible)
                     AppLog.Warn("UiSurface", "Main UI open proceeding though the Overlay still reports visible.", null, ("Reason", reason));
                 else
@@ -676,15 +692,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private async Task CoordinateOverlayToggleAsync()
     {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
         await _visibleSurfaceTransition.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_overlayController.IsVisible)
+            // Toggle-off / already captured: run the unified close and return.
+            if (_overlayCaptureActive || _overlayController.IsVisible)
             {
-                await _overlayController.EnsureHiddenAsync().ConfigureAwait(false);
+                await RetireOverlayCaptureUnderTransitionAsync("ToggleOff", surfaceAlreadyGone: false).ConfigureAwait(false);
                 return;
             }
 
+            // OQ3-A: retire the Main UI through the existing .Frontend CloseRequested path first.
             var server = _frontendServer;
             if (server is not null)
             {
@@ -707,13 +726,121 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 AppLog.Info("UiSurface", "Main UI retired before Overlay Show.");
             }
 
-            await _overlayController.ShowAsync().ConfigureAwait(false);
+            // OQ4 section 12: require the current Full-1902 presentation owner and a running PR5
+            // source. If either is missing the current controller stays live and the Overlay is not
+            // shown -- no capture.
+            var presentation = _presentationOwnership;
+            var source = _physicalOwnership?.LiveInputSource;
+            if (presentation is null || source is not { IsRunning: true })
+            {
+                AppLog.Warn("OverlayCapture", "Overlay Show not attempted; no owned presentation / running PR5 source.", null,
+                    ("Event", "OverlayCaptureNotAttempted"),
+                    ("HasPresentation", presentation is not null), ("SourceRunning", source?.IsRunning ?? false));
+                return;
+            }
+
+            if (!await _overlayController.ShowAsync().ConfigureAwait(false))
+            {
+                AppLog.Warn("OverlayCapture", "Overlay Show did not acknowledge Visible; controller stays live.", null, ("Event", "OverlayShowFailed"));
+                return;
+            }
+
+            AppLog.Info("OverlayCapture", "Capture requested.", ("Event", "OverlayCaptureRequested"));
+            var pause = await presentation.PauseForOverlayAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            if (!pause.Succeeded)
+            {
+                AppLog.Warn("OverlayCapture", "Presentation pause failed; retiring the Overlay without capture.", null,
+                    ("Event", "OverlayCaptureAbandoned"), ("Outcome", pause.Outcome), ("Reason", pause.Reason));
+                await _overlayController.EnsureHiddenAsync().ConfigureAwait(false);
+                if (pause.Outcome is Devices.MSI.Claw.OverlayPauseOutcome.NeutralRejectedPresentationRetired
+                    or Devices.MSI.Claw.OverlayPauseOutcome.NeutralRejectedRetireFailed)
+                    RequestControllerPresentationReconcile("OverlayPauseFailed");
+                return;
+            }
+            AppLog.Info("OverlayCapture", "Presentation paused neutral.", ("Event", "OverlayCapturePresentationPaused"));
+
+            var router = new OverlayControllerInputRouter(source, action => _overlayController.SendNavigationAsync(action));
+            router.Start();
+            _overlayInputRouter = router;
+            _overlayCaptureActive = true;
+            AppLog.Info("OverlayCapture", "Capture committed.", ("Event", "OverlayCaptureCommitted"));
         }
         catch (Exception exception)
         {
             AppLog.Warn("UiSurface", "Overlay visible-surface coordination failed.", exception);
         }
         finally { _visibleSurfaceTransition.Release(); }
+    }
+
+    private async Task HandleOverlayCloseReasonAsync(string reason, bool surfaceAlreadyGone)
+    {
+        await _visibleSurfaceTransition.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await RetireOverlayCaptureUnderTransitionAsync(reason, surfaceAlreadyGone).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("OverlayCapture", "Overlay capture retirement failed.", exception, ("Reason", reason));
+        }
+        finally { _visibleSurfaceTransition.Release(); }
+    }
+
+    /// <summary>OQ4 section 11: the ONE Overlay retirement path. Assumes <see cref="_visibleSurfaceTransition"/>
+    /// is already held. Every normal/real close reason converges here.</summary>
+    private async Task RetireOverlayCaptureUnderTransitionAsync(string reason, bool surfaceAlreadyGone)
+    {
+        var router = _overlayInputRouter;
+        var wasCapturing = _overlayCaptureActive;
+        AppLog.Info("OverlayCapture", "Retirement requested.", ("Event", "OverlayCaptureRetirementRequested"),
+            ("Reason", reason), ("SurfaceAlreadyGone", surfaceAlreadyGone), ("WasCapturing", wasCapturing));
+
+        router?.StopAcceptingNavigation();
+
+        if (!surfaceAlreadyGone && _overlayController.IsVisible)
+        {
+            if (!await _overlayController.EnsureHiddenAsync().ConfigureAwait(false) && _overlayController.IsVisible)
+            {
+                // Section 11.1: the Overlay could not be proven retired. Do NOT resume the
+                // game-facing publisher; leave capture / neutral fail-safe.
+                AppLog.Warn("OverlayCapture", "Overlay could not be proven retired; leaving capture and neutral output in place.", null,
+                    ("Event", "OverlayCaptureRetirementIncomplete"), ("Reason", reason));
+                return;
+            }
+        }
+
+        var releaseOutcome = OverlayConsumedControlsReleaseOutcome.AlreadyReleased;
+        if (router is not null)
+        {
+            AppLog.Info("OverlayCapture", "Waiting for consumed controls release.", ("Event", "OverlayCaptureWaitingRelease"), ("Reason", reason));
+            releaseOutcome = await router.WaitForConsumedControlsReleaseAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            AppLog.Info("OverlayCapture", "Consumed controls released.", ("Event", "OverlayCaptureControlsReleased"),
+                ("Reason", reason), ("Outcome", releaseOutcome));
+        }
+
+        router?.Dispose();
+        _overlayInputRouter = null;
+        _overlayCaptureActive = false;
+
+        if (!wasCapturing) return;
+
+        var presentation = _presentationOwnership;
+        var source = _physicalOwnership?.LiveInputSource;
+        if (presentation is null)
+            return;
+
+        if (releaseOutcome == OverlayConsumedControlsReleaseOutcome.SourceUnavailable || source is not { IsRunning: true })
+        {
+            AppLog.Warn("OverlayCapture", "Source unavailable; leaving presentation neutral.", null,
+                ("Event", "OverlayCaptureSourceUnavailable"), ("Reason", reason), ("ReleaseOutcome", releaseOutcome));
+            return; // existing PR8/PR10 physical recovery + PR7 reconcile own repair
+        }
+
+        var resume = await presentation.ResumeAfterOverlayAsync(source, _startupCancellationTokenSource.Token).ConfigureAwait(false);
+        AppLog.Info("OverlayCapture", resume.Succeeded ? "Same presentation resumed." : "Presentation not resumed; output left neutral.",
+            ("Event", resume.Succeeded ? "OverlayCaptureResumed" : "OverlayCaptureResumeLeftNeutral"),
+            ("Reason", reason), ("Outcome", resume.Outcome));
+        RequestControllerPresentationReconcile("OverlayCaptureReleased");
     }
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
@@ -862,6 +989,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
         _frontendLauncher.StopAcceptingRequests();
+        // OQ4 section 15: abandon Overlay navigation / capture without waiting for the user to
+        // release buttons. _processShutdownStarted already blocks any new capture transition; the
+        // existing presentation teardown remains authoritative and never resumes a publisher here.
+        var overlayRouter = _overlayInputRouter;
+        _overlayInputRouter = null;
+        _overlayCaptureActive = false;
+        overlayRouter?.StopAcceptingNavigation();
+        overlayRouter?.Dispose();
         _overlayController.BeginShutdown();
         _gameBarDelivery.StopAccepting();
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
