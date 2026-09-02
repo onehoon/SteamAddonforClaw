@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Contracts.Wing;
 using SteamInputAddonforClaw.Install;
 
@@ -28,6 +29,7 @@ public sealed class StartupSettingsCoordinator : IOem1MappingPreference, IWingMa
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public Oem1MappingSettings Oem1Mapping => Settings.Oem1Mapping;
     public WingMappingSettings WingMapping => Settings.WingMapping;
+    public IReadOnlyList<OverlayTabId> OverlayTabOrder => Settings.OverlayTabOrder;
     public event EventHandler? Oem1MappingChanged;
     public event EventHandler? WingMappingChanged;
 
@@ -91,6 +93,27 @@ public sealed class StartupSettingsCoordinator : IOem1MappingPreference, IWingMa
         _settingsStore.Save(next);
         Settings = next;
         WingMappingChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// The narrow validated mutation seam OQ5-UI-09 will call when the Overlay requests a reorder.
+    /// A valid complete order (all five tabs, each once) is normalized, persisted, then published
+    /// (save-then-current, like OEM1/WING). A request equal to the current order is an accepted
+    /// no-op. An invalid request is rejected: it is NOT silently converted to the default -- the
+    /// user's current valid order stays exactly as it is, and nothing is written to disk.
+    /// </summary>
+    public bool TryChangeOverlayTabOrder(IReadOnlyList<OverlayTabId> requested)
+    {
+        if (!OverlayTabOrderContract.TryNormalize(requested, out var normalized))
+            return false;
+
+        if (normalized.SequenceEqual(Settings.OverlayTabOrder))
+            return true;
+
+        var next = Settings with { OverlayTabOrder = normalized };
+        _settingsStore.Save(next);
+        Settings = next;
+        return true;
     }
 
     public void SuppressDeveloperMenuWarningPermanently()

@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Contracts.Wing;
 
 namespace SteamInputAddonforClaw.Settings;
@@ -20,4 +21,11 @@ public sealed record AppSettings(
     /// </summary>
     public Oem1MappingSettings Oem1Mapping { get; init; } = Oem1MappingSettings.Default;
     public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
+
+    /// <summary>
+    /// The order of the five fixed top-level Overlay tabs. Same init-only compatibility pattern as
+    /// OEM1/WING above. Always a complete normalized order (all five tabs, each once); the first
+    /// entry is the tab selected on every Overlay Show. Transported to Overlay.exe by OQ5-UI-09.
+    /// </summary>
+    public IReadOnlyList<OverlayTabId> OverlayTabOrder { get; init; } = OverlayTabOrderContract.DefaultOrder;
 }

@@ -19,6 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\SteamInputAddonforClaw.Contracts\SteamInputAddonforClaw.Contracts.csproj" />
     <ProjectReference Include="..\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
   </ItemGroup>
 

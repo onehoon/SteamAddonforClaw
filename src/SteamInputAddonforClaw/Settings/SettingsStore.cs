@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Contracts.Wing;
 using SteamInputAddonforClaw.Diagnostics;
 
@@ -11,9 +12,9 @@ public sealed class SettingsStore
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true,
-        // The OEM1 mapping is the only nested payload here, and its enums must round-trip as names:
-        // a numeric action/key/slot value in the settings file would silently change meaning the
-        // moment an enum member is inserted.
+        // The OEM1/WING mappings and the Overlay tab order all persist enums, which must round-trip
+        // as names: a numeric action/key/slot/tab value in the settings file would silently change
+        // meaning the moment an enum member is inserted.
         Converters = { new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) }
     };
     private readonly string _settingsPath;
@@ -48,7 +49,8 @@ public sealed class SettingsStore
             {
                 DeveloperMenuEnabled = developerMenuEnabled,
                 Oem1Mapping = ReadOem1Mapping(root),
-                WingMapping = ReadWingMapping(root)
+                WingMapping = ReadWingMapping(root),
+                OverlayTabOrder = ReadOverlayTabOrder(root)
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
             return settings;
@@ -63,6 +65,39 @@ public sealed class SettingsStore
             AppLog.Warn("Settings", "Settings read failed. Using defaults.", exception, ("Action", "Defaults"));
             return new AppSettings();
         }
+    }
+
+    /// <summary>
+    /// Reads the persisted Overlay tab order. Absent (pre-OQ5-UI-08 file) or malformed -- not an
+    /// array, wrong count, duplicate/missing/unknown tab, numeric enum, null/non-string element --
+    /// resolves only this preference to the frozen default. It is parsed in isolation so a broken
+    /// tab-order value can never throw into <see cref="Load"/>'s catch and reset every unrelated
+    /// setting to defaults.
+    /// </summary>
+    private static IReadOnlyList<OverlayTabId> ReadOverlayTabOrder(JsonElement root)
+    {
+        if (!root.TryGetProperty("OverlayTabOrder", out var property) || property.ValueKind != JsonValueKind.Array)
+            return OverlayTabOrderContract.DefaultOrder;
+
+        var parsed = new List<OverlayTabId>(property.GetArrayLength());
+        foreach (var element in property.EnumerateArray())
+        {
+            var name = element.ValueKind == JsonValueKind.String ? element.GetString() : null;
+            // Enum.TryParse would also accept "3" or an out-of-range "99"; require an actual name.
+            if (string.IsNullOrEmpty(name) || !char.IsLetter(name[0])
+                || !Enum.TryParse<OverlayTabId>(name, ignoreCase: false, out var tab))
+            {
+                AppLog.Warn("Settings", "Overlay tab order contains an invalid entry; using the default order.", null, ("Action", "Default"));
+                return OverlayTabOrderContract.DefaultOrder;
+            }
+            parsed.Add(tab);
+        }
+
+        if (OverlayTabOrderContract.TryNormalize(parsed, out var normalized))
+            return normalized;
+
+        AppLog.Warn("Settings", "Overlay tab order is not a complete set of the five tabs; using the default order.", null, ("Action", "Default"));
+        return normalized;
     }
 
     private static WingMappingSettings ReadWingMapping(JsonElement root)
@@ -138,7 +173,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.Oem1Mapping, settings.WingMapping };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.Oem1Mapping, settings.WingMapping, OverlayTabOrder = OverlayTabOrderContract.NormalizeOrDefault(settings.OverlayTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

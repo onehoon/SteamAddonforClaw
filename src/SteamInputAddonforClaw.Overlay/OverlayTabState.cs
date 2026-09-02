@@ -1,42 +1,29 @@
+using SteamInputAddonforClaw.Contracts.Overlay;
+
 namespace SteamInputAddonforClaw.Overlay;
 
-// Five fixed top-level Overlay tab identities. Identity is kept separate from the visible
-// label so a later persisted tab order can reorder known IDs without treating localized
-// display text as authority (OQ5-UI-01).
-internal enum OverlayTabId
-{
-    Device,
-    Profile,
-    Controller,
-    Shortcut,
-    Setting,
-}
-
-// Narrow Overlay-only tab selection/order state. Not a navigation framework: it only knows
-// the current order, the selected tab, and how to reset selection to order[0] on every Show.
+// Narrow Overlay-only tab selection/order state. Not a navigation framework: it only knows the
+// current order, the selected tab, and how to reset selection to order[0] on every Show. Tab
+// identity (OverlayTabId) and the five-tab order invariant now live in the shared Contracts
+// assembly so Runtime settings persistence and the future .Overlay transport use the same rule.
 internal sealed class OverlayTabState
 {
-    internal static readonly IReadOnlyList<OverlayTabId> DefaultOrder =
-    [
-        OverlayTabId.Device,
-        OverlayTabId.Profile,
-        OverlayTabId.Controller,
-        OverlayTabId.Shortcut,
-        OverlayTabId.Setting,
-    ];
+    internal static IReadOnlyList<OverlayTabId> DefaultOrder => OverlayTabOrderContract.DefaultOrder;
 
     private readonly IReadOnlyList<OverlayTabId> _order;
     private OverlayTabId _selectedTab;
 
     internal OverlayTabState()
-        : this(DefaultOrder)
+        : this(OverlayTabOrderContract.DefaultOrder)
     {
     }
 
     internal OverlayTabState(IReadOnlyList<OverlayTabId> order)
     {
         ArgumentNullException.ThrowIfNull(order);
-        _order = Normalize(order);
+        // Any missing / duplicate / unknown order deterministically resolves to the frozen default
+        // so the shell can never enter an invalid tab state.
+        _order = OverlayTabOrderContract.NormalizeOrDefault(order);
         _selectedTab = _order[0];
     }
 
@@ -72,19 +59,5 @@ internal sealed class OverlayTabState
         if (target < 0 || target >= _order.Count) return false;
         _selectedTab = _order[target];
         return true;
-    }
-
-    // Any missing / duplicate / unknown order deterministically resolves to the frozen
-    // default order so the shell can never enter an invalid tab state.
-    private static IReadOnlyList<OverlayTabId> Normalize(IReadOnlyList<OverlayTabId> order)
-    {
-        var seen = new HashSet<OverlayTabId>();
-        foreach (var id in order)
-        {
-            if (!Enum.IsDefined(id) || !seen.Add(id))
-                return DefaultOrder;
-        }
-
-        return seen.SetEquals(DefaultOrder) ? order.ToArray() : DefaultOrder;
     }
 }

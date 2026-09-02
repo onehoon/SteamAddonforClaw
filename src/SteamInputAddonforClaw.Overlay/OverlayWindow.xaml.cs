@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI.ViewManagement;
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
 namespace SteamInputAddonforClaw.Overlay;
