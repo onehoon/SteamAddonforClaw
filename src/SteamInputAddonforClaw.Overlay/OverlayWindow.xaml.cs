@@ -208,8 +208,11 @@ public sealed partial class OverlayWindow : Window
                 OverlayLog.Info("SliderPreview", "Preview commit submitted.", ("Value", desired));
                 return Task.FromResult(new OverlaySliderCommitSettlement(true, desired, null));
             },
-            onCurrentSettlement: settlement => DispatcherQueue.TryEnqueue(() =>
+            onCurrentSettlement: (generation, settlement) => DispatcherQueue.TryEnqueue(() =>
             {
+                // Re-check on the UI thread: a newer edit may have been queued ahead of this apply.
+                if (_sliderPreviewCommit is null || !_sliderPreviewCommit.IsCurrentGeneration(generation))
+                    return;
                 OverlayLog.Info("SliderPreview", "Preview commit settled.",
                     ("Succeeded", settlement.Succeeded), ("Value", settlement.AuthoritativeValue));
                 if (settlement is { Succeeded: true, AuthoritativeValue: { } value })

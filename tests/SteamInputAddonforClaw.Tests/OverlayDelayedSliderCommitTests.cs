@@ -57,9 +57,9 @@ public sealed class OverlayDelayedSliderCommitTests
     private sealed class SettlementSink
     {
         private readonly object _lock = new();
-        private readonly List<OverlaySliderCommitSettlement> _items = new();
-        public Action<OverlaySliderCommitSettlement> Callback => s => { lock (_lock) _items.Add(s); };
-        public IReadOnlyList<OverlaySliderCommitSettlement> Items { get { lock (_lock) return _items.ToArray(); } }
+        private readonly List<(int Generation, OverlaySliderCommitSettlement Settlement)> _items = new();
+        public Action<int, OverlaySliderCommitSettlement> Callback => (g, s) => { lock (_lock) _items.Add((g, s)); };
+        public IReadOnlyList<(int Generation, OverlaySliderCommitSettlement Settlement)> Items { get { lock (_lock) return _items.ToArray(); } }
     }
 
     private static async Task SpinUntilAsync(Func<bool> condition, string because)
@@ -77,7 +77,7 @@ public sealed class OverlayDelayedSliderCommitTests
     {
         var delay = new ManualDelay();
         var commit = new GatedCommit();
-        using var helper = new OverlayDelayedSliderCommit(commit.Func, _ => { }, Delay, delay.Func);
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, Delay, delay.Func);
 
         helper.Schedule(55);
 
@@ -92,7 +92,7 @@ public sealed class OverlayDelayedSliderCommitTests
     {
         var delay = new ManualDelay();
         var commit = new GatedCommit();
-        using var helper = new OverlayDelayedSliderCommit(commit.Func, _ => { }, Delay, delay.Func);
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, Delay, delay.Func);
 
         helper.Schedule(55);
         helper.Schedule(60);
@@ -108,7 +108,7 @@ public sealed class OverlayDelayedSliderCommitTests
     {
         var delay = new ManualDelay();
         var commit = new GatedCommit();
-        using var helper = new OverlayDelayedSliderCommit(commit.Func, _ => { }, Delay, delay.Func);
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, Delay, delay.Func);
 
         helper.Schedule(55);   // window started
         helper.Schedule(60);   // previous window cancelled, restarted from here
@@ -126,8 +126,8 @@ public sealed class OverlayDelayedSliderCommitTests
         var delayB = new ManualDelay();
         var commitA = new GatedCommit();
         var commitB = new GatedCommit();
-        using var a = new OverlayDelayedSliderCommit(commitA.Func, _ => { }, Delay, delayA.Func);
-        using var b = new OverlayDelayedSliderCommit(commitB.Func, _ => { }, Delay, delayB.Func);
+        using var a = new OverlayDelayedSliderCommit(commitA.Func, (_, _) => { }, Delay, delayA.Func);
+        using var b = new OverlayDelayedSliderCommit(commitB.Func, (_, _) => { }, Delay, delayB.Func);
 
         a.Schedule(55);
         b.Schedule(30);
@@ -149,7 +149,7 @@ public sealed class OverlayDelayedSliderCommitTests
     {
         var delay = new ManualDelay();
         var commit = new GatedCommit();
-        using var helper = new OverlayDelayedSliderCommit(commit.Func, _ => { }, Delay, delay.Func);
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, Delay, delay.Func);
 
         helper.Schedule(65);
         delay.Elapse();
@@ -177,8 +177,8 @@ public sealed class OverlayDelayedSliderCommitTests
 
         await SpinUntilAsync(() => sink.Items.Count == 1, "settlement delivered");
         Assert.False(helper.HasPendingDraft);
-        Assert.True(sink.Items[0].Succeeded);
-        Assert.Equal(65, sink.Items[0].AuthoritativeValue);
+        Assert.True(sink.Items[0].Settlement.Succeeded);
+        Assert.Equal(65, sink.Items[0].Settlement.AuthoritativeValue);
 
         await Task.Delay(40);
         Assert.Single(sink.Items);
@@ -199,9 +199,9 @@ public sealed class OverlayDelayedSliderCommitTests
 
         await SpinUntilAsync(() => sink.Items.Count == 1, "failure settlement delivered");
         Assert.False(helper.HasPendingDraft);
-        Assert.False(sink.Items[0].Succeeded);
-        Assert.Equal(50, sink.Items[0].AuthoritativeValue);
-        Assert.Equal("boom", sink.Items[0].FailureMessage);
+        Assert.False(sink.Items[0].Settlement.Succeeded);
+        Assert.Equal(50, sink.Items[0].Settlement.AuthoritativeValue);
+        Assert.Equal("boom", sink.Items[0].Settlement.FailureMessage);
     }
 
     [Fact]
@@ -216,8 +216,8 @@ public sealed class OverlayDelayedSliderCommitTests
         delay.Elapse();
 
         await SpinUntilAsync(() => sink.Items.Count == 1, "failure settlement delivered");
-        Assert.False(sink.Items[0].Succeeded);
-        Assert.Equal("kaboom", sink.Items[0].FailureMessage);
+        Assert.False(sink.Items[0].Settlement.Succeeded);
+        Assert.Equal("kaboom", sink.Items[0].Settlement.FailureMessage);
         Assert.False(helper.HasPendingDraft);
     }
 
@@ -248,7 +248,7 @@ public sealed class OverlayDelayedSliderCommitTests
         commit.CompleteNext(new OverlaySliderCommitSettlement(true, 60, null));
 
         await SpinUntilAsync(() => sink.Items.Count == 1, "B settlement delivered");
-        Assert.Equal(60, sink.Items[0].AuthoritativeValue);
+        Assert.Equal(60, sink.Items[0].Settlement.AuthoritativeValue);
         Assert.False(helper.HasPendingDraft);
     }
 
@@ -286,8 +286,8 @@ public sealed class OverlayDelayedSliderCommitTests
 
         commit.CompleteNext(new OverlaySliderCommitSettlement(true, 65, null));
         await SpinUntilAsync(() => sink.Items.Count == 1, "in-flight settlement still delivered");
-        Assert.True(sink.Items[0].Succeeded);
-        Assert.Equal(65, sink.Items[0].AuthoritativeValue);
+        Assert.True(sink.Items[0].Settlement.Succeeded);
+        Assert.Equal(65, sink.Items[0].Settlement.AuthoritativeValue);
         Assert.False(helper.HasPendingDraft);
     }
 
@@ -314,7 +314,7 @@ public sealed class OverlayDelayedSliderCommitTests
         await SpinUntilAsync(() => commit.Submitted.Count == 2, "B submitted");
         commit.CompleteNext(new OverlaySliderCommitSettlement(true, 60, null));
         await SpinUntilAsync(() => sink.Items.Count == 1, "B settlement delivered");
-        Assert.Equal(60, sink.Items[0].AuthoritativeValue);
+        Assert.Equal(60, sink.Items[0].Settlement.AuthoritativeValue);
     }
 
     [Fact]
@@ -340,40 +340,47 @@ public sealed class OverlayDelayedSliderCommitTests
     }
 
     [Fact]
-    public async Task Schedule_cannot_interleave_between_the_generation_check_and_settlement_delivery()
+    public async Task Settlement_raises_its_producing_generation_for_the_ui_apply_boundary()
     {
         var delay = new ManualDelay();
         var commit = new GatedCommit();
         var sink = new SettlementSink();
-        OverlayDelayedSliderCommit helper = null!;
-        Task? racer = null;
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, sink.Callback, Delay, delay.Func);
 
-        helper = new OverlayDelayedSliderCommit(commit.Func, settlement =>
-        {
-            sink.Callback(settlement);
+        helper.Schedule(65);
+        delay.Elapse();
+        await SpinUntilAsync(() => commit.Submitted.Count == 1, "commit in flight");
+        commit.CompleteNext(new OverlaySliderCommitSettlement(true, 65, null));
+        await SpinUntilAsync(() => sink.Items.Count == 1, "settlement delivered");
 
-            // Try to make a newer generation current from another thread while A's settlement is
-            // still being delivered. With correct atomicity this Schedule blocks on the gate we
-            // hold; with the old bug it would take effect during the sleep below.
-            var started = new ManualResetEventSlim();
-            racer = Task.Run(() => { started.Set(); helper.Schedule(999); });
-            started.Wait();
-            Thread.Sleep(50);
+        // No newer edit: the raised generation is still current, so a guarded UI apply proceeds.
+        Assert.True(helper.IsCurrentGeneration(sink.Items[0].Generation));
+    }
 
-            Assert.False(helper.HasPendingDraft); // B is still blocked; A's cleared state holds
-        }, Delay, delay.Func);
+    [Fact]
+    public async Task Settlement_is_dropped_at_the_ui_apply_boundary_when_a_newer_draft_became_current()
+    {
+        var delay = new ManualDelay();
+        var commit = new GatedCommit();
+        var sink = new SettlementSink();
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, sink.Callback, Delay, delay.Func);
 
         helper.Schedule(55);
         delay.Elapse();
         await SpinUntilAsync(() => commit.Submitted.Count == 1, "A submitted");
         commit.CompleteNext(new OverlaySliderCommitSettlement(true, 55, null));
+        await SpinUntilAsync(() => sink.Items.Count == 1, "A settlement raised");
 
-        await SpinUntilAsync(() => sink.Items.Count == 1, "A settled");
-        Assert.Equal(55, sink.Items[0].AuthoritativeValue);
+        var settledGeneration = sink.Items[0].Generation;
+        Assert.True(helper.IsCurrentGeneration(settledGeneration));
 
-        if (racer is not null) await racer;
+        // A newer adjustment becomes current before A's marshalled UI apply would run (e.g. a
+        // controller step queued on the DispatcherQueue ahead of the settlement callback).
+        helper.Schedule(60);
+
+        Assert.False(helper.IsCurrentGeneration(settledGeneration)); // A's UI apply must skip
         Assert.True(helper.TryGetPendingValue(out var pending));
-        Assert.Equal(999, pending); // B only became current after A's settlement fully delivered
+        Assert.Equal(60, pending);                                   // B's preview stays current
     }
 
     [Fact]

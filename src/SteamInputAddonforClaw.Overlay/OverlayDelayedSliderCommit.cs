@@ -18,10 +18,11 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
     internal static readonly TimeSpan ProductionDelay = TimeSpan.FromMilliseconds(2000);
 
     private readonly Func<double, Task<OverlaySliderCommitSettlement>> _commitAsync;
-    // Invoked only while this settlement is still the current generation. Delivered while holding
-    // _sync so a concurrent Schedule() cannot slip in between the check and the delivery, so it
-    // MUST NOT re-enter this helper synchronously (the fixture marshals via DispatcherQueue).
-    private readonly Action<OverlaySliderCommitSettlement> _onCurrentSettlement;
+    // Raised with the generation that produced this settlement, after the background stale check
+    // passes. The consumer marshals to its UI thread and MUST re-check IsCurrentGeneration there
+    // before applying, because a newer Schedule() (or a newer edit already queued ahead of the
+    // marshalled callback) can make the settlement stale between here and the actual apply.
+    private readonly Action<int, OverlaySliderCommitSettlement> _onCurrentSettlement;
     private readonly TimeSpan _delay;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly object _sync = new();
@@ -35,7 +36,7 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
 
     internal OverlayDelayedSliderCommit(
         Func<double, Task<OverlaySliderCommitSettlement>> commitAsync,
-        Action<OverlaySliderCommitSettlement> onCurrentSettlement,
+        Action<int, OverlaySliderCommitSettlement> onCurrentSettlement,
         TimeSpan delay,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
@@ -46,6 +47,15 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
     }
 
     internal bool HasPendingDraft { get { lock (_sync) return _hasPendingDraft; } }
+
+    // Re-check at the UI apply boundary: true only while `generation` is still the current one and
+    // the helper is alive. A settlement whose generation is no longer current must not be applied
+    // over the newer pending preview.
+    internal bool IsCurrentGeneration(int generation)
+    {
+        lock (_sync)
+            return !_disposed && generation == _generation;
+    }
 
     // The latest desired value while a timer or current commit is still pending. This is the seam a
     // future invalidation handler uses to keep the pending draft visible instead of snapping back.
@@ -147,14 +157,15 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
         {
             // A newer Schedule replaced this draft while the commit was in flight, or the helper
             // was disposed on teardown: this completion is stale and must not clear the newer
-            // pending fact or apply its settlement.
+            // pending fact or raise its settlement.
             if (_disposed || generation != _generation) return;
             _commitInFlight = false;
             _hasPendingDraft = false;
-
-            // Deliver under _sync: Schedule() cannot make a newer generation current between the
-            // final current-generation check and this settlement being applied.
-            _onCurrentSettlement(settlement);
         }
+
+        // Not under _sync: the consumer marshals to its UI thread and re-checks IsCurrentGeneration
+        // there, so a Schedule() (or an edit queued ahead of the marshalled callback) that lands
+        // after this point is still caught at the actual apply boundary.
+        _onCurrentSettlement(generation, settlement);
     }
 }
