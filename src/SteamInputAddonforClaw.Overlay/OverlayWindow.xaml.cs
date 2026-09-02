@@ -166,14 +166,30 @@ public sealed partial class OverlayWindow : Window
         ApplySelectedTabVisualState();
     }
 
-    // Device gets the temporary navigation-preview rows; every other tab keeps its OQ5-UI-01
-    // placeholder with zero selectable rows.
+    // Device gets the temporary preview fixture (a Toggle primitive + navigation rows); every
+    // other tab keeps its OQ5-UI-01 placeholder with zero selectable rows.
     private FrameworkElement BuildPage(OverlayTabId id, List<OverlayRow> rows)
     {
         if (id != OverlayTabId.Device)
             return CreatePlaceholderPage(id);
 
         var stack = new StackPanel { Spacing = 4 };
+
+        // OQ5-UI-05 temporary fixture: not product features, no persistence, no Runtime transport.
+        // The enabled preview's requestChange is a local echo standing in for a future Runtime
+        // authoritative readback so the primitive can be hardware-tested.
+        OverlayToggleRow enabledToggle = null!;
+        enabledToggle = new OverlayToggleRow("Toggle Preview",
+            desired => enabledToggle.ApplyState(isAvailable: true, isOn: desired));
+        enabledToggle.ApplyState(isAvailable: true, isOn: false);
+        rows.Add(new OverlayRow(enabledToggle.Container, enabledToggle.Capabilities));
+        stack.Children.Add(enabledToggle.Container);
+
+        var unavailableToggle = new OverlayToggleRow("Unavailable Toggle Preview", _ => { });
+        unavailableToggle.ApplyState(isAvailable: false, isOn: false);
+        rows.Add(new OverlayRow(unavailableToggle.Container, unavailableToggle.Capabilities));
+        stack.Children.Add(unavailableToggle.Container);
+
         for (var i = 1; i <= NavigationPreviewRowCount; i++)
         {
             var label = new TextBlock { Text = $"Navigation Preview {i:00}" };
