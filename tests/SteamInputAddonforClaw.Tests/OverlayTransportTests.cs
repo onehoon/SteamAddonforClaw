@@ -331,6 +331,48 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Ensure_hidden_that_cannot_run_reports_failure_and_keeps_the_surface_visible()
+    {
+        // OQ4 PR3 review [2]: this is the exact signal AddonProcessHost.RetireOverlayCaptureUnder-
+        // TransitionAsync gates on -- EnsureHiddenAsync() == false while IsVisible stays true means
+        // "retirement not proven", which blocks the following Main UI launch.
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+
+        Process? StartTestProcess(ProcessStartInfo _) => Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe", Arguments = "/c pause",
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true
+        });
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(_ => Task.CompletedTask);
+
+            Assert.True(await controller.ShowAsync());
+            Assert.True(controller.IsVisible);
+
+            controller.BeginShutdown(); // a transient state where EnsureHiddenAsync cannot run
+
+            Assert.False(await controller.EnsureHiddenAsync());
+            Assert.True(controller.IsVisible); // surface not proven gone -> host blocks Main UI launch
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Explicit_show_and_hide_track_visibility_and_are_idempotent()
     {
         var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));

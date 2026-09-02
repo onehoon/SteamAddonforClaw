@@ -669,21 +669,29 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         await _visibleSurfaceTransition.WaitAsync().ConfigureAwait(false);
         try
         {
-            // OQ4 section 11.2: an Overlay-capture / visible Overlay is retired through the SAME
-            // unified safe retirement helper before the Main UI is launched.
+            // OQ4 section 11.2: retire an Overlay-capture / visible Overlay through the SAME unified
+            // safe retirement helper and launch the Main UI ONLY when retirement is proven. A Hide /
+            // transport failure blocks the launch (the Overlay stays fail-safe on screen).
             if (_overlayCaptureActive || _overlayController.IsVisible)
             {
                 AppLog.Info("UiSurface", "Overlay Hide requested before Main UI open.", ("Reason", reason));
-                await RetireOverlayCaptureUnderTransitionAsync("MainUiOpen", surfaceAlreadyGone: false).ConfigureAwait(false);
-                if (_overlayController.IsVisible)
-                    AppLog.Warn("UiSurface", "Main UI open proceeding though the Overlay still reports visible.", null, ("Reason", reason));
-                else
-                    AppLog.Info("UiSurface", "Overlay retired before Main UI open.", ("Reason", reason));
+                bool retired;
+                try
+                {
+                    retired = await RetireOverlayCaptureUnderTransitionAsync("MainUiOpen", surfaceAlreadyGone: false).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("UiSurface", "Main UI open blocked because Overlay retirement failed.", exception, ("Reason", reason));
+                    return;
+                }
+                if (!retired)
+                {
+                    AppLog.Warn("UiSurface", "Main UI open blocked because Overlay retirement was not proven.", null, ("Reason", reason));
+                    return;
+                }
+                AppLog.Info("UiSurface", "Overlay retired before Main UI open.", ("Reason", reason));
             }
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("UiSurface", "Overlay retirement before Main UI open failed; requesting open anyway.", exception, ("Reason", reason));
         }
         finally { _visibleSurfaceTransition.Release(); }
 
@@ -787,8 +795,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     /// <summary>OQ4 section 11: the ONE Overlay retirement path. Assumes <see cref="_visibleSurfaceTransition"/>
-    /// is already held. Every normal/real close reason converges here.</summary>
-    private async Task RetireOverlayCaptureUnderTransitionAsync(string reason, bool surfaceAlreadyGone)
+    /// is already held. Every normal/real close reason converges here. Returns <see langword="true"/>
+    /// when the Overlay surface is proven gone (safe for a following Main UI launch); <see langword="false"/>
+    /// when a Hide could not be proven, in which case capture + neutral output are left fail-safe.</summary>
+    private async Task<bool> RetireOverlayCaptureUnderTransitionAsync(string reason, bool surfaceAlreadyGone)
     {
         var router = _overlayInputRouter;
         var wasCapturing = _overlayCaptureActive;
@@ -802,10 +812,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (!await _overlayController.EnsureHiddenAsync().ConfigureAwait(false) && _overlayController.IsVisible)
             {
                 // Section 11.1: the Overlay could not be proven retired. Do NOT resume the
-                // game-facing publisher; leave capture / neutral fail-safe.
+                // game-facing publisher; leave capture / neutral fail-safe. A following Main UI
+                // launch must be blocked.
                 AppLog.Warn("OverlayCapture", "Overlay could not be proven retired; leaving capture and neutral output in place.", null,
                     ("Event", "OverlayCaptureRetirementIncomplete"), ("Reason", reason));
-                return;
+                return false;
             }
         }
 
@@ -822,25 +833,29 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _overlayInputRouter = null;
         _overlayCaptureActive = false;
 
-        if (!wasCapturing) return;
+        if (!wasCapturing) return true;
 
         var presentation = _presentationOwnership;
-        var source = _physicalOwnership?.LiveInputSource;
-        if (presentation is null)
-            return;
+        if (presentation is null) return true;
 
+        var source = _physicalOwnership?.LiveInputSource;
+        // Always end the presentation pause. ResumeAfterOverlayAsync clears _overlayPaused FIRST, then
+        // only restarts the publisher when the source is healthy -- so a real PID1902 loss still
+        // unblocks normal physical recovery / PR7 reconcile instead of staying Blocked:OverlayCaptureActive.
+        var resume = await presentation.ResumeAfterOverlayAsync(source, _startupCancellationTokenSource.Token).ConfigureAwait(false);
         if (releaseOutcome == OverlayConsumedControlsReleaseOutcome.SourceUnavailable || source is not { IsRunning: true })
         {
-            AppLog.Warn("OverlayCapture", "Source unavailable; leaving presentation neutral.", null,
-                ("Event", "OverlayCaptureSourceUnavailable"), ("Reason", reason), ("ReleaseOutcome", releaseOutcome));
-            return; // existing PR8/PR10 physical recovery + PR7 reconcile own repair
+            AppLog.Warn("OverlayCapture", "Source unavailable; Overlay pause cleared and presentation left neutral for physical recovery.", null,
+                ("Event", "OverlayCaptureSourceUnavailable"), ("Reason", reason),
+                ("ReleaseOutcome", releaseOutcome), ("ResumeOutcome", resume.Outcome));
+            return true; // existing PR8/PR10 physical recovery + PR7 reconcile own repair
         }
 
-        var resume = await presentation.ResumeAfterOverlayAsync(source, _startupCancellationTokenSource.Token).ConfigureAwait(false);
         AppLog.Info("OverlayCapture", resume.Succeeded ? "Same presentation resumed." : "Presentation not resumed; output left neutral.",
             ("Event", resume.Succeeded ? "OverlayCaptureResumed" : "OverlayCaptureResumeLeftNeutral"),
             ("Reason", reason), ("Outcome", resume.Outcome));
         RequestControllerPresentationReconcile("OverlayCaptureReleased");
+        return true;
     }
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
