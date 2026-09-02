@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Numerics;
+using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Media;
 using Windows.UI.ViewManagement;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -12,6 +14,12 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow : Window
 {
+    // OQ5-UI-04: temporary, non-feature navigation-preview rows so the row-selection / scroll
+    // model is hardware-testable before real Device controls exist. Replaced by OQ5-UI-05/06.
+    private const int NavigationPreviewRowCount = 12;
+
+    private sealed record OverlayRow(Border Container, OverlayRowCapabilities Capabilities);
+
     private const double ContentSlideDistanceDip = 32.0;
     private const double HiddenOpacity = 0.90;
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
@@ -21,12 +29,20 @@ public sealed partial class OverlayWindow : Window
     private readonly OverlayTabState _tabState = new();
     private readonly Dictionary<OverlayTabId, Button> _tabButtons = new();
     private readonly Dictionary<OverlayTabId, FrameworkElement> _tabPages = new();
+    private readonly Dictionary<OverlayTabId, IReadOnlyList<OverlayRow>> _pageRows = new();
+    private readonly OverlayRowSelection _rowSelection = new();
+    private readonly Brush _rowSelectedBrush;
+    private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Colors.Transparent);
 
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
 
     public OverlayWindow()
     {
         InitializeComponent();
+        _rowSelectedBrush =
+            Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var accent) && accent is Brush brush
+                ? brush
+                : new SolidColorBrush(Colors.SlateGray);
         BuildShell();
     }
 
@@ -139,13 +155,45 @@ public sealed partial class OverlayWindow : Window
             TabStrip.Children.Add(button);
             _tabButtons[id] = button;
 
-            var page = CreatePlaceholderPage(id);
+            var rows = new List<OverlayRow>();
+            var page = BuildPage(id, rows);
             page.Visibility = Visibility.Collapsed;
             TabBody.Children.Add(page);
             _tabPages[id] = page;
+            _pageRows[id] = rows;
         }
 
         ApplySelectedTabVisualState();
+    }
+
+    // Device gets the temporary navigation-preview rows; every other tab keeps its OQ5-UI-01
+    // placeholder with zero selectable rows.
+    private FrameworkElement BuildPage(OverlayTabId id, List<OverlayRow> rows)
+    {
+        if (id != OverlayTabId.Device)
+            return CreatePlaceholderPage(id);
+
+        var stack = new StackPanel { Spacing = 4 };
+        for (var i = 1; i <= NavigationPreviewRowCount; i++)
+        {
+            var label = new TextBlock { Text = $"Navigation Preview {i:00}" };
+            if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
+                label.Style = bodyStyle;
+
+            var container = new Border
+            {
+                Child = label,
+                Padding = new Thickness(12, 10, 12, 10),
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(2),
+                BorderBrush = RowUnselectedBrush,
+            };
+            // Preview rows are navigation/highlight only: always selectable, no Activate/Adjust.
+            rows.Add(new OverlayRow(container, new OverlayRowCapabilities(() => true)));
+            stack.Children.Add(container);
+        }
+
+        return stack;
     }
 
     private static string LabelFor(OverlayTabId id) => id switch
@@ -200,6 +248,41 @@ public sealed partial class OverlayWindow : Window
         if (_tabState.SelectNext()) ApplySelectedTabVisualState();
     }
 
+    // OQ5-UI-04 s.11: NavigateUp/Down move logical row selection; Left/Right and Accept dispatch to
+    // the selected row only when it registered that capability. All row/selection state stays private
+    // to OverlayWindow -- App only forwards the semantic action.
+    internal void NavigateUp() => MoveRowSelection(up: true);
+
+    internal void NavigateDown() => MoveRowSelection(up: false);
+
+    // If the selected row became unselectable, the selection method normalizes to another row and
+    // reports it; on that same press we only refresh the highlight and skip the adjust/activate so
+    // the fallback row is never mutated under a stale highlight.
+    internal void AdjustSelectedRow(int delta)
+    {
+        if (_rowSelection.AdjustSelected(delta)) RefreshRowSelectionAfterMove();
+    }
+
+    internal void ActivateSelectedRow()
+    {
+        if (_rowSelection.ActivateSelected()) RefreshRowSelectionAfterMove();
+    }
+
+    private void MoveRowSelection(bool up)
+    {
+        if (up ? _rowSelection.MovePrevious() : _rowSelection.MoveNext())
+            RefreshRowSelectionAfterMove();
+    }
+
+    private void RefreshRowSelectionAfterMove()
+    {
+        ApplyRowSelectionVisual();
+        BringSelectedRowIntoView();
+    }
+
+    // s.12: deterministic tab-change ordering -- tab visuals, then show the page and reset the
+    // shared scroll to top, then reset that page's row selection to its first selectable row,
+    // then apply the row-selection visual.
     private void ApplySelectedTabVisualState()
     {
         var selected = _tabState.SelectedTab;
@@ -215,6 +298,36 @@ public sealed partial class OverlayWindow : Window
         catch (Exception exception)
         {
             OverlayLog.Warn("Shell", "Could not reset the body scroll position on tab change.", exception);
+        }
+
+        _rowSelection.SetRows(CapabilitiesFor(selected));
+        ApplyRowSelectionVisual();
+    }
+
+    private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(OverlayTabId tab) =>
+        _pageRows.TryGetValue(tab, out var rows)
+            ? rows.Select(row => row.Capabilities).ToArray()
+            : [];
+
+    private void ApplyRowSelectionVisual()
+    {
+        if (!_pageRows.TryGetValue(_tabState.SelectedTab, out var rows)) return;
+        var selectedIndex = _rowSelection.SelectedIndex;
+        for (var i = 0; i < rows.Count; i++)
+            rows[i].Container.BorderBrush = i == selectedIndex ? _rowSelectedBrush : RowUnselectedBrush;
+    }
+
+    private void BringSelectedRowIntoView()
+    {
+        if (!_pageRows.TryGetValue(_tabState.SelectedTab, out var rows)) return;
+        if (_rowSelection.SelectedIndex is not { } index || index < 0 || index >= rows.Count) return;
+        try
+        {
+            rows[index].Container.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Shell", "Could not bring the selected row into view.", exception);
         }
     }
 
