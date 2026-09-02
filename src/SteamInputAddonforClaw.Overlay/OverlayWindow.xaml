@@ -4,12 +4,44 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid x:Name="AnimationViewport">
         <Grid x:Name="OpaquePanel" Background="#FFF3F3F3" Padding="28">
-            <StackPanel x:Name="AnimatedContent" Spacing="16">
-                <TextBlock Text="Addon Quick Settings" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Overlay POC-A" FontSize="18" />
-                <TextBlock x:Name="GeometryText" TextWrapping="Wrap" />
-                <TextBlock x:Name="NavigationDiagnosticText" TextWrapping="Wrap" FontFamily="Consolas" />
-            </StackPanel>
+            <Grid x:Name="AnimatedContent" RowSpacing="16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock
+                    Grid.Row="0"
+                    Text="Quick Settings"
+                    Style="{ThemeResource TitleTextBlockStyle}" />
+
+                <Grid x:Name="TabStrip" Grid.Row="1" ColumnSpacing="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                </Grid>
+
+                <ScrollViewer
+                    x:Name="BodyScroll"
+                    Grid.Row="2"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
+                    <Grid x:Name="TabBody" />
+                </ScrollViewer>
+
+                <TextBlock
+                    x:Name="FooterHint"
+                    Grid.Row="3"
+                    Text="B  Close"
+                    Style="{ThemeResource CaptionTextBlockStyle}"
+                    Opacity="0.75" />
+            </Grid>
         </Grid>
     </Grid>
 </Window>

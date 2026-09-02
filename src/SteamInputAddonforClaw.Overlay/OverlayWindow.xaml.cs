@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Numerics;
 using Microsoft.UI.Composition;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Windows.UI.ViewManagement;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
@@ -16,9 +18,17 @@ public sealed partial class OverlayWindow : Window
     private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(150);
     private uint _lastConfiguredDpi;
 
+    private readonly OverlayTabState _tabState = new();
+    private readonly Dictionary<OverlayTabId, Button> _tabButtons = new();
+    private readonly Dictionary<OverlayTabId, FrameworkElement> _tabPages = new();
+
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
 
-    public OverlayWindow() => InitializeComponent();
+    public OverlayWindow()
+    {
+        InitializeComponent();
+        BuildShell();
+    }
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
 
@@ -26,6 +36,9 @@ public sealed partial class OverlayWindow : Window
 
     internal async Task ShowForPocAsync()
     {
+        // Commit the startup tab before any visual work so a warm process that was previously
+        // showing another tab never flashes it for a frame during the reveal (OQ5-UI-01 s.6).
+        ResetUiForShow();
         ConfigureWindow();
         var initialStatePrepared = true;
         try
@@ -104,21 +117,105 @@ public sealed partial class OverlayWindow : Window
         }
     }
 
-    private int _navigationDiagnosticCount;
-
-    // OQ4 POC: reflect the last semantic navigation action in one diagnostic text field so the
-    // capture -> navigate -> close path can be observed on hardware. No real control tree yet.
-    internal void ShowNavigationDiagnostic(string action)
+    // OQ5-UI-01: five-tab shell. Tab buttons and placeholder pages are built once from the
+    // current tab order; identity (OverlayTabId) is carried on Button.Tag and kept separate
+    // from the visible label text so a later persisted order can reorder known IDs.
+    private void BuildShell()
     {
-        _navigationDiagnosticCount++;
-        NavigationDiagnosticText.Text = $"nav #{_navigationDiagnosticCount}: {action}";
+        var order = _tabState.Order;
+        for (var column = 0; column < order.Count; column++)
+        {
+            var id = order[column];
+
+            var button = new Button
+            {
+                Content = LabelFor(id),
+                Tag = id,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(4, 6, 4, 6),
+            };
+            button.Click += OnTabHeaderClick;
+            Grid.SetColumn(button, column);
+            TabStrip.Children.Add(button);
+            _tabButtons[id] = button;
+
+            var page = CreatePlaceholderPage(id);
+            page.Visibility = Visibility.Collapsed;
+            TabBody.Children.Add(page);
+            _tabPages[id] = page;
+        }
+
+        ApplySelectedTabVisualState();
+    }
+
+    private static string LabelFor(OverlayTabId id) => id switch
+    {
+        OverlayTabId.Device => "Device",
+        OverlayTabId.Profile => "Profile",
+        OverlayTabId.Controller => "Controller",
+        OverlayTabId.Shortcut => "Shortcut",
+        OverlayTabId.Setting => "Setting",
+        _ => id.ToString(),
+    };
+
+    private static FrameworkElement CreatePlaceholderPage(OverlayTabId id)
+    {
+        var page = new TextBlock
+        {
+            Text = LabelFor(id),
+            Opacity = 0.6,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
+            page.Style = bodyStyle;
+        return page;
+    }
+
+    private void OnTabHeaderClick(object sender, RoutedEventArgs args)
+    {
+        if (sender is Button { Tag: OverlayTabId id } && id != _tabState.SelectedTab)
+        {
+            _tabState.Select(id);
+            ApplySelectedTabVisualState();
+        }
+    }
+
+    // Reset selection to the first tab in the current order before every visual reveal.
+    private void ResetUiForShow()
+    {
+        _tabState.ResetForShow();
+        ApplySelectedTabVisualState();
+    }
+
+    private void ApplySelectedTabVisualState()
+    {
+        var selected = _tabState.SelectedTab;
+        foreach (var (id, button) in _tabButtons)
+            button.FontWeight = id == selected ? FontWeights.SemiBold : FontWeights.Normal;
+        foreach (var (id, page) in _tabPages)
+            page.Visibility = id == selected ? Visibility.Visible : Visibility.Collapsed;
+
+        try
+        {
+            BodyScroll.ChangeView(null, 0, null, disableAnimation: true);
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Shell", "Could not reset the body scroll position on tab change.", exception);
+        }
     }
 
     private void ConfigureWindow()
     {
         WindowInterop.Configure(this, out var rect, out _lastConfiguredDpi, out var monitorText);
         var scale = _lastConfiguredDpi / 96.0;
-        GeometryText.Text = $"{monitorText}\nWorkArea: {rect.X},{rect.Y} {rect.Width}x{rect.Height}\nDPI / Scale: {_lastConfiguredDpi} / {scale:0.##}\nPanel DIP / physical width: {OverlayWindowGeometry.PocPanelWidthDip:0} / {rect.Width}px";
+        OverlayLog.Info("Geometry", "Overlay window configured",
+            ("Monitor", monitorText),
+            ("WorkAreaX", rect.X), ("WorkAreaY", rect.Y),
+            ("WorkAreaWidth", rect.Width), ("WorkAreaHeight", rect.Height),
+            ("Dpi", _lastConfiguredDpi), ("Scale", scale),
+            ("PanelWidthDip", OverlayWindowGeometry.PocPanelWidthDip),
+            ("PanelWidthPhysical", rect.Width));
     }
 
     private void LogSurfaceBounds(string reason)
