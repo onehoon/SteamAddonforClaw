@@ -18,6 +18,9 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
     internal static readonly TimeSpan ProductionDelay = TimeSpan.FromMilliseconds(2000);
 
     private readonly Func<double, Task<OverlaySliderCommitSettlement>> _commitAsync;
+    // Invoked only while this settlement is still the current generation. Delivered while holding
+    // _sync so a concurrent Schedule() cannot slip in between the check and the delivery, so it
+    // MUST NOT re-enter this helper synchronously (the fixture marshals via DispatcherQueue).
     private readonly Action<OverlaySliderCommitSettlement> _onCurrentSettlement;
     private readonly TimeSpan _delay;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
@@ -148,8 +151,10 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             if (_disposed || generation != _generation) return;
             _commitInFlight = false;
             _hasPendingDraft = false;
-        }
 
-        _onCurrentSettlement(settlement);
+            // Deliver under _sync: Schedule() cannot make a newer generation current between the
+            // final current-generation check and this settlement being applied.
+            _onCurrentSettlement(settlement);
+        }
     }
 }

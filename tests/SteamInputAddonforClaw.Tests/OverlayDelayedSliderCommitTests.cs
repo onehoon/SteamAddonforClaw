@@ -340,6 +340,43 @@ public sealed class OverlayDelayedSliderCommitTests
     }
 
     [Fact]
+    public async Task Schedule_cannot_interleave_between_the_generation_check_and_settlement_delivery()
+    {
+        var delay = new ManualDelay();
+        var commit = new GatedCommit();
+        var sink = new SettlementSink();
+        OverlayDelayedSliderCommit helper = null!;
+        Task? racer = null;
+
+        helper = new OverlayDelayedSliderCommit(commit.Func, settlement =>
+        {
+            sink.Callback(settlement);
+
+            // Try to make a newer generation current from another thread while A's settlement is
+            // still being delivered. With correct atomicity this Schedule blocks on the gate we
+            // hold; with the old bug it would take effect during the sleep below.
+            var started = new ManualResetEventSlim();
+            racer = Task.Run(() => { started.Set(); helper.Schedule(999); });
+            started.Wait();
+            Thread.Sleep(50);
+
+            Assert.False(helper.HasPendingDraft); // B is still blocked; A's cleared state holds
+        }, Delay, delay.Func);
+
+        helper.Schedule(55);
+        delay.Elapse();
+        await SpinUntilAsync(() => commit.Submitted.Count == 1, "A submitted");
+        commit.CompleteNext(new OverlaySliderCommitSettlement(true, 55, null));
+
+        await SpinUntilAsync(() => sink.Items.Count == 1, "A settled");
+        Assert.Equal(55, sink.Items[0].AuthoritativeValue);
+
+        if (racer is not null) await racer;
+        Assert.True(helper.TryGetPendingValue(out var pending));
+        Assert.Equal(999, pending); // B only became current after A's settlement fully delivered
+    }
+
+    [Fact]
     public void Production_delay_matches_the_QAM_policy()
     {
         Assert.Equal(TimeSpan.FromMilliseconds(2000), OverlayDelayedSliderCommit.ProductionDelay);
