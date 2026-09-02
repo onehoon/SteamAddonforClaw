@@ -797,14 +797,16 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
-    public void RuntimeComposition_GatesLegacyRoutingAndResumeBaselineOnAuthorityState()
+    public void RuntimeComposition_NeverComposesLegacyRouting_ButKeepsTheStockResumeBaselineGated()
     {
         var source = File.ReadAllText(Path.Combine(RepoRoot(), "src/SteamInputAddonforClaw/Runtime/AddonRuntimeComposition.cs"));
-        // The old Steam-session routing owner is only created when legacy routing is allowed...
-        Assert.Contains("legacyRoutingAllowed", source, StringComparison.Ordinal);
-        Assert.Contains("? AddonRoutingRuntime.Create(", source, StringComparison.Ordinal);
-        // ...and the legacy XInput restoration baseline becomes a no-op otherwise (resume hole, section 19).
-        Assert.Contains("!legacyRoutingAllowed || stockCenterMBaseline is null", source, StringComparison.Ordinal);
+        // Full1902 A2 section 10: no production branch creates the legacy Steam-session routing owner.
+        Assert.Contains("AddonRoutingRuntime? routingRuntime = null;", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddonRoutingRuntime.Create(", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartRoutingObservation(", source, StringComparison.Ordinal);
+        // Section 11: the stock PID1901 resume baseline is still gated on the Center M Enabled
+        // authority state -- independently, not via the removed legacy routing selection.
+        Assert.Contains("!stockCenterMAuthority || stockCenterMBaseline is null", source, StringComparison.Ordinal);
     }
 
     private static string RepoRoot()

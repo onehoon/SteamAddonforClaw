@@ -24,7 +24,7 @@ public sealed class MsiClawAddonPresentationTests
             runtime,
             deckSessionFactory: r => new CanonicalSteamDeckSession(r),
             xbox360PublisherFactory: (_, _, fault) => { xbox360.Fault = fault; return xbox360; },
-            deckPublisherFactory: (_, _, fault) => { deck.Fault = fault; return deck; });
+            deckPublisherFactory: (_, _, _, fault) => { deck.Fault = fault; return deck; });
     }
 
     // ---- 25.2 / 25.4 Xbox360 first attach ----
@@ -699,6 +699,80 @@ public sealed class MsiClawAddonPresentationTests
             < host.IndexOf("_presentationOwnership.DisposeAsync", StringComparison.Ordinal));
     }
 
+    // ================= Full1902 A2 section 15.4: synthetic Steam/QuickAccess system-button pulses =================
+
+    [Fact]
+    public async Task SteamDeck_live_steam_pulse_is_requested_and_reaches_the_shared_overlay()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsDeck(), default);
+        Assert.Equal(AddonPresentationKind.SteamDeck, h.Owner.ActivePresentation);
+        var overlay = Assert.Single(h.DeckOverlays);
+
+        Assert.True(((IMsiClawAddonPresentation)h.Owner).TryRequestSteamPulse());
+        Assert.Equal((byte)1, overlay.Apply(new SteamDeckDeviceState()).Steam);
+
+        Assert.True(((IMsiClawAddonPresentation)h.Owner).TryRequestQuickAccessPulse());
+        Assert.Equal((byte)1, overlay.Apply(new SteamDeckDeviceState()).QuickAccess);
+
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Xbox360_presentation_reports_both_pulse_methods_unavailable()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).TryRequestSteamPulse());
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).TryRequestQuickAccessPulse());
+
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Absent_presentation_reports_pulses_unavailable()
+    {
+        var owner = new MsiClawAddonPresentation(viiper: null);
+        Assert.False(((IMsiClawAddonPresentation)owner).TryRequestSteamPulse());
+        Assert.False(((IMsiClawAddonPresentation)owner).TryRequestQuickAccessPulse());
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Overlay_capture_pause_reports_steam_pulse_unavailable()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsDeck(), default);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await h.Owner.PauseForOverlayAsync(default)).Outcome);
+
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).TryRequestSteamPulse());
+
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SteamDeck_retirement_clears_a_pending_pulse_so_it_cannot_survive_into_a_new_publisher()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsDeck(), default);
+        var firstOverlay = Assert.Single(h.DeckOverlays);
+        Assert.True(((IMsiClawAddonPresentation)h.Owner).TryRequestSteamPulse());
+
+        // Switch away and back: the overlay instance is shared, but retirement clears it.
+        h.Snapshot = WantsXbox();
+        await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal((byte)0, firstOverlay.Apply(new SteamDeckDeviceState()).Steam);
+
+        h.Snapshot = WantsDeck();
+        await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+        // A fresh Deck publication starts with no leftover synthetic button asserted.
+        Assert.Equal((byte)0, h.DeckOverlays[^1].Apply(new SteamDeckDeviceState()).Steam);
+
+        await h.Owner.DisposeAsync();
+    }
+
     private sealed class SwitchHarness
     {
         public FakeNative Native { get; } = new();
@@ -706,6 +780,7 @@ public sealed class MsiClawAddonPresentationTests
         public SteamPresentationSnapshot Snapshot { get; set; } = new(0, false);
         public List<FakePublisher> Xbox360Publishers { get; } = [];
         public List<FakePublisher> DeckPublishers { get; } = [];
+        public List<SteamInputAddonforClaw.VirtualOutput.Viiper.SteamDeckSystemButtonOverlay> DeckOverlays { get; } = [];
         public MsiClawAddonPresentation Owner { get; }
 
         public Func<SteamPresentationSnapshot> Capture => () => Snapshot;
@@ -718,7 +793,7 @@ public sealed class MsiClawAddonPresentationTests
                 runtime,
                 deckSessionFactory: r => new CanonicalSteamDeckSession(r),
                 xbox360PublisherFactory: (_, _, fault) => { var p = new FakePublisher { Fault = fault }; Xbox360Publishers.Add(p); return p; },
-                deckPublisherFactory: (_, _, fault) => { var p = new FakePublisher { Fault = fault }; DeckPublishers.Add(p); return p; });
+                deckPublisherFactory: (_, _, overlay, fault) => { var p = new FakePublisher { Fault = fault }; DeckOverlays.Add(overlay); DeckPublishers.Add(p); return p; });
         }
     }
 

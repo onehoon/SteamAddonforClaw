@@ -98,6 +98,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // PR6: the process-lifetime Full-1902 virtual-presentation owner (one canonical VIIPER runtime +
     // exactly one attached typed device + its publisher). Retired before _physicalOwnership.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPresentation? _presentationOwnership;
+    // Full1902 A2: feature-local OEM1/WING front-button action owner (Disabled boot only). Holds pulse
+    // callbacks into _presentationOwnership, so it is disposed BEFORE the presentation owner.
+    private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawFrontButtonRuntime? _frontButtonRuntime;
     // PR7: the most recently requested runtime X360 <-> SteamDeck presentation reconcile. Serialized
     // inside the presentation owner's own gate; tracked only so controlled teardown can await it.
     private Task _presentationReconcile = Task.CompletedTask;
@@ -267,7 +270,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 startupComposition.StockCenterMBaseline,
                 startupResult.RecoverySafe,
                 startupResult.HardwareSupported,
-                startupResult.LegacyRoutingAllowed,
+                // Full1902 A2 section 11: Center M Enabled (stock authority) -- gates only the stock
+                // PID1901 resume baseline. `LegacyRoutingAllowed` is `true` iff roots are exactly
+                // Enabled/Automatic; the legacy routing owner it once selected is no longer composed.
+                stockCenterMAuthority: startupResult.LegacyRoutingAllowed,
                 winGSuppressionGuard: _winGSuppressionGuard,
                 // PR7: forward the raw BPM bool to QAM unchanged, then request a Full-1902 runtime
                 // presentation reconcile (BPM is half of the X360 <-> SteamDeck policy).
@@ -276,11 +282,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 // PR2.5: while Center M startup config is exactly Disabled, launch-at-startup is a
                 // mandatory-ON policy the Repair()/setter enforce -- not a user preference.
                 isLaunchAtWindowsStartupRequired: IsControllerRuntimeMandatory);
-
-        // Frontend transport and tray readiness are independent of OEM1 activation. Routing still
-        // awaits this task at its helper-acquisition boundary, so removing this process-wide await
-        // does not reintroduce a shared-helper Start race.
-        AppLog.Info("CenterM.Oem1", "OEM1 activation pending; Frontend transport will initialize independently.");
 
         _runtimeHost = composition.RuntimeHost;
         _cpuBoostRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
@@ -327,6 +328,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // downstream (DirectInput stop, PID1901 restore, HidHide clear, Center M roots, restart).
             async token =>
             {
+                // Full1902 A2 section 14: stop the feature-local front-button owner (WMI observation +
+                // pulse callbacks into the presentation) before the presentation it targets is retired.
+                if (_frontButtonRuntime is { } frontButtons)
+                {
+                    await frontButtons.DisposeAsync().ConfigureAwait(false);
+                    _frontButtonRuntime = null;
+                }
                 if (_presentationOwnership is { } presentation && !await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false))
                     return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", null);
                 return _physicalOwnership is { } owner
@@ -370,7 +378,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // external requests, so a user cannot request Enable-and-Restart mid-commit. Failure still
         // continues to frontend startup so the repair/Enable path stays available. Bounded by the
         // existing native/PnP/DirectInput operations; other Center M states add no delay.
-        await TryStartDisabledModeControllerAsync(startupComposition, startupResult).ConfigureAwait(false);
+        await TryStartDisabledModeControllerAsync(startupComposition, startupResult, composition.StartupSettings).ConfigureAwait(false);
 
         try
         {
@@ -411,7 +419,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// init canonical VIIPER -> require VIIPER Ready -> PR5 AcquireAsync -> require Owned + live input
     /// -> fresh Steam/BPM snapshot -> attach exactly one X360/SteamDeck presentation. Any failure
     /// keeps the mandatory Runtime/tray/frontend alive; PID1902 is never rolled back here.</summary>
-    private async Task TryStartDisabledModeControllerAsync(AddonStartupComposition startupComposition, StartupResult startupResult)
+    private async Task TryStartDisabledModeControllerAsync(AddonStartupComposition startupComposition, StartupResult startupResult, Settings.StartupSettingsCoordinator startupSettings)
     {
         if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)
             return;
@@ -471,6 +479,26 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var presentationResult = await presentation.AttachInitialAsync(source, snapshot, _startupCancellationTokenSource.Token).ConfigureAwait(false);
             AppLog.Info("ControllerPresentation", "First presentation attach completed.",
                 ("Succeeded", presentationResult.Succeeded), ("Presentation", presentationResult.Presentation?.ToString() ?? "None"), ("Reason", presentationResult.Reason));
+
+            // Full1902 A2 section 7: the feature-local OEM1/WING front-button action path is composed
+            // against the now-existing Full1902 presentation owner -- never AddonRoutingRuntime. Pulse
+            // requests self-gate on a live SteamDeck publication, so composing it even after a failed
+            // attach is safe (OEM1 Normal-domain hotkey/launch actions still work). A button-feature
+            // failure is feature-local: it never compromises PID1902 ownership or the presentation.
+            try
+            {
+                _frontButtonRuntime = Devices.MSI.Claw.MsiClawFrontButtonRuntime.Create(
+                    hardwareSupported: startupResult.HardwareSupported,
+                    oem1MappingPreference: startupSettings,
+                    wingMappingPreference: startupSettings,
+                    isSteamDeckPresentationActive: () => _presentationOwnership?.ActivePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck,
+                    tryRequestQuickAccessPulse: () => _presentationOwnership?.TryRequestQuickAccessPulse() ?? false,
+                    tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("CenterM.Oem1", "Front-button action path composition failed; controller ownership is unaffected.", exception);
+            }
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
         catch (Exception exception)
@@ -1095,6 +1123,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // the token; drain the last in-flight one before tearing down the presentation owner.
         try { await _presentationReconcile.ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Runtime presentation reconcile failed during shutdown.", exception); }
+        if (_frontButtonRuntime is not null)
+        {
+            // Full1902 A2 section 14: stop accepting front-button events and drop pulse callbacks into
+            // the presentation owner BEFORE that owner is disposed just below.
+            try { await _frontButtonRuntime.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception exception) { AppLog.Warn("CenterM.Oem1", "Front-button runtime teardown failed during shutdown.", exception); }
+            _frontButtonRuntime = null;
+        }
         if (_presentationOwnership is not null)
         {
             // PR6 section 18: retire the virtual presentation + tear down canonical VIIPER BEFORE the

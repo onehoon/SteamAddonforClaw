@@ -88,6 +88,30 @@ public sealed class AddonRuntimeHostTests
         await host.DisposeAsync();
     }
 
+    [Fact] // Full1902 A2 section 15.1: Center M Enabled composes the host with routingRuntime: null,
+           // so a Steam RunningAppID / BPM / Developer Test activation republishes the transition but
+           // drives zero legacy routing reconcile work -- no PID1902 takeover path exists.
+    public async Task Center_m_enabled_steam_activation_drives_no_legacy_routing_mutation()
+    {
+        using var steamRuntime = new SteamSessionRuntime();
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true));
+        var transitions = 0;
+        host.SteamSessionStateChanged += (_, _) => Interlocked.Increment(ref transitions);
+
+        steamRuntime.DeveloperTestModeState.SetEnabled(true);
+        await Task.Delay(TimeSpan.FromMilliseconds(50));
+
+        Assert.Equal(1, transitions);
+        Assert.Equal(RoutingRuntimeStatusSnapshot.Unavailable, host.CaptureRoutingStatus());
+        await host.ReconcileAsync();
+        Assert.Equal(RoutingRuntimeStatusSnapshot.Unavailable, host.CaptureRoutingStatus());
+
+        await host.DisposeAsync();
+        Assert.True(host.RoutingShutdownSucceeded);
+    }
+
     [Fact]
     public async Task Host_republishes_Steam_state_transitions_to_subscribers()
     {

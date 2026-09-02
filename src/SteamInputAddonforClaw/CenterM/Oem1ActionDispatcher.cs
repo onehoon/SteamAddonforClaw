@@ -1,18 +1,15 @@
 using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.CenterM;
 
 /// <summary>
 /// Resolves an <see cref="Oem1GesturePolicyRequest"/> to its configured <see cref="Oem1Action"/> and
-/// dispatches it. Normal OEM1 mapping and Steam routing are independent features: the mapping DOMAIN
-/// is selected first by capturing whether canonical Steam Deck routing is actually active right now
-/// -- never whether routing is merely enabled/available/eligible -- and only then is the slot's
-/// persisted binding resolved and executed. Routing status and the mapping are both captured fresh at
-/// every dispatch, never cached, and <see cref="RoutingRuntimeStatusSnapshot.Available"/> is never
-/// consulted here: an unavailable/disabled/idle routing runtime is simply "not currently routing",
-/// which selects the normal mapping exactly like every other non-active case.
+/// dispatches it. Normal OEM1 mapping and the SteamDeck presentation are independent features: the
+/// mapping DOMAIN is selected first by capturing whether the actual Full1902 SteamDeck presentation
+/// is active right now (Full1902 A2 section 5) -- never routing eligibility or a persisted setting --
+/// and only then is the slot's persisted binding resolved and executed. The domain fact and the
+/// mapping are both captured fresh at every dispatch, never cached.
 /// </summary>
 /// <remarks>
 /// This is the runtime half of the single capability definition in
@@ -24,22 +21,25 @@ namespace SteamInputAddonforClaw.CenterM;
 internal sealed class Oem1ActionDispatcher
 {
     private readonly Func<Oem1MappingSettings> _captureMapping;
-    private readonly Func<RoutingRuntimeStatusSnapshot> _captureRoutingStatus;
+    private readonly Func<bool> _captureRoutingDomainActive;
     private readonly Action _requestQuickAccessPulse;
     private readonly Action _launchBigPicture;
     private readonly Action<Oem1HotkeyBinding> _sendHotkey;
     private readonly Action<Oem1LaunchApplicationBinding> _launchApplication;
 
+    /// <param name="captureRoutingDomainActive">Full1902 A2 section 5: <see langword="true"/> when the
+    /// active Full1902 presentation is SteamDeck (Routing mapping domain), <see langword="false"/> for
+    /// Xbox360 / no presentation (Normal mapping domain). Captured fresh per dispatch.</param>
     internal Oem1ActionDispatcher(
         Func<Oem1MappingSettings> captureMapping,
-        Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
+        Func<bool> captureRoutingDomainActive,
         Action requestQuickAccessPulse,
         Action launchBigPicture,
         Action<Oem1HotkeyBinding>? sendHotkey = null,
         Action<Oem1LaunchApplicationBinding>? launchApplication = null)
     {
         _captureMapping = captureMapping ?? throw new ArgumentNullException(nameof(captureMapping));
-        _captureRoutingStatus = captureRoutingStatus ?? throw new ArgumentNullException(nameof(captureRoutingStatus));
+        _captureRoutingDomainActive = captureRoutingDomainActive ?? throw new ArgumentNullException(nameof(captureRoutingDomainActive));
         _requestQuickAccessPulse = requestQuickAccessPulse ?? throw new ArgumentNullException(nameof(requestQuickAccessPulse));
         _launchBigPicture = launchBigPicture ?? throw new ArgumentNullException(nameof(launchBigPicture));
         _sendHotkey = sendHotkey ?? Oem1KeyboardHotkeyExecutor.Send;
@@ -49,8 +49,8 @@ internal sealed class Oem1ActionDispatcher
     /// <summary>
     /// Dispatches the resolved action. Returns <see langword="false"/> when a bound,
     /// non-<see cref="Oem1Action.None"/> action was actually invoked and its execution threw, OR when
-    /// the routing-status/mapping capture itself threw before an action could even be resolved --
-    /// routing being unavailable/inactive is never a failure, it is the normal-mapping case, and
+    /// the domain/mapping capture itself threw before an action could even be resolved --
+    /// the SteamDeck presentation being inactive is never a failure, it is the normal-mapping case, and
     /// neither is a binding that capability validation refuses (nothing was executed, so custom
     /// authority need not be revoked). The caller (production composition) treats a false return as an
     /// OEM1 replacement-backend failure: custom gesture authority must be revoked and native Center M
@@ -72,12 +72,9 @@ internal sealed class Oem1ActionDispatcher
         {
             var mapping = _captureMapping();
 
-            // Belt-and-braces with the composition, which already revokes gesture-bridge authority
-            // The product policy keeps OEM1 remapping always enabled; persisted OFF values are not
-            // an alternate runtime policy because the application is unreleased.
-            // The ONLY question that matters for domain selection: is canonical Steam Deck routing
-            // actually active right now? Never Available, never routing-enabled, never eligibility.
-            var routingActuallyActive = _captureRoutingStatus().SteamOutputActive;
+            // The ONLY question that matters for domain selection: is the actual Full1902 SteamDeck
+            // presentation active right now? Never routing eligibility, never a persisted setting.
+            var routingActuallyActive = _captureRoutingDomainActive();
 
             slot = Oem1MappingSlots.Resolve(routingActuallyActive, request.Gesture);
             var binding = mapping.Resolve(slot);

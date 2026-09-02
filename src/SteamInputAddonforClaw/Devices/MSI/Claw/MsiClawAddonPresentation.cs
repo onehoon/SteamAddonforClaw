@@ -93,6 +93,22 @@ internal interface IAddonPresentationPublisher
 
 internal interface IMsiClawAddonPresentation : IAsyncDisposable
 {
+    /// <summary>The currently attached typed device kind, or <see langword="null"/> when no
+    /// presentation is attached. The feature-local front-button action path selects the OEM1
+    /// Normal/Routing mapping domain from this actual Full1902 presentation rather than legacy
+    /// routing status.</summary>
+    AddonPresentationKind? ActivePresentation { get; }
+
+    /// <summary>Full1902 A2: request a synthetic SteamDeck <c>Steam</c> system-button pulse on the
+    /// existing publish path. Returns <see langword="false"/> (no-op) unless the current presentation
+    /// is a healthy live SteamDeck publication. No attach/detach, no VIIPER recreation, no PID
+    /// mutation, no retry loop.</summary>
+    bool TryRequestSteamPulse();
+
+    /// <summary>Full1902 A2: request a synthetic SteamDeck <c>QuickAccess</c> system-button pulse on
+    /// the existing publish path. Same eligibility contract as <see cref="TryRequestSteamPulse"/>.</summary>
+    bool TryRequestQuickAccessPulse();
+
     /// <summary>Selects one presentation from a fresh raw Steam/BPM snapshot, attaches exactly that
     /// typed device, sends neutral, and starts exactly one matching publisher on the supplied PR5
     /// input source. No fallback to the other presentation on failure.</summary>
@@ -141,7 +157,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly CanonicalViiperRuntime? _viiper;
     private readonly Func<CanonicalViiperRuntime, ICanonicalSteamDeckSession> _deckSessionFactory;
     private readonly Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher> _xbox360PublisherFactory;
-    private readonly Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, Action<Exception>, IAddonPresentationPublisher> _deckPublisherFactory;
+    private readonly Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher> _deckPublisherFactory;
+
+    /// <summary>Full1902 A2: the one output-only synthetic Steam/QuickAccess system-button primitive,
+    /// shared with the live SteamDeck publisher via <see cref="_deckPublisherFactory"/> so a front
+    /// button emits a pulse on the existing continuous publish path -- never a second publication
+    /// path or a second VIIPER device. Cleared on every SteamDeck retirement.</summary>
+    private readonly SteamDeckSystemButtonOverlay _systemButtonOverlay = new();
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _faultLock = new();
@@ -156,14 +178,14 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         CanonicalViiperRuntime? viiper,
         Func<CanonicalViiperRuntime, ICanonicalSteamDeckSession>? deckSessionFactory = null,
         Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher>? xbox360PublisherFactory = null,
-        Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, Action<Exception>, IAddonPresentationPublisher>? deckPublisherFactory = null)
+        Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? deckPublisherFactory = null)
     {
         _viiper = viiper;
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
         _xbox360PublisherFactory = xbox360PublisherFactory
             ?? ((source, setState, fault) => new PublisherAdapter(new CanonicalXbox360InputPublisher(source, setState, fault: fault)));
         _deckPublisherFactory = deckPublisherFactory
-            ?? ((source, sink, fault) => new PublisherAdapter(new CanonicalSteamDeckInputPublisher(source, sink, fault: fault)));
+            ?? ((source, sink, overlay, fault) => new PublisherAdapter(new CanonicalSteamDeckInputPublisher(source, sink, fault: fault, systemButtonOverlay: overlay)));
     }
 
     /// <summary>The canonical VIIPER runtime state, or <see langword="null"/> if VIIPER could not be
@@ -171,9 +193,35 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// <see cref="CanonicalViiperRuntimeState.Ready"/>.</summary>
     internal CanonicalViiperRuntimeState? ViiperState => _viiper?.State;
 
-    internal AddonPresentationKind? ActivePresentation => _activeKind;
+    /// <summary>Lock-free read (matches the existing internal accessor): a torn read during a switch
+    /// at worst makes one queued gesture pick the other mapping domain, which the next press corrects.</summary>
+    public AddonPresentationKind? ActivePresentation => _activeKind;
 
     internal bool IsOverlayPaused => _overlayPaused;
+
+    public bool TryRequestSteamPulse() => TryRequestSystemButtonPulse(_systemButtonOverlay.RequestSteamPulse);
+
+    public bool TryRequestQuickAccessPulse() => TryRequestSystemButtonPulse(_systemButtonOverlay.RequestQuickAccessPulse);
+
+    /// <summary>Full1902 A2 section 4.2: eligibility-gated, non-blocking synthetic system-button
+    /// pulse. Acquire the owner gate without waiting (a press during an attach/switch/retire is
+    /// simply dropped, no queue), then merge the pulse into the shared overlay only on a healthy
+    /// live SteamDeck publication.</summary>
+    private bool TryRequestSystemButtonPulse(Action requestPulse)
+    {
+        if (!_gate.Wait(0)) return false;
+        try
+        {
+            if (_disposed) return false;
+            if (_overlayPaused) return false;
+            if (_activeKind != AddonPresentationKind.SteamDeck) return false;
+            if (_publisher is not { IsRunning: true }) return false;
+            if (_deckSession is not { State: CanonicalSteamDeckSessionState.Active }) return false;
+            requestPulse();
+            return true;
+        }
+        finally { _gate.Release(); }
+    }
 
     public async Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, SteamPresentationSnapshot snapshot, CancellationToken cancellationToken)
     {
@@ -313,7 +361,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             return Fail(AddonPresentationKind.SteamDeck, "SteamDeckNeutral", "SteamDeckNeutralRejected:Detached=" + detached);
         }
 
-        var publisher = _deckPublisherFactory(source, session, OnPublisherFault);
+        var publisher = _deckPublisherFactory(source, session, _systemButtonOverlay, OnPublisherFault);
         try
         {
             publisher.Start();
@@ -487,6 +535,11 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             }
             _publisher = null;
         }
+
+        // Full1902 A2 section 4.3: clear any pending/active synthetic system-button pulse while the
+        // publisher is retired so an old front-button pulse can never survive into a later new Deck
+        // publisher (the overlay instance is shared across every SteamDeck publication).
+        _systemButtonOverlay.Clear();
 
         // 2. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
         if (_activeKind == AddonPresentationKind.Xbox360)

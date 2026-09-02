@@ -13,10 +13,11 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AddonProcessHostStartupTests
 {
-    [Fact]
-    public async Task InitializeRuntimeAsync_reaches_frontend_ready_while_OEM1_activation_is_pending()
+    [Fact] // Full1902 A2: OEM1/WING activation no longer gates runtime startup (the front-button owner
+           // is composed only on a Disabled boot, after presentation attach) -- a non-Disabled startup
+           // just reaches frontend-ready without any OEM1 ordering barrier.
+    public async Task InitializeRuntimeAsync_reaches_frontend_ready_without_an_oem1_activation_barrier()
     {
-        var oem1Activation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runtimeHost = new AddonRuntimeHost(
             new SteamSessionRuntime(),
             routingRuntime: null,
@@ -26,7 +27,7 @@ public sealed class AddonProcessHostStartupTests
             hasIncompleteRecovery: () => false,
             establishBaseline: _ => Task.FromResult(true));
         var runtimeComposition = new AddonRuntimeComposition(
-            runtimeHost, null!, "test", null!, oem1Activation.Task);
+            runtimeHost, null!, "test", null!);
         var testDataRoot = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw-HostTests", Guid.NewGuid().ToString("N"));
         var host = new AddonProcessHost(null, (_, _) => runtimeComposition, testDataRoot,
             () => $"SteamInputAddonforClaw.Frontend.Test.{Guid.NewGuid():N}");
@@ -37,9 +38,7 @@ public sealed class AddonProcessHostStartupTests
         var initialization = host.InitializeRuntimeAsync();
 
         await initialization.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.False(oem1Activation.Task.IsCompleted);
 
-        oem1Activation.SetResult();
         await host.DisposeAsync();
     }
 }

@@ -382,7 +382,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             // moment ago must take effect on the very next press with no re-wiring, and neither the
             // dispatcher nor this composition may hold a stale copy of it.
             captureMapping: () => mappingPreference.Oem1Mapping,
-            captureRoutingStatus: captureRoutingStatus,
+            captureRoutingDomainActive: () => captureRoutingStatus().SteamOutputActive,
             requestQuickAccessPulse: requestQuickAccessPulse,
             launchBigPicture: _testOnlyOem1LaunchBigPicture ?? Oem1BigPictureLauncher.Launch);
 
