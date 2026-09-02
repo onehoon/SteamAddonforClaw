@@ -5,16 +5,17 @@ using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Install;
 
-internal enum ElevatedStartupTaskOutcome { Created, Cancelled, Failed }
+internal enum ElevatedStartupTaskOutcome { Created, Removed, Cancelled, Failed }
 
-/// <summary>Runs one bounded, privileged "create the Addon-owned startup task" operation. It reuses
-/// the same <c>Verb="runas"</c> self-elevation pattern as the prerequisite setup helper: a short
-/// child <c>SteamInputAddonforClaw.exe --ensure-startup-task &lt;user&gt;</c> that creates exactly
-/// this one task and exits. There is no long-lived elevated process, service, or generic task API
-/// (PR10 addendum sections 16/17/19).</summary>
+/// <summary>Runs one bounded, privileged operation on the Addon-owned startup task. It reuses the
+/// same <c>Verb="runas"</c> self-elevation pattern as the prerequisite setup helper: a short child
+/// <c>SteamInputAddonforClaw.exe --ensure-startup-task &lt;user&gt;</c> (create) or
+/// <c>--remove-startup-task &lt;user&gt;</c> (PR12 section 11) that acts on exactly this one fixed
+/// task and exits. There is no long-lived elevated process, service, or generic task API.</summary>
 internal interface IElevatedStartupTaskInvoker
 {
     ElevatedStartupTaskOutcome EnsureOwnedTask();
+    ElevatedStartupTaskOutcome RemoveOwnedTask();
 }
 
 internal sealed class SelfElevatedStartupTaskInvoker : IElevatedStartupTaskInvoker
@@ -34,7 +35,13 @@ internal sealed class SelfElevatedStartupTaskInvoker : IElevatedStartupTaskInvok
             ?? (() => System.Security.Principal.WindowsIdentity.GetCurrent().Name);
     }
 
-    public ElevatedStartupTaskOutcome EnsureOwnedTask()
+    public ElevatedStartupTaskOutcome EnsureOwnedTask() =>
+        Invoke(ElevatedStartupTaskSetup.Argument, ElevatedStartupTaskOutcome.Created, "creation");
+
+    public ElevatedStartupTaskOutcome RemoveOwnedTask() =>
+        Invoke(ElevatedStartupTaskSetup.RemoveArgument, ElevatedStartupTaskOutcome.Removed, "removal");
+
+    private ElevatedStartupTaskOutcome Invoke(string argument, ElevatedStartupTaskOutcome success, string what)
     {
         var executablePath = _executablePathProvider();
         if (!File.Exists(executablePath))
@@ -50,7 +57,7 @@ internal sealed class SelfElevatedStartupTaskInvoker : IElevatedStartupTaskInvok
         Process? process;
         try
         {
-            process = Process.Start(new ProcessStartInfo(executablePath, $"{ElevatedStartupTaskSetup.Argument} {userArgument}")
+            process = Process.Start(new ProcessStartInfo(executablePath, $"{argument} {userArgument}")
             {
                 UseShellExecute = true,
                 Verb = "runas",
@@ -59,7 +66,7 @@ internal sealed class SelfElevatedStartupTaskInvoker : IElevatedStartupTaskInvok
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
         {
-            AppLog.Info("TaskScheduler", "Elevated startup-task creation was cancelled at the UAC prompt.");
+            AppLog.Info("TaskScheduler", $"Elevated startup-task {what} was cancelled at the UAC prompt.");
             return ElevatedStartupTaskOutcome.Cancelled;
         }
         catch (Exception exception)
@@ -77,41 +84,46 @@ internal sealed class SelfElevatedStartupTaskInvoker : IElevatedStartupTaskInvok
                 AppLog.Warn("TaskScheduler", "Elevated startup-task helper did not exit in time.");
                 return ElevatedStartupTaskOutcome.Failed;
             }
-            return process.ExitCode == 0 ? ElevatedStartupTaskOutcome.Created : ElevatedStartupTaskOutcome.Failed;
+            return process.ExitCode == 0 ? success : ElevatedStartupTaskOutcome.Failed;
         }
     }
 }
 
-/// <summary>The <c>--ensure-startup-task</c> elevated entrypoint (invoked from <see cref="Program"/>).
-/// It creates ONLY the fixed Addon-owned task and exits: 0 = created/compliant, 1 = failed.</summary>
+/// <summary>The <c>--ensure-startup-task</c> / <c>--remove-startup-task</c> elevated entrypoints
+/// (invoked from <see cref="Program"/>). Each acts on ONLY the fixed Addon-owned task and exits:
+/// 0 = done, 1 = failed.</summary>
 internal static class ElevatedStartupTaskSetup
 {
     internal const string Argument = "--ensure-startup-task";
+    internal const string RemoveArgument = "--remove-startup-task";
 
-    public static int Run(string[] args)
+    public static int Run(string[] args) => Run(args, Argument, enabled: true, "ensure");
+
+    public static int RunRemove(string[] args) => Run(args, RemoveArgument, enabled: false, "removal");
+
+    private static int Run(string[] args, string argument, bool enabled, string what)
     {
         try
         {
             string? currentUser = null;
-            var index = Array.FindIndex(args, a => a.Equals(Argument, StringComparison.OrdinalIgnoreCase));
+            var index = Array.FindIndex(args, a => a.Equals(argument, StringComparison.OrdinalIgnoreCase));
             if (index >= 0 && index + 1 < args.Length)
             {
                 try { currentUser = Encoding.UTF8.GetString(Convert.FromBase64String(args[index + 1])); }
                 catch (FormatException) { currentUser = null; }
             }
 
-            // No elevated fallback here: this process IS elevated, so RegisterTaskDefinition succeeds
-            // directly. A null currentUser falls back to this (elevated) identity.
+            // No elevated fallback here: this process IS elevated, so the write succeeds directly.
             var manager = string.IsNullOrWhiteSpace(currentUser)
                 ? new WindowsTaskSchedulerStartupManager()
                 : new WindowsTaskSchedulerStartupManager(currentUserIdentityProvider: () => currentUser);
-            var result = manager.Synchronize(true);
-            AppLog.Info("TaskScheduler", "Elevated startup-task ensure completed.", ("Success", result.Success), ("Message", result.Message));
+            var result = manager.Synchronize(enabled);
+            AppLog.Info("TaskScheduler", $"Elevated startup-task {what} completed.", ("Success", result.Success), ("Message", result.Message));
             return result.Success ? 0 : 1;
         }
         catch (Exception exception)
         {
-            AppLog.Error("TaskScheduler", "Elevated startup-task ensure threw.", exception);
+            AppLog.Error("TaskScheduler", $"Elevated startup-task {what} threw.", exception);
             return 1;
         }
     }

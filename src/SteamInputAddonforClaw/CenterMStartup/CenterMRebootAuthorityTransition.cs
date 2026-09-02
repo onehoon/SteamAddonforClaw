@@ -2,13 +2,33 @@ using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.Startup;
 
 namespace SteamInputAddonforClaw.CenterMStartup;
 
 internal enum WindowsRestartRequestResult { Requested, Failed }
+
+/// <summary>Result of the PR12 Runtime-owned uninstall-preparation operation. It reports only whether
+/// the machine was left verified stock-safe (MSI authority restored + the mandatory Addon startup
+/// task removed); the actual Velopack/Windows uninstall interception is PR13.</summary>
+internal sealed record StockUninstallPrepareResult(bool Succeeded, string Reason)
+{
+    internal static StockUninstallPrepareResult Ok() => new(true, "UninstallPrepared");
+    internal static StockUninstallPrepareResult Fail(string reason) => new(false, reason);
+}
+
+/// <summary>Internal result of the one shared stock-restoration core reused by <c>Enable Center M
+/// and Restart</c> and PR12 uninstall preparation.</summary>
+internal sealed record StockRestorationResult(bool Succeeded, string Reason, FrontendCenterMStartupSnapshot? FinalSnapshot, FrontendCenterMStartupMutationResult? IncompleteMutation)
+{
+    internal static StockRestorationResult Ok(FrontendCenterMStartupSnapshot snapshot) => new(true, "StockAuthorityRestored", snapshot, null);
+    internal static StockRestorationResult Fail(string reason) => new(false, reason, null, null);
+    internal static StockRestorationResult Incomplete(FrontendCenterMStartupMutationResult mutation) => new(false, "CenterMEnableIncomplete", null, mutation);
+}
 
 /// <summary>The one Runtime-owned Windows-restart seam for the reboot-bound authority transition
 /// (work order PR3 section 10). Production issues a normal local interactive-user restart
@@ -60,6 +80,11 @@ internal interface ICenterMRebootAuthorityTransition
     /// <param name="centerMEnabled"><see langword="true"/> = Enable and Restart (restore MSI/stock
     /// authority); <see langword="false"/> = Disable and Restart (switch authority to the Addon).</param>
     Task<FrontendCenterMStartupMutationResult> RequestAsync(bool centerMEnabled, CancellationToken cancellationToken);
+
+    /// <summary>PR12: the Runtime-owned stock-restoration + startup-task removal that must complete
+    /// before the Addon may be removed from the machine. Shares the <c>Enable Center M</c> stock
+    /// restoration core but issues NO Windows restart. Fails closed on any ambiguous/unsafe state.</summary>
+    Task<StockUninstallPrepareResult> PrepareForUninstallAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -84,6 +109,15 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly Func<bool> _conflictingControllerEnvironment;
     private readonly Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> _captureAdmission;
     private readonly Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> _releasePhysicalOwnership;
+    // PR12 section 6: independent current-world proof that the physical MSI Claw is PID1901/XInput --
+    // NothingOwned from the process owner is NOT sufficient stock proof.
+    private readonly Func<CancellationToken, Task<StockCenterMStartupBaselineResult>> _establishStockBaseline;
+    // PR12 section 8: the one exact Addon-owned PID1902 primary collection when no live owner returns
+    // it -- read-only, never a broad VID/PID guess.
+    private readonly Func<string?> _captureExistingOwnedHiddenTarget;
+    // PR12 section 11: remove the mandatory Addon startup task -- LAST, only after stock authority is
+    // proven. Routed through the existing startup-registration owner.
+    private readonly Func<StartupRegistrationResult> _removeStartupRegistration;
     private readonly IWindowsRestartRequester _restartRequester;
     private int _inProgress;
 
@@ -98,6 +132,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         // MSI Claw to PID1901 BEFORE HidHide is cleared. Returns the exact PR5-persisted target so the
         // clear step operates on it rather than []. Null-owner boots return NothingOwned.
         Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> releasePhysicalOwnership,
+        Func<CancellationToken, Task<StockCenterMStartupBaselineResult>> establishStockBaseline,
+        Func<string?> captureExistingOwnedHiddenTarget,
+        Func<StartupRegistrationResult> removeStartupRegistration,
         IWindowsRestartRequester restartRequester)
     {
         _centerMStartup = centerMStartup;
@@ -107,6 +144,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _conflictingControllerEnvironment = conflictingControllerEnvironment;
         _captureAdmission = captureAdmission;
         _releasePhysicalOwnership = releasePhysicalOwnership;
+        _establishStockBaseline = establishStockBaseline;
+        _captureExistingOwnedHiddenTarget = captureExistingOwnedHiddenTarget;
+        _removeStartupRegistration = removeStartupRegistration;
         _restartRequester = restartRequester;
     }
 
@@ -212,34 +252,118 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         if (!_lowerLevelRuntimeSafety().CanTerminate)
             return Fail(snapshot, "Controller authority cannot change while a routing, native-mode, or recovery operation is in progress. Try again once it finishes.");
 
-        // Caller/frontend cancellation is honored only BEFORE the first mutation. The physical
-        // release stops the live DirectInput session and can issue PID1902 -> PID1901, so from here
-        // the Runtime owns completion even if the frontend pipe disconnects (same one-way mutation
-        // boundary the Disable path already uses -- CancellationToken.None for the ordered sequence).
+        // Caller/frontend cancellation is honored only BEFORE the first mutation. From here the
+        // Runtime owns completion even if the frontend pipe disconnects (CancellationToken.None
+        // across the ordered mutation section -- same boundary the Disable path uses).
         cancellationToken.ThrowIfCancellationRequested();
 
-        // PR5 section 16: retire the process-owned DirectInput session and restore the same physical
-        // MSI Claw to PID1901 before clearing HidHide. A null-owner boot returns NothingOwned.
-        var release = await _releasePhysicalOwnership(CancellationToken.None).ConfigureAwait(false);
-        AppLog.Info("CenterM.Authority", "Physical ownership release for enable.", ("Succeeded", release.Succeeded), ("Reason", release.Reason), ("HiddenTarget", release.HiddenTarget ?? "None"));
-        if (!release.Succeeded)
-            return Fail(snapshot, $"The Addon controller ownership could not be released, so MSI Center M was not enabled: {release.Reason}.");
-
-        // Clear exactly the PR5-persisted target (or [] on a boot with no owned target).
-        string[] clearTargets = release.HiddenTarget is null ? [] : [release.HiddenTarget];
-        var clear = _hidHideBaseline.ApplyEnabledModeBaseline(clearTargets);
-        AppLog.Info("CenterM.Authority", "HidHide baseline clear.", ("Outcome", clear.Outcome), ("Reason", clear.Reason));
-        if (!clear.IsCompliant)
-            return Fail(snapshot, $"The Addon HidHide controller baseline could not be cleared, so MSI Center M was not enabled: {clear.Reason}. Existing HidHide state was left untouched.");
-
-        var mutation = await _centerMStartup.SetEnabledAsync(true, CancellationToken.None).ConfigureAwait(false);
-        AppLog.Info("CenterM.Authority", "Center M startup mutation.", ("Outcome", mutation.Outcome), ("State", mutation.Snapshot.State));
-        if (!mutation.Succeeded)
-            return IncompleteMutation(mutation, centerMEnabled: true);
+        var restore = await RestoreStockAuthorityCoreAsync("CenterMEnable").ConfigureAwait(false);
+        if (restore.IncompleteMutation is { } incomplete)
+            return IncompleteMutation(incomplete, centerMEnabled: true);
+        if (!restore.Succeeded)
+            return Fail(snapshot, $"MSI Center M was not enabled: {restore.Reason}.");
 
         // The mandatory-Runtime policy (PR2.5) stops applying automatically now that the roots read
         // back exactly Enabled -- no separate "release" state.
-        return RequestRestart(mutation.Snapshot);
+        return RequestRestart(restore.FinalSnapshot!);
+    }
+
+    /// <summary>PR12 sections 4-10: the one shared ordered stock-restoration core. Retire the virtual
+    /// presentation, release active physical ownership, INDEPENDENTLY prove current PID1901/XInput,
+    /// release the Addon HidHide controller baseline for the exact owned target, and enable + verify
+    /// Center M startup roots. It issues NO Windows restart and removes NO startup registration --
+    /// each caller finishes its own way. Every step is fail-closed and ordered.</summary>
+    private async Task<StockRestorationResult> RestoreStockAuthorityCoreAsync(string reason)
+    {
+        // 5-6. Retire the virtual presentation + release active PR5 physical ownership.
+        var release = await _releasePhysicalOwnership(CancellationToken.None).ConfigureAwait(false);
+        AppLog.Info("CenterM.Authority", "Stock restoration physical release.",
+            ("Event", "UninstallPhysicalRelease"), ("Reason", reason), ("Succeeded", release.Succeeded),
+            ("ReleaseReason", release.Reason), ("HiddenTarget", release.HiddenTarget ?? "None"));
+        if (!release.Succeeded)
+            return StockRestorationResult.Fail("PhysicalRelease:" + release.Reason);
+
+        // 7 / section 6: independent current-world proof of PID1901 -- NEVER assume PID1901 just
+        // because no process-lifetime owner object exists.
+        var stock = await _establishStockBaseline(CancellationToken.None).ConfigureAwait(false);
+        AppLog.Info("CenterM.Authority", "Stock restoration baseline.",
+            ("Event", "UninstallStockBaseline"), ("Reason", reason), ("Succeeded", stock.Succeeded),
+            ("ModeWriteIssued", stock.ModeWriteIssued), ("BaselineReason", stock.Reason));
+        if (!stock.Succeeded)
+            return StockRestorationResult.Fail("StockBaseline:" + stock.Reason);
+
+        // 8. Exact Addon-owned HidHide target: prefer the live owner's, else the one safely provable
+        //    persisted primary PID1902 collection. Never a broad VID/PID match.
+        var target = release.HiddenTarget ?? _captureExistingOwnedHiddenTarget();
+        var clear = _hidHideBaseline.ApplyEnabledModeBaseline(target is null ? [] : [target]);
+        AppLog.Info("CenterM.Authority", "Stock restoration HidHide release.",
+            ("Event", "UninstallHidHideRelease"), ("Reason", reason), ("Outcome", clear.Outcome),
+            ("ClearReason", clear.Reason), ("HiddenTarget", target ?? "None"));
+        if (!clear.IsCompliant)
+            return StockRestorationResult.Fail("HidHideRelease:" + clear.Reason);
+
+        // 9-10. Center M startup roots -> exactly Enabled / Enabled / Automatic, verified by read-back.
+        var mutation = await _centerMStartup.SetEnabledAsync(true, CancellationToken.None).ConfigureAwait(false);
+        AppLog.Info("CenterM.Authority", "Stock restoration Center M enable.",
+            ("Event", "UninstallCenterMEnable"), ("Reason", reason), ("Outcome", mutation.Outcome), ("FinalState", mutation.Snapshot.State));
+        if (!mutation.Succeeded)
+            return StockRestorationResult.Incomplete(mutation);
+        if (mutation.Snapshot.State != FrontendCenterMStartupState.Enabled)
+            return StockRestorationResult.Fail("CenterMNotEnabled:" + mutation.Snapshot.State);
+
+        return StockRestorationResult.Ok(mutation.Snapshot);
+    }
+
+    public async Task<StockUninstallPrepareResult> PrepareForUninstallAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref _inProgress, 1) != 0)
+            return StockUninstallPrepareResult.Fail("AnotherAuthorityTransitionInProgress");
+        try
+        {
+            var snapshot = _centerMStartup.Capture();
+            AppLog.Info("Uninstall", "Stock uninstall preparation started.",
+                ("Event", "UninstallStockPrepareStarted"), ("CenterMState", snapshot.State));
+
+            // Section 14: ambiguous root truth must never be silently resolved to MSI/stock.
+            if (snapshot.State is FrontendCenterMStartupState.Partial or FrontendCenterMStartupState.Unavailable)
+                return Report(StockUninstallPrepareResult.Fail("CenterMAuthorityAmbiguous:" + snapshot.State));
+
+            // Read-only preflight (honors the caller token).
+            if (!_lowerLevelRuntimeSafety().CanTerminate)
+                return Report(StockUninstallPrepareResult.Fail("LowerLevelRuntimeOperationInProgress"));
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Sections 12-13: the same shared core proves stock authority for both an already-Enabled
+            // and a Full1902-Disabled machine (idempotent + cheap when already stock). NO restart.
+            var restore = await RestoreStockAuthorityCoreAsync("Uninstall").ConfigureAwait(false);
+            if (!restore.Succeeded)
+                return Report(StockUninstallPrepareResult.Fail(restore.Reason));
+
+            // Section 11: the mandatory Addon startup task is removed ONLY now, after stock authority
+            // is proven and verified.
+            var removal = _removeStartupRegistration();
+            AppLog.Info("Uninstall", "Stock uninstall startup task removal.",
+                ("Event", "UninstallStartupTaskRemoval"), ("Outcome", removal.Success ? "Removed" : "Failed"), ("Message", removal.Message));
+            if (!removal.Success)
+                return Report(StockUninstallPrepareResult.Fail("StartupTaskRemoval:" + removal.Message));
+
+            return Report(StockUninstallPrepareResult.Ok());
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return Report(StockUninstallPrepareResult.Fail("CancelledBeforeMutation"));
+        }
+        finally
+        {
+            Volatile.Write(ref _inProgress, 0);
+        }
+
+        static StockUninstallPrepareResult Report(StockUninstallPrepareResult result)
+        {
+            AppLog.Info("Uninstall", "Stock uninstall preparation completed.",
+                ("Event", "UninstallStockPrepareCompleted"), ("Outcome", result.Succeeded ? "Success" : "Failed"), ("Reason", result.Reason));
+            return result;
+        }
     }
 
     private FrontendCenterMStartupMutationResult RequestRestart(FrontendCenterMStartupSnapshot snapshot)

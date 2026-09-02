@@ -76,6 +76,20 @@ internal sealed class RuntimeProcessApplication
     private void RequestExitForUninstall()
     {
         AppLog.Info("Lifecycle", "Uninstall shutdown request accepted.");
+        // PR12 section 17: leave the MSI Claw verified stock-safe (MSI authority restored + mandatory
+        // Addon startup task removed) BEFORE the Runtime exits. This is the bounded uninstall path, so
+        // running it synchronously on this ThreadPool callback is acceptable. The final Velopack /
+        // Windows uninstall interception that gates file removal on this result is PR13.
+        try
+        {
+            var prepare = _processHost?.PrepareForUninstallAsync().GetAwaiter().GetResult();
+            AppLog.Info("Lifecycle", "Uninstall stock preparation result.",
+                ("Succeeded", prepare?.Succeeded ?? false), ("Reason", prepare?.Reason ?? "HostUnavailable"));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Lifecycle", "Uninstall stock preparation threw; continuing shutdown.", exception);
+        }
         BeginShutdownAndRequestLoopExit();
     }
 

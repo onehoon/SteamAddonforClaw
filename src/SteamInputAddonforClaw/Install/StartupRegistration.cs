@@ -96,10 +96,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         RemoveLegacyRunValue();
 
         if (!enabled)
-        {
-            try { _taskStore.Delete(); AppLog.Info("TaskScheduler", "Startup task deleted."); return StartupRegistrationResult.Disabled(); }
-            catch (Exception exception) { AppLog.Error("TaskScheduler", "Startup task deletion failed.", exception); return StartupRegistrationResult.Failed(); }
-        }
+            return RemoveOwnedTask();
 
         if (!File.Exists(stableExecutablePath))
         {
@@ -154,15 +151,49 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         return verified ? StartupRegistrationResult.Enabled() : StartupRegistrationResult.Failed();
     }
 
-    /// <summary>PR11 section 12: read-only, bounded. Re-reads on a short interval until the exact task
-    /// contract verifies or the window expires. No repeated writes / elevation / unbounded retry.</summary>
-    private bool ReadBackVerifyWithBoundedSettle(ScheduledTaskConfiguration configuration)
+    /// <summary>PR12 section 11: remove the ONE Addon-owned task. Read-only first (already absent ->
+    /// Success, no UAC). A denied delete uses the same bounded elevated child pattern as create, then
+    /// an independent normal-process read-back must prove the task is gone.</summary>
+    private StartupRegistrationResult RemoveOwnedTask()
+    {
+        if (SafeRead() is null)
+        {
+            AppLog.Info("TaskScheduler", "Startup task removal skipped; task is already absent.", ("TaskFound", false));
+            return StartupRegistrationResult.Disabled();
+        }
+
+        if (_elevatedInvoker is not null)
+        {
+            AppLog.Info("TaskScheduler", "Startup task elevated removal requested.", ("ElevatedRepairRequested", true));
+            var outcome = _elevatedInvoker.RemoveOwnedTask();
+            AppLog.Info("TaskScheduler", "Startup task elevated removal completed.", ("ElevatedRepairResult", outcome));
+            if (outcome != ElevatedStartupTaskOutcome.Removed)
+                return StartupRegistrationResult.Failed();
+            var gone = ReadBackVerifyWithBoundedSettle(absent: true, configuration: null);
+            AppLog.Info("TaskScheduler", "Startup task removal readback verification completed.", ("ReadbackVerified", gone));
+            return gone ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
+        }
+
+        try { _taskStore.Delete(); }
+        catch (Exception exception) { AppLog.Error("TaskScheduler", "Startup task deletion failed.", exception); return StartupRegistrationResult.Failed(); }
+        var absent = SafeRead() is null;
+        AppLog.Info("TaskScheduler", "Startup task deleted.", ("ReadbackVerified", absent));
+        return absent ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
+    }
+
+    /// <summary>PR11 section 12 / PR12 section 11: read-only, bounded. Re-reads on a short interval
+    /// until the exact task contract verifies (or, for <paramref name="absent"/>, the task is gone)
+    /// or the window expires. No repeated writes / elevation / unbounded retry.</summary>
+    private bool ReadBackVerifyWithBoundedSettle(ScheduledTaskConfiguration configuration) =>
+        ReadBackVerifyWithBoundedSettle(absent: false, configuration);
+
+    private bool ReadBackVerifyWithBoundedSettle(bool absent, ScheduledTaskConfiguration? configuration)
     {
         var attempts = Math.Max(1, (int)Math.Ceiling(_readbackSettleWindow / _readbackSettleInterval));
         for (var attempt = 1; ; attempt++)
         {
             var reread = SafeRead();
-            if (reread is not null && IsCompliant(reread, configuration))
+            if (absent ? reread is null : reread is not null && IsCompliant(reread, configuration!))
                 return true;
             if (attempt >= attempts)
                 return false;

@@ -10,14 +10,21 @@ internal static class UninstallBootstrap
     internal static void RunFastCallbackOnly()
     {
         AppLog.Info("Uninstall", "Velopack uninstall cleanup started.", ("FastCallback", true));
+        // PR12 section 11/18: the running Runtime owns stock restoration AND the startup-task removal
+        // (which must come only AFTER stock authority is proven). The fast callback no longer deletes
+        // the task unconditionally -- if the Runtime did not release, the mandatory startup guarantee
+        // must stay in place.
         var runtimeReleased = RequestRunningRuntimeShutdown();
-        try { new WindowsTaskSchedulerStartupManager().Synchronize(false); } catch (Exception exception) { AppLog.Warn("Uninstall", "Startup registration cleanup failed.", exception); }
 
         if (!runtimeReleased)
         {
-            AppLog.Warn("Uninstall", "Runtime ownership was not released; preserving Addon-owned artifacts and recovery evidence.", null, ("Action", "PreserveDependencySafety"));
+            AppLog.Warn("Uninstall", "Runtime ownership was not released; preserving Addon-owned artifacts, startup registration, and recovery evidence.", null, ("Action", "PreserveDependencySafety"));
             return;
         }
+
+        // Backstop only: the Runtime's PrepareForUninstallAsync already removed the task after proving
+        // stock authority. This is an idempotent no-op on the common path (task already absent).
+        try { WindowsTaskSchedulerStartupManager.WithElevatedRepair().Synchronize(false); } catch (Exception exception) { AppLog.Warn("Uninstall", "Startup registration cleanup backstop failed.", exception); }
 
         RunBoundedLocalCleanup(runtimeReleased);
 
