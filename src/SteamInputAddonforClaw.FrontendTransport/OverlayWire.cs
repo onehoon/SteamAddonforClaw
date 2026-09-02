@@ -219,15 +219,16 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     }
 
     // OQ5-UI-09: read the current authoritative order through the shared contract (so a caller that
-    // somehow holds a malformed value still puts a valid five-tab order on the wire) and send it.
-    private async Task SendTabOrderStateAsync(Stream pipe, SemaphoreSlim writeGate, CancellationToken token)
+    // somehow holds a malformed value still puts a valid five-tab order on the wire) and send it on
+    // the one instance write gate shared with SendCommandAsync / SendNavigationAsync.
+    private async Task SendTabOrderStateAsync(Stream pipe, CancellationToken token)
     {
         IReadOnlyList<OverlayTabId> order;
         try { order = OverlayTabOrderContract.NormalizeOrDefault(_getTabOrder()); }
         catch { order = OverlayTabOrderContract.DefaultOrder; }
         await OverlayWireCodec.WriteAsync(pipe,
             new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState, TabOrder: order),
-            writeGate, token).ConfigureAwait(false);
+            _writeGate, token).ConfigureAwait(false);
     }
 
     private async Task AcceptLoopAsync()
@@ -272,19 +273,22 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private async Task ServeAsync(Stream pipe)
     {
         using var connection = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        using var writeGate = new SemaphoreSlim(1, 1);
+        // OQ5-UI-09 blocker fix: every Runtime -> Overlay write goes through the ONE instance
+        // _writeGate, including handshake and the post-Ready TabOrderState replies. A second
+        // per-connection semaphore would let a tab-order reply and a SendNavigationAsync/
+        // SendCommandAsync write interleave 4-byte prefixes and payloads on the same byte stream.
         var hello = await OverlayWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false);
         if (hello.Kind != OverlayWireMessageKind.Handshake || hello.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
         {
-            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProtocolError, Error: "Overlay protocol version mismatch."), writeGate, connection.Token).ConfigureAwait(false);
+            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProtocolError, Error: "Overlay protocol version mismatch."), _writeGate, connection.Token).ConfigureAwait(false);
             return;
         }
 
-        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), writeGate, connection.Token).ConfigureAwait(false);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), _writeGate, connection.Token).ConfigureAwait(false);
         // OQ5-UI-09 section 6: the authoritative tab order goes out immediately after acceptance so
         // the client can apply it before it reports Ready -- the Runtime never Shows a Ready Overlay
         // that still has only the default local order.
-        await SendTabOrderStateAsync(pipe, writeGate, connection.Token).ConfigureAwait(false);
+        await SendTabOrderStateAsync(pipe, connection.Token).ConfigureAwait(false);
         while (!connection.IsCancellationRequested)
         {
             var message = await OverlayWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false);
@@ -306,7 +310,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 // whatever it now holds". A malformed persist must not tear this connection down.
                 try { _tryChangeTabOrder(message.TabOrder); }
                 catch { /* feature-local: the coordinator keeps its previous authoritative order */ }
-                await SendTabOrderStateAsync(pipe, writeGate, connection.Token).ConfigureAwait(false);
+                await SendTabOrderStateAsync(pipe, connection.Token).ConfigureAwait(false);
                 continue;
             }
 

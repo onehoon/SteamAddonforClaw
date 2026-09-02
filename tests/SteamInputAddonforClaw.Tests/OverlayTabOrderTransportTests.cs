@@ -152,6 +152,55 @@ public sealed class OverlayTabOrderTransportTests
     }
 
     [Fact]
+    public async Task F_tab_order_replies_and_navigation_share_one_write_gate_and_never_interleave()
+    {
+        var pipeName = Pipe();
+        IReadOnlyList<OverlayTabId> current = OverlayTabOrderContract.DefaultOrder;
+        await using var server = new NamedPipeOverlayServer(pipeName,
+            () => current,
+            requested => { current = requested; return true; });
+        await server.StartAsync();
+        await using var client = new NamedPipeOverlayClient(pipeName);
+
+        var navActions = new List<OverlayNavigationAction>();
+        var orders = new List<IReadOnlyList<OverlayTabId>>();
+        var run = client.RunAsync(
+            _ => Task.CompletedTask,
+            action => { lock (navActions) navActions.Add(action); return Task.CompletedTask; },
+            order => { lock (orders) orders.Add(order); return Task.CompletedTask; });
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show)); // navigation only delivers while Visible
+
+        // Overlap authoritative TabOrderState republishes (client -> server -> republish) with
+        // server navigation writes. A corrupt/interleaved frame would throw out of the client loop.
+        for (var i = 0; i < 40; i++)
+        {
+            var order = i % 2 == 0 ? Custom : (IReadOnlyList<OverlayTabId>)OverlayTabOrderContract.DefaultOrder;
+            var setTask = client.SendSetTabOrderAsync(order);
+            var navTask = server.SendNavigationAsync(OverlayNavigationAction.NavigateDown);
+            Assert.True(await setTask);
+            await navTask;
+        }
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            lock (navActions) lock (orders)
+                if (navActions.Count >= 40 && orders.Count >= 41) break;
+            Assert.False(run.IsFaulted, run.Exception?.ToString());
+            await Task.Delay(20);
+        }
+
+        Assert.False(run.IsFaulted, run.Exception?.ToString());
+        lock (navActions) Assert.All(navActions, a => Assert.Equal(OverlayNavigationAction.NavigateDown, a));
+        lock (orders) Assert.All(orders, o => Assert.Equal(5, o.Count));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task G_client_rejects_a_malformed_initial_tab_order_state()
     {
         var pipeName = Pipe();
