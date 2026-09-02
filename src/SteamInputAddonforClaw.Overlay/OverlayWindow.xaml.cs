@@ -187,6 +187,19 @@ public sealed partial class OverlayWindow : Window
         ApplySelectedTabVisualState();
     }
 
+    // OQ5-UI-02: LB/RB semantic tab navigation from the Runtime capture path. Keeps all visual
+    // dictionary/page-visibility logic here; only re-applies visuals when selection actually moved
+    // (no-op at a boundary). App marshals the semantic action, it never touches tab state directly.
+    internal void SelectPreviousTab()
+    {
+        if (_tabState.SelectPrevious()) ApplySelectedTabVisualState();
+    }
+
+    internal void SelectNextTab()
+    {
+        if (_tabState.SelectNext()) ApplySelectedTabVisualState();
+    }
+
     private void ApplySelectedTabVisualState()
     {
         var selected = _tabState.SelectedTab;

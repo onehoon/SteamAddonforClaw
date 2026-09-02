@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Lifecycle;
 
 internal enum OverlayConsumedControlsReleaseOutcome
 {
-    /// <summary>None of DPad/A/B were held when the release wait began.</summary>
+    /// <summary>None of the consumed controls (DPad/A/B/LB/RB) were held when the release wait began.</summary>
     AlreadyReleased,
     /// <summary>All consumed controls were observed released after waiting.</summary>
     ReleasedAfterWait,
@@ -21,12 +21,13 @@ internal enum OverlayConsumedControlsReleaseOutcome
 /// and NOT a generic input framework. While Overlay capture is active it listens to the existing PR5
 /// <see cref="IMsiClawPreparedInputSource.StateChanged"/>, converts button rising edges into low-rate
 /// semantic Overlay actions, stops accepting actions during close, detects release of the consumed
-/// controls (DPad/A/B), and surfaces one source-unavailable signal for real DirectInput loss.
+/// controls (DPad/A/B/LB/RB), and surfaces one source-unavailable signal for real DirectInput loss.
 /// Controller authority stays in <c>MsiClawInputSource</c>.</summary>
 internal sealed class OverlayControllerInputRouter : IDisposable
 {
-    // OQ4 section 6.1: the intentionally small first mapping. DPad/A/B are also exactly the
-    // "consumed controls" the section 7 release gate waits for.
+    // OQ4 section 6.1 + OQ5-UI-02 section 6: the semantic mapping. Every entry here is also a
+    // "consumed control" the section 7 release gate waits for, so adding LB/RB (PreviousTab/NextTab)
+    // deliberately makes a held bumper block publisher resume until it is released.
     private static readonly (Func<GamepadButtons, bool> Held, OverlayNavigationAction Action)[] Bindings =
     [
         (b => b.DPadUp, OverlayNavigationAction.NavigateUp),
@@ -35,6 +36,8 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         (b => b.DPadRight, OverlayNavigationAction.NavigateRight),
         (b => b.A, OverlayNavigationAction.Accept),
         (b => b.B, OverlayNavigationAction.Back),
+        (b => b.LeftBumper, OverlayNavigationAction.PreviousTab),
+        (b => b.RightBumper, OverlayNavigationAction.NextTab),
     ];
 
     private readonly IMsiClawPreparedInputSource _source;
@@ -83,7 +86,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         AppLog.Info("OverlayCapture", "Overlay input router stopped accepting navigation.", ("Event", "OverlayRouterStopped"));
     }
 
-    /// <summary>Section 7: complete immediately when DPad/A/B are already released, otherwise await
+    /// <summary>Section 7: complete immediately when the consumed controls are already released, otherwise await
     /// <see cref="IMsiClawPreparedInputSource.StateChanged"/> until every consumed control is
     /// released. No polling timer, no sleep loop.</summary>
     internal Task<OverlayConsumedControlsReleaseOutcome> WaitForConsumedControlsReleaseAsync(CancellationToken cancellationToken)

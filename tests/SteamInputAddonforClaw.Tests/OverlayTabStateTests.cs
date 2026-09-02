@@ -114,4 +114,56 @@ public sealed class OverlayTabStateTests
 
         Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
     }
+
+    [Fact]
+    public void NextAndPreviousMoveOneTabInDefaultOrder()
+    {
+        var state = new OverlayTabState();
+
+        Assert.True(state.SelectNext());
+        Assert.Equal(OverlayTabId.Profile, state.SelectedTab);
+
+        Assert.True(state.SelectPrevious());
+        Assert.Equal(OverlayTabId.Device, state.SelectedTab);
+    }
+
+    [Fact]
+    public void PreviousAtTheFirstTabIsANoOp()
+    {
+        var state = new OverlayTabState();
+
+        Assert.False(state.SelectPrevious());
+        Assert.Equal(OverlayTabId.Device, state.SelectedTab);
+    }
+
+    [Fact]
+    public void NextAtTheLastTabIsANoOpAndDoesNotWrap()
+    {
+        var state = new OverlayTabState();
+        state.Select(OverlayTabId.Setting);
+
+        Assert.False(state.SelectNext());
+        Assert.Equal(OverlayTabId.Setting, state.SelectedTab);
+    }
+
+    [Fact]
+    public void TraversalFollowsTheCurrentOrderNotEnumDeclarationOrder()
+    {
+        var state = new OverlayTabState(
+        [
+            OverlayTabId.Controller,
+            OverlayTabId.Device,
+            OverlayTabId.Profile,
+            OverlayTabId.Shortcut,
+            OverlayTabId.Setting,
+        ]);
+        state.Select(OverlayTabId.Device);
+
+        Assert.True(state.SelectPrevious());
+        Assert.Equal(OverlayTabId.Controller, state.SelectedTab);
+
+        state.Select(OverlayTabId.Device);
+        Assert.True(state.SelectNext());
+        Assert.Equal(OverlayTabId.Profile, state.SelectedTab);
+    }
 }
