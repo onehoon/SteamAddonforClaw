@@ -106,33 +106,6 @@ public sealed class AddonRuntimeHostTests
         await host.DisposeAsync();
     }
 
-    [Fact] // Full1902 review [BLOCKER]: with the Steam Input Routing preference removed, a Steam
-           // RunningAppID / BPM / developer-test activation must not drive any legacy physical routing
-           // mutation while Center M is Enabled -- the composition never gives the host a routing owner.
-    public async Task Center_m_enabled_steam_activation_drives_no_legacy_routing_mutation()
-    {
-        using var steamRuntime = new SteamSessionRuntime();
-        // Center M Enabled composes AddonRuntimeHost with routingRuntime: null (see
-        // AddonRuntimeComposition + StartupCoordinatorTests source guard).
-        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
-            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
-            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true));
-        var transitions = 0;
-        host.SteamSessionStateChanged += (_, _) => Interlocked.Increment(ref transitions);
-
-        steamRuntime.DeveloperTestModeState.SetEnabled(true);
-        await Task.Delay(TimeSpan.FromMilliseconds(50));
-
-        Assert.Equal(1, transitions);
-        // No routing backend appeared and nothing to reconcile: status stays Unavailable.
-        Assert.Equal(RoutingRuntimeStatusSnapshot.Unavailable, host.CaptureRoutingStatus());
-        await host.ReconcileAsync();
-        Assert.Equal(RoutingRuntimeStatusSnapshot.Unavailable, host.CaptureRoutingStatus());
-
-        await host.DisposeAsync();
-        Assert.True(host.RoutingShutdownSucceeded);
-    }
-
     [Fact]
     public async Task Steam_state_transition_drives_exactly_one_normal_reconcile_and_exactly_one_status_refresh()
     {

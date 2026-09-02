@@ -267,8 +267,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 startupComposition.StockCenterMBaseline,
                 startupResult.RecoverySafe,
                 startupResult.HardwareSupported,
-                // Center M Enabled (stock authority): gates only the stock PID1901 resume baseline.
-                stockCenterMAuthority: startupResult.LegacyRoutingAllowed,
+                startupResult.LegacyRoutingAllowed,
                 winGSuppressionGuard: _winGSuppressionGuard,
                 // PR7: forward the raw BPM bool to QAM unchanged, then request a Full-1902 runtime
                 // presentation reconcile (BPM is half of the X360 <-> SteamDeck policy).
