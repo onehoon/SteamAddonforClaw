@@ -271,6 +271,53 @@ public sealed class OverlayDelayedSliderCommitTests
     }
 
     [Fact]
+    public async Task CancelUnsubmitted_leaves_an_already_submitted_commit_to_settle_normally()
+    {
+        var delay = new ManualDelay();
+        var commit = new GatedCommit();
+        var sink = new SettlementSink();
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, sink.Callback, Delay, delay.Func);
+
+        helper.Schedule(65);
+        delay.Elapse();
+        await SpinUntilAsync(() => commit.Submitted.Count == 1, "commit already submitted");
+
+        helper.CancelUnsubmitted(); // Overlay close after the commit already started -- must be a no-op here
+
+        commit.CompleteNext(new OverlaySliderCommitSettlement(true, 65, null));
+        await SpinUntilAsync(() => sink.Items.Count == 1, "in-flight settlement still delivered");
+        Assert.True(sink.Items[0].Succeeded);
+        Assert.Equal(65, sink.Items[0].AuthoritativeValue);
+        Assert.False(helper.HasPendingDraft);
+    }
+
+    [Fact]
+    public async Task A_newer_schedule_still_makes_an_older_in_flight_completion_stale_after_cancel()
+    {
+        var delay = new ManualDelay();
+        var commit = new GatedCommit();
+        var sink = new SettlementSink();
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, sink.Callback, Delay, delay.Func);
+
+        helper.Schedule(55);
+        delay.Elapse();
+        await SpinUntilAsync(() => commit.Submitted.Count == 1, "A submitted");
+
+        helper.CancelUnsubmitted(); // no-op: A is in flight
+        helper.Schedule(60);        // B supersedes A
+
+        commit.CompleteNext(new OverlaySliderCommitSettlement(true, 55, null)); // A settles late
+        await Task.Delay(40);
+        Assert.Empty(sink.Items); // A ignored as stale
+
+        delay.Elapse();
+        await SpinUntilAsync(() => commit.Submitted.Count == 2, "B submitted");
+        commit.CompleteNext(new OverlaySliderCommitSettlement(true, 60, null));
+        await SpinUntilAsync(() => sink.Items.Count == 1, "B settlement delivered");
+        Assert.Equal(60, sink.Items[0].AuthoritativeValue);
+    }
+
+    [Fact]
     public async Task Disposal_rejects_new_scheduling_and_suppresses_stale_settlement()
     {
         var delay = new ManualDelay();

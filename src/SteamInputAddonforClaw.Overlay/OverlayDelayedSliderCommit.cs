@@ -26,6 +26,7 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
     private int _generation;
     private double _pendingValue;
     private bool _hasPendingDraft;
+    private bool _commitInFlight;
     private bool _disposed;
     private CancellationTokenSource? _scheduleCts;
 
@@ -64,6 +65,9 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             if (_disposed) return;
             _pendingValue = desiredValue;
             _hasPendingDraft = true;
+            // A fresh draft: any commit still running belongs to an older generation and is now
+            // stale, so this new draft is once again "not submitted".
+            _commitInFlight = false;
             generation = ++_generation;
             _scheduleCts?.Cancel();
             _scheduleCts?.Dispose();
@@ -74,13 +78,17 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
         _ = RunAsync(desiredValue, generation, token);
     }
 
-    // Cancel an unsubmitted scheduled draft (e.g. Overlay begins hiding). An already in-flight
-    // commit is left to settle, but its completion is stale by generation and cannot become
-    // current UI authority.
+    // Cancel a draft that is still waiting out the trailing window (e.g. Overlay begins hiding).
+    // A commit that has already passed the delay and entered the commit call is left alone: it may
+    // finish and deliver its current settlement without holding OQ4 capture open. Disposal, not
+    // this method, is what suppresses an already-submitted operation's settlement.
     internal void CancelUnsubmitted()
     {
         lock (_sync)
         {
+            if (_disposed || !_hasPendingDraft || _commitInFlight)
+                return;
+
             _generation++;
             _hasPendingDraft = false;
             _scheduleCts?.Cancel();
@@ -97,6 +105,7 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             _disposed = true;
             _generation++;
             _hasPendingDraft = false;
+            _commitInFlight = false;
             _scheduleCts?.Cancel();
             _scheduleCts?.Dispose();
             _scheduleCts = null;
@@ -117,6 +126,8 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
         lock (_sync)
         {
             if (_disposed || generation != _generation) return;
+            // Past the delay: this draft is now submitted, so CancelUnsubmitted() must leave it be.
+            _commitInFlight = true;
         }
 
         OverlaySliderCommitSettlement settlement;
@@ -131,9 +142,11 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
 
         lock (_sync)
         {
-            // A newer Schedule replaced this draft while the commit was in flight: its completion
-            // is stale and must not clear the newer pending fact or apply its settlement.
+            // A newer Schedule replaced this draft while the commit was in flight, or the helper
+            // was disposed on teardown: this completion is stale and must not clear the newer
+            // pending fact or apply its settlement.
             if (_disposed || generation != _generation) return;
+            _commitInFlight = false;
             _hasPendingDraft = false;
         }
 
