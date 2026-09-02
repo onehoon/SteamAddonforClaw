@@ -46,6 +46,11 @@ internal enum OverlayPauseOutcome
     /// rejected, so the current active presentation was retired through the existing owner. No
     /// alternate presentation fallback.</summary>
     NeutralRejectedPresentationRetired,
+    /// <summary>Fail-close boundary reached but the retirement of the current presentation could not
+    /// itself be proven (e.g. native detach failure). The publisher is stopped, the last game-facing
+    /// state was not proven neutral, and ownership evidence is retained -- callers must NOT treat
+    /// this as a clean retirement.</summary>
+    NeutralRejectedRetireFailed,
     /// <summary>A precondition (owner disposed, no active presentation / publisher, wrong kind) was
     /// not met; no mutation was attempted.</summary>
     Blocked,
@@ -386,7 +391,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Error("OverlayCapture", "Neutral write rejected on a stopped publisher; retiring the current presentation.", null,
                     ("Event", "OverlayPauseNeutralRejected"), ("Presentation", kind));
-                await RetireActivePresentationCoreAsync("OverlayPauseNeutralRejected").ConfigureAwait(false);
+                if (!await RetireActivePresentationCoreAsync("OverlayPauseNeutralRejected").ConfigureAwait(false))
+                {
+                    AppLog.Error("OverlayCapture", "Presentation could not be proven retired after Overlay neutral rejection; ownership retained.", null,
+                        ("Event", "OverlayPauseFailCloseIncomplete"), ("Presentation", kind));
+                    return new(OverlayPauseOutcome.NeutralRejectedRetireFailed, "NeutralRejectedRetireFailed");
+                }
                 return new(OverlayPauseOutcome.NeutralRejectedPresentationRetired, "NeutralRejected");
             }
 
@@ -415,8 +425,23 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 return LeftNeutral("SourceNotRunning");
             if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
                 return LeftNeutral("ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"));
-            if (kind == AddonPresentationKind.SteamDeck && _deckSession is not { State: CanonicalSteamDeckSessionState.Active })
-                return LeftNeutral("SteamDeckSessionNotActive:" + (_deckSession?.State.ToString() ?? "None"));
+
+            // VIIPER Ready / session Active are not proof the typed USB device is still attached
+            // (sleep/resume or PnP disruption can drop it while the Overlay is open). Prove it with
+            // the same narrow attachment query the structural reconcile path uses before restarting
+            // the publisher against a possibly-detached device.
+            if (kind == AddonPresentationKind.Xbox360)
+            {
+                if (!_viiper!.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                    return LeftNeutral("Xbox360AttachmentNotAttached:" + attachment);
+            }
+            else
+            {
+                if (_deckSession is not { State: CanonicalSteamDeckSessionState.Active } session)
+                    return LeftNeutral("SteamDeckSessionNotActive:" + (_deckSession?.State.ToString() ?? "None"));
+                if (!session.TryGetTrackedAttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                    return LeftNeutral("SteamDeckAttachmentNotAttached:" + attachment);
+            }
 
             try
             {

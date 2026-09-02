@@ -310,6 +310,64 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
+    public async Task Overlay_pause_neutral_rejected_and_failed_retirement_does_not_claim_retirement()
+    {
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher();
+        var owner = Build(native, xbox360, new FakePublisher());
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        native.StateResults.Enqueue(false); // pause neutral write rejected
+        native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure); // and the retire detach fails
+
+        var pause = await owner.PauseForOverlayAsync(default);
+
+        Assert.Equal(OverlayPauseOutcome.NeutralRejectedRetireFailed, pause.Outcome);
+        Assert.False(pause.Succeeded);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation); // ownership evidence retained
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Xbox360_overlay_resume_with_a_detached_device_leaves_neutral_and_does_not_restart_the_publisher()
+    {
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher();
+        var owner = Build(native, xbox360, new FakePublisher());
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await owner.PauseForOverlayAsync(default)).Outcome);
+        native.AttachmentStates.Enqueue(USBDeviceAttachmentState.Detached); // device dropped while Overlay was open
+
+        var resume = await owner.ResumeAfterOverlayAsync(new FakeSource(), default);
+
+        Assert.Equal(OverlayResumeOutcome.LeftNeutral, resume.Outcome);
+        Assert.Contains("AttachmentNotAttached", resume.Reason);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.False(xbox360.IsRunning);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SteamDeck_overlay_resume_with_a_detached_device_leaves_neutral_and_does_not_restart_the_publisher()
+    {
+        var native = new FakeNative();
+        var deck = new FakePublisher();
+        var owner = Build(native, new FakePublisher(), deck);
+        await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await owner.PauseForOverlayAsync(default)).Outcome);
+        native.AttachmentStates.Enqueue(USBDeviceAttachmentState.Detached);
+
+        var resume = await owner.ResumeAfterOverlayAsync(new FakeSource(), default);
+
+        Assert.Equal(OverlayResumeOutcome.LeftNeutral, resume.Outcome);
+        Assert.Contains("AttachmentNotAttached", resume.Reason);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.False(deck.IsRunning);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Overlay_resume_with_unavailable_source_leaves_output_neutral_and_allows_a_later_reconcile()
     {
         var native = new FakeNative();
@@ -682,8 +740,10 @@ public sealed class MsiClawAddonPresentationTests
     {
         internal readonly List<string> Calls = [];
         internal Queue<USBDeviceAttachResult> AttachResults { get; } = [];
+        internal Queue<USBDeviceDetachResult> DetachResults { get; } = [];
         internal Queue<USBDeviceAttachmentState> AttachmentStates { get; } = [];
         internal Queue<bool> StateResults { get; } = [];
+        private readonly Dictionary<nuint, USBDeviceAttachmentState> _attachmentByHandle = [];
         public bool NewUSBServer(ref USBServerConfig config, out nuint handle, ViiperLogCallback? callback = null) { Calls.Add("NewUSBServer"); handle = 10; return true; }
         public bool CloseUSBServer(nuint handle) { Calls.Add("CloseUSBServer"); return true; }
         public bool CreateUSBBus(nuint handle, ref uint bus) { Calls.Add("CreateUSBBus"); bus = 42; return true; }
@@ -691,9 +751,9 @@ public sealed class MsiClawAddonPresentationTests
         public bool GetUSBDeviceIdentity(nuint handle, out uint bus, out uint id) { Calls.Add("GetUSBDeviceIdentity"); bus = 42; id = handle == 20 ? 9u : 10u; return true; }
         public bool AttachUSBDevice(nuint handle) => throw new NotSupportedException();
         public bool DetachUSBDevice(nuint handle) => throw new NotSupportedException();
-        public USBDeviceAttachResult AttachUSBDeviceEx(nuint handle) { Calls.Add("AttachUSBDeviceEx"); return AttachResults.Count > 0 ? AttachResults.Dequeue() : USBDeviceAttachResult.Success; }
-        public USBDeviceDetachResult DetachUSBDeviceEx(nuint handle) { Calls.Add("DetachUSBDeviceEx"); return USBDeviceDetachResult.Success; }
-        public bool GetUSBDeviceAttachmentState(nuint handle, out USBDeviceAttachmentState state) { Calls.Add("GetUSBDeviceAttachmentState"); state = AttachmentStates.Count > 0 ? AttachmentStates.Dequeue() : USBDeviceAttachmentState.Detached; return true; }
+        public USBDeviceAttachResult AttachUSBDeviceEx(nuint handle) { Calls.Add("AttachUSBDeviceEx"); var r = AttachResults.Count > 0 ? AttachResults.Dequeue() : USBDeviceAttachResult.Success; if (r == USBDeviceAttachResult.Success) _attachmentByHandle[handle] = USBDeviceAttachmentState.Attached; return r; }
+        public USBDeviceDetachResult DetachUSBDeviceEx(nuint handle) { Calls.Add("DetachUSBDeviceEx"); var r = DetachResults.Count > 0 ? DetachResults.Dequeue() : USBDeviceDetachResult.Success; if (r == USBDeviceDetachResult.Success) _attachmentByHandle[handle] = USBDeviceAttachmentState.Detached; return r; }
+        public bool GetUSBDeviceAttachmentState(nuint handle, out USBDeviceAttachmentState state) { Calls.Add("GetUSBDeviceAttachmentState"); state = AttachmentStates.Count > 0 ? AttachmentStates.Dequeue() : (_attachmentByHandle.TryGetValue(handle, out var s) ? s : USBDeviceAttachmentState.Detached); return true; }
         public bool CreateSteamDeckDevice(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid) { Calls.Add("CreateSteamDeckDevice"); handle = 20; return true; }
         public bool SetSteamDeckDeviceState(nuint handle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); return StateResults.Count == 0 || StateResults.Dequeue(); }
         public bool SetSteamDeckOutputCallback(nuint handle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); return true; }
