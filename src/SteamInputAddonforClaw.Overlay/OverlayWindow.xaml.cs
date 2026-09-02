@@ -166,8 +166,8 @@ public sealed partial class OverlayWindow : Window
         ApplySelectedTabVisualState();
     }
 
-    // Device gets the temporary preview fixture (a Toggle primitive + navigation rows); every
-    // other tab keeps its OQ5-UI-01 placeholder with zero selectable rows.
+    // Device gets the temporary preview fixture (Toggle + Slider primitives + navigation rows);
+    // every other tab keeps its OQ5-UI-01 placeholder with zero selectable rows.
     private FrameworkElement BuildPage(OverlayTabId id, List<OverlayRow> rows)
     {
         if (id != OverlayTabId.Device)
@@ -189,6 +189,20 @@ public sealed partial class OverlayWindow : Window
         unavailableToggle.ApplyState(isAvailable: false, isOn: false);
         rows.Add(new OverlayRow(unavailableToggle.Container, unavailableToggle.Capabilities));
         stack.Children.Add(unavailableToggle.Container);
+
+        // OQ5-UI-06 temporary fixture: neutral 0..100 step 5 numbers, not a product feature. The
+        // enabled preview's requestChange is a local echo standing in for a future Runtime readback.
+        OverlaySliderRow enabledSlider = null!;
+        enabledSlider = new OverlaySliderRow("Slider Preview", OverlaySliderRow.FormatInteger,
+            desired => enabledSlider.ApplyState(isAvailable: true, minimum: 0, maximum: 100, step: 5, value: desired));
+        enabledSlider.ApplyState(isAvailable: true, minimum: 0, maximum: 100, step: 5, value: 50);
+        rows.Add(new OverlayRow(enabledSlider.Container, enabledSlider.Capabilities));
+        stack.Children.Add(enabledSlider.Container);
+
+        var unavailableSlider = new OverlaySliderRow("Unavailable Slider Preview", OverlaySliderRow.FormatInteger, _ => { });
+        unavailableSlider.ApplyState(isAvailable: false, minimum: 0, maximum: 100, step: 5, value: 50);
+        rows.Add(new OverlayRow(unavailableSlider.Container, unavailableSlider.Capabilities));
+        stack.Children.Add(unavailableSlider.Container);
 
         for (var i = 1; i <= NavigationPreviewRowCount; i++)
         {
