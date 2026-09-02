@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Overlay;
 using Xunit;
 

@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using Xunit;
@@ -222,6 +223,129 @@ public sealed class SettingsStoreTests : IDisposable
         coordinator.Repair();
 
         Assert.Equal([true], manager.Requests);
+    }
+
+    // ---- OQ5-UI-08: Overlay tab order --------------------------------------------------------------
+
+    private static readonly OverlayTabId[] CustomTabOrder =
+    [
+        OverlayTabId.Controller,
+        OverlayTabId.Device,
+        OverlayTabId.Profile,
+        OverlayTabId.Shortcut,
+        OverlayTabId.Setting,
+    ];
+
+    [Fact]
+    public void NewAppSettings_DefaultsOverlayTabOrderToTheFrozenOrder()
+    {
+        Assert.Equal(OverlayTabOrderContract.DefaultOrder, new AppSettings().OverlayTabOrder);
+    }
+
+    [Fact]
+    public void Load_WhenOverlayTabOrderIsMissing_DefaultsWithoutLosingOtherSettings()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"LogLevel\":\"Debug\"}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.Equal(OverlayTabOrderContract.DefaultOrder, settings.OverlayTabOrder);
+        Assert.False(settings.LaunchAtWindowsStartup);
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+    }
+
+    [Fact]
+    public void SaveAndLoad_PreservesACustomOverlayTabOrderAsEnumNames()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+
+        store.Save(new AppSettings { OverlayTabOrder = CustomTabOrder });
+
+        Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);
+        var json = File.ReadAllText(path);
+        foreach (var tab in OverlayTabOrderContract.DefaultOrder)
+            Assert.Contains($"\"{tab}\"", json);                 // every tab persisted as its enum name
+        Assert.DoesNotContain("DefaultOverlayTab", json);
+        Assert.DoesNotContain("LastOverlayTab", json);
+        Assert.DoesNotContain("SelectedOverlayTab", json);
+        Assert.DoesNotContain("OverlayScrollOffset", json);
+    }
+
+    [Theory]
+    [InlineData("\"OverlayTabOrder\":\"Device\"")]                                                    // wrong JSON kind
+    [InlineData("\"OverlayTabOrder\":[\"Device\",\"Profile\",\"Controller\"]")]                       // missing tabs
+    [InlineData("\"OverlayTabOrder\":[\"Device\",\"Device\",\"Profile\",\"Controller\",\"Shortcut\"]")] // duplicate
+    [InlineData("\"OverlayTabOrder\":[\"Device\",\"Profile\",\"Controller\",\"Shortcut\",\"Nope\"]")] // unknown name
+    [InlineData("\"OverlayTabOrder\":[0,1,2,3,4]")]                                                   // numeric enum
+    [InlineData("\"OverlayTabOrder\":[\"Device\",\"Profile\",\"Controller\",\"Shortcut\",null]")]     // null element
+    public void Load_InvalidOverlayTabOrder_FallsBackToDefaultAndKeepsOtherSettings(string tabOrderFragment)
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"LogLevel\":\"Debug\"," + tabOrderFragment + "}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.Equal(OverlayTabOrderContract.DefaultOrder, settings.OverlayTabOrder);
+        Assert.False(settings.LaunchAtWindowsStartup);
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+    }
+
+    [Fact]
+    public void TryChangeOverlayTabOrder_WithAValidOrder_PersistsAndPublishes()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        Assert.True(coordinator.TryChangeOverlayTabOrder(CustomTabOrder));
+
+        Assert.Equal(CustomTabOrder, coordinator.OverlayTabOrder);
+        Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);
+    }
+
+    [Fact]
+    public void TryChangeOverlayTabOrder_EqualToCurrent_IsAnAcceptedNoOp()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        var coordinator = new StartupSettingsCoordinator(
+            new AppSettings { OverlayTabOrder = CustomTabOrder }, store, new FakeStartupManager());
+
+        Assert.True(coordinator.TryChangeOverlayTabOrder([.. CustomTabOrder]));
+        Assert.Equal(CustomTabOrder, coordinator.OverlayTabOrder);
+        Assert.False(File.Exists(path)); // no disk write for a no-op
+    }
+
+    [Fact]
+    public void TryChangeOverlayTabOrder_WithAnInvalidOrder_IsRejectedWithoutStateChange()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        store.Save(new AppSettings { OverlayTabOrder = CustomTabOrder });
+        var coordinator = new StartupSettingsCoordinator(
+            new AppSettings { OverlayTabOrder = CustomTabOrder }, store, new FakeStartupManager());
+
+        Assert.False(coordinator.TryChangeOverlayTabOrder([OverlayTabId.Device, OverlayTabId.Device]));
+
+        Assert.Equal(CustomTabOrder, coordinator.OverlayTabOrder);          // unchanged, NOT reset to default
+        Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);         // disk unchanged
+    }
+
+    [Fact]
+    public void ExistingSettingsMutations_PreserveACustomOverlayTabOrder()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        var coordinator = new StartupSettingsCoordinator(
+            new AppSettings(LaunchAtWindowsStartup: true) { OverlayTabOrder = CustomTabOrder }, store, new FakeStartupManager());
+
+        coordinator.ChangeLaunchAtWindowsStartup(false);
+
+        Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);
     }
 
     public void Dispose()
