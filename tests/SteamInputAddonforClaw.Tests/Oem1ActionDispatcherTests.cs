@@ -1,17 +1,13 @@
 using SteamInputAddonforClaw.CenterM;
 using SteamInputAddonforClaw.Contracts.Oem1;
-using SteamInputAddonforClaw.Routing;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class Oem1ActionDispatcherTests
 {
-    private static RoutingRuntimeStatusSnapshot StatusWithSteamOutput(bool active, bool available = true) =>
-        new(Available: available, OperationalState: RoutingOperationalState.OverrideActive, SteamOutputActive: active, NativeDirectInputActive: false);
-
     private static Oem1ActionDispatcher CreateDispatcher(
-        Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
+        Func<bool> captureSteamDeckPresentationActive,
         Action? requestQuickAccessPulse = null,
         Action? launchBigPicture = null,
         Oem1MappingSettings? mapping = null,
@@ -20,7 +16,7 @@ public sealed class Oem1ActionDispatcherTests
         Action<Oem1LaunchApplicationBinding>? launchApplication = null) =>
         new(
             captureMapping ?? (() => mapping ?? Oem1MappingSettings.Default),
-            captureRoutingStatus,
+            captureSteamDeckPresentationActive,
             requestQuickAccessPulse ?? (() => { }),
             launchBigPicture ?? (() => { }),
             // Test seams: neither OS-level key injection nor a real process launch ever happens here.
@@ -58,7 +54,7 @@ public sealed class Oem1ActionDispatcherTests
         var pulseCount = 0;
         var bigPictureCount = 0;
         var dispatcher = CreateDispatcher(
-            () => RoutingRuntimeStatusSnapshot.Unavailable,
+            () => false,
             () => pulseCount++,
             () => bigPictureCount++);
 
@@ -75,7 +71,7 @@ public sealed class Oem1ActionDispatcherTests
         var pulseCount = 0;
         var bigPictureCount = 0;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(active: false, available: false),
+            () => false,
             () => pulseCount++,
             () => bigPictureCount++);
 
@@ -91,7 +87,7 @@ public sealed class Oem1ActionDispatcherTests
         var pulseCount = 0;
         var bigPictureCount = 0;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(active: false, available: true),
+            () => false,
             () => pulseCount++,
             () => bigPictureCount++);
 
@@ -107,7 +103,7 @@ public sealed class Oem1ActionDispatcherTests
         var pulseCount = 0;
         var bigPictureCount = 0;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(active: true),
+            () => true,
             () => pulseCount++,
             () => bigPictureCount++);
 
@@ -124,7 +120,7 @@ public sealed class Oem1ActionDispatcherTests
         var bigPictureCount = 0;
         var steamOutputActive = true;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(steamOutputActive),
+            () => steamOutputActive,
             () => pulseCount++,
             () => bigPictureCount++);
 
@@ -146,7 +142,7 @@ public sealed class Oem1ActionDispatcherTests
         var pulseCount = 0;
         var bigPictureCount = 0;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             () => pulseCount++,
             () => bigPictureCount++);
 
@@ -161,7 +157,7 @@ public sealed class Oem1ActionDispatcherTests
     {
         var pulseCount = 0;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(true),
+            () => true,
             () => pulseCount++);
 
         dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Double));
@@ -185,7 +181,7 @@ public sealed class Oem1ActionDispatcherTests
             RoutingDouble = Oem1SlotBinding.Of(Oem1Action.LaunchApplication) with { Launch = new(@"C:\fake\app.exe") }
         };
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(steamOutputActive),
+            () => steamOutputActive,
             () => pulses++,
             () => bigPictures++,
             mapping: mapping,
@@ -210,7 +206,7 @@ public sealed class Oem1ActionDispatcherTests
         Oem1HotkeyBinding? sent = null;
         var expected = new Oem1HotkeyBinding(Oem1HotkeyModifiers.Control | Oem1HotkeyModifiers.Shift, Oem1HotkeyKey.S);
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             mapping: Oem1MappingSettings.Default with
             {
                 NormalSingle = Oem1SlotBinding.Of(Oem1Action.KeyboardHotkey) with { Hotkey = expected }
@@ -227,7 +223,7 @@ public sealed class Oem1ActionDispatcherTests
         Oem1LaunchApplicationBinding? launched = null;
         var expected = new Oem1LaunchApplicationBinding(@"C:\fake\app.exe", "--windowed");
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(true),
+            () => true,
             mapping: Oem1MappingSettings.Default with
             {
                 RoutingSingle = Oem1SlotBinding.Of(Oem1Action.LaunchApplication) with { Launch = expected }
@@ -245,7 +241,7 @@ public sealed class Oem1ActionDispatcherTests
         var hotkeys = 0;
         var mapping = Oem1MappingSettings.Default;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             launchBigPicture: () => bigPictures++,
             captureMapping: () => mapping,
             sendHotkey: _ => hotkeys++);
@@ -267,7 +263,7 @@ public sealed class Oem1ActionDispatcherTests
         var bigPictureCount = 0;
         var steamOutputActive = false;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(steamOutputActive),
+            () => steamOutputActive,
             () => pulseCount++,
             () => bigPictureCount++);
 
@@ -292,7 +288,7 @@ public sealed class Oem1ActionDispatcherTests
         var launches = 0;
         var steamOutputActive = false;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(steamOutputActive),
+            () => steamOutputActive,
             () => pulses++,
             () => bigPictures++,
             mapping: Oem1MappingSettings.Default with
@@ -322,7 +318,7 @@ public sealed class Oem1ActionDispatcherTests
         var bigPictures = 0;
         var mapping = Oem1MappingSettings.Default;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             launchBigPicture: () => bigPictures++,
             captureMapping: () => mapping);
 
@@ -346,7 +342,7 @@ public sealed class Oem1ActionDispatcherTests
         // Only reachable by a hand-edited settings file or an older build -- the settings UI never
         // offers Big Picture for a routing slot, because it reads the same capability catalog.
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(true),
+            () => true,
             () => pulses++,
             () => bigPictures++,
             mapping: Oem1MappingSettings.Default with { RoutingSingle = Oem1SlotBinding.Of(Oem1Action.SteamBigPicture) });
@@ -365,7 +361,7 @@ public sealed class Oem1ActionDispatcherTests
     {
         var pulses = 0;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             () => pulses++,
             mapping: Oem1MappingSettings.Default with { NormalSingle = Oem1SlotBinding.Of(Oem1Action.SteamQuickAccess) });
 
@@ -378,7 +374,7 @@ public sealed class Oem1ActionDispatcherTests
     {
         var bigPictureCount = 0;
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             launchBigPicture: () => bigPictureCount++);
         var source = new ImmediateMsiEventSource();
         var recognizer = new Oem1GestureRecognizer(
@@ -401,7 +397,7 @@ public sealed class Oem1ActionDispatcherTests
     public void Big_picture_backend_exception_causes_dispatch_to_report_failure()
     {
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             launchBigPicture: () => throw new InvalidOperationException("steam launch failed"));
 
         var ok = dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
@@ -413,7 +409,7 @@ public sealed class Oem1ActionDispatcherTests
     public void Quick_access_pulse_exception_causes_dispatch_to_report_failure()
     {
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(true),
+            () => true,
             requestQuickAccessPulse: () => throw new InvalidOperationException("pulse failed"));
 
         var ok = dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
@@ -425,7 +421,7 @@ public sealed class Oem1ActionDispatcherTests
     public void Hotkey_execution_exception_causes_dispatch_to_report_failure()
     {
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             mapping: Oem1MappingSettings.Default with { NormalSingle = Oem1SlotBinding.Of(Oem1Action.KeyboardHotkey) },
             sendHotkey: _ => throw new InvalidOperationException("SendInput failed"));
 
@@ -436,7 +432,7 @@ public sealed class Oem1ActionDispatcherTests
     public void Application_launch_exception_causes_dispatch_to_report_failure()
     {
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             mapping: Oem1MappingSettings.Default with { NormalSingle = Oem1SlotBinding.Of(Oem1Action.LaunchApplication) },
             launchApplication: _ => throw new InvalidOperationException("launch failed"));
 
@@ -462,7 +458,7 @@ public sealed class Oem1ActionDispatcherTests
     public void Mapping_capture_exception_causes_dispatch_to_report_failure()
     {
         var dispatcher = CreateDispatcher(
-            () => StatusWithSteamOutput(false),
+            () => false,
             captureMapping: () => throw new InvalidOperationException("settings unavailable"));
 
         Assert.False(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
@@ -471,7 +467,7 @@ public sealed class Oem1ActionDispatcherTests
     [Fact]
     public void Routing_unavailable_is_not_a_dispatch_failure()
     {
-        var dispatcher = CreateDispatcher(() => RoutingRuntimeStatusSnapshot.Unavailable);
+        var dispatcher = CreateDispatcher(() => false);
 
         var ok = dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
 
