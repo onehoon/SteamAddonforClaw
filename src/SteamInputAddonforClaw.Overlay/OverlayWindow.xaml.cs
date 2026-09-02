@@ -34,6 +34,9 @@ public sealed partial class OverlayWindow : Window
     private readonly Brush _rowSelectedBrush;
     private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Colors.Transparent);
 
+    // OQ5-UI-07: the delayed-commit helper behind the temporary "Slider Preview" fixture only.
+    private OverlayDelayedSliderCommit? _sliderPreviewCommit;
+
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
 
     public OverlayWindow()
@@ -44,6 +47,7 @@ public sealed partial class OverlayWindow : Window
                 ? brush
                 : new SolidColorBrush(Colors.SlateGray);
         BuildShell();
+        Closed += (_, _) => _sliderPreviewCommit?.Dispose();
     }
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
@@ -97,6 +101,10 @@ public sealed partial class OverlayWindow : Window
 
     internal async Task HideForPocAsync()
     {
+        // OQ5-UI-07 s.11/s.13: hide never waits for the 2s timer -- drop any unsubmitted preview
+        // draft so a hidden Overlay cannot fire an obsolete fake mutation later. Already-submitted
+        // work settles on its own and stays subject to the generation check.
+        _sliderPreviewCommit?.CancelUnsubmitted();
         WindowInterop.DisarmOutsideClickDismissal();
         if (AnimationsEnabled())
         {
@@ -190,11 +198,26 @@ public sealed partial class OverlayWindow : Window
         rows.Add(new OverlayRow(unavailableToggle.Container, unavailableToggle.Capabilities));
         stack.Children.Add(unavailableToggle.Container);
 
-        // OQ5-UI-06 temporary fixture: neutral 0..100 step 5 numbers, not a product feature. The
-        // enabled preview's requestChange is a local echo standing in for a future Runtime readback.
+        // OQ5-UI-06/07 temporary fixture: neutral 0..100 step 5 numbers, not a product feature.
+        // The preview stays immediate; the desired value is routed through the OQ5-UI-07 delayed
+        // helper, and a fake commit that just echoes the value settles it ~2s after the last edit.
         OverlaySliderRow enabledSlider = null!;
+        _sliderPreviewCommit = new OverlayDelayedSliderCommit(
+            commitAsync: desired =>
+            {
+                OverlayLog.Info("SliderPreview", "Preview commit submitted.", ("Value", desired));
+                return Task.FromResult(new OverlaySliderCommitSettlement(true, desired, null));
+            },
+            onCurrentSettlement: settlement => DispatcherQueue.TryEnqueue(() =>
+            {
+                OverlayLog.Info("SliderPreview", "Preview commit settled.",
+                    ("Succeeded", settlement.Succeeded), ("Value", settlement.AuthoritativeValue));
+                if (settlement is { Succeeded: true, AuthoritativeValue: { } value })
+                    enabledSlider.ApplyState(isAvailable: true, minimum: 0, maximum: 100, step: 5, value: value);
+            }),
+            delay: OverlayDelayedSliderCommit.ProductionDelay);
         enabledSlider = new OverlaySliderRow("Slider Preview", OverlaySliderRow.FormatInteger,
-            desired => enabledSlider.ApplyState(isAvailable: true, minimum: 0, maximum: 100, step: 5, value: desired));
+            desired => _sliderPreviewCommit.Schedule(desired));
         enabledSlider.ApplyState(isAvailable: true, minimum: 0, maximum: 100, step: 5, value: 50);
         rows.Add(new OverlayRow(enabledSlider.Container, enabledSlider.Capabilities));
         stack.Children.Add(enabledSlider.Container);
