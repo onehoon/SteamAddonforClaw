@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Lifecycle;
 
 internal enum OverlayConsumedControlsReleaseOutcome
 {
-    /// <summary>None of the consumed controls (DPad/A/B/LB/RB) were held when the release wait began.</summary>
+    /// <summary>No consumed control (DPad/A/B/LB/RB or either analog stick) was active when the release wait began.</summary>
     AlreadyReleased,
     /// <summary>All consumed controls were observed released after waiting.</summary>
     ReleasedAfterWait,
@@ -21,10 +21,16 @@ internal enum OverlayConsumedControlsReleaseOutcome
 /// and NOT a generic input framework. While Overlay capture is active it listens to the existing PR5
 /// <see cref="IMsiClawPreparedInputSource.StateChanged"/>, converts button rising edges into low-rate
 /// semantic Overlay actions, stops accepting actions during close, detects release of the consumed
-/// controls (DPad/A/B/LB/RB), and surfaces one source-unavailable signal for real DirectInput loss.
-/// Controller authority stays in <c>MsiClawInputSource</c>.</summary>
+/// controls (DPad/A/B/LB/RB and both analog sticks), and surfaces one source-unavailable signal for
+/// real DirectInput loss. Controller authority stays in <c>MsiClawInputSource</c>.</summary>
 internal sealed class OverlayControllerInputRouter : IDisposable
 {
+    // OQ5-UI-03 section 5: implementation-local, not persisted or user-configurable. A stick becomes
+    // directionally active at the larger activation threshold and only re-arms once both axes fall
+    // back inside the smaller neutral band -- simple hysteresis against analog jitter.
+    private const int StickActivationThreshold = 16_000;
+    private const int StickNeutralThreshold = 8_000;
+
     // OQ4 section 6.1 + OQ5-UI-02 section 6: the semantic mapping. Every entry here is also a
     // "consumed control" the section 7 release gate waits for, so adding LB/RB (PreviousTab/NextTab)
     // deliberately makes a held bumper block publisher resume until it is released.
@@ -45,7 +51,9 @@ internal sealed class OverlayControllerInputRouter : IDisposable
     private readonly Channel<OverlayNavigationAction> _actions =
         Channel.CreateUnbounded<OverlayNavigationAction>(new UnboundedChannelOptions { SingleReader = true });
     private readonly object _sync = new();
-    private GamepadButtons _previous;
+    private ControllerState _previousState;
+    private bool _leftStickArmed;
+    private bool _rightStickArmed;
     private TaskCompletionSource<OverlayConsumedControlsReleaseOutcome>? _releaseWaiter;
     private Task? _deliveryLoop;
     private bool _accepting;
@@ -66,9 +74,12 @@ internal sealed class OverlayControllerInputRouter : IDisposable
             if (_started || _disposed) return;
             _started = true;
             _accepting = true;
-            // Section 6.2: a control already held when capture begins must not emit an action --
-            // only a later false->true edge does.
-            _previous = _source.LatestState.Buttons;
+            // Section 6.2 / OQ5-UI-03 section 4.3: a control already held -- or a stick already
+            // deflected -- when capture begins must not emit an action. A stick that starts
+            // outside the neutral band starts disarmed and must return to neutral before it can fire.
+            _previousState = _source.LatestState;
+            _leftStickArmed = IsStickNeutral(_previousState.LeftStick);
+            _rightStickArmed = IsStickNeutral(_previousState.RightStick);
             _deliveryLoop = Task.Run(DeliveryLoopAsync);
         }
         _source.StateChanged += OnStateChanged;
@@ -95,7 +106,7 @@ internal sealed class OverlayControllerInputRouter : IDisposable
         {
             if (_sourceUnavailable || _disposed)
                 return Task.FromResult(OverlayConsumedControlsReleaseOutcome.SourceUnavailable);
-            if (!AnyConsumedHeld(_previous))
+            if (!AnyConsumedInputActive(_previousState))
                 return Task.FromResult(OverlayConsumedControlsReleaseOutcome.AlreadyReleased);
             _releaseWaiter?.TrySetResult(OverlayConsumedControlsReleaseOutcome.SourceUnavailable);
             var waiter = new TaskCompletionSource<OverlayConsumedControlsReleaseOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -131,18 +142,46 @@ internal sealed class OverlayControllerInputRouter : IDisposable
             if (!_disposed && _accepting)
             {
                 foreach (var (held, action) in Bindings)
-                    if (held(buttons) && !held(_previous))
+                    if (held(buttons) && !held(_previousState.Buttons))
                     {
                         _actions.Writer.TryWrite(action);
                         AppLog.Debug("OverlayCapture", "Navigation action.", ("Event", "OverlayNavigation"), ("Action", action));
                     }
+                TryQueueStickNavigation(state.LeftStick, ref _leftStickArmed, "Left");
+                TryQueueStickNavigation(state.RightStick, ref _rightStickArmed, "Right");
             }
-            _previous = buttons;
-            if (_releaseWaiter is { } waiter && !AnyConsumedHeld(buttons))
+            _previousState = state;
+            if (_releaseWaiter is { } waiter && !AnyConsumedInputActive(state))
             {
                 _releaseWaiter = null;
                 waiter.TrySetResult(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait);
             }
+        }
+    }
+
+    // OQ5-UI-03 section 4: one stick deflection emits at most one dominant-axis action. Armed only
+    // while neutral; disarms on fire and re-arms once both axes are back inside the neutral band.
+    private void TryQueueStickNavigation(StickState stick, ref bool armed, string which)
+    {
+        var x = (int)stick.X;
+        var y = (int)stick.Y;
+        var absX = Math.Abs(x);
+        var absY = Math.Abs(y);
+
+        if (armed)
+        {
+            if (Math.Max(absX, absY) < StickActivationThreshold) return;
+            // Frozen dominant-axis rule: abs(Y) >= abs(X) is vertical (tie prefers vertical).
+            var action = absY >= absX
+                ? (y > 0 ? OverlayNavigationAction.NavigateUp : OverlayNavigationAction.NavigateDown)
+                : (x > 0 ? OverlayNavigationAction.NavigateRight : OverlayNavigationAction.NavigateLeft);
+            armed = false;
+            _actions.Writer.TryWrite(action);
+            AppLog.Debug("OverlayCapture", "Navigation action.", ("Event", "OverlayNavigation"), ("Action", action), ("Source", which + "Stick"));
+        }
+        else if (absX <= StickNeutralThreshold && absY <= StickNeutralThreshold)
+        {
+            armed = true;
         }
     }
 
@@ -165,6 +204,15 @@ internal sealed class OverlayControllerInputRouter : IDisposable
             if (held(buttons)) return true;
         return false;
     }
+
+    private static bool IsStickNeutral(StickState stick) =>
+        Math.Abs((int)stick.X) <= StickNeutralThreshold && Math.Abs((int)stick.Y) <= StickNeutralThreshold;
+
+    // OQ5-UI-03 section 7.2: the release gate now waits for buttons AND both sticks. A stick counts
+    // as active until it is back inside the neutral band, so a held stick cannot leak into the game
+    // the instant Overlay capture is retired.
+    private static bool AnyConsumedInputActive(ControllerState state) =>
+        AnyConsumedHeld(state.Buttons) || !IsStickNeutral(state.LeftStick) || !IsStickNeutral(state.RightStick);
 
     public void Dispose()
     {

@@ -16,6 +16,11 @@ public sealed class OverlayControllerInputRouterTests
 
     private static ControllerState State(GamepadButtons buttons) => new(buttons, default, default, default, default);
 
+    private static StickState Stick(int x, int y) => new((short)x, (short)y);
+
+    private static ControllerState Sticks(StickState left = default, StickState right = default) =>
+        new(default, left, right, default, default);
+
     private sealed class Delivery
     {
         private readonly List<OverlayNavigationAction> _actions = [];
@@ -26,11 +31,18 @@ public sealed class OverlayControllerInputRouterTests
             _signal.Release();
             return Task.CompletedTask;
         };
+        // Cumulative: waits until at least <paramref name="count"/> actions have been delivered in
+        // total, so a test may call it more than once as it drives successive edges.
         public async Task<IReadOnlyList<OverlayNavigationAction>> WaitForAsync(int count)
         {
-            for (var i = 0; i < count; i++)
-                Assert.True(await _signal.WaitAsync(TimeSpan.FromSeconds(5)));
-            lock (_actions) return _actions.ToArray();
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (true)
+            {
+                lock (_actions)
+                    if (_actions.Count >= count) return _actions.ToArray();
+                var remaining = deadline - DateTime.UtcNow;
+                Assert.True(remaining > TimeSpan.Zero && await _signal.WaitAsync(remaining));
+            }
         }
         public IReadOnlyList<OverlayNavigationAction> Snapshot() { lock (_actions) return _actions.ToArray(); }
     }
@@ -41,6 +53,7 @@ public sealed class OverlayControllerInputRouterTests
         public bool IsRunning => true;
         public event EventHandler<ControllerState>? StateChanged;
         public void Raise(GamepadButtons buttons) { LatestState = State(buttons); StateChanged?.Invoke(this, LatestState); }
+        public void RaiseState(ControllerState state) { LatestState = state; StateChanged?.Invoke(this, state); }
         public MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor) => new(MsiClawInputStartStatus.Started, "");
         public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken) => Task.FromResult(true);
         public Task StopAsync() => Task.CompletedTask;
@@ -265,5 +278,205 @@ public sealed class OverlayControllerInputRouterTests
         source.Raise(Buttons(a: true));
         await Task.Delay(100);
         Assert.Empty(delivery.Snapshot());
+    }
+
+    // ---- OQ5-UI-03: dual-stick directional navigation --------------------------------------------
+
+    private const int Active = 20_000;
+
+    [Fact]
+    public async Task Left_stick_deflections_map_to_the_four_navigate_actions()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.RaiseState(Sticks(left: Stick(0, Active)));   // up
+        source.RaiseState(Sticks(left: Stick(0, 0)));
+        source.RaiseState(Sticks(left: Stick(0, -Active)));  // down
+        source.RaiseState(Sticks(left: Stick(0, 0)));
+        source.RaiseState(Sticks(left: Stick(-Active, 0)));  // left
+        source.RaiseState(Sticks(left: Stick(0, 0)));
+        source.RaiseState(Sticks(left: Stick(Active, 0)));   // right
+
+        var actions = await delivery.WaitForAsync(4);
+        Assert.Equal(
+            new[] { OverlayNavigationAction.NavigateUp, OverlayNavigationAction.NavigateDown, OverlayNavigationAction.NavigateLeft, OverlayNavigationAction.NavigateRight },
+            actions);
+    }
+
+    [Fact]
+    public async Task Right_stick_deflections_map_to_the_four_navigate_actions()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.RaiseState(Sticks(right: Stick(0, Active)));
+        source.RaiseState(Sticks(right: Stick(0, 0)));
+        source.RaiseState(Sticks(right: Stick(0, -Active)));
+        source.RaiseState(Sticks(right: Stick(0, 0)));
+        source.RaiseState(Sticks(right: Stick(-Active, 0)));
+        source.RaiseState(Sticks(right: Stick(0, 0)));
+        source.RaiseState(Sticks(right: Stick(Active, 0)));
+
+        var actions = await delivery.WaitForAsync(4);
+        Assert.Equal(
+            new[] { OverlayNavigationAction.NavigateUp, OverlayNavigationAction.NavigateDown, OverlayNavigationAction.NavigateLeft, OverlayNavigationAction.NavigateRight },
+            actions);
+    }
+
+    [Fact]
+    public async Task Held_stick_emits_once_then_re_arms_only_after_returning_to_neutral()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.RaiseState(Sticks(left: Stick(Active, 0)));
+        source.RaiseState(Sticks(left: Stick(Active, 0)));  // still held
+        source.RaiseState(Sticks(left: Stick(30_000, 0)));  // farther, same direction
+        await delivery.WaitForAsync(1);
+        await Task.Delay(100);
+        Assert.Equal(new[] { OverlayNavigationAction.NavigateRight }, delivery.Snapshot());
+
+        source.RaiseState(Sticks(left: Stick(0, 0)));       // neutral -> re-arm
+        source.RaiseState(Sticks(left: Stick(Active, 0)));  // fresh deflection
+        var actions = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { OverlayNavigationAction.NavigateRight, OverlayNavigationAction.NavigateRight }, actions);
+    }
+
+    [Fact]
+    public async Task Stick_deflected_at_capture_start_emits_nothing_until_neutral_then_deflected()
+    {
+        var source = new FakeSource { LatestState = Sticks(left: Stick(0, Active)) };
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.RaiseState(Sticks(left: Stick(0, Active)));  // same deflection, still disarmed
+        await Task.Delay(100);
+        Assert.Empty(delivery.Snapshot());
+
+        source.RaiseState(Sticks(left: Stick(0, 0)));       // neutral -> arm
+        source.RaiseState(Sticks(left: Stick(0, Active)));  // fresh
+        var actions = await delivery.WaitForAsync(1);
+        Assert.Equal(new[] { OverlayNavigationAction.NavigateUp }, actions);
+    }
+
+    [Fact]
+    public async Task Right_stick_deflected_at_capture_start_is_independent_of_left_stick_arming()
+    {
+        var source = new FakeSource { LatestState = Sticks(right: Stick(Active, 0)) };
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        // Left stick is armed from a neutral start and fires immediately; right stick started
+        // deflected and stays silent until it returns to neutral.
+        source.RaiseState(new(default, Stick(0, Active), Stick(Active, 0), default, default));
+        var first = await delivery.WaitForAsync(1);
+        Assert.Equal(new[] { OverlayNavigationAction.NavigateUp }, first);
+
+        await Task.Delay(100);
+        Assert.Single(delivery.Snapshot());
+
+        source.RaiseState(Sticks(right: Stick(0, 0)));
+        source.RaiseState(Sticks(right: Stick(Active, 0)));
+        var actions = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { OverlayNavigationAction.NavigateUp, OverlayNavigationAction.NavigateRight }, actions);
+    }
+
+    [Fact]
+    public async Task Movement_into_the_hysteresis_band_does_not_re_arm_the_stick()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.RaiseState(Sticks(left: Stick(Active, 0)));   // fire NavigateRight, disarm
+        await delivery.WaitForAsync(1);
+        source.RaiseState(Sticks(left: Stick(12_000, 0)));   // between neutral (8k) and activation (16k)
+        source.RaiseState(Sticks(left: Stick(Active, 0)));   // back to active -- still disarmed
+        await Task.Delay(100);
+        Assert.Single(delivery.Snapshot());
+
+        source.RaiseState(Sticks(left: Stick(0, 0)));        // real neutral -> re-arm
+        source.RaiseState(Sticks(left: Stick(Active, 0)));
+        var actions = await delivery.WaitForAsync(2);
+        Assert.Equal(2, actions.Count);
+    }
+
+    [Fact]
+    public async Task Diagonal_deflection_emits_only_the_dominant_axis_action()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.RaiseState(Sticks(left: Stick(18_000, 24_000)));   // Y dominant -> Up only
+        source.RaiseState(Sticks(left: Stick(0, 0)));
+        source.RaiseState(Sticks(left: Stick(-24_000, 18_000))); // X dominant -> Left only
+        source.RaiseState(Sticks(left: Stick(0, 0)));
+        source.RaiseState(Sticks(left: Stick(20_000, 20_000)));  // tie -> vertical (Up)
+
+        var actions = await delivery.WaitForAsync(3);
+        Assert.Equal(
+            new[] { OverlayNavigationAction.NavigateUp, OverlayNavigationAction.NavigateLeft, OverlayNavigationAction.NavigateUp },
+            actions);
+    }
+
+    [Fact]
+    public async Task Release_waiter_waits_while_left_stick_is_deflected_then_completes_on_neutral()
+    {
+        var source = new FakeSource();
+        using var router = new OverlayControllerInputRouter(source, _ => Task.CompletedTask);
+        router.Start();
+        source.RaiseState(Sticks(left: Stick(0, Active)));
+
+        var wait = router.WaitForConsumedControlsReleaseAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        source.RaiseState(Sticks(left: Stick(0, 0)));
+        Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Release_waiter_waits_while_right_stick_is_deflected_then_completes_on_neutral()
+    {
+        var source = new FakeSource();
+        using var router = new OverlayControllerInputRouter(source, _ => Task.CompletedTask);
+        router.Start();
+        source.RaiseState(Sticks(right: Stick(Active, 0)));
+
+        var wait = router.WaitForConsumedControlsReleaseAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        source.RaiseState(Sticks(right: Stick(0, 0)));
+        Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Release_waiter_waits_until_both_a_bumper_and_a_stick_are_released()
+    {
+        var source = new FakeSource();
+        using var router = new OverlayControllerInputRouter(source, _ => Task.CompletedTask);
+        router.Start();
+        source.RaiseState(new(Buttons(rb: true), default, Stick(Active, 0), default, default));
+
+        var wait = router.WaitForConsumedControlsReleaseAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        source.RaiseState(new(Buttons(), default, Stick(Active, 0), default, default)); // RB released, stick still held
+        await Task.Delay(100);
+        Assert.False(wait.IsCompleted);
+
+        source.RaiseState(Sticks(right: Stick(0, 0)));
+        Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 }
