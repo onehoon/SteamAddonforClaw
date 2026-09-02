@@ -368,6 +368,31 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
+    public async Task Overlay_resume_with_a_null_source_still_clears_the_pause_and_unblocks_a_later_reconcile()
+    {
+        // OQ4 PR3 review [1]: real PID1902 loss routes through the unified retirement path with no
+        // live source. The pause fact must still be cleared so recovery / PR7 reconcile is not
+        // permanently Blocked:OverlayCaptureActive.
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher();
+        var owner = Build(native, xbox360, new FakePublisher());
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await owner.PauseForOverlayAsync(default)).Outcome);
+        Assert.True(owner.IsOverlayPaused);
+
+        var resume = await owner.ResumeAfterOverlayAsync(null, default);
+
+        Assert.Equal(OverlayResumeOutcome.LeftNeutral, resume.Outcome);
+        Assert.False(owner.IsOverlayPaused);
+        Assert.False(xbox360.IsRunning);
+
+        var reconcile = await owner.ReconcileDesiredPresentationAsync(new FakeSource(), WantsXbox, default);
+        Assert.NotEqual(PresentationReconcileOutcome.Blocked, reconcile.Outcome);
+        Assert.NotEqual("OverlayCaptureActive", reconcile.Reason);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Overlay_resume_with_unavailable_source_leaves_output_neutral_and_allows_a_later_reconcile()
     {
         var native = new FakeNative();

@@ -119,11 +119,12 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// switching. Never blocks explicit authority release or process shutdown.</summary>
     Task<OverlayPauseResult> PauseForOverlayAsync(CancellationToken cancellationToken);
 
-    /// <summary>OQ4: end an Overlay-capture pause. The pause fact is always cleared. If the physical
-    /// source is healthy and the same presentation is still structurally valid, the SAME publisher
-    /// object is restarted with no attach/detach/VIIPER recreate; otherwise output is left neutral
-    /// for the existing physical recovery / PR7 reconcile path.</summary>
-    Task<OverlayResumeResult> ResumeAfterOverlayAsync(IMsiClawPreparedInputSource source, CancellationToken cancellationToken);
+    /// <summary>OQ4: end an Overlay-capture pause. The pause fact is ALWAYS cleared -- even when
+    /// <paramref name="source"/> is <see langword="null"/> / unavailable (real PID1902 loss) -- so
+    /// normal physical recovery / PR7 reconcile is no longer blocked. The SAME publisher object is
+    /// restarted only when the source is healthy and the presentation is still structurally valid
+    /// (no attach/detach/VIIPER recreate); otherwise output is left neutral.</summary>
+    Task<OverlayResumeResult> ResumeAfterOverlayAsync(IMsiClawPreparedInputSource? source, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -407,7 +408,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         finally { _gate.Release(); }
     }
 
-    public async Task<OverlayResumeResult> ResumeAfterOverlayAsync(IMsiClawPreparedInputSource source, CancellationToken cancellationToken)
+    public async Task<OverlayResumeResult> ResumeAfterOverlayAsync(IMsiClawPreparedInputSource? source, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
