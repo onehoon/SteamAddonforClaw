@@ -71,6 +71,28 @@ public sealed class SingleInstanceGateTests
         Assert.Equal(0, activationCount);
     }
 
+    [Fact] // PR12 review [P1]: a failed stock preparation leaves the Runtime alive, so a later
+           // uninstall request in the same Runtime must still be delivered.
+    public void RegisterUninstallRequest_DeliversEveryRequest_NotJustTheFirst()
+    {
+        var names = CreateNames();
+        using var primary = new SingleInstanceGate(names.MutexName, names.ActivationEventName);
+        var handled = 0;
+        var latch = new SemaphoreSlim(0);
+        primary.RegisterUninstallRequest(() =>
+        {
+            Interlocked.Increment(ref handled);
+            latch.Release();
+        });
+
+        using var signal = new EventWaitHandle(false, EventResetMode.AutoReset, names.ActivationEventName + ".Uninstall");
+        signal.Set();
+        Assert.True(latch.Wait(TimeSpan.FromSeconds(5)));
+        signal.Set();
+        Assert.True(latch.Wait(TimeSpan.FromSeconds(5)));
+        Assert.Equal(2, Volatile.Read(ref handled));
+    }
+
     private static (string MutexName, string ActivationEventName) CreateNames()
     {
         var identifier = Guid.NewGuid().ToString("N");

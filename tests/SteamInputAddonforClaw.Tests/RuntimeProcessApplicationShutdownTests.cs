@@ -28,6 +28,22 @@ public sealed class RuntimeProcessApplicationShutdownTests
         Assert.DoesNotContain("frontendClient", source, StringComparison.Ordinal);
     }
 
+    [Fact] // PR12 review [P1]: a stock preparation that does not succeed (or throws) must NOT shut
+           // down the only controller Runtime.
+    public void Uninstall_shutdown_is_gated_on_a_successful_stock_preparation()
+    {
+        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src/SteamInputAddonforClaw/Hosting/RuntimeProcessApplication.cs"));
+        var method = source[source.IndexOf("private void RequestExitForUninstall()", StringComparison.Ordinal)..];
+        method = method[..method.IndexOf("\n    private ", StringComparison.Ordinal)];
+
+        // The success gate and both early returns come before the single shutdown call.
+        var successGate = method.IndexOf("Succeeded: true", StringComparison.Ordinal);
+        var shutdown = method.IndexOf("BeginShutdownAndRequestLoopExit()", StringComparison.Ordinal);
+        Assert.True(successGate > 0 && successGate < shutdown);
+        Assert.Equal(2, Regex.Matches(method, @"\breturn;").Count); // throw path + failed-result path
+        Assert.Contains("remain active", method, StringComparison.Ordinal);
+    }
+
     private static string RepositoryRoot()
     {
         for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)

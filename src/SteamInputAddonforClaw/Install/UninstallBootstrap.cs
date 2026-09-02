@@ -22,10 +22,11 @@ internal static class UninstallBootstrap
             return;
         }
 
-        // Backstop only: the Runtime's PrepareForUninstallAsync already removed the task after proving
-        // stock authority. This is an idempotent no-op on the common path (task already absent).
-        try { WindowsTaskSchedulerStartupManager.WithElevatedRepair().Synchronize(false); } catch (Exception exception) { AppLog.Warn("Uninstall", "Startup registration cleanup backstop failed.", exception); }
-
+        // PR12 section 18 / review [P1]: the fast callback does NOT own startup-task removal. A gone
+        // Runtime process only proves the mutex disappeared -- NOT that PR12 stock preparation
+        // succeeded -- so removing the mandatory startup task here could strip the guarantee while
+        // Center M is still Disabled, and it must never launch a UAC flow from this callback. That
+        // mutation belongs exclusively to a successful Runtime PrepareForUninstallAsync.
         RunBoundedLocalCleanup(runtimeReleased);
 
         AppLog.Info("Uninstall", "FastCallback completed without elevation or dependency teardown.", ("Action", "BoundedOnly"));

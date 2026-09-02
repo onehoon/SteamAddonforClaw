@@ -249,6 +249,36 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         Assert.False(Manager(store, elevated).Synchronize(false).Success);
     }
 
+    [Fact] // PR12 review [P1]: a Task Scheduler read failure before deletion is NOT verified absence.
+    public void Disable_fails_when_the_task_cannot_be_read_before_removal()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 1 };
+        var elevated = new FakeElevated { Store = store };
+
+        Assert.False(Manager(store, elevated).Synchronize(false).Success);
+        Assert.Equal(0, elevated.RemoveCalls);
+        Assert.Equal(0, store.DeleteCalls);
+    }
+
+    [Fact] // PR12 review [P1]: a read failure during post-elevated-delete verification is NOT absence.
+    public void Disable_fails_when_absence_cannot_be_read_back_after_the_elevated_removal()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 2 };
+        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
+
+        Assert.False(Manager(store, elevated).Synchronize(false).Success);
+        Assert.Equal(1, elevated.RemoveCalls); // removal ran; absence just could not be proven
+    }
+
+    [Fact] // same distinction on the direct-write (elevated child) path
+    public void The_elevated_child_disable_fails_when_absence_cannot_be_read_back_after_delete()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 2 };
+
+        Assert.False(Manager(store, elevated: null).Synchronize(false).Success);
+        Assert.Equal(1, store.DeleteCalls);
+    }
+
     [Fact]
     public void The_elevated_child_disable_deletes_directly_and_verifies_absence()
     {
@@ -269,6 +299,8 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         // Read lag: from the Nth Read() onward, Current becomes CompliantValue.
         public int CompliantOnReadNumber;
         public OwnedStartupTaskState? CompliantValue;
+        // Task Scheduler read failure: from the Nth Read() onward, Read() throws (0 == never).
+        public int FailReadsFrom;
         public int RegisterCalls;
         public int DeleteCalls;
         public int ReadCalls;
@@ -277,6 +309,8 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         public OwnedStartupTaskState? Read()
         {
             ReadCalls++;
+            if (FailReadsFrom > 0 && ReadCalls >= FailReadsFrom)
+                throw new InvalidOperationException("Simulated Task Scheduler read failure.");
             if (CompliantOnReadNumber > 0 && ReadCalls >= CompliantOnReadNumber && CompliantValue is not null)
                 Current = CompliantValue;
             return Current;
