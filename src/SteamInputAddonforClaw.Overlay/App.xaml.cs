@@ -98,6 +98,21 @@ public partial class App : Application
                     case OverlayNavigationAction.NextTab:
                         _window?.SelectNextTab();
                         break;
+                    case OverlayNavigationAction.NavigateUp:
+                        _window?.NavigateUp();
+                        break;
+                    case OverlayNavigationAction.NavigateDown:
+                        _window?.NavigateDown();
+                        break;
+                    case OverlayNavigationAction.NavigateLeft:
+                        _window?.AdjustSelectedRow(-1);
+                        break;
+                    case OverlayNavigationAction.NavigateRight:
+                        _window?.AdjustSelectedRow(+1);
+                        break;
+                    case OverlayNavigationAction.Accept:
+                        _window?.ActivateSelectedRow();
+                        break;
                 }
             }
             catch (Exception exception)
