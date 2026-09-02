@@ -33,6 +33,54 @@ internal sealed record PresentationReconcileResult(PresentationReconcileOutcome 
     internal bool Succeeded => Outcome is PresentationReconcileOutcome.NoChange or PresentationReconcileOutcome.Switched or PresentationReconcileOutcome.Attached;
 }
 
+internal enum OverlayPauseOutcome
+{
+    /// <summary>Publisher proven stopped and the SAME attached device written neutral. The typed
+    /// device stays attached; a later <see cref="IMsiClawAddonPresentation.ResumeAfterOverlayAsync"/>
+    /// restarts the same publisher.</summary>
+    Paused,
+    /// <summary>The publisher could not be stopped/joined. Nothing was written neutral, nothing was
+    /// detached; the current presentation stays owned and live.</summary>
+    PublisherNotStopped,
+    /// <summary>Fail-close boundary: the publisher was proven stopped but the neutral write was
+    /// rejected, so the current active presentation was retired through the existing owner. No
+    /// alternate presentation fallback.</summary>
+    NeutralRejectedPresentationRetired,
+    /// <summary>Fail-close boundary reached but the retirement of the current presentation could not
+    /// itself be proven (e.g. native detach failure). The publisher is stopped, the last game-facing
+    /// state was not proven neutral, and ownership evidence is retained -- callers must NOT treat
+    /// this as a clean retirement.</summary>
+    NeutralRejectedRetireFailed,
+    /// <summary>A precondition (owner disposed, no active presentation / publisher, wrong kind) was
+    /// not met; no mutation was attempted.</summary>
+    Blocked,
+}
+
+/// <summary>The in-memory result of one OQ4 Overlay-capture pause. Not persisted.</summary>
+internal sealed record OverlayPauseResult(OverlayPauseOutcome Outcome, string Reason)
+{
+    internal bool Succeeded => Outcome == OverlayPauseOutcome.Paused;
+}
+
+internal enum OverlayResumeOutcome
+{
+    /// <summary>The SAME publisher was restarted against a healthy source; the presentation is live.</summary>
+    Resumed,
+    /// <summary>The Overlay pause was cleared but the same presentation could not be safely resumed
+    /// (source not running, presentation no longer structurally valid, or publisher start threw).
+    /// Output stays neutral / publisher stopped; existing physical recovery / PR7 reconcile owns
+    /// recovery.</summary>
+    LeftNeutral,
+    /// <summary>There was no Overlay pause to end.</summary>
+    NotPaused,
+}
+
+/// <summary>The in-memory result of one OQ4 Overlay-capture resume. Not persisted.</summary>
+internal sealed record OverlayResumeResult(OverlayResumeOutcome Outcome, string Reason)
+{
+    internal bool Succeeded => Outcome == OverlayResumeOutcome.Resumed;
+}
+
 /// <summary>A narrow abstraction over the two canonical VIIPER input publishers so the presentation
 /// owner can be tested without the production worker thread. Production adapters forward verbatim to
 /// <see cref="CanonicalXbox360InputPublisher"/> / <see cref="CanonicalSteamDeckInputPublisher"/>.</summary>
@@ -63,6 +111,19 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// the selected typed device, then tear the canonical VIIPER runtime down to its closed state.
     /// Must reach a proven-safe state before physical ownership is released to MSI.</summary>
     Task<bool> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken);
+
+    /// <summary>OQ4: stop the current publisher, prove it joined, and write the SAME attached typed
+    /// device neutral -- WITHOUT detaching it or recreating VIIPER. On a proven-stopped publisher
+    /// with a rejected neutral write the current presentation is retired through the existing owner
+    /// (fail-close). While paused, <see cref="ReconcileDesiredPresentationAsync"/> is blocked from
+    /// switching. Never blocks explicit authority release or process shutdown.</summary>
+    Task<OverlayPauseResult> PauseForOverlayAsync(CancellationToken cancellationToken);
+
+    /// <summary>OQ4: end an Overlay-capture pause. The pause fact is always cleared. If the physical
+    /// source is healthy and the same presentation is still structurally valid, the SAME publisher
+    /// object is restarted with no attach/detach/VIIPER recreate; otherwise output is left neutral
+    /// for the existing physical recovery / PR7 reconcile path.</summary>
+    Task<OverlayResumeResult> ResumeAfterOverlayAsync(IMsiClawPreparedInputSource source, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -88,6 +149,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private ICanonicalSteamDeckSession? _deckSession;
     private Task? _faultCleanup;
     private bool _disposed;
+    private bool _overlayPaused;
 
     internal MsiClawAddonPresentation(
         CanonicalViiperRuntime? viiper,
@@ -109,6 +171,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     internal CanonicalViiperRuntimeState? ViiperState => _viiper?.State;
 
     internal AddonPresentationKind? ActivePresentation => _activeKind;
+
+    internal bool IsOverlayPaused => _overlayPaused;
 
     public async Task<InitialPresentationResult> AttachInitialAsync(IMsiClawPreparedInputSource source, SteamPresentationSnapshot snapshot, CancellationToken cancellationToken)
     {
@@ -143,6 +207,11 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         {
             if (_disposed)
                 return Blocked("OwnerDisposed");
+            // OQ4 section 5.4: while Overlay capture is paused the current presentation stays
+            // attached + neutral. No attach, no detach, no publisher restart. The Runtime requests
+            // one normal reconcile with fresh Steam/BPM facts AFTER capture ends.
+            if (_overlayPaused)
+                return Blocked("OverlayCaptureActive");
             if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
                 return Blocked("ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"));
             if (source is null || !source.IsRunning)
@@ -279,6 +348,118 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     public Task<bool> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken) => RetireAsync("CenterMEnable");
 
+    public async Task<OverlayPauseResult> PauseForOverlayAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return PauseBlocked("OwnerDisposed");
+            if (_overlayPaused) return new(OverlayPauseOutcome.Paused, "AlreadyPaused");
+            if (_activeKind is not { } kind || _publisher is not { } publisher)
+                return PauseBlocked("NoActivePresentation");
+            if (!publisher.IsRunning)
+                return PauseBlocked("PublisherNotRunning");
+            if (kind == AddonPresentationKind.SteamDeck && _deckSession is not { State: CanonicalSteamDeckSessionState.Active })
+                return PauseBlocked("SteamDeckSessionNotActive:" + (_deckSession?.State.ToString() ?? "None"));
+
+            // 1. Stop + prove the publisher joined. Never write neutral underneath a possibly-live
+            //    publisher; never detach here.
+            try
+            {
+                await publisher.StopAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("OverlayCapture", "Presentation publisher could not be stopped for Overlay; presentation stays live.", exception,
+                    ("Event", "OverlayPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStopThrew"));
+                return new(OverlayPauseOutcome.PublisherNotStopped, "PublisherStopThrew");
+            }
+            if (publisher.IsRunning)
+            {
+                AppLog.Warn("OverlayCapture", "Presentation publisher still running after StopAsync; presentation stays live.", null,
+                    ("Event", "OverlayPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
+                return new(OverlayPauseOutcome.PublisherNotStopped, "PublisherStillRunning");
+            }
+
+            // 2. Write the SAME attached device neutral. A rejected neutral write on a proven-stopped
+            //    publisher is a real output-safety failure: fail-close the current presentation
+            //    through the existing owner. No alternate presentation fallback.
+            var neutral = kind == AddonPresentationKind.Xbox360
+                ? _viiper!.SetXbox360State(default)
+                : _deckSession!.SetNeutral();
+            if (!neutral)
+            {
+                AppLog.Error("OverlayCapture", "Neutral write rejected on a stopped publisher; retiring the current presentation.", null,
+                    ("Event", "OverlayPauseNeutralRejected"), ("Presentation", kind));
+                if (!await RetireActivePresentationCoreAsync("OverlayPauseNeutralRejected").ConfigureAwait(false))
+                {
+                    AppLog.Error("OverlayCapture", "Presentation could not be proven retired after Overlay neutral rejection; ownership retained.", null,
+                        ("Event", "OverlayPauseFailCloseIncomplete"), ("Presentation", kind));
+                    return new(OverlayPauseOutcome.NeutralRejectedRetireFailed, "NeutralRejectedRetireFailed");
+                }
+                return new(OverlayPauseOutcome.NeutralRejectedPresentationRetired, "NeutralRejected");
+            }
+
+            _overlayPaused = true;
+            AppLog.Info("OverlayCapture", "Presentation paused neutral.", ("Event", "OverlayPausePaused"), ("Presentation", kind));
+            return new(OverlayPauseOutcome.Paused, "Paused");
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<OverlayResumeResult> ResumeAfterOverlayAsync(IMsiClawPreparedInputSource source, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_overlayPaused)
+                return new(OverlayResumeOutcome.NotPaused, "NotPaused");
+
+            // Ending capture always clears the pause fact so normal recovery / reconcile is no
+            // longer blocked, even when the same presentation cannot be resumed.
+            _overlayPaused = false;
+
+            if (_disposed || _activeKind is not { } kind || _publisher is not { } publisher)
+                return LeftNeutral("NoActivePresentation");
+            if (source is null || !source.IsRunning)
+                return LeftNeutral("SourceNotRunning");
+            if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
+                return LeftNeutral("ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"));
+
+            // VIIPER Ready / session Active are not proof the typed USB device is still attached
+            // (sleep/resume or PnP disruption can drop it while the Overlay is open). Prove it with
+            // the same narrow attachment query the structural reconcile path uses before restarting
+            // the publisher against a possibly-detached device.
+            if (kind == AddonPresentationKind.Xbox360)
+            {
+                if (!_viiper!.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                    return LeftNeutral("Xbox360AttachmentNotAttached:" + attachment);
+            }
+            else
+            {
+                if (_deckSession is not { State: CanonicalSteamDeckSessionState.Active } session)
+                    return LeftNeutral("SteamDeckSessionNotActive:" + (_deckSession?.State.ToString() ?? "None"));
+                if (!session.TryGetTrackedAttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                    return LeftNeutral("SteamDeckAttachmentNotAttached:" + attachment);
+            }
+
+            try
+            {
+                publisher.Start();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("OverlayCapture", "Publisher restart threw after Overlay; leaving output neutral.", exception,
+                    ("Event", "OverlayResumeFailed"), ("Presentation", kind));
+                return LeftNeutral("PublisherStartThrew");
+            }
+
+            AppLog.Info("OverlayCapture", "Same presentation resumed.", ("Event", "OverlayResumeResumed"), ("Presentation", kind));
+            return new(OverlayResumeOutcome.Resumed, "Resumed");
+        }
+        finally { _gate.Release(); }
+    }
+
     /// <summary>Retire ONLY the current active presentation (stop/join publisher -&gt; canonical
     /// detach primitive -&gt; clear managed fields). The canonical VIIPER runtime (server / bus / both
     /// typed device objects) stays alive and Ready -- this is the PR7 X360 &lt;-&gt; Deck switch step.
@@ -330,6 +511,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             _deckSession = null;
         }
         _activeKind = null;
+        // OQ4 section 5.6: an explicit authority release / teardown that retires the presentation
+        // also clears any Overlay pause so the closed state is consistent.
+        _overlayPaused = false;
         return true;
     }
 
@@ -388,6 +572,19 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         AppLog.Warn("ControllerPresentation", "Initial presentation failed.", null,
             ("Event", "InitialPresentationFailed"), ("Stage", stage), ("Reason", reason), ("Presentation", kind?.ToString() ?? "None"));
         return new(false, kind, reason);
+    }
+
+    private static OverlayPauseResult PauseBlocked(string reason)
+    {
+        AppLog.Info("OverlayCapture", "Overlay pause not attempted.", ("Event", "OverlayPauseBlocked"), ("Reason", reason));
+        return new(OverlayPauseOutcome.Blocked, reason);
+    }
+
+    private OverlayResumeResult LeftNeutral(string reason)
+    {
+        AppLog.Warn("OverlayCapture", "Same presentation could not be resumed after Overlay; output left neutral.", null,
+            ("Event", "OverlayResumeLeftNeutral"), ("Presentation", _activeKind?.ToString() ?? "None"), ("Reason", reason));
+        return new(OverlayResumeOutcome.LeftNeutral, reason);
     }
 
     private PresentationReconcileResult Blocked(string reason)
