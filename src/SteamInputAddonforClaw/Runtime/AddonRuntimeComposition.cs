@@ -37,10 +37,13 @@ internal static class AddonRuntimeCompositionFactory
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
         bool hardwareSupported,
-        // PR4: false once Center M startup roots are exactly Disabled/Partial/Unavailable. The old
-        // Steam-session physical routing owner and the legacy stock XInput resume baseline must not
-        // run in those authority states (work order PR4 sections 17-19).
-        bool legacyRoutingAllowed,
+        // True only when Center M startup roots are exactly Enabled/Automatic (MSI/stock authority).
+        // It gates the stock PID1901 resume baseline. It does NOT gate any Addon controller
+        // ownership: per REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md 3.1, Center M Enabled
+        // means "Addon DirectInput / HidHide / VIIPER ownership = none" and "Steam/BPM must not
+        // override this authority decision", so the legacy Steam-session physical routing owner is
+        // never created here.
+        bool stockCenterMAuthority,
         WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
         Action? routingReconcileCompleted = null,
@@ -58,20 +61,11 @@ internal static class AddonRuntimeCompositionFactory
         if (bigPictureStateChanged is not null) steamRuntime.BigPictureStateChanged += bigPictureStateChanged;
         var startupRegistrationResult = startupSettings.Repair();
 
-        if (!legacyRoutingAllowed)
-        {
-            steamRuntime.StartActualObservation();
-            AppLog.Info("Routing", "Legacy Steam-session physical routing is not selected in this Center M authority state; actual game observation remains active.", ("Action", "ActualObservation"));
-        }
-        else if (recoverySafe)
-        {
-            steamRuntime.StartRoutingObservation();
-        }
-        else
-        {
-            steamRuntime.StartActualObservation();
-            AppLog.Warn("Recovery", "Steam/controller routing remains stopped because recovery is unsafe.", null, ("Action", "Passive"));
-        }
+        // Full1902: the legacy Steam-session physical routing owner is never composed. Center M
+        // Enabled has no Addon controller ownership at all; Center M Disabled uses the VIIPER
+        // presentation owner (PR6/PR7), not this path. Only the actual-AppID fact used by
+        // Device/Profile is observed.
+        steamRuntime.StartActualObservation();
 
         var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
         var powerGate = new PowerMutationGate();
@@ -86,25 +80,17 @@ internal static class AddonRuntimeCompositionFactory
                 new ViiperRuntimeInspector()),
             () => steamRuntime.State,
             () => recoverySafetyState.Current == RecoverySafety.Safe);
-        var routingRuntime = legacyRoutingAllowed
-            ? AddonRoutingRuntime.Create(
-                handheldDeviceAdapter,
-                statusProvider,
-                recoveryManager,
-                powerGate,
-                recoverySafetyState,
-                startupSettings,
-                hardwareSupported,
-                winGSuppressionGuard,
-                wingMappingPreference: startupSettings)
-            : null;
-        if (!legacyRoutingAllowed)
-            AppLog.Info("Routing", "Legacy Steam-session routing runtime was not created for this Center M authority state.", ("Action", "Passive"));
+        // Full1902 review [BLOCKER]: removing the Steam Input Routing preference must not let Steam/BPM
+        // drive the legacy physical routing owner. That owner was only ever composed in the Center M
+        // Enabled (stock authority) state, where the design forbids any Addon controller ownership, so
+        // it is no longer created. The stock PID1901 resume baseline below is kept independently.
+        AddonRoutingRuntime? routingRuntime = null;
+        AppLog.Info("Routing", "Legacy Steam-session routing runtime is not composed (Full1902 controller authority).", ("Action", "Passive"));
 
-        // PR4 section 19: sleep/resume while Center M is Disabled must not call the legacy XInput
-        // restoration baseline. A non-legacy authority state gets a no-op that reports success.
-        Func<CancellationToken, Task<bool>> establishBaseline = (!legacyRoutingAllowed || stockCenterMBaseline is null)
-            ? _ => Task.FromResult(!legacyRoutingAllowed)
+        // Sleep/resume while Center M is Disabled must not call the legacy stock XInput baseline; the
+        // Enabled (stock authority) state still needs stock PID1901 verification on resume.
+        Func<CancellationToken, Task<bool>> establishBaseline = (!stockCenterMAuthority || stockCenterMBaseline is null)
+            ? _ => Task.FromResult(!stockCenterMAuthority)
             : async token => (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
 
         var runtimeHost = new AddonRuntimeHost(
