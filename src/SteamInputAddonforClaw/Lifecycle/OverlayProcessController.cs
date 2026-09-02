@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.FrontendTransport;
 
@@ -14,6 +15,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private readonly Func<string, NamedPipeOverlayServer> _serverFactory;
+    // OQ5-UI-09: bound once by AddonProcessHost onto the ONE StartupSettingsCoordinator before warm
+    // start. FrontendTransport never sees the coordinator -- only these two narrow operations.
+    private Func<IReadOnlyList<OverlayTabId>>? _getTabOrder;
+    private Func<IReadOnlyList<OverlayTabId>, bool>? _tryChangeTabOrder;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
@@ -34,7 +39,19 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _executablePath = Path.Combine(runtimeBaseDirectory, "overlay", "SteamInputAddonforClaw.Overlay.exe");
         _logDirectory = logDirectory;
         _startProcess = startProcess ?? Process.Start;
-        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName));
+        // The default factory reads the bound authority at connection time (StartCoreAsync), which
+        // always runs after AddonProcessHost has called BindTabOrderAuthority.
+        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _getTabOrder, _tryChangeTabOrder));
+    }
+
+    // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
+    // called before the first warm start; a later call replaces the delegates for the next connection.
+    internal void BindTabOrderAuthority(
+        Func<IReadOnlyList<OverlayTabId>> getTabOrder,
+        Func<IReadOnlyList<OverlayTabId>, bool> tryChangeTabOrder)
+    {
+        _getTabOrder = getTabOrder ?? throw new ArgumentNullException(nameof(getTabOrder));
+        _tryChangeTabOrder = tryChangeTabOrder ?? throw new ArgumentNullException(nameof(tryChangeTabOrder));
     }
 
     internal string ExecutablePath => _executablePath;

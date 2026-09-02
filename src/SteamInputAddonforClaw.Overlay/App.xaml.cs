@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -61,7 +62,7 @@ public partial class App : Application
         {
             _client = new NamedPipeOverlayClient(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
             OverlayLog.Info("Transport", "Overlay command loop starting.");
-            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync).ConfigureAwait(false);
+            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -74,6 +75,32 @@ public partial class App : Application
         {
             if (_client is not null) await _client.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    // OQ5-UI-09: authoritative tab order from the Runtime. Used for the mandatory initial snapshot
+    // (the returned Task must complete before the client reports Ready) and any later republish.
+    // Marshalled through the existing DispatcherQueue; completes only after the shell has applied it.
+    private Task HandleTabOrderAsync(IReadOnlyList<OverlayTabId> order)
+    {
+        OverlayLog.Info("TabOrder", "Authoritative tab order received.", ("Count", order.Count));
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                _window?.ApplyTabOrder(order);
+                completion.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                OverlayLog.Error("TabOrder", "Applying the authoritative tab order failed.", exception);
+                completion.TrySetException(exception);
+            }
+        }))
+        {
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for tab-order application."));
+        }
+        return completion.Task;
     }
 
     // OQ4: semantic navigation from the Runtime capture path. Marshal UI work through the existing

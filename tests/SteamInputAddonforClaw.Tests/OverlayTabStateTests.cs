@@ -148,6 +148,41 @@ public sealed class OverlayTabStateTests
     }
 
     [Fact]
+    public void TryApplyOrderReplacesTheOrderAndPreservesTheSelectedTab()
+    {
+        var state = new OverlayTabState();
+        state.Select(OverlayTabId.Setting);
+
+        Assert.True(state.TryApplyOrder(
+        [
+            OverlayTabId.Controller,
+            OverlayTabId.Device,
+            OverlayTabId.Profile,
+            OverlayTabId.Shortcut,
+            OverlayTabId.Setting,
+        ]));
+
+        Assert.Equal(OverlayTabId.Controller, state.Order[0]);
+        Assert.Equal(OverlayTabId.Setting, state.SelectedTab); // preserved on a live reorder
+
+        state.ResetForShow();
+        Assert.Equal(OverlayTabId.Controller, state.SelectedTab); // new first tab on the next Show
+    }
+
+    [Fact]
+    public void TryApplyOrderRejectsAnInvalidOrderWithoutCorruptingCurrentState()
+    {
+        var state = new OverlayTabState();
+        state.Select(OverlayTabId.Profile);
+
+        Assert.False(state.TryApplyOrder([OverlayTabId.Device, OverlayTabId.Device, OverlayTabId.Profile, OverlayTabId.Controller, OverlayTabId.Shortcut]));
+        Assert.False(state.TryApplyOrder([OverlayTabId.Device, OverlayTabId.Profile]));
+
+        Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
+        Assert.Equal(OverlayTabId.Profile, state.SelectedTab);
+    }
+
+    [Fact]
     public void TraversalFollowsTheCurrentOrderNotEnumDeclarationOrder()
     {
         var state = new OverlayTabState(

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Linq;
+using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
 using Xunit;
@@ -188,6 +189,8 @@ public sealed class OverlayTransportTests
         var hello = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
         Assert.Equal(OverlayWireMessageKind.Handshake, hello.Kind);
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None);
+        // OQ5-UI-09: the client applies the initial authoritative order before it reports Ready.
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState, TabOrder: OverlayTabOrderContract.DefaultOrder), writeGate, CancellationToken.None);
 
         var ready = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
         Assert.Equal(OverlayState.Ready, ready.State);
@@ -208,7 +211,9 @@ public sealed class OverlayTransportTests
         await client.ConnectAsync(5000);
         using var writeGate = new SemaphoreSlim(1, 1);
         await OverlayWireCodec.WriteAsync(client, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
-        await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
+        await OverlayWireCodec.ReadAsync(client, CancellationToken.None); // HandshakeAccepted
+        var initialOrder = await OverlayWireCodec.ReadAsync(client, CancellationToken.None); // OQ5-UI-09 TabOrderState
+        Assert.Equal(OverlayWireMessageKind.TabOrderState, initialOrder.Kind);
         await OverlayWireCodec.WriteAsync(client, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.State, State: OverlayState.Ready), writeGate, CancellationToken.None);
         Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
 
