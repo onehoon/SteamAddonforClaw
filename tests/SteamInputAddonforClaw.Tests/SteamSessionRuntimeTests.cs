@@ -9,7 +9,7 @@ public sealed class SteamSessionRuntimeTests
     [Fact]
     public void DeveloperTestModeState_transition_is_published_through_the_owned_state_graph()
     {
-        using var runtime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        using var runtime = new SteamSessionRuntime();
         SteamSessionStateChangedEventArgs? observed = null;
         runtime.StateChanged += (_, args) => observed = args;
 
@@ -25,7 +25,7 @@ public sealed class SteamSessionRuntimeTests
     [Fact]
     public void Dispose_is_idempotent()
     {
-        var runtime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var runtime = new SteamSessionRuntime();
 
         runtime.Dispose();
         runtime.Dispose();
@@ -35,7 +35,7 @@ public sealed class SteamSessionRuntimeTests
     public void ActualObservation_tracksAppId_withoutStartingRoutingObservation()
     {
         var source = new FakeRunningAppIdSource();
-        using var runtime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference(), source);
+        using var runtime = new SteamSessionRuntime(source);
         var observed = new List<uint>();
         runtime.ActualRunningAppIdChanged += appId => observed.Add(appId);
 
@@ -45,12 +45,6 @@ public sealed class SteamSessionRuntimeTests
         Assert.Equal([123u], observed);
         Assert.Equal(123u, runtime.ActualRunningAppId);
         Assert.False(runtime.State.IsActive);
-    }
-
-    private sealed class FakeSteamInputRoutingPreference : ISteamInputRoutingPreference
-    {
-        public bool SteamInputRoutingEnabled => true;
-        public event EventHandler? SteamInputRoutingEnabledChanged { add { } remove { } }
     }
 
     private sealed class FakeRunningAppIdSource : IRunningAppIdSource

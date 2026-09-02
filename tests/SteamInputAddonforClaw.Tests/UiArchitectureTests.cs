@@ -126,12 +126,13 @@ public sealed class UiArchitectureTests
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
         var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
 
-        // The card lives on the Controller page, above the Steam Input Routing section, and is no
-        // longer on the Device page.
+        // The card lives on the Controller page and is no longer on the Device page.
         Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal) >= 0);
-        Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal)
-            < xaml.IndexOf("x:Name=\"SteamInputRoutingExpander\"", StringComparison.Ordinal));
         Assert.DoesNotContain("CenterMStartupCard", devicePage, StringComparison.Ordinal);
+
+        // Full1902 removed the user-configurable Steam Input Routing switch entirely.
+        Assert.DoesNotContain("SteamInputRouting", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SteamInputRouting", codeBehind, StringComparison.Ordinal);
 
         // Re-read on every entry to the Controller page (the reboot-bound transition raises no StateInvalidated).
         Assert.Contains("internal void Activate() => _ = RefreshCenterMStartupAsync();", codeBehind, StringComparison.Ordinal);

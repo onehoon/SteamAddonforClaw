@@ -1,5 +1,4 @@
 using SteamInputAddonforClaw.Prerequisites;
-using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using Xunit;
 
@@ -8,54 +7,55 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ElevatedSteamSafetyGateTests
 {
     [Fact]
-    public void RoutingEnabledAndBigPictureActive_BlocksMutation()
+    public void RunningAppIdActive_BlocksMutation()
     {
-        var result = Evaluate(0, true, new(true, true, "Active"));
+        var result = Evaluate(123, new(false, true, "Inactive"));
         Assert.False(result.Allowed);
         Assert.Equal("SteamSessionActive", result.Reason);
     }
 
     [Fact]
-    public void RoutingDisabled_DoesNotProbeOrBlock()
+    public void RunningAppIdReadFailure_BlocksMutation()
     {
-        var result = Evaluate(0, false, new(true, true, "Active"));
-        Assert.True(result.Allowed);
+        var result = ElevatedSteamSafetyGate.Evaluate(
+            () => throw new InvalidOperationException("read failed"),
+            () => new(false, true, "Inactive"));
+        Assert.False(result.Allowed);
+        Assert.Equal("RunningAppIdUnavailable", result.Reason);
     }
 
     [Fact]
-    public void RoutingEnabledAndUnreliableBigPictureProbe_BlocksMutation()
+    public void BigPictureActive_BlocksMutation()
     {
-        var result = Evaluate(0, true, new(false, false, "Unreliable"));
+        var result = Evaluate(0, new(true, true, "Active"));
+        Assert.False(result.Allowed);
+        Assert.Equal("SteamSessionActive", result.Reason);
+    }
+
+    [Fact]
+    public void BigPictureProbeUnreliable_BlocksMutation()
+    {
+        var result = Evaluate(0, new(false, false, "Unreliable"));
         Assert.False(result.Allowed);
         Assert.Equal("BigPictureProbeFailed", result.Reason);
     }
 
     [Fact]
-    public void UnreliableSettings_BlocksMutation()
+    public void BigPictureProbeThrows_BlocksMutation()
     {
-        var result = ElevatedSteamSafetyGate.Evaluate(() => 0, () => new(new AppSettings(), false, "SettingsUnreliable"), () => new(false, true, "Inactive"));
+        var result = ElevatedSteamSafetyGate.Evaluate(() => 0, () => throw new InvalidOperationException("probe failed"));
         Assert.False(result.Allowed);
-        Assert.Equal("SettingsUnreliable", result.Reason);
+        Assert.Equal("BigPictureProbeFailed", result.Reason);
     }
 
     [Fact]
-    public void MissingSettingsAreReliableDefaults()
+    public void NoGameAndBigPictureInactive_AllowsMutation()
     {
-        var result = Evaluate(0, false, new(false, true, "Inactive"));
+        var result = Evaluate(0, new(false, true, "Inactive"));
         Assert.True(result.Allowed);
+        Assert.Equal("Allowed", result.Reason);
     }
 
-    [Fact]
-    public void RunningAppIdTakesPriorityAndBlocks()
-    {
-        var result = Evaluate(123, false, new(false, true, "Inactive"));
-        Assert.False(result.Allowed);
-        Assert.Equal("SteamSessionActive", result.Reason);
-    }
-
-    private static (bool Allowed, string Reason) Evaluate(uint appId, bool enabled, SteamBigPictureProbeResult probe) =>
-        ElevatedSteamSafetyGate.Evaluate(
-            () => appId,
-            () => new(new AppSettings(SteamInputRoutingEnabled: enabled), true, "Loaded"),
-            () => probe);
+    private static (bool Allowed, string Reason) Evaluate(uint appId, SteamBigPictureProbeResult probe) =>
+        ElevatedSteamSafetyGate.Evaluate(() => appId, () => probe);
 }

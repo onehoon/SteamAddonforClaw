@@ -19,25 +19,17 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void Load_WhenSettingsDoNotExist_EnablesSteamInputRoutingByDefault()
-    {
-        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-
-        var settings = store.Load();
-
-        Assert.False(settings.SteamInputRoutingEnabled);
-    }
-
-    [Fact]
-    public void Load_SettingsWithoutRoutingProperty_EnablesSteamInputRouting()
+    public void Load_LegacySteamInputRoutingKey_IsIgnored()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         Directory.CreateDirectory(_testDirectory);
-        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false}");
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"SteamInputRoutingEnabled\":true}");
 
         var settings = new SettingsStore(path).Load();
 
-        Assert.False(settings.SteamInputRoutingEnabled);
+        // The removed routing preference must not survive as any in-memory state.
+        Assert.False(settings.LaunchAtWindowsStartup);
+        Assert.DoesNotContain("SteamInputRoutingEnabled", typeof(AppSettings).GetProperties().Select(p => p.Name));
     }
 
     [Fact]
@@ -51,36 +43,16 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void SaveAndLoad_PreservesSteamInputRoutingSetting()
-    {
-        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-        store.Save(new AppSettings(SteamInputRoutingEnabled: true));
-        Assert.True(store.Load().SteamInputRoutingEnabled);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void Load_ReadsSteamInputRoutingEnabledKey(bool enabled)
-    {
-        var path = Path.Combine(_testDirectory, "settings.json");
-        Directory.CreateDirectory(_testDirectory);
-        File.WriteAllText(path, $"{{\"SteamInputRoutingEnabled\":{(enabled ? "true" : "false")}}}");
-
-        Assert.Equal(enabled, new SettingsStore(path).Load().SteamInputRoutingEnabled);
-    }
-
-    [Fact]
-    public void Save_WritesSteamInputRoutingEnabledKeyOnly()
+    public void Save_DoesNotWriteTheRemovedSteamInputRoutingKey()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         var store = new SettingsStore(path);
 
-        store.Save(new AppSettings(SteamInputRoutingEnabled: false));
+        store.Save(new AppSettings(SuppressDeveloperMenuWarning: true));
 
         var json = File.ReadAllText(path);
-        Assert.Contains("\"SteamInputRoutingEnabled\": false", json);
-        Assert.DoesNotContain("RouteInSteamBigPicture", json);
+        Assert.DoesNotContain("SteamInputRoutingEnabled", json);
+        Assert.Contains("\"SuppressDeveloperMenuWarning\": true", json);
     }
 
     [Fact]
@@ -155,31 +127,6 @@ public sealed class SettingsStoreTests : IDisposable
 
         Assert.True(coordinator.SuppressDeveloperMenuWarning);
         Assert.True(store.Load().SuppressDeveloperMenuWarning);
-    }
-
-    [Fact]
-    public void ReliableLoad_InvalidSteamInputRoutingType_BlocksSafetyMutation()
-    {
-        var path = Path.Combine(_testDirectory, "settings.json");
-        Directory.CreateDirectory(_testDirectory);
-        File.WriteAllText(path, "{\"SteamInputRoutingEnabled\":\"true\"}");
-        var result = new SettingsStore(path).LoadForSafetyGate();
-        Assert.False(result.IsReliable);
-        Assert.Equal("SettingsUnreliable", result.Reason);
-    }
-
-    [Fact]
-    public void ReliableLoad_InvalidDeveloperMenuWarningType_DoesNotAffectSafetyMutation()
-    {
-        var path = Path.Combine(_testDirectory, "settings.json");
-        Directory.CreateDirectory(_testDirectory);
-        File.WriteAllText(path, "{\"SteamInputRoutingEnabled\":false,\"SuppressDeveloperMenuWarning\":\"false\"}");
-
-        var result = new SettingsStore(path).LoadForSafetyGate();
-
-        Assert.True(result.IsReliable);
-        Assert.Equal("Loaded", result.Reason);
-        Assert.False(result.Settings.SteamInputRoutingEnabled);
     }
 
     [Fact]
@@ -264,19 +211,6 @@ public sealed class SettingsStoreTests : IDisposable
 
         Assert.True(coordinator.Settings.LaunchAtWindowsStartup);
         Assert.Equal([true], manager.Requests);
-    }
-
-    [Fact]
-    public void ChangeSteamInputRoutingSetting_SaveFailureKeepsMemoryAndEmitsNoChange()
-    {
-        Directory.CreateDirectory(_testDirectory);
-        var coordinator = new StartupSettingsCoordinator(new AppSettings(SteamInputRoutingEnabled: false), new SettingsStore(_testDirectory), new FakeStartupManager());
-        var changes = 0;
-        coordinator.SteamInputRoutingEnabledChanged += (_, _) => changes++;
-
-        Assert.ThrowsAny<Exception>(() => coordinator.ChangeSteamInputRoutingEnabled(true));
-        Assert.False(coordinator.SteamInputRoutingEnabled);
-        Assert.Equal(0, changes);
     }
 
     [Fact]

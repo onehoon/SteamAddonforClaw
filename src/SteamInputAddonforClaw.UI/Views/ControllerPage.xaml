@@ -7,7 +7,7 @@
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
-                <TextBlock Opacity="0.7" Text="Configure Steam Input controller routing." TextWrapping="Wrap" />
+                <TextBlock Opacity="0.7" Text="Configure controller settings." TextWrapping="Wrap" />
             </StackPanel>
 
             <InfoBar x:Name="CenterMStartupInfoBar" IsClosable="False" IsOpen="False" Severity="Informational" />
@@ -23,18 +23,6 @@
                 </StackPanel>
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsExpander x:Name="SteamInputRoutingExpander" Header="Steam Input Routing" IsExpanded="True" Description="Automatically route the built-in controller through Steam Input for Steam games and Big Picture Mode.">
-                <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsExpander.HeaderIcon>
-                <ToggleSwitch x:Name="SteamInputRoutingToggleSwitch" OffContent="" OnContent="" Toggled="SteamInputRoutingToggleSwitch_Toggled" />
-                <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard Header="Routing Button Behavior" Description="During active Steam Input Routing (Steam game or Big Picture Mode), these button assignments are fixed and cannot be customized.">
-                        <StackPanel Spacing="8">
-                            <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="Gamebar Button"/><TextBlock Grid.Column="1" Text="→"/><TextBlock Grid.Column="2" Text="Steam Button"/></Grid>
-                            <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="Center M Button"/><TextBlock Grid.Column="1" Text="→"/><TextBlock Grid.Column="2" Text="Steam Quick Access"/></Grid>
-                        </StackPanel>
-                    </ctcontrols:SettingsCard>
-                </ctcontrols:SettingsExpander.Items>
-            </ctcontrols:SettingsExpander>
             <TextBlock x:Name="CenterMUnavailableText" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
             <views:CenterMButtonPage x:Name="CenterMInlineContent" />
         </StackPanel>

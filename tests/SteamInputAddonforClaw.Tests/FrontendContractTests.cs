@@ -39,9 +39,33 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
+    public void Full1902_removed_the_steam_input_routing_frontend_contract()
+    {
+        Assert.Null(typeof(FrontendSettingsSnapshot).GetProperty("SteamInputRoutingEnabled"));
+        Assert.Null(typeof(IAddonFrontendControl).GetMethod("SetSteamInputRoutingEnabledAsync"));
+        Assert.Null(typeof(FrontendSettingsSnapshot).Assembly.GetType(
+            "SteamInputAddonforClaw.Contracts.Frontend.FrontendSteamInputRoutingMutationResult"));
+    }
+
+    [Fact]
+    public void Settings_snapshot_still_round_trips_the_retained_preferences()
+    {
+        var value = new FrontendSettingsSnapshot(true, FrontendLogLevel.Debug, SuppressDeveloperMenuWarning: true, Oem1MappingSettings.Default)
+        {
+            DeveloperMenuEnabled = true,
+            LaunchAtWindowsStartupRequired = true,
+        };
+        var restored = JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(value));
+        Assert.Equal(value, restored);
+        Assert.True(restored!.SuppressDeveloperMenuWarning);
+        Assert.True(restored.DeveloperMenuEnabled);
+        Assert.True(restored.LaunchAtWindowsStartupRequired);
+    }
+
+    [Fact]
     public void Settings_snapshot_round_trips_through_SystemTextJson()
     {
-        var value = new FrontendSettingsSnapshot(true, FrontendLogLevel.Debug, false, true, Oem1MappingSettings.Default);
+        var value = new FrontendSettingsSnapshot(true, FrontendLogLevel.Debug, true, Oem1MappingSettings.Default);
         var restored = JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
     }
@@ -58,7 +82,7 @@ public sealed class FrontendContractTests
     public void Bootstrap_snapshot_round_trips_through_SystemTextJson()
     {
         var value = new FrontendBootstrapSnapshot(
-            new(false, FrontendLogLevel.Info, true, false, Oem1MappingSettings.Default),
+            new(false, FrontendLogLevel.Info, false, Oem1MappingSettings.Default),
             "Registered at startup.",
             new(false),
             @"C:\Logs",
@@ -70,7 +94,7 @@ public sealed class FrontendContractTests
     [Fact]
     public void LaunchAtStartupResult_round_trips_through_SystemTextJson()
     {
-        var value = new FrontendLaunchAtStartupResult(new(true, FrontendLogLevel.Off, false, false, Oem1MappingSettings.Default), "Registration updated.");
+        var value = new FrontendLaunchAtStartupResult(new(true, FrontendLogLevel.Off, false, Oem1MappingSettings.Default), "Registration updated.");
         var restored = JsonSerializer.Deserialize<FrontendLaunchAtStartupResult>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
     }

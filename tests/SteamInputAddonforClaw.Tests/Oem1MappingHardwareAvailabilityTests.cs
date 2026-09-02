@@ -12,11 +12,11 @@ namespace SteamInputAddonforClaw.Tests;
 /// <summary>
 /// The frontend half of the OEM1 hardware-availability gate: bootstrap must report whether the
 /// Center M Button feature exists on this machine at all, taken verbatim from the runtime's single
-/// startup hardware-support result -- and that fact must be independent of the Steam Input routing
-/// master switch, Steam/BPM state, and the persisted remapping switch.
+/// startup hardware-support result -- and that fact must be independent of Steam/BPM state and the
+/// persisted remapping switch.
 /// </summary>
 /// <remarks>
-/// CI fix: like <see cref="FrontendSteamInputRoutingSettingTests"/>, this touches the shared static
+/// CI fix: this touches the shared static
 /// <see cref="SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride"/> via
 /// <see cref="CreateControl"/>, so it must join the same "AppLog" collection.
 /// </remarks>
@@ -54,23 +54,23 @@ public sealed class Oem1MappingHardwareAvailabilityTests : IDisposable
     }
 
     [Fact]
-    public async Task The_routing_master_switch_never_changes_OEM1_hardware_availability()
+    public async Task A_settings_mutation_never_changes_OEM1_hardware_availability()
     {
-        var control = CreateControl(new AppSettings(SteamInputRoutingEnabled: true), oem1MappingAvailable: true, out _);
+        var control = CreateControl(new AppSettings(), oem1MappingAvailable: true, out _);
 
-        await control.SetSteamInputRoutingEnabledAsync(false);
+        await control.SetOem1MappingAsync(Oem1MappingSettings.Default with { RemappingEnabled = false });
         Assert.True((await control.GetBootstrapAsync()).Oem1MappingAvailable);
 
-        await control.SetSteamInputRoutingEnabledAsync(true);
+        await control.SetOem1MappingAsync(Oem1MappingSettings.Default with { RemappingEnabled = true });
         Assert.True((await control.GetBootstrapAsync()).Oem1MappingAvailable);
     }
 
     [Fact]
-    public async Task The_routing_master_switch_cannot_make_unsupported_hardware_report_available()
+    public async Task A_settings_mutation_cannot_make_unsupported_hardware_report_available()
     {
-        var control = CreateControl(new AppSettings(SteamInputRoutingEnabled: false), oem1MappingAvailable: false, out _);
+        var control = CreateControl(new AppSettings(), oem1MappingAvailable: false, out _);
 
-        await control.SetSteamInputRoutingEnabledAsync(true);
+        await control.SetOem1MappingAsync(Oem1MappingSettings.Default with { RemappingEnabled = false });
 
         Assert.False((await control.GetBootstrapAsync()).Oem1MappingAvailable);
     }

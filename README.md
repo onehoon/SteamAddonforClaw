@@ -9,9 +9,9 @@
 
 Steam Addon for Claw brings Steam Input and Steam Deck-style controller integration to the built-in controller on supported MSI Claw handhelds.
 
-When a Steam game or Steam Big Picture session needs the controller, the Addon can temporarily route the built-in MSI controller through a virtual Steam Deck controller. When routing is no longer needed, the Claw returns to its normal native Windows controller mode.
+While the Addon holds controller authority (MSI Center M disabled), it continuously presents the built-in MSI controller to Windows. When a Steam game or Steam Big Picture session is active, that presentation is a virtual Steam Deck controller; otherwise it is a virtual Xbox 360 controller. There is no user switch for this — presentation follows the Steam/Big Picture state automatically.
 
-Steam Input Routing is optional. Center M button remapping, device-level CPU Boost and TDP controls, per-game performance profiles, and Steam Quick Access Menu performance controls remain available independently from the routing switch.
+Center M button remapping, device-level CPU Boost and TDP controls, per-game performance profiles, and Steam Quick Access Menu performance controls are independent features.
 
 ## Supported devices
 
@@ -32,7 +32,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 
 - Windows 11 x64
 - A supported MSI Claw model listed above
-- Steam installed and running for Steam Input routing, per-game Steam profiles, and Quick Access Menu integration
+- Steam installed and running for Steam Deck controller presentation, per-game Steam profiles, and Quick Access Menu integration
 - The stock MSI controller environment with MSI Center M installed and available
 
 > [!CAUTION]
@@ -42,59 +42,35 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 
 ## Main features
 
-- Optional automatic Steam Input routing for Steam games and Steam Big Picture Mode
+- Automatic Steam Deck controller presentation for Steam games and Steam Big Picture Mode
+- Automatic Xbox 360 controller presentation outside Steam games and Big Picture Mode
 - Virtual Steam Deck controller output (`VID 28DE`, `PID 1205`)
 - Built-in controller button, stick, trigger, D-pad, and rear-button mapping
 - Physical rumble support
-- WING button integration as the Steam button during active routing
-- Center M / OEM1 integration as Steam Quick Access during active routing
-- Configurable Center M normal action outside active routing
-- Device-level CPU Boost, Windows 11 Power Mode, and TDP control independent from Steam Input Routing
-- Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles independent from Steam Input Routing
+- Configurable Center M normal action
+- Device-level CPU Boost, Windows 11 Power Mode, and TDP control as independent features
+- Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles as independent features
 - Event-driven Steam game detection without periodic game/process polling
 - Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls
 - Automatic silent update checks at application startup
 - Background tray operation and lifecycle recovery
 
-## Steam Input Routing
+## Steam controller presentation
 
-> [!NOTE]
-> **Steam Input Routing is optional.**
->
-> This switch controls only the built-in controller's virtual Steam Deck routing. Center M remapping, Device CPU Boost / TDP Control, and per-game performance profiles remain available when Steam Input Routing is disabled.
-
-Open the **Controller** tab and enable **Steam Input Routing** only if you want the built-in controller to be presented to Steam as a virtual Steam Deck controller.
-
-When enabled, the Addon automatically routes the built-in controller when a Steam game or Steam Big Picture Mode requires Steam Input.
-
-### Normal operation
+While MSI Center M is disabled, the Addon holds controller authority and always presents one virtual controller. Which one it presents is decided automatically:
 
 ```text
-MSI Claw built-in controller
-        ↓
-Native MSI / Windows controller mode
+MSI Center M disabled  →  Steam Addon for Claw controller authority
+        │
+        ├── Steam game running OR Steam Big Picture active  →  virtual Steam Deck controller
+        │
+        └── otherwise                                       →  virtual Xbox 360 controller
 ```
 
-Outside an active Steam route, or when Steam Input Routing is disabled, the Claw remains in its normal controller mode.
+There is no user-configurable switch for this. Presentation follows the live Steam / Big Picture state.
 
-### During Steam Input Routing
-
-```text
-MSI Claw built-in controller
-        ↓
-MSI DirectInput mode
-        ↓
-Steam Addon for Claw
-        ↓
-Virtual Steam Deck controller
-        ↓
-Steam Input
-```
-
-The virtual Steam Deck controller is the single controller presentation used by the Addon while routing is active.
-
-If routing cannot be established safely, the Addon does not continue with a partially owned route and returns toward the native controller state instead.
+To restore the stock MSI controller environment, re-enable MSI Center M from the **Controller** tab.
 
 ## Controller mapping
 
@@ -117,24 +93,11 @@ The built-in MSI Claw controls are mapped to the virtual Steam Deck controller a
 
 Motion / gyro output is not currently part of the supported controller mapping.
 
-## WING and Center M button behavior
-
-The WING and Center M buttons intentionally behave differently depending on whether Steam Input Routing is active.
-
-| Button | Routing inactive | Steam Input Routing active |
-| --- | --- | --- |
-| **WING** | Native Windows / Game Bar behavior | **Steam Button** |
-| **Center M / OEM1** | User-configured Normal Action | **Steam Quick Access** |
-
-The routing-time assignments are fixed. They are not user-remappable because they provide the Steam system-button behavior needed while the virtual Steam Deck controller is active.
-
 ## Center M button remapping
 
-The **Controller** tab also contains the Center M button settings used when Steam Input Routing is inactive.
+The **Controller** tab contains the Center M button settings.
 
-Center M remapping does not require Steam Input Routing to be enabled. When routing is disabled or inactive, Center M uses the configured **Normal Action**.
-
-Center M remapping is managed by the Addon and is shown as **Always enabled**. The editable **Normal Action** controls what a normal Center M press does outside an active Steam route.
+Center M remapping is managed by the Addon and is shown as **Always enabled**. The editable **Normal Action** controls what a normal Center M press does.
 
 Available Normal Actions are:
 
@@ -143,21 +106,17 @@ Available Normal Actions are:
 - **Keyboard / Hotkey** — optional Ctrl, Shift, Alt, or Win modifiers plus one key
 - **Launch Application** — launches a selected `.exe`, with optional arguments
 
-During active routing, the Normal Action is temporarily ignored and Center M always becomes **Steam Quick Access**.
+### MSI Center M and controller ownership
 
-### MSI Center M suppression and ownership
+The MSI Center M application can change the physical controller mode. While the Addon holds controller authority (MSI Center M disabled), it protects controller ownership so Center M cannot unexpectedly take the controller back.
 
-The MSI Center M application can change the physical controller mode. That would conflict with an active Steam route, so the Addon protects controller ownership while routing is active.
-
-When a route is being established, the Addon checks the real MSI Center M MainUI state and prevents Center M from unexpectedly taking the controller back while the virtual Steam Deck route is owned. If that ownership boundary cannot be established safely, routing does not continue.
-
-When Steam Input Routing is inactive, manually opening the real MSI Center M application is still allowed and native Center M behavior can take over normally. The physical Center M button itself continues to use the Normal Action configured in the Addon.
+To hand controller authority back to the stock environment, re-enable MSI Center M from the **Controller** tab. This restarts Windows to apply the change.
 
 ## Device tab
 
 The **Device** tab contains global performance settings for the handheld.
 
-Device CPU Boost and TDP Control operate independently from Steam Input Routing. You can use these features without enabling controller routing.
+Device CPU Boost and TDP Control are independent features and are unaffected by controller presentation.
 
 These settings are the normal device-level values used when no enabled game profile is taking priority.
 
@@ -227,7 +186,7 @@ When the game exits:
 - if the corresponding Device feature is enabled, the saved Device value becomes effective again;
 - if the Device feature is disabled, the Addon stops managing that feature instead of restoring an older pre-game value.
 
-Performance profiles use the actual Steam AppID and operate independently from the controller-routing switch. A game profile can therefore apply even when Steam Input Routing itself is disabled.
+Performance profiles use the actual Steam AppID and operate independently from controller presentation.
 
 ## Game detection and Non-Steam games
 
@@ -239,30 +198,27 @@ This means the Addon does not repeatedly scan running `.exe` files or periodical
 
 The detected Steam AppID is used for two separate purposes:
 
-- **Steam Input Routing** — when enabled, a detected Steam session can activate the virtual Steam Deck controller route.
-- **Performance Profiles** — CPU Boost and TDP profiles use the actual running Steam AppID independently from Steam Input Routing.
-
-Because these are separate features, disabling **Steam Input Routing** does not disable game detection or per-game performance profiles.
+- **Controller presentation** — a detected Steam session (or Big Picture) presents the virtual Steam Deck controller instead of the Xbox 360 controller.
+- **Performance Profiles** — CPU Boost and TDP profiles use the actual running Steam AppID.
 
 ```text
 Steam RunningAppID
         │
-        ├── Steam Input Routing enabled? ──→ Virtual Steam Deck routing
+        ├── Steam game or Big Picture active? ──→ Virtual Steam Deck presentation
         │
-        └── Matching enabled Profile? ─────→ CPU Boost / TDP profile
+        └── Matching enabled Profile? ─────────→ CPU Boost / TDP profile
 ```
 
 ### Non-Steam games
 
-Non-Steam games can use the same routing and per-game performance features when they are added to the Steam library as a **Non-Steam Game**.
+Non-Steam games can use the same presentation and per-game performance features when they are added to the Steam library as a **Non-Steam Game**.
 
 The Profile tab reads Non-Steam shortcuts registered in Steam, so those shortcuts can have their own CPU Boost and TDP profiles just like regular Steam games.
 
 When a Non-Steam game is launched through Steam and Steam reports that shortcut as the current running AppID:
 
 - its enabled CPU Boost / TDP profile can be applied;
-- Steam Input Routing can activate if **Steam Input Routing** is enabled;
-- if Steam Input Routing is disabled, the game profile can still apply normally.
+- controller presentation switches to the virtual Steam Deck controller.
 
 ### Games that use a launcher
 
@@ -270,7 +226,7 @@ Some Non-Steam games first start a separate launcher, which then starts the actu
 
 These games are supported only while Steam continues to recognize the Non-Steam shortcut as running after the actual game is launched.
 
-If Steam considers the shortcut finished when the launcher exits, even though the actual game continues running, Steam no longer provides that shortcut as the active `RunningAppID`. In that case, the Addon cannot keep the corresponding routing session or game profile active.
+If Steam considers the shortcut finished when the launcher exits, even though the actual game continues running, Steam no longer provides that shortcut as the active `RunningAppID`. In that case, the Addon cannot keep the corresponding Steam Deck presentation or game profile active.
 
 This behavior intentionally follows Steam's own running-game state. The Addon does not scan for the child game process separately or use executable polling as a fallback.
 
@@ -285,8 +241,6 @@ The Addon tab is available when Steam's GamepadUI Quick Access Menu exists, incl
 
 Steam controls whether a Desktop Steam game receives the GamepadUI overlay; the Addon does not
 enable that Steam setting automatically.
-
-During active routing, press **Center M** to open Steam Quick Access.
 
 The Addon tab provides quick access to the same performance settings used by the desktop UI:
 
@@ -321,15 +275,13 @@ If the update service is temporarily unavailable, the update check times out, or
 4. Configure optional CPU Boost / TDP defaults in **Device**.
 5. Configure game-specific performance settings in **Profile** if desired.
 6. Configure the Center M **Normal Action** in **Controller** if desired.
-7. If you want Steam Deck controller routing, enable **Steam Input Routing** in **Controller**.
-8. Start a Steam game, a Non-Steam game added to Steam, or enter Steam Big Picture Mode.
-9. While routing is active, use **WING** for the Steam menu and **Center M** for Steam Quick Access.
+7. Start a Steam game, a Non-Steam game added to Steam, or enter Steam Big Picture Mode — the built-in controller is presented to Steam as a virtual Steam Deck controller automatically.
 
 ## Background operation
 
 The controller runtime runs separately from the settings window and remains available from the system tray.
 
-Closing the settings window does not need to stop controller routing or profile handling. Use the tray controls when you want to reopen the UI or fully exit the Addon.
+Closing the settings window does not stop controller presentation or profile handling. Use the tray controls when you want to reopen the UI or fully exit the Addon.
 
 ## Safety and recovery
 
@@ -337,13 +289,13 @@ The Addon is designed around the normal handheld lifecycle rather than leaving t
 
 It handles the controller ownership and recovery path across events such as:
 
-- entering and leaving Steam routing
+- entering and leaving Steam games and Big Picture Mode
 - physical controller re-enumeration
 - sleep / hibernate / resume
 - application shutdown or restart
-- routing failures and rollback
+- presentation-switch failures and rollback
 
-The Addon does not intentionally replay a stale routed session after startup. Controller ownership is rebuilt from the current live device state.
+The Addon does not intentionally replay a stale session after startup. Controller ownership is rebuilt from the current live device state.
 
 ## Known limitations
 
@@ -352,18 +304,18 @@ The Addon does not intentionally replay a stale routed session after startup. Co
 - Motion / gyro output is not currently supported by the Steam Deck virtual-controller mapping.
 - Launcher-based Non-Steam games depend on Steam continuing to report the shortcut as the active `RunningAppID` after the actual game starts.
 - QAM integration depends on Steam GamepadUI internals and may require an Addon update after a major Steam client UI change.
-- Running another application that independently takes ownership of the same physical controller can prevent Steam Input Routing from becoming active.
+- Running another application that independently takes ownership of the same physical controller can conflict with the Addon's controller presentation.
 
 ## Troubleshooting
 
-If Steam Input Routing does not activate:
+If the virtual Steam Deck controller is not presented during a Steam game:
 
 1. Confirm the device is one of the supported board IDs listed above.
 2. Confirm the machine is using the stock MSI Center M controller environment and that Handheld Companion, ClawTweaks, or another controller-management tool is not active.
-3. Confirm **Steam Input Routing** is enabled in the Controller tab.
+3. Confirm MSI Center M is disabled in the Controller tab so the Addon holds controller authority.
 4. Confirm Steam is running and recognizes the game or Non-Steam shortcut as currently running.
-5. Close other controller-routing or virtual-controller tools that may be managing the built-in controller.
-6. If MSI Center M was opened or the controller was re-enumerated, allow the Addon to return to a stable native state and then start the Steam session again.
+5. Close other controller-management or virtual-controller tools that may be managing the built-in controller.
+6. If MSI Center M was opened or the controller was re-enumerated, allow the Addon to return to a stable state and then start the Steam session again.
 
 If a Non-Steam game profile stops applying after a launcher closes, check whether Steam still shows that Non-Steam shortcut as running. The Addon intentionally follows Steam's active AppID rather than scanning the child game executable.
 
