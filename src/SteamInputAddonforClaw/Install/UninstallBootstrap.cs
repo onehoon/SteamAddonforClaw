@@ -10,15 +10,23 @@ internal static class UninstallBootstrap
     internal static void RunFastCallbackOnly()
     {
         AppLog.Info("Uninstall", "Velopack uninstall cleanup started.", ("FastCallback", true));
+        // PR12 section 11/18: the running Runtime owns stock restoration AND the startup-task removal
+        // (which must come only AFTER stock authority is proven). The fast callback no longer deletes
+        // the task unconditionally -- if the Runtime did not release, the mandatory startup guarantee
+        // must stay in place.
         var runtimeReleased = RequestRunningRuntimeShutdown();
-        try { new WindowsTaskSchedulerStartupManager().Synchronize(false); } catch (Exception exception) { AppLog.Warn("Uninstall", "Startup registration cleanup failed.", exception); }
 
         if (!runtimeReleased)
         {
-            AppLog.Warn("Uninstall", "Runtime ownership was not released; preserving Addon-owned artifacts and recovery evidence.", null, ("Action", "PreserveDependencySafety"));
+            AppLog.Warn("Uninstall", "Runtime ownership was not released; preserving Addon-owned artifacts, startup registration, and recovery evidence.", null, ("Action", "PreserveDependencySafety"));
             return;
         }
 
+        // PR12 section 18 / review [P1]: the fast callback does NOT own startup-task removal. A gone
+        // Runtime process only proves the mutex disappeared -- NOT that PR12 stock preparation
+        // succeeded -- so removing the mandatory startup task here could strip the guarantee while
+        // Center M is still Disabled, and it must never launch a UAC flow from this callback. That
+        // mutation belongs exclusively to a successful Runtime PrepareForUninstallAsync.
         RunBoundedLocalCleanup(runtimeReleased);
 
         AppLog.Info("Uninstall", "FastCallback completed without elevation or dependency teardown.", ("Action", "BoundedOnly"));

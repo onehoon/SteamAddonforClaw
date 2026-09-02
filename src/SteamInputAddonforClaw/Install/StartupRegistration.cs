@@ -96,10 +96,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         RemoveLegacyRunValue();
 
         if (!enabled)
-        {
-            try { _taskStore.Delete(); AppLog.Info("TaskScheduler", "Startup task deleted."); return StartupRegistrationResult.Disabled(); }
-            catch (Exception exception) { AppLog.Error("TaskScheduler", "Startup task deletion failed.", exception); return StartupRegistrationResult.Failed(); }
-        }
+            return RemoveOwnedTask();
 
         if (!File.Exists(stableExecutablePath))
         {
@@ -154,8 +151,45 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         return verified ? StartupRegistrationResult.Enabled() : StartupRegistrationResult.Failed();
     }
 
-    /// <summary>PR11 section 12: read-only, bounded. Re-reads on a short interval until the exact task
-    /// contract verifies or the window expires. No repeated writes / elevation / unbounded retry.</summary>
+    /// <summary>PR12 section 11: remove the ONE Addon-owned task. Read-only first (already absent ->
+    /// Success, no UAC). A denied delete uses the same bounded elevated child pattern as create, then
+    /// an independent normal-process read-back must prove the task is gone.</summary>
+    private StartupRegistrationResult RemoveOwnedTask()
+    {
+        // review [P1]: a Task Scheduler read failure must NOT be mistaken for verified absence.
+        if (!TryRead(out var current))
+        {
+            AppLog.Warn("TaskScheduler", "Startup task removal aborted; the owned task could not be read.");
+            return StartupRegistrationResult.Failed();
+        }
+        if (current is null)
+        {
+            AppLog.Info("TaskScheduler", "Startup task removal skipped; task is already absent.", ("TaskFound", false));
+            return StartupRegistrationResult.Disabled();
+        }
+
+        if (_elevatedInvoker is not null)
+        {
+            AppLog.Info("TaskScheduler", "Startup task elevated removal requested.", ("ElevatedRepairRequested", true));
+            var outcome = _elevatedInvoker.RemoveOwnedTask();
+            AppLog.Info("TaskScheduler", "Startup task elevated removal completed.", ("ElevatedRepairResult", outcome));
+            if (outcome != ElevatedStartupTaskOutcome.Removed)
+                return StartupRegistrationResult.Failed();
+            var gone = ReadBackVerifyAbsentWithBoundedSettle();
+            AppLog.Info("TaskScheduler", "Startup task removal readback verification completed.", ("ReadbackVerified", gone));
+            return gone ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
+        }
+
+        try { _taskStore.Delete(); }
+        catch (Exception exception) { AppLog.Error("TaskScheduler", "Startup task deletion failed.", exception); return StartupRegistrationResult.Failed(); }
+        var absent = TryRead(out var afterDelete) && afterDelete is null;
+        AppLog.Info("TaskScheduler", "Startup task deleted.", ("ReadbackVerified", absent));
+        return absent ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
+    }
+
+    /// <summary>PR11 section 12 / PR12 section 11: read-only, bounded. Re-reads on a short interval
+    /// until the exact task contract verifies (or, for <paramref name="absent"/>, the task is gone)
+    /// or the window expires. No repeated writes / elevation / unbounded retry.</summary>
     private bool ReadBackVerifyWithBoundedSettle(ScheduledTaskConfiguration configuration)
     {
         var attempts = Math.Max(1, (int)Math.Ceiling(_readbackSettleWindow / _readbackSettleInterval));
@@ -170,10 +204,39 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         }
     }
 
+    /// <summary>review [P1]: absence is only proven by a SUCCESSFUL read that returns no task. A
+    /// transient read failure keeps settling and, if it never clears, reports NOT absent.</summary>
+    private bool ReadBackVerifyAbsentWithBoundedSettle()
+    {
+        var attempts = Math.Max(1, (int)Math.Ceiling(_readbackSettleWindow / _readbackSettleInterval));
+        for (var attempt = 1; ; attempt++)
+        {
+            if (TryRead(out var reread) && reread is null)
+                return true;
+            if (attempt >= attempts)
+                return false;
+            _sleep(_readbackSettleInterval);
+        }
+    }
+
     private OwnedStartupTaskState? SafeRead()
     {
         try { return _taskStore.Read(); }
         catch (Exception exception) { AppLog.Warn("TaskScheduler", "Startup task read failed.", exception); return null; }
+    }
+
+    /// <summary>Preserves the distinction between "read succeeded + task absent" (returns
+    /// <see langword="true"/> with <paramref name="state"/> <see langword="null"/>) and "read failed"
+    /// (returns <see langword="false"/>). A read exception must never be read as verified absence.</summary>
+    private bool TryRead(out OwnedStartupTaskState? state)
+    {
+        try { state = _taskStore.Read(); return true; }
+        catch (Exception exception)
+        {
+            AppLog.Warn("TaskScheduler", "Owned startup task read failed.", exception);
+            state = null;
+            return false;
+        }
     }
 
     internal const string NoExecutionTimeLimit = "PT0S";
@@ -271,10 +334,16 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
             return new OwnedStartupTaskState(enabled, actionPath, actionArguments, logonTriggerUserId, logonType, runLevel,
                 disallowOnBatteries, stopGoingOnBatteries, executionTimeLimit);
         }
+        catch (COMException exception) when (exception.HResult == FileNotFoundHResult)
+        {
+            return null;
+        }
         catch (Exception exception)
         {
+            // review [P1]: a genuine read failure must surface as a failure, not as "task absent".
+            // Only FileNotFound above is real absence.
             AppLog.Warn("TaskScheduler", "Owned startup task could not be read.", exception);
-            return null;
+            throw;
         }
     }
 

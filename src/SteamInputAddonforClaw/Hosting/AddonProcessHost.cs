@@ -51,6 +51,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // Runtime termination policy, and the mandatory launch-at-startup predicate all read from it
     // (PR2.5 work order section 8) rather than constructing independent Center M readers.
     private CenterMStartupControl? _centerMStartupControl;
+    // PR12: the shared authority-transition owner also exposes the Runtime-owned uninstall-preparation
+    // stock-restoration operation.
+    private SteamInputAddonforClaw.CenterMStartup.ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
     private NamedPipeAddonFrontendServer? _frontendServer;
     private NamedPipeAddonFrontendServer? _qamFrontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher;
@@ -298,12 +301,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // for the first time) -- plus the RAW lower-level Runtime safety decision (not
         // AddonProcessHost.EvaluateUserTermination, whose ControllerAuthorityMandatory outer rule
         // must never block the official Enable-and-Restart release path).
+        var authorityHidHideBaseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
+            new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
+            Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable."));
         var centerMAuthorityTransition = new SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition(
             _centerMStartupControl,
             composition.StartupSettings,
-            new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
-                new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
-                Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.")),
+            authorityHidHideBaseline,
             _runtimeHost.EvaluateUserTermination,
             () => IsConflictingControllerEnvironment(startupComposition.ControllerEnvironmentAssessmentProvider),
             async token =>
@@ -323,7 +327,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     ? await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
                     : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
             },
+            // PR12 section 6/7: reuse the composition's existing StockCenterMStartupBaseline (the one
+            // built from the shared MsiClawNativeStateManager). A machine with no MSI Claw fails
+            // closed here rather than assuming stock.
+            startupComposition.StockCenterMBaseline is { } stockBaseline
+                ? stockBaseline.EstablishAsync
+                : _ => Task.FromResult(new SteamInputAddonforClaw.Startup.StockCenterMStartupBaselineResult(false, false, "StockBaselineUnavailable")),
+            // PR12 section 8: the one safely provable persisted Addon-owned primary PID1902 target.
+            () => authorityHidHideBaseline.TryGetSingleExistingOwnedTarget(
+                SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId),
+            // PR12 section 11: startup-task removal routed through the existing registration owner.
+            () => composition.StartupSettings.ChangeLaunchAtWindowsStartup(false),
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
+        _centerMAuthorityTransition = centerMAuthorityTransition;
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
@@ -855,6 +871,24 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _trayHostWindow = null;
             AppLog.Error("Tray", "Tray initialization failed in headless Runtime mode.", exception);
             return false;
+        }
+    }
+
+    /// <summary>PR12 section 17: the one narrow Runtime-owned operation a future safe-uninstall entry
+    /// requests BEFORE any file removal. Leaves the machine verified stock-safe (MSI authority
+    /// restored + mandatory Addon startup task removed) or fails closed. Issues no Windows restart.</summary>
+    internal async Task<SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult> PrepareForUninstallAsync()
+    {
+        if (_centerMAuthorityTransition is not { } transition)
+            return SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult.Fail("AuthorityTransitionUnavailable");
+        try
+        {
+            return await transition.PrepareForUninstallAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Uninstall", "Stock uninstall preparation threw; the Runtime remains stock-unsafe.", exception);
+            return SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult.Fail("PrepareThrew:" + exception.GetType().Name);
         }
     }
 

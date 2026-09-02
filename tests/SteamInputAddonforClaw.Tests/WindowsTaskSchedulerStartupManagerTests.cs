@@ -199,12 +199,92 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         Assert.Equal("PT0S", store.LastRegistered.ExecutionTimeLimit);
     }
 
+    // ---- Disable / removal (PR12 section 11) ----
+
     [Fact]
-    public void Disable_deletes_the_owned_task()
+    public void Disable_when_the_task_is_already_absent_is_a_read_only_success()
+    {
+        var store = new FakeTaskStore { Current = null };
+        var elevated = new FakeElevated();
+
+        var result = Manager(store, elevated).Synchronize(false);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, elevated.RemoveCalls);
+        Assert.Equal(0, store.DeleteCalls);
+    }
+
+    [Fact]
+    public void Disable_in_the_production_manager_removes_the_task_via_the_elevated_child_then_verifies_absence()
+    {
+        var store = new FakeTaskStore { Current = Compliant() };
+        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
+
+        var result = Manager(store, elevated).Synchronize(false);
+
+        Assert.True(result.Success);
+        Assert.Equal(1, elevated.RemoveCalls);
+        Assert.Equal(0, store.DeleteCalls);
+        Assert.Null(store.Current);
+    }
+
+    [Fact]
+    public void Disable_fails_when_the_elevated_removal_leaves_the_task_present()
+    {
+        var store = new FakeTaskStore { Current = Compliant() };
+        var elevated = new FakeElevated { Store = store, RemoveOutcome = ElevatedStartupTaskOutcome.Removed }; // child claims success but task stays
+
+        Assert.False(Manager(store, elevated).Synchronize(false).Success);
+        Assert.Equal(1, elevated.RemoveCalls);
+    }
+
+    [Theory]
+    [InlineData("Cancelled")]
+    [InlineData("Failed")]
+    public void Disable_fails_when_the_elevated_removal_does_not_report_removed(string outcome)
+    {
+        var store = new FakeTaskStore { Current = Compliant() };
+        var elevated = new FakeElevated { Store = store, RemoveOutcome = Enum.Parse<ElevatedStartupTaskOutcome>(outcome) };
+
+        Assert.False(Manager(store, elevated).Synchronize(false).Success);
+    }
+
+    [Fact] // PR12 review [P1]: a Task Scheduler read failure before deletion is NOT verified absence.
+    public void Disable_fails_when_the_task_cannot_be_read_before_removal()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 1 };
+        var elevated = new FakeElevated { Store = store };
+
+        Assert.False(Manager(store, elevated).Synchronize(false).Success);
+        Assert.Equal(0, elevated.RemoveCalls);
+        Assert.Equal(0, store.DeleteCalls);
+    }
+
+    [Fact] // PR12 review [P1]: a read failure during post-elevated-delete verification is NOT absence.
+    public void Disable_fails_when_absence_cannot_be_read_back_after_the_elevated_removal()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 2 };
+        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
+
+        Assert.False(Manager(store, elevated).Synchronize(false).Success);
+        Assert.Equal(1, elevated.RemoveCalls); // removal ran; absence just could not be proven
+    }
+
+    [Fact] // same distinction on the direct-write (elevated child) path
+    public void The_elevated_child_disable_fails_when_absence_cannot_be_read_back_after_delete()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 2 };
+
+        Assert.False(Manager(store, elevated: null).Synchronize(false).Success);
+        Assert.Equal(1, store.DeleteCalls);
+    }
+
+    [Fact]
+    public void The_elevated_child_disable_deletes_directly_and_verifies_absence()
     {
         var store = new FakeTaskStore { Current = Compliant() };
 
-        var result = Manager(store, new FakeElevated()).Synchronize(false);
+        var result = Manager(store, elevated: null).Synchronize(false);
 
         Assert.True(result.Success);
         Assert.Equal(1, store.DeleteCalls);
@@ -219,6 +299,8 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         // Read lag: from the Nth Read() onward, Current becomes CompliantValue.
         public int CompliantOnReadNumber;
         public OwnedStartupTaskState? CompliantValue;
+        // Task Scheduler read failure: from the Nth Read() onward, Read() throws (0 == never).
+        public int FailReadsFrom;
         public int RegisterCalls;
         public int DeleteCalls;
         public int ReadCalls;
@@ -227,6 +309,8 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         public OwnedStartupTaskState? Read()
         {
             ReadCalls++;
+            if (FailReadsFrom > 0 && ReadCalls >= FailReadsFrom)
+                throw new InvalidOperationException("Simulated Task Scheduler read failure.");
             if (CompliantOnReadNumber > 0 && ReadCalls >= CompliantOnReadNumber && CompliantValue is not null)
                 Current = CompliantValue;
             return Current;
@@ -248,8 +332,11 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     private sealed class FakeElevated : IElevatedStartupTaskInvoker
     {
         public ElevatedStartupTaskOutcome Outcome = ElevatedStartupTaskOutcome.Created;
+        public ElevatedStartupTaskOutcome RemoveOutcome = ElevatedStartupTaskOutcome.Removed;
         public int Calls;
+        public int RemoveCalls;
         public Action<FakeTaskStore>? OnInvoke;
+        public Action<FakeTaskStore>? OnRemove;
         public FakeTaskStore? Store;
 
         public ElevatedStartupTaskOutcome EnsureOwnedTask()
@@ -257,6 +344,13 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             Calls++;
             if (Store is not null) OnInvoke?.Invoke(Store);
             return Outcome;
+        }
+
+        public ElevatedStartupTaskOutcome RemoveOwnedTask()
+        {
+            RemoveCalls++;
+            if (Store is not null) OnRemove?.Invoke(Store);
+            return RemoveOutcome;
         }
     }
 }

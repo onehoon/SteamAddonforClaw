@@ -38,6 +38,11 @@ public static class Program
                 Environment.ExitCode = ElevatedStartupTaskSetup.Run(args);
                 return;
             }
+            if (args.Contains(ElevatedStartupTaskSetup.RemoveArgument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = ElevatedStartupTaskSetup.RunRemove(args);
+                return;
+            }
 
             var restartDeadline = DateTimeOffset.UtcNow.AddSeconds(10);
             var restartAttempt = 0;

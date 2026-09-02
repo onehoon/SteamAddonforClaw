@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Lifecycle;
 
@@ -76,6 +77,31 @@ internal sealed class RuntimeProcessApplication
     private void RequestExitForUninstall()
     {
         AppLog.Info("Lifecycle", "Uninstall shutdown request accepted.");
+        // PR12 sections 14/15/17: leave the MSI Claw verified stock-safe (MSI authority restored +
+        // mandatory Addon startup task removed) BEFORE the Runtime exits. If preparation does NOT
+        // succeed (Partial/Unavailable, stock-baseline / HidHide / Center M failure, or a throw), the
+        // only controller Runtime and the mandatory startup guarantee MUST stay alive -- do not shut
+        // down. The uninstall request is retryable, so a later attempt can succeed. The final Velopack
+        // / Windows uninstall interception that gates file removal on this result is PR13.
+        StockUninstallPrepareResult? prepare;
+        try
+        {
+            prepare = _processHost?.PrepareForUninstallAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Lifecycle", "Uninstall stock preparation threw; Runtime will remain active.", exception);
+            return;
+        }
+
+        if (prepare is not { Succeeded: true })
+        {
+            AppLog.Warn("Lifecycle", "Uninstall stock preparation did not succeed; Runtime will remain active.", null,
+                ("Reason", prepare?.Reason ?? "HostUnavailable"));
+            return;
+        }
+
+        AppLog.Info("Lifecycle", "Uninstall stock preparation succeeded.", ("Reason", prepare.Reason));
         BeginShutdownAndRequestLoopExit();
     }
 

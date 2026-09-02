@@ -73,12 +73,15 @@ internal sealed class SingleInstanceGate : IDisposable
             if (_uninstallRegistration is not null)
                 throw new InvalidOperationException("An uninstall handler is already registered.");
 
+            // PR12 review [P1]: a failed stock preparation intentionally leaves the Runtime alive, so
+            // a later uninstall attempt in the same Runtime must still be received. The auto-reset
+            // event re-arms the wait after each signal.
             _uninstallRegistration = ThreadPool.RegisterWaitForSingleObject(
                 _uninstallEvent,
                 (_, timedOut) => OnUninstallSignaled(requestHandler, timedOut),
                 null,
                 Timeout.Infinite,
-                executeOnlyOnce: true);
+                executeOnlyOnce: false);
         }
     }
 

@@ -267,7 +267,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
 
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.Snapshot.State);
-        Assert.Equal(new[] { "physical-release", "hidhide:enable", "centerm:true", "restart" }, h.Order);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "hidhide:enable", "centerm:true", "restart" }, h.Order);
         Assert.False(h.Hid.Active);
         Assert.Empty(h.Hid.Whitelist);
     }
@@ -289,7 +289,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
 
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
         // physical release (DI stop + PID1901 restore) runs before HidHide is cleared.
-        Assert.Equal(new[] { "physical-release", "hidhide:enable", "centerm:true", "restart" }, h.Order);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "hidhide:enable", "centerm:true", "restart" }, h.Order);
         Assert.DoesNotContain(ownedTarget, h.Hid.Hidden); // the exact PR5 target was cleared, not treated as foreign
         Assert.Empty(h.Hid.Whitelist);
         Assert.False(h.Hid.Active);
@@ -358,7 +358,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var result = await h.Build().RequestAsync(centerMEnabled: true, cts.Token);
 
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
-        Assert.Equal(new[] { "physical-release", "hidhide:enable", "centerm:true", "restart" }, h.Order);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "hidhide:enable", "centerm:true", "restart" }, h.Order);
     }
 
     [Fact]
@@ -399,7 +399,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
 
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Cancelled, result.Outcome);
-        Assert.Equal(new[] { "physical-release", "hidhide:enable", "centerm:true" }, h.Order);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "hidhide:enable", "centerm:true" }, h.Order);
         Assert.False(h.Hid.Active); // baseline was already cleared
         Assert.NotNull(result.FailureMessage);
         Assert.DoesNotContain("nothing", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
@@ -459,6 +459,206 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Contains("ExitCode", source);
     }
 
+    // ================= PR12: stock-safe uninstall preparation (work order section 22) =================
+
+    [Fact] // 22.1 -- Disabled + active Full1902 ownership happy path: strict order, NO restart.
+    public async Task Prepare_for_uninstall_disabled_happy_path_runs_the_exact_order()
+    {
+        var h = new Harness(this)
+        {
+            PhysicalRelease = new(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
+        h.Hid.Active = true;
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("UninstallPrepared", result.Reason);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "hidhide:enable", "centerm:true", "startup-remove" }, h.Order);
+        Assert.DoesNotContain("restart", h.Order);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, h.Roots.Classify());
+        Assert.False(h.Hid.Active);
+        Assert.DoesNotContain(AddonExe, h.Hid.Whitelist);
+    }
+
+    [Fact] // 22.2 / 22.3 -- presentation/physical release failure stops everything downstream.
+    public async Task Prepare_for_uninstall_stops_when_physical_release_fails()
+    {
+        var h = new Harness(this) { PhysicalRelease = new(false, "VirtualPresentationReleaseFailed", null) };
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(new[] { "physical-release" }, h.Order);
+        Assert.Equal(0, h.StockBaselineCalls);
+        Assert.Equal(0, h.StartupRemovalCalls);
+        Assert.NotEqual(FrontendCenterMStartupState.Enabled, h.Roots.Classify());
+    }
+
+    [Fact] // 22.4 -- NothingOwned but current PID1902: NOT accepted as stock; the stock baseline must switch.
+    public async Task Prepare_for_uninstall_does_not_treat_nothing_owned_as_stock_safe()
+    {
+        var h = new Harness(this)
+        {
+            PhysicalRelease = SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned,
+            StockBaselineSucceeds = true,
+            StockBaselineModeWrite = true, // the stock baseline had to switch PID1902 -> PID1901
+            StockBaselineReason = "XInputVerified",
+        };
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, h.StockBaselineCalls); // stock proof always runs, even with no owner object
+        Assert.Contains("stock-baseline", h.Order);
+    }
+
+    [Fact] // 22.5 -- NothingOwned + already PID1901: idempotent proceed.
+    public async Task Prepare_for_uninstall_when_already_stock_pid1901_proceeds_idempotently()
+    {
+        var h = new Harness(this)
+        {
+            PhysicalRelease = SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned,
+            StockBaselineModeWrite = false,
+            StockBaselineReason = "AlreadyXInput",
+        };
+
+        Assert.True((await h.Build().PrepareForUninstallAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact] // 22.6 -- stock baseline failure blocks HidHide clear / Center M enable / startup removal.
+    public async Task Prepare_for_uninstall_stops_when_the_stock_baseline_cannot_be_proven()
+    {
+        var h = new Harness(this) { StockBaselineSucceeds = false, StockBaselineReason = "CurrentMsiStateUnavailable" };
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("StockBaseline", result.Reason);
+        Assert.Equal(new[] { "physical-release", "stock-baseline" }, h.Order);
+        Assert.Equal(0, h.StartupRemovalCalls);
+    }
+
+    [Fact] // 22.7 -- persisted exact HidHide target fallback when no owner returns one.
+    public async Task Prepare_for_uninstall_uses_the_safely_persisted_owned_target_for_hidhide_release()
+    {
+        const string persisted = @"HID\VID_0DB0&PID_1902&MI_00&COL01\persisted";
+        var h = new Harness(this)
+        {
+            PhysicalRelease = SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned, // HiddenTarget null
+            PersistedOwnedTarget = persisted,
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(persisted);
+        h.Hid.Active = true;
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.DoesNotContain(persisted, h.Hid.Hidden); // the exact persisted Addon target was removed
+    }
+
+    [Fact] // 22.8 -- HidHide release failure blocks Center M enable and startup removal.
+    public async Task Prepare_for_uninstall_stops_when_hidhide_release_cannot_be_verified()
+    {
+        const string owned = @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned";
+        var h = new Harness(this) { PhysicalRelease = new(true, "Released", owned) };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(owned);
+        h.Hid.Active = true;
+        h.Hid.KeepHiddenOnRemove = true; // the owned target removal cannot be verified
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("HidHideRelease", result.Reason);
+        Assert.DoesNotContain("centerm:true", h.Order);
+        Assert.Equal(0, h.StartupRemovalCalls);
+    }
+
+    [Fact] // 22.9 -- Center M Enable failure: startup task stays, result fails.
+    public async Task Prepare_for_uninstall_stops_when_center_m_cannot_be_enabled()
+    {
+        var h = new Harness(this) { CenterMHelperCompletes = false };
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("centerm:true", h.Order);
+        Assert.Equal(0, h.StartupRemovalCalls);
+    }
+
+    [Fact] // 22.10 -- startup-task removal failure AFTER stock restore: fail, but never re-enter Addon authority.
+    public async Task Prepare_for_uninstall_startup_task_removal_failure_does_not_reverse_stock_authority()
+    {
+        var h = new Harness(this)
+        {
+            PhysicalRelease = new(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+            StartupTaskRemovalSucceeds = false,
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
+        h.Hid.Active = true;
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("StartupTaskRemoval", result.Reason);
+        // Stock authority already restored -- and NOT reversed by the failed startup-task removal.
+        Assert.Equal(FrontendCenterMStartupState.Enabled, h.Roots.Classify());
+        Assert.False(h.Hid.Active);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "hidhide:enable", "centerm:true", "startup-remove" }, h.Order);
+    }
+
+    [Fact] // 22.11 -- Center M already Enabled: still independently proves stock, no PID1902 acquisition.
+    public async Task Prepare_for_uninstall_when_center_m_already_enabled_still_proves_stock()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            PhysicalRelease = new(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
+        h.Hid.Active = true;
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, h.StockBaselineCalls);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "hidhide:enable", "centerm:true", "startup-remove" }, h.Order);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, h.Roots.Classify());
+    }
+
+    [Theory] // 22.12 -- Partial / Unavailable root truth fails closed with NO mutation.
+    [InlineData("partial")]
+    [InlineData("unavailable")]
+    public async Task Prepare_for_uninstall_fails_closed_on_ambiguous_center_m_authority(string kind)
+    {
+        var h = kind == "partial"
+            ? new Harness(this) { StartPartial = true }
+            : new Harness(this) { CenterMAvailable = false };
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("CenterMAuthorityAmbiguous", result.Reason);
+        Assert.Empty(h.Order);
+    }
+
+    [Fact] // 22.12 -- a lower-level routing/native operation in progress blocks preparation.
+    public async Task Prepare_for_uninstall_is_blocked_while_a_lower_level_operation_owns_the_controller()
+    {
+        var h = new Harness(this) { Safety = new UserTerminationDecision(false, UserTerminationBlockReason.RoutingTransition) };
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Empty(h.Order);
+    }
+
     // ---- Harness ----
 
     private sealed class Harness
@@ -468,6 +668,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
 
         public bool CenterMAvailable { get; init; } = true;
         public bool StartEnabled { get; init; }
+        public bool StartPartial { get; init; }
         public bool StartupSucceeds { get; init; } = true;
         public bool CenterMHelperCompletes { get; init; } = true;
         public bool CenterMHelperCancels { get; init; }
@@ -479,6 +680,14 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public Action? OnPhysicalRelease { get; set; }
         public UserTerminationDecision Safety { get; init; } = new(true, UserTerminationBlockReason.None);
         public Func<Task>? BeforeCenterMMutation { get; set; }
+        // ---- PR12 stock-restoration knobs ----
+        public bool StockBaselineSucceeds { get; init; } = true;
+        public bool StockBaselineModeWrite { get; init; }
+        public string StockBaselineReason { get; init; } = "AlreadyXInput";
+        public string? PersistedOwnedTarget { get; init; }
+        public bool StartupTaskRemovalSucceeds { get; init; } = true;
+        public int StockBaselineCalls { get; private set; }
+        public int StartupRemovalCalls { get; private set; }
 
         public List<string> Order { get; } = [];
         public FakeHid Hid { get; } = new();
@@ -486,7 +695,8 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
 
         public CenterMRebootAuthorityTransition Build(FakeRestart? restart = null)
         {
-            Roots.Server = Roots.Updater = StartEnabled;
+            Roots.Server = StartPartial || StartEnabled;
+            Roots.Updater = !StartPartial && StartEnabled;
             Roots.Service = StartEnabled ? CenterMFoundationServiceMode.Automatic : CenterMFoundationServiceMode.Disabled;
 
             var reader = new CenterMStartupStateReader(
@@ -526,6 +736,22 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                     Order.Add("physical-release");
                     OnPhysicalRelease?.Invoke();
                     return Task.FromResult(PhysicalRelease);
+                },
+                // PR12: independent stock-baseline PID1901 proof.
+                token =>
+                {
+                    Assert.False(token.CanBeCanceled);
+                    StockBaselineCalls++;
+                    Order.Add("stock-baseline");
+                    return Task.FromResult(new SteamInputAddonforClaw.Startup.StockCenterMStartupBaselineResult(
+                        StockBaselineSucceeds, StockBaselineModeWrite, StockBaselineReason));
+                },
+                () => PersistedOwnedTarget,
+                () =>
+                {
+                    StartupRemovalCalls++;
+                    Order.Add("startup-remove");
+                    return StartupTaskRemovalSucceeds ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
                 },
                 r);
         }
