@@ -133,7 +133,7 @@ public sealed class OverlayTransportTests
             lock (actions)
             {
                 actions.Add(action);
-                if (actions.Count == 6) all.TrySetResult();
+                if (actions.Count == Enum.GetValues<OverlayNavigationAction>().Length) all.TrySetResult();
             }
             return Task.CompletedTask;
         });

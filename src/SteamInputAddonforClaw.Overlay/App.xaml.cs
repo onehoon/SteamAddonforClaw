@@ -87,8 +87,18 @@ public partial class App : Application
         {
             try
             {
-                if (action == OverlayNavigationAction.Back)
-                    _ = SendBackDismissAsync();
+                switch (action)
+                {
+                    case OverlayNavigationAction.Back:
+                        _ = SendBackDismissAsync();
+                        break;
+                    case OverlayNavigationAction.PreviousTab:
+                        _window?.SelectPreviousTab();
+                        break;
+                    case OverlayNavigationAction.NextTab:
+                        _window?.SelectNextTab();
+                        break;
+                }
             }
             catch (Exception exception)
             {

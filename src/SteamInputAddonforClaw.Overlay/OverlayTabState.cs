@@ -55,6 +55,25 @@ internal sealed class OverlayTabState
     // Every successful Overlay Show starts on the first tab in the current order.
     internal void ResetForShow() => _selectedTab = _order[0];
 
+    // OQ5-UI-02: LB moves one tab earlier in the current order, RB one tab later. Bounded/no-wrap:
+    // at either boundary the call is a no-op. Traversal derives position from the current order,
+    // never a hard-coded Device -> ... -> Setting sequence, so a later persisted order just works.
+    internal bool SelectPrevious() => MoveBy(-1);
+
+    internal bool SelectNext() => MoveBy(1);
+
+    private bool MoveBy(int delta)
+    {
+        var current = 0;
+        for (var i = 0; i < _order.Count; i++)
+            if (_order[i] == _selectedTab) { current = i; break; }
+
+        var target = current + delta;
+        if (target < 0 || target >= _order.Count) return false;
+        _selectedTab = _order[target];
+        return true;
+    }
+
     // Any missing / duplicate / unknown order deterministically resolves to the frozen
     // default order so the shell can never enter an invalid tab state.
     private static IReadOnlyList<OverlayTabId> Normalize(IReadOnlyList<OverlayTabId> order)

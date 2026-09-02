@@ -38,7 +38,7 @@
                 <TextBlock
                     x:Name="FooterHint"
                     Grid.Row="3"
-                    Text="B  Close"
+                    Text="LB/RB  Tabs&#x2003;B  Close"
                     Style="{ThemeResource CaptionTextBlockStyle}"
                     Opacity="0.75" />
             </Grid>

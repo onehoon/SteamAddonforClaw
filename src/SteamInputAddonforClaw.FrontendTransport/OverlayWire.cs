@@ -10,13 +10,15 @@ internal static class OverlayTransportProtocol
     // Version 3 (OQ4): adds the Runtime -> Overlay Navigation message and OverlayNavigationAction.
     // Semantic, edge-driven navigation only -- no ControllerState / buttons / sticks / raw reports
     // ever cross this wire. A v2 peer must fail the handshake rather than silently ignore Navigation.
-    internal const int CurrentVersion = 3;
+    // Version 4 (OQ5-UI-02): adds PreviousTab / NextTab semantic actions for LB/RB tab navigation.
+    // No compatibility fallback with v3 -- a v3 peer must fail the handshake.
+    internal const int CurrentVersion = 4;
     internal const int MaxFrameBytes = 64 * 1024;
 }
 
 internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError }
 internal enum OverlayCommand { Show, Hide, Shutdown }
-internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back }
+internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
 
 internal sealed record OverlayWireMessage(

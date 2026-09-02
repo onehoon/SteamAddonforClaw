@@ -9,8 +9,10 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class OverlayControllerInputRouterTests
 {
-    private static GamepadButtons Buttons(bool up = false, bool down = false, bool left = false, bool right = false, bool a = false, bool b = false) =>
-        new(a, b, false, false, up, right, down, left, false, false, false, false, false, false, false, false);
+    private static GamepadButtons Buttons(
+        bool up = false, bool down = false, bool left = false, bool right = false,
+        bool a = false, bool b = false, bool lb = false, bool rb = false) =>
+        new(a, b, false, false, up, right, down, left, lb, rb, false, false, false, false, false, false);
 
     private static ControllerState State(GamepadButtons buttons) => new(buttons, default, default, default, default);
 
@@ -119,10 +121,77 @@ public sealed class OverlayControllerInputRouterTests
         using var router = new OverlayControllerInputRouter(source, delivery.Callback);
         router.Start();
 
-        var noisy = new GamepadButtons(false, false, X: true, Y: true, false, false, false, false, LeftBumper: true, RightBumper: true, Back: true, Start: true, true, true, true, true);
+        // X/Y, Back/Start, stick clicks and LT/RT-full are all unmapped; LB/RB are excluded here
+        // (they now map to PreviousTab/NextTab and are covered by dedicated bumper tests).
+        var noisy = new GamepadButtons(false, false, X: true, Y: true, false, false, false, false, false, false, Back: true, Start: true, true, true, true, true);
         source.Raise(noisy);
         await Task.Delay(100);
         Assert.Empty(delivery.Snapshot());
+    }
+
+    [Fact]
+    public async Task Bumper_rising_edges_map_to_previous_and_next_tab()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(lb: true));
+        source.Raise(Buttons());
+        source.Raise(Buttons(rb: true));
+
+        var actions = await delivery.WaitForAsync(2);
+        Assert.Equal(new[] { OverlayNavigationAction.PreviousTab, OverlayNavigationAction.NextTab }, actions);
+    }
+
+    [Fact]
+    public async Task Held_bumper_emits_once_and_does_not_repeat()
+    {
+        var source = new FakeSource();
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(rb: true));
+        source.Raise(Buttons(rb: true)); // still held
+        source.Raise(Buttons(rb: true));
+        await delivery.WaitForAsync(1);
+        await Task.Delay(100);
+        Assert.Equal(new[] { OverlayNavigationAction.NextTab }, delivery.Snapshot());
+    }
+
+    [Fact]
+    public async Task Bumper_already_held_at_start_emits_nothing_until_released_and_pressed_again()
+    {
+        var source = new FakeSource { LatestState = State(Buttons(rb: true)) };
+        var delivery = new Delivery();
+        using var router = new OverlayControllerInputRouter(source, delivery.Callback);
+        router.Start();
+
+        source.Raise(Buttons(rb: true)); // same state, no edge
+        await Task.Delay(100);
+        Assert.Empty(delivery.Snapshot());
+
+        source.Raise(Buttons());        // release
+        source.Raise(Buttons(rb: true)); // fresh press
+        var actions = await delivery.WaitForAsync(1);
+        Assert.Equal(new[] { OverlayNavigationAction.NextTab }, actions);
+    }
+
+    [Fact]
+    public async Task Release_waiter_waits_while_a_bumper_is_held_then_completes_on_release()
+    {
+        var source = new FakeSource();
+        using var router = new OverlayControllerInputRouter(source, _ => Task.CompletedTask);
+        router.Start();
+        source.Raise(Buttons(lb: true)); // LB held
+
+        var wait = router.WaitForConsumedControlsReleaseAsync(CancellationToken.None);
+        Assert.False(wait.IsCompleted);
+
+        source.Raise(Buttons()); // release
+        Assert.Equal(OverlayConsumedControlsReleaseOutcome.ReleasedAfterWait, await wait.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
