@@ -53,7 +53,7 @@ public sealed class MandatoryLaunchAtStartupFrontendTests : IDisposable
     [Fact]
     public void Settings_snapshot_round_trips_the_required_flag_over_the_wire_codec()
     {
-        var value = new FrontendSettingsSnapshot(true, FrontendLogLevel.Info, false, false, Contracts.Oem1.Oem1MappingSettings.Default)
+        var value = new FrontendSettingsSnapshot(true, FrontendLogLevel.Info, false, Contracts.Oem1.Oem1MappingSettings.Default)
         { LaunchAtWindowsStartupRequired = true };
 
         var restored = JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(value));

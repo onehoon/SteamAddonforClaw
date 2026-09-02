@@ -169,17 +169,15 @@ public sealed class Oem1MappingSettingsPersistenceTests : IDisposable
     }
 
     [Fact]
-    public void The_steam_input_routing_switch_and_the_remapping_switch_are_independent()
+    public void Changing_the_remapping_switch_persists_without_disturbing_other_settings()
     {
         var store = new SettingsStore(SettingsPath);
         var coordinator = new StartupSettingsCoordinator(store.Load(), store, new NoOpStartupManager());
 
-        coordinator.ChangeSteamInputRoutingEnabled(false);
-        Assert.True(coordinator.Oem1Mapping.RemappingEnabled);
-
         coordinator.ChangeOem1Mapping(coordinator.Oem1Mapping with { RemappingEnabled = false });
-        Assert.False(coordinator.SteamInputRoutingEnabled);
+
         Assert.False(new SettingsStore(SettingsPath).Load().Oem1Mapping.RemappingEnabled);
+        Assert.True(coordinator.Settings.LaunchAtWindowsStartup);
     }
 
     public void Dispose()

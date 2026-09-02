@@ -11,7 +11,6 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
-using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
@@ -364,9 +363,8 @@ internal static class ElevatedPrerequisiteSetup
             var recoverySafety = new MachineRecoverySafetyInspector().Inspect();
             if (!AllowsRecoverySafeProvisioning(recoverySafety)) return (false, recoverySafety.Reason);
             using var runningAppId = new SteamRunningAppIdRegistrySource();
-            var settings = new SettingsStore(AddonDataPaths.SettingsPath);
             var probe = new SteamBigPictureWindowProbe();
-            return ElevatedSteamSafetyGate.Evaluate(runningAppId.GetRunningAppId, settings.LoadForSafetyGate, probe.Capture);
+            return ElevatedSteamSafetyGate.Evaluate(runningAppId.GetRunningAppId, probe.Capture);
         }
         catch (Exception exception)
         {

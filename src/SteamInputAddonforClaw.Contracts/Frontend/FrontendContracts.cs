@@ -136,7 +136,7 @@ public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeSt
 /// The frontend deliberately carries the SAME <see cref="Oem1MappingSettings"/> the runtime persists
 /// and the dispatcher validates against, rather than a parallel frontend-shaped copy -- the settings
 /// UI and runtime capability validation must never be able to disagree.</remarks>
-public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SteamInputRoutingEnabled, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping)
+public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping)
 {
     public bool DeveloperMenuEnabled { get; init; }
     public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
@@ -145,11 +145,6 @@ public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, Front
     /// snapshot comes back with <see cref="LaunchAtWindowsStartup"/> still true. Optional, defaulted:
     /// an older peer that omits it simply renders the toggle unlocked.</summary>
     public bool LaunchAtWindowsStartupRequired { get; init; }
-}
-public enum FrontendSteamInputRoutingMutationOutcome { Succeeded }
-public sealed record FrontendSteamInputRoutingMutationResult(FrontendSteamInputRoutingMutationOutcome Outcome, FrontendSettingsSnapshot Settings)
-{
-    public bool Succeeded => Outcome == FrontendSteamInputRoutingMutationOutcome.Succeeded;
 }
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
 
@@ -289,7 +284,6 @@ public interface IAddonFrontendControl
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
     Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken cancellationToken = default);
-    Task<FrontendSteamInputRoutingMutationResult> SetSteamInputRoutingEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);
     /// <summary>Persists a COMPLETE new OEM1 mapping (remapping switch + all four slot bindings).
     /// Whole-record, not per-slot: it is what makes "turning remapping off never erases the mappings"

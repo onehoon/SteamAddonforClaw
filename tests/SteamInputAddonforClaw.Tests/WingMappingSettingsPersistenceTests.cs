@@ -41,19 +41,18 @@ public sealed class WingMappingSettingsPersistenceTests : IDisposable
 
         var persisted = new SettingsStore(PathName).Load();
         Assert.Equal(mapping, persisted.WingMapping);
-        Assert.False(persisted.SteamInputRoutingEnabled);
         Assert.Equal(Oem1MappingSettings.Default, persisted.Oem1Mapping);
         Assert.Equal(1, changes);
     }
 
     [Fact]
-    public void Routing_toggle_does_not_erase_wing_mapping()
+    public void A_later_log_level_change_does_not_erase_wing_mapping()
     {
         var store = new SettingsStore(PathName);
         var coordinator = new StartupSettingsCoordinator(store.Load(), store, new NoOpStartupManager());
         var mapping = WingMappingSettings.Default with { Double = WingSlotBinding.Of(WingAction.SteamButton) };
         coordinator.ChangeWingMapping(mapping);
-        coordinator.ChangeSteamInputRoutingEnabled(false);
+        coordinator.ChangeLogLevel(AppLogPreference.Debug);
         Assert.Equal(mapping, new SettingsStore(PathName).Load().WingMapping);
     }
 

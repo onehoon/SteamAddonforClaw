@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 
 namespace SteamInputAddonforClaw.Prerequisites;
@@ -7,7 +6,6 @@ internal static class ElevatedSteamSafetyGate
 {
     internal static (bool Allowed, string Reason) Evaluate(
         Func<uint> runningAppIdReader,
-        Func<SettingsLoadResult> settingsReader,
         Func<SteamBigPictureProbeResult> bigPictureProbe)
     {
         uint runningAppId;
@@ -15,14 +13,8 @@ internal static class ElevatedSteamSafetyGate
         catch { return (false, "RunningAppIdUnavailable"); }
         if (runningAppId != 0) return (false, "SteamSessionActive");
 
-        SettingsLoadResult settings;
-        try { settings = settingsReader(); }
-        catch { return (false, "SettingsUnreliable"); }
-        if (!settings.IsReliable) return (false, "SettingsUnreliable");
-        // With the Steam Input routing master switch off, an active Big Picture session is not an
-        // Addon routing session, so it cannot be disturbed by prerequisite mutation.
-        if (!settings.Settings.SteamInputRoutingEnabled) return (true, "Allowed");
-
+        // Full1902 removed the user-configurable Steam Input routing switch: an active Big Picture
+        // session is always a real Steam session and prerequisite mutation must never run through it.
         SteamBigPictureProbeResult probe;
         try { probe = bigPictureProbe(); }
         catch { return (false, "BigPictureProbeFailed"); }

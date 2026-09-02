@@ -1,5 +1,4 @@
 using SteamInputAddonforClaw.Developer;
-using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw.Steam;
 
@@ -10,7 +9,6 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private readonly SteamSessionWatcher _watcher;
     private readonly DeveloperTestModeState _testMode;
     private readonly SteamBigPictureWatcher _bigPictureWatcher;
-    private readonly ISteamInputRoutingPreference _settings;
     private readonly Lock _sync = new();
     private readonly Lock _publicationGate = new();
     private readonly Queue<SteamSessionStateChangedEventArgs> _pendingTransitions = new();
@@ -18,21 +16,19 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private bool _disposed;
     private SteamSessionState _state;
 
-    internal EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher, DeveloperTestModeState testMode, ISteamInputRoutingPreference settings)
+    internal EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher, DeveloperTestModeState testMode)
     {
         _watcher = watcher ?? throw new ArgumentNullException(nameof(watcher));
         _testMode = testMode ?? throw new ArgumentNullException(nameof(testMode));
         _bigPictureWatcher = bigPictureWatcher ?? throw new ArgumentNullException(nameof(bigPictureWatcher));
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _state = ComputeState();
         _watcher.StateChanged += OnInputChanged;
         _bigPictureWatcher.StateChanged += OnInputChanged;
-        _settings.SteamInputRoutingEnabledChanged += OnInputChanged;
         _testMode.Changed += OnInputChanged;
     }
 
     public EffectiveSteamSessionSource(SteamSessionWatcher watcher, DeveloperTestModeState testMode)
-        : this(watcher, new SteamBigPictureWatcher(new InactiveSteamBigPictureProbe()), testMode, new StaticSteamInputRoutingPreference())
+        : this(watcher, new SteamBigPictureWatcher(new InactiveSteamBigPictureProbe()), testMode)
     {
     }
 
@@ -59,10 +55,6 @@ public sealed class EffectiveSteamSessionSource : IDisposable
 
     private SteamSessionState ComputeState()
     {
-        // Steam Input routing is a single master eligibility gate: while it is off, no session source
-        // (actual game, Big Picture, developer test) may produce an effective routing session. The
-        // preference itself stays stored; it just cannot make routing eligible.
-        if (!_settings.SteamInputRoutingEnabled) return SteamSessionState.FromRunningAppId(0);
         var actual = _watcher.State;
         if (actual.IsActive) return actual;
         if (_bigPictureWatcher.IsActive) return SteamSessionState.CreateBigPicture();
@@ -117,18 +109,9 @@ public sealed class EffectiveSteamSessionSource : IDisposable
         }
         _watcher.StateChanged -= OnInputChanged;
         _bigPictureWatcher.StateChanged -= OnInputChanged;
-        _settings.SteamInputRoutingEnabledChanged -= OnInputChanged;
         _testMode.Changed -= OnInputChanged;
         GC.SuppressFinalize(this);
     }
-}
-
-// Used by the settings-less convenience constructor, which pairs an always-inactive Big Picture probe
-// with the product default (routing enabled) so actual-game and developer-test sources behave normally.
-internal sealed class StaticSteamInputRoutingPreference : ISteamInputRoutingPreference
-{
-    public bool SteamInputRoutingEnabled => true;
-    public event EventHandler? SteamInputRoutingEnabledChanged { add { } remove { } }
 }
 
 internal sealed class InactiveSteamBigPictureProbe : ISteamBigPictureWindowProbe

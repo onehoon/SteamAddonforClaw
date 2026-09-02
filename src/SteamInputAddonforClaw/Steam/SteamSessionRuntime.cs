@@ -1,12 +1,11 @@
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw.Steam;
 
 /// <summary>One raw, read-only Steam/BPM fact for the Full-1902 first-presentation decision (work
-/// order PR6 section 8). Deliberately NOT derived from <c>EffectiveSteamSessionSource</c> -- the
-/// user's old routing preference and Developer Test Mode must not influence it.</summary>
+/// order PR6 section 8). Deliberately NOT derived from <c>EffectiveSteamSessionSource</c> --
+/// Developer Test Mode must not influence it.</summary>
 internal readonly record struct SteamPresentationSnapshot(uint RunningAppId, bool BigPictureActive)
 {
     internal bool WantsSteamDeck => RunningAppId != 0 || BigPictureActive;
@@ -16,7 +15,7 @@ internal readonly record struct SteamPresentationSnapshot(uint RunningAppId, boo
 /// Owns the concrete Steam/Big Picture session-observation source graph that previously was
 /// constructed and held directly by <c>App.xaml.cs</c>: the running-AppID registry source, the
 /// session watcher, the Big Picture watcher, developer test mode, the effective-session source
-/// that combines all three plus the user's routing preference, and per-session diagnostics
+/// that combines all three, and per-session diagnostics
 /// observation. The same concrete implementations are reused unchanged -- this type is a focused
 /// owner, not a rewrite.
 /// </summary>
@@ -37,7 +36,7 @@ internal sealed class SteamSessionRuntime : IDisposable
     private bool _actualObservationStarted;
     private bool _disposed;
 
-    internal SteamSessionRuntime(ISteamInputRoutingPreference routingPreference, IRunningAppIdSource? runningAppIdSource = null)
+    internal SteamSessionRuntime(IRunningAppIdSource? runningAppIdSource = null)
     {
         _runningAppIdSource = runningAppIdSource ?? new SteamRunningAppIdRegistrySource();
         _sessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
@@ -45,7 +44,7 @@ internal sealed class SteamSessionRuntime : IDisposable
         DeveloperTestModeState = new DeveloperTestModeState();
         _bigPictureWatcher.StateChanged += OnBigPictureStateChanged;
         _bigPictureWatcher.Start();
-        _effectiveSource = new EffectiveSteamSessionSource(_sessionWatcher, _bigPictureWatcher, DeveloperTestModeState, routingPreference);
+        _effectiveSource = new EffectiveSteamSessionSource(_sessionWatcher, _bigPictureWatcher, DeveloperTestModeState);
         _effectiveSource.StateChanged += OnEffectiveStateChanged;
     }
 

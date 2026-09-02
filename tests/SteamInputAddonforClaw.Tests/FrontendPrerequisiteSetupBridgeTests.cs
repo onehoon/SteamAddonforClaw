@@ -95,7 +95,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
 
         control.BeginProcessShutdown();
 
-        var exception = await Assert.ThrowsAsync<FrontendProtocolException>(() => control.SetSteamInputRoutingEnabledAsync(true));
+        var exception = await Assert.ThrowsAsync<FrontendProtocolException>(() => control.SetLogLevelAsync(FrontendLogLevel.Debug));
         Assert.Contains("shutting down", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 

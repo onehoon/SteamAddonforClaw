@@ -39,11 +39,12 @@ public sealed class SettingsStore
             var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty) && startupProperty.ValueKind is JsonValueKind.False or JsonValueKind.True
                 ? startupProperty.GetBoolean() : true;
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
-            var steamInputRoutingEnabled = root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty)
-                && routeProperty.ValueKind == JsonValueKind.True;
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
             var developerMenuEnabled = root.TryGetProperty("DeveloperMenuEnabled", out var developerMenuProperty) && developerMenuProperty.ValueKind == JsonValueKind.True && developerMenuProperty.GetBoolean();
-            var settings = new AppSettings(startup, logLevel, steamInputRoutingEnabled, suppressDeveloperMenuWarning)
+            var settings = new AppSettings(
+                LaunchAtWindowsStartup: startup,
+                LogLevel: logLevel,
+                SuppressDeveloperMenuWarning: suppressDeveloperMenuWarning)
             {
                 DeveloperMenuEnabled = developerMenuEnabled,
                 Oem1Mapping = ReadOem1Mapping(root),
@@ -129,48 +130,17 @@ public sealed class SettingsStore
         }
     }
 
-    internal SettingsLoadResult LoadForSafetyGate()
-    {
-        try
-        {
-            if (!File.Exists(_settingsPath)) return new(new AppSettings(), true, "Defaults");
-            using var document = JsonDocument.Parse(File.ReadAllText(_settingsPath));
-            var root = document.RootElement;
-            var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty)
-                ? startupProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? startupProperty.GetBoolean() : throw new JsonException("LaunchAtWindowsStartup must be boolean.")
-                : true;
-            var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty)
-                ? levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : throw new JsonException("LogLevel must be string.")
-                : null);
-            var route = root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty)
-                ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("SteamInputRoutingEnabled must be boolean.")
-                : false;
-            // Developer-menu warning suppression and the OEM1 mapping are UI/feature preference data,
-            // not safety-gate inputs. Keep malformed values from affecting the prerequisite mutation
-            // decision -- and note this result is only ever evaluated, never saved back, so omitting
-            // them here cannot erase what is persisted.
-            return new(new AppSettings(startup, logLevel, route), true, "Loaded");
-        }
-        catch (Exception exception) when (exception is JsonException or InvalidOperationException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            AppLog.Warn("Settings", "Reliable safety-gate settings read failed.", exception, ("Action", "BlockMutation"));
-            return new(new AppSettings(), false, "SettingsUnreliable");
-        }
-    }
-
     public void Save(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel), ("SteamInputRoutingEnabled", settings.SteamInputRoutingEnabled));
+        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
 
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.Oem1Mapping, settings.WingMapping };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.Oem1Mapping, settings.WingMapping };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");
     }
 }
-
-internal sealed record SettingsLoadResult(AppSettings Settings, bool IsReliable, string Reason);

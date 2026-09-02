@@ -1,12 +1,10 @@
-using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>Work order PR6 section 8/25.1: the raw one-shot Steam/BPM presentation snapshot. It uses
-/// only raw RunningAppID + Big Picture facts -- never the old routing preference or Developer Test
-/// Mode.</summary>
+/// only raw RunningAppID + Big Picture facts -- never Developer Test Mode.</summary>
 [Collection("AppLog")]
 public sealed class SteamPresentationSnapshotTests
 {
@@ -21,10 +19,10 @@ public sealed class SteamPresentationSnapshotTests
         => Assert.True(new SteamPresentationSnapshot(0, BigPictureActive: true).WantsSteamDeck);
 
     [Fact]
-    public void Capture_reads_the_raw_running_app_id_regardless_of_the_old_routing_preference()
+    public void Capture_reads_the_raw_running_app_id()
     {
         var appId = new FakeAppIdSource { AppId = 0 };
-        using var runtime = new SteamSessionRuntime(new FakeRoutingPreference { Enabled = false }, appId);
+        using var runtime = new SteamSessionRuntime(appId);
 
         Assert.Equal(0u, runtime.CapturePresentationSnapshot().RunningAppId);
         Assert.False(runtime.CapturePresentationSnapshot().WantsSteamDeck);
@@ -32,14 +30,14 @@ public sealed class SteamPresentationSnapshotTests
         appId.AppId = 570;
         var snapshot = runtime.CapturePresentationSnapshot();
         Assert.Equal(570u, snapshot.RunningAppId);
-        Assert.True(snapshot.WantsSteamDeck); // routing preference is still disabled -- irrelevant
+        Assert.True(snapshot.WantsSteamDeck);
     }
 
     [Fact]
     public void Developer_test_mode_does_not_make_the_production_snapshot_want_steamdeck()
     {
         var appId = new FakeAppIdSource { AppId = 0 };
-        using var runtime = new SteamSessionRuntime(new FakeRoutingPreference { Enabled = true }, appId);
+        using var runtime = new SteamSessionRuntime(appId);
         runtime.DeveloperTestModeState.SetEnabled(true);
 
         Assert.False(runtime.CapturePresentationSnapshot().WantsSteamDeck);
@@ -50,12 +48,5 @@ public sealed class SteamPresentationSnapshotTests
         public uint AppId { get; set; }
         public uint GetRunningAppId() => AppId;
         public event EventHandler? Changed { add { } remove { } }
-    }
-
-    private sealed class FakeRoutingPreference : ISteamInputRoutingPreference
-    {
-        public bool Enabled { get; set; }
-        public bool SteamInputRoutingEnabled => Enabled;
-        public event EventHandler? SteamInputRoutingEnabledChanged { add { } remove { } }
     }
 }

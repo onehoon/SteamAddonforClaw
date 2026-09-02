@@ -18,7 +18,7 @@ public sealed class AddonProcessHostStartupTests
     {
         var oem1Activation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runtimeHost = new AddonRuntimeHost(
-            new SteamSessionRuntime(new FakeRoutingPreference()),
+            new SteamSessionRuntime(),
             routingRuntime: null,
             new PowerMutationGate(),
             new RecoverySafetyState(RecoverySafety.Safe),
@@ -41,11 +41,5 @@ public sealed class AddonProcessHostStartupTests
 
         oem1Activation.SetResult();
         await host.DisposeAsync();
-    }
-
-    private sealed class FakeRoutingPreference : ISteamInputRoutingPreference
-    {
-        public bool SteamInputRoutingEnabled => false;
-        public event EventHandler? SteamInputRoutingEnabledChanged { add { } remove { } }
     }
 }

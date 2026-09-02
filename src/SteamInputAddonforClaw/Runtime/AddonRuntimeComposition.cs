@@ -54,7 +54,7 @@ internal static class AddonRuntimeCompositionFactory
         // process falls back to one bounded elevated child that creates exactly this one task.
         var startupRegistration = WindowsTaskSchedulerStartupManager.WithElevatedRepair();
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration, isLaunchAtWindowsStartupRequired);
-        var steamRuntime = new SteamSessionRuntime(startupSettings);
+        var steamRuntime = new SteamSessionRuntime();
         if (bigPictureStateChanged is not null) steamRuntime.BigPictureStateChanged += bigPictureStateChanged;
         var startupRegistrationResult = startupSettings.Repair();
 
