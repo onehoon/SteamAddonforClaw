@@ -36,6 +36,10 @@ public sealed partial class OverlayWindow : Window
     private readonly Brush _rowSelectedBrush;
     private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Colors.Transparent);
 
+    // OQ5-UI-11: the fixed 2x2 Shortcut grid -- one pure selection model + the four tile borders.
+    private readonly OverlayShortcutSelection _shortcutSelection = new();
+    private readonly Dictionary<OverlayShortcutSlotId, Border> _shortcutTiles = new();
+
     // OQ5-UI-07: the delayed-commit helper behind the temporary "Slider Preview" fixture only.
     private OverlayDelayedSliderCommit? _sliderPreviewCommit;
 
@@ -181,12 +185,14 @@ public sealed partial class OverlayWindow : Window
     }
 
     // Device gets the temporary preview fixture (Toggle + Slider primitives + navigation rows);
-    // Setting gets the OQ5-UI-10 tab-order editor; every other tab keeps its OQ5-UI-01 placeholder
-    // with zero selectable rows.
+    // Setting gets the OQ5-UI-10 tab-order editor; Shortcut gets the OQ5-UI-11 2x2 slot shell;
+    // every other tab keeps its OQ5-UI-01 placeholder with zero selectable rows.
     private FrameworkElement BuildPage(OverlayTabId id, List<OverlayRow> rows)
     {
         if (id == OverlayTabId.Setting)
             return BuildTabOrderEditorPage(rows);
+        if (id == OverlayTabId.Shortcut)
+            return BuildShortcutPage();
         if (id != OverlayTabId.Device)
             return CreatePlaceholderPage(id);
 
@@ -300,6 +306,85 @@ public sealed partial class OverlayWindow : Window
         TabOrderChangeRequested?.Invoke(proposed);
     }
 
+    // OQ5-UI-11: the fixed four-slot Shortcut shell. A 2x2 Grid of four Unassigned tiles kept by
+    // slot identity. Not registered as _pageRows -- OverlayShortcutSelection owns the one selected
+    // tile while this page is active, and A does nothing because no slot has an action yet.
+    private FrameworkElement BuildShortcutPage()
+    {
+        var grid = new Grid
+        {
+            ColumnSpacing = 8,
+            RowSpacing = 8,
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+            },
+            RowDefinitions =
+            {
+                new RowDefinition { Height = GridLength.Auto },
+                new RowDefinition { Height = GridLength.Auto },
+            },
+        };
+
+        var slots = new (OverlayShortcutSlotId Id, string Label, int Row, int Column)[]
+        {
+            (OverlayShortcutSlotId.Slot1, "Slot 1", 0, 0),
+            (OverlayShortcutSlotId.Slot2, "Slot 2", 0, 1),
+            (OverlayShortcutSlotId.Slot3, "Slot 3", 1, 0),
+            (OverlayShortcutSlotId.Slot4, "Slot 4", 1, 1),
+        };
+
+        foreach (var (id, label, row, column) in slots)
+        {
+            var title = new TextBlock { Text = label };
+            if (Application.Current.Resources.TryGetValue("BodyStrongTextBlockStyle", out var titleStyle) && titleStyle is Style ts)
+                title.Style = ts;
+
+            var state = new TextBlock { Text = "Unassigned", Opacity = 0.6 };
+            if (Application.Current.Resources.TryGetValue("CaptionTextBlockStyle", out var stateStyle) && stateStyle is Style ss)
+                state.Style = ss;
+
+            var content = new StackPanel { Spacing = 2 };
+            content.Children.Add(title);
+            content.Children.Add(state);
+
+            var tile = new Border
+            {
+                Child = content,
+                Padding = new Thickness(14, 16, 14, 16),
+                MinHeight = 72,
+                CornerRadius = new CornerRadius(6),
+                BorderThickness = new Thickness(2),
+                BorderBrush = RowUnselectedBrush,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            if (Application.Current.Resources.TryGetValue("CardBackgroundFillColorDefaultBrush", out var fill) && fill is Brush fillBrush)
+                tile.Background = fillBrush;
+            tile.Tapped += (_, _) => SelectShortcutSlot(id, "Pointer");
+            Grid.SetRow(tile, row);
+            Grid.SetColumn(tile, column);
+            grid.Children.Add(tile);
+            _shortcutTiles[id] = tile;
+        }
+
+        ApplyShortcutSelectionVisual();
+        return grid;
+    }
+
+    private void SelectShortcutSlot(OverlayShortcutSlotId slot, string source)
+    {
+        if (!_shortcutSelection.Select(slot)) return;
+        OverlayLog.Debug("Shortcut", "Shortcut tile selected.", ("Slot", slot), ("Source", source));
+        ApplyShortcutSelectionVisual();
+    }
+
+    private void ApplyShortcutSelectionVisual()
+    {
+        foreach (var (id, tile) in _shortcutTiles)
+            tile.BorderBrush = id == _shortcutSelection.SelectedSlot ? _rowSelectedBrush : RowUnselectedBrush;
+    }
+
     private static string LabelFor(OverlayTabId id) => id switch
     {
         OverlayTabId.Device => "Device",
@@ -355,22 +440,46 @@ public sealed partial class OverlayWindow : Window
     // OQ5-UI-04 s.11: NavigateUp/Down move logical row selection; Left/Right and Accept dispatch to
     // the selected row only when it registered that capability. All row/selection state stays private
     // to OverlayWindow -- App only forwards the semantic action.
-    internal void NavigateUp() => MoveRowSelection(up: true);
+    // OQ5-UI-11 s.7.5: the Shortcut page is the one 2D exception -- the same semantic actions drive
+    // the fixed 2x2 grid instead of the linear row model while that page is active.
+    internal void NavigateUp()
+    {
+        if (OnShortcutPage()) { if (_shortcutSelection.MoveUp()) ApplyShortcutSelectionVisual(); return; }
+        MoveRowSelection(up: true);
+    }
 
-    internal void NavigateDown() => MoveRowSelection(up: false);
+    internal void NavigateDown()
+    {
+        if (OnShortcutPage()) { if (_shortcutSelection.MoveDown()) ApplyShortcutSelectionVisual(); return; }
+        MoveRowSelection(up: false);
+    }
 
     // If the selected row became unselectable, the selection method normalizes to another row and
     // reports it; on that same press we only refresh the highlight and skip the adjust/activate so
     // the fallback row is never mutated under a stale highlight.
     internal void AdjustSelectedRow(int delta)
     {
+        if (OnShortcutPage())
+        {
+            if (delta < 0 ? _shortcutSelection.MoveLeft() : _shortcutSelection.MoveRight())
+                ApplyShortcutSelectionVisual();
+            return;
+        }
         if (_rowSelection.AdjustSelected(delta)) RefreshRowSelectionAfterMove();
     }
 
     internal void ActivateSelectedRow()
     {
+        if (OnShortcutPage())
+        {
+            // Every PR11 slot is Unassigned: A performs no product action.
+            OverlayLog.Debug("Shortcut", "Accept on an unassigned Shortcut slot; no action.", ("Slot", _shortcutSelection.SelectedSlot));
+            return;
+        }
         if (_rowSelection.ActivateSelected()) RefreshRowSelectionAfterMove();
     }
+
+    private bool OnShortcutPage() => _tabState.SelectedTab == OverlayTabId.Shortcut;
 
     private void MoveRowSelection(bool up)
     {
@@ -468,6 +577,15 @@ public sealed partial class OverlayWindow : Window
 
         _rowSelection.SetRows(CapabilitiesFor(selected));
         ApplyRowSelectionVisual();
+
+        // OQ5-UI-11 s.7.4: entering the Shortcut page selects Slot 1. CapabilitiesFor(Shortcut) is
+        // empty, so _rowSelection has no selected row and OverlayShortcutSelection is the one
+        // selection authority for that page.
+        if (selected == OverlayTabId.Shortcut)
+        {
+            _shortcutSelection.Reset();
+            ApplyShortcutSelectionVisual();
+        }
     }
 
     private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(OverlayTabId tab) =>
