@@ -53,6 +53,32 @@ internal sealed class OverlayTabState
         return true;
     }
 
+    // OQ5-UI-10: build the one-position-move proposal the Setting-page editor sends to the Runtime.
+    // Pure: it never mutates the current order -- only TryApplyOrder(authoritative) does that. delta
+    // must be -1 (earlier) or +1 (later); a boundary move produces no proposal.
+    internal bool TryCreateMovedOrder(OverlayTabId tab, int delta, out IReadOnlyList<OverlayTabId> proposed)
+    {
+        proposed = _order;
+        if (delta != -1 && delta != 1)
+            return false;
+
+        var index = -1;
+        for (var i = 0; i < _order.Count; i++)
+            if (_order[i] == tab) { index = i; break; }
+
+        var target = index + delta;
+        if (index < 0 || target < 0 || target >= _order.Count)
+            return false;
+
+        var moved = _order.ToArray();
+        (moved[index], moved[target]) = (moved[target], moved[index]);
+        if (!OverlayTabOrderContract.TryNormalize(moved, out var normalized))
+            return false;
+
+        proposed = normalized;
+        return true;
+    }
+
     // OQ5-UI-02: LB moves one tab earlier in the current order, RB one tab later. Bounded/no-wrap:
     // at either boundary the call is a no-op. Traversal derives position from the current order,
     // never a hard-coded Device -> ... -> Setting sequence, so a later persisted order just works.

@@ -31,6 +31,7 @@ public sealed partial class OverlayWindow : Window
     private readonly Dictionary<OverlayTabId, Button> _tabButtons = new();
     private readonly Dictionary<OverlayTabId, FrameworkElement> _tabPages = new();
     private readonly Dictionary<OverlayTabId, IReadOnlyList<OverlayRow>> _pageRows = new();
+    private readonly Dictionary<OverlayTabId, OverlayTabOrderRow> _tabOrderRows = new();
     private readonly OverlayRowSelection _rowSelection = new();
     private readonly Brush _rowSelectedBrush;
     private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Colors.Transparent);
@@ -39,6 +40,10 @@ public sealed partial class OverlayWindow : Window
     private OverlayDelayedSliderCommit? _sliderPreviewCommit;
 
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
+
+    // OQ5-UI-10: the Setting-page editor proposes a one-position tab move; App forwards it through the
+    // existing OQ5-UI-09 SendSetTabOrderAsync seam. OverlayWindow never owns the transport client.
+    internal event Action<IReadOnlyList<OverlayTabId>>? TabOrderChangeRequested;
 
     public OverlayWindow()
     {
@@ -176,9 +181,12 @@ public sealed partial class OverlayWindow : Window
     }
 
     // Device gets the temporary preview fixture (Toggle + Slider primitives + navigation rows);
-    // every other tab keeps its OQ5-UI-01 placeholder with zero selectable rows.
+    // Setting gets the OQ5-UI-10 tab-order editor; every other tab keeps its OQ5-UI-01 placeholder
+    // with zero selectable rows.
     private FrameworkElement BuildPage(OverlayTabId id, List<OverlayRow> rows)
     {
+        if (id == OverlayTabId.Setting)
+            return BuildTabOrderEditorPage(rows);
         if (id != OverlayTabId.Device)
             return CreatePlaceholderPage(id);
 
@@ -251,6 +259,45 @@ public sealed partial class OverlayWindow : Window
         }
 
         return stack;
+    }
+
+    // OQ5-UI-10: the five fixed tab-order rows live in one 5-row Grid, created once and kept by
+    // OverlayTabId. ApplyTabOrder repositions them via Grid.SetRow -- instances are never recreated.
+    private FrameworkElement BuildTabOrderEditorPage(List<OverlayRow> rows)
+    {
+        var section = new StackPanel { Spacing = 8 };
+
+        var heading = new TextBlock { Text = "Tab Order" };
+        if (Application.Current.Resources.TryGetValue("BodyStrongTextBlockStyle", out var style) && style is Style headingStyle)
+            heading.Style = headingStyle;
+        section.Children.Add(heading);
+
+        var grid = new Grid { RowSpacing = 4 };
+        var order = _tabState.Order;
+        for (var i = 0; i < order.Count; i++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var id = order[i];
+            var row = new OverlayTabOrderRow(id, LabelFor(id), delta => RequestTabOrderMove(id, delta));
+            row.SetPosition(i, order.Count);
+            Grid.SetRow(row.Container, i);
+            grid.Children.Add(row.Container);
+            _tabOrderRows[id] = row;
+            rows.Add(new OverlayRow(row.Container, row.Capabilities));
+        }
+
+        section.Children.Add(grid);
+        return section;
+    }
+
+    // OQ5-UI-10: a proposal is only a request. The visible order changes only when the Runtime
+    // republishes TabOrderState -> ApplyTabOrder. A boundary move produces no proposal and no request.
+    private void RequestTabOrderMove(OverlayTabId tab, int delta)
+    {
+        if (!_tabState.TryCreateMovedOrder(tab, delta, out var proposed))
+            return;
+        OverlayLog.Info("TabOrder", "Tab order move requested.", ("Tab", tab), ("Delta", delta < 0 ? -1 : 1));
+        TabOrderChangeRequested?.Invoke(proposed);
     }
 
     private static string LabelFor(OverlayTabId id) => id switch
@@ -343,6 +390,13 @@ public sealed partial class OverlayWindow : Window
     // (s.11.1) -- the new first tab only takes effect on the next Show via ResetForShow().
     internal void ApplyTabOrder(IReadOnlyList<OverlayTabId> order)
     {
+        // Capture the Setting-editor row identity selected right now (before the order changes) so a
+        // live reorder preserves the selected tab rather than the old numeric row slot.
+        OverlayTabId? selectedEditorTab = null;
+        var settingVisible = _tabState.SelectedTab == OverlayTabId.Setting;
+        if (settingVisible && _rowSelection.SelectedIndex is { } selected && selected >= 0 && selected < _tabState.Order.Count)
+            selectedEditorTab = _tabState.Order[selected];
+
         if (!_tabState.TryApplyOrder(order))
         {
             OverlayLog.Warn("Shell", "Ignored an invalid authoritative Overlay tab order.");
@@ -350,11 +404,39 @@ public sealed partial class OverlayWindow : Window
         }
 
         var applied = _tabState.Order;
-        for (var column = 0; column < applied.Count; column++)
-            if (_tabButtons.TryGetValue(applied[column], out var button))
-                Grid.SetColumn(button, column);
+        for (var position = 0; position < applied.Count; position++)
+        {
+            if (_tabButtons.TryGetValue(applied[position], out var button))
+                Grid.SetColumn(button, position);
+            if (_tabOrderRows.TryGetValue(applied[position], out var editorRow))
+            {
+                Grid.SetRow(editorRow.Container, position);
+                editorRow.SetPosition(position, applied.Count);
+            }
+        }
+
+        // Rebuild the Setting page's ordered row list so CapabilitiesFor(Setting) / the selection
+        // model see the authoritative order. The OverlayTabOrderRow instances are reused.
+        if (_tabOrderRows.Count == applied.Count)
+            _pageRows[OverlayTabId.Setting] = applied
+                .Select(id => new OverlayRow(_tabOrderRows[id].Container, _tabOrderRows[id].Capabilities))
+                .ToArray();
 
         ApplySelectedHeaderVisual();
+
+        // s.8.2/8.4: if the Setting editor is what the user is looking at, re-point selection at the
+        // same identity and refresh just the row highlight -- do NOT run the full tab-change path
+        // (which would reset body scroll and selection).
+        if (settingVisible)
+        {
+            int? preferredIndex = null;
+            if (selectedEditorTab is { } tab)
+                for (var i = 0; i < applied.Count; i++)
+                    if (applied[i] == tab) { preferredIndex = i; break; }
+            _rowSelection.SetRows(CapabilitiesFor(OverlayTabId.Setting), preferredIndex);
+            ApplyRowSelectionVisual();
+        }
+
         OverlayLog.Info("Shell", "Authoritative Overlay tab order applied.", ("SelectedTab", _tabState.SelectedTab));
     }
 

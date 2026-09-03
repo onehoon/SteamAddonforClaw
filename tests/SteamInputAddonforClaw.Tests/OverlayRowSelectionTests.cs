@@ -29,6 +29,31 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
+    public void SetRowsWithAValidPreferredIndexKeepsThatRowSelected()
+    {
+        var selection = new OverlayRowSelection();
+
+        selection.SetRows([Row(), Row(), Row(), Row(), Row()], preferredIndex: 3);
+
+        Assert.Equal(3, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void SetRowsWithAnInvalidOrUnselectablePreferredIndexFallsBackToFirstSelectable()
+    {
+        var selection = new OverlayRowSelection();
+
+        selection.SetRows([Row(selectable: false), Row(), Row()], preferredIndex: 0); // unselectable
+        Assert.Equal(1, selection.SelectedIndex);
+
+        selection.SetRows([Row(), Row()], preferredIndex: 9); // out of range
+        Assert.Equal(0, selection.SelectedIndex);
+
+        selection.SetRows([Row(), Row()], preferredIndex: null); // default behaviour
+        Assert.Equal(0, selection.SelectedIndex);
+    }
+
+    [Fact]
     public void MoveNextAndPreviousStepThroughSelectableRows()
     {
         var selection = new OverlayRowSelection();
