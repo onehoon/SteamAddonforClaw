@@ -128,7 +128,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
             isSteamDeckPresentationActive: () => true,
             tryRequestQuickAccessPulse: () => false,
             tryRequestSteamPulse: () => { steamPulses++; return true; },
-            nativeWinGSuppressionReady: () => false, // production default until Policy B
+            nativeWinGSuppressionReady: () => false, // Policy B: guard reports not armed (arm failed / unavailable)
             oem1EventSourceOverride: new FakeEventSource(),
             wingEventSourceOverride: wing);
 

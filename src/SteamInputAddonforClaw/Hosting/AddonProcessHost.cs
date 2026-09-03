@@ -256,6 +256,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
         AppLog.Info($"Starting runtime. Environment={startupResult.EnvironmentMode}; Readiness={startupResult.EnvironmentReadiness}.");
 
+        // Full1902 Policy B section 4/13: the ONE process-owned Win+G low-level hook installation.
+        // It runs here -- synchronously, before this method's first await -- so it is installed on the
+        // same (message-loop) thread that will later pump its callbacks, and BEFORE the Disabled-mode
+        // controller path can reach the first live AttachInitialAsync(). Installation is idempotent
+        // and authority-neutral: it is armed only for Center M Disabled / Addon authority
+        // (EnsureAddonAuthorityWinGSuppression), and IsArmed stays false under stock authority.
+        _winGSuppressionGuard.Start();
+
         // PR4: reuse the ONE Center M startup control constructed by the startup composition -- the
         // same instance the authority branch read -- for the mandatory policy, PR3 transition, and
         // Device-page capture. No second Center M startup writer/manager is created.
@@ -337,9 +345,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 }
                 if (_presentationOwnership is { } presentation && !await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false))
                     return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", null);
-                return _physicalOwnership is { } owner
+                var physicalReleaseResult = _physicalOwnership is { } owner
                     ? await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
                     : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
+                // Full1902 Policy B section 8: suppression belongs to Addon controller authority.
+                // Disarm ONLY after the virtual presentation is retired AND the physical MSI Claw is
+                // proven restored to stock PID1901 -- never at the start of Enable-and-Restart, never
+                // while a live Addon virtual controller is still exposed. Shared by both the
+                // Enable-and-Restart and the PR12 stock-safe uninstall-preparation flows (same seam).
+                if (physicalReleaseResult.Succeeded)
+                {
+                    _winGSuppressionGuard.Disarm();
+                    AppLog.Info("Wing.Guard", "Full1902 Win+G suppression released; stock controller authority restored.",
+                        ("Authority", "StockCenterM"), ("Event", "Full1902WinGSuppressionReleased"));
+                }
+                return physicalReleaseResult;
             },
             // PR12 section 6/7: reuse the composition's existing StockCenterMStartupBaseline (the one
             // built from the shared MsiClawNativeStateManager). A machine with no MSI Claw fails
@@ -488,6 +508,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return;
             }
 
+            // Full1902 Policy B section 5.2/5.3: while the Addon owns the controller, native Win+G /
+            // Xbox Game Bar must never surface. Arm suppression -- and PROVE it armed -- BEFORE the
+            // first live virtual presentation. A failed install/arm is fail-closed: no live X360 or
+            // SteamDeck presentation, no publisher, no front-button WING delivery, and no native Game
+            // Bar fallback while the Addon still owns PID1902. No retry loop -- an ordinary Runtime
+            // restart retries through this same path. PID1902 / HidHide stay owned so Enable-and-Restart
+            // can still release stock-safely.
+            if (!EnsureAddonAuthorityWinGSuppression())
+            {
+                await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+                return;
+            }
+
             // PR10: the owner has committed a real strong identity + exact hidden target, so a later
             // physical disappearance can be recovered on a real Device Arrival even after the bounded
             // PR8/PR9 attempt has already failed closed.
@@ -511,7 +544,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     wingMappingPreference: startupSettings,
                     isSteamDeckPresentationActive: () => _presentationOwnership?.ActivePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck,
                     tryRequestQuickAccessPulse: () => _presentationOwnership?.TryRequestQuickAccessPulse() ?? false,
-                    tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false);
+                    tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false,
+                    // Full1902 Policy B section 6: WING custom delivery becomes live only while native
+                    // Win+G suppression is proven armed for this Addon-authority lifetime -- bound to
+                    // the existing guard seam, not a new authority boolean.
+                    nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed);
             }
             catch (Exception exception)
             {
@@ -930,9 +967,30 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartRuntimeEventWatchers()
     {
-        // Game Bar foreground presentation remains dormant in production. Install the existing
-        // Runtime-owned Win+G hook after all synchronous watcher work (none in this mode).
+        // Full1902 Policy B section 4: the Win+G hook is now installed by InitializeRuntimeAsync
+        // (before the first Disabled-mode presentation attach). Nothing is installed here -- Game Bar
+        // foreground presentation remains dormant in production and there is no other watcher work.
+    }
+
+    /// <summary>Full1902 Policy B section 5.2/13: arm native Win+G / Xbox Game Bar suppression for the
+    /// Center M Disabled / Addon controller-authority lifetime and prove it took. The hook itself is
+    /// installed once by <see cref="InitializeRuntimeAsync"/>; the <see cref="WinGSuppressionGuard.Start"/>
+    /// call here is idempotent and only re-asserts installation. Returns <see langword="false"/>
+    /// fail-closed when the hook is unavailable or cannot be proven armed -- no retry loop.</summary>
+    private bool EnsureAddonAuthorityWinGSuppression()
+    {
         _winGSuppressionGuard.Start();
+        AppLog.Info("Wing.Guard", "Full1902 Win+G suppression arm started.", ("Authority", "AddonAuthority"), ("Event", "Full1902WinGSuppressionArmStarted"));
+        if (_winGSuppressionGuard.EnsureArmed() && _winGSuppressionGuard.IsArmed)
+        {
+            AppLog.Info("Wing.Guard", "Full1902 Win+G suppression armed.", ("Authority", "AddonAuthority"), ("Event", "Full1902WinGSuppressionArmed"));
+            return true;
+        }
+        AppLog.Error("Wing.Guard", "Full1902 Win+G suppression could not be armed; Disabled-mode presentation is fail-closed.", null,
+            ("Authority", "AddonAuthority"),
+            ("Reason", _winGSuppressionGuard.IsHookInstalled ? "WinGSuppressionArmFailed" : "WinGSuppressionUnavailable"),
+            ("Event", "Full1902WinGSuppressionArmFailed"));
+        return false;
     }
 
     internal void StartDeferredRuntimeStartup()
@@ -1311,6 +1369,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (source is null)
             {
                 AppLog.Info("ControllerPresentation", "Runtime presentation reconcile skipped; no live PR5 input source.", ("Trigger", trigger));
+                return;
+            }
+            // Full1902 Policy B section 5.7: a Steam/BPM switch of an already-live presentation never
+            // touches suppression, but a reconcile that would re-attach a live presentation after
+            // physical/DirectInput recovery must not bring virtual output back while native Win+G
+            // suppression is not armed. In the Disabled-authority steady state IsArmed is always true,
+            // so this is a fail-closed guard, not a behaviour change -- 0 Disarm, 0 hook reinstall.
+            if (!_winGSuppressionGuard.IsArmed)
+            {
+                AppLog.Warn("ControllerPresentation", "Runtime presentation reconcile skipped; Win+G suppression is not armed.", null,
+                    ("Trigger", trigger), ("Event", "Full1902WinGSuppressionArmFailed"));
                 return;
             }
             var result = await presentation.ReconcileDesiredPresentationAsync(
