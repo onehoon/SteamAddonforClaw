@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SteamInputAddonforClaw.Contracts.Overlay;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
 
@@ -11,12 +12,15 @@ internal static class OverlayTransportProtocol
     // Semantic, edge-driven navigation only -- no ControllerState / buttons / sticks / raw reports
     // ever cross this wire. A v2 peer must fail the handshake rather than silently ignore Navigation.
     // Version 4 (OQ5-UI-02): adds PreviousTab / NextTab semantic actions for LB/RB tab navigation.
-    // No compatibility fallback with v3 -- a v3 peer must fail the handshake.
-    internal const int CurrentVersion = 4;
+    // Version 5 (OQ5-UI-09): adds TabOrderState (Runtime -> Overlay) and SetTabOrder (Overlay ->
+    // Runtime) carrying the shared OverlayTabId list. The Runtime sends the authoritative order right
+    // after HandshakeAccepted and the Overlay must apply it before it reports Ready. No fallback --
+    // a v4 peer must fail the handshake.
+    internal const int CurrentVersion = 5;
     internal const int MaxFrameBytes = 64 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, SetTabOrder }
 internal enum OverlayCommand { Show, Hide, Shutdown }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
@@ -27,7 +31,8 @@ internal sealed record OverlayWireMessage(
     OverlayCommand? Command = null,
     OverlayNavigationAction? Navigation = null,
     OverlayState? State = null,
-    string? Error = null);
+    string? Error = null,
+    IReadOnlyList<OverlayTabId>? TabOrder = null);
 
 internal static class OverlayWireCodec
 {
@@ -92,6 +97,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(5);
     private readonly string _pipeName;
     private readonly Func<NamedPipeServerStream> _pipeFactory;
+    private readonly Func<IReadOnlyList<OverlayTabId>> _getTabOrder;
+    private readonly Func<IReadOnlyList<OverlayTabId>, bool> _tryChangeTabOrder;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _commandGate = new(1, 1);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -108,18 +115,26 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
     internal event Action<NamedPipeOverlayServer>? DismissRequested;
 
-    internal NamedPipeOverlayServer(string pipeName)
+    internal NamedPipeOverlayServer(string pipeName,
+        Func<IReadOnlyList<OverlayTabId>>? getTabOrder = null,
+        Func<IReadOnlyList<OverlayTabId>, bool>? tryChangeTabOrder = null)
         : this(pipeName, () => new NamedPipeServerStream(
             pipeName,
             PipeDirection.InOut,
             1,
             PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly)) { }
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly), getTabOrder, tryChangeTabOrder) { }
 
-    internal NamedPipeOverlayServer(string pipeName, Func<NamedPipeServerStream> pipeFactory)
+    internal NamedPipeOverlayServer(string pipeName, Func<NamedPipeServerStream> pipeFactory,
+        Func<IReadOnlyList<OverlayTabId>>? getTabOrder = null,
+        Func<IReadOnlyList<OverlayTabId>, bool>? tryChangeTabOrder = null)
     {
         _pipeName = pipeName;
         _pipeFactory = pipeFactory;
+        // OQ5-UI-09: the Runtime binds these onto the ONE StartupSettingsCoordinator. Without a bind
+        // (tests, no-authority contexts) the server reports the frozen default and rejects mutations.
+        _getTabOrder = getTabOrder ?? (() => OverlayTabOrderContract.DefaultOrder);
+        _tryChangeTabOrder = tryChangeTabOrder ?? (_ => false);
     }
 
     internal bool IsReady { get { lock (_sync) return _readyState; } }
@@ -203,6 +218,19 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
+    // OQ5-UI-09: read the current authoritative order through the shared contract (so a caller that
+    // somehow holds a malformed value still puts a valid five-tab order on the wire) and send it on
+    // the one instance write gate shared with SendCommandAsync / SendNavigationAsync.
+    private async Task SendTabOrderStateAsync(Stream pipe, CancellationToken token)
+    {
+        IReadOnlyList<OverlayTabId> order;
+        try { order = OverlayTabOrderContract.NormalizeOrDefault(_getTabOrder()); }
+        catch { order = OverlayTabOrderContract.DefaultOrder; }
+        await OverlayWireCodec.WriteAsync(pipe,
+            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState, TabOrder: order),
+            _writeGate, token).ConfigureAwait(false);
+    }
+
     private async Task AcceptLoopAsync()
     {
         while (!_lifetime.IsCancellationRequested)
@@ -245,24 +273,44 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private async Task ServeAsync(Stream pipe)
     {
         using var connection = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        using var writeGate = new SemaphoreSlim(1, 1);
+        // OQ5-UI-09 blocker fix: every Runtime -> Overlay write goes through the ONE instance
+        // _writeGate, including handshake and the post-Ready TabOrderState replies. A second
+        // per-connection semaphore would let a tab-order reply and a SendNavigationAsync/
+        // SendCommandAsync write interleave 4-byte prefixes and payloads on the same byte stream.
         var hello = await OverlayWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false);
         if (hello.Kind != OverlayWireMessageKind.Handshake || hello.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
         {
-            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProtocolError, Error: "Overlay protocol version mismatch."), writeGate, connection.Token).ConfigureAwait(false);
+            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProtocolError, Error: "Overlay protocol version mismatch."), _writeGate, connection.Token).ConfigureAwait(false);
             return;
         }
 
-        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), writeGate, connection.Token).ConfigureAwait(false);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), _writeGate, connection.Token).ConfigureAwait(false);
+        // OQ5-UI-09 section 6: the authoritative tab order goes out immediately after acceptance so
+        // the client can apply it before it reports Ready -- the Runtime never Shows a Ready Overlay
+        // that still has only the default local order.
+        await SendTabOrderStateAsync(pipe, connection.Token).ConfigureAwait(false);
         while (!connection.IsCancellationRequested)
         {
             var message = await OverlayWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false);
             if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                 throw new FrontendProtocolException("Invalid Overlay state message.");
 
-            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null)
+            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null && message.TabOrder is null)
             {
                 DismissRequested?.Invoke(this);
+                continue;
+            }
+
+            if (message.Kind == OverlayWireMessageKind.SetTabOrder)
+            {
+                if (message.TabOrder is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null)
+                    throw new FrontendProtocolException("Invalid Overlay SetTabOrder message.");
+                // The authoritative state reply IS the mutation result: accepted / rejected-no-op /
+                // invalid / persistence-failure all resolve to "read the coordinator again and send
+                // whatever it now holds". A malformed persist must not tear this connection down.
+                try { _tryChangeTabOrder(message.TabOrder); }
+                catch { /* feature-local: the coordinator keeps its previous authoritative order */ }
+                await SendTabOrderStateAsync(pipe, connection.Token).ConfigureAwait(false);
                 continue;
             }
 
@@ -312,9 +360,16 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     internal NamedPipeOverlayClient(string pipeName) => _pipeName = pipeName;
 
     internal async Task RunAsync(Func<OverlayCommand, Task> commandHandler, CancellationToken token = default)
-        => await RunAsync(commandHandler, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, null, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(Func<OverlayCommand, Task> commandHandler, Func<OverlayNavigationAction, Task>? navigationHandler, CancellationToken token = default)
+        => await RunAsync(commandHandler, navigationHandler, null, token).ConfigureAwait(false);
+
+    internal async Task RunAsync(
+        Func<OverlayCommand, Task> commandHandler,
+        Func<OverlayNavigationAction, Task>? navigationHandler,
+        Func<IReadOnlyList<OverlayTabId>, Task>? tabOrderHandler,
+        CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -326,21 +381,36 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         if (accepted.Kind != OverlayWireMessageKind.HandshakeAccepted || accepted.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
             throw new FrontendProtocolException("Overlay handshake was rejected.");
 
+        // OQ5-UI-09 section 6: apply the mandatory initial authoritative order BEFORE reporting Ready.
+        var initial = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
+        if (initial.ProtocolVersion != OverlayTransportProtocol.CurrentVersion || initial.Kind != OverlayWireMessageKind.TabOrderState)
+            throw new FrontendProtocolException("Overlay did not receive an initial tab-order state.");
+        var initialOrder = ValidateTabOrderMessage(initial);
+        if (tabOrderHandler is not null)
+            await tabOrderHandler(initialOrder).ConfigureAwait(false);
+
         await SendStateAsync(pipe, OverlayState.Ready, linked.Token).ConfigureAwait(false);
         while (!linked.IsCancellationRequested)
         {
             var message = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
             if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                 throw new FrontendProtocolException("Invalid Overlay message.");
+            if (message.Kind == OverlayWireMessageKind.TabOrderState)
+            {
+                var order = ValidateTabOrderMessage(message);
+                if (tabOrderHandler is not null)
+                    await tabOrderHandler(order).ConfigureAwait(false);
+                continue;
+            }
             if (message.Kind == OverlayWireMessageKind.Navigation)
             {
-                if (message.Navigation is null || message.Command is not null || message.State is not null || message.Error is not null)
+                if (message.Navigation is null || message.Command is not null || message.State is not null || message.Error is not null || message.TabOrder is not null)
                     throw new FrontendProtocolException("Invalid Overlay navigation message.");
                 if (navigationHandler is not null)
                     await navigationHandler(message.Navigation.Value).ConfigureAwait(false);
                 continue;
             }
-            if (message.Kind != OverlayWireMessageKind.Command || message.Command is null || message.Navigation is not null)
+            if (message.Kind != OverlayWireMessageKind.Command || message.Command is null || message.Navigation is not null || message.TabOrder is not null)
                 throw new FrontendProtocolException("Invalid Overlay command message.");
             await commandHandler(message.Command.Value).ConfigureAwait(false);
             if (message.Command == OverlayCommand.Show)
@@ -354,6 +424,36 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
 
     private async Task SendStateAsync(Stream pipe, OverlayState state, CancellationToken token) =>
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.State, State: state), _writeGate, token).ConfigureAwait(false);
+
+    private static IReadOnlyList<OverlayTabId> ValidateTabOrderMessage(OverlayWireMessage message)
+    {
+        if (message.TabOrder is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null)
+            throw new FrontendProtocolException("Invalid Overlay tab-order message.");
+        if (!OverlayTabOrderContract.TryNormalize(message.TabOrder, out var order))
+            throw new FrontendProtocolException("Overlay tab-order state was not a complete five-tab order.");
+        return order;
+    }
+
+    // OQ5-UI-09 section 8: the OQ5-UI-10 reorder-editor seam. true only means the request frame was
+    // written; the authoritative result is the TabOrderState the Runtime republishes afterwards.
+    internal async Task<bool> SendSetTabOrderAsync(IReadOnlyList<OverlayTabId> requested, CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var pipe = _pipe;
+        if (pipe is null) return false;
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.SetTabOrder, TabOrder: requested),
+                _writeGate, linked.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
+        {
+            return false;
+        }
+    }
 
     internal async Task SendDismissRequestedAsync(CancellationToken token = default)
     {

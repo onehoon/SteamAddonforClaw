@@ -10,7 +10,7 @@ internal sealed class OverlayTabState
 {
     internal static IReadOnlyList<OverlayTabId> DefaultOrder => OverlayTabOrderContract.DefaultOrder;
 
-    private readonly IReadOnlyList<OverlayTabId> _order;
+    private IReadOnlyList<OverlayTabId> _order;
     private OverlayTabId _selectedTab;
 
     internal OverlayTabState()
@@ -41,6 +41,17 @@ internal sealed class OverlayTabState
 
     // Every successful Overlay Show starts on the first tab in the current order.
     internal void ResetForShow() => _selectedTab = _order[0];
+
+    // OQ5-UI-09: apply an authoritative order pushed from the Runtime. Every valid order contains all
+    // five identities, so the currently selected tab stays valid and is preserved -- the new first
+    // tab only takes effect on the next ResetForShow(). An invalid order is ignored.
+    internal bool TryApplyOrder(IReadOnlyList<OverlayTabId> order)
+    {
+        if (!OverlayTabOrderContract.TryNormalize(order, out var normalized))
+            return false;
+        _order = normalized;
+        return true;
+    }
 
     // OQ5-UI-02: LB moves one tab earlier in the current order, RB one tab later. Bounded/no-wrap:
     // at either boundary the call is a no-op. Traversal derives position from the current order,

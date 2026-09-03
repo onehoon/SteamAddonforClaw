@@ -409,6 +409,24 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 await _qamFrontendServer.DisposeAsync().ConfigureAwait(false);
             _qamFrontendServer = null;
         }
+        // OQ5-UI-09: give the Overlay transport a read + validated-mutation seam onto the ONE
+        // StartupSettingsCoordinator before warm startup, so every Overlay connection applies the
+        // authoritative OverlayTabOrder before it reports Ready. A settings write failure is
+        // feature-local -- it never touches controller Runtime ownership.
+        _overlayController.BindTabOrderAuthority(
+            () => composition.StartupSettings.OverlayTabOrder,
+            requested =>
+            {
+                try
+                {
+                    return composition.StartupSettings.TryChangeOverlayTabOrder(requested);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("Overlay", "Overlay tab-order persistence failed; keeping the current authoritative order.", exception);
+                    return false;
+                }
+            });
         _overlayStartup = StartOverlayWarmupAsync();
 
         _startupComposition = null;

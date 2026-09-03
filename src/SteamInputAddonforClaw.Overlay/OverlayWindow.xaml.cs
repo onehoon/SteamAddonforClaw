@@ -337,14 +337,41 @@ public sealed partial class OverlayWindow : Window
         BringSelectedRowIntoView();
     }
 
+    // OQ5-UI-09: apply an authoritative tab order from the Runtime without disturbing the visible
+    // session. The five page/button/row instances are preserved; only the tab-strip column order and
+    // the selected-header accent change. Selected page/row/scroll position stay exactly as they are
+    // (s.11.1) -- the new first tab only takes effect on the next Show via ResetForShow().
+    internal void ApplyTabOrder(IReadOnlyList<OverlayTabId> order)
+    {
+        if (!_tabState.TryApplyOrder(order))
+        {
+            OverlayLog.Warn("Shell", "Ignored an invalid authoritative Overlay tab order.");
+            return;
+        }
+
+        var applied = _tabState.Order;
+        for (var column = 0; column < applied.Count; column++)
+            if (_tabButtons.TryGetValue(applied[column], out var button))
+                Grid.SetColumn(button, column);
+
+        ApplySelectedHeaderVisual();
+        OverlayLog.Info("Shell", "Authoritative Overlay tab order applied.", ("SelectedTab", _tabState.SelectedTab));
+    }
+
+    private void ApplySelectedHeaderVisual()
+    {
+        var selected = _tabState.SelectedTab;
+        foreach (var (id, button) in _tabButtons)
+            button.FontWeight = id == selected ? FontWeights.SemiBold : FontWeights.Normal;
+    }
+
     // s.12: deterministic tab-change ordering -- tab visuals, then show the page and reset the
     // shared scroll to top, then reset that page's row selection to its first selectable row,
     // then apply the row-selection visual.
     private void ApplySelectedTabVisualState()
     {
         var selected = _tabState.SelectedTab;
-        foreach (var (id, button) in _tabButtons)
-            button.FontWeight = id == selected ? FontWeights.SemiBold : FontWeights.Normal;
+        ApplySelectedHeaderVisual();
         foreach (var (id, page) in _tabPages)
             page.Visibility = id == selected ? Visibility.Visible : Visibility.Collapsed;
 
