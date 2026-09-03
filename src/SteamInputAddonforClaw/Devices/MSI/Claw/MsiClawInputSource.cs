@@ -460,7 +460,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         }
     }
 
-    private static void LogStateChange(int session, ControllerState previous, ControllerState current)
+    internal static void LogStateChange(int session, ControllerState previous, ControllerState current)
     {
         if (IsM1Pressed(previous) != IsM1Pressed(current))
         {
@@ -470,7 +470,11 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         {
             AppLog.Debug("MsiInput", "M2 state changed.", ("TestSession", session), ("ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex), ("Previous", IsM2Pressed(previous)), ("Current", IsM2Pressed(current)));
         }
-        AppLog.Debug("MsiInput", "ControllerState changed.", ("TestSession", session), ("M1", $"{IsM1Pressed(previous)}->{IsM1Pressed(current)}"), ("M2", $"{IsM2Pressed(previous)}->{IsM2Pressed(current)}"));
+        // Full1902 0903 cleanup (section 6): the former generic "ControllerState changed." line only
+        // printed M1/M2 old/new, so any B / D-pad / stick / trigger change produced a misleading
+        // "M1=False->False M2=False->False" entry (~200 per session). The dedicated M1/M2 logs above
+        // carry the MSI-specific evidence; actual ControllerState field changes are the Input
+        // category's job (Diagnostics/DiagnosticSession).
     }
 
     private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;

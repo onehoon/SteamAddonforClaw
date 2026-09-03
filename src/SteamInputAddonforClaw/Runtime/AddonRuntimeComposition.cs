@@ -41,7 +41,10 @@ internal static class AddonRuntimeCompositionFactory
         WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
         Action? routingReconcileCompleted = null,
-        Func<bool>? isLaunchAtWindowsStartupRequired = null)
+        Func<bool>? isLaunchAtWindowsStartupRequired = null,
+        // Full1902 0903 cleanup (section 4.6): a read-only override for the final Addon operational
+        // status, closing over AddonProcessHost's existing physical/presentation ownership facts.
+        Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null)
     {
         ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
@@ -73,7 +76,8 @@ internal static class AddonRuntimeCompositionFactory
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
                 new ViiperRuntimeInspector()),
             () => steamRuntime.State,
-            () => recoverySafetyState.Current == RecoverySafety.Safe);
+            () => recoverySafetyState.Current == RecoverySafety.Safe,
+            captureFull1902AddonStatus);
         // Full1902 A2 section 10: no production branch creates AddonRoutingRuntime. Center M Enabled
         // has no Addon controller ownership at all; Center M Disabled uses the Full1902 VIIPER
         // presentation owner (PR6/PR7) + the feature-local front-button runtime, both composed in

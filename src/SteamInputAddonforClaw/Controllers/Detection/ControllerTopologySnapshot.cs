@@ -21,11 +21,13 @@ internal sealed class ControllerTopologySnapshot
 
     internal IReadOnlyList<ControllerDeviceInfo> ResolveAncestors(ControllerDeviceInfo device)
     {
-        var ancestors = device.AncestorInstanceIds
+        // Full1902 0903 cleanup (section 5): no per-call log here. This generic helper runs once per
+        // captured Windows device during classification (audio, ACPI, USB4, ...), so a large startup
+        // emitted ~880 unrelated "Controller ancestry resolved" lines. Resolution is unchanged; the
+        // "Controller topology snapshot created." summary above stays as the one bounded per-snapshot log.
+        return device.AncestorInstanceIds
             .Where(_devicesByInstanceId.ContainsKey)
             .Select(instanceId => _devicesByInstanceId[instanceId])
             .ToArray();
-        AppLog.Debug("PnP", "Controller ancestry resolved.", ("InstanceId", device.InstanceId), ("AncestorCount", device.AncestorInstanceIds.Count), ("ResolvedAncestorCount", ancestors.Length), ("UnresolvedAncestorCount", device.AncestorInstanceIds.Count - ancestors.Length));
-        return ancestors;
     }
 }

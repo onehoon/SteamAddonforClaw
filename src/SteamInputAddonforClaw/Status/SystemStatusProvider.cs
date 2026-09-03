@@ -13,7 +13,13 @@ internal sealed class SystemStatusProvider(
     IControllerEnvironmentAssessmentProvider environmentAssessmentProvider,
     IRuntimePrerequisiteInspector prerequisiteInspector,
     Func<SteamSessionState> steamStateProvider,
-    Func<bool> recoverySafeProvider) : ISystemStatusProvider
+    Func<bool> recoverySafeProvider,
+    // Full1902 0903 cleanup (section 4): an optional, read-only override for the FINAL derived Addon
+    // operational status. A non-null result means the Runtime positively proved a healthy Full1902
+    // Disabled-mode controller path (physical ownership + active presentation); null keeps the
+    // existing legacy AddonStatusEvaluator result unchanged. The legacy compatibility/routing facts
+    // in the snapshot are never touched by this.
+    Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null) : ISystemStatusProvider
 {
     internal SystemStatusProvider(
         IDeviceInformationProvider deviceInformationProvider,
@@ -44,7 +50,16 @@ internal sealed class SystemStatusProvider(
         var steam = TrySteamState();
         var recoverySafe = TryRecoverySafety();
         var decision = RoutingEligibilityPolicy.Evaluate(new RoutingPolicyInput(steam, hardwareCompatibility, compatibility, prerequisites, recoverySafe));
-        var addon = AddonStatusEvaluator.Map(decision, compatibility);
+        var legacyAddon = AddonStatusEvaluator.Map(decision, compatibility);
+        // Full1902 0903 cleanup (section 4): a status-only override cannot become a controller
+        // mutation or a capture failure -- an exception falls back to the legacy result.
+        AddonStatusSnapshot addon;
+        try { addon = captureFull1902AddonStatus?.Invoke() ?? legacyAddon; }
+        catch (Exception exception)
+        {
+            AppLog.Debug("Status", "Full1902 Addon-status override threw; using the legacy status.", ("Reason", exception.GetType().Name));
+            addon = legacyAddon;
+        }
         AppLog.Debug("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
         return new SystemStatusSnapshot(device, hardwareCompatibility, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId, steam.Source), decision, addon, recoverySafe);
     }
