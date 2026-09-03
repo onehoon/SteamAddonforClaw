@@ -349,21 +349,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 }
                 if (_presentationOwnership is { } presentation && !await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false))
                     return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", null);
-                var physicalReleaseResult = _physicalOwnership is { } owner
+                return _physicalOwnership is { } owner
                     ? await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
                     : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
-                // Full1902 Policy B section 8: suppression belongs to Addon controller authority.
-                // Disarm ONLY after the virtual presentation is retired AND the physical MSI Claw is
-                // proven restored to stock PID1901 -- never at the start of Enable-and-Restart, never
-                // while a live Addon virtual controller is still exposed. Shared by both the
-                // Enable-and-Restart and the PR12 stock-safe uninstall-preparation flows (same seam).
-                if (physicalReleaseResult.Succeeded)
-                {
-                    _winGSuppressionGuard.Disarm();
-                    AppLog.Info("Wing.Guard", "Full1902 Win+G suppression released; stock controller authority restored.",
-                        ("Authority", "StockCenterM"), ("Event", "Full1902WinGSuppressionReleased"));
-                }
-                return physicalReleaseResult;
             },
             // PR12 section 6/7: reuse the composition's existing StockCenterMStartupBaseline (the one
             // built from the shared MsiClawNativeStateManager). A machine with no MSI Claw fails
@@ -376,6 +364,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId),
             // PR12 section 11: startup-task removal routed through the existing registration owner.
             () => composition.StartupSettings.ChangeLaunchAtWindowsStartup(false),
+            // Full1902 Policy B section 8: native Win+G / Xbox Game Bar suppression belongs to Addon
+            // controller authority. It is released ONLY here -- at the verified success boundary of the
+            // shared stock-restoration core, after the independent PID1901 proof, the Enabled-mode
+            // HidHide release, and the Center M root enable/read-back have all passed. Covers both
+            // Enable-and-Restart and PR12 stock-safe uninstall preparation.
+            onStockAuthorityRestored: () =>
+            {
+                _winGSuppressionGuard.Disarm();
+                AppLog.Info("Wing.Guard", "Full1902 Win+G suppression released; stock controller authority restored.",
+                    ("Authority", "StockCenterM"), ("Event", "Full1902WinGSuppressionReleased"));
+            },
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _centerMAuthorityTransition = centerMAuthorityTransition;
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(

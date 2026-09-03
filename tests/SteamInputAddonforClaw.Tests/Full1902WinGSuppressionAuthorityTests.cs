@@ -155,20 +155,27 @@ public sealed class Full1902WinGSuppressionAuthorityTests
         }
     }
 
-    // ---- 14.8: stock authority release retires Addon output before disarming ----
+    // ---- 14.8 / review [BLOCKER]: disarm only at the verified stock-restoration success boundary ----
 
     [Fact]
-    public void Stock_authority_release_disarms_only_after_physical_pid1901_restore_succeeds()
+    public void Disarm_runs_only_through_the_onStockAuthorityRestored_boundary_callback()
     {
         var source = HostSource();
-        var release = source.IndexOf("VirtualPresentationReleaseFailed", StringComparison.Ordinal);
-        Assert.True(release > 0);
-        var window = source[release..(release + 1600)];
-        var physicalRelease = window.IndexOf("owner.ReleaseForCenterMEnableAsync", StringComparison.Ordinal);
-        var disarm = window.IndexOf("_winGSuppressionGuard.Disarm()", StringComparison.Ordinal);
-        Assert.True(physicalRelease > 0, "physical release call not found in window");
-        Assert.True(disarm > physicalRelease, "Disarm must follow the physical PID1901 restore");
-        Assert.Contains("physicalReleaseResult.Succeeded", window); // guarded by success
+
+        // The physical-release callback handed to CenterMRebootAuthorityTransition must NOT disarm --
+        // it is only the front-button / presentation / physical teardown step.
+        var releaseCallbackStart = source.IndexOf("Full1902 A2 section 14: stop the feature-local front-button owner", StringComparison.Ordinal);
+        var releaseCallbackEnd = source.IndexOf("StockCenterMBaseline is { } stockBaseline", StringComparison.Ordinal);
+        Assert.True(releaseCallbackStart > 0 && releaseCallbackEnd > releaseCallbackStart);
+        Assert.DoesNotContain("_winGSuppressionGuard.Disarm()", source[releaseCallbackStart..releaseCallbackEnd]);
+
+        // The one Disarm() is inside the onStockAuthorityRestored delegate -- which the transition
+        // core invokes only after the independent PID1901 proof + HidHide release + Center M
+        // enable/read-back all pass (proven by CenterMRebootAuthorityTransitionTests).
+        var restoredDelegate = source.IndexOf("onStockAuthorityRestored: () =>", StringComparison.Ordinal);
+        Assert.True(restoredDelegate > 0);
+        var disarm = source.IndexOf("_winGSuppressionGuard.Disarm()", StringComparison.Ordinal);
+        Assert.True(disarm > restoredDelegate && disarm < source.IndexOf("WindowsRestartRequester()", restoredDelegate, StringComparison.Ordinal));
     }
 
     [Fact]

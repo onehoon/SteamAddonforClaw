@@ -659,6 +659,85 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Empty(h.Order);
     }
 
+    // ---- Full1902 Policy B: stock-authority-restored boundary (Win+G suppression release) ----
+
+    [Fact]
+    public async Task Stock_authority_restored_callback_fires_once_only_at_the_verified_success_boundary()
+    {
+        var h = new Harness(this) { StartEnabled = false };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Active = true;
+
+        var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(1, h.StockAuthorityRestoredCalls);
+        // After physical-release + stock-baseline + hidhide:enable + centerm:true, BEFORE restart.
+        Assert.Equal(4, h.StockAuthorityRestoredAtOrderIndex);
+    }
+
+    [Theory]
+    [InlineData("physical")]  // physical PID1901 release failed
+    [InlineData("stock")]     // independent current-world PID1901 proof failed
+    [InlineData("hidhide")]   // Enabled-mode HidHide release could not be verified
+    [InlineData("centerm")]   // Center M root enable / read-back failed
+    public async Task Stock_authority_restored_callback_does_not_fire_when_any_fail_closed_step_fails(string failAt)
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = failAt == "physical"
+                ? new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "DirectInputStopFailed", null)
+                : new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+            StockBaselineSucceeds = failAt != "stock",
+            CenterMHelperCompletes = failAt != "centerm",
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
+        h.Hid.Active = true;
+        if (failAt == "hidhide") h.Hid.KeepHiddenOnRemove = true;
+
+        var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
+
+        Assert.NotEqual(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(0, h.StockAuthorityRestoredCalls); // suppression stays owned
+    }
+
+    [Fact] // NothingOwned is Succeeded=true, but the independent stock proof is still required.
+    public async Task Stock_authority_restored_callback_does_not_fire_for_nothing_owned_without_stock_proof()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned,
+            StockBaselineSucceeds = false,
+            StockBaselineReason = "CurrentMsiStateUnavailable",
+        };
+
+        var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
+
+        Assert.NotEqual(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(0, h.StockAuthorityRestoredCalls);
+    }
+
+    [Fact] // Uninstall preparation shares the same core -> same boundary callback.
+    public async Task Stock_authority_restored_callback_fires_for_uninstall_preparation_too()
+    {
+        var h = new Harness(this)
+        {
+            PhysicalRelease = new(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
+        h.Hid.Active = true;
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, h.StockAuthorityRestoredCalls);
+        Assert.Equal(4, h.StockAuthorityRestoredAtOrderIndex); // before startup-remove
+    }
+
     // ---- Harness ----
 
     private sealed class Harness
@@ -688,6 +767,10 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool StartupTaskRemovalSucceeds { get; init; } = true;
         public int StockBaselineCalls { get; private set; }
         public int StartupRemovalCalls { get; private set; }
+        public int StockAuthorityRestoredCalls { get; private set; }
+        /// <summary>Order.Count at the moment the stock-authority-restored callback fired -- i.e. how
+        /// many ordered steps had already completed. Proves it runs only at the verified boundary.</summary>
+        public int StockAuthorityRestoredAtOrderIndex { get; private set; } = -1;
 
         public List<string> Order { get; } = [];
         public FakeHid Hid { get; } = new();
@@ -753,6 +836,9 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                     Order.Add("startup-remove");
                     return StartupTaskRemovalSucceeds ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
                 },
+                // Full1902 Policy B: the verified stock-authority-restored boundary callback. Counted
+                // rather than added to Order so the existing ordering assertions stay unchanged.
+                () => { StockAuthorityRestoredCalls++; StockAuthorityRestoredAtOrderIndex = Order.Count; },
                 r);
         }
 
