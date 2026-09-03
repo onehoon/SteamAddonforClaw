@@ -92,6 +92,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeShutdownPrepared;
     private Task? _deferredRuntimeStartup;
     private Task? _overlayStartup;
+    // Full1902 Policy B review [BLOCKER]: the Disabled-mode controller acquisition + Win+G arm now
+    // runs deferred (off the message-loop thread, after the hook is installed and the loop is
+    // pumping). While it is still committing, an external "Enable Center M and Restart" must not race
+    // the physical owner -- the wrapped lower-level runtime-safety gate reports not-terminable until
+    // this clears.
+    private int _disabledControllerStartupPending;
+    private Settings.StartupSettingsCoordinator? _runtimeStartupSettings;
     // PR5: the process-lifetime Full PID1902 physical owner. Non-null only after an exact Disabled
     // boot; owns one live DirectInput session which PR6 consumes.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? _physicalOwnership;
@@ -256,14 +263,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
         AppLog.Info($"Starting runtime. Environment={startupResult.EnvironmentMode}; Readiness={startupResult.EnvironmentReadiness}.");
 
-        // Full1902 Policy B section 4/13: the ONE process-owned Win+G low-level hook installation.
-        // It runs here -- synchronously, before this method's first await -- so it is installed on the
-        // same (message-loop) thread that will later pump its callbacks, and BEFORE the Disabled-mode
-        // controller path can reach the first live AttachInitialAsync(). Installation is idempotent
-        // and authority-neutral: it is armed only for Center M Disabled / Addon authority
-        // (EnsureAddonAuthorityWinGSuppression), and IsArmed stays false under stock authority.
-        _winGSuppressionGuard.Start();
-
         // PR4: reuse the ONE Center M startup control constructed by the startup composition -- the
         // same instance the authority branch read -- for the mandatory policy, PR3 transition, and
         // Device-page capture. No second Center M startup writer/manager is created.
@@ -323,7 +322,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _centerMStartupControl,
             composition.StartupSettings,
             authorityHidHideBaseline,
-            _runtimeHost.EvaluateUserTermination,
+            // Full1902 Policy B review [BLOCKER]: block the reboot-bound transition while the deferred
+            // Disabled-mode physical acquisition + Win+G arm is still committing, so Enable-and-Restart
+            // never races the physical owner. Otherwise the raw lower-level Runtime safety decision.
+            () => Volatile.Read(ref _disabledControllerStartupPending) != 0
+                ? new SteamInputAddonforClaw.Lifecycle.UserTerminationDecision(false, SteamInputAddonforClaw.Lifecycle.UserTerminationBlockReason.RoutingTransition)
+                : _runtimeHost.EvaluateUserTermination(),
             () => IsConflictingControllerEnvironment(startupComposition.ControllerEnvironmentAssessmentProvider),
             async token =>
             {
@@ -393,12 +397,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
 
-        // PR6 section 16: run the whole Disabled-mode controller startup sequence -- VIIPER init ->
-        // PR5 physical acquire -> first presentation attach -- BEFORE the frontend transport accepts
-        // external requests, so a user cannot request Enable-and-Restart mid-commit. Failure still
-        // continues to frontend startup so the repair/Enable path stays available. Bounded by the
-        // existing native/PnP/DirectInput operations; other Center M states add no delay.
-        await TryStartDisabledModeControllerAsync(startupComposition, startupResult, composition.StartupSettings).ConfigureAwait(false);
+        // Full1902 Policy B review [BLOCKER]: the whole Disabled-mode controller startup sequence
+        // (VIIPER init -> PR5 physical acquire -> Win+G arm+prove -> first presentation attach) now
+        // runs deferred in StartDeferredRuntimeStartup, AFTER StartRuntimeEventWatchers has installed
+        // the WH_KEYBOARD_LL hook from the pumping message loop. Until it commits, the reboot-bound
+        // authority transition is gated (see the wrapped lower-level safety delegate above) so a user
+        // cannot request Enable-and-Restart mid-commit -- preserving the old ordering guarantee.
+        _runtimeStartupSettings = composition.StartupSettings;
+        if (startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled)
+            Volatile.Write(ref _disabledControllerStartupPending, 1);
 
         try
         {
@@ -449,7 +456,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             });
         _overlayStartup = StartOverlayWarmupAsync();
 
-        _startupComposition = null;
+        // Full1902 Policy B: _startupComposition is retained (nulled at dispose) so the deferred
+        // Disabled-mode controller startup can reuse it off the message-loop thread.
     }
 
     /// <summary>PR5/PR6: the whole Disabled-mode controller startup sequence. Runs only for an exact
@@ -967,19 +975,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartRuntimeEventWatchers()
     {
-        // Full1902 Policy B section 4: the Win+G hook is now installed by InitializeRuntimeAsync
-        // (before the first Disabled-mode presentation attach). Nothing is installed here -- Game Bar
-        // foreground presentation remains dormant in production and there is no other watcher work.
+        // Full1902 Policy B review [BLOCKER]: this is the ONE process-owned WH_KEYBOARD_LL
+        // installation site. It runs from the NativeMessageLoop WM_RUNTIME_READY callback -- i.e. on
+        // the thread that is now actively pumping GetMessageW -- and returns immediately, so the hook
+        // can respond within LowLevelHooksTimeout and Windows cannot silently unhook it. The
+        // long-running Disabled-mode controller acquisition + arm check runs afterwards, OFF this
+        // thread, in StartDeferredRuntimeStartup.
+        _winGSuppressionGuard.Start();
     }
 
     /// <summary>Full1902 Policy B section 5.2/13: arm native Win+G / Xbox Game Bar suppression for the
-    /// Center M Disabled / Addon controller-authority lifetime and prove it took. The hook itself is
-    /// installed once by <see cref="InitializeRuntimeAsync"/>; the <see cref="WinGSuppressionGuard.Start"/>
-    /// call here is idempotent and only re-asserts installation. Returns <see langword="false"/>
-    /// fail-closed when the hook is unavailable or cannot be proven armed -- no retry loop.</summary>
+    /// Center M Disabled / Addon controller-authority lifetime and prove it took. The hook is
+    /// installed once by <see cref="StartRuntimeEventWatchers"/> from the pumping message loop; this
+    /// only arms it. Returns <see langword="false"/> fail-closed when the hook is unavailable or
+    /// cannot be proven armed -- no retry loop.</summary>
     private bool EnsureAddonAuthorityWinGSuppression()
     {
-        _winGSuppressionGuard.Start();
         AppLog.Info("Wing.Guard", "Full1902 Win+G suppression arm started.", ("Authority", "AddonAuthority"), ("Event", "Full1902WinGSuppressionArmStarted"));
         if (_winGSuppressionGuard.EnsureArmed() && _winGSuppressionGuard.IsArmed)
         {
@@ -999,6 +1010,24 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var cancellationToken = _startupCancellationTokenSource.Token;
         _deferredRuntimeStartup = Task.Run(async () =>
         {
+            // Full1902 Policy B review [BLOCKER]: the long-running Disabled-mode controller
+            // acquisition + Win+G arm+prove + first presentation attach runs here -- off the
+            // message-loop thread, so it can never block the WH_KEYBOARD_LL owner while GetMessageW
+            // keeps pumping. StartRuntimeEventWatchers has already installed the hook by this point.
+            try
+            {
+                await TryStartDisabledModeControllerAsync(
+                    _startupComposition!, _startupResult!, _runtimeStartupSettings!).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("ControllerOwnership", "Deferred Disabled-mode controller startup threw; Runtime remains available.", exception);
+            }
+            finally
+            {
+                Volatile.Write(ref _disabledControllerStartupPending, 0);
+            }
+
             StartPowerObservation();
             var reconcile = ReconcileAsync(cancellationToken);
             ReconcileDeviceProfileStartup();

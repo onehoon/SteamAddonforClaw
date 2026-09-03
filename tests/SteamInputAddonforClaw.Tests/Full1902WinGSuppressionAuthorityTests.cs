@@ -33,28 +33,53 @@ public sealed class Full1902WinGSuppressionAuthorityTests
 
     // ---- 14.2: hook installed on the one process-owned path, before the first Disabled attach ----
 
-    [Fact]
-    public void Hook_is_installed_once_by_InitializeRuntimeAsync_before_the_disabled_controller_path()
+    [Fact] // review [BLOCKER]: install the WH_KEYBOARD_LL hook only from the pumping message loop.
+    public void Hook_is_installed_only_from_the_message_loop_ready_path()
     {
-        var body = Method(HostSource(), "internal async Task InitializeRuntimeAsync()");
-        var lines = body.Split('\n').Where(l => !l.TrimStart().StartsWith("//")).ToArray();
-        var codeOnly = string.Join('\n', lines);
+        var source = HostSource();
 
-        var start = codeOnly.IndexOf("_winGSuppressionGuard.Start();", StringComparison.Ordinal);
-        Assert.True(start > 0, "InitializeRuntimeAsync must install the Win+G hook");
+        // The one install site is StartRuntimeEventWatchers -- invoked from the NativeMessageLoop
+        // WM_RUNTIME_READY callback (RuntimeProcessApplication), i.e. on the actively-pumping thread.
+        var watchers = Method(source, "internal void StartRuntimeEventWatchers()");
+        Assert.Contains("_winGSuppressionGuard.Start();", watchers);
 
-        // Must precede the composition build and the first real await (the Disabled controller path).
-        var disabledPath = codeOnly.IndexOf("await TryStartDisabledModeControllerAsync", StringComparison.Ordinal);
-        var firstConfigureAwait = codeOnly.IndexOf(".ConfigureAwait(false)", StringComparison.Ordinal);
-        Assert.True(start < disabledPath);
-        Assert.True(firstConfigureAwait < 0 || start < firstConfigureAwait);
+        // InitializeRuntimeAsync (runs before the loop starts) must NOT install the hook.
+        var init = Method(source, "internal async Task InitializeRuntimeAsync()");
+        Assert.DoesNotContain("_winGSuppressionGuard.Start()", init);
+
+        // Exactly one Start() call site in the whole host.
+        Assert.Single(Regex.Matches(source, @"_winGSuppressionGuard\.Start\(\)"));
     }
 
-    [Fact]
-    public void StartRuntimeEventWatchers_no_longer_installs_the_hook()
+    [Fact] // review [BLOCKER]: the long-running Disabled-mode acquisition + arm must run OFF the hook
+           // owner thread, after the loop is pumping -- not synchronously before the loop starts.
+    public void Disabled_controller_startup_is_deferred_off_the_message_loop_thread()
     {
-        var body = Method(HostSource(), "internal void StartRuntimeEventWatchers()");
-        Assert.DoesNotContain("_winGSuppressionGuard.Start()", body);
+        var source = HostSource();
+
+        // Not run from InitializeRuntimeAsync (pre-loop).
+        var init = Method(source, "internal async Task InitializeRuntimeAsync()");
+        Assert.DoesNotContain("TryStartDisabledModeControllerAsync(", init);
+
+        // Run from StartDeferredRuntimeStartup's Task.Run body (post-WM_RUNTIME_READY).
+        var deferred = Method(source, "internal void StartDeferredRuntimeStartup()");
+        Assert.Contains("Task.Run(async () =>", deferred);
+        Assert.Contains("await TryStartDisabledModeControllerAsync(", deferred);
+    }
+
+    [Fact] // review [BLOCKER]: Enable-and-Restart must not race the deferred physical acquisition.
+    public void Reboot_transition_is_gated_while_the_deferred_disabled_startup_is_committing()
+    {
+        var source = HostSource();
+        // The lower-level runtime-safety delegate handed to CenterMRebootAuthorityTransition reports
+        // not-terminable while _disabledControllerStartupPending is set; the flag is cleared in the
+        // deferred task's finally.
+        Assert.Contains("_disabledControllerStartupPending", source);
+        var transition = source[source.IndexOf("new SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition(", StringComparison.Ordinal)..];
+        transition = transition[..transition.IndexOf("WindowsRestartRequester()", StringComparison.Ordinal)];
+        Assert.Contains("_disabledControllerStartupPending", transition);
+        var deferred = Method(source, "internal void StartDeferredRuntimeStartup()");
+        Assert.Contains("Volatile.Write(ref _disabledControllerStartupPending, 0)", deferred);
     }
 
     // ---- 14.2/14.3: arm + prove before the first live presentation; arm failure is fail-closed ----
@@ -103,9 +128,9 @@ public sealed class Full1902WinGSuppressionAuthorityTests
     public void Suppression_is_only_ever_disarmed_on_stock_authority_release_or_process_teardown()
     {
         var source = HostSource();
-        // Exactly two Disarm() sites: the stock authority-release seam and the process-exit finalizer.
-        var disarms = Regex.Matches(source, @"_winGSuppressionGuard\.Disarm\(\)|guard\.Disarm\(\)").Count;
-        Assert.Equal(1, disarms); // the authority-release seam; FinalizeWinGGuardAfterRoutingShutdown uses Dispose()
+        // Exactly one Disarm() site: the stock authority-release seam.
+        // FinalizeWinGGuardAfterRoutingShutdown uses Dispose() at process teardown, not Disarm().
+        Assert.Single(Regex.Matches(source, @"_winGSuppressionGuard\.Disarm\(\)|guard\.Disarm\(\)"));
 
         // The presentation reconcile path (Steam/BPM switch + recovery) must not disarm or reinstall.
         var reconcile = Method(source, "private async Task ReconcileControllerPresentationAsync(");
