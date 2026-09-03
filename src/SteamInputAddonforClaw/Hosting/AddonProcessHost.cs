@@ -288,7 +288,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 routingReconcileCompleted: null,
                 // PR2.5: while Center M startup config is exactly Disabled, launch-at-startup is a
                 // mandatory-ON policy the Repair()/setter enforce -- not a user preference.
-                isLaunchAtWindowsStartupRequired: IsControllerRuntimeMandatory);
+                isLaunchAtWindowsStartupRequired: IsControllerRuntimeMandatory,
+                // Full1902 0903 cleanup (section 4): read-only override for the final Addon operational
+                // status, closing over this host's existing physical/presentation ownership facts.
+                captureFull1902AddonStatus: TryCaptureFull1902AddonStatus);
 
         _runtimeHost = composition.RuntimeHost;
         _cpuBoostRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
@@ -847,9 +850,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var source = _physicalOwnership?.LiveInputSource;
             if (presentation is null || source is not { IsRunning: true })
             {
-                AppLog.Warn("OverlayCapture", "Overlay Show not attempted; no owned presentation / running PR5 source.", null,
+                // Full1902 0903 cleanup (section 7): same no-op behaviour, authority-aware severity.
+                // Under stock authority (Center M not exactly Disabled) an explicit user Overlay POC
+                // request simply cannot run -- expected, not a degradation, so INFO. Only while Addon
+                // authority is expected (exactly Disabled) is a missing presentation/source a real
+                // ownership problem worth a WARN.
+                (string Key, object? Value)[] fields =
+                [
                     ("Event", "OverlayCaptureNotAttempted"),
-                    ("HasPresentation", presentation is not null), ("SourceRunning", source?.IsRunning ?? false));
+                    ("HasPresentation", presentation is not null),
+                    ("SourceRunning", source?.IsRunning ?? false),
+                ];
+                if (ExpectsFull1902ControllerAuthority())
+                    AppLog.Warn("OverlayCapture", "Overlay Show not attempted; no owned presentation / running PR5 source.", null, fields);
+                else
+                    AppLog.Info("OverlayCapture", "Overlay Show not attempted; the Addon does not own the controller (stock authority).", fields);
                 return;
             }
 
@@ -1091,6 +1106,28 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         UserTerminationComposition.Compose(
             _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None),
             IsControllerRuntimeMandatory());
+
+    /// <summary>Full1902 0903 cleanup (section 4.4): a conservative, read-only override for the final
+    /// Addon operational status. Returns <see cref="AddonOperationalStatus.Ready"/> only when the
+    /// existing process-owned facts positively prove a healthy Center M Disabled / Addon-authority
+    /// controller path -- an exactly-Disabled startup that has finished committing, with a running
+    /// PR5 physical input source and an attached virtual presentation. Every other state returns
+    /// <see langword="null"/>, which keeps the existing legacy <c>AddonStatusEvaluator</c> result
+    /// (so incomplete / recovering / blocked states are never falsely reported Ready). No new PnP /
+    /// HidHide / VIIPER probe is done here -- those owners already passed their real safety
+    /// boundaries before this state was reached.</summary>
+    /// <summary>The already-known boot-time authority fact: this Runtime booted into an exactly-Disabled
+    /// Center M configuration and is therefore the expected controller authority. Used only for
+    /// log-severity decisions -- authority mutations always re-read the shared Center M startup control.</summary>
+    private bool ExpectsFull1902ControllerAuthority() =>
+        _startupResult?.CenterMStartupState == FrontendCenterMStartupState.Disabled;
+
+    private AddonStatusSnapshot? TryCaptureFull1902AddonStatus() =>
+        Full1902AddonStatusEvaluator.Evaluate(
+            _startupResult?.CenterMStartupState,
+            Volatile.Read(ref _disabledControllerStartupPending) != 0,
+            _physicalOwnership?.LiveInputSource is { IsRunning: true },
+            _presentationOwnership?.ActivePresentation);
 
     /// <summary>The mandatory-controller-authority fact for a user action, read fresh from the shared
     /// Center M startup reader (never cached from process startup). A read that cannot prove an

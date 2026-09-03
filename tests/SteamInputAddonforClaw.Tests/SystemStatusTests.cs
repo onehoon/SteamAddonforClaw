@@ -105,6 +105,48 @@ public sealed class SystemStatusTests
         Assert.Equal(AddonOperationalStatus.Indeterminate, snapshot.Addon.Status);
     }
 
+    // ---- Full1902 0903 cleanup section 9.1: optional Full1902 Addon-status override ----
+
+    private static SystemStatusProvider ProviderWithFull1902Override(Func<AddonStatusSnapshot?>? capture) =>
+        new(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
+            new ControllerEnvironmentAssessmentProvider(
+                [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning))]),
+            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
+            () => SteamSessionState.FromRunningAppId(0), () => true, capture);
+
+    [Fact]
+    public async Task Full1902_override_null_keeps_the_legacy_addon_status()
+    {
+        var snapshot = await ProviderWithFull1902Override(() => null).CaptureAsync();
+
+        // Center M not running -> legacy stock compatibility fact is still MsiCenterMNotOperational.
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, snapshot.Compatibility.Status);
+        Assert.NotEqual(AddonOperationalStatus.Ready, snapshot.Addon.Status);
+    }
+
+    [Fact]
+    public async Task Full1902_override_ready_replaces_only_the_final_addon_status_not_the_legacy_facts()
+    {
+        var snapshot = await ProviderWithFull1902Override(
+            () => new AddonStatusSnapshot(AddonOperationalStatus.Ready, "Full1902 controller authority is active (SteamDeck)."))
+            .CaptureAsync();
+
+        Assert.Equal(AddonOperationalStatus.Ready, snapshot.Addon.Status);
+        Assert.Contains("SteamDeck", snapshot.Addon.Reason);
+        // The legacy compatibility fact is intentionally untouched in Full1902 Disabled mode.
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, snapshot.Compatibility.Status);
+    }
+
+    [Fact]
+    public async Task Full1902_override_that_throws_does_not_crash_capture_and_falls_back_to_legacy()
+    {
+        var snapshot = await ProviderWithFull1902Override(
+            () => throw new InvalidOperationException("status read failed")).CaptureAsync();
+
+        Assert.NotEqual(AddonOperationalStatus.Ready, snapshot.Addon.Status);
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, snapshot.Compatibility.Status);
+    }
+
     [Fact]
     public void MsiCenterM_BootBaselineWithoutDesktopUi_IsOperational()
     {
