@@ -148,6 +148,46 @@ public sealed class OverlayTabStateTests
     }
 
     [Fact]
+    public void TryCreateMovedOrderSwapsExactlyOneAdjacentPair()
+    {
+        var state = new OverlayTabState(); // Device, Profile, Controller, Shortcut, Setting
+
+        Assert.True(state.TryCreateMovedOrder(OverlayTabId.Controller, -1, out var earlier));
+        Assert.Equal(new[] { OverlayTabId.Device, OverlayTabId.Controller, OverlayTabId.Profile, OverlayTabId.Shortcut, OverlayTabId.Setting }, earlier);
+
+        Assert.True(state.TryCreateMovedOrder(OverlayTabId.Controller, +1, out var later));
+        Assert.Equal(new[] { OverlayTabId.Device, OverlayTabId.Profile, OverlayTabId.Shortcut, OverlayTabId.Controller, OverlayTabId.Setting }, later);
+
+        Assert.Equal(5, earlier.Distinct().Count());
+    }
+
+    [Fact]
+    public void TryCreateMovedOrderIsABoundedNoOpAtEitherEnd()
+    {
+        var state = new OverlayTabState();
+
+        Assert.False(state.TryCreateMovedOrder(OverlayTabId.Device, -1, out _));   // first tab earlier
+        Assert.False(state.TryCreateMovedOrder(OverlayTabId.Setting, +1, out _));  // last tab later
+        Assert.False(state.TryCreateMovedOrder(OverlayTabId.Profile, 2, out _));   // delta must be +/-1
+    }
+
+    [Fact]
+    public void TryCreateMovedOrderDoesNotMutateTheCurrentOrder()
+    {
+        var state = new OverlayTabState();
+        state.Select(OverlayTabId.Setting);
+
+        Assert.True(state.TryCreateMovedOrder(OverlayTabId.Setting, -1, out var proposed));
+
+        Assert.Equal(OverlayTabState.DefaultOrder, state.Order); // unchanged -- proposal only
+        Assert.Equal(OverlayTabId.Setting, state.SelectedTab);
+
+        // Only an authoritative apply changes the current order.
+        Assert.True(state.TryApplyOrder(proposed));
+        Assert.Equal(OverlayTabId.Setting, state.Order[3]);
+    }
+
+    [Fact]
     public void TryApplyOrderReplacesTheOrderAndPreservesTheSelectedTab()
     {
         var state = new OverlayTabState();

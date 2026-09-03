@@ -21,6 +21,7 @@ public partial class App : Application
         OverlayLog.Info("App", "DispatcherQueue acquired.");
         _window = new OverlayWindow();
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
+        _window.TabOrderChangeRequested += OnTabOrderChangeRequested;
         OverlayLog.Info("App", "OverlayWindow constructed.", ("Hwnd", _window.HandleForDiagnostics));
         _window.Closed += (_, _) => { OverlayLog.Info("Window", "Closed received."); Exit(); };
         OverlayLog.Info("Window", "Initial hidden preparation started.");
@@ -101,6 +102,25 @@ public partial class App : Application
             completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for tab-order application."));
         }
         return completion.Task;
+    }
+
+    // OQ5-UI-10: the Setting-page editor proposed a one-position tab move. Forward it through the
+    // existing OQ5-UI-09 request seam; the visible order only changes when the Runtime republishes
+    // TabOrderState. A write failure is preference-local -- the Overlay stays on its current order.
+    private void OnTabOrderChangeRequested(IReadOnlyList<OverlayTabId> proposed) => _ = SendTabOrderAsync(proposed);
+
+    private async Task SendTabOrderAsync(IReadOnlyList<OverlayTabId> proposed)
+    {
+        try
+        {
+            if (_client is null) return;
+            if (!await _client.SendSetTabOrderAsync(proposed).ConfigureAwait(false))
+                OverlayLog.Warn("TabOrder", "SetTabOrder request could not be written; keeping the current authoritative order.");
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Error("TabOrder", "SetTabOrder request failed; Overlay remains Runtime-owned.", exception);
+        }
     }
 
     // OQ4: semantic navigation from the Runtime capture path. Marshal UI work through the existing

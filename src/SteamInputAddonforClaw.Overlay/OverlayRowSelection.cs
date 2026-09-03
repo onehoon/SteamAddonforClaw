@@ -19,10 +19,18 @@ internal sealed class OverlayRowSelection
     internal int? SelectedIndex => _selectedIndex;
 
     // Swap in the active page's rows and select its first selectable row (or clear).
-    internal void SetRows(IReadOnlyList<OverlayRowCapabilities> rows)
+    internal void SetRows(IReadOnlyList<OverlayRowCapabilities> rows) => SetRows(rows, preferredIndex: null);
+
+    // OQ5-UI-10: same as SetRows(rows) but keeps `preferredIndex` selected when it is a valid,
+    // selectable row -- used when the Setting-page tab-order editor reorders its own rows and the
+    // caller wants to preserve the selected row identity rather than snap back to the first row.
+    internal void SetRows(IReadOnlyList<OverlayRowCapabilities> rows, int? preferredIndex)
     {
         _rows = rows ?? [];
-        _selectedIndex = FirstSelectableFrom(0, 1);
+        _selectedIndex =
+            preferredIndex is { } index && index >= 0 && index < _rows.Count && _rows[index].IsSelectable()
+                ? index
+                : FirstSelectableFrom(0, 1);
     }
 
     internal bool MovePrevious() => Move(-1);
