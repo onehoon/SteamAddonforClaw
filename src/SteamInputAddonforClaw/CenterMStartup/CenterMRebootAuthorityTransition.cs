@@ -118,6 +118,11 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     // PR12 section 11: remove the mandatory Addon startup task -- LAST, only after stock authority is
     // proven. Routed through the existing startup-registration owner.
     private readonly Func<StartupRegistrationResult> _removeStartupRegistration;
+    // Full1902 Policy B section 8: invoked exactly once, at the verified success boundary of
+    // RestoreStockAuthorityCoreAsync -- after the independent PID1901 proof, the Enabled-mode HidHide
+    // release, and the Center M root enable/read-back have all passed. Shared by Enable-and-Restart
+    // and PR12 uninstall preparation. Production drops native Win+G suppression here.
+    private readonly Action _onStockAuthorityRestored;
     private readonly IWindowsRestartRequester _restartRequester;
     private int _inProgress;
 
@@ -135,6 +140,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         Func<CancellationToken, Task<StockCenterMStartupBaselineResult>> establishStockBaseline,
         Func<string?> captureExistingOwnedHiddenTarget,
         Func<StartupRegistrationResult> removeStartupRegistration,
+        Action onStockAuthorityRestored,
         IWindowsRestartRequester restartRequester)
     {
         _centerMStartup = centerMStartup;
@@ -147,6 +153,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _establishStockBaseline = establishStockBaseline;
         _captureExistingOwnedHiddenTarget = captureExistingOwnedHiddenTarget;
         _removeStartupRegistration = removeStartupRegistration;
+        _onStockAuthorityRestored = onStockAuthorityRestored;
         _restartRequester = restartRequester;
     }
 
@@ -311,6 +318,18 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         if (mutation.Snapshot.State != FrontendCenterMStartupState.Enabled)
             return StockRestorationResult.Fail("CenterMNotEnabled:" + mutation.Snapshot.State);
 
+        // Full1902 Policy B section 8: stock controller authority is now proven -- native Win+G / Xbox
+        // Game Bar suppression may be released. This is the earliest safe point: every fail-closed
+        // step above (physical release, independent PID1901 proof, Enabled-mode HidHide release,
+        // Center M root enable/read-back) has passed.
+        try
+        {
+            _onStockAuthorityRestored();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("CenterM.Authority", "Stock-authority-restored callback threw; stock restoration still succeeded.", exception, ("Reason", reason));
+        }
         return StockRestorationResult.Ok(mutation.Snapshot);
     }
 
