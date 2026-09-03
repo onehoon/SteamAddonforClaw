@@ -2,30 +2,42 @@
 
 ## Status
 
-Focused implementation work order for moving native `Win+G` / Xbox Game Bar suppression from the old Steam-route lifetime to the Full PID1902 Addon controller-authority lifetime.
+Focused implementation work order for moving native `Win+G` / Xbox Game Bar suppression to the Full1902 Addon controller-authority lifetime.
 
-This work order follows the merged Full1902 Policy A removal of the `SteamInputRoutingEnabled` master switch.
+This document has been **revised after merged PR #470** (`Full1902 Policy A2: decouple OEM1/WING front-button actions and disable legacy routing`).
+
+PR #470 is now a hard prerequisite and changed the production composition materially:
+
+- production no longer composes `AddonRoutingRuntime`;
+- production no longer starts legacy Steam-session physical routing observation;
+- OEM1/WING action wiring is owned by the feature-local `MsiClawFrontButtonRuntime`;
+- WING Steam-button delivery already targets the existing Full1902 `MsiClawAddonPresentation` pulse seam;
+- `MsiClawFrontButtonRuntime` already exposes the exact Policy B readiness seam through `nativeWinGSuppressionReady`;
+- production currently leaves that readiness false, so WING custom delivery is intentionally inactive until this work lands.
+
+This work order therefore no longer treats `WinGProtectionRoutingStage.CaptureAuthority()` or `AddonRoutingRuntime` as production WING authority.
 
 This work order is intentionally **not numbered PR13**. PR13 remains reserved for the later Windows / Velopack uninstall-entry integration.
 
-Code-review baseline used to prepare this work order:
+Code-review baseline for this revision:
 
 ```text
 repository: onehoon/SteamAddonforClaw
 branch:     main
-commit:     4a5b872f0cc8670144fad452d7fd662c2783b4c8
+commit:     3c727cf194cfa9f2678468294f372dcc6791cdca
+merged PR:  #470
 ```
 
-Before implementation, read and treat these documents as design authorities:
+Before implementation, read and treat these as design authorities:
 
 - `docs/Full 1902 Implementation/README.md`
 - `docs/Full 1902 Implementation/HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md`
 - `docs/Full 1902 Implementation/REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md`
 - `docs/Full 1902 Implementation/FULL_1902_IMPLEMENTATION_ARCHITECTURE.md`
-- `docs/work-order/FULL1902_POLICY_A_REMOVE_STEAM_INPUT_ROUTING_MASTER_SWITCH_WORK_ORDER.md`
-- current PR5–PR10 Full1902 physical ownership / presentation / recovery work orders where relevant to startup, recovery, suspend/resume, and authority release.
+- `docs/work-order/FULL1902_POLICY_A2_DECOUPLE_FRONT_BUTTON_ACTIONS_AND_DISABLE_LEGACY_ROUTING_WORK_ORDER.md`
+- current PR5–PR12 Full1902 physical ownership / presentation / recovery / stock-safe-release work orders where relevant.
 
-The application is pre-release. Implement the current Full1902 product policy directly. Do not preserve the obsolete idea that native Game Bar suppression exists only while a Steam routing session is active.
+The application is pre-release. Implement the current Full1902 product policy directly. Do not preserve obsolete route-scoped suppression semantics merely because legacy classes remain in the tree.
 
 ---
 
@@ -42,59 +54,116 @@ MSI Center M Disabled / Addon controller authority
 → independent of Steam game state
 → independent of Big Picture state
 → independent of Xbox360 vs SteamDeck virtual presentation
+→ independent of Overlay capture
+→ retained across supported physical-input recovery and suspend/resume
 ```
 
-The confirmed product policy is:
+Confirmed product policy:
 
 > While the Addon owns the controller, the WING button must never surface native Xbox Game Bar.
 
-This PR is only about **native Game Bar suppression ownership/lifetime**.
+This PR is only about **native Game Bar suppression ownership/lifetime and activating the already-extracted WING delivery seam safely**.
 
-It does **not** decide the final user-visible WING button action.
-
----
-
-# 2. Why this is required now
-
-The old architecture treated Win+G suppression as one routing pipeline stage:
-
-```text
-Steam routing session enters
-→ WinGProtectionRoutingStage.ExecuteMutationAsync()
-→ WinGSuppressionGuard.EnsureArmed()
-
-Steam routing session leaves / rolls back
-→ WinGProtectionRoutingStage.RollbackMutationAsync()
-→ WinGSuppressionGuard.Disarm()
-```
-
-That lifecycle no longer matches Full1902.
-
-Full1902 authority is:
-
-```text
-Center M Disabled
-→ Addon owns PID1902 continuously
-→ Steam/BPM inactive = Xbox360 presentation
-→ Steam/BPM active   = SteamDeck presentation
-```
-
-There is no valid reason for native Game Bar to become available merely because the virtual presentation changed to Xbox360 or because Steam/BPM became inactive.
-
-More importantly, the current Disabled-mode Full1902 path does not compose the legacy routing runtime at all:
-
-```text
-legacyRoutingAllowed = false
-→ AddonRoutingRuntime = null
-```
-
-Therefore the existing route-stage suppression lifetime is not the correct Full1902 authority mechanism.
+It does **not** decide the final user-visible WING Single/Double mappings.
 
 ---
 
-# 3. Current code-review findings
+# 2. Current production architecture after PR #470
 
-## 3.1 `WinGSuppressionGuard` is already the correct low-level primitive
+## 2.1 Legacy physical routing is no longer production-composed
+
+Current production target is already:
+
+```csharp
+AddonRoutingRuntime? routingRuntime = null;
+```
+
+`AddonRuntimeCompositionFactory` calls only:
+
+```csharp
+steamRuntime.StartActualObservation();
+```
+
+for the old Runtime composition path.
+
+Therefore Policy B must not reintroduce any dependency on:
+
+```text
+AddonRoutingRuntime
+RoutingPipeline
+WinGProtectionRoutingStage
+CanonicalSteamDeckOutputStage
+legacy route activation
+```
+
+These classes may still exist in source for historical/tests/cleanup reasons, but they are not production authority.
+
+## 2.2 `MsiClawFrontButtonRuntime` is now the production front-button owner
+
+Current production file:
+
+```text
+src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawFrontButtonRuntime.cs
+```
+
+It owns only feature-local behavior:
+
+- OEM1 Event41 WMI observation;
+- WING Event88 WMI observation;
+- OEM1/WING gesture recognition;
+- OEM1/WING action dispatch;
+- a small WING lifetime epoch used to reject stale delayed gesture delivery.
+
+It intentionally does **not** own:
+
+- PID1901/PID1902;
+- DirectInput;
+- HidHide;
+- VIIPER;
+- Steam/BPM observation;
+- physical recovery;
+- Center M startup authority.
+
+This separation must remain.
+
+## 2.3 PR #470 already created the Policy B WING readiness seam
+
+`MsiClawFrontButtonRuntime.Create(...)` accepts:
+
+```csharp
+Func<bool>? nativeWinGSuppressionReady
+```
+
+and `CaptureWingAuthority()` derives active delivery from:
+
+```text
+front-button runtime lifetime valid
+AND nativeWinGSuppressionReady() == true
+```
+
+Production currently does not pass a readiness callback, so the default is false.
+
+That is intentional interim safety: WING custom actions remain inactive until native Win+G suppression is proven ready.
+
+Policy B should activate this existing seam directly; do not replace it with a new manager or state object.
+
+## 2.4 Steam/QAM pulses already reuse the Full1902 presentation owner
+
+PR #470 added to `IMsiClawAddonPresentation` / `MsiClawAddonPresentation`:
+
+```csharp
+AddonPresentationKind? ActivePresentation { get; }
+bool TryRequestSteamPulse();
+bool TryRequestQuickAccessPulse();
+```
+
+The SteamDeck pulse path uses one shared `SteamDeckSystemButtonOverlay` inside the existing continuous SteamDeck publisher.
+
+Policy B must not change this ownership model and must not create another virtual device or pulse publisher.
+
+---
+
+# 3. `WinGSuppressionGuard` remains the one low-level primitive
 
 Current file:
 
@@ -104,133 +173,86 @@ src/SteamInputAddonforClaw/GameBar/WinGSuppressionGuard.cs
 
 It already owns the process-local low-level keyboard-hook mechanics:
 
-- `Start()` installs the hook;
+- `Start()` installs the low-level hook;
 - `EnsureArmed()` enables Win+G suppression;
-- `Disarm()` disables suppression while leaving the hook installed;
+- `IsArmed` verifies both armed state and installed hook;
+- `Disarm()` releases suppression while leaving the hook installed;
 - `Dispose()` removes the hook;
-- current Win-key cleanup prevents a suppressed chord from leaving the modifier logically stuck.
-
-Do **not** replace this implementation with:
-
-- a new global keyboard service;
-- registry policy disabling Game Bar system-wide;
-- Group Policy mutation;
-- a second hook implementation;
-- a background watchdog.
+- existing Win-key cleanup prevents a suppressed chord from leaving the Windows modifier logically stuck.
 
 Reuse this guard.
 
-## 3.2 `WinGProtectionRoutingStage` currently binds suppression to the obsolete route lifetime
+Do **not** add:
 
-Current file:
-
-```text
-src/SteamInputAddonforClaw/GameBar/WinGProtectionRoutingStage.cs
-```
-
-It is an `IRoutingPipelineStage` whose mutation arm/rollback directly calls:
-
-```csharp
-_guard.EnsureArmed();
-_guard.Disarm();
-```
-
-That remains a legacy route mechanism, not the Full1902 authority boundary.
-
-It also exposes:
-
-```csharp
-CaptureAuthority()
-```
-
-with an active/epoch snapshot used by the existing WING gesture path.
-
-Do not casually delete or repurpose that gesture-authority behavior in this PR.
-
-## 3.3 `AddonRoutingRuntime` couples the same stage to legacy WING gesture delivery
-
-Current file:
-
-```text
-src/SteamInputAddonforClaw/Routing/AddonRoutingRuntime.cs
-```
-
-It currently creates:
-
-```csharp
-var winGProtectionStage = new WinGProtectionRoutingStage(winGSuppressionGuard);
-```
-
-and feeds its authority snapshot into:
-
-```text
-ConfigureWingActionPath(...)
-```
-
-This means `WinGProtectionRoutingStage` currently serves two historical roles:
-
-1. route-scoped Game Bar suppression;
-2. route-scoped WING gesture stale-delivery authority.
-
-The second role is tied to the not-yet-finalized WING mapping policy.
-
-For this focused PR, **do not redesign the final WING gesture/mapping authority** merely to delete the old stage.
-
-## 3.4 `AddonProcessHost` is the correct Full1902 orchestration boundary
-
-Current file:
-
-```text
-src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs
-```
-
-It already owns the single process-level:
-
-```text
-WinGSuppressionGuard
-```
-
-and also owns the Full1902 process-lifetime controller objects:
-
-```text
-_physicalOwnership
-_presentationOwnership
-_presentationReconcile
-_ownedControllerRecovery
-_deviceArrivalWatcher
-```
-
-This is where the product already knows whether the current runtime successfully entered the Full1902 Disabled-mode Addon authority path.
-
-Therefore Full1902 suppression should be orchestrated here, at the real authority / live-presentation boundary, rather than introducing a new `WingAuthorityManager` or another controller state authority.
-
-## 3.5 Full1902 presentation owner should remain presentation-only
-
-Current file:
-
-```text
-src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPresentation.cs
-```
-
-Its contract is intentionally narrow:
-
-```text
-one canonical VIIPER runtime
-one active typed presentation
-one publisher
-```
-
-It explicitly does not own Center M authority, PID1902, HidHide, or Steam/BPM authority.
-
-Do **not** move keyboard-hook/Game Bar policy into this VIIPER presentation owner merely because `AttachInitialAsync()` is the first live-output step.
-
-The process host should enforce the suppression precondition before it calls the presentation owner.
+- another keyboard-hook implementation;
+- a `WingAuthorityManager`;
+- a `GameBarPolicyService`;
+- registry/GPO Game Bar disabling;
+- a service/helper/watchdog;
+- polling of `IsArmed`;
+- a retry state machine.
 
 ---
 
-# 4. Required Full1902 suppression lifecycle
+# 4. Critical current ordering problem after PR #470
 
-## 4.1 Center M Enabled / stock authority
+The production Runtime currently installs the keyboard hook through:
+
+```csharp
+AddonProcessHost.StartRuntimeEventWatchers()
+{
+    _winGSuppressionGuard.Start();
+}
+```
+
+But `RuntimeProcessApplication` calls this only **after**:
+
+```text
+RunStartupAsync()
+→ InitializeRuntimeAsync()
+→ TryInitializeTray(...)
+→ enter NativeMessageLoop
+→ StartRuntimeEventWatchers()
+```
+
+Meanwhile the Full1902 Disabled-mode controller path runs during `InitializeRuntimeAsync()` / deferred startup setup and currently reaches:
+
+```csharp
+presentation.AttachInitialAsync(...)
+```
+
+before the old `StartRuntimeEventWatchers()` hook-install point is guaranteed to have run.
+
+That ordering is incompatible with Policy B.
+
+Required invariant:
+
+```text
+Center M Disabled
+→ physical PID1902 ownership + DirectInput + exact HidHide proven
+→ Win+G hook installed
+→ EnsureArmed() succeeds
+→ IsArmed == true
+→ only then first live virtual presentation may attach/start publisher
+```
+
+Therefore this PR must move or otherwise guarantee the **single hook installation** early enough that the arm check can be performed before the first `AttachInitialAsync()`.
+
+Do not call `Start()` twice merely to preserve the old call site.
+
+Preferred simplification:
+
+- move the one process-owned `Start()` to the authority-aware startup path before first live presentation, or to an earlier single process startup point that is guaranteed to run before that boundary;
+- make the old `StartRuntimeEventWatchers()` call no longer responsible for first installation if that ordering is too late;
+- keep exactly one low-level guard instance and one installation lifecycle.
+
+Do not create a second hook just for Disabled mode.
+
+---
+
+# 5. Required Full1902 suppression lifecycle
+
+## 5.1 Center M Enabled / stock authority
 
 Full1902 authority contract:
 
@@ -240,63 +262,77 @@ Center M Enabled
 → desired PID1901
 → no Full1902 physical ownership
 → no Full1902 VIIPER presentation
+→ no Full1902 front-button action owner
 ```
 
-In this state this PR must not independently arm a new Full1902 Game Bar suppression lifetime.
-
-Do not globally disable Game Bar just because the Addon process is running.
-
-The still-present legacy routing path may retain its existing route-local behavior until that legacy stack is removed in a later focused cleanup. Do not expand this PR into deleting `AddonRoutingRuntime` or finalizing legacy WING behavior.
-
-## 4.2 Center M Disabled / Addon authority startup
-
-The guard may be installed earlier in process startup if that is already the current lifecycle, but **suppression must be armed and proven before the first live virtual controller presentation is exposed**.
-
-Required ordering conceptually:
+In this state:
 
 ```text
-Center M exactly Disabled
-→ Full1902 Disabled admission succeeds
-→ physical ownership reaches safe PID1902 + DirectInput + HidHide state
-→ Win+G suppression hook is installed
-→ EnsureArmed() succeeds / IsArmed is true
-→ only then AttachInitialAsync(...)
-→ publisher becomes live
+Full1902 Win+G suppression must not be armed.
 ```
 
-Do not reorder physical/HidHide ownership merely to satisfy this work order.
+The Addon process may still install the hook earlier if process architecture requires it, but `IsArmed` must remain false under stock authority.
 
-The new requirement is one extra gate immediately before the first live presentation boundary:
+Do not globally suppress Game Bar merely because the Addon Runtime is running.
+
+Do not create a hidden VIIPER/presentation just to service WING.
+
+## 5.2 Center M Disabled / Addon authority startup
+
+After Disabled admission and physical ownership are safe, but **before** first live virtual presentation:
 
 ```text
-Addon authority + ready physical owner
-+ Game Bar suppression proven armed
-→ live virtual presentation allowed
+1. Ensure the one WinGSuppressionGuard hook is installed.
+2. Call EnsureArmed().
+3. Require EnsureArmed() == true.
+4. Require IsArmed == true.
+5. Only then call presentation.AttachInitialAsync(...).
+6. Only after the presentation boundary succeeds, compose/start MsiClawFrontButtonRuntime.
+7. Pass nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed.
 ```
 
-## 4.3 Arm failure is fail-closed
+Conceptual production wiring:
 
-If Disabled-mode Addon authority is otherwise ready but the WING/Game Bar suppression guard cannot be proven armed:
+```csharp
+_frontButtonRuntime = MsiClawFrontButtonRuntime.Create(
+    hardwareSupported: startupResult.HardwareSupported,
+    oem1MappingPreference: startupSettings,
+    wingMappingPreference: startupSettings,
+    isSteamDeckPresentationActive: () =>
+        _presentationOwnership?.ActivePresentation == AddonPresentationKind.SteamDeck,
+    tryRequestQuickAccessPulse: () =>
+        _presentationOwnership?.TryRequestQuickAccessPulse() ?? false,
+    tryRequestSteamPulse: () =>
+        _presentationOwnership?.TryRequestSteamPulse() ?? false,
+    nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed);
+```
+
+Exact formatting/naming may differ, but do not add another authority boolean.
+
+## 5.3 Arm failure is fail-closed
+
+If Disabled-mode Addon authority is otherwise ready but the guard cannot be installed/armed/proven:
 
 ```text
 DO NOT attach a live Xbox360 presentation
 DO NOT attach a live SteamDeck presentation
-DO NOT start a publisher
-DO NOT fall back to native Win+G / Game Bar behavior
+DO NOT start a controller publisher
+DO NOT create WING custom delivery
+DO NOT fall back to native Game Bar behavior while Addon owns the controller
 ```
 
-Keep controller output neutral/detached according to the existing Full1902 fail-close boundary and log a clear reason such as:
+Keep virtual output detached/neutral according to the existing Full1902 fail-close boundary.
+
+Log a clear reason, conceptually:
 
 ```text
 WinGSuppressionUnavailable
 WinGSuppressionArmFailed
 ```
 
-Exact enum/string naming is not mandated.
+No retry loop. A later ordinary Runtime restart may retry through the normal startup path.
 
-Do not create retry loops or a watchdog. A later normal Runtime restart may retry through the ordinary startup path.
-
-## 4.4 Suppression remains armed across presentation switching
+## 5.4 Suppression remains armed across presentation switching
 
 Once Addon authority is live:
 
@@ -307,107 +343,189 @@ Steam game start/exit
 Big Picture enter/exit
 ```
 
-must **not**:
+must cause:
 
-- call `Disarm()`;
-- call `EnsureArmed()` on every switch;
-- reinstall the keyboard hook;
-- create a new suppression epoch.
+```text
+0 Disarm() calls
+0 additional Start() hook installs
+0 new hook ownership state
+```
 
-Presentation switching is not an authority change.
+Presentation switching is not controller-authority release.
 
-## 4.5 Overlay capture does not change suppression authority
+## 5.5 Overlay capture does not change suppression authority
 
-The current Overlay capture path temporarily pauses/neutralizes game-facing publication while keeping the same controller authority.
+Overlay capture temporarily pauses/neutralizes game-facing publication while keeping Addon controller authority.
 
 Therefore:
 
 ```text
-Overlay show / capture
-Overlay hide / resume
+Overlay show/capture
+Overlay hide/resume
 ```
 
 must not disarm native Game Bar suppression.
 
 Do not tie suppression to `_overlayCaptureActive`.
 
-## 4.6 Suspend / hibernate / resume does not release suppression authority
+## 5.6 Suspend / hibernate / resume retains suppression authority
 
 Center M Disabled remains Addon authority across suspend/hibernate/resume.
 
-Do not intentionally disarm the guard for suspend and re-arm it as a new authority session on resume.
+Do not intentionally disarm on suspend and create a new suppression session on resume.
 
-If the existing Windows keyboard hook survives normally, leave it alone.
+If the existing Windows hook survives supported resume normally, leave it alone.
 
-Do not add polling, periodic reinstallation, a resume epoch, or a new synchronization state solely for theoretical notification timing.
+Do not add resume polling/reinstall loops or new epochs for theoretical timing interleavings.
 
-If real evidence later shows Windows destroys the hook across a normal supported resume path, handle that as a separate concrete lifecycle defect with evidence.
+If future hardware evidence proves the hook is destroyed across real resume, handle that concrete defect separately.
 
-## 4.7 PID1902 loss / PnP recovery does not release suppression authority
+## 5.7 Physical device loss / PnP / DirectInput recovery retains suppression authority
 
-Temporary physical controller loss, PID1902 session loss, or same-device PnP re-enumeration while Center M remains Disabled is still Addon authority.
-
-During recovery:
+While Center M remains Disabled:
 
 ```text
-virtual output neutral / recovery in progress
-→ Win+G suppression remains armed
-→ physical ownership recovers
-→ presentation resumes/reconciles
+physical PID1902 loss
+DirectInput session loss
+same-device PnP re-enumeration
+owned recovery
 ```
 
-Do not disarm merely because DirectInput or the physical device is temporarily unavailable.
+are recovery events, not controller-authority release.
 
-If a recovery path must recreate/reattach a presentation after it had been retired, it must not create a live presentation when `WinGSuppressionGuard.IsArmed` is false. Reuse one small process-host precondition/helper; do not build a second recovery manager.
+Suppression remains armed.
+
+If an existing recovery path recreates or reattaches live presentation, it must require:
+
+```text
+_winGSuppressionGuard.IsArmed == true
+```
+
+before live presentation/publisher resumes.
+
+Use one small process-host precondition/helper if needed. Do not build a second recovery manager.
 
 ---
 
-# 5. Explicit authority release
+# 6. WING production authority after Policy B
 
-Suppression belongs to Addon controller authority, so it must be released only when Addon controller authority is actually being returned to stock.
-
-Supported release examples:
+PR #470 already provides the correct feature-local authority boundary:
 
 ```text
-Enable Center M and Restart
-stock-safe uninstall preparation
-process teardown after the controller has already been made safe for the intended lifecycle
+MsiClawFrontButtonRuntime lifetime
++ nativeWinGSuppressionReady()
+→ WingRouteAuthoritySnapshot.Active
 ```
 
-For `Enable Center M and Restart`, do not disarm at the beginning of the button action.
+Policy B should simply bind:
 
-Keep suppression active while live Addon-owned controller output is still present.
+```csharp
+nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed
+```
 
-Conceptual ordering:
+This gives the intended behavior:
 
 ```text
-neutral / stop publisher
-→ detach / retire virtual presentation
-→ release DirectInput / restore same MSI Claw to PID1901
-→ complete the existing stock-safe authority-release safety boundary
+Center M Disabled + guard armed
+→ WING custom delivery allowed
+
+Center M Disabled + guard unavailable/unarmed
+→ WING custom delivery blocked
+
+Center M Enabled
+→ no Full1902 front-button runtime
+→ no Policy-B WING delivery
+```
+
+Do not introduce a second WING authority owner.
+
+The existing small lifetime epoch inside `MsiClawFrontButtonRuntime` remains sufficient for stale delayed gesture rejection.
+
+Do not add another hook epoch/barrier.
+
+---
+
+# 7. Legacy `WinGProtectionRoutingStage` after PR #470
+
+After PR #470, the legacy stage is no longer a production prerequisite for WING delivery.
+
+Therefore this Policy B PR must **not** depend on:
+
+```text
+WinGProtectionRoutingStage.CaptureAuthority()
+WinGProtectionRoutingStage.ExecuteMutationAsync()
+WinGProtectionRoutingStage.RollbackMutationAsync()
+AddonRoutingRuntime.Create(...)
+```
+
+The old class may remain unreferenced if deleting it would widen the PR unnecessarily.
+
+Do not spend this PR deleting the entire old route stack unless a strictly mechanical dead-code deletion is clearly isolated and very small.
+
+A later legacy cleanup may delete:
+
+- `WinGProtectionRoutingStage`;
+- old route-owned WING composition paths;
+- `StartRoutingObservation()` if fully dead;
+- other unused legacy routing classes.
+
+Policy B does not need them.
+
+---
+
+# 8. Explicit stock authority release
+
+Suppression belongs to Addon controller authority, so it must be released only when controller authority has actually become stock-safe.
+
+Relevant supported flows:
+
+- Enable Center M and Restart;
+- stock-safe uninstall preparation;
+- process teardown after an already-completed stock restoration.
+
+PR #470 established the front-button teardown dependency:
+
+```text
+front-button runtime
+→ presentation owner
+```
+
+Policy B must extend the stock release ordering conceptually to:
+
+```text
+stop/dispose MsiClawFrontButtonRuntime
+→ neutral/stop publisher
+→ detach/retire virtual presentation
+→ release DirectInput
+→ restore and verify same physical MSI Claw PID1901
+→ complete existing stock-safe authority-release boundary
 → Disarm Win+G suppression
-→ continue Center M startup-root enable / restart flow as already designed
+→ continue Center M root enable / restart or uninstall completion
 ```
 
-The exact call site should reuse the current centralized authority transition / stock-restoration orchestration. Do not introduce a second Center M transition manager.
+Do not disarm at the beginning of Enable-and-Restart.
 
-If the current teardown path already disposes the guard shortly after proven stock restoration, a separate `Disarm()` call may be unnecessary there. Avoid duplicate teardown just to satisfy a checklist.
+Do not disarm while a live Addon virtual controller remains exposed.
 
-For uninstall, reuse the current PR12 stock-safe preparation path if a direct Runtime release seam is already available. **Do not implement PR13 installer interception in this work order.**
+Reuse the existing `CenterMRebootAuthorityTransition`, presentation release seam, physical ownership release seam, stock baseline, and PR12 uninstall preparation.
+
+Do not introduce another Center M transition coordinator.
+
+If immediate process disposal follows a proven stock-safe release and naturally removes the hook, avoid redundant teardown purely for checklist symmetry. The key invariant is that suppression is not released before stock authority is safe.
 
 ---
 
-# 6. Controlled Runtime restart and unexpected Runtime death
+# 9. Controlled Runtime restart and unexpected Runtime death
 
-A process-local keyboard hook naturally disappears when the Runtime process exits.
+A process-local keyboard hook disappears with the Runtime process.
 
-Do not try to make Win+G suppression persistent outside the Runtime process by adding:
+Do not make suppression persistent outside the Runtime process using:
 
-- a Windows service;
-- a supervisor;
-- a second helper process;
-- system-wide Game Bar registry policy;
-- Task Scheduler activity whose only job is keeping the hook alive.
+- a service;
+- supervisor;
+- helper process;
+- registry/GPO system-wide Game Bar policy;
+- Task Scheduler activity whose only job is maintaining the hook.
 
 For a controlled Runtime restart while Center M remains Disabled:
 
@@ -415,46 +533,15 @@ For a controlled Runtime restart while Center M remains Disabled:
 old Runtime exits
 → process hook disappears
 → mandatory Addon Runtime starts again
-→ Full1902 startup reconciles controller authority
-→ suppression is armed before the new live virtual presentation
+→ Full1902 startup reconciles PID1902 authority
+→ hook installs/arms before new live presentation
 ```
 
-Unexpected Runtime death remains the known broader Full1902 runtime-availability reliability problem. Do not solve that unrelated problem inside this focused suppression PR.
+Unexpected Runtime death remains the broader known runtime-availability issue. Do not solve that unrelated reliability problem here.
 
 ---
 
-# 7. Legacy `WinGProtectionRoutingStage` boundary for this PR
-
-Keep this PR narrow.
-
-Because `WinGProtectionRoutingStage.CaptureAuthority()` currently participates in the existing legacy WING gesture path, **do not require deleting the stage in this work order**.
-
-Target transitional structure:
-
-```text
-Full1902 Center M Disabled path
-→ AddonProcessHost owns authority-bound suppression
-→ does NOT depend on WinGProtectionRoutingStage
-
-Legacy routing path, while still present
-→ may retain WinGProtectionRoutingStage and its existing route-local WING gesture authority
-```
-
-The two supported controller-authority branches are mutually exclusive at startup, so this does not require a new shared arbitration layer.
-
-Add comments only where necessary to make the transitional ownership clear.
-
-A later focused WING/legacy-routing cleanup can decide whether to:
-
-- delete `WinGProtectionRoutingStage` entirely;
-- replace its route-authority snapshot with the final WING action authority;
-- remove legacy routing-specific WING semantics.
-
-Do not pull that future design into this PR.
-
----
-
-# 8. WING mapping policy is explicitly out of scope
+# 10. WING mapping policy remains out of scope
 
 Do not change:
 
@@ -464,127 +551,182 @@ WingMapping
 IWingMappingPreference
 WingGestureRecognizer
 WingActionDispatcher action catalog/defaults
-Single/Double mappings
-SteamButton action semantics
-KeyboardHotkey / LaunchApplication actions
+Single/Double mapping values
+KeyboardHotkey action semantics
+LaunchApplication action semantics
 ```
 
-Do not decide in this work order whether WING Single should ultimately be:
+The current `SteamButton` action should simply become safely deliverable when Policy-B suppression readiness is true.
+
+Do not decide whether WING Single should ultimately be:
 
 - Steam Button;
 - Addon Quick Settings Overlay;
 - another user-selected action.
 
-The only fixed policy here is:
+Only this policy is fixed:
 
 ```text
 Addon controller authority active
-→ native Xbox Game Bar must not appear from WING / Win+G
+→ native Xbox Game Bar must not surface from WING / Win+G
 ```
-
-Custom WING action delivery is a separate policy layer.
 
 ---
 
-# 9. Other explicit out-of-scope items
+# 11. OEM1 scope
 
-Do not change any of the following except strictly mechanical compile fixes:
+PR #470 already separated OEM1 from legacy physical routing.
 
-- OEM1 / Center M button remapping policy;
-- OEM1 dummy `MSI Center M.exe` helper suppression cleanup;
+Do not redesign OEM1 in this PR.
+
+Do not change:
+
+- `Oem1MappingSettings` contract;
+- Normal/Routing slot semantics;
+- OEM1 gesture behavior;
+- Quick Access pulse behavior;
+- Big Picture behavior;
+- legacy dummy Center M helper cleanup beyond strictly dead mechanical code.
+
+Policy B may mechanically touch `MsiClawFrontButtonRuntime.Create(...)` composition only to pass the new suppression-readiness callback for WING.
+
+---
+
+# 12. Other explicit out-of-scope items
+
+Do not change except for strictly required mechanical compile/test fixes:
+
+- final OEM1/WING button assignment UX;
 - Overlay button assignment;
 - M1/M2 Xbox360 remapping;
 - rumble / vibration strength;
 - battery charge limit;
-- `SteamInputRoutingEnabled` compatibility code (it is already removed);
-- `legacyRoutingAllowed` removal;
-- deletion of the old `AddonRoutingRuntime` / legacy route pipeline;
+- deletion of the old entire `AddonRoutingRuntime` stack;
 - Steam/BPM detection semantics;
-- Xbox360 ↔ SteamDeck presentation selection;
+- Xbox360 ↔ SteamDeck selection policy;
 - PID1901/PID1902 authority rules;
 - HidHide baseline/policy;
-- DirectInput acquisition/recovery;
+- DirectInput acquisition/recovery semantics;
 - VIIPER server/bus/device ownership;
-- Game Bar foreground presentation mechanics in the old legacy route;
 - PR13 Velopack / Windows uninstall interception.
+
+Do not add a new general abstraction merely because old routing code remains in source.
 
 ---
 
-# 10. Preferred implementation shape
+# 13. Preferred implementation shape
 
-Do not add a new public subsystem.
+Use `AddonProcessHost`, which already owns:
 
-A small private process-host helper is enough, conceptually:
+```text
+_winGSuppressionGuard
+_physicalOwnership
+_presentationOwnership
+_frontButtonRuntime
+_presentationReconcile
+_ownedControllerRecovery
+_deviceArrivalWatcher
+```
+
+A small private helper is sufficient, conceptually:
 
 ```csharp
 private bool EnsureAddonAuthorityWinGSuppression()
 {
-    _winGSuppressionGuard.Start(); // only if current lifecycle does not already install it earlier
-    return _winGSuppressionGuard.EnsureArmed() && _winGSuppressionGuard.IsArmed;
+    _winGSuppressionGuard.Start();
+    return _winGSuppressionGuard.EnsureArmed()
+        && _winGSuppressionGuard.IsArmed;
 }
 ```
 
 Exact implementation is not mandated.
 
-Important points:
+Important constraints:
 
-- preserve current idempotent hook ownership;
-- do not repeatedly `Start()`/arm per Steam event;
-- do not add a second authority boolean;
-- derive the decision from the already-selected Full1902 Disabled-mode startup path / real ownership objects;
-- use the existing process-host teardown for disposal;
-- use one narrow check before first/recreated live presentation.
-
-If `Start()` is already called earlier in `AddonProcessHost`, keep that installation location and only add the authority-bound arm check where needed. Do not duplicate hook installation.
+- call `Start()` from exactly one process-owned installation path;
+- make that installation happen before first live Disabled-mode presentation;
+- do not reinstall per Steam/BPM event;
+- do not add a persisted suppression flag;
+- do not add an `AddonAuthoritySuppressionActive` boolean duplicating `IsArmed`;
+- derive policy from the existing Center M Disabled / Full1902 startup path;
+- keep `MsiClawAddonPresentation` presentation-only;
+- keep `MsiClawFrontButtonRuntime` feature-local;
+- let `WinGSuppressionGuard` remain the low-level hook owner.
 
 ---
 
-# 11. Required tests
+# 14. Required tests
 
-## 11.1 Preserve low-level guard tests
+## 14.1 Preserve low-level guard tests
 
-Keep the existing `WinGSuppressionGuardTests` behavior covering:
+Keep `WinGSuppressionGuardTests` covering:
 
-- Win+G suppression when armed;
-- unrelated keys passing through;
-- modifier cleanup;
+- Win+G suppressed when armed;
+- unrelated keys pass through;
+- Win modifier cleanup;
 - disarm;
-- hook disposal/idempotency.
+- hook install failure;
+- disposal/idempotency.
 
-Do not weaken those tests while changing ownership lifetime.
+Do not weaken these tests to fit the new ownership lifecycle.
 
-## 11.2 Full1902 Disabled startup ordering
+## 14.2 Disabled startup ordering
 
 Add focused process-host/lifecycle coverage proving:
 
 ```text
-Center M Disabled / physical owner ready
-→ suppression arm succeeds
-→ only then first virtual presentation may attach/start
+Center M Disabled
+→ physical owner ready
+→ hook installed
+→ arm succeeds
+→ IsArmed true
+→ first AttachInitialAsync allowed
 ```
 
-Use test seams/fakes rather than a real keyboard hook in unit tests.
+The test must fail if a live first presentation can be attached before the arm result is known.
 
-The test must fail if the first presentation can become live before the arm result is known.
+Use fakes/seams; do not require a real keyboard hook in unit tests.
 
-## 11.3 Arm failure fail-close
+## 14.3 Arm failure fail-close
 
 Prove:
 
 ```text
 Center M Disabled
 + physical ownership ready
-+ suppression arm failure
-→ no live initial presentation
++ suppression install/arm failure
+→ no initial live presentation
 → no publisher start
-→ no native Game Bar fallback
+→ no front-button WING custom delivery
 ```
 
-Do not require a retry-state machine in the test.
+Do not require retry machinery.
 
-## 11.4 Presentation changes do not change suppression
+## 14.4 WING readiness seam becomes live only when armed
 
-Prove that after successful authority admission:
+Add/adjust `MsiClawFrontButtonRuntimeTests` proving:
+
+```text
+nativeWinGSuppressionReady == false
+→ CaptureWingAuthority().Active == false
+→ WING SteamButton action not delivered
+
+nativeWinGSuppressionReady == true
+→ WING authority active during valid runtime lifetime
+→ WING SteamButton delegates to presentation TryRequestSteamPulse()
+```
+
+Production composition test/source guard must prove the callback is based on:
+
+```csharp
+_winGSuppressionGuard.IsArmed
+```
+
+not a new duplicated boolean.
+
+## 14.5 Presentation changes do not own suppression
+
+Prove after successful admission:
 
 ```text
 Xbox360 ↔ SteamDeck
@@ -592,39 +734,57 @@ Steam game start/exit
 BPM enter/exit
 ```
 
-cause zero `Disarm()` calls and do not reinstall the hook.
+cause:
 
-## 11.5 Overlay capture does not change suppression
+```text
+zero Disarm()
+zero hook reinstall
+```
+
+## 14.6 Overlay capture does not own suppression
 
 Prove Overlay pause/resume leaves suppression armed.
 
-## 11.6 Physical recovery does not change suppression
+Do not require WING pulse delivery while the SteamDeck publisher is Overlay-paused; PR #470 already correctly makes the pulse seam unavailable there.
 
-For the existing realistic owned-controller recovery paths, verify that temporary DirectInput loss / same-device PnP recovery does not intentionally disarm suppression and that a reattached live presentation still requires suppression to be armed.
+The suppression itself must remain armed.
 
-Do not invent instruction-level race tests around callback ordering.
+## 14.7 Physical recovery does not own suppression
 
-## 11.7 Authority release
+For realistic PR8–PR10 owned recovery paths:
 
-Prove the real stock-release path does not disarm while a live Addon virtual presentation is still active.
+- temporary DirectInput loss does not intentionally disarm;
+- same-device PnP recovery does not intentionally disarm;
+- any recreated/reconciled live presentation requires `IsArmed` true.
 
-After the current authority-release safety boundary is proven, suppression is disarmed/disposed according to the existing process lifecycle.
+Do not invent instruction-level race tests.
 
-Also prove Center M Enabled startup does not arm the new Full1902 authority suppression path.
+## 14.8 Authority release ordering
 
-## 11.8 Preserve WING mapping contracts
+Prove the real Enable Center M / stock-safe release path does not disarm while a live Addon virtual presentation remains active.
 
-Existing WING mapping persistence/action tests should continue to pass unchanged except for compile-required setup changes.
+After the existing stock-safe boundary is proven, suppression may be disarmed/disposed.
 
-No test should assert a new final WING Single/Double default as part of this PR.
+Also prove Center M Enabled startup does not arm Full1902 suppression merely because Runtime starts.
+
+## 14.9 Regression for PR #470
+
+Preserve all #470 invariants:
+
+- no production `AddonRoutingRuntime.Create(...)`;
+- no production `StartRoutingObservation()`;
+- OEM1/WING action path remains independent of legacy routing;
+- no second VIIPER/publisher created for front-button pulses;
+- OEM1 Normal/Routing mapping continues to follow actual `ActivePresentation`;
+- WING action still uses `MsiClawAddonPresentation.TryRequestSteamPulse()`.
 
 ---
 
-# 12. Logging
+# 15. Logging
 
-Add concise lifecycle logs only where they help diagnose a real device/user failure.
+Add concise lifecycle logs for real failures/transitions only.
 
-Useful events include conceptually:
+Useful conceptual events:
 
 ```text
 Full1902WinGSuppressionArmStarted
@@ -633,99 +793,110 @@ Full1902WinGSuppressionArmFailed
 Full1902WinGSuppressionReleased
 ```
 
-Include the authority context (`CenterMDisabled` / `AddonAuthority`) where useful.
+Include useful authority context such as `CenterMDisabled` / `AddonAuthority`.
 
-Do not log every keyboard event beyond the existing Debug-level hook diagnostics.
+Do not log every keyboard event beyond existing Debug hook diagnostics.
 
-Do not add telemetry/polling solely to prove the guard is still armed.
+Do not add telemetry/polling to prove the guard stays armed.
 
 ---
 
-# 13. Documentation cleanup
+# 16. Documentation cleanup
 
-Inspect current active user documentation after Policy A:
+Inspect active user documentation only if needed:
 
 ```text
 README.md
 docs/KOREAN_USER_GUIDE.md
 ```
 
-Only update them if they still claim that native Game Bar availability changes with Steam routing state.
+Update only if they still imply native Game Bar availability changes with Steam routing state.
 
-Do **not** invent final WING/Overlay mapping text.
+Do not invent final WING/Overlay mapping text.
 
-Historical `docs/work-order/*` files remain historical records and must not be bulk-edited.
+Historical work orders remain historical records. Do not bulk-edit older work orders.
+
+This Policy B document itself is the authoritative post-#470 implementation contract.
 
 ---
 
-# 14. No overengineering
+# 17. No overengineering
 
 Do not add:
 
 - `WingAuthorityManager`;
 - `GameBarPolicyService`;
-- a persistent suppression database;
-- a new lifecycle state machine;
-- an epoch/barrier solely for hook ownership;
-- a second Center M authority source;
+- `SuppressionState` persistence;
+- a new controller lifecycle state machine;
+- a hook epoch/barrier;
+- another Center M authority source;
 - background polling of `IsArmed`;
-- automatic retry loops;
-- a Windows service / watchdog;
+- retry loops;
+- Windows service/watchdog;
 - system-wide Game Bar registry mutation.
 
-The existing Full1902 startup/physical/presentation authority and the existing `WinGSuppressionGuard` are sufficient.
+The existing owners are sufficient:
 
-Real supported lifecycle safety must remain intact, especially:
+```text
+AddonProcessHost              → orchestration / authority lifetime
+WinGSuppressionGuard          → low-level Win+G hook
+MsiClawAddonPresentation      → one live VIIPER presentation/publisher
+MsiClawFrontButtonRuntime     → OEM1/WING gesture/action delivery
+```
 
-- suspend / hibernate / resume;
+Protect real supported lifecycle failures only:
+
+- sleep / hibernate / resume;
 - controlled Runtime restart;
 - physical device loss / PnP return;
 - DirectInput owned-session recovery;
 - explicit Center M authority release;
-- uninstall stock-safe preparation;
-- actual hook arm/install failure.
+- stock-safe uninstall preparation;
+- actual hook install/arm failure.
 
-Do not add complexity for narrow instruction-level interleavings that have no realistic handheld lifecycle path.
+Do not add complexity for narrow scheduler interleavings that have no realistic handheld lifecycle path.
 
 ---
 
-# 15. Acceptance criteria
-
-The PR is complete only when all of the following are true.
+# 18. Acceptance criteria
 
 ## Product behavior
 
 - [ ] Center M Disabled / Addon authority cannot expose its first live virtual controller while native Win+G suppression is unarmed.
-- [ ] Failed suppression arm causes a fail-closed controller-presentation result rather than native Game Bar fallback.
-- [ ] Once Addon authority is live, suppression remains armed across Xbox360 ↔ SteamDeck transitions.
+- [ ] Failed hook install/arm causes fail-closed presentation behavior rather than native Game Bar fallback.
+- [ ] Once Addon authority is live, suppression stays armed across Xbox360 ↔ SteamDeck transitions.
 - [ ] Steam game / BPM state changes do not own suppression lifetime.
 - [ ] Overlay capture pause/resume does not own suppression lifetime.
 - [ ] temporary physical/DirectInput loss does not release suppression authority.
 - [ ] suspend/hibernate/resume does not intentionally release suppression authority.
-- [ ] explicit stock authority release retires live Addon controller output before suppression is released.
-- [ ] Center M Enabled does not arm the new Full1902 suppression path merely because the Addon Runtime is running.
+- [ ] WING custom delivery becomes active only when the existing suppression guard reports `IsArmed`.
+- [ ] explicit stock authority release retires Addon output before suppression is released.
+- [ ] Center M Enabled does not arm Full1902 suppression merely because Runtime is running.
 
 ## Architecture
 
-- [ ] `WinGSuppressionGuard` remains the one low-level keyboard-hook implementation.
-- [ ] Full1902 Disabled-mode suppression no longer depends on `WinGProtectionRoutingStage` being composed.
-- [ ] `MsiClawAddonPresentation` remains VIIPER/presentation-only and does not become a Game Bar policy owner.
-- [ ] no new controller authority manager/state source is introduced.
-- [ ] legacy `WinGProtectionRoutingStage` may remain for its current legacy route/WING gesture role; deleting/replacing it is not required here.
-- [ ] no WING mapping/default/action policy is changed.
-- [ ] no OEM1 policy is changed.
+- [ ] `WinGSuppressionGuard` remains the only low-level keyboard-hook implementation.
+- [ ] hook installation occurs early enough to be proven before first Disabled-mode `AttachInitialAsync()`.
+- [ ] production WING authority is `MsiClawFrontButtonRuntime` + suppression readiness, not `WinGProtectionRoutingStage`.
+- [ ] production does not compose `AddonRoutingRuntime`.
+- [ ] `MsiClawAddonPresentation` remains VIIPER/presentation-only.
+- [ ] `MsiClawFrontButtonRuntime` remains feature-local and does not become controller authority.
+- [ ] no new authority manager/state source is introduced.
+- [ ] no final WING mapping/default policy is changed.
+- [ ] no OEM1 mapping policy is changed.
 - [ ] no PR13 installer interception work is included.
 
 ## Lifecycle / failure
 
 - [ ] controlled Runtime teardown remains idempotent.
 - [ ] hook disposal remains process-owned and idempotent.
-- [ ] arm/install failure is observable in logs and blocks live presentation.
+- [ ] arm/install failure is observable and blocks live presentation.
+- [ ] recovery does not silently expose live presentation with suppression unarmed.
 - [ ] no polling/watchdog/retry service is added.
 
 ---
 
-# 16. Validation
+# 19. Validation
 
 Run at minimum:
 
@@ -736,81 +907,49 @@ dotnet test SteamInputAddonforClaw.slnx -c Release
 git diff --check
 ```
 
-Also inspect repository references for:
+Also inspect production references for:
 
 ```text
 WinGSuppressionGuard
-WinGProtectionRoutingStage
 EnsureArmed
+IsArmed
 Disarm
-WingRouteAuthoritySnapshot
-ConfigureWingActionPath
+MsiClawFrontButtonRuntime.Create
+CaptureWingAuthority
+TryRequestSteamPulse
+AttachInitialAsync
+AddonRoutingRuntime.Create
+StartRoutingObservation
 ```
 
-The review should confirm that Full1902 Disabled-mode live presentation has a direct authority-bound suppression precondition and is not accidentally depending on the old routing stage.
+Required review conclusions:
+
+```text
+1. Full1902 Disabled first live presentation has a direct suppression precondition.
+2. WING production readiness is bound to the existing WinGSuppressionGuard.IsArmed seam.
+3. #470 legacy-routing removal is not regressed.
+4. No second VIIPER/publisher/authority is introduced.
+```
 
 ---
 
-# 17. Manual MSI Claw smoke validation
+# 20. Manual MSI Claw smoke validation
 
 If supported hardware is available:
 
 ```text
 1. Boot with MSI Center M Disabled.
-2. Confirm normal non-Steam desktop state presents Xbox360.
-3. Press WING repeatedly: native Xbox Game Bar must never appear.
-4. Launch a Steam game and confirm SteamDeck presentation.
-5. Press WING: native Xbox Game Bar must still never appear.
-6. Exit the game and confirm Xbox360 presentation returns without making Game Bar available.
-7. Enter/leave BPM and repeat the WING check.
-8. Exercise Overlay show/hide; WING must not leak native Game Bar during capture/resume.
-9. Sleep/resume and repeat.
-10. If practical, exercise one real controller PnP/recovery path and repeat.
-11. Use Enable Center M and Restart; after stock authority is restored, verify the Addon no longer applies its Full1902 suppression lifetime.
+2. Confirm normal desktop state presents Xbox360.
+3. Press WING: native Xbox Game Bar must not appear.
+4. Start a Steam game and confirm presentation switches to SteamDeck.
+5. Press WING: native Xbox Game Bar must not appear; configured WING action may execute according to current mapping.
+6. Exit the Steam game and return to Xbox360; native Game Bar must remain blocked.
+7. Enter/exit BPM; suppression must remain continuous.
+8. Open/close Addon Overlay; native Game Bar must remain blocked while Addon authority remains active.
+9. Sleep/resume; verify Addon authority and Game Bar suppression remain correct.
+10. If practical, exercise real same-device PnP/DirectInput recovery and verify no native Game Bar exposure.
+11. Use Enable Center M and Restart.
+12. After stock authority is restored, confirm the Addon Full1902 suppression lifetime is no longer active.
 ```
 
-Do not use this smoke test to decide final WING custom mapping behavior.
-
----
-
-# 18. Review guidance
-
-Blocking findings for this PR include:
-
-- Full1902 Disabled mode can attach/start a live virtual presentation before suppression is proven armed;
-- native Game Bar becomes available when Steam/BPM becomes inactive but Addon authority remains active;
-- X360 ↔ SteamDeck switching disarms/rearms suppression;
-- PnP/DirectInput recovery releases suppression authority while Center M remains Disabled;
-- suppression is released before the live Addon controller presentation is safely retired during explicit stock handoff;
-- hook arm failure silently continues with live controller output;
-- the implementation introduces global Game Bar registry/policy mutation or a watchdog/service without evidence;
-- the PR changes final WING/OEM1/Overlay mapping policy.
-
-Non-blocking / separate work:
-
-- deleting the remaining legacy `WinGProtectionRoutingStage` after final WING policy is decided;
-- deleting `AddonRoutingRuntime` / `legacyRoutingAllowed`;
-- choosing WING Single/Double defaults;
-- assigning WING or OEM1 to the Addon Quick Settings Overlay;
-- OEM1 dummy-helper removal;
-- PR13 uninstall interception.
-
----
-
-# 19. Final invariant
-
-After this PR:
-
-```text
-Controller authority decides native Game Bar suppression.
-
-Center M Enabled / MSI authority
-→ Full1902 suppression not active
-
-Center M Disabled / Addon authority
-→ native WING Win+G / Xbox Game Bar suppressed continuously
-→ Steam/BPM only changes Xbox360 vs SteamDeck presentation
-→ presentation changes do not change suppression authority
-```
-
-Native Game Bar suppression is therefore no longer conceptually owned by a Steam routing session.
+Do not substitute synthetic instruction-level race testing for these real lifecycle checks.
