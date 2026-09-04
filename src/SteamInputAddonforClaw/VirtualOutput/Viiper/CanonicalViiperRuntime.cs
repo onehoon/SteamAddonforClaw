@@ -190,6 +190,12 @@ internal sealed class CanonicalViiperRuntime
     internal bool SetXbox360State(Xbox360DeviceState state) =>
         State == CanonicalViiperRuntimeState.Ready && _xbox360Created && _native.SetXbox360DeviceState(Xbox360DeviceHandle, state);
 
+    /// <summary>Forwards the host's Xbox360 rumble callback to the persistent logical device. Narrow
+    /// pass-through only -- the managed delegate lifetime and feedback policy belong to the caller
+    /// (MsiClawAddonPresentation), exactly as with <see cref="SetDeckOutputCallback"/>.</summary>
+    internal bool SetXbox360RumbleCallback(Xbox360RumbleCallback? callback) =>
+        State == CanonicalViiperRuntimeState.Ready && _xbox360Created && _native.SetXbox360RumbleCallback(Xbox360DeviceHandle, callback);
+
     /// <summary>
     /// Production staged initialization, one deterministic ownership chain:
     /// NewUSBServer -&gt; CreateUSBBus -&gt; CreateSteamDeckDevice(autoAttach=false) -&gt;

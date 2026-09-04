@@ -48,13 +48,15 @@ internal interface ICanonicalViiperNativeApi
     bool RemoveSteamDeckDevice(nuint deviceHandle);
     SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle);
 
-    // Canonical typed Xbox360 surface. The process-lifetime runtime creates one detached-ready
-    // logical handle. The current Game Bar presentation path may classified-attach it and publish
-    // typed Xbox360 state while an eligible outer Steam route is active. This interface binds the
-    // ABI surface only; presentation policy remains in AddonRoutingRuntime. Buttons/D-pad/sticks/
-    // triggers are supported here; no Xbox360 rumble callback is currently bound by the Addon.
+    // Canonical typed Xbox360 surface. The Full1902 process-lifetime runtime creates one
+    // detached-ready logical handle; MsiClawAddonPresentation classified-attaches it for the Xbox360
+    // virtual presentation. This interface binds the ABI surface only -- presentation policy stays in
+    // MsiClawAddonPresentation. Buttons/D-pad/sticks/triggers are supported here; the host's rumble
+    // is delivered through SetXbox360RumbleCallback, whose managed delegate is rooted like the Steam
+    // Deck output callback.
     bool CreateXbox360Device(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, byte xinputSubType);
     bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state);
+    bool SetXbox360RumbleCallback(nuint deviceHandle, Xbox360RumbleCallback? callback);
     bool RemoveXbox360Device(nuint deviceHandle);
     Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint deviceHandle);
 }
@@ -80,6 +82,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         "RemoveSteamDeckDeviceEx",
         "CreateXbox360Device",
         "SetXbox360DeviceState",
+        "SetXbox360RumbleCallback",
         "RemoveXbox360Device",
         "RemoveXbox360DeviceEx"
     ];
@@ -101,10 +104,12 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     private readonly RemoveSteamDeckDeviceExDelegate _removeSteamDeckDeviceEx;
     private readonly CreateXbox360DeviceDelegate _createXbox360Device;
     private readonly SetXbox360DeviceStateDelegate _setXbox360DeviceState;
+    private readonly SetXbox360RumbleCallbackDelegate _setXbox360RumbleCallback;
     private readonly RemoveXbox360DeviceDelegate _removeXbox360Device;
     private readonly RemoveXbox360DeviceExDelegate _removeXbox360DeviceEx;
     private readonly object _callbackGate = new();
     private readonly Dictionary<nuint, SteamDeckOutputCallback> _steamDeckOutputCallbacks = [];
+    private readonly Dictionary<nuint, Xbox360RumbleCallback> _xbox360RumbleCallbacks = [];
     private readonly Dictionary<nuint, ViiperLogCallback> _logCallbacks = [];
     // Shared logical-device ownership map for both Steam Deck and Xbox360 handles. Safe to share:
     // VIIPER's canonical implementation allocates every typed device handle from the same
@@ -134,6 +139,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         _removeSteamDeckDeviceEx = Bind<RemoveSteamDeckDeviceExDelegate>(library, resolve, "RemoveSteamDeckDeviceEx");
         _createXbox360Device = Bind<CreateXbox360DeviceDelegate>(library, resolve, "CreateXbox360Device");
         _setXbox360DeviceState = Bind<SetXbox360DeviceStateDelegate>(library, resolve, "SetXbox360DeviceState");
+        _setXbox360RumbleCallback = Bind<SetXbox360RumbleCallbackDelegate>(library, resolve, "SetXbox360RumbleCallback");
         _removeXbox360Device = Bind<RemoveXbox360DeviceDelegate>(library, resolve, "RemoveXbox360Device");
         _removeXbox360DeviceEx = Bind<RemoveXbox360DeviceExDelegate>(library, resolve, "RemoveXbox360DeviceEx");
     }
@@ -267,6 +273,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         lock (_callbackGate)
         {
             _steamDeckOutputCallbacks.Remove(deviceHandle);
+            _xbox360RumbleCallbacks.Remove(deviceHandle);
             _deviceOwnership.Remove(deviceHandle);
         }
     }
@@ -278,19 +285,19 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
             if (!predicate(ownership)) continue;
 
             _steamDeckOutputCallbacks.Remove(deviceHandle);
+            _xbox360RumbleCallbacks.Remove(deviceHandle);
             _deviceOwnership.Remove(deviceHandle);
         }
     }
 
-    // ---- Canonical typed Xbox360 surface. The process-lifetime runtime creates one
-    // detached-ready logical handle. The current Game Bar presentation path may
-    // classified-attach it and publish typed Xbox360 state while an eligible outer
-    // Steam route is active. This API layer owns only ABI binding/managed callback
-    // rooting; presentation policy remains in AddonRoutingRuntime. Buttons/D-pad/
-    // sticks/triggers are mapped here; no Xbox360 rumble callback is currently bound.
-    // Ownership is tracked in the shared _deviceOwnership map (see its declaration above).
-    // RemoveUSBBus/CloseUSBServer release it through the existing
-    // ReleaseOutputCallbacksLocked path. ----
+    // ---- Canonical typed Xbox360 surface. The Full1902 process-lifetime runtime creates one
+    // detached-ready logical handle; MsiClawAddonPresentation classified-attaches it for the Xbox360
+    // virtual presentation. This API layer owns only ABI binding/managed callback rooting;
+    // presentation policy remains in MsiClawAddonPresentation. Buttons/D-pad/sticks/triggers are
+    // mapped here, and the host's rumble is delivered through the rooted SetXbox360RumbleCallback.
+    // Callback/ownership state is tracked in the shared _xbox360RumbleCallbacks / _deviceOwnership
+    // maps; RemoveXbox360Device(Ex)/RemoveUSBBus/CloseUSBServer release it through the existing
+    // ReleaseDeviceOwnership / ReleaseOutputCallbacksLocked paths. ----
 
     public bool CreateXbox360Device(
         nuint serverHandle,
@@ -318,6 +325,24 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     public bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state)
         => Succeeded(_setXbox360DeviceState(deviceHandle, state));
+
+    public bool SetXbox360RumbleCallback(nuint deviceHandle, Xbox360RumbleCallback? callback)
+    {
+        // Same atomicity requirement as SetSteamDeckOutputCallback: hold _callbackGate across the
+        // native call and the managed-root mutation so native can never end up holding a function
+        // pointer whose managed delegate the root dictionary no longer keeps alive, and so the
+        // teardown-driven release paths cannot interleave.
+        lock (_callbackGate)
+        {
+            var succeeded = Succeeded(_setXbox360RumbleCallback(deviceHandle, callback));
+            if (succeeded)
+            {
+                if (callback is null) _xbox360RumbleCallbacks.Remove(deviceHandle);
+                else _xbox360RumbleCallbacks[deviceHandle] = callback;
+            }
+            return succeeded;
+        }
+    }
 
     public bool RemoveXbox360Device(nuint deviceHandle)
     {
@@ -402,6 +427,9 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate byte SetXbox360DeviceStateDelegate(nuint handle, Xbox360DeviceState state);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte SetXbox360RumbleCallbackDelegate(nuint handle, Xbox360RumbleCallback? callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate byte RemoveXbox360DeviceDelegate(nuint handle);

@@ -137,4 +137,26 @@ public sealed class RumbleV1Tests
         Assert.Equal(TwoMotorRumble.Stopped, result.Rumble);
         Assert.False(result.HasPhysicalTranslation);
     }
+
+    // ---- Full1902 production Xbox360 motor mapping (work order section 8.1 / 19.2) ----
+
+    [Fact]
+    public void Xbox360Mapping_LeftIsLargeMotorAndRightIsSmallMotor()
+    {
+        Assert.Equal(new TwoMotorRumble(65535, 0),
+            new TwoMotorRumble(Xbox360RumbleFeedbackBridge.Expand(255), Xbox360RumbleFeedbackBridge.Expand(0)));
+        Assert.Equal(new TwoMotorRumble(0, 65535),
+            new TwoMotorRumble(Xbox360RumbleFeedbackBridge.Expand(0), Xbox360RumbleFeedbackBridge.Expand(255)));
+    }
+
+    [Theory]
+    [InlineData((byte)0, (ushort)0)]
+    [InlineData((byte)1, (ushort)257)]
+    [InlineData((byte)127, (ushort)32639)]
+    [InlineData((byte)255, (ushort)65535)]
+    public void Xbox360Mapping_ExpandRoundTripsExactly8BitMagnitudeThroughThePhysicalConversion(byte value, ushort expanded)
+    {
+        Assert.Equal(expanded, Xbox360RumbleFeedbackBridge.Expand(value));
+        Assert.Equal(value, SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawRumblePacketBuilder.ToPhysicalByte(expanded));
+    }
 }
