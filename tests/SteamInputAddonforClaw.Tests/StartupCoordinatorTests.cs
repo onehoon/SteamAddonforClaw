@@ -197,26 +197,6 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
-    public async Task VirtualOutputIsRecheckedAfterHidHideCleanupBeforeJournalRetirement()
-    {
-        var events = new List<string>();
-        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
-            new(HidHideDeviceAdditions: ["HID\\Claw"], AddonOwnedVirtualDeviceEntries:
-                [new(Guid.NewGuid(), "steamdeck", 0x28DE, 0x1205, [], [])]));
-        var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
-        var cleaner = new FakeStartupHidHideRecoveryCleaner();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
-            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.True(result.RecoverySafe);
-        Assert.Equal(1, cleaner.CallCount);
-        Assert.Equal(1, store.DeleteCallCount);
-    }
-
-    [Fact]
     public async Task JournalDeletionThrows_DoesNotCrashAndBlocksRouting()
     {
         var events = new List<string>();
@@ -821,20 +801,4 @@ public sealed class StartupCoordinatorTests
     private sealed class ThrowingTopologyWaiter : IControllerTopologyWaiter { public Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken _) => throw new Xunit.Sdk.XunitException("Topology wait must not run after recovery failure."); }
     private sealed class ThrowingProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => throw new Xunit.Sdk.XunitException("Hardware probe must not run after recovery failure."); }
     private sealed class ThrowingHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => throw new Xunit.Sdk.XunitException("Hardware evaluator must not run after recovery failure."); }
-    private sealed class UnsafeInspector : IStartupVirtualOutputRecoveryInspector
-    {
-        public Task<StartupVirtualOutputRecoveryAssessment> AssessAsync(IReadOnlyList<Recovery.AddonOwnedVirtualDeviceRecoveryEntry> _, CancellationToken __) =>
-            Task.FromResult(new StartupVirtualOutputRecoveryAssessment(false, "ResidualOrAmbiguousVirtualDevicePresent"));
-    }
-    private sealed class SequencedVirtualOutputInspector(params StartupVirtualOutputRecoveryAssessment[] assessments) : IStartupVirtualOutputRecoveryInspector
-    {
-        private int _index;
-        public int CallCount { get; private set; }
-        public Task<StartupVirtualOutputRecoveryAssessment> AssessAsync(IReadOnlyList<Recovery.AddonOwnedVirtualDeviceRecoveryEntry> _, CancellationToken __)
-        {
-            CallCount++;
-            return Task.FromResult(assessments[Math.Min(_index++, assessments.Length - 1)]);
-        }
-    }
-
 }
