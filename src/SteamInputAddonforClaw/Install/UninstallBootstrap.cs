@@ -38,7 +38,6 @@ internal static class UninstallBootstrap
             return;
         var cefCleaned = Steam.SteamCefDebugBootstrap.RemoveOwnedMarker();
         var fpsCleaned = TryCleanupOwnedIntelFpsForUninstall();
-        TryDeleteDirectory(CenterM.CenterMHelperStaging.RuntimeDirectory);
         TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
         if (cefCleaned && fpsCleaned && !File.Exists(AddonDataPaths.RecoveryJournalPath))
             AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
@@ -75,12 +74,6 @@ internal static class UninstallBootstrap
                 ("OwnershipPath", ownershipPath));
             return false;
         }
-    }
-
-    private static void TryDeleteDirectory(string path)
-    {
-        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); }
-        catch (Exception exception) { AppLog.Warn("Uninstall", "Bounded Addon-owned directory cleanup failed.", exception, ("Path", path)); }
     }
 
     private static void TryDeleteFile(string path)

@@ -41,10 +41,9 @@ internal static class FirstTimeSetupPolicy
         if ((input.Provisioning.HidHide == ComponentProvisioningState.PendingReboot && !input.Provisioning.HidHideBootSessionChanged)
             || (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.PendingReboot && !input.Provisioning.UsbIpWin2BootSessionChanged))
             return new(FirstTimeSetupStatus.RestartRequired, FirstTimeSetupReason.PendingReboot, false);
-        // Routing prerequisites (HidHide/usbip-win2) are the only ones this policy gates. OEM1's own
-        // arming prerequisites (environment eligibility, Launcher/Server, same-name topology, exact
-        // helper ownership) are owned entirely by CenterMOem1LifecycleCoordinator and never surface a
-        // first-time-setup requirement here.
+        // HidHide/usbip-win2 provisioning is the only thing this policy gates. OEM1/WING front-button
+        // behavior is feature-local to MsiClawFrontButtonRuntime and never surfaces a first-time-setup
+        // requirement here.
         if (!componentsReady)
         {
             if (input.HidHideInstallation.Status is ComponentInstallationStatus.ExistingUnverified or ComponentInstallationStatus.Incompatible or ComponentInstallationStatus.Indeterminate

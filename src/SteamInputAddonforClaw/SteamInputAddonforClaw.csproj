@@ -19,9 +19,6 @@
   <ItemGroup>
     <ProjectReference Include="..\SteamInputAddonforClaw.Contracts\SteamInputAddonforClaw.Contracts.csproj" />
     <ProjectReference Include="..\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
-    <!-- Dormant OEM1 helper binary: not linked, just built and copied alongside this app's output
-         so CenterMHelperStaging can find and stage it at runtime. See CopyCenterMHelperOutput. -->
-    <ProjectReference Include="..\SteamInputAddonforClaw.CenterMHelper\SteamInputAddonforClaw.CenterMHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
     <!-- Privileged MSI Center M startup Enable/Disable helper (work order PR1): not linked, built and
          copied alongside this app's output so CenterMStartupHelperClient can spawn it with runas. -->
     <ProjectReference Include="..\SteamInputAddonforClaw.CenterMStartupHelper\SteamInputAddonforClaw.CenterMStartupHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
@@ -51,24 +48,6 @@
     <Error Text="MSI Center M startup helper publish output not found." Condition="!Exists('%(CenterMStartupHelperOutput.Identity)')" />
     <Copy SourceFiles="@(CenterMStartupHelperOutput)" DestinationFolder="$(OutDir)" />
     <Copy SourceFiles="@(CenterMStartupHelperOutput)" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != ''" />
-  </Target>
-
-  <!-- The staged/renamed helper is built via its own NativeAOT Publish target rather than just
-       its ordinary Build output. -->
-  <Target Name="PublishCenterMHelper" BeforeTargets="CopyCenterMHelperOutput">
-    <MSBuild
-      Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\SteamInputAddonforClaw.CenterMHelper.csproj"
-      Targets="Publish"
-      Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishAot=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\" />
-  </Target>
-
-  <Target Name="CopyCenterMHelperOutput" AfterTargets="Build;Publish">
-    <ItemGroup>
-      <CenterMHelperOutput Include="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\CenterMHelper.exe" />
-    </ItemGroup>
-    <Error Text="CenterMHelper publish output not found -- the staged helper would not be self-contained." Condition="!Exists('%(CenterMHelperOutput.Identity)')" />
-    <Copy SourceFiles="@(CenterMHelperOutput)" DestinationFolder="$(OutDir)CenterMHelperSource\" />
-    <Copy SourceFiles="@(CenterMHelperOutput)" DestinationFolder="$(PublishDir)CenterMHelperSource\" Condition="'$(PublishDir)' != ''" />
   </Target>
 
   <ItemGroup>

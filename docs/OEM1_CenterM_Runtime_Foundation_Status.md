@@ -1,11 +1,22 @@
 # OEM1 / Center M Native Runtime Foundation — Status
 
-> **Superseded internals (Full1902 Cleanup A).** `MsiClawRoutingComposition`,
-> `AddonRoutingRuntime`, the `RoutingPipeline*` graph, and
-> `CenterMMainUiRoutingGuardStage` have been deleted. OEM1 / WING button action
-> ownership now lives in `MsiClawFrontButtonRuntime` (composed in `AddonProcessHost`
-> on a Center M Disabled boot). The PR notes below are historical; their
-> references to the routing composition wiring no longer describe the tree.
+> **Superseded internals (Full1902 Cleanup A + B).** Cleanup A deleted
+> `MsiClawRoutingComposition`, `AddonRoutingRuntime`, the `RoutingPipeline*` graph,
+> and `CenterMMainUiRoutingGuardStage`. Cleanup B deleted the entire Center M
+> dummy / MainUI suppression subsystem: the `SteamInputAddonforClaw.CenterMHelper`
+> project and its `CenterMHelperSource` publish payload; `CenterMHelperOwnership` /
+> `CenterMHelperStaging` / `CenterMHelperInvariant` / `CenterMOrphanedHelperRegistry`;
+> the `CenterMMainUiRoutingGuard` / `CenterMMainUiRoutingRetirement` /
+> `CenterMMainUiRoutingTerminator` / `CenterMMainUiMutexOwnership` /
+> `CenterMMainUiWindowController` / `MainUiLifecycleObserver` / `SafeMainUiTerminator` /
+> `TrackedCenterMMainUi` graph; and `CenterMOem1LifecycleCoordinator` /
+> `CenterMOem1LifecycleRuntime` / `CenterMBackendProbe`. OEM1 / WING button action
+> ownership now lives entirely in `MsiClawFrontButtonRuntime` (composed in
+> `AddonProcessHost` on a Center M Disabled boot); native Win+G suppression is
+> `WinGSuppressionGuard`, bound to the Addon controller-authority lifetime.
+> `CenterMStartupHelper` and `CenterMStartup/**` (the elevated startup-root
+> authority boundary) are unchanged. The PR notes below are historical; their
+> references to the helper / MainUI / routing wiring no longer describe the tree.
 
 This tracks the OEM1 (Center M button) remapping feature across PRs. See the
 research handoff (`MSI_CenterM_OEM1_Remapping_Research_Design_Handoff_2026-08-14`)

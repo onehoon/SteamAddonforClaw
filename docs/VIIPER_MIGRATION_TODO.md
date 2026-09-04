@@ -1,14 +1,17 @@
 # Steam Deck Runtime Roadmap
 
-> **Superseded internals (Full1902 Cleanup A).** The legacy Steam-session routing
-> authority — `AddonRoutingRuntime`, `RoutingPipelineRuntimeCoordinator`, the
-> `RoutingPipeline*` graph, `MsiClawRoutingComposition` /
-> `IHandheldRoutingComposition`, `CanonicalSteamDeckOutputStage`,
-> `WinGProtectionRoutingStage`, `GameBarForegroundWatcher`, and
-> `RoutingRuntimeStatusSnapshot` — has been deleted. The PR-by-PR notes below are
-> retained as history; their present-tense references to those types no longer
-> describe the tree. Current presentation authority is `MsiClawAddonPresentation`
-> → `CanonicalViiperRuntime` → one live X360 **or** Steam Deck publisher.
+> **Superseded internals (Full1902 Cleanup A + B).** Cleanup A deleted the legacy
+> Steam-session routing authority — `AddonRoutingRuntime`,
+> `RoutingPipelineRuntimeCoordinator`, the `RoutingPipeline*` graph,
+> `MsiClawRoutingComposition` / `IHandheldRoutingComposition`,
+> `CanonicalSteamDeckOutputStage`, `WinGProtectionRoutingStage`,
+> `GameBarForegroundWatcher`, and `RoutingRuntimeStatusSnapshot`. Cleanup B then
+> deleted the Center M dummy / MainUI suppression subsystem, including
+> `CenterMHelperOwnership` / `CenterMHelperStaging` and the whole
+> `CenterMMainUiRouting*` graph. The PR-by-PR notes below are retained as history;
+> their present-tense references to those types no longer describe the tree.
+> Current presentation authority is `MsiClawAddonPresentation` →
+> `CanonicalViiperRuntime` → one live X360 **or** Steam Deck publisher.
 
 ## Current state
 
