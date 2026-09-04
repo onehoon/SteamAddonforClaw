@@ -97,6 +97,44 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void A_gamebar_win_g_candidate_is_rejected_with_no_write_and_no_event()
+    {
+        var coordinator = NewCoordinator();
+        var changes = 0;
+        coordinator.FrontButtonMappingChanged += (_, _) => changes++;
+
+        var winG = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.KeyboardHotkey) with
+            {
+                Hotkey = new FrontButtonHotkeyBinding(FrontButtonHotkeyModifiers.Windows, FrontButtonHotkeyKey.G)
+            });
+
+        Assert.False(coordinator.ChangeFrontButtonMapping(winG));
+        Assert.Equal(0, changes);
+        Assert.False(File.Exists(PathName));
+    }
+
+    [Theory]
+    // missing Steam domain
+    [InlineData("{\"FrontButtonMapping\":{\"Normal\":{\"Gamebar\":{\"Action\":\"QuickSettingsOverlay\",\"Hotkey\":{},\"Launch\":{}},\"CenterM\":{\"Action\":\"SteamBigPicture\",\"Hotkey\":{},\"Launch\":{}}}},\"LogLevel\":\"Debug\"}")]
+    // missing partner binding (Normal.CenterM)
+    [InlineData("{\"FrontButtonMapping\":{\"Normal\":{\"Gamebar\":{\"Action\":\"QuickSettingsOverlay\",\"Hotkey\":{},\"Launch\":{}}},\"Steam\":{\"Gamebar\":{\"Action\":\"SteamButton\",\"Hotkey\":{},\"Launch\":{}},\"CenterM\":{\"Action\":\"SteamQuickAccess\",\"Hotkey\":{},\"Launch\":{}}}},\"LogLevel\":\"Debug\"}")]
+    // missing Action on a binding
+    [InlineData("{\"FrontButtonMapping\":{\"Normal\":{\"Gamebar\":{\"Hotkey\":{},\"Launch\":{}},\"CenterM\":{\"Action\":\"SteamBigPicture\",\"Hotkey\":{},\"Launch\":{}}},\"Steam\":{\"Gamebar\":{\"Action\":\"SteamButton\",\"Hotkey\":{},\"Launch\":{}},\"CenterM\":{\"Action\":\"SteamQuickAccess\",\"Hotkey\":{},\"Launch\":{}}}},\"LogLevel\":\"Debug\"}")]
+    // missing Hotkey / Launch on a binding
+    [InlineData("{\"FrontButtonMapping\":{\"Normal\":{\"Gamebar\":{\"Action\":\"QuickSettingsOverlay\"},\"CenterM\":{\"Action\":\"SteamBigPicture\",\"Hotkey\":{},\"Launch\":{}}},\"Steam\":{\"Gamebar\":{\"Action\":\"SteamButton\",\"Hotkey\":{},\"Launch\":{}},\"CenterM\":{\"Action\":\"SteamQuickAccess\",\"Hotkey\":{},\"Launch\":{}}}},\"LogLevel\":\"Debug\"}")]
+    public void Incomplete_mapping_json_resolves_the_whole_feature_to_defaults(string json)
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, json);
+
+        var loaded = new SettingsStore(PathName).Load();
+
+        Assert.Equal(FrontButtonMappingSettings.Default, loaded.FrontButtonMapping);
+        Assert.Equal(AppLogPreference.Debug, loaded.LogLevel);
+    }
+
+    [Fact]
     public void Old_split_oem1_wing_json_is_ignored_and_dropped_on_the_next_save()
     {
         Directory.CreateDirectory(_directory);

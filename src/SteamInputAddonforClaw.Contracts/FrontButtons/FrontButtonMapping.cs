@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SteamInputAddonforClaw.Contracts.FrontButtons;
 
 /// <summary>
@@ -109,21 +111,36 @@ public sealed record FrontButtonLaunchApplicationBinding(string ExecutablePath =
 /// (never null) so switching a binding's action back and forth in the UI does not discard what the
 /// user already typed.
 /// </summary>
+/// <remarks>
+/// Every member is <see cref="JsonRequiredAttribute"/>: a persisted mapping that omits any member is
+/// rejected on load (System.Text.Json throws, the loader falls back to the frozen defaults) rather
+/// than silently completed from these property initializers. The initializers exist only for
+/// convenient in-code construction (<see cref="Of"/>, <c>with</c> expressions).
+/// </remarks>
 public sealed record FrontButtonBinding
 {
+    [JsonRequired]
     public FrontButtonAction Action { get; init; } = FrontButtonAction.QuickSettingsOverlay;
+
+    [JsonRequired]
     public FrontButtonHotkeyBinding Hotkey { get; init; } = FrontButtonHotkeyBinding.Empty;
+
+    [JsonRequired]
     public FrontButtonLaunchApplicationBinding Launch { get; init; } = FrontButtonLaunchApplicationBinding.Empty;
 
-    public static FrontButtonBinding Of(FrontButtonAction action) => new() { Action = action };
+    public static FrontButtonBinding Of(FrontButtonAction action) =>
+        new() { Action = action, Hotkey = FrontButtonHotkeyBinding.Empty, Launch = FrontButtonLaunchApplicationBinding.Empty };
 }
 
 /// <summary>Both physical buttons' bindings for one domain. The two actions must differ
-/// (<see cref="FrontButtonMappingValidation"/>).</summary>
+/// (<see cref="FrontButtonMappingValidation"/>). Both members are required in persisted JSON.</summary>
 public sealed record FrontButtonDomainMapping
 {
-    public FrontButtonBinding Gamebar { get; init; } = FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay);
-    public FrontButtonBinding CenterM { get; init; } = FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture);
+    [JsonRequired]
+    public FrontButtonBinding Gamebar { get; init; } = null!;
+
+    [JsonRequired]
+    public FrontButtonBinding CenterM { get; init; } = null!;
 
     public FrontButtonBinding Resolve(FrontButtonKind kind) =>
         kind == FrontButtonKind.Gamebar ? Gamebar : CenterM;
@@ -140,22 +157,28 @@ public sealed record FrontButtonDomainMapping
 /// </summary>
 public sealed record FrontButtonMappingSettings
 {
-    public FrontButtonDomainMapping Normal { get; init; } = new()
-    {
-        Gamebar = FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay),
-        CenterM = FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture)
-    };
+    [JsonRequired]
+    public FrontButtonDomainMapping Normal { get; init; } = null!;
 
-    public FrontButtonDomainMapping Steam { get; init; } = new()
-    {
-        Gamebar = FrontButtonBinding.Of(FrontButtonAction.SteamButton),
-        CenterM = FrontButtonBinding.Of(FrontButtonAction.SteamQuickAccess)
-    };
+    [JsonRequired]
+    public FrontButtonDomainMapping Steam { get; init; } = null!;
 
     /// <summary>First-install / no-persisted-value defaults, frozen by the work order:
     /// Normal Gamebar = Quick Settings Overlay, Normal Center M = Steam Big Picture,
     /// Steam Gamebar = Steam Button, Steam Center M = Steam Quick Access.</summary>
-    public static FrontButtonMappingSettings Default { get; } = new();
+    public static FrontButtonMappingSettings Default { get; } = new()
+    {
+        Normal = new()
+        {
+            Gamebar = FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay),
+            CenterM = FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture)
+        },
+        Steam = new()
+        {
+            Gamebar = FrontButtonBinding.Of(FrontButtonAction.SteamButton),
+            CenterM = FrontButtonBinding.Of(FrontButtonAction.SteamQuickAccess)
+        }
+    };
 
     public FrontButtonDomainMapping ResolveDomain(FrontButtonDomain domain) =>
         domain == FrontButtonDomain.Steam ? Steam : Normal;
@@ -253,6 +276,17 @@ public static class FrontButtonMappingValidation
         if (!Enum.IsDefined(binding.Action)) return $"{domain}/{kind} action is not a recognized value";
         if (!FrontButtonActionCapabilities.Supports(binding.Action, domain))
             return $"{domain}/{kind} action {binding.Action} is not valid in the {domain} domain";
+
+        // §7 / Full1902 Policy B: the Gamebar Button must never be an indirect route back to native
+        // Win+G / Xbox Game Bar while Addon controller authority is active. A Keyboard / Hotkey =
+        // Win+G binding on the Gamebar Button is invalid at the persistence boundary, not merely
+        // refused at execution time. Center M has no such restriction.
+        if (kind == FrontButtonKind.Gamebar
+            && binding.Action == FrontButtonAction.KeyboardHotkey
+            && binding.Hotkey.Modifiers.HasFlag(FrontButtonHotkeyModifiers.Windows)
+            && binding.Hotkey.Key == FrontButtonHotkeyKey.G)
+            return $"{domain}/Gamebar cannot map Keyboard / Hotkey to Win+G";
+
         return null;
     }
 }

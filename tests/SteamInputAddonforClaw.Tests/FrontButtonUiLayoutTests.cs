@@ -46,6 +46,18 @@ public sealed class FrontButtonUiLayoutTests
     }
 
     [Fact]
+    public void The_editor_cannot_leave_a_gamebar_win_g_hotkey_selected()
+    {
+        var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
+
+        // A Gamebar editor disables the G key while Win is checked and clears a G selection, so the
+        // Win+G combination can never be persisted from the UI (it is also rejected by validation).
+        Assert.Contains("RefreshHotkeyAvailability", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("Kind == FrontButtonKind.Gamebar && _windows.IsChecked == true", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("_key.SelectedItem = null", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_center_m_button_detail_page_is_gone()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

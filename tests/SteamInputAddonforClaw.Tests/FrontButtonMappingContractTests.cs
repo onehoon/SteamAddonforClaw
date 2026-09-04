@@ -144,6 +144,32 @@ public sealed class FrontButtonMappingContractTests
         Assert.NotNull(FrontButtonMappingValidation.Validate(mapping));
     }
 
+    [Theory]
+    [InlineData(FrontButtonDomain.Normal)]
+    [InlineData(FrontButtonDomain.Steam)]
+    public void A_gamebar_win_g_hotkey_binding_is_rejected_at_the_validation_boundary(FrontButtonDomain domain)
+    {
+        var mapping = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, domain, FrontButtonBinding.Of(FrontButtonAction.KeyboardHotkey) with
+            {
+                Hotkey = new FrontButtonHotkeyBinding(FrontButtonHotkeyModifiers.Windows, FrontButtonHotkeyKey.G)
+            });
+
+        Assert.NotNull(FrontButtonMappingValidation.Validate(mapping));
+    }
+
+    [Fact]
+    public void A_center_m_win_g_hotkey_binding_is_allowed()
+    {
+        var mapping = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.KeyboardHotkey) with
+            {
+                Hotkey = new FrontButtonHotkeyBinding(FrontButtonHotkeyModifiers.Windows, FrontButtonHotkeyKey.G)
+            });
+
+        Assert.Null(FrontButtonMappingValidation.Validate(mapping));
+    }
+
     [Fact]
     public void A_domain_invalid_action_is_rejected()
     {

@@ -164,6 +164,7 @@ public sealed partial class ControllerPage : UserControl
                 if (vkey == FrontButtonHotkeyKey.None) continue;
                 _key.Items.Add(new ComboBoxItem { Content = vkey.ToString(), Tag = vkey });
             }
+            RefreshHotkeyAvailability();
 
             _hotkeyPanel = new StackPanel
             {
@@ -189,11 +190,15 @@ public sealed partial class ControllerPage : UserControl
             configPanel.Children.Add(_hotkeyPanel);
             configPanel.Children.Add(_launchPanel);
 
-            foreach (var modifier in new[] { _control, _shift, _alt, _windows })
+            foreach (var modifier in new[] { _control, _shift, _alt })
             {
                 modifier.Checked += (_, _) => page.OnEditorConfigurationChanged(this);
                 modifier.Unchecked += (_, _) => page.OnEditorConfigurationChanged(this);
             }
+            // §7 / Policy B: a Gamebar editor must not be able to leave Win+G selected. Toggling Win
+            // re-evaluates whether the G key is offered and clears it if it was chosen.
+            _windows.Checked += (_, _) => { RefreshHotkeyAvailability(); page.OnEditorConfigurationChanged(this); };
+            _windows.Unchecked += (_, _) => { RefreshHotkeyAvailability(); page.OnEditorConfigurationChanged(this); };
             _key.SelectionChanged += (_, _) => page.OnEditorConfigurationChanged(this);
             _path.TextChanged += (_, _) => page.OnEditorConfigurationChanged(this);
             _arguments.TextChanged += (_, _) => page.OnEditorConfigurationChanged(this);
@@ -214,6 +219,7 @@ public sealed partial class ControllerPage : UserControl
             _alt.IsChecked = binding.Hotkey.Modifiers.HasFlag(FrontButtonHotkeyModifiers.Alt);
             _windows.IsChecked = binding.Hotkey.Modifiers.HasFlag(FrontButtonHotkeyModifiers.Windows);
             SelectKey(binding.Hotkey.Key);
+            RefreshHotkeyAvailability();
             _path.Text = binding.Launch.ExecutablePath;
             _arguments.Text = binding.Launch.Arguments;
             ShowConfigurationFor(binding.Action);
@@ -244,6 +250,19 @@ public sealed partial class ControllerPage : UserControl
             foreach (var item in ActionComboBox.Items)
                 if (item is ComboBoxItem comboItem && comboItem.Tag is FrontButtonAction candidate)
                     comboItem.IsEnabled = candidate != partnerAction || candidate == SelectedAction;
+        }
+
+        /// <summary>§7 / Policy B: on a Gamebar editor the <c>G</c> key is unavailable while the Win
+        /// modifier is checked, and a G selection is cleared if Win becomes checked -- so the editor
+        /// can never leave Win+G selected. Center M is unaffected.</summary>
+        private void RefreshHotkeyAvailability()
+        {
+            var blockG = Kind == FrontButtonKind.Gamebar && _windows.IsChecked == true;
+            foreach (var item in _key.Items)
+                if (item is ComboBoxItem { Tag: FrontButtonHotkeyKey key } comboItem)
+                    comboItem.IsEnabled = !(blockG && key == FrontButtonHotkeyKey.G);
+            if (blockG && CaptureKey() == FrontButtonHotkeyKey.G)
+                _key.SelectedItem = null;
         }
 
         private FrontButtonHotkeyModifiers CaptureModifiers()
