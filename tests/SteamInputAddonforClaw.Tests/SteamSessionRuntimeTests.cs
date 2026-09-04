@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using Xunit;
 
@@ -6,19 +5,23 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class SteamSessionRuntimeTests
 {
+    // Full1902 Cleanup I: the production Steam runtime no longer owns DeveloperTestModeState,
+    // EffectiveSteamSessionSource, or DiagnosticSessionTracker. See EffectiveSteamSessionSourceTests
+    // for the parked helper's own spec.
     [Fact]
-    public void DeveloperTestModeState_transition_is_published_through_the_owned_state_graph()
+    public void ProductionRuntime_HasNoSyntheticEffectiveSessionDependency()
     {
-        using var runtime = new SteamSessionRuntime();
-        SteamSessionStateChangedEventArgs? observed = null;
-        runtime.StateChanged += (_, args) => observed = args;
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src/SteamInputAddonforClaw/Steam/SteamSessionRuntime.cs"));
+        Assert.DoesNotContain("EffectiveSteamSessionSource", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeveloperTestModeState", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("DiagnosticSessionTracker", source, StringComparison.Ordinal);
+    }
 
-        // Use the same DeveloperTestModeState instance the runtime itself exposes -- proving
-        // there is exactly one effective-session graph, not a duplicate.
-        runtime.DeveloperTestModeState.SetEnabled(true);
-
-        Assert.NotNull(observed);
-        Assert.Equal(SteamSessionSource.DeveloperTest, observed.Current.Source);
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("repo root");
     }
 
     [Fact]

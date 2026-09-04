@@ -34,13 +34,17 @@ public sealed class SteamPresentationSnapshotTests
     }
 
     [Fact]
-    public void Developer_test_mode_does_not_make_the_production_snapshot_want_steamdeck()
+    public void The_production_presentation_snapshot_has_no_developer_test_mode_input()
     {
-        var appId = new FakeAppIdSource { AppId = 0 };
-        using var runtime = new SteamSessionRuntime(appId);
-        runtime.DeveloperTestModeState.SetEnabled(true);
+        // Full1902 Cleanup I: SteamSessionRuntime no longer owns Developer state at all, so the
+        // stronger architectural fact is that its source has no Developer coupling.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Steam/SteamSessionRuntime.cs"));
 
-        Assert.False(runtime.CapturePresentationSnapshot().WantsSteamDeck);
+        Assert.DoesNotContain("DeveloperTestModeState", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("_testMode", source, StringComparison.Ordinal);
+        Assert.DoesNotContain(".IsEnabled", source, StringComparison.Ordinal);
     }
 
     private sealed class FakeAppIdSource : IRunningAppIdSource

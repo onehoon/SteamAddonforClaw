@@ -25,36 +25,42 @@ public sealed class AddonRuntimeHostTests
             establishBaseline ?? (_ => Task.FromResult(false)),
             notificationSource);
 
-    [Fact]
-    public async Task Host_republishes_Steam_state_transitions_to_subscribers()
+    [Fact] // Full1902 Cleanup I: the host no longer exposes a synthetic SteamSessionStateChanged
+           // surface or a DeveloperTestModeState property.
+    public void Host_has_no_synthetic_steam_session_surface()
     {
-        using var steamRuntime = new SteamSessionRuntime();
-        var host = NewHost(steamRuntime, new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
-        SteamSessionStateChangedEventArgs? observed = null;
-        host.SteamSessionStateChanged += (_, args) => observed = args;
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Runtime/AddonRuntimeHost.cs"));
 
-        steamRuntime.DeveloperTestModeState.SetEnabled(true);
-
-        Assert.NotNull(observed);
-        Assert.Equal(SteamSessionSource.DeveloperTest, observed!.Current.Source);
-
-        await host.DisposeAsync();
+        Assert.DoesNotContain("SteamSessionStateChanged", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeveloperTestModeState", source, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task Host_republishes_actual_running_app_id_changes()
     {
-        using var steamRuntime = new SteamSessionRuntime();
+        var source = new FakeRunningAppIdSource();
+        using var steamRuntime = new SteamSessionRuntime(source);
         var host = NewHost(steamRuntime, new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
         var observed = new List<uint>();
         host.ActualRunningAppIdChanged += observed.Add;
 
-        steamRuntime.DeveloperTestModeState.SetEnabled(true);
-        // DeveloperTest does not change the actual-AppID fact; the host simply forwards whatever
-        // SteamSessionRuntime raises. The observation wiring is what matters here.
-        Assert.Equal(steamRuntime.ActualRunningAppId, host.ActualRunningAppId);
+        steamRuntime.StartActualObservation();
+        source.SetRunningAppId(570);
+
+        Assert.Equal([570u], observed);
+        Assert.Equal(570u, host.ActualRunningAppId);
 
         await host.DisposeAsync();
+    }
+
+    private sealed class FakeRunningAppIdSource : SteamInputAddonforClaw.Steam.IRunningAppIdSource
+    {
+        private uint _appId;
+        public event EventHandler? Changed;
+        public uint GetRunningAppId() => _appId;
+        public void SetRunningAppId(uint appId) { _appId = appId; Changed?.Invoke(this, EventArgs.Empty); }
     }
 
     [Fact]
