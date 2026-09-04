@@ -80,16 +80,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
-    public async Task Disable_is_blocked_by_a_conflicting_controller_environment()
-    {
-        var h = new Harness(this) { StartEnabled = true, ConflictingEnvironment = true };
-        var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
-
-        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
-        Assert.Empty(h.Order);
-    }
-
-    [Fact]
     public async Task Disable_stops_before_center_m_when_startup_registration_fails()
     {
         var h = new Harness(this) { StartEnabled = true, StartupSucceeds = false };
@@ -314,14 +304,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
-    public async Task Enable_is_not_blocked_by_a_conflicting_controller_environment()
-    {
-        var h = new Harness(this) { StartEnabled = false, ConflictingEnvironment = true };
-        var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
-        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
-    }
-
-    [Fact]
     public async Task Enable_stops_before_center_m_when_the_baseline_cannot_be_cleared()
     {
         const string ownedTarget = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&abcdef&0&0000";
@@ -405,27 +387,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.DoesNotContain("nothing", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("cleared", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
     }
-
-    // ---- Third-party controller-manager admission (Disable entry gate, fail-closed) ----
-
-    [Fact]
-    public void Admission_allows_entry_only_when_the_detector_positively_proves_no_manager()
-        => Assert.False(AddonProcessHost.IsConflictingControllerEnvironment(
-            new StubEnvironmentProvider(ControllerManagerKind.None)));
-
-    [Theory]
-    [InlineData("ClawTweaks")]
-    [InlineData("HandheldCompanion")]
-    [InlineData("Winhanced")]
-    [InlineData("Multiple")]
-    [InlineData("Indeterminate")]
-    public void Admission_blocks_entry_for_any_detected_or_unresolved_manager(string kind)
-        => Assert.True(AddonProcessHost.IsConflictingControllerEnvironment(
-            new StubEnvironmentProvider(Enum.Parse<ControllerManagerKind>(kind))));
-
-    [Fact]
-    public void Admission_blocks_entry_when_the_assessment_throws()
-        => Assert.True(AddonProcessHost.IsConflictingControllerEnvironment(new ThrowingEnvironmentProvider()));
 
     // ---- Architecture guards ----
 
@@ -753,7 +714,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool CenterMHelperCancels { get; init; }
         public bool PrerequisitesReady { get; init; } = true;
         public bool RecoverySafe { get; init; } = true;
-        public bool ConflictingEnvironment { get; init; }
         public SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult PhysicalRelease { get; init; } =
             SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
         public Action? OnPhysicalRelease { get; set; }
@@ -809,7 +769,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
             return new CenterMRebootAuthorityTransition(
                 centerM, coordinator, baseline,
                 () => Safety,
-                () => ConflictingEnvironment,
                 _ => Task.FromResult((prerequisites, RecoverySafe)),
                 token =>
                 {
@@ -865,21 +824,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool Updater;
         public CenterMFoundationServiceMode Service;
         public FrontendCenterMStartupState Classify() => CenterMStartupControl.Classify(Server, Updater, Service);
-    }
-
-    private sealed class StubEnvironmentProvider(ControllerManagerKind kind) : IControllerEnvironmentAssessmentProvider
-    {
-        public ControllerEnvironmentAssessmentSnapshot Capture() => new(
-            Array.Empty<ControllerSoftwareStatus>(),
-            new ControllerManagerClassification(kind, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate),
-            new ControllerEnvironmentCompatibilityAssessment(
-                ControllerEnvironmentCompatibilityStatus.Indeterminate,
-                ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate));
-    }
-
-    private sealed class ThrowingEnvironmentProvider : IControllerEnvironmentAssessmentProvider
-    {
-        public ControllerEnvironmentAssessmentSnapshot Capture() => throw new InvalidOperationException("assessment unavailable");
     }
 
     private sealed class FakeStartupManager(List<string> order, Func<bool> ok) : IWindowsStartupManager

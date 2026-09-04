@@ -354,12 +354,6 @@ internal static class ElevatedPrerequisiteSetup
         {
             var hardware = CaptureHardwareCompatibility();
             if (!hardware.AllowsMutation) return (false, "Hardware" + hardware.Status);
-            var software = new IControllerSoftwareStatusProvider[]
-            {
-                new MsiCenterMSoftwareStatusProvider()
-            };
-            var compatibility = new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate(software.Select(provider => provider.Capture()).ToArray());
-            if (!compatibility.AllowsMutation) return (false, "Compatibility" + compatibility.Reason);
             var recoverySafety = new MachineRecoverySafetyInspector().Inspect();
             if (!AllowsRecoverySafeProvisioning(recoverySafety)) return (false, recoverySafety.Reason);
             using var runningAppId = new SteamRunningAppIdRegistrySource();

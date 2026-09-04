@@ -52,7 +52,13 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // (FrontendRoutingSnapshot) and the FrontendRoutingOperationalState / FrontendRoutingEligibilityReason
 // enums are gone, so a v20 peer would connect and then fail every status-response deserialization on
 // the missing member -- failing the handshake up front is the honest outcome.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 21; }
+// Version 22: Full1902 Cleanup D removed the third-party controller-software / manager compatibility
+// authority. The required FrontendStatusSnapshot.ControllerSoftware / ControllerEnvironmentStatus /
+// ControllerEnvironmentReason members and the FrontendSoftwareSnapshot / FrontendControllerEnvironmentStatus
+// / FrontendSoftwareInstallationStatus / FrontendSoftwareRuntimeStatus types are gone, so a v21 peer
+// would connect and then fail every status-response deserialization on the missing members -- failing
+// the handshake up front is the honest outcome.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 22; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

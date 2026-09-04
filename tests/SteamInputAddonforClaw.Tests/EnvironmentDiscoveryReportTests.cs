@@ -19,7 +19,7 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
             installed: [new("HKLM64", "b", "Zeta", "", "", ""), new("HKLM64", "a", "Alpha", "", "", "")]));
 
         Assert.Contains("SnapshotVersion: 1", report);
-        Assert.True(report.IndexOf("=== SYSTEM ===", StringComparison.Ordinal) < report.IndexOf("=== CURRENT DETECTION ===", StringComparison.Ordinal));
+        Assert.True(report.IndexOf("=== SYSTEM ===", StringComparison.Ordinal) < report.IndexOf("=== RUNNING PROCESSES ===", StringComparison.Ordinal));
         Assert.True(report.IndexOf("Name=Alpha; PID=3", StringComparison.Ordinal) < report.IndexOf("Name=zeta; PID=9", StringComparison.Ordinal));
         Assert.True(report.IndexOf("DisplayName=Alpha", StringComparison.Ordinal) < report.IndexOf("DisplayName=Zeta", StringComparison.Ordinal));
         Assert.DoesNotContain("CommandLine", report, StringComparison.OrdinalIgnoreCase);
@@ -68,14 +68,6 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         Assert.DoesNotContain("foo", report, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public void Writer_RecordsEnvironmentReadinessAsNotEvaluated()
-    {
-        var report = new EnvironmentDiscoveryReportWriter().Write(Snapshot(processes: []));
-
-        Assert.Contains("EnvironmentReadiness: NotEvaluated", report);
-        Assert.DoesNotContain("EnvironmentReadiness: Stable", report);
-    }
 
     [Fact]
     public async Task Generator_WritesNewReportForTimestampCollision()
@@ -100,9 +92,6 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
     private static EnvironmentDiscoverySnapshot Snapshot(IReadOnlyList<ProcessDiscoveryInfo> processes, IReadOnlyList<InstalledApplicationDiscoveryInfo>? installed = null) => new(
         new DateTimeOffset(2026, 8, 9, 17, 30, 12, TimeSpan.Zero),
         new SystemDiscoveryInfo("Windows 11", "26100", "x64", "MSI", "Claw", ["Intel Arc"], "1.0.0"),
-        new DiscoverySection<CurrentDetectionDiscoveryInfo>([new CurrentDetectionDiscoveryInfo(
-            [new ControllerSoftwareStatus(ControllerSoftwareKind.MsiCenterM, "MSI Center M", SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running, "Running")],
-            new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled), "NotEvaluated")]),
         new DiscoverySection<ProcessDiscoveryInfo>(processes),
         new DiscoverySection<ServiceDiscoveryInfo>([new("svc", "Service", "Running", "Automatic", "C:\\svc.exe")]),
         new DiscoverySection<InstalledApplicationDiscoveryInfo>(installed ?? []),

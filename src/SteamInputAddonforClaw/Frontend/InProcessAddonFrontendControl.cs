@@ -491,8 +491,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
             ("HidHideStatus", current.Prerequisites.HidHide.Status),
             ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
-            ("CompatibilityStatus", current.Compatibility.Status),
-            ("CompatibilityReason", current.Compatibility.Reason),
             ("SteamActive", current.Steam.IsActive),
             ("RecoverySafe", current.RecoverySafe),
             ("SetupStatus", setup.Status));

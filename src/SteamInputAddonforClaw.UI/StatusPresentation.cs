@@ -38,20 +38,6 @@ internal static class StatusPresentation
     };
 
     /// <summary>
-    /// Mirrors the pre-frontend-contract ControllerSoftwareStatusFormatter exactly: Runtime state
-    /// takes priority, falling back to Installation only when Runtime carries no positive signal.
-    /// </summary>
-    internal static string FormatControllerSoftwareStatus(FrontendSoftwareSnapshot item) => item.Runtime switch
-    {
-        FrontendSoftwareRuntimeStatus.Running => "Running",
-        FrontendSoftwareRuntimeStatus.Starting => "Starting",
-        FrontendSoftwareRuntimeStatus.Indeterminate => "Indeterminate",
-        _ when item.Installation == FrontendSoftwareInstallationStatus.Installed => "Installed / Not running",
-        _ when item.Installation == FrontendSoftwareInstallationStatus.NotInstalled => "Not installed",
-        _ => "Indeterminate"
-    };
-
-    /// <summary>
     /// True when the addon's derived operational status is a safety-boundary condition that must
     /// stay visible as a warning InfoBar on supported hardware.
     /// </summary>
@@ -62,7 +48,6 @@ internal static class StatusPresentation
 
         return !snapshot.RecoverySafe
         || snapshot.Hardware.Status == FrontendHardwareStatus.Indeterminate
-        || snapshot.ControllerEnvironmentStatus == FrontendControllerEnvironmentStatus.Indeterminate
         || snapshot.AddonStatus is FrontendAddonOperationalStatus.SetupRequired
             or FrontendAddonOperationalStatus.RecoveryRequired
             or FrontendAddonOperationalStatus.Unsupported

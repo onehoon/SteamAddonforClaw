@@ -11,8 +11,6 @@ internal static class FrontendSnapshotMapper
     internal static FrontendStatusSnapshot Map(SystemStatusSnapshot snapshot) => new(
         new(snapshot.Device.Manufacturer, snapshot.Device.Model, snapshot.Device.BaseBoardProduct, snapshot.Device.GpuModels),
         new(MapHardwareStatus(snapshot.HardwareCompatibility.Status), snapshot.HardwareCompatibility.DeviceFamily?.Value, snapshot.HardwareCompatibility.DeviceModel?.Value, snapshot.HardwareCompatibility.Reason),
-        snapshot.ControllerSoftware.Select(x => new FrontendSoftwareSnapshot(x.Kind.ToString(), x.DisplayName, MapInstallation(x.Installation), MapRuntime(x.Runtime), x.Reason)).ToArray(),
-        MapControllerEnvironmentStatus(snapshot.Compatibility.Status), snapshot.Compatibility.Reason.ToString(),
         new(MapPrerequisite(snapshot.Prerequisites.HidHide.Status), snapshot.Prerequisites.HidHide.Reason, MapPrerequisite(snapshot.Prerequisites.UsbIpWin2.Status), snapshot.Prerequisites.UsbIpWin2.Reason, MapPrerequisite(snapshot.Prerequisites.Viiper.Status), snapshot.Prerequisites.Viiper.Reason),
         new(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, MapSteamSource(snapshot.Steam.Source)),
         MapAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason, snapshot.RecoverySafe,
@@ -30,13 +28,6 @@ internal static class FrontendSnapshotMapper
         HardwareCompatibilityStatus.Supported => FrontendHardwareStatus.Supported,
         HardwareCompatibilityStatus.Unsupported => FrontendHardwareStatus.Unsupported,
         _ => FrontendHardwareStatus.Indeterminate
-    };
-
-    private static FrontendControllerEnvironmentStatus MapControllerEnvironmentStatus(ControllerEnvironmentCompatibilityStatus status) => status switch
-    {
-        ControllerEnvironmentCompatibilityStatus.Supported => FrontendControllerEnvironmentStatus.Supported,
-        ControllerEnvironmentCompatibilityStatus.Unsupported => FrontendControllerEnvironmentStatus.Unsupported,
-        _ => FrontendControllerEnvironmentStatus.Indeterminate
     };
 
     private static FrontendSteamSource MapSteamSource(SteamSessionSource source) => source switch
@@ -57,21 +48,6 @@ internal static class FrontendSnapshotMapper
         AddonOperationalStatus.RecoveryRequired => FrontendAddonOperationalStatus.RecoveryRequired,
         AddonOperationalStatus.Indeterminate => FrontendAddonOperationalStatus.Indeterminate,
         _ => FrontendAddonOperationalStatus.Indeterminate
-    };
-
-    private static FrontendSoftwareInstallationStatus MapInstallation(SoftwareInstallationStatus status) => status switch
-    {
-        SoftwareInstallationStatus.Installed => FrontendSoftwareInstallationStatus.Installed,
-        SoftwareInstallationStatus.NotInstalled => FrontendSoftwareInstallationStatus.NotInstalled,
-        _ => FrontendSoftwareInstallationStatus.Indeterminate
-    };
-
-    private static FrontendSoftwareRuntimeStatus MapRuntime(SoftwareRuntimeStatus status) => status switch
-    {
-        SoftwareRuntimeStatus.Running => FrontendSoftwareRuntimeStatus.Running,
-        SoftwareRuntimeStatus.NotRunning => FrontendSoftwareRuntimeStatus.NotRunning,
-        SoftwareRuntimeStatus.Starting => FrontendSoftwareRuntimeStatus.Starting,
-        _ => FrontendSoftwareRuntimeStatus.Indeterminate
     };
 
     private static FrontendPrerequisiteStatus MapPrerequisite(PrerequisiteStatus status) => status switch

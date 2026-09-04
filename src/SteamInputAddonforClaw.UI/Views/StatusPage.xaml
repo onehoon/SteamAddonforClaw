@@ -41,8 +41,6 @@
 
             <InfoBar x:Name="StatusInfoBar" IsClosable="False" IsOpen="False" />
 
-            <ctcontrols:SettingsExpander x:Name="ControllerSoftwareExpander" Header="Controller Software" />
-
             <ctcontrols:SettingsExpander x:Name="RoutingComponentsExpander" Header="Routing Components" />
         </StackPanel>
     </ScrollViewer>

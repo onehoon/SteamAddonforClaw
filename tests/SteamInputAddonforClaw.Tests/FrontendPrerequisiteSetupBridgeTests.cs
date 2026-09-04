@@ -119,8 +119,6 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
     private static SystemStatusSnapshot Snapshot(string model) => new(
         new("MSI", model, "BOARD", []),
         new(HardwareCompatibilityStatus.Supported, null, null, "Test"),
-        [],
-        new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported),
         new(new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Test")),
         new(false, 0),
         new(AddonOperationalStatus.Ready, "Test"), true);

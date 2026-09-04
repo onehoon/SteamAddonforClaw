@@ -303,7 +303,7 @@ public sealed class FirstTimeSetupPolicyTests
 
     private static FirstTimeSetupInput Input(PrerequisiteStatus hidHide, PrerequisiteStatus usbIp) => new(
         new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test"),
-        new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported), true,
+        true,
         SteamSessionState.FromRunningAppId(0),
         new(PrerequisiteKind.HidHide, hidHide, "test"), new(PrerequisiteKind.UsbIpWin2, usbIp, "test"),
         Installation(hidHide, PrerequisiteKind.HidHide), Installation(usbIp, PrerequisiteKind.UsbIpWin2),

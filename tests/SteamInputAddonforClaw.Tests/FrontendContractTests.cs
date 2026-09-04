@@ -16,8 +16,6 @@ public sealed class FrontendContractTests
     private static readonly FrontendStatusSnapshot SampleStatus = new(
         new("MSI", "Claw", "BOARD", ["GPU"]),
         new(FrontendHardwareStatus.Supported, "msi.claw", "EX", "Matched"),
-        [new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Installed, FrontendSoftwareRuntimeStatus.Running, "Ready")],
-        FrontendControllerEnvironmentStatus.Supported, "StockCenterMOnlySupported",
         new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
         new(true, 480, FrontendSteamSource.BigPicture),
         FrontendAddonOperationalStatus.Ready, "Eligible", true,
@@ -241,8 +239,6 @@ public sealed class FrontendContractTests
         var runtime = new SystemStatusSnapshot(
             new("MSI", "Claw", "BOARD", []),
             new(hardwareStatus, null, null, "Test"),
-            [],
-            new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported),
             new(new(PrerequisiteKind.HidHide, hidHideStatus, "Test"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Test")),
             new(steamActive, steamAppId, steamSource),
             new(addonStatus, "Test"),

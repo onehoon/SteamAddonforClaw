@@ -1,7 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
-using SteamInputAddonforClaw.Startup;
-using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
@@ -13,11 +11,9 @@ internal sealed record InstalledApplicationDiscoveryInfo(string Source, string K
 internal sealed record AppPackageDiscoveryInfo(string Name, string PackageFamilyName, string PackageFullName, string Publisher, string InstalledLocation, string Version);
 internal sealed record StartupRegistrationDiscoveryInfo(string Source, string Name, string Value);
 internal sealed record ScheduledTaskDiscoveryInfo(string TaskPath, string TaskName, string Enabled, string State, string Executable);
-internal sealed record CurrentDetectionDiscoveryInfo(IReadOnlyList<ControllerSoftwareStatus> Software, ControllerEnvironment Environment, string EnvironmentReadiness);
 internal sealed record EnvironmentDiscoverySnapshot(
     DateTimeOffset CapturedAt,
     SystemDiscoveryInfo System,
-    DiscoverySection<CurrentDetectionDiscoveryInfo> CurrentDetection,
     DiscoverySection<ProcessDiscoveryInfo> Processes,
     DiscoverySection<ServiceDiscoveryInfo> Services,
     DiscoverySection<InstalledApplicationDiscoveryInfo> InstalledApplications,

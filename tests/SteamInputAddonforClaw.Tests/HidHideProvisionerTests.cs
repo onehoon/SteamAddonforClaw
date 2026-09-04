@@ -29,15 +29,6 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
-    public async Task UnsupportedEnvironment_BlocksBeforeProcessLaunch()
-    {
-        var runner = new FakeRunner();
-        var result = await Create(runner, context: Context(ControllerEnvironmentCompatibilityStatus.Unsupported)).ProvisionAsync(CancellationToken.None);
-        Assert.Equal(HidHideProvisioningResultKind.Blocked, result.Kind);
-        Assert.Equal(0, runner.Calls);
-    }
-
-    [Fact]
     public async Task ActiveSteamSession_BlocksBeforeProcessLaunch()
     {
         var runner = new FakeRunner();
@@ -231,8 +222,7 @@ public sealed class HidHideProvisionerTests
         packageProbe ?? new FakePackageProbe(package ?? new(false, null, true)),
         store ?? new FakeStore(), runner, () => "test-installer.exe", integrity ?? (_ => true), safety ?? new FakeSafetyProvider(context ?? Context()));
 
-    private static HidHideProvisioningContext Context(ControllerEnvironmentCompatibilityStatus compatibility = ControllerEnvironmentCompatibilityStatus.Supported) => new(
-        new(compatibility, compatibility == ControllerEnvironmentCompatibilityStatus.Supported ? ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported : ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion),
+    private static HidHideProvisioningContext Context() => new(
         SteamSessionState.FromRunningAppId(0),
         new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "test"), true);
 

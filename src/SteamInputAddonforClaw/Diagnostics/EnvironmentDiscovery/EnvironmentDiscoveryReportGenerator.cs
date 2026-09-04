@@ -69,7 +69,6 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
         return new EnvironmentDiscoverySnapshot(
             capturedAt,
             new SystemDiscoveryInfo(Environment.OSVersion.VersionString, Environment.OSVersion.Version.Build.ToString(), Environment.Is64BitOperatingSystem ? "x64" : "x86", deviceInfo.Manufacturer, deviceInfo.Model, deviceInfo.GpuModels, AppVersion()),
-            Section(() => (IReadOnlyList<CurrentDetectionDiscoveryInfo>)[CaptureCurrentDetection(devices)]),
             Section(CaptureProcesses),
             Section(CaptureServices),
             Section(CaptureInstalledApplications),
@@ -78,15 +77,6 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
             Section(CaptureScheduledTasks),
             Section(devices.EnumeratePresentDevices),
             Section(() => (IReadOnlyList<RuntimePrerequisiteAssessment>)[new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices), new WindowsUsbIpWin2PackageProbe()), new ViiperRuntimeInspector()).Inspect()]));
-    }
-
-    private static CurrentDetectionDiscoveryInfo CaptureCurrentDetection(IControllerDeviceEnumerator devices)
-    {
-        var assessment = new ControllerEnvironmentAssessmentProvider(
-        [
-            new MsiCenterMSoftwareStatusProvider()
-        ]).Capture();
-        return new CurrentDetectionDiscoveryInfo(assessment.Software, StartupControllerEnvironmentMapper.Map(assessment), "NotEvaluated");
     }
 
     private static IReadOnlyList<ProcessDiscoveryInfo> CaptureProcesses() => Process.GetProcesses()

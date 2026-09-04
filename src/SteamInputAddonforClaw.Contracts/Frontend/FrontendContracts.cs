@@ -29,10 +29,7 @@ public sealed record FrontendGameProfileMutationResult(FrontendGameProfileMutati
 public enum FrontendVibrationTestCommand { Rumble = 0, Haptic = 1, Stop = 3 }
 public enum FrontendSetupStatus { Complete, Required, Blocked, RestartRequired, NotApplicable, Indeterminate }
 public enum FrontendHardwareStatus { Supported, Unsupported, Indeterminate }
-public enum FrontendControllerEnvironmentStatus { Supported, Unsupported, Indeterminate }
 public enum FrontendSteamSource { Actual, BigPicture, DeveloperTest, Indeterminate }
-public enum FrontendSoftwareInstallationStatus { Installed, NotInstalled, Indeterminate }
-public enum FrontendSoftwareRuntimeStatus { Running, NotRunning, Starting, Indeterminate }
 public enum FrontendPrerequisiteStatus { Ready, Missing, Present, Unusable, Incompatible, Indeterminate }
 public enum FrontendPrerequisiteSetupResultKind { Ready, Installed, RebootRequired, Cancelled, NotInstallable, Blocked, Failed, AlreadyInProgress }
 public enum FrontendAddonOperationalStatus
@@ -196,7 +193,6 @@ public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Err
 public sealed record FrontendDeviceSnapshot(string Manufacturer, string Model, string BaseBoard, IReadOnlyList<string> GpuModels);
 public sealed record FrontendHardwareSnapshot(FrontendHardwareStatus Status, string? Family, string? Model, string Reason);
 public sealed record FrontendSteamSnapshot(bool Active, uint AppId, FrontendSteamSource Source);
-public sealed record FrontendSoftwareSnapshot(string Kind, string DisplayName, FrontendSoftwareInstallationStatus Installation, FrontendSoftwareRuntimeStatus Runtime, string Reason);
 public sealed record FrontendPrerequisiteSnapshot(FrontendPrerequisiteStatus HidHideStatus, string HidHideReason, FrontendPrerequisiteStatus UsbIpStatus, string UsbIpReason, FrontendPrerequisiteStatus ViiperStatus, string ViiperReason);
 public enum FrontendClawSensorProbeState { Idle, Discovering, Ready, Starting, Countdown, RecordingPhase, Stopping, Completed, Failed }
 public enum FrontendClawSensorProbePhase { Rest, RollLeft, RollRight, PitchUp, PitchDown, YawLeft, YawRight }
@@ -251,9 +247,6 @@ public sealed record FrontendClawSensorProbeSnapshot(
 public sealed record FrontendStatusSnapshot(
     FrontendDeviceSnapshot Device,
     FrontendHardwareSnapshot Hardware,
-    IReadOnlyList<FrontendSoftwareSnapshot> ControllerSoftware,
-    FrontendControllerEnvironmentStatus ControllerEnvironmentStatus,
-    string ControllerEnvironmentReason,
     FrontendPrerequisiteSnapshot Prerequisites,
     FrontendSteamSnapshot Steam,
     FrontendAddonOperationalStatus AddonStatus,

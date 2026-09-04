@@ -2,35 +2,26 @@ using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Startup;
-using SteamInputAddonforClaw.Status;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>Work order PR4 sections 9-14/25: the read-only Disabled-boot controller admission gate.
-/// It classifies Ready/Blocked from existing facts only and mutates nothing.</summary>
+/// <summary>Work order PR4 sections 9-14/25 (Cleanup D: the third-party controller-manager gate is
+/// gone): the read-only Disabled-boot controller admission gate. It classifies Ready/Blocked from
+/// prerequisite / recovery-journal / HidHide-baseline facts only and mutates nothing beyond the
+/// deterministic HidHide baseline normalization.</summary>
 public sealed class DisabledBootControllerAdmissionTests
 {
     private static DisabledBootControllerAdmission Build(
-        ControllerManagerKind manager = ControllerManagerKind.None,
-        Func<ControllerEnvironmentAssessmentSnapshot>? capture = null,
         RuntimePrerequisiteAssessment? prerequisites = null,
         Func<RuntimePrerequisiteAssessment>? inspect = null,
         RecoveryResult? recovery = null,
         AddonHidHideBaselineOutcome hidHide = AddonHidHideBaselineOutcome.AlreadyCompliant,
         Func<AddonHidHideBaselineResult>? inspectHidHide = null)
         => new(
-            new StubEnvironment(capture ?? (() => Snapshot(manager))),
             new StubInspector(inspect ?? (() => prerequisites ?? Ready())),
             () => recovery ?? new RecoveryResult(RecoveryStatus.NoRecoveryNeeded, "none"),
             inspectHidHide ?? (() => new AddonHidHideBaselineResult(hidHide, "r", AddonHidHideBaselineSnapshot.Unknown)));
-
-    private static ControllerEnvironmentAssessmentSnapshot Snapshot(ControllerManagerKind kind) => new(
-        Array.Empty<ControllerSoftwareStatus>(),
-        new ControllerManagerClassification(kind, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate),
-        new ControllerEnvironmentCompatibilityAssessment(
-            ControllerEnvironmentCompatibilityStatus.Indeterminate,
-            ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate));
 
     private static RuntimePrerequisiteAssessment Ready() => new(
         new PrerequisiteAssessment(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "ok"),
@@ -94,25 +85,6 @@ public sealed class DisabledBootControllerAdmissionTests
             DisabledBootAdmissionOutcome.Blocked,
             Build(inspect: () => throw new InvalidOperationException("boom")).Evaluate().Outcome);
 
-    // ---- 25.7 controller manager ----
-
-    [Theory]
-    [InlineData("ClawTweaks")]
-    [InlineData("HandheldCompanion")]
-    [InlineData("Winhanced")]
-    [InlineData("Multiple")]
-    [InlineData("Indeterminate")]
-    public void Any_non_none_controller_manager_is_blocked(string kind)
-        => Assert.Equal(
-            DisabledBootAdmissionOutcome.Blocked,
-            Build(manager: Enum.Parse<ControllerManagerKind>(kind)).Evaluate().Outcome);
-
-    [Fact]
-    public void Controller_manager_assessment_throwing_is_blocked()
-        => Assert.Equal(
-            DisabledBootAdmissionOutcome.Blocked,
-            Build(capture: () => throw new InvalidOperationException("boom")).Evaluate().Outcome);
-
     // ---- 25.8 recovery journal ----
 
     [Theory]
@@ -122,36 +94,6 @@ public sealed class DisabledBootControllerAdmissionTests
         => Assert.Equal(
             DisabledBootAdmissionOutcome.Blocked,
             Build(recovery: new RecoveryResult(Enum.Parse<RecoveryStatus>(status), "x")).Evaluate().Outcome);
-
-    // ---- production wiring: a real assessment provider must actually observe the managers ----
-
-    [Theory]
-    [InlineData("ClawTweaks")]
-    [InlineData("HandheldCompanion")]
-    public void A_real_assessment_that_detects_a_manager_cannot_yield_ready(string kindName)
-    {
-        var kind = Enum.Parse<ControllerSoftwareKind>(kindName);
-        // Feed the actual ControllerEnvironmentAssessmentProvider + ControllerManagerClassifier, not a
-        // hand-set Manager.Kind, so this also guards the classifier path.
-        var assessment = new ControllerEnvironmentAssessmentProvider(
-            [new FakeSoftwareProvider(new ControllerSoftwareStatus(kind, kindName,
-                SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running, "detected"))]);
-        var admission = new DisabledBootControllerAdmission(
-            assessment, new StubInspector(Ready), () => new RecoveryResult(RecoveryStatus.NoRecoveryNeeded, "none"),
-            () => new AddonHidHideBaselineResult(AddonHidHideBaselineOutcome.AlreadyCompliant, "r", AddonHidHideBaselineSnapshot.Unknown));
-
-        Assert.Equal(DisabledBootAdmissionOutcome.Blocked, admission.Evaluate().Outcome);
-    }
-
-    [Fact]
-    public void Production_startup_composition_wires_the_real_conflict_detectors()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
-        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Startup/AddonStartupComposition.cs"));
-        Assert.Contains("new ClawTweaksSoftwareStatusProvider(", source, StringComparison.Ordinal);
-        Assert.Contains("new HandheldCompanionSoftwareStatusProvider(", source, StringComparison.Ordinal);
-    }
 
     // ---- PR10 addendum section 22: end-to-end Disabled-boot HidHide normalization gate ----
 
@@ -171,7 +113,6 @@ public sealed class DisabledBootControllerAdmissionTests
         var baseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
             client, addonExe, () => [officialCli, officialClient]);
         var admission = new DisabledBootControllerAdmission(
-            new StubEnvironment(() => Snapshot(ControllerManagerKind.None)),
             new StubInspector(Ready),
             () => new RecoveryResult(RecoveryStatus.NoRecoveryNeeded, "none"),
             () => baseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(
@@ -193,7 +134,6 @@ public sealed class DisabledBootControllerAdmissionTests
         var baseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
             client, addonExe, () => []); // official CLI path cannot be resolved -> Unavailable
         var admission = new DisabledBootControllerAdmission(
-            new StubEnvironment(() => Snapshot(ControllerManagerKind.None)),
             new StubInspector(Ready),
             () => new RecoveryResult(RecoveryStatus.NoRecoveryNeeded, "none"),
             () => baseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(_ => false));
@@ -229,16 +169,6 @@ public sealed class DisabledBootControllerAdmissionTests
         public bool AddHiddenDevice(string deviceEntry) { if (!Hidden.Contains(deviceEntry, StringComparer.OrdinalIgnoreCase)) Hidden.Add(deviceEntry); return true; }
         public bool RemoveHiddenDevice(string deviceEntry) { Hidden.RemoveAll(e => string.Equals(e, deviceEntry, StringComparison.OrdinalIgnoreCase)); return true; }
         public bool SetActive(bool active) { Active = active; return true; }
-    }
-
-    private sealed class FakeSoftwareProvider(ControllerSoftwareStatus status) : IControllerSoftwareStatusProvider
-    {
-        public ControllerSoftwareStatus Capture() => status;
-    }
-
-    private sealed class StubEnvironment(Func<ControllerEnvironmentAssessmentSnapshot> capture) : IControllerEnvironmentAssessmentProvider
-    {
-        public ControllerEnvironmentAssessmentSnapshot Capture() => capture();
     }
 
     private sealed class StubInspector(Func<RuntimePrerequisiteAssessment> inspect) : IRuntimePrerequisiteInspector

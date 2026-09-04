@@ -12,6 +12,11 @@ internal interface IControllerEnvironmentWaiter
 
 internal enum ControllerEnvironmentReadiness { NotApplicable, Stable, Indeterminate }
 
+// Full1902 Cleanup D: the third-party controller-manager detection graph that once produced other
+// modes is gone; production always resolves StockCenterM. The enum shape is kept for the startup
+// result / topology-waiter contract until Cleanup E collapses it.
+internal enum ControllerEnvironmentMode { Unsupported, StockCenterM, ClawTweaks, HHCManaged, Indeterminate }
+
 internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
 {
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
