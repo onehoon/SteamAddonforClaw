@@ -91,25 +91,29 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
-    public void VirtualDeviceMutationRoundTripsStructuredIdentity()
+    public void LoadJournal_StillValidatesLegacySchemaV5VirtualDeviceEntries()
     {
-        var manager = Manager();
-        var session = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        // Full1902 Cleanup F: current production never writes AddonOwnedVirtualDeviceEntries, but an
+        // old development-build recovery.json may still contain them. LoadJournal must keep reading
+        // and validating that schema-v5 shape until the dedicated RecoveryJournal cleanup decides
+        // whether old files are dropped or retired.
+        var store = new RecoveryJournalStore(PathName);
         var mutationId = Guid.NewGuid();
+        store.WriteNew(new RecoveryJournal(
+            RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, Snapshot(),
+            new(DeviceNativeStateChanged: true,
+                AddonOwnedVirtualDeviceEntries:
+                [
+                    new AddonOwnedVirtualDeviceRecoveryEntry(mutationId, "steamdeck", 0x28DE, 0x1205, [], ["USB\\VID_28DE&PID_1205\\legacy"])
+                ])));
 
-        Assert.Equal(RecoveryStatus.Success, manager.RecordAddonOwnedVirtualDeviceIntent(
-            session.RecoverySessionId, mutationId, "steamdeck", 0x28DE, 0x1205, []).Status);
-        Assert.Equal(RecoveryStatus.Success, manager.ResolveAddonOwnedVirtualDeviceIdentity(
-            session.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1205\\owned"]).Status);
+        var loaded = Manager().LoadJournal();
 
-        var loaded = manager.LoadJournal().Journal!;
-        var entry = Assert.Single(loaded.Mutations.AddonOwnedVirtualDeviceEntries!);
-        Assert.Equal(RecoveryManager.CurrentSchemaVersion, loaded.SchemaVersion);
+        Assert.Equal(RecoveryStatus.Success, loaded.Status);
+        var entry = Assert.Single(loaded.Journal!.Mutations.AddonOwnedVirtualDeviceEntries!);
         Assert.Equal(mutationId, entry.MutationId);
         Assert.Equal("steamdeck", entry.DeviceType);
-        Assert.Equal((ushort)0x28DE, entry.VendorId);
-        Assert.Equal((ushort)0x1205, entry.ProductId);
-        Assert.Equal("USB\\VID_28DE&PID_1205\\owned", Assert.Single(entry.ResolvedInstanceIds));
+        Assert.Equal("USB\\VID_28DE&PID_1205\\legacy", Assert.Single(entry.ResolvedInstanceIds));
     }
 
     [Fact]
@@ -134,9 +138,6 @@ public sealed class RecoveryManagerTests : IDisposable
         var native = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
         manager.RecordHidHideWhitelistAddition(native.RecoverySessionId, "C:\\addon.exe");
         manager.RecordHidHideDeviceAddition(native.RecoverySessionId, "HID\\Claw");
-        var mutationId = Guid.NewGuid();
-        manager.RecordAddonOwnedVirtualDeviceIntent(native.RecoverySessionId, mutationId, "steamdeck", 0x28DE, 0x1205, []);
-        manager.ResolveAddonOwnedVirtualDeviceIdentity(native.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1205\\owned"]);
 
         var loaded = manager.LoadJournal();
 
@@ -148,9 +149,6 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.True(journal.Mutations.DeviceNativeStateChanged);
         Assert.Contains("C:\\addon.exe", journal.Mutations.ExecutableWhitelistAdditions!);
         Assert.Contains("HID\\Claw", journal.Mutations.HidHideDeviceAdditions!);
-        var entry = Assert.Single(journal.Mutations.AddonOwnedVirtualDeviceEntries!);
-        Assert.Equal(mutationId, entry.MutationId);
-        Assert.Equal("USB\\VID_28DE&PID_1205\\owned", Assert.Single(entry.ResolvedInstanceIds));
     }
 
     [Fact]

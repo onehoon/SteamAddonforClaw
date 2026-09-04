@@ -6,7 +6,6 @@ public enum ControllerDeviceClassification
 {
     NotController,
     InternalHandheld,
-    AddonOwnedVirtual,
     KnownVirtual,
     Indeterminate
 }
@@ -34,18 +33,11 @@ public sealed class ControllerDeviceClassifier
         "USB/IP"
     ];
 
-    private readonly IControllerIdentityExclusionSource _identityExclusionSource;
-    private readonly IInternalControllerMatcher? _internalControllerMatcher;
+    private readonly IInternalControllerMatcher _internalControllerMatcher;
 
-    public ControllerDeviceClassifier(IControllerIdentityExclusionSource? identityExclusionSource = null)
-    {
-        _identityExclusionSource = identityExclusionSource ?? EmptyControllerIdentityExclusionSource.Instance;
-    }
-
-    public ControllerDeviceClassifier(IInternalControllerMatcher internalControllerMatcher, IControllerIdentityExclusionSource? identityExclusionSource = null)
+    public ControllerDeviceClassifier(IInternalControllerMatcher internalControllerMatcher)
     {
         _internalControllerMatcher = internalControllerMatcher ?? throw new ArgumentNullException(nameof(internalControllerMatcher));
-        _identityExclusionSource = identityExclusionSource ?? EmptyControllerIdentityExclusionSource.Instance;
     }
 
     public ControllerDeviceClassification Classify(ControllerDeviceInfo device)
@@ -98,11 +90,6 @@ public sealed class ControllerDeviceClassifier
             return new ControllerClassificationResult(ControllerDeviceClassification.InternalHandheld, internalMatch.Reason);
         }
 
-        if (_identityExclusionSource.IsExcluded(device))
-        {
-            return new ControllerClassificationResult(ControllerDeviceClassification.AddonOwnedVirtual, "IdentityExclusionSource");
-        }
-
         var knownVirtual = GetKnownVirtualEvidence(device, topology);
         if (knownVirtual is not null)
         {
@@ -148,11 +135,6 @@ public sealed class ControllerDeviceClassifier
 
     private InternalControllerMatchResult MatchInternalController(ControllerDeviceInfo device, ControllerTopologySnapshot? topology)
     {
-        if (_internalControllerMatcher is null)
-        {
-            return new(InternalControllerMatchStatus.NoMatch, "NoInternalControllerMatcher");
-        }
-
         try
         {
             return _internalControllerMatcher.Match(new InternalControllerMatchContext(device, topology?.ResolveAncestors(device) ?? []));

@@ -125,43 +125,10 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store)
             Mutations = journal.Mutations with { OriginalHidHideActiveState = null }
         });
 
-    public RecoveryResult RecordAddonOwnedVirtualDeviceIntent(Guid sessionId, Guid mutationId, string deviceType, ushort vendorId, ushort productId, IEnumerable<string> preExistingIds)
-    {
-        if (mutationId == Guid.Empty || string.IsNullOrWhiteSpace(deviceType)) return new(RecoveryStatus.Failure, "The virtual-device mutation identity is invalid.");
-        var existing = NormalizeIds(preExistingIds);
-        return UpdateRecoverySession(sessionId, journal =>
-        {
-            var entries = (journal.Mutations.AddonOwnedVirtualDeviceEntries ?? []).ToList();
-            if (entries.Any(entry => entry.MutationId == mutationId)) throw new InvalidOperationException("The virtual-device mutation ID is already recorded.");
-            entries.Add(new(mutationId, deviceType, vendorId, productId, existing, []));
-            return journal with { Mutations = journal.Mutations with { AddonOwnedVirtualDeviceEntries = entries } };
-        });
-    }
-
-    public RecoveryResult ResolveAddonOwnedVirtualDeviceIdentity(Guid sessionId, Guid mutationId, IEnumerable<string> resolvedIds)
-    {
-        var resolved = NormalizeIds(resolvedIds);
-        if (resolved.Count == 0) return new(RecoveryStatus.Failure, "At least one resolved virtual-device identity is required.");
-        return UpdateRecoverySession(sessionId, journal =>
-        {
-            var entries = (journal.Mutations.AddonOwnedVirtualDeviceEntries ?? []).ToList();
-            var index = entries.FindIndex(entry => entry.MutationId == mutationId);
-            if (index < 0) throw new InvalidOperationException("The virtual-device mutation ID is unknown.");
-            entries[index] = entries[index] with { ResolvedInstanceIds = resolved };
-            return journal with { Mutations = journal.Mutations with { AddonOwnedVirtualDeviceEntries = entries } };
-        });
-    }
-
-    public RecoveryResult CompleteAddonOwnedVirtualDeviceMutation(Guid sessionId, Guid mutationId) =>
-        UpdateRecoverySession(sessionId, journal =>
-        {
-            var entries = (journal.Mutations.AddonOwnedVirtualDeviceEntries ?? []).Where(entry => entry.MutationId != mutationId).ToArray();
-            if (entries.Length == (journal.Mutations.AddonOwnedVirtualDeviceEntries?.Count ?? 0)) throw new InvalidOperationException("The virtual-device mutation ID is unknown.");
-            return journal with { Mutations = journal.Mutations with { AddonOwnedVirtualDeviceEntries = entries } };
-        });
-
-    private static IReadOnlyList<string> NormalizeIds(IEnumerable<string> values) =>
-        (values ?? []).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    // Full1902 Cleanup F: the Addon-owned virtual-device mutation writers are gone -- current
+    // Full1902 VIIPER presentation is not a RecoveryJournal mutation session. The schema-v5
+    // AddonOwnedVirtualDeviceEntries collection is still read/validated below so an old
+    // development-build recovery.json remains loadable until the dedicated RecoveryJournal cleanup.
 
     public RecoveryResult CompleteDeviceNativeStateMutation(Guid recoverySessionId) =>
         UpdateRecoverySession(recoverySessionId, journal => journal with
