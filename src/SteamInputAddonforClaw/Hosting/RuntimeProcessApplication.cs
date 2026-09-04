@@ -40,7 +40,7 @@ internal sealed class RuntimeProcessApplication
                 return;
 
             _processHost.InitializeRuntimeAsync().GetAwaiter().GetResult();
-            _processHost.TryInitializeTray(RequestRestart, RequestExit);
+            _processHost.TryInitializeTray(RequestRestart);
             _messageLoop.Run(() =>
             {
                 _processHost.StartRuntimeEventWatchers();
@@ -59,19 +59,6 @@ internal sealed class RuntimeProcessApplication
             _processHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
             AppLog.Info("Runtime", "Runtime process cleanup completed.");
         }
-    }
-
-    private void RequestExit()
-    {
-        var termination = _processHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
-        if (!termination.CanTerminate)
-        {
-            AppLog.Info("Lifecycle", "Exit request blocked.", ("Reason", termination.Reason));
-            return;
-        }
-
-        AppLog.Info("Lifecycle", "Exit request accepted.");
-        BeginShutdownAndRequestLoopExit();
     }
 
     private void RequestExitForUninstall()
@@ -107,7 +94,7 @@ internal sealed class RuntimeProcessApplication
 
     private void RequestRestart()
     {
-        var termination = _processHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
+        var termination = _processHost?.EvaluateUserRestart() ?? new(true, UserTerminationBlockReason.None);
         if (!termination.CanTerminate)
         {
             AppLog.Info("Lifecycle", "Restart request blocked.", ("Reason", termination.Reason));
