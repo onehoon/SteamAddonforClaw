@@ -128,6 +128,12 @@ internal enum SuspendResumeOutcome
     /// output are retained; the existing PR8/PR10 recovery owns physical repair and will re-enter
     /// this release path through <c>PhysicalInputRecovered</c>.</summary>
     DeferredSourceUnavailable,
+    /// <summary>Review #490 (3rd pass): the managed active-kind/publisher pair is empty, but residual
+    /// typed-device ownership evidence (a retained Deck session, or a still-attached canonical X360)
+    /// survives from a failed initial-attach cleanup detach -- the same structural proof
+    /// <see cref="MsiClawAddonPresentation.PauseForSuspendAsync"/> requires. The suspend pause is
+    /// retained; the caller must NOT fall through into PR7 mutation.</summary>
+    DeferredUnsafePresentation,
     /// <summary>The suspend pause was cleared but game-facing publication is intentionally left
     /// stopped/neutral (Overlay capture still owns its own neutral pause, or owner disposed).</summary>
     LeftNeutral,
@@ -138,7 +144,8 @@ internal sealed record SuspendResumeResult(SuspendResumeOutcome Outcome, string 
 {
     /// <summary>The suspend pause is still active -- the caller must not continue into normal
     /// presentation reconciliation.</summary>
-    internal bool StillBlocked => Outcome == SuspendResumeOutcome.DeferredSourceUnavailable;
+    internal bool StillBlocked => Outcome is SuspendResumeOutcome.DeferredSourceUnavailable
+        or SuspendResumeOutcome.DeferredUnsafePresentation;
 }
 
 /// <summary>A narrow abstraction over the two canonical VIIPER input publishers so the presentation
@@ -713,29 +720,11 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // managed fields stay null.
             if (_activeKind is null && _publisher is null)
             {
-                // A retained Deck session is explicit residual ownership evidence from a failed detach.
-                if (_deckSession is not null)
+                if (!TryProveNoResidualPresentationLocked(out var residualReason))
                 {
-                    AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual SteamDeck session ownership evidence.", null,
-                        ("Event", "PresentationSuspendPauseFailed"), ("Reason", "ResidualSteamDeckSession"));
-                    return new(SuspendPauseOutcome.Blocked, "ResidualSteamDeckSession");
-                }
-
-                // X360 has no separate managed session field, so prove the canonical device is detached.
-                if (_viiper is { State: CanonicalViiperRuntimeState.Ready } runtime)
-                {
-                    if (!runtime.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Detached)
-                    {
-                        AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual Xbox360 attachment evidence.", null,
-                            ("Event", "PresentationSuspendPauseFailed"), ("Reason", "ResidualXbox360Attachment"), ("Attachment", attachment));
-                        return new(SuspendPauseOutcome.Blocked, "ResidualXbox360Attachment:" + attachment);
-                    }
-                }
-                else if (_viiper is { State: CanonicalViiperRuntimeState.Unsafe })
-                {
-                    AppLog.Error("ControllerPresentation", "Presentation suspend pause: canonical VIIPER is Unsafe; cannot prove no residual attachment.", null,
-                        ("Event", "PresentationSuspendPauseFailed"), ("Reason", "ViiperUnsafe"));
-                    return new(SuspendPauseOutcome.Blocked, "ViiperUnsafe");
+                    AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual typed-device ownership evidence.", null,
+                        ("Event", "PresentationSuspendPauseFailed"), ("Reason", residualReason));
+                    return new(SuspendPauseOutcome.Blocked, residualReason);
                 }
 
                 AppLog.Info("ControllerPresentation", "Presentation suspend pause: no active presentation.",
@@ -870,14 +859,43 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // never the pre-sleep desired presentation.
             var desired = captureSnapshot().WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
 
-            // Section 7.2 pause case: no presentation attached -> nothing to resume; let the existing
-            // PR7 reconcile attach the currently-desired presentation.
-            if (_activeKind is not { } kind || _publisher is not { } publisher)
+            // Section 7.2 pause case: the ACTUAL empty state -> nothing to resume. Review #490 (3rd
+            // pass): apply the SAME structural residual-attachment proof PauseForSuspendAsync requires
+            // before releasing the pause -- a rejected initial neutral write + failed cleanup detach
+            // can leave a residual attached device while both managed fields stay null, and that
+            // residual ownership must stay fail-closed across Resume too, not just across Suspend.
+            if (_activeKind is null && _publisher is null)
             {
+                if (!TryProveNoResidualPresentationLocked(out var residualReason))
+                {
+                    AppLog.Warn("ControllerPresentation", "Presentation suspend pause retained on Resume; residual typed-device ownership evidence unresolved.", null,
+                        ("Event", "PresentationResumeDeferredUnsafePresentation"), ("Reason", residualReason));
+                    return new(SuspendResumeOutcome.DeferredUnsafePresentation, residualReason);
+                }
+
                 _suspendPaused = false;
                 AppLog.Info("ControllerPresentation", "Presentation suspend pause released; no attached presentation, reconcile required.",
                     ("Event", "PresentationResumeReconcileRequired"), ("DesiredPresentation", desired));
                 return new(SuspendResumeOutcome.ReconcileRequired, "NoActivePresentation");
+            }
+
+            // The inverse impossible state (a publisher with no active kind) is never resumed through.
+            if (_activeKind is not { } kind)
+            {
+                AppLog.Warn("ControllerPresentation", "Presentation suspend pause retained on Resume; publisher present without an active presentation kind.", null,
+                    ("Event", "PresentationResumeDeferredUnsafePresentation"), ("Reason", "InconsistentPresentationState"));
+                return new(SuspendResumeOutcome.DeferredUnsafePresentation, "InconsistentPresentationState");
+            }
+
+            // A retained active kind with a null publisher (PauseForSuspendAsync already proved this
+            // device neutral before Sleep, per review #490 1st pass) has no publisher object to
+            // restart -- release the pause and let the existing PR7 reconcile retry detach/re-attach.
+            if (_publisher is not { } publisher)
+            {
+                _suspendPaused = false;
+                AppLog.Info("ControllerPresentation", "Presentation suspend pause released; no publisher to restart, reconcile required.",
+                    ("Event", "PresentationResumeReconcileRequired"), ("ActivePresentation", kind), ("DesiredPresentation", desired));
+                return new(SuspendResumeOutcome.ReconcileRequired, "PublisherNotAttached");
             }
 
             // Section 10.4: desired kind changed during Sleep -> do not briefly restart the old
@@ -942,6 +960,42 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             return new(SuspendResumeOutcome.SamePublisherResumed, "SamePublisher");
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>Review #490 (3rd pass): the shared structural proof that no residual typed-device
+    /// attachment/ownership evidence survives when both <see cref="_activeKind"/> and
+    /// <see cref="_publisher"/> are null. A rejected INITIAL neutral write followed by a failed
+    /// cleanup detach (in <c>AttachXbox360Async</c> / <c>AttachSteamDeckAsync</c>) never commits
+    /// either managed field, so their emptiness alone is not proof of "nothing attached". Shared by
+    /// <see cref="PauseForSuspendAsync"/> and the empty-state branch of
+    /// <see cref="ResumeAfterSuspendAsync"/> so Suspend and Resume apply the identical fail-close
+    /// rule. Assumes <see cref="_gate"/> is already held.</summary>
+    private bool TryProveNoResidualPresentationLocked(out string reason)
+    {
+        // A retained Deck session is explicit residual ownership evidence from a failed detach.
+        if (_deckSession is not null)
+        {
+            reason = "ResidualSteamDeckSession";
+            return false;
+        }
+
+        // X360 has no separate managed session field, so prove the canonical device is detached.
+        if (_viiper is { State: CanonicalViiperRuntimeState.Ready } runtime)
+        {
+            if (!runtime.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Detached)
+            {
+                reason = "ResidualXbox360Attachment:" + attachment;
+                return false;
+            }
+        }
+        else if (_viiper is { State: CanonicalViiperRuntimeState.Unsafe })
+        {
+            reason = "ViiperUnsafe";
+            return false;
+        }
+
+        reason = "None";
+        return true;
     }
 
     private static SuspendPauseResult SuspendPauseBlocked(string reason)

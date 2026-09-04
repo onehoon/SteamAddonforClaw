@@ -1289,6 +1289,49 @@ public sealed class MsiClawAddonPresentationTests
         await owner.DisposeAsync();
     }
 
+    [Fact] // review #490 (3rd pass): residual X360 ownership from a failed initial-attach cleanup
+           // must stay fail-closed across Resume too, not just across Suspend.
+    public async Task Resume_after_a_residual_xbox360_suspend_pause_stays_blocked_and_never_attaches()
+    {
+        var native = new FakeNative();
+        var owner = Build(native, new FakePublisher(), new FakePublisher());
+        native.StateResults.Enqueue(false); // initial Xbox360 neutral rejected
+        native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure); // cleanup detach fails
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        Assert.Equal(SuspendPauseOutcome.Blocked, (await owner.PauseForSuspendAsync(default)).Outcome);
+        native.Calls.Clear();
+
+        // A fresh Steam/BPM policy now wants the OPPOSITE presentation while the residual X360 is
+        // still unresolved -- Resume must not let that policy attach a SteamDeck alongside it.
+        var resume = await owner.ResumeAfterSuspendAsync(new FakeSource(), WantsDeck, default);
+
+        Assert.Equal(SuspendResumeOutcome.DeferredUnsafePresentation, resume.Outcome);
+        Assert.True(resume.StillBlocked);
+        Assert.True(((IMsiClawAddonPresentation)owner).IsSuspendPaused); // pause NOT released
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact] // review #490 (3rd pass): symmetric case for a residual SteamDeck session.
+    public async Task Resume_after_a_residual_steamdeck_suspend_pause_stays_blocked_and_never_attaches()
+    {
+        var native = new FakeNative();
+        var owner = Build(native, new FakePublisher(), new FakePublisher());
+        native.StateResults.Enqueue(false); // initial SteamDeck neutral rejected
+        native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure); // cleanup detach fails
+        await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+        Assert.Equal(SuspendPauseOutcome.Blocked, (await owner.PauseForSuspendAsync(default)).Outcome);
+        native.Calls.Clear();
+
+        var resume = await owner.ResumeAfterSuspendAsync(new FakeSource(), WantsXbox, default);
+
+        Assert.Equal(SuspendResumeOutcome.DeferredUnsafePresentation, resume.Outcome);
+        Assert.True(resume.StillBlocked);
+        Assert.True(((IMsiClawAddonPresentation)owner).IsSuspendPaused);
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
     [Fact] // section 16.9 / 10.1
     public async Task Resume_with_an_unavailable_physical_source_keeps_the_suspend_pause_active()
     {
