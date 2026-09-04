@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Power;
@@ -12,7 +11,7 @@ namespace SteamInputAddonforClaw.Runtime;
 /// (<c>PowerTransitionCoordinator</c>/<c>PowerTransitionWatcher</c>), and user-termination safety
 /// (<c>UserTerminationGuard</c>). No dependency on the presentation shell, the main window, the system
 /// tray, or any device-specific (MSI/CenterM) type -- UI communication happens only through the
-/// generic <see cref="SteamSessionStateChanged"/>/<see cref="StatusRefreshRequested"/> events, and
+/// generic <see cref="ActualRunningAppIdChanged"/>/<see cref="StatusRefreshRequested"/> events, and
 /// the device-specific stock-mode baseline capability arrives only as a generic
 /// <c>Func&lt;CancellationToken, Task&lt;bool&gt;&gt;</c> callback.
 /// </summary>
@@ -63,7 +62,6 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         _steamRuntime = steamRuntime;
         _powerGate = powerGate;
         _recoverySafetyState = recoverySafetyState;
-        _steamRuntime.StateChanged += OnSteamSessionStateChanged;
         _steamRuntime.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
 
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState,
@@ -80,9 +78,6 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             () => _shutdownCancellation.IsCancellationRequested);
     }
 
-    internal DeveloperTestModeState DeveloperTestModeState => _steamRuntime.DeveloperTestModeState;
-
-    internal event EventHandler<SteamSessionStateChangedEventArgs>? SteamSessionStateChanged;
     internal event Action<uint>? ActualRunningAppIdChanged;
     internal event EventHandler? StatusRefreshRequested;
     internal event Action? PowerResumeObserved;
@@ -140,14 +135,10 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         {
             if (_steamStopped) return;
             _steamStopped = true;
-            _steamRuntime.StateChanged -= OnSteamSessionStateChanged;
             _steamRuntime.ActualRunningAppIdChanged -= OnActualRunningAppIdChanged;
             _steamRuntime.Dispose();
         }
     }
-
-    private void OnSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args) =>
-        SteamSessionStateChanged?.Invoke(this, args);
 
     private void OnActualRunningAppIdChanged(uint appId) => ActualRunningAppIdChanged?.Invoke(appId);
 

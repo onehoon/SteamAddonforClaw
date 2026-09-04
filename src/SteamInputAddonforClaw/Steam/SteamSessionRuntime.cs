@@ -1,56 +1,41 @@
-using SteamInputAddonforClaw.Developer;
-using SteamInputAddonforClaw.Diagnostics;
-
 namespace SteamInputAddonforClaw.Steam;
 
 /// <summary>One raw, read-only Steam/BPM fact for the Full-1902 first-presentation decision (work
-/// order PR6 section 8). Deliberately NOT derived from <c>EffectiveSteamSessionSource</c> --
-/// Developer Test Mode must not influence it.</summary>
+/// order PR6 section 8). Deliberately actual-only -- Developer Test Mode must not influence it.</summary>
 internal readonly record struct SteamPresentationSnapshot(uint RunningAppId, bool BigPictureActive)
 {
     internal bool WantsSteamDeck => RunningAppId != 0 || BigPictureActive;
 }
 
 /// <summary>
-/// Owns the concrete Steam/Big Picture session-observation source graph that previously was
-/// constructed and held directly by <c>App.xaml.cs</c>: the running-AppID registry source, the
-/// session watcher, the Big Picture watcher, developer test mode, the effective-session source
-/// that combines all three, and per-session diagnostics
-/// observation. The same concrete implementations are reused unchanged -- this type is a focused
-/// owner, not a rewrite.
+/// Owns the concrete Steam/Big Picture observation the Full1902 runtime actually consumes: the
+/// running-AppID registry source and the Big Picture watcher. Exposes only current facts --
+/// <see cref="ActualRunningAppId"/> / <see cref="ActualRunningAppIdChanged"/> and
+/// <see cref="IsBigPictureActive"/> / <see cref="BigPictureStateChanged"/> -- plus the one-shot
+/// <see cref="CapturePresentationSnapshot"/> the presentation owner reads.
 /// </summary>
 /// <remarks>
-/// Diagnostic session observation (<see cref="DiagnosticSessionTracker.Observe"/>) happens
-/// internally on every effective-session transition, before that transition is republished via
-/// <see cref="StateChanged"/> -- matching the exact order the previous inline App handler used.
-/// <see cref="Dispose"/> completes the current diagnostic session before disposing the Steam
-/// sources, and is idempotent.
+/// Full1902 Cleanup I removed the synthetic effective-session graph (the Developer-Test-driven
+/// effective source and its per-session diagnostic tracker). Those helpers still exist as parked
+/// source for a later Developer-feature redesign, but no production controller / presentation /
+/// status owner constructs or consumes them.
 /// </remarks>
 internal sealed class SteamSessionRuntime : IDisposable
 {
     private readonly IRunningAppIdSource _runningAppIdSource;
-    private readonly SteamSessionWatcher _sessionWatcher;
     private readonly SteamBigPictureWatcher _bigPictureWatcher;
-    private readonly EffectiveSteamSessionSource _effectiveSource;
-    private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private bool _actualObservationStarted;
     private bool _disposed;
 
     internal SteamSessionRuntime(IRunningAppIdSource? runningAppIdSource = null)
     {
         _runningAppIdSource = runningAppIdSource ?? new SteamRunningAppIdRegistrySource();
-        _sessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
         _bigPictureWatcher = new SteamBigPictureWatcher();
-        DeveloperTestModeState = new DeveloperTestModeState();
         _bigPictureWatcher.StateChanged += OnBigPictureStateChanged;
         _bigPictureWatcher.Start();
-        _effectiveSource = new EffectiveSteamSessionSource(_sessionWatcher, _bigPictureWatcher, DeveloperTestModeState);
-        _effectiveSource.StateChanged += OnEffectiveStateChanged;
     }
 
-    internal DeveloperTestModeState DeveloperTestModeState { get; }
     internal uint ActualRunningAppId => _runningAppIdSource.GetRunningAppId();
-    internal event EventHandler<SteamSessionStateChangedEventArgs>? StateChanged;
     internal event Action<uint>? ActualRunningAppIdChanged;
     internal event Action<bool>? BigPictureStateChanged;
     internal bool IsBigPictureActive => _bigPictureWatcher.IsActive;
@@ -59,8 +44,7 @@ internal sealed class SteamSessionRuntime : IDisposable
 
     private void OnActualRunningAppIdChanged(object? sender, EventArgs args) => ActualRunningAppIdChanged?.Invoke(_runningAppIdSource.GetRunningAppId());
 
-    /// <summary>Starts only the actual AppID fact observation used by Device/Profile. This is
-    /// intentionally independent from the recovery-gated Routing session watcher.</summary>
+    /// <summary>Starts only the actual AppID fact observation used by Device/Profile.</summary>
     internal void StartActualObservation()
     {
         if (_actualObservationStarted) return;
@@ -76,29 +60,21 @@ internal sealed class SteamSessionRuntime : IDisposable
         return new(_runningAppIdSource.GetRunningAppId(), _bigPictureWatcher.IsActive);
     }
 
-    /// <summary>Explicit resume refresh: session watcher first, then the effective source.</summary>
+    /// <summary>Explicit resume refresh: re-scan the current Steam/BPM facts and re-notify consumers
+    /// so the Full1902 presentation reconcile converges on the post-suspend state.</summary>
     internal void Refresh()
     {
-        _sessionWatcher.Refresh();
-        _effectiveSource.Refresh();
-    }
-
-    private void OnEffectiveStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
-    {
-        _diagnosticSessions.Observe(_runningAppIdSource.GetRunningAppId(), args.Current.RunningAppId, args.Current.Source.ToString());
-        StateChanged?.Invoke(this, args);
+        _bigPictureWatcher.Refresh();
+        OnActualRunningAppIdChanged(this, EventArgs.Empty);
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _diagnosticSessions.Complete();
-        _effectiveSource.StateChanged -= OnEffectiveStateChanged;
         if (_actualObservationStarted)
             _runningAppIdSource.Changed -= OnActualRunningAppIdChanged;
-        _effectiveSource.Dispose();
-        _sessionWatcher.Dispose();
+        _bigPictureWatcher.StateChanged -= OnBigPictureStateChanged;
         _bigPictureWatcher.Dispose();
         (_runningAppIdSource as IDisposable)?.Dispose();
     }

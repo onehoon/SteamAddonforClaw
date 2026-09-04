@@ -367,8 +367,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             },
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _centerMAuthorityTransition = centerMAuthorityTransition;
+        // Full1902 Cleanup I: the Developer Test toggle is disconnected UI-only state. No controller /
+        // presentation / Steam owner consumes it -- this standalone instance exists only so the
+        // frontend RPC and FrontendDeveloperSnapshot(TestModeEnabled) stay coherent.
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
-            composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
+            composition.StartupSettings, composition.StatusProvider, _runtimeHost, new SteamInputAddonforClaw.Developer.DeveloperTestModeState(), composition.StartupRegistrationMessage,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
             // received -- the UI and the runtime can never disagree about whether OEM1 mapping exists.
             oem1MappingAvailable: startupResult.HardwareSupported,
