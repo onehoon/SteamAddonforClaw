@@ -105,7 +105,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
     }
 
     private static InProcessAddonFrontendControl CreateControl(ISystemStatusProvider status, FakeExecutor executor) =>
-        new(null!, status, null, null!, "", executor, () => "test-runtime.exe");
+        new(null!, status, null, null!, executor, () => "test-runtime.exe");
 
     private sealed class ThrowingStatusProvider(SystemStatusSnapshot initial) : ISystemStatusProvider
     {

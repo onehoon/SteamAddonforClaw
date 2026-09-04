@@ -20,7 +20,7 @@ public sealed class DeveloperTestModeDisconnectTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _dir;
         var store = new SettingsStore(Path.Combine(_dir, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
-        return new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, developer, "");
+        return new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, developer);
     }
 
     [Fact]

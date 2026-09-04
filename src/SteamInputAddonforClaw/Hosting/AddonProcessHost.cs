@@ -273,9 +273,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 // PR7: forward the raw BPM bool to QAM unchanged, then request a Full-1902 runtime
                 // presentation reconcile (BPM is half of the X360 <-> SteamDeck policy).
                 bigPictureStateChanged: OnBigPictureStateChanged,
-                // PR2.5: while Center M startup config is exactly Disabled, launch-at-startup is a
-                // mandatory-ON policy the Repair()/setter enforce -- not a user preference.
-                isLaunchAtWindowsStartupRequired: IsControllerRuntimeMandatory,
                 // Full1902 0903 cleanup (section 4): read-only override for the final Addon operational
                 // status, closing over this host's existing physical/presentation ownership facts.
                 captureFull1902AddonStatus: TryCaptureFull1902AddonStatus);
@@ -353,7 +350,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             () => authorityHidHideBaseline.TryGetSingleExistingOwnedTarget(
                 SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId),
             // PR12 section 11: startup-task removal routed through the existing registration owner.
-            () => composition.StartupSettings.ChangeLaunchAtWindowsStartup(false),
+            () => composition.StartupSettings.RemoveStartupRegistrationForUninstall(),
             // Full1902 Policy B section 8: native Win+G / Xbox Game Bar suppression belongs to Addon
             // controller authority. It is released ONLY here -- at the verified success boundary of the
             // shared stock-restoration core, after the independent PID1901 proof, the Enabled-mode
@@ -371,7 +368,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // presentation / Steam owner consumes it -- this standalone instance exists only so the
         // frontend RPC and FrontendDeveloperSnapshot(TestModeEnabled) stay coherent.
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
-            composition.StartupSettings, composition.StatusProvider, _runtimeHost, new SteamInputAddonforClaw.Developer.DeveloperTestModeState(), composition.StartupRegistrationMessage,
+            composition.StartupSettings, composition.StatusProvider, _runtimeHost, new SteamInputAddonforClaw.Developer.DeveloperTestModeState(),
             // Same single startup hardware-support result the routing composition's OEM1 gate above
             // received -- the UI and the runtime can never disagree about whether OEM1 mapping exists.
             oem1MappingAvailable: startupResult.HardwareSupported,

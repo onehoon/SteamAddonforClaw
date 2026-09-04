@@ -17,7 +17,6 @@ namespace SteamInputAddonforClaw.Runtime;
 internal sealed record AddonRuntimeComposition(
     AddonRuntimeHost RuntimeHost,
     StartupSettingsCoordinator StartupSettings,
-    string StartupRegistrationMessage,
     ISystemStatusProvider StatusProvider);
 
 internal static class AddonRuntimeCompositionFactory
@@ -30,7 +29,6 @@ internal static class AddonRuntimeCompositionFactory
         // (MSI / stock controller authority). It gates ONLY the stock PID1901 resume baseline.
         bool stockCenterMAuthority,
         Action<bool>? bigPictureStateChanged = null,
-        Func<bool>? isLaunchAtWindowsStartupRequired = null,
         // Full1902 0903 cleanup (section 4.6): a read-only override for the final Addon operational
         // status, closing over AddonProcessHost's existing physical/presentation ownership facts.
         Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null)
@@ -41,10 +39,14 @@ internal static class AddonRuntimeCompositionFactory
         // PR10 addendum section 16: a first, access-denied task creation from the normal Runtime
         // process falls back to one bounded elevated child that creates exactly this one task.
         var startupRegistration = WindowsTaskSchedulerStartupManager.WithElevatedRepair();
-        var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration, isLaunchAtWindowsStartupRequired);
+        var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
         var steamRuntime = new SteamSessionRuntime();
         if (bigPictureStateChanged is not null) steamRuntime.BigPictureStateChanged += bigPictureStateChanged;
-        var startupRegistrationResult = startupSettings.Repair();
+        // Installed-app lifecycle infrastructure: prove the owned startup task exists at Runtime
+        // startup. A failed repair is logged but never exits an already-running Runtime.
+        var startupRegistrationResult = startupSettings.EnsureStartupRegistration();
+        AppLog.Info("Startup", "Startup registration ensured.",
+            ("Success", startupRegistrationResult.Success), ("Message", startupRegistrationResult.Message));
 
         // Full1902 A2 section 10/12: the legacy Steam-session physical routing owner is never composed,
         // so the routing session watcher is never started. Only the actual-AppID fact used by
@@ -85,6 +87,6 @@ internal static class AddonRuntimeCompositionFactory
             bigPictureStateChanged(true);
 
         return new AddonRuntimeComposition(
-            runtimeHost, startupSettings, startupRegistrationResult.Message, statusProvider);
+            runtimeHost, startupSettings, statusProvider);
     }
 }

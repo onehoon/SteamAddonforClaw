@@ -221,7 +221,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         //     abort a transition the user already confirmed, section 9) ---
 
         // 1. The Runtime must prove it will start at the next logon BEFORE Center M is disabled.
-        var registration = _startupSettings.ChangeLaunchAtWindowsStartup(true);
+        var registration = _startupSettings.EnsureStartupRegistration();
         AppLog.Info("CenterM.Authority", "Mandatory startup verification.", ("Success", registration.Success), ("Message", registration.Message));
         if (!registration.Success)
             return Fail(snapshot, $"The Addon could not be registered to start at the next Windows logon, so MSI Center M was not disabled. {registration.Message}");

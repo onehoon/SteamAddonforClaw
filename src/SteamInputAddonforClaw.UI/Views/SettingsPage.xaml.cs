@@ -3,7 +3,6 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -26,29 +25,29 @@ public sealed partial class SettingsPage : UserControl
     /// no repair/install controls: Runtime lifecycle/reconciliation stays the authority for setup.</summary>
     internal void RenderRequiredComponents(FrontendStatusSnapshot snapshot)
     {
-        var components = new List<StatusCardViewModel>
+        var components = new (string Name, string Status, string Reason)[]
         {
-            new("HidHide", snapshot.Prerequisites.HidHideStatus.ToString(), snapshot.Prerequisites.HidHideReason),
-            new("usbip-win2", snapshot.Prerequisites.UsbIpStatus.ToString(), snapshot.Prerequisites.UsbIpReason),
-            new("VIIPER", snapshot.Prerequisites.ViiperStatus.ToString(), snapshot.Prerequisites.ViiperReason),
+            ("HidHide", snapshot.Prerequisites.HidHideStatus.ToString(), snapshot.Prerequisites.HidHideReason),
+            ("usbip-win2", snapshot.Prerequisites.UsbIpStatus.ToString(), snapshot.Prerequisites.UsbIpReason),
+            ("VIIPER", snapshot.Prerequisites.ViiperStatus.ToString(), snapshot.Prerequisites.ViiperReason),
         };
 
         var readyCount = components.Count(item => string.Equals(item.Status, "Ready", StringComparison.OrdinalIgnoreCase));
         RequiredComponentsExpander.Description = new TextBlock
         {
-            Text = $"{readyCount} of {components.Count} ready",
+            Text = $"{readyCount} of {components.Length} ready",
             FontSize = 14,
             FontWeight = FontWeights.SemiBold,
         };
 
         RequiredComponentsExpander.Items.Clear();
-        foreach (var item in components)
+        foreach (var (name, status, reason) in components)
         {
             RequiredComponentsExpander.Items.Add(new SettingsCard
             {
-                Header = item.Name,
-                Description = item.Secondary,
-                Content = new TextBlock { Text = item.Status, Opacity = 0.7 },
+                Header = name,
+                Description = reason,
+                Content = new TextBlock { Text = status, Opacity = 0.7 },
             });
         }
     }

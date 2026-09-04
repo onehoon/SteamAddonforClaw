@@ -10,48 +10,35 @@ public sealed class SettingsStoreTests : IDisposable
     private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
 
     [Fact]
-    public void Load_WhenSettingsDoNotExist_ReturnsStartupEnabledByDefault()
-    {
-        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-
-        var settings = store.Load();
-
-        Assert.True(settings.LaunchAtWindowsStartup);
-    }
-
-    [Fact]
-    public void Load_LegacySteamInputRoutingKey_IsIgnored()
+    public void Load_LegacyKeys_AreIgnored()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         Directory.CreateDirectory(_testDirectory);
-        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"SteamInputRoutingEnabled\":true}");
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"SteamInputRoutingEnabled\":true,\"LogLevel\":\"Debug\"}");
 
         var settings = new SettingsStore(path).Load();
 
-        // The removed routing preference must not survive as any in-memory state.
-        Assert.False(settings.LaunchAtWindowsStartup);
+        // App UI PR-B: the removed LaunchAtWindowsStartup preference (and the older routing key) must
+        // not survive as any in-memory state, and unrelated settings still load.
+        Assert.DoesNotContain("LaunchAtWindowsStartup", typeof(AppSettings).GetProperties().Select(p => p.Name));
         Assert.DoesNotContain("SteamInputRoutingEnabled", typeof(AppSettings).GetProperties().Select(p => p.Name));
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
     }
 
     [Fact]
-    public void SaveAndLoad_PreservesStartupSetting()
-    {
-        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-
-        store.Save(new AppSettings(LaunchAtWindowsStartup: false));
-
-        Assert.False(store.Load().LaunchAtWindowsStartup);
-    }
-
-    [Fact]
-    public void Save_DoesNotWriteTheRemovedSteamInputRoutingKey()
+    public void Save_DoesNotWriteTheRemovedLaunchAtWindowsStartupKey()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         var store = new SettingsStore(path);
 
-        store.Save(new AppSettings(SuppressDeveloperMenuWarning: true));
+        // An old pre-release JSON file carrying the obsolete property: it loads (ignored), and the
+        // next save no longer serializes it.
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"SuppressDeveloperMenuWarning\":false}");
+        store.Save(store.Load() with { SuppressDeveloperMenuWarning = true });
 
         var json = File.ReadAllText(path);
+        Assert.DoesNotContain("LaunchAtWindowsStartup", json);
         Assert.DoesNotContain("SteamInputRoutingEnabled", json);
         Assert.Contains("\"SuppressDeveloperMenuWarning\": true", json);
     }
@@ -102,7 +89,7 @@ public sealed class SettingsStoreTests : IDisposable
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings { DeveloperMenuEnabled = true }, store, new FakeStartupManager());
 
-        coordinator.ChangeLaunchAtWindowsStartup(false);
+        coordinator.ChangeLogLevel(AppLogPreference.Info);
 
         Assert.True(store.Load().DeveloperMenuEnabled);
     }
@@ -136,23 +123,23 @@ public sealed class SettingsStoreTests : IDisposable
         var path = Path.Combine(_testDirectory, "settings.json"); Directory.CreateDirectory(_testDirectory);
         File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false}");
         var settings = new SettingsStore(path).Load();
-        Assert.False(settings.LaunchAtWindowsStartup); Assert.Equal(AppLogPreference.Off, settings.LogLevel);
+        Assert.Equal(AppLogPreference.Off, settings.LogLevel);
     }
 
     [Fact]
     public void InvalidLogLevel_PreservesOtherSettingsAndDefaultsToOff()
     {
         var path = Path.Combine(_testDirectory, "settings.json"); Directory.CreateDirectory(_testDirectory);
-        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"LogLevel\":\"SomethingInvalid\"}");
+        File.WriteAllText(path, "{\"SuppressDeveloperMenuWarning\":true,\"LogLevel\":\"SomethingInvalid\"}");
         var settings = new SettingsStore(path).Load();
-        Assert.False(settings.LaunchAtWindowsStartup); Assert.Equal(AppLogPreference.Off, settings.LogLevel);
+        Assert.True(settings.SuppressDeveloperMenuWarning); Assert.Equal(AppLogPreference.Off, settings.LogLevel);
     }
 
     [Fact]
     public void DebugLogLevel_RoundTripsAsText()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-        store.Save(new AppSettings(false, AppLogPreference.Debug));
+        store.Save(new AppSettings(AppLogPreference.Debug));
         Assert.Equal(AppLogPreference.Debug, store.Load().LogLevel);
         Assert.Contains("\"LogLevel\": \"Debug\"", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
     }
@@ -161,7 +148,7 @@ public sealed class SettingsStoreTests : IDisposable
     public void InfoLogLevel_RoundTripsAsText()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-        store.Save(new AppSettings(false, AppLogPreference.Info));
+        store.Save(new AppSettings(AppLogPreference.Info));
         Assert.Equal(AppLogPreference.Info, store.Load().LogLevel);
         Assert.Contains("\"LogLevel\": \"Info\"", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
     }
@@ -170,7 +157,7 @@ public sealed class SettingsStoreTests : IDisposable
     public void OffLogLevel_RoundTripsAsText()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-        store.Save(new AppSettings(false, AppLogPreference.Off));
+        store.Save(new AppSettings(AppLogPreference.Off));
         Assert.Equal(AppLogPreference.Off, store.Load().LogLevel);
         Assert.Contains("\"LogLevel\": \"Off\"", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
     }
@@ -203,24 +190,12 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void ChangeLaunchAtWindowsStartup_WhenEnabled_CallsStartupManagerAndPersistsSetting()
+    public void EnsureStartupRegistration_RequestsTaskRepair()
     {
         var manager = new FakeStartupManager();
-        var coordinator = new StartupSettingsCoordinator(new AppSettings(false), new SettingsStore(Path.Combine(_testDirectory, "settings.json")), manager);
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_testDirectory, "settings.json")), manager);
 
-        coordinator.ChangeLaunchAtWindowsStartup(true);
-
-        Assert.True(coordinator.Settings.LaunchAtWindowsStartup);
-        Assert.Equal([true], manager.Requests);
-    }
-
-    [Fact]
-    public void Repair_WhenStartupIsEnabled_RequestsTaskRepair()
-    {
-        var manager = new FakeStartupManager();
-        var coordinator = new StartupSettingsCoordinator(new AppSettings(true), new SettingsStore(Path.Combine(_testDirectory, "settings.json")), manager);
-
-        coordinator.Repair();
+        coordinator.EnsureStartupRegistration();
 
         Assert.Equal([true], manager.Requests);
     }
@@ -252,7 +227,6 @@ public sealed class SettingsStoreTests : IDisposable
         var settings = new SettingsStore(path).Load();
 
         Assert.Equal(OverlayTabOrderContract.DefaultOrder, settings.OverlayTabOrder);
-        Assert.False(settings.LaunchAtWindowsStartup);
         Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
     }
 
@@ -290,7 +264,6 @@ public sealed class SettingsStoreTests : IDisposable
         var settings = new SettingsStore(path).Load();
 
         Assert.Equal(OverlayTabOrderContract.DefaultOrder, settings.OverlayTabOrder);
-        Assert.False(settings.LaunchAtWindowsStartup);
         Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
     }
 
@@ -341,9 +314,9 @@ public sealed class SettingsStoreTests : IDisposable
         var path = Path.Combine(_testDirectory, "settings.json");
         var store = new SettingsStore(path);
         var coordinator = new StartupSettingsCoordinator(
-            new AppSettings(LaunchAtWindowsStartup: true) { OverlayTabOrder = CustomTabOrder }, store, new FakeStartupManager());
+            new AppSettings { OverlayTabOrder = CustomTabOrder }, store, new FakeStartupManager());
 
-        coordinator.ChangeLaunchAtWindowsStartup(false);
+        coordinator.ChangeLogLevel(AppLogPreference.Info);
 
         Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);
     }

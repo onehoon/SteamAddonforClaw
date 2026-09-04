@@ -88,7 +88,6 @@ public sealed class CenterMStartupFrontendTests : IDisposable
             new ThrowingSystemStatusProvider(),
             null,
             new DeveloperTestModeState(),
-            "",
             centerMStartup: centerM,
             centerMAuthorityTransition: owner);
     }

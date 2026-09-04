@@ -752,7 +752,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
 
             var store = new SettingsStore(Path.Combine(_owner._testDirectory, "settings.json"));
             var coordinator = new StartupSettingsCoordinator(new AppSettings(), store,
-                new FakeStartupManager(Order, () => StartupSucceeds), isLaunchAtWindowsStartupRequired: () => true);
+                new FakeStartupManager(Order, () => StartupSucceeds));
 
             Hid.OrderSink = Order;
             var baseline = new AddonControllerHidHideBaseline(Hid, AddonExe, () => [OfficialCli, OfficialClient]);

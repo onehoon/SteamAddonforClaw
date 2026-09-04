@@ -26,7 +26,6 @@ $requiredAssets = @(
     'ui\SteamInputAddonforClaw.UI.pri',
     'ui\App.xbf',
     'ui\MainWindow.xbf',
-    'ui\Views\StatusPage.xbf',
     'ui\Views\HowToUsePage.xbf',
     'ui\Views\ControllerPage.xbf',
     'ui\Views\SettingsPage.xbf',

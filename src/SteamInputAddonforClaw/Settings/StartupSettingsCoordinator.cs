@@ -9,23 +9,16 @@ public sealed class StartupSettingsCoordinator : IOem1MappingPreference, IWingMa
 {
     private readonly SettingsStore _settingsStore;
     private readonly IWindowsStartupManager _startupManager;
-    private readonly Func<bool> _isLaunchAtWindowsStartupRequired;
 
-    internal const string LaunchAtWindowsStartupRequiredMessage = "Required while MSI Center M is disabled.";
-
-    public StartupSettingsCoordinator(AppSettings settings, SettingsStore settingsStore, IWindowsStartupManager startupManager, Func<bool>? isLaunchAtWindowsStartupRequired = null)
+    public StartupSettingsCoordinator(AppSettings settings, SettingsStore settingsStore, IWindowsStartupManager startupManager)
     {
         Settings = settings;
         _settingsStore = settingsStore;
         _startupManager = startupManager;
-        _isLaunchAtWindowsStartupRequired = isLaunchAtWindowsStartupRequired ?? (() => false);
     }
 
     public AppSettings Settings { get; private set; }
 
-    /// <summary>True while MSI Center M is exactly Disabled: <c>LaunchAtWindowsStartup</c> is then a
-    /// mandatory-ON policy, not a user preference (PR2.5 work order section 6).</summary>
-    public bool IsLaunchAtWindowsStartupRequired => _isLaunchAtWindowsStartupRequired();
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public Oem1MappingSettings Oem1Mapping => Settings.Oem1Mapping;
     public WingMappingSettings WingMapping => Settings.WingMapping;
@@ -33,26 +26,15 @@ public sealed class StartupSettingsCoordinator : IOem1MappingPreference, IWingMa
     public event EventHandler? Oem1MappingChanged;
     public event EventHandler? WingMappingChanged;
 
-    public StartupRegistrationResult ChangeLaunchAtWindowsStartup(bool enabled)
-    {
-        // Section 6.4: while mandatory, a request to turn startup OFF must never persist false or
-        // delete the owned task. Prove/repair the required task and report why -- but do NOT persist
-        // false first and only then discover the mandatory policy.
-        if (!enabled && _isLaunchAtWindowsStartupRequired())
-        {
-            if (!Settings.LaunchAtWindowsStartup)
-            {
-                Settings = Settings with { LaunchAtWindowsStartup = true };
-                _settingsStore.Save(Settings);
-            }
-            var repair = _startupManager.Synchronize(true);
-            return repair.Success ? new StartupRegistrationResult(true, LaunchAtWindowsStartupRequiredMessage) : repair;
-        }
+    /// <summary>Installed-app lifecycle infrastructure: make sure the owned Task Scheduler task
+    /// exists. Background startup is not a user preference -- there is nothing to persist and no OFF
+    /// request. A failed repair is returned as-is; the already-running Runtime is never intentionally
+    /// exited for it.</summary>
+    public StartupRegistrationResult EnsureStartupRegistration() => _startupManager.Synchronize(true);
 
-        Settings = Settings with { LaunchAtWindowsStartup = enabled };
-        _settingsStore.Save(Settings);
-        return _startupManager.Synchronize(enabled);
-    }
+    /// <summary>Uninstall preparation only: remove the owned startup task. Named narrowly so ordinary
+    /// feature code cannot look like it can turn application startup on and off.</summary>
+    public StartupRegistrationResult RemoveStartupRegistrationForUninstall() => _startupManager.Synchronize(false);
 
     public void ChangeLogLevel(AppLogPreference level)
     {
@@ -124,22 +106,6 @@ public sealed class StartupSettingsCoordinator : IOem1MappingPreference, IWingMa
         Settings = next;
     }
 
-    /// <summary>At Runtime startup: synchronize the owned Task Scheduler task. When Center M is
-    /// exactly Disabled the effective desired state is forced ON and a saved <c>false</c> is
-    /// converged to <c>true</c>, so a machine that had Center M disabled before this architecture
-    /// existed cannot stay in the unsupported "Disabled + startup off" state (section 6.3). A failed
-    /// repair is returned as-is -- the already-running Runtime is never intentionally exited for it
-    /// (section 6.5).</summary>
-    public StartupRegistrationResult Repair()
-    {
-        var required = _isLaunchAtWindowsStartupRequired();
-        if (required && !Settings.LaunchAtWindowsStartup)
-        {
-            Settings = Settings with { LaunchAtWindowsStartup = true };
-            _settingsStore.Save(Settings);
-        }
-        return _startupManager.Synchronize(required || Settings.LaunchAtWindowsStartup);
-    }
 }
 
 /// <summary>
