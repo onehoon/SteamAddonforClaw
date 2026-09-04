@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.IO;
-using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 
 namespace SteamInputAddonforClaw.CenterM;
 
@@ -22,7 +22,7 @@ namespace SteamInputAddonforClaw.CenterM;
 /// </remarks>
 internal static class Oem1ApplicationLauncher
 {
-    internal static void Launch(Oem1LaunchApplicationBinding application)
+    internal static void Launch(FrontButtonLaunchApplicationBinding application)
     {
         ArgumentNullException.ThrowIfNull(application);
         // An unfinished configuration is not a failure -- there is simply nothing to launch.

@@ -103,8 +103,8 @@ Battery Charge Limit
 Examples:
 
 ```text
-WING mapping
-OEM1 / Center M button mapping
+Gamebar Button mapping
+Center M Button mapping
 M1 mapping in Xbox360 presentation
 M2 mapping in Xbox360 presentation
 Joystick LED
@@ -365,26 +365,49 @@ Its meaning should be clear:
 
 The first logical section is button mapping.
 
-Target features:
+Shipped features (App UI PR-C):
 
 ```text
-WING
-OEM1 / Center M button
+Gamebar Button   (internal WING / Event88)
+Center M Button  (internal OEM1 / Event41)
+```
+
+Planned:
+
+```text
 M1
 M2
 ```
 
-#### WING / OEM1
+#### Gamebar Button / Center M Button
 
-Full1902 changes the meaning of these mappings because Steam/BPM now selects presentation rather than enabling/disabling a separate routing mode.
-
-Do not preserve wording based on the removed model such as:
+Each physical button has exactly one action per runtime presentation domain:
 
 ```text
-when Steam Input Routing is inactive
+Normal
+Steam Game / Big Picture
 ```
 
-Mapping labels/descriptions must instead describe the actual presentation/state in which the mapping applies.
+The domain is resolved per press from the actual Full1902 presentation
+(`ActivePresentation == SteamDeck` → Steam Game / Big Picture, otherwise → Normal), never a
+persisted flag or a raw Steam/Big Picture probe.
+
+Frozen defaults:
+
+```text
+Normal:
+  Gamebar Button  → Quick Settings Overlay
+  Center M Button → Steam Big Picture
+
+Steam Game / Big Picture:
+  Gamebar Button  → Steam Button
+  Center M Button → Steam Quick Access
+```
+
+The Normal Gamebar default is `Quick Settings Overlay` — it does NOT default to Steam Button
+regardless of presentation. `None`, persisted Double slots, and a per-button Remapping Enabled
+switch do not exist. Within one domain the two buttons may not use the same action. There is one
+atomic `FrontButtonMappingSettings` and one `SetFrontButtonMapping` frontend RPC (protocol v25).
 
 #### M1 / M2
 
@@ -415,8 +438,8 @@ The user thinks of them as controller behavior, so the UI should follow the user
 Controller
 
 [Button Mapping]
-WING
-OEM1
+Gamebar Button
+Center M Button
 M1
 M2
 
@@ -537,8 +560,8 @@ Do not promote developer test tools into ordinary navigation solely because Stat
 | Windows Power Mode | Device | Existing global control |
 | Fan Control | Device | Future; add only when implemented |
 | Battery Charge Limit | Device | Future; global device setting |
-| WING mapping | Controller | Button behavior |
-| OEM1 / Center M button mapping | Controller | Button behavior |
+| Gamebar Button mapping | Controller | Button behavior |
+| Center M Button mapping | Controller | Button behavior |
 | M1 mapping | Controller | Primarily Xbox360 presentation policy |
 | M2 mapping | Controller | Primarily Xbox360 presentation policy |
 | Joystick LED | Controller | Future controller hardware behavior |
@@ -670,8 +693,8 @@ Device
 
 Controller
  ├ Button Mapping
- │  ├ WING                   [when implemented/finalized]
- │  ├ OEM1
+ │  ├ Gamebar Button         [shipped: Normal + Steam Game / Big Picture actions]
+ │  ├ Center M Button        [shipped: Normal + Steam Game / Big Picture actions]
  │  ├ M1                     [future]
  │  └ M2                     [future]
  └ Controller Settings

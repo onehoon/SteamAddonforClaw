@@ -67,7 +67,14 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // the FrontendSettingsSnapshot.LaunchAtWindowsStartup / LaunchAtWindowsStartupRequired members, and
 // FrontendBootstrapSnapshot.StartupRegistrationMessage. A v23 peer would connect and then fail every
 // settings/bootstrap deserialization on the missing members -- failing the handshake up front is honest.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 24; }
+// Version 25: App UI PR-C replaces the split OEM1/WING mapping contract with the atomic front-button
+// mapping contract. The two SetOem1Mapping / SetWingMapping RPCs (and their request records) become
+// one SetFrontButtonMapping; FrontendSettingsSnapshot.Oem1Mapping / WingMapping become one required
+// FrontButtonMapping (FrontButtonMappingSettings); FrontendBootstrapSnapshot.Oem1MappingAvailable /
+// WingMappingAvailable become one FrontButtonMappingAvailable. A v24 peer would connect and then
+// fail every settings/bootstrap deserialization on the changed members -- failing the handshake up
+// front is the honest outcome. Pre-release: no compatibility shim.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 25; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -99,14 +106,13 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, SetOem1Mapping, SetWingMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, SetFrontButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
 internal sealed record FrontendWireEnvelope(int ProtocolVersion, FrontendWireMessageKind Kind, long? RequestId = null, FrontendRpcMethod? Method = null, FrontendNotificationKind? Notification = null, JsonElement? Payload = null, FrontendWireError? Error = null);
 internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
-internal sealed record SetOem1MappingRequest(SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Mapping);
-internal sealed record SetWingMappingRequest(SteamInputAddonforClaw.Contracts.Wing.WingMappingSettings Mapping);
+internal sealed record SetFrontButtonMappingRequest(SteamInputAddonforClaw.Contracts.FrontButtons.FrontButtonMappingSettings Mapping);
 internal sealed record SetDeveloperTestModeRequest(bool Enabled);
 internal sealed record RunFanProbeRequest(FrontendFanProbeOperation Operation);
 internal sealed record SetDeviceCpuBoostAcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);

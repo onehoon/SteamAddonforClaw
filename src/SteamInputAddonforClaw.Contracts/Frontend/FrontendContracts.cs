@@ -1,6 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
-using SteamInputAddonforClaw.Contracts.Oem1;
-using SteamInputAddonforClaw.Contracts.Wing;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 
 namespace SteamInputAddonforClaw.Contracts.Frontend;
 
@@ -115,14 +114,14 @@ public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeSt
     public static readonly FrontendFanProbeSnapshot Unavailable = new(false, FrontendFanProbeState.Unavailable, "Unavailable", "", "", "", "Unsupported", null, false, "MSI fan probe is unavailable.");
 }
 
-/// <remarks><see cref="Oem1Mapping"/> is the settings-layer projection of the persisted OEM1 mapping.
-/// The frontend deliberately carries the SAME <see cref="Oem1MappingSettings"/> the runtime persists
-/// and the dispatcher validates against, rather than a parallel frontend-shaped copy -- the settings
-/// UI and runtime capability validation must never be able to disagree.</remarks>
-public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping)
+/// <remarks><see cref="FrontButtonMapping"/> is the settings-layer projection of the one persisted
+/// front-button mapping. The frontend deliberately carries the SAME
+/// <see cref="FrontButtonMappingSettings"/> the runtime persists and the dispatcher validates
+/// against, rather than a parallel frontend-shaped copy -- the settings UI and runtime capability
+/// validation must never be able to disagree.</remarks>
+public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool SuppressDeveloperMenuWarning, FrontButtonMappingSettings FrontButtonMapping)
 {
     public bool DeveloperMenuEnabled { get; init; }
-    public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
 }
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
 
@@ -174,12 +173,13 @@ public sealed record FrontendCenterMStartupMutationResult(
 {
     public bool Succeeded => Outcome == FrontendCenterMStartupMutationOutcome.Succeeded;
 }
-/// <param name="Oem1MappingAvailable">Whether the Center M (OEM1) mapping feature exists at all on
-/// this machine. It is the runtime's single startup hardware-support result (a supported MSI Claw),
-/// NOT a routing/Steam/BPM/runtime condition, and NOT the persisted remapping switch -- a machine
-/// that is not a recognized Claw reports false while its saved mapping stays untouched. A startup
-/// fact, so it lives on bootstrap rather than on the settings snapshot every setter returns.</param>
-public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool Oem1MappingAvailable, bool WingMappingAvailable = false);
+/// <param name="FrontButtonMappingAvailable">Whether the front-button mapping feature (Gamebar
+/// Button + Center M Button) exists at all on this machine. It is the runtime's single startup
+/// hardware-support result (a supported MSI Claw), NOT a Steam/BPM/presentation/Overlay/Win+G runtime
+/// condition -- a machine that is not a recognized Claw reports false while its saved mapping stays
+/// untouched. A startup fact, so it lives on bootstrap rather than on the settings snapshot every
+/// setter returns.</param>
+public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool FrontButtonMappingAvailable);
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
 public sealed record FrontendDeviceSnapshot(string Manufacturer, string Model, string BaseBoard, IReadOnlyList<string> GpuModels);
@@ -254,12 +254,11 @@ public interface IAddonFrontendControl
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);
-    /// <summary>Persists a COMPLETE new OEM1 mapping (remapping switch + all four slot bindings).
-    /// Whole-record, not per-slot: it is what makes "turning remapping off never erases the mappings"
-    /// structural rather than a rule each caller has to remember.</summary>
-    Task<FrontendSettingsSnapshot> SetOem1MappingAsync(Oem1MappingSettings mapping, CancellationToken cancellationToken = default);
-    Task<FrontendSettingsSnapshot> SetWingMappingAsync(WingMappingSettings mapping, CancellationToken cancellationToken = default) =>
-        Task.FromException<FrontendSettingsSnapshot>(new NotSupportedException("WING mapping is unavailable."));
+    /// <summary>Persists the COMPLETE new front-button mapping (both buttons, both domains --
+    /// four bindings). Whole-record, not per-binding: the cross-button same-domain uniqueness rule
+    /// belongs to one whole mapping. An invalid candidate is rejected by the settings layer and the
+    /// returned snapshot reflects the unchanged persisted state.</summary>
+    Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(FrontButtonMappingSettings mapping, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default);
     Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default);
     /// <summary>Captures the current MSI Center M startup configuration (work order PR1). Read-only:

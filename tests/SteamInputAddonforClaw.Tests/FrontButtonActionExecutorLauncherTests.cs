@@ -1,5 +1,5 @@
 using SteamInputAddonforClaw.CenterM;
-using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -9,7 +9,7 @@ namespace SteamInputAddonforClaw.Tests;
 /// out: <see cref="Oem1ApplicationLauncher"/>'s scope restriction to a plain executable, and
 /// <see cref="Oem1KeyboardHotkeyExecutor"/>'s best-effort key-release cleanup on a partial failure.
 /// </summary>
-public sealed class Oem1ActionExecutorTests
+public sealed class FrontButtonActionExecutorLauncherTests
 {
     // ---- Oem1ApplicationLauncher (review fix, MAJOR: executable-only, no shell resolution) ----
 
@@ -20,7 +20,7 @@ public sealed class Oem1ActionExecutorTests
     [InlineData(@"C:\Users\test\noextension")]
     public void Launch_refuses_a_non_executable_target(string path)
     {
-        var application = new Oem1LaunchApplicationBinding(path);
+        var application = new FrontButtonLaunchApplicationBinding(path);
 
         var exception = Assert.Throws<InvalidOperationException>(() => Oem1ApplicationLauncher.Launch(application));
         Assert.Contains(".exe", exception.Message);
@@ -30,7 +30,7 @@ public sealed class Oem1ActionExecutorTests
     public void Launch_is_a_no_op_for_an_unconfigured_binding()
     {
         // Empty path -- nothing configured yet -- must not even reach the extension check.
-        var exception = Record.Exception(() => Oem1ApplicationLauncher.Launch(Oem1LaunchApplicationBinding.Empty));
+        var exception = Record.Exception(() => Oem1ApplicationLauncher.Launch(FrontButtonLaunchApplicationBinding.Empty));
         Assert.Null(exception);
     }
 
@@ -59,9 +59,9 @@ public sealed class Oem1ActionExecutorTests
         };
         try
         {
-            var hotkey = new Oem1HotkeyBinding(
-                Oem1HotkeyModifiers.Control | Oem1HotkeyModifiers.Shift | Oem1HotkeyModifiers.Alt | Oem1HotkeyModifiers.Windows,
-                Oem1HotkeyKey.S);
+            var hotkey = new FrontButtonHotkeyBinding(
+                FrontButtonHotkeyModifiers.Control | FrontButtonHotkeyModifiers.Shift | FrontButtonHotkeyModifiers.Alt | FrontButtonHotkeyModifiers.Windows,
+                FrontButtonHotkeyKey.S);
 
             var exception = Assert.Throws<InvalidOperationException>(() => Oem1KeyboardHotkeyExecutor.Send(hotkey));
             Assert.Contains("key-up", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -89,7 +89,7 @@ public sealed class Oem1ActionExecutorTests
         Oem1KeyboardHotkeyExecutor.TestOnly_SendKeyOverride = (virtualKey, keyUp) => events.Add((virtualKey, keyUp));
         try
         {
-            var hotkey = new Oem1HotkeyBinding(Oem1HotkeyModifiers.Control, Oem1HotkeyKey.S);
+            var hotkey = new FrontButtonHotkeyBinding(FrontButtonHotkeyModifiers.Control, FrontButtonHotkeyKey.S);
 
             var exception = Record.Exception(() => Oem1KeyboardHotkeyExecutor.Send(hotkey));
 
@@ -110,7 +110,7 @@ public sealed class Oem1ActionExecutorTests
         Oem1KeyboardHotkeyExecutor.TestOnly_SendKeyOverride = (_, _) => called = true;
         try
         {
-            Oem1KeyboardHotkeyExecutor.Send(Oem1HotkeyBinding.Empty);
+            Oem1KeyboardHotkeyExecutor.Send(FrontButtonHotkeyBinding.Empty);
             Assert.False(called);
         }
         finally

@@ -371,7 +371,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, new SteamInputAddonforClaw.Developer.DeveloperTestModeState(),
             // Same single startup hardware-support result the routing composition's OEM1 gate above
             // received -- the UI and the runtime can never disagree about whether OEM1 mapping exists.
-            oem1MappingAvailable: startupResult.HardwareSupported,
+            frontButtonMappingAvailable: startupResult.HardwareSupported,
             // Device/Profile CPU Boost is a sibling capability of Routing/OEM1, not a member of the
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
@@ -542,14 +542,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             {
                 _frontButtonRuntime = Devices.MSI.Claw.MsiClawFrontButtonRuntime.Create(
                     hardwareSupported: startupResult.HardwareSupported,
-                    oem1MappingPreference: startupSettings,
-                    wingMappingPreference: startupSettings,
+                    frontButtonMappingPreference: startupSettings,
                     isSteamDeckPresentationActive: () => _presentationOwnership?.ActivePresentation == Devices.MSI.Claw.AddonPresentationKind.SteamDeck,
+                    // App UI PR-C section 13: the QuickSettingsOverlay action routes through the
+                    // existing Runtime-owned coordinated Overlay toggle seam, never the Overlay process
+                    // controller / transport directly.
+                    requestOverlayToggle: RequestOverlayToggle,
                     tryRequestQuickAccessPulse: () => _presentationOwnership?.TryRequestQuickAccessPulse() ?? false,
                     tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false,
-                    // Full1902 Policy B section 6: WING custom delivery becomes live only while native
-                    // Win+G suppression is proven armed for this Addon-authority lifetime -- bound to
-                    // the existing guard seam, not a new authority boolean.
+                    // Full1902 Policy B (already merged, #473): Gamebar / WING custom delivery is live
+                    // only while native Win+G suppression is proven armed for this Addon-authority
+                    // lifetime -- bound to the existing guard seam, not a new authority boolean.
                     nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed);
             }
             catch (Exception exception)
@@ -774,7 +777,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // normal close path and waits for the .Frontend connection to disconnect.
     internal void RequestFrontendOpen(FrontendOpenReason reason) => _ = CoordinateFrontendOpenAsync(reason);
 
-    internal void ToggleOverlayForPoc() => _ = CoordinateOverlayToggleAsync();
+    // App UI PR-C section 13.2: a production front-button binding (QuickSettingsOverlay) enters here.
+    // This stays the narrow host-facing entry point; CoordinateOverlayToggleAsync remains the single
+    // owner of visible-surface ordering and controller capture.
+    internal void RequestOverlayToggle() => _ = CoordinateOverlayToggleAsync();
 
     private async Task CoordinateFrontendOpenAsync(FrontendOpenReason reason)
     {
@@ -1150,7 +1156,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try
         {
             _trayHostWindow = new NativeTrayHostWindow();
-            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, exit, EvaluateUserTermination, ToggleOverlayForPoc);
+            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, exit, EvaluateUserTermination, RequestOverlayToggle);
             return true;
         }
         catch (Exception exception)

@@ -1,8 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Overlay;
-using SteamInputAddonforClaw.Contracts.Wing;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Settings;
@@ -12,8 +11,8 @@ public sealed class SettingsStore
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true,
-        // The OEM1/WING mappings and the Overlay tab order all persist enums, which must round-trip
-        // as names: a numeric action/key/slot/tab value in the settings file would silently change
+        // The front-button mapping and the Overlay tab order all persist enums, which must round-trip
+        // as names: a numeric action/key/domain/tab value in the settings file would silently change
         // meaning the moment an enum member is inserted.
         Converters = { new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) }
     };
@@ -45,8 +44,7 @@ public sealed class SettingsStore
                 SuppressDeveloperMenuWarning: suppressDeveloperMenuWarning)
             {
                 DeveloperMenuEnabled = developerMenuEnabled,
-                Oem1Mapping = ReadOem1Mapping(root),
-                WingMapping = ReadWingMapping(root),
+                FrontButtonMapping = ReadFrontButtonMapping(root),
                 OverlayTabOrder = ReadOverlayTabOrder(root)
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LogLevel", settings.LogLevel));
@@ -97,68 +95,34 @@ public sealed class SettingsStore
         return normalized;
     }
 
-    private static WingMappingSettings ReadWingMapping(JsonElement root)
-    {
-        if (!root.TryGetProperty("WingMapping", out var property) || property.ValueKind != JsonValueKind.Object)
-            return WingMappingSettings.Default;
-        try
-        {
-            var mapping = property.Deserialize<WingMappingSettings>(SerializerOptions) ?? throw new JsonException("WING mapping was null.");
-            if (mapping.Single is null || mapping.Double is null
-                || mapping.Single.Hotkey is null || mapping.Single.Launch is null
-                || mapping.Double.Hotkey is null || mapping.Double.Launch is null
-                || !WingActionCapabilities.Supports(mapping.Single.Action)
-                || !WingActionCapabilities.Supports(mapping.Double.Action))
-                throw new JsonException("WING mapping contains an invalid action or slot.");
-            return mapping;
-        }
-        catch (JsonException exception)
-        {
-            AppLog.Warn("Settings", "WING mapping settings could not be parsed; using defaults.", exception);
-            return WingMappingSettings.Default;
-        }
-    }
-
     /// <summary>
-    /// Reads the persisted OEM1 mapping. Missing entirely (no value has ever been saved / first
-    /// install) uses the locked first-install defaults, including remapping ON. A present but
-    /// corrupt/unreadable value is a DIFFERENT case and must not silently turn suppression back on.
+    /// Reads the persisted front-button mapping (App UI PR-C). Parsed in isolation so a broken value
+    /// can never throw into <see cref="Load"/>'s catch and reset unrelated log/developer/overlay-tab
+    /// settings. Pre-release migration policy: absent, malformed, unknown-action, domain-invalid,
+    /// duplicate, or incomplete all resolve to the frozen PR-C defaults -- there is no schema
+    /// migration from the old split OEM1/WING structure, and the obsolete <c>Oem1Mapping</c> /
+    /// <c>WingMapping</c> JSON members are simply ignored (the next normal save drops them).
     /// </summary>
-    /// <remarks>
-    /// Review fix (MAJOR): the previous fallback was unconditionally <see cref="Oem1MappingSettings.Default"/>
-    /// (remapping <c>true</c>) for both "never saved" and "saved but unparseable" -- but an existing
-    /// settings file with a corrupt <c>Oem1Mapping</c> object can still legitimately record
-    /// <c>RemappingEnabled: false</c> at the top level of that same object. Falling back to the ON
-    /// default in that case would silently re-enable OEM1 suppression against an explicit persisted
-    /// Off, which is exactly the kind of behind-the-user's-back reactivation this setting exists to
-    /// prevent. The salvage below reads only the top-level <c>RemappingEnabled</c> boolean directly
-    /// (itself defaulting to <see langword="false"/> -- fail-OPEN to native Center M, never fail
-    /// toward suppression -- if even that cannot be read) and otherwise falls back to the default
-    /// bindings; bindings are not safety-relevant the way the switch is.
-    /// </remarks>
-    private static Oem1MappingSettings ReadOem1Mapping(JsonElement root)
+    private static FrontButtonMappingSettings ReadFrontButtonMapping(JsonElement root)
     {
-        if (!root.TryGetProperty("Oem1Mapping", out var mappingProperty) || mappingProperty.ValueKind != JsonValueKind.Object)
-            return Oem1MappingSettings.Default; // genuinely absent -- first install, locked defaults apply
-
-        var salvagedEnabled = mappingProperty.TryGetProperty("RemappingEnabled", out var enabledProperty)
-            && enabledProperty.ValueKind is JsonValueKind.True or JsonValueKind.False
-            && enabledProperty.GetBoolean();
+        if (!root.TryGetProperty("FrontButtonMapping", out var property) || property.ValueKind != JsonValueKind.Object)
+            return FrontButtonMappingSettings.Default;
 
         try
         {
-            var parsed = mappingProperty.Deserialize<Oem1MappingSettings>(SerializerOptions)
-                ?? throw new JsonException("OEM1 mapping was null.");
-
-            if (parsed.NormalSingle is null || parsed.NormalDouble is null || parsed.RoutingSingle is null || parsed.RoutingDouble is null)
-                throw new JsonException("OEM1 mapping contains a null slot binding.");
-
-            return parsed;
+            var mapping = property.Deserialize<FrontButtonMappingSettings>(SerializerOptions);
+            var reason = FrontButtonMappingValidation.Validate(mapping);
+            if (reason is not null)
+            {
+                AppLog.Warn("Settings", "Front-button mapping is invalid; using the frozen defaults for this feature only.", null, ("Reason", reason));
+                return FrontButtonMappingSettings.Default;
+            }
+            return mapping!;
         }
         catch (JsonException exception)
         {
-            AppLog.Warn("Settings", "OEM1 mapping settings could not be parsed; preserving the persisted remapping switch and falling back to default bindings.", exception, ("SalvagedRemappingEnabled", salvagedEnabled));
-            return Oem1MappingSettings.Default with { RemappingEnabled = salvagedEnabled };
+            AppLog.Warn("Settings", "Front-button mapping could not be parsed; using the frozen defaults for this feature only.", exception);
+            return FrontButtonMappingSettings.Default;
         }
     }
 
@@ -170,7 +134,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.Oem1Mapping, settings.WingMapping, OverlayTabOrder = OverlayTabOrderContract.NormalizeOrDefault(settings.OverlayTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.FrontButtonMapping, OverlayTabOrder = OverlayTabOrderContract.NormalizeOrDefault(settings.OverlayTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

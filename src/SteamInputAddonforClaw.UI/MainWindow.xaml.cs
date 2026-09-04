@@ -32,15 +32,15 @@ public sealed partial class MainWindow : Window
     private bool _setupPromptPendingActivation;
     private bool _prerequisiteSetupInProgress;
 
-    // Review fix (BLOCKER): the single ordered mutation path for the OEM1 mapping, shared by the
-    // Controller page's remapping toggle and the Center M Button detail page's slot editors -- see
-    // QueueOem1Mutation. _oem1UiMapping is the latest edit either surface has requested (advanced
-    // synchronously, before persistence even starts); _oem1PersistedMapping is the last value this
-    // window knows is actually on disk, used to roll a failed save back to.
-    private Contracts.Oem1.Oem1MappingSettings _oem1UiMapping = Contracts.Oem1.Oem1MappingSettings.Default;
-    private Contracts.Oem1.Oem1MappingSettings _oem1PersistedMapping = Contracts.Oem1.Oem1MappingSettings.Default;
-    private Task _oem1SaveChain = Task.CompletedTask;
-    private long _oem1EditVersion;
+    // App UI PR-C: the single ordered mutation path for the WHOLE front-button mapping. The
+    // cross-button same-domain uniqueness rule belongs to one whole mapping, so there is one save
+    // chain, not one per button. _frontButtonUiMapping is the latest edit the Controller page has
+    // requested (advanced synchronously, before persistence starts); _frontButtonPersistedMapping is
+    // the last value this window knows is actually on disk, used to roll a failed save back to.
+    private Contracts.FrontButtons.FrontButtonMappingSettings _frontButtonUiMapping = Contracts.FrontButtons.FrontButtonMappingSettings.Default;
+    private Contracts.FrontButtons.FrontButtonMappingSettings _frontButtonPersistedMapping = Contracts.FrontButtons.FrontButtonMappingSettings.Default;
+    private Task _frontButtonSaveChain = Task.CompletedTask;
+    private long _frontButtonEditVersion;
 
     internal MainWindow(
         IAddonFrontendControl frontend,
@@ -49,8 +49,8 @@ public sealed partial class MainWindow : Window
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         _bootstrap = bootstrap ?? throw new ArgumentNullException(nameof(bootstrap));
         _suppressDeveloperMenuWarning = bootstrap.Settings.SuppressDeveloperMenuWarning;
-        _oem1UiMapping = bootstrap.Settings.Oem1Mapping;
-        _oem1PersistedMapping = bootstrap.Settings.Oem1Mapping;
+        _frontButtonUiMapping = bootstrap.Settings.FrontButtonMapping;
+        _frontButtonPersistedMapping = bootstrap.Settings.FrontButtonMapping;
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -68,7 +68,7 @@ public sealed partial class MainWindow : Window
         // and silently undo the other. Both pages now only ever REQUEST an edit; this window is the
         // single owner of the current OEM1 mapping and its one ordered save chain, exactly as it
         // already owns navigation between the two pages.
-        ControllerContent.MappingEditRequested += (_, mapping) => QueueOem1Mutation(mapping);
+        ControllerContent.MappingEditRequested += (_, mapping) => QueueFrontButtonMutation(mapping);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
@@ -386,53 +386,45 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The single ordered mutation path for the OEM1 mapping (review fix, BLOCKER). Advances the
-    /// current edit synchronously and pushes it into BOTH pages immediately -- before persistence
-    /// even starts -- so an edit made on one page is visible on the other the instant the user
-    /// switches, whether or not its save has completed yet. The actual save is chained behind
-    /// whatever is already in flight, and only the save that is still the newest edit when it
-    /// completes is allowed to touch the controls again.
+    /// The single ordered mutation path for the WHOLE front-button mapping (App UI PR-C §19).
+    /// Advances the current edit synchronously and pushes it back into the Controller page
+    /// immediately -- before persistence even starts. The actual save is chained behind whatever is
+    /// already in flight, and only the save that is still the newest edit when it completes is
+    /// allowed to touch the controls again. One whole-record chain, never one per button, so the
+    /// cross-button uniqueness rule cannot produce a lost update.
     /// </summary>
-    private void QueueOem1Mutation(Contracts.Oem1.Oem1MappingSettings next)
+    private void QueueFrontButtonMutation(Contracts.FrontButtons.FrontButtonMappingSettings next)
     {
-        _oem1UiMapping = next;
-        var version = ++_oem1EditVersion;
+        _frontButtonUiMapping = next;
+        var version = ++_frontButtonEditVersion;
 
-        ControllerContent.ApplyOem1Mapping(next);
+        ControllerContent.ApplyFrontButtonMapping(next);
 
-        _oem1SaveChain = SaveOem1AfterAsync(_oem1SaveChain, next, version);
+        _frontButtonSaveChain = SaveFrontButtonAfterAsync(_frontButtonSaveChain, next, version);
     }
 
-    private async Task SaveOem1AfterAsync(Task previous, Contracts.Oem1.Oem1MappingSettings next, long version)
+    private async Task SaveFrontButtonAfterAsync(Task previous, Contracts.FrontButtons.FrontButtonMappingSettings next, long version)
     {
-        // The predecessor's own failure (if any) was already handled where it happened; this chain
-        // only needs it to have FINISHED before this save starts, so a faulted predecessor must not
-        // abort the newly queued one.
         try { await previous; }
-        catch { /* observed above */ }
+        catch { /* observed where it happened */ }
 
         try
         {
-            var result = await _frontend.SetOem1MappingAsync(next);
-            _oem1PersistedMapping = result.Oem1Mapping;
+            var result = await _frontend.SetFrontButtonMappingAsync(next);
+            _frontButtonPersistedMapping = result.FrontButtonMapping;
 
-            // A newer edit was queued while this request was in flight -- its own save is already
-            // chained behind this one and will apply the true final state; applying this now-stale
-            // response would visibly revert what the user just did on either page.
-            if (version != _oem1EditVersion) return;
+            if (version != _frontButtonEditVersion) return;
 
-            _oem1UiMapping = result.Oem1Mapping;
-            ControllerContent.ApplyOem1Mapping(result.Oem1Mapping);
+            _frontButtonUiMapping = result.FrontButtonMapping;
+            ControllerContent.ApplyFrontButtonMapping(result.FrontButtonMapping);
         }
         catch (Exception exception)
         {
-            AppLog.Warn("Window", "Center M mapping save failed.", exception);
-            // Roll both pages back to what is actually persisted -- but only if nothing newer is
-            // already queued to resolve this itself.
-            if (version != _oem1EditVersion) return;
+            AppLog.Warn("Window", "Front-button mapping save failed.", exception);
+            if (version != _frontButtonEditVersion) return;
 
-            _oem1UiMapping = _oem1PersistedMapping;
-            ControllerContent.ApplyOem1Mapping(_oem1PersistedMapping);
+            _frontButtonUiMapping = _frontButtonPersistedMapping;
+            ControllerContent.ApplyFrontButtonMapping(_frontButtonPersistedMapping);
         }
     }
 

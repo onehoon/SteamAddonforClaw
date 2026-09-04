@@ -29,7 +29,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly DeveloperTestModeState _developer;
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
     private readonly Func<string?> _processPath;
-    private readonly bool _oem1MappingAvailable;
+    private readonly bool _frontButtonMappingAvailable;
     private int _shutdownStarted;
     private readonly object _clawSensorProbeGate = new();
     private ClawSensorProbeSession? _clawSensorProbe;
@@ -73,18 +73,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // valid passive state -- the request just reports unavailable, like every other null fallback here.
     private readonly ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
 
-    /// <param name="oem1MappingAvailable">The startup hardware-support result
+    /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
-    /// UI gates the Center M Button feature on the SAME fact the routing composition's OEM1 action
-    /// path gates on. Defaults to false so any construction path that never established hardware
-    /// support reports the feature unavailable rather than offering it.</param>
+    /// UI gates the front-button mapping feature on the SAME fact the front-button runtime gates on.
+    /// Defaults to false so any construction path that never established hardware support reports the
+    /// feature unavailable rather than offering it.</param>
     /// <param name="cpuBoostRuntime">The Device/Profile CPU Boost Runtime authority (owned by
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null)
     {
-        _oem1MappingAvailable = oem1MappingAvailable;
+        _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _centerMStartup = centerMStartup;
         _centerMAuthorityTransition = centerMAuthorityTransition;
         _cpuBoostRuntime = cpuBoostRuntime;
@@ -314,7 +314,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(false, new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
     private FrontendGameProfileMutationResult UnavailableMutation(uint appId, string message) => new(FrontendGameProfileMutationOutcome.Unavailable, message, CaptureGameProfile(appId));
 
-    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), new(_developer.IsEnabled), AppLog.DirectoryPath, _oem1MappingAvailable, _oem1MappingAvailable));
+    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), new(_developer.IsEnabled), AppLog.DirectoryPath, _frontButtonMappingAvailable));
 
     public async Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default)
     {
@@ -331,20 +331,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
-    public Task<FrontendSettingsSnapshot> SetOem1MappingAsync(Contracts.Oem1.Oem1MappingSettings mapping, CancellationToken cancellationToken = default)
+    public Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(Contracts.FrontButtons.FrontButtonMappingSettings mapping, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(mapping);
         ThrowIfShuttingDown();
-        _settings.ChangeOem1Mapping(mapping);
-        StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return Task.FromResult(MapSettings());
-    }
-
-    public Task<FrontendSettingsSnapshot> SetWingMappingAsync(Contracts.Wing.WingMappingSettings mapping, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(mapping);
-        ThrowIfShuttingDown();
-        _settings.ChangeWingMapping(mapping);
+        // Invalid candidates are rejected inside ChangeFrontButtonMapping (no write, no publish); the
+        // snapshot below then just reflects the unchanged persisted state.
+        _settings.ChangeFrontButtonMapping(mapping);
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(MapSettings());
     }
@@ -807,7 +800,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.Oem1Mapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, WingMapping = _settings.WingMapping };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1

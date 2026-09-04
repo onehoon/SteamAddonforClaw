@@ -282,6 +282,17 @@ Button detail page. **Still does not mark SD5 complete: no real-hardware
 validation has been performed** -- all coverage remains deterministic
 automated tests with fake WMI/process/launch/key-injection seams.
 
+App UI PR-C update (2026-09-04): the split OEM1/WING persistence above is
+superseded. There is now one atomic `FrontButtonMappingSettings`
+(`SteamInputAddonforClaw.Contracts/FrontButtons`) covering Gamebar Button and
+Center M Button, each with one Normal and one Steam Game / Big Picture action;
+no `None`, no persisted Double slots, no Remapping Enabled switch. Domain is
+resolved from the actual Full1902 SteamDeck presentation. The
+`QuickSettingsOverlay` action routes through the existing
+`AddonProcessHost.RequestOverlayToggle` coordinated seam. Frontend protocol is
+v25. Full1902 Policy B (#473) is already production-active; Gamebar/WING
+delivery is bound to `WinGSuppressionGuard.IsArmed`, not a constant.
+
 PR3 WING Event88 runtime path: the MSI Event88 semantic source is now
 software-wired to the canonical WinGProtection authority epoch. The default
 Single action is SteamButton and Double is None; SteamButton uses the existing

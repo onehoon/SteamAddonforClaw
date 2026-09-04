@@ -1,5 +1,5 @@
 using System.Runtime.InteropServices;
-using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 
 namespace SteamInputAddonforClaw.CenterM;
 
@@ -22,7 +22,7 @@ internal static class Oem1KeyboardHotkeyExecutor
     /// without touching the real OS input queue. Null (the default) in production.</summary>
     internal static Action<ushort, bool>? TestOnly_SendKeyOverride;
 
-    internal static void Send(Oem1HotkeyBinding hotkey)
+    internal static void Send(FrontButtonHotkeyBinding hotkey)
     {
         ArgumentNullException.ThrowIfNull(hotkey);
         // An unfinished hotkey configuration is not a failure -- there is simply nothing to press.
@@ -56,13 +56,13 @@ internal static class Oem1KeyboardHotkeyExecutor
     }
 
     /// <summary>Modifiers first (in a fixed, conventional order), the single key last.</summary>
-    private static ushort[] BuildKeySequence(Oem1HotkeyBinding hotkey)
+    private static ushort[] BuildKeySequence(FrontButtonHotkeyBinding hotkey)
     {
         var keys = new List<ushort>(5);
-        if (hotkey.Modifiers.HasFlag(Oem1HotkeyModifiers.Control)) keys.Add(VkControl);
-        if (hotkey.Modifiers.HasFlag(Oem1HotkeyModifiers.Shift)) keys.Add(VkShift);
-        if (hotkey.Modifiers.HasFlag(Oem1HotkeyModifiers.Alt)) keys.Add(VkAlt);
-        if (hotkey.Modifiers.HasFlag(Oem1HotkeyModifiers.Windows)) keys.Add(VkLeftWindows);
+        if (hotkey.Modifiers.HasFlag(FrontButtonHotkeyModifiers.Control)) keys.Add(VkControl);
+        if (hotkey.Modifiers.HasFlag(FrontButtonHotkeyModifiers.Shift)) keys.Add(VkShift);
+        if (hotkey.Modifiers.HasFlag(FrontButtonHotkeyModifiers.Alt)) keys.Add(VkAlt);
+        if (hotkey.Modifiers.HasFlag(FrontButtonHotkeyModifiers.Windows)) keys.Add(VkLeftWindows);
         keys.Add((ushort)hotkey.Key);
         return [.. keys];
     }

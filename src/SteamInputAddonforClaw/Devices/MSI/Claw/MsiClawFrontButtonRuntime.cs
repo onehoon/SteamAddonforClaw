@@ -1,5 +1,4 @@
 using SteamInputAddonforClaw.CenterM;
-using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Wing;
 
@@ -65,20 +64,24 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
     /// hardware (the OEM1 mapping feature only exists on a supported MSI Claw), matching the previous
     /// <c>MsiClawRoutingComposition.ConfigureOem1ActionPath</c> hardware gate.
     /// </summary>
-    /// <param name="isSteamDeckPresentationActive">Full1902 A2 section 5: <see langword="true"/> when
-    /// the active Full1902 presentation is SteamDeck. Selects the OEM1 Routing mapping domain.</param>
-    /// <param name="tryRequestQuickAccessPulse">OEM1 <c>SteamQuickAccess</c> action -- the live
+    /// <param name="isSteamDeckPresentationActive">App UI PR-C section 5: <see langword="true"/> when
+    /// the active Full1902 presentation is SteamDeck. Selects the Steam Game / Big Picture mapping
+    /// domain for both physical buttons.</param>
+    /// <param name="requestOverlayToggle">The <c>QuickSettingsOverlay</c> action -- the existing
+    /// Runtime-owned coordinated Overlay toggle seam (<c>AddonProcessHost.RequestOverlayToggle</c>),
+    /// never the Overlay process controller or transport directly.</param>
+    /// <param name="tryRequestQuickAccessPulse">The <c>SteamQuickAccess</c> action -- the live
     /// SteamDeck presentation's Quick Access system-button pulse seam.</param>
-    /// <param name="tryRequestSteamPulse">WING <c>SteamButton</c> action -- the live SteamDeck
+    /// <param name="tryRequestSteamPulse">The <c>SteamButton</c> action -- the live SteamDeck
     /// presentation's Steam system-button pulse seam.</param>
-    /// <param name="nativeWinGSuppressionReady">Full1902 A2 section 9.2: WING custom action delivery
-    /// stays gated by native Win+G suppression readiness until Policy B binds suppression to Addon
-    /// authority. Production passes a callback that is currently always <see langword="false"/>.</param>
+    /// <param name="nativeWinGSuppressionReady">Full1902 Policy B (already merged): WING / Gamebar
+    /// custom action delivery is live only while native Win+G suppression is proven armed for this
+    /// Addon-authority lifetime. Production binds this to <c>WinGSuppressionGuard.IsArmed</c>.</param>
     internal static MsiClawFrontButtonRuntime Create(
         bool hardwareSupported,
-        Settings.IOem1MappingPreference oem1MappingPreference,
-        Settings.IWingMappingPreference wingMappingPreference,
+        Settings.IFrontButtonMappingPreference frontButtonMappingPreference,
         Func<bool> isSteamDeckPresentationActive,
+        Action requestOverlayToggle,
         Func<bool> tryRequestQuickAccessPulse,
         Func<bool> tryRequestSteamPulse,
         Func<bool>? nativeWinGSuppressionReady = null,
@@ -87,12 +90,14 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
         IOem1GestureDelay? oem1GestureDelay = null,
         IOem1GestureClock? oem1GestureClock = null,
         Action? launchBigPictureOverride = null,
+        Action<Contracts.FrontButtons.FrontButtonHotkeyBinding>? sendHotkeyOverride = null,
+        Action<Contracts.FrontButtons.FrontButtonLaunchApplicationBinding>? launchApplicationOverride = null,
         IOem1GestureDelay? wingGestureDelay = null,
         TimeProvider? wingTimeProvider = null)
     {
-        ArgumentNullException.ThrowIfNull(oem1MappingPreference);
-        ArgumentNullException.ThrowIfNull(wingMappingPreference);
+        ArgumentNullException.ThrowIfNull(frontButtonMappingPreference);
         ArgumentNullException.ThrowIfNull(isSteamDeckPresentationActive);
+        ArgumentNullException.ThrowIfNull(requestOverlayToggle);
         ArgumentNullException.ThrowIfNull(tryRequestQuickAccessPulse);
         ArgumentNullException.ThrowIfNull(tryRequestSteamPulse);
         var suppressionReady = nativeWinGSuppressionReady ?? (static () => false);
@@ -104,26 +109,30 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
             return new MsiClawFrontButtonRuntime(suppressionReady);
         }
 
+        Func<Contracts.FrontButtons.FrontButtonMappingSettings> captureMapping = () => frontButtonMappingPreference.FrontButtonMapping;
+
+        // §2 (addendum): one stateless executor shared by both physical-button dispatchers so the
+        // action switch is not hand-copied. It reaches every seam a domain can legally resolve --
+        // coordinated Overlay toggle, Big Picture launcher, both system-button pulses, hotkey, and
+        // application launcher.
+        var actionExecutor = new CenterM.FrontButtonActionExecutor(
+            requestOverlayToggle: requestOverlayToggle,
+            launchBigPicture: launchBigPictureOverride ?? Oem1BigPictureLauncher.Launch,
+            tryRequestSteamPulse: tryRequestSteamPulse,
+            tryRequestQuickAccessPulse: tryRequestQuickAccessPulse,
+            sendHotkey: sendHotkeyOverride,
+            launchApplication: launchApplicationOverride);
+
         // ---- OEM1 (Center M button) ----
         var oem1EventSource = oem1EventSourceOverride ?? new WmiMsiEventSource();
+        // §5.2 / §10.2: one action per physical press per domain -- production disables double-click
+        // recognition unconditionally so a press resolves immediately with no 200 ms wait.
         var oem1Recognizer = new Oem1GestureRecognizer(
-            doubleClickEnabled: () =>
-            {
-                var mapping = oem1MappingPreference.Oem1Mapping;
-                var slot = Oem1MappingSlots.Resolve(isSteamDeckPresentationActive(), Oem1Gesture.Double);
-                var binding = mapping.Resolve(slot);
-                return Oem1ActionCapabilities.Supports(binding.Action, slot) && binding.Action != Oem1Action.None;
-            },
+            doubleClickEnabled: static () => false,
             doubleClickWindow: TimeSpan.FromMilliseconds(200),
             delay: oem1GestureDelay, clock: oem1GestureClock);
         var oem1Bridge = new Oem1EventGestureBridge(oem1EventSource, oem1Recognizer);
-        var oem1Dispatcher = new Oem1ActionDispatcher(
-            captureMapping: () => oem1MappingPreference.Oem1Mapping,
-            captureRoutingDomainActive: isSteamDeckPresentationActive,
-            // The SteamQuickAccess action is only reachable from the Routing mapping domain, i.e. only
-            // while the SteamDeck presentation is live, so this seam is effectively self-gating.
-            requestQuickAccessPulse: () => tryRequestQuickAccessPulse(),
-            launchBigPicture: launchBigPictureOverride ?? Oem1BigPictureLauncher.Launch);
+        var oem1Dispatcher = new Oem1ActionDispatcher(captureMapping, isSteamDeckPresentationActive, actionExecutor);
 
         var runtime = new MsiClawFrontButtonRuntime(oem1EventSource, oem1Recognizer, oem1Bridge,
             wingEventSourceOverride ?? new WmiMsiEventSource(), suppressionReady);
@@ -141,13 +150,11 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
         oem1EventSource.Start();
         oem1Bridge.SetCustomAuthority(true, allowActivation: () => !runtime.Oem1FailedOpen);
 
-        // ---- WING ----
+        // ---- WING (Gamebar button) ----
         var wingRecognizer = new WingGestureRecognizer(
-            doubleEnabled: () => WingMapping.From(wingMappingPreference.WingMapping).Double.Action != WingAction.None,
+            doubleEnabled: static () => false,
             delay: wingGestureDelay, timeProvider: wingTimeProvider);
-        var wingDispatcher = new WingActionDispatcher(
-            () => WingMapping.From(wingMappingPreference.WingMapping),
-            trySteam: tryRequestSteamPulse);
+        var wingDispatcher = new WingActionDispatcher(captureMapping, isSteamDeckPresentationActive, actionExecutor);
         var wingBridge = new WingEventGestureBridge(runtime._wingEventSource!, wingRecognizer, runtime.CaptureWingAuthority, wingDispatcher);
         runtime._wingBridge = wingBridge;
         if (!runtime._wingEventSource!.Start())
