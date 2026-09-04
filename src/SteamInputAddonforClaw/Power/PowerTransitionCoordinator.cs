@@ -13,11 +13,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly Func<CancellationToken, Task<bool>>? _afterRecovery;
     private readonly bool _recoveryEnabled;
     private readonly TimeSpan _suspendQuiesceBudget;
-    private readonly Func<bool> _hasResidualRoutingCleanup;
-    private readonly Func<CancellationToken, Task<bool>> _retryResidualRoutingCleanup;
-    private readonly Func<bool> _hasPreservedRoutingSession;
-    private readonly Func<CancellationToken, Task<bool>> _reconcilePreservedRoutingSession;
-    private readonly Func<Task>? _afterPreservedRecoveryCommit;
     private readonly Action? _resumeObserved;
     private readonly SemaphoreSlim _serial = new(1, 1);
     private readonly Channel<QueuedNotification> _notifications = Channel.CreateUnbounded<QueuedNotification>(new() { SingleReader = true, SingleWriter = false });
@@ -28,7 +23,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Func<bool>? hasResidualRoutingCleanup = null, Func<CancellationToken, Task<bool>>? retryResidualRoutingCleanup = null, Func<bool>? hasPreservedRoutingSession = null, Func<CancellationToken, Task<bool>>? reconcilePreservedRoutingSession = null, Func<Task>? afterPreservedRecoveryCommit = null, Action? resumeObserved = null)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Action? resumeObserved = null)
     {
         (_gate, _recovery, _participants, _afterRecovery) = (gate, recovery, participants.ToArray(), afterRecovery);
         _recoveryEnabled = recoveryEnabled;
@@ -39,11 +34,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
         // headroom against enqueue-to-processing scheduling delay without weakening the real
         // production deadline.
         _suspendQuiesceBudget = suspendQuiesceBudget ?? TimeSpan.FromMilliseconds(1200);
-        _hasResidualRoutingCleanup = hasResidualRoutingCleanup ?? (() => false);
-        _retryResidualRoutingCleanup = retryResidualRoutingCleanup ?? (_ => Task.FromResult(true));
-        _hasPreservedRoutingSession = hasPreservedRoutingSession ?? (() => false);
-        _reconcilePreservedRoutingSession = reconcilePreservedRoutingSession ?? (_ => Task.FromResult(false));
-        _afterPreservedRecoveryCommit = afterPreservedRecoveryCommit;
         _resumeObserved = resumeObserved;
         _reader = Task.Run(ProcessNotificationsAsync);
     }
@@ -142,70 +132,10 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             var safe = false;
             try
             {
-                if (_hasPreservedRoutingSession())
-                {
-                    if (!_gate.TryOpenResumeCleanup(recoveryEpoch)) return;
-                    var preserved = false;
-                    var sealedCleanup = false;
-                    try { preserved = await _reconcilePreservedRoutingSession(cancellationToken).ConfigureAwait(false); }
-                    finally { sealedCleanup = _gate.TrySealResumeCleanup(recoveryEpoch); }
-                    if (!sealedCleanup || _gate.Epoch != recoveryEpoch) return;
-                    safe = preserved;
-                    var committed = _gate.TryCommitRecovery(recoveryEpoch, safe, () =>
-                    {
-                        _recovery.Set(safe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
-                        State = safe ? PowerTransitionState.Awake : PowerTransitionState.Unsafe;
-                    });
-                    if (!committed) return;
-                    if (safe && _afterPreservedRecoveryCommit is not null)
-                    {
-                        try { await _afterPreservedRecoveryCommit().ConfigureAwait(false); }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-                        catch (Exception exception)
-                        {
-                            AppLog.Error("Power.Recovery", "Post-commit deferred routing reconciliation failed.", exception,
-                                ("Cycle", cycleForResume), ("Epoch", recoveryEpoch));
-                        }
-                    }
-                    return;
-                }
-                if (_hasResidualRoutingCleanup())
-                {
-                    if (!_gate.TryOpenResumeCleanup(recoveryEpoch))
-                    {
-                        AppLog.Warn("Power.Recovery", "Residual routing cleanup window could not be opened.", null, ("Cycle", cycleForResume), ("Epoch", recoveryEpoch));
-                        return;
-                    }
-                    var cleaned = false;
-                    var sealedCleanup = false;
-                    try { cleaned = await _retryResidualRoutingCleanup(cancellationToken).ConfigureAwait(false); }
-                    finally { sealedCleanup = _gate.TrySealResumeCleanup(recoveryEpoch); }
-                    if (!sealedCleanup)
-                    {
-                        AppLog.Warn("Power.Recovery", "Residual cleanup completion ignored because a newer power epoch is authoritative.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch));
-                        return;
-                    }
-                    AppLog.Info("Power.Recovery", "Residual routing cleanup retried on resume.", ("Cycle", cycleForResume), ("Epoch", recoveryEpoch), ("Result", cleaned ? "Succeeded" : "Failed"));
-                    if (!cleaned)
-                    {
-                        // The current process still owns exact stage state and the frozen
-                        // routing plan -- a failed owner-stage rollback here must not fall
-                        // through to journal recovery, which cannot know this stage's true state.
-                        _gate.TryCommitRecovery(recoveryEpoch, openGate: false, () =>
-                        {
-                            _recovery.Set(RecoverySafety.Unsafe);
-                            State = PowerTransitionState.Unsafe;
-                        });
-                        return;
-                    }
-                }
-
                 if (_hasIncompleteRecovery())
                 {
-                    // Residual routing cleanup above (if any) already retried the current
-                    // process's own canonical pipeline teardown. A journal still remaining at
-                    // this point is not state to replay -- it is fail-closed evidence that
-                    // cleanup is incomplete or ambiguous.
+                    // A journal still remaining at resume is not state to replay -- it is
+                    // fail-closed evidence that a prior owned mutation did not finish cleanly.
                     AppLog.Warn("Power.Resume", "Recovery journal remains after canonical cleanup; failing closed instead of replaying it.", null, ("Cycle", cycleForResume), ("Epoch", recoveryEpoch));
                     recoveryCompleted = true;
                     _gate.TryCommitRecovery(recoveryEpoch, openGate: false, () =>
