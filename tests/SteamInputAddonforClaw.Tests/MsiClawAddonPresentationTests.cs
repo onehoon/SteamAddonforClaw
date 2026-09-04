@@ -971,14 +971,56 @@ public sealed class MsiClawAddonPresentationTests
 
     private sealed class FakeRumbleSink : SteamInputAddonforClaw.Feedback.IPhysicalRumbleSink
     {
+        private readonly object _sync = new();
         internal List<SteamInputAddonforClaw.Feedback.TwoMotorRumble> Writes { get; } = [];
         internal bool Throw { get; set; }
+        // When set, the FIRST non-zero write blocks on this gate until the test releases it, modeling
+        // WindowsMsiClawRumbleTransport's up-to-250 ms pending physical write.
+        internal ManualResetEventSlim? BlockFirstNonZeroWrite { get; set; }
+        internal ManualResetEventSlim FirstNonZeroWriteEntered { get; } = new(false);
+        private bool _blocked;
+
         public SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteResult SetRumble(SteamInputAddonforClaw.Feedback.TwoMotorRumble rumble)
         {
             if (Throw) throw new InvalidOperationException("sink failure");
-            Writes.Add(rumble);
+            if (BlockFirstNonZeroWrite is { } gate && !_blocked && !rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
+            {
+                _blocked = true;
+                FirstNonZeroWriteEntered.Set();
+                gate.Wait();
+            }
+            lock (_sync) Writes.Add(rumble);
             return new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "OK");
         }
+    }
+
+    [Fact] // PR #488 review finding 2: a callback already inside a pending physical write is drained
+           // by the bridge Dispose, so the lifecycle STOP is always the final physical write.
+    public async Task A_callback_pending_in_the_sink_cannot_land_a_non_zero_write_after_the_lifecycle_stop()
+    {
+        var native = new FakeNative();
+        var gate = new ManualResetEventSlim(false);
+        var sink = new FakeRumbleSink { BlockFirstNonZeroWrite = gate };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+
+        // A native rumble callback enters the sink and blocks mid-write.
+        var callback = Task.Run(() => native.ArmedXbox360RumbleCallback!(0, 200, 100));
+        Assert.True(sink.FirstNonZeroWriteEntered.Wait(TimeSpan.FromSeconds(2)));
+
+        // Retire on another thread: DisarmFeedbackAndStopLocked -> bridge.Dispose() must block draining
+        // the in-progress write before the STOP is issued.
+        var retire = Task.Run(() => owner.ReleaseForCenterMEnableAsync(default));
+        await Task.Delay(100);
+        Assert.False(retire.IsCompleted); // still draining the blocked callback
+
+        gate.Set();
+        Assert.True(await retire);
+        await callback;
+
+        Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes[^1]);
+        Assert.Single(sink.Writes, w => w.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped));
+        await owner.DisposeAsync();
     }
 
     // ---- fakes ----

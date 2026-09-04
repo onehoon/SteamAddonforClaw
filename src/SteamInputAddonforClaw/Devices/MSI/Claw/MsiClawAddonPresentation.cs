@@ -421,7 +421,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     /// <summary>Clears the native feedback callback and requests a best-effort physical STOP, so a
     /// retired/paused presentation can never leave a motor latched. Ordering: the caller has already
-    /// stopped/joined the publisher.</summary>
+    /// stopped/joined the publisher; <c>armed.Dispose()</c> clears the native registration, cancels
+    /// the SteamDeck dead-man stop, and DRAINS any callback still inside its physical write, so the
+    /// STOP written below is guaranteed to be the final physical write.</summary>
     private void DisarmFeedbackAndStopLocked(string reason)
     {
         var armed = _armedFeedback;
