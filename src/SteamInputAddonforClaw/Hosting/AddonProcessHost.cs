@@ -477,7 +477,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             // PR6 section 5: canonical VIIPER must be positively Ready before any new PID takeover.
             var viiper = LoadAndInitializeCanonicalViiper();
-            var presentation = new Devices.MSI.Claw.MsiClawAddonPresentation(viiper);
+            // Full1902 production rumble: one physical MSI writer for the live owned-controller
+            // runtime, keyed to the same verified PID1902 physical session the owner exposes. The
+            // presentation owner arms/disarms the active virtual presentation's feedback callback
+            // against this one sink; it never reaches for a second physical writer or discovery.
+            var rumbleSink = new Devices.MSI.Claw.MsiClawRumbleSink(owner, new Devices.MSI.Claw.WindowsMsiClawRumbleTransport());
+            var presentation = new Devices.MSI.Claw.MsiClawAddonPresentation(viiper, rumbleSink);
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));
@@ -575,7 +580,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         return native is null ? null : VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
     }
 
-    private Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? CreatePhysicalOwnership(AddonStartupComposition startupComposition)
+    // Returns the concrete owner (not just IMsiClawAddonPhysicalOwnership): the Full1902 rumble sink
+    // consumes its IMsiClawPhysicalInputIdentityProvider face for the verified current PID1902 session.
+    private Devices.MSI.Claw.MsiClawAddonPhysicalOwnership? CreatePhysicalOwnership(AddonStartupComposition startupComposition)
     {
         if (startupComposition.HandheldDeviceAdapter.NativeState is not Devices.MSI.Claw.MsiClawNativeStateManager nativeState)
         {

@@ -156,6 +156,7 @@ public sealed class CanonicalSteamDeckSessionTests
         public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint handle) { Calls.Add("RemoveSteamDeckDeviceEx"); return SteamDeckDeviceRemoveResult.Success; }
         public bool CreateXbox360Device(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid, byte subtype) { Calls.Add("CreateXbox360Device"); handle = 30; return true; }
         public bool SetXbox360DeviceState(nuint handle, Xbox360DeviceState state) => true;
+        public bool SetXbox360RumbleCallback(nuint handle, Xbox360RumbleCallback? callback) { Calls.Add("SetXbox360RumbleCallback"); return true; }
         public bool RemoveXbox360Device(nuint handle) { Calls.Add("RemoveXbox360Device"); return true; }
         public Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint handle) { Calls.Add("RemoveXbox360DeviceEx"); return Xbox360DeviceRemoveResult.Success; }
     }

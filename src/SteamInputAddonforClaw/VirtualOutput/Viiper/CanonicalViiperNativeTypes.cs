@@ -19,6 +19,13 @@ internal delegate void ViiperLogCallback(ViiperLogLevel level, nint message);
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate void SteamDeckOutputCallback(nuint handle, nint data, uint length);
 
+// Mirrors VIIPER's native Xbox360 rumble callback typedef
+// (src/SteamInputAddonforClaw/Dependencies/Viiper/libVIIPER.h -- see PROVENANCE.md for the pinned
+// commit): invoked by libVIIPER with the owning Xbox360 device handle and the host's already-decoded
+// left (large/low-frequency) and right (small/high-frequency) motor intensities, 0..255.
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate void Xbox360RumbleCallback(nuint handle, byte leftMotor, byte rightMotor);
+
 // Mirrors the generated dist/libVIIPER/libVIIPER.h classified USB attachment enums exactly
 // (VIIPER main@a6bb749199aa797da690c611d2f18edc5e770c1e -- see
 // src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md for the pinned commit). Distinct

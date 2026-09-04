@@ -29,4 +29,32 @@ public sealed class VibrationContractRemovalTests
             typeof(SteamInputAddonforClaw.Contracts.Frontend.IAddonFrontendControl).GetMethods(),
             m => m.Name.Contains("VibrationTest", StringComparison.Ordinal));
     }
+
+    [Fact] // Full1902 production rumble (work order section 19.7): the production feedback path must
+           // not indirectly reconnect the Cleanup-J Developer Vibration Test or the deleted
+           // routing-era feedback authority/bridge.
+    public void Production_rumble_feedback_does_not_reconnect_the_developer_vibration_or_legacy_feedback_authority()
+    {
+        var runtime = typeof(SteamInputAddonforClaw.Feedback.TwoMotorRumble).Assembly;
+        foreach (var forbidden in new[]
+        {
+            "SteamInputAddonforClaw.Feedback.FeedbackAuthority",
+            "SteamInputAddonforClaw.Feedback.FeedbackAuthorityToken",
+            "SteamInputAddonforClaw.Feedback.FeedbackAuthorityLease",
+            "SteamInputAddonforClaw.Feedback.SteamDeckRumbleFeedbackBridge",
+            "SteamInputAddonforClaw.Feedback.RumbleManager",
+            "SteamInputAddonforClaw.Feedback.FeedbackManager",
+        })
+            Assert.Null(runtime.GetType(forbidden));
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var bridge = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Feedback/PresentationRumbleFeedback.cs"));
+        var presentation = File.ReadAllText(Path.Combine(dir.FullName, "src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPresentation.cs"));
+        foreach (var forbidden in new[] { "FeedbackAuthority", "RunVibrationTest", "OpenVibrationTestSession", "VibrationTestSession" })
+        {
+            Assert.DoesNotContain(forbidden, bridge, StringComparison.Ordinal);
+            Assert.DoesNotContain(forbidden, presentation, StringComparison.Ordinal);
+        }
+    }
 }

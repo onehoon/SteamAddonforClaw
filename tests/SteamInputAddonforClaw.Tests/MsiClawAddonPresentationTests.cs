@@ -797,6 +797,232 @@ public sealed class MsiClawAddonPresentationTests
         }
     }
 
+    // ---- Full1902 production rumble feedback lifetime (work order sections 8-13 / 19.4 / 19.6) ----
+
+    private static MsiClawAddonPresentation BuildWithSink(FakeNative native, FakePublisher xbox360, FakePublisher deck, FakeRumbleSink sink)
+    {
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
+        Assert.NotNull(runtime);
+        return new MsiClawAddonPresentation(
+            runtime,
+            rumbleSink: sink,
+            deckSessionFactory: r => new CanonicalSteamDeckSession(r),
+            xbox360PublisherFactory: (_, _, fault) => { xbox360.Fault = fault; return xbox360; },
+            deckPublisherFactory: (_, _, _, fault) => { deck.Fault = fault; return deck; });
+    }
+
+    [Fact]
+    public async Task Xbox360_attach_arms_only_the_xbox360_rumble_callback()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+
+        Assert.Contains("SetXbox360RumbleCallback", native.Calls);
+        Assert.DoesNotContain("SetSteamDeckOutputCallback", native.Calls);
+        Assert.NotNull(native.ArmedXbox360RumbleCallback);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SteamDeck_attach_arms_only_the_deck_output_callback()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+
+        await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+
+        Assert.Contains("SetSteamDeckOutputCallback", native.Calls);
+        Assert.DoesNotContain("SetXbox360RumbleCallback", native.Calls);
+        Assert.NotNull(native.ArmedSteamDeckOutputCallback);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Driving_the_xbox360_rumble_callback_writes_the_expanded_two_motor_rumble_to_the_shared_sink()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+
+        native.ArmedXbox360RumbleCallback!(0, 255, 0);
+
+        Assert.Contains(new SteamInputAddonforClaw.Feedback.TwoMotorRumble(65535, 0), sink.Writes);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Driving_the_deck_output_callback_decodes_recognized_packets_and_ignores_non_rumble()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+
+        var rumble = new byte[] { 0xEB, 9, 1, 0x10, 0x00, 0xC8, 0x00, 0x40, 0x00, 0, 0 };
+        DriveDeckCallback(native, rumble);
+        Assert.Contains(new SteamInputAddonforClaw.Feedback.TwoMotorRumble(0x00C8, 0x0040), sink.Writes);
+
+        var writesBefore = sink.Writes.Count;
+        DriveDeckCallback(native, new byte[] { 0xB6, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }); // unsupported opcode
+        Assert.Equal(writesBefore, sink.Writes.Count);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Callback_exceptions_and_write_failures_are_contained_and_the_presentation_stays_active()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink { Throw = true };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+
+        var exception = Record.Exception(() => native.ArmedXbox360RumbleCallback!(0, 10, 20));
+
+        Assert.Null(exception);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Switch_xbox360_to_deck_clears_the_old_callback_requests_stop_then_arms_deck()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+
+        Assert.Equal(PresentationReconcileOutcome.Attached, (await owner.ReconcileDesiredPresentationAsync(new FakeSource(), () => WantsXbox(), default)).Outcome);
+        native.Calls.Clear();
+        sink.Writes.Clear();
+
+        Assert.Equal(PresentationReconcileOutcome.Switched, (await owner.ReconcileDesiredPresentationAsync(new FakeSource(), () => WantsDeck(), default)).Outcome);
+
+        Assert.Contains("ClearXbox360RumbleCallback", native.Calls);
+        Assert.True(native.Calls.IndexOf("ClearXbox360RumbleCallback") < native.Calls.IndexOf("DetachUSBDeviceEx"));
+        Assert.Contains(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes);
+        Assert.Contains("SetSteamDeckOutputCallback", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Retirement_clears_the_callback_and_requests_a_physical_stop()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        sink.Writes.Clear();
+
+        Assert.True(await owner.ReleaseForCenterMEnableAsync(default));
+
+        Assert.Contains("ClearXbox360RumbleCallback", native.Calls);
+        Assert.Contains(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes);
+    }
+
+    [Fact]
+    public async Task Xbox360_rumble_callback_registration_failure_keeps_the_controller_presentation_healthy()
+    {
+        var native = new FakeNative();
+        native.RumbleCallbackResults.Enqueue(false); // arm fails
+        var xbox360 = new FakePublisher();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, xbox360, new FakePublisher(), sink);
+
+        var result = await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation);
+        Assert.True(xbox360.Started);
+        Assert.Null(native.ArmedXbox360RumbleCallback);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Overlay_pause_disarms_and_stops_and_resume_rearms_the_same_presentation()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        sink.Writes.Clear();
+
+        Assert.Equal(OverlayPauseOutcome.Paused, (await owner.PauseForOverlayAsync(default)).Outcome);
+        Assert.Contains("ClearXbox360RumbleCallback", native.Calls);
+        Assert.Contains(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes);
+
+        native.Calls.Clear();
+        Assert.Equal(OverlayResumeOutcome.Resumed, (await owner.ResumeAfterOverlayAsync(new FakeSource(), default)).Outcome);
+        Assert.Contains("SetXbox360RumbleCallback", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    private static void DriveDeckCallback(FakeNative native, byte[] report)
+    {
+        var handle = System.Runtime.InteropServices.GCHandle.Alloc(report, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try { native.ArmedSteamDeckOutputCallback!(0, handle.AddrOfPinnedObject(), (uint)report.Length); }
+        finally { handle.Free(); }
+    }
+
+    private sealed class FakeRumbleSink : SteamInputAddonforClaw.Feedback.IPhysicalRumbleSink
+    {
+        private readonly object _sync = new();
+        internal List<SteamInputAddonforClaw.Feedback.TwoMotorRumble> Writes { get; } = [];
+        internal bool Throw { get; set; }
+        // When set, the FIRST non-zero write blocks on this gate until the test releases it, modeling
+        // WindowsMsiClawRumbleTransport's up-to-250 ms pending physical write.
+        internal ManualResetEventSlim? BlockFirstNonZeroWrite { get; set; }
+        internal ManualResetEventSlim FirstNonZeroWriteEntered { get; } = new(false);
+        private bool _blocked;
+
+        public SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteResult SetRumble(SteamInputAddonforClaw.Feedback.TwoMotorRumble rumble)
+        {
+            if (Throw) throw new InvalidOperationException("sink failure");
+            if (BlockFirstNonZeroWrite is { } gate && !_blocked && !rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
+            {
+                _blocked = true;
+                FirstNonZeroWriteEntered.Set();
+                gate.Wait();
+            }
+            lock (_sync) Writes.Add(rumble);
+            return new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "OK");
+        }
+    }
+
+    [Fact] // PR #488 review finding 2: a callback already inside a pending physical write is drained
+           // by the bridge Dispose, so the lifecycle STOP is always the final physical write.
+    public async Task A_callback_pending_in_the_sink_cannot_land_a_non_zero_write_after_the_lifecycle_stop()
+    {
+        var native = new FakeNative();
+        var gate = new ManualResetEventSlim(false);
+        var sink = new FakeRumbleSink { BlockFirstNonZeroWrite = gate };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+
+        // A native rumble callback enters the sink and blocks mid-write.
+        var callback = Task.Run(() => native.ArmedXbox360RumbleCallback!(0, 200, 100));
+        Assert.True(sink.FirstNonZeroWriteEntered.Wait(TimeSpan.FromSeconds(2)));
+
+        // Retire on another thread: DisarmFeedbackAndStopLocked -> bridge.Dispose() must block draining
+        // the in-progress write before the STOP is issued.
+        var retire = Task.Run(() => owner.ReleaseForCenterMEnableAsync(default));
+        await Task.Delay(100);
+        Assert.False(retire.IsCompleted); // still draining the blocked callback
+
+        gate.Set();
+        Assert.True(await retire);
+        await callback;
+
+        Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes[^1]);
+        Assert.Single(sink.Writes, w => w.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped));
+        await owner.DisposeAsync();
+    }
+
     // ---- fakes ----
 
     private sealed class FakeSource : IMsiClawPreparedInputSource
@@ -856,11 +1082,21 @@ public sealed class MsiClawAddonPresentationTests
         public bool GetUSBDeviceAttachmentState(nuint handle, out USBDeviceAttachmentState state) { Calls.Add("GetUSBDeviceAttachmentState"); state = AttachmentStates.Count > 0 ? AttachmentStates.Dequeue() : (_attachmentByHandle.TryGetValue(handle, out var s) ? s : USBDeviceAttachmentState.Detached); return true; }
         public bool CreateSteamDeckDevice(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid) { Calls.Add("CreateSteamDeckDevice"); handle = 20; return true; }
         public bool SetSteamDeckDeviceState(nuint handle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); return StateResults.Count == 0 || StateResults.Dequeue(); }
-        public bool SetSteamDeckOutputCallback(nuint handle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); return true; }
+        public bool SetSteamDeckOutputCallback(nuint handle, SteamDeckOutputCallback? callback) { Calls.Add(callback is null ? "ClearSteamDeckOutputCallback" : "SetSteamDeckOutputCallback"); var ok = RumbleCallbackResults.Count == 0 || RumbleCallbackResults.Dequeue(); if (ok) ArmedSteamDeckOutputCallback = callback; return ok; }
         public bool RemoveSteamDeckDevice(nuint handle) => throw new NotSupportedException();
         public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint handle) { Calls.Add("RemoveSteamDeckDeviceEx"); return SteamDeckDeviceRemoveResult.Success; }
+        internal Queue<bool> RumbleCallbackResults { get; } = [];
+        internal Xbox360RumbleCallback? ArmedXbox360RumbleCallback { get; private set; }
+        internal SteamDeckOutputCallback? ArmedSteamDeckOutputCallback { get; private set; }
         public bool CreateXbox360Device(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid, byte subtype) { Calls.Add("CreateXbox360Device"); handle = 30; return true; }
         public bool SetXbox360DeviceState(nuint handle, Xbox360DeviceState state) { Calls.Add("SetXbox360DeviceState"); return StateResults.Count == 0 || StateResults.Dequeue(); }
+        public bool SetXbox360RumbleCallback(nuint handle, Xbox360RumbleCallback? callback)
+        {
+            Calls.Add(callback is null ? "ClearXbox360RumbleCallback" : "SetXbox360RumbleCallback");
+            var ok = RumbleCallbackResults.Count == 0 || RumbleCallbackResults.Dequeue();
+            if (ok) ArmedXbox360RumbleCallback = callback;
+            return ok;
+        }
         public bool RemoveXbox360Device(nuint handle) { Calls.Add("RemoveXbox360Device"); return true; }
         public Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint handle) { Calls.Add("RemoveXbox360DeviceEx"); return Xbox360DeviceRemoveResult.Success; }
     }

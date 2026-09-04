@@ -509,6 +509,59 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Equal(0, h.SwitchCalls);
     }
 
+    // ---- Full1902 production rumble physical identity/generation (work order section 6 / 19.5) ----
+
+    [Fact]
+    public async Task Successful_acquisition_publishes_the_verified_descriptor_identity_and_first_generation()
+    {
+        var owner = new Harness { InitialMode = MsiClawNativeMode.DirectInput }.Build();
+
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+
+        var identity = ((IMsiClawPhysicalInputIdentityProvider)owner).CurrentIdentity;
+        Assert.NotNull(identity);
+        Assert.Equal(PrimaryPnp, identity!.PnpInstanceId);
+        Assert.Equal(1, ((IMsiClawPhysicalInputIdentityProvider)owner).CurrentSessionGeneration);
+    }
+
+    [Fact]
+    public async Task Real_loss_and_recovery_advances_the_physical_session_generation()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        var provider = (IMsiClawPhysicalInputIdentityProvider)owner;
+        Assert.Equal(1, provider.CurrentSessionGeneration);
+
+        Assert.True((await owner.RecoverLostInputAsync(default)).IsOwned);
+
+        Assert.Equal(2, provider.CurrentSessionGeneration);
+        Assert.NotNull(provider.CurrentIdentity);
+        Assert.Equal(PrimaryPnp, provider.CurrentIdentity!.PnpInstanceId);
+    }
+
+    [Fact]
+    public async Task A_failed_recovery_leaves_no_usable_rumble_identity()
+    {
+        var (owner, h) = await AcquiredThenLost(new Harness { InitialMode = MsiClawNativeMode.DirectInput });
+        h.RecoveryHidHideOutcome = AddonHidHideBaselineOutcome.Conflict; // recovery fails at the HidHide step
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, (await owner.RecoverLostInputAsync(default)).Outcome);
+
+        Assert.Null(((IMsiClawPhysicalInputIdentityProvider)owner).CurrentIdentity);
+    }
+
+    [Fact]
+    public void The_physical_owner_is_the_rumble_identity_provider_and_the_presentation_owner_never_bumps_the_generation()
+    {
+        Assert.True(typeof(IMsiClawPhysicalInputIdentityProvider).IsAssignableFrom(typeof(MsiClawAddonPhysicalOwnership)));
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var presentation = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPresentation.cs"));
+        // A virtual X360<->SteamDeck switch must not manufacture a physical-session generation.
+        Assert.DoesNotContain("SessionGeneration", presentation, StringComparison.Ordinal);
+        Assert.DoesNotContain("PublishLivePhysicalSession", presentation, StringComparison.Ordinal);
+    }
+
     [Fact] // 21.2 -- mandatory ordering
     public async Task Recovery_verifies_hidhide_before_restarting_directinput()
     {
@@ -1084,9 +1137,18 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         {
             "ExternalNativeTakeover", "ConfirmExternalNativeTakeover", "retryCurrentSessionAfterSafeCleanup",
             "ApplyEnabledModeBaseline", "ControllerRecoveryManager", "PhysicalRecoveryManager",
-            "Timer", "epoch", "generation", "RecoveryBarrier",
+            "Timer", "epoch", "RecoveryBarrier", "RumblePhysicalIdentityTracker",
         })
             Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
+
+        // Full1902 production rumble (work order section 6): the ONLY "generation" concept here is the
+        // narrow IMsiClawPhysicalInputIdentityProvider contract MsiClawRumbleSink already requires --
+        // a single incrementing value on real DirectInput-session commits, not a barrier/epoch
+        // framework. It advances on acquisition/recovery commit only, never on a virtual switch.
+        Assert.Contains("IMsiClawPhysicalInputIdentityProvider", source, StringComparison.Ordinal);
+        Assert.Contains("_currentSessionGeneration++", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecoveryGeneration", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("GenerationBarrier", source, StringComparison.Ordinal);
     }
 
     // ---- 30 architecture guard ----

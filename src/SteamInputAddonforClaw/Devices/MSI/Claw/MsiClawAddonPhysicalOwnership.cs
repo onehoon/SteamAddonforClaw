@@ -80,7 +80,7 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
 /// virtual X360/SteamDeck presentation. On failure it releases only process-owned handles: durable
 /// Addon authority is never silently released and PID1902 is never converted back to PID1901.
 /// </summary>
-internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwnership
+internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwnership, IMsiClawPhysicalInputIdentityProvider
 {
     private readonly Func<FrontendCenterMStartupState> _captureCenterMStartupState;
     private readonly Func<CancellationToken, Task<NativeStateCaptureResult>> _captureStableNativeState;
@@ -97,6 +97,13 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _ownsInputSource;
     private string? _ownedHiddenTarget;
+    // Production rumble physical identity/generation (work order section 6). Guarded by its own tiny
+    // lock, not _gate: MsiClawRumbleSink reads these on a VIIPER-owned callback thread and must never
+    // block on the async acquisition/recovery gate. The generation advances only when a real live
+    // DirectInput session is committed -- never for a virtual Xbox360<->SteamDeck presentation switch.
+    private readonly Lock _identitySync = new();
+    private MsiClawPhysicalInputIdentity? _currentIdentity;
+    private long _currentSessionGeneration;
     // PR8 section 6: the strong physical identity committed by a successful acquisition. Kept only in
     // memory, never persisted, and never cleared on a recovery failure -- the official
     // Enable-and-Restart release still needs it as ownership evidence.
@@ -131,6 +138,33 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     }
 
     public IMsiClawPreparedInputSource? LiveInputSource => _ownsInputSource ? _inputSource : null;
+
+    public MsiClawPhysicalInputIdentity? CurrentIdentity { get { lock (_identitySync) return _currentIdentity; } }
+
+    public long CurrentSessionGeneration { get { lock (_identitySync) return _currentSessionGeneration; } }
+
+    /// <summary>Publishes the just-committed live DirectInput session's identity from the same verified
+    /// descriptor acquisition/recovery already proved, and advances the physical-session generation.</summary>
+    private void PublishLivePhysicalSession(DirectInputDeviceDescriptor descriptor)
+    {
+        lock (_identitySync)
+        {
+            _currentIdentity = new MsiClawPhysicalInputIdentity(
+                descriptor.InstanceGuid,
+                descriptor.DevicePath ?? string.Empty,
+                descriptor.PnpInstanceId ?? string.Empty,
+                descriptor.PhysicalIdentity ?? string.Empty);
+            _currentSessionGeneration++;
+        }
+    }
+
+    /// <summary>Marks the owned DirectInput session no longer usable for normal rumble writes (real
+    /// loss, Center M Enable-and-Restart release, or teardown). A stale in-flight write is then
+    /// rejected by <see cref="MsiClawRumbleSink"/> on the null identity.</summary>
+    private void ClearLivePhysicalSession()
+    {
+        lock (_identitySync) _currentIdentity = null;
+    }
 
     public async Task<MsiClawPhysicalOwnershipResult> AcquireAsync(CancellationToken cancellationToken)
     {
@@ -279,6 +313,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         _ownsInputSource = true;
         _ownedHiddenTarget = target;
         _ownedPhysicalIdentity = finalIdentity;
+        PublishLivePhysicalSession(descriptor);
         AppLog.Info("ControllerOwnership", "Physical ownership acquired.", ("Result", "Owned"),
             ("ModeWriteIssued", modeWriteIssued), ("HiddenTarget", target));
         return new(MsiClawPhysicalOwnershipOutcome.Owned, "PhysicalOwnershipVerified", modeWriteIssued, target);
@@ -300,6 +335,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 if (_inputSource.IsRunning)
                     return new(false, "DirectInputStillRunning", target);
                 _ownsInputSource = false;
+                ClearLivePhysicalSession();
             }
 
             // Restore the same strongly-verified physical MSI Claw to PID1901. Center M roots are
@@ -368,6 +404,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         // The dead owned session is accepted for recovery. Do NOT clear the owned identity/target --
         // the official Enable-and-Restart release must still be able to clear exactly this entry.
         _ownsInputSource = false;
+        // The live rumble physical session is gone until recovery commits a fresh verified descriptor.
+        ClearLivePhysicalSession();
 
         // 10.3. Reuse the same bounded native/PnP settle capture PR5 was given.
         var capture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
@@ -513,6 +551,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         //        (After a PID1901->PID1902 reclaim, _ownedPhysicalIdentity was already refreshed to
         //        the fresh Strong PID1902 identity right after the post-reclaim capture verified.)
         _ownsInputSource = true;
+        PublishLivePhysicalSession(descriptor);
         var successReason = modeWriteIssued ? "OwnedPhysicalStateDriftReclaimed" : "OwnedPhysicalInputRecovered";
         AppLog.Info("ControllerOwnership", "Owned physical input recovery succeeded.",
             ("Event", "OwnedPhysicalRecoverySucceeded"), ("Reason", successReason),
@@ -635,6 +674,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             if (_ownsInputSource)
             {
                 _ownsInputSource = false;
+                ClearLivePhysicalSession();
                 await SafeStopAsync().ConfigureAwait(false);
             }
             try { await _inputSource.DisposeAsync().ConfigureAwait(false); }

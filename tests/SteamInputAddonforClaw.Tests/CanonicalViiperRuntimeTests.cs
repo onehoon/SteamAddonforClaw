@@ -1231,6 +1231,23 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime.State);
     }
 
+    [Fact] // Full1902 production rumble: the runtime forwards the Xbox360 host-rumble callback to the
+           // persistent Xbox360 logical device and roots nothing itself (parity with SetDeckOutputCallback).
+    public void SetXbox360RumbleCallback_forwards_to_the_persistent_xbox360_device_only_when_ready()
+    {
+        var native = new FakeNative();
+        var runtime = ReadyRuntime(native);
+        Xbox360RumbleCallback callback = (_, _, _) => { };
+
+        Assert.True(runtime.SetXbox360RumbleCallback(callback));
+        Assert.Same(callback, native.ArmedXbox360RumbleCallback);
+        Assert.Contains("SetXbox360RumbleCallback", native.Calls);
+        Assert.DoesNotContain("SetSteamDeckOutputCallback", native.Calls);
+
+        Assert.True(runtime.SetXbox360RumbleCallback(null));
+        Assert.Contains("ClearXbox360RumbleCallback", native.Calls);
+    }
+
     [Fact]
     public void Xbox360_route_primitives_only_ever_touch_the_Xbox360_handle_never_the_Deck_handle()
     {
@@ -1423,6 +1440,15 @@ public sealed class CanonicalViiperRuntimeTests
         {
             Calls.Add("SetXbox360DeviceState");
             return SetXbox360StateResults.Count == 0 || SetXbox360StateResults.Dequeue();
+        }
+        internal Queue<bool> SetXbox360RumbleCallbackResults { get; } = [];
+        internal Xbox360RumbleCallback? ArmedXbox360RumbleCallback { get; private set; }
+        public bool SetXbox360RumbleCallback(nuint deviceHandle, Xbox360RumbleCallback? callback)
+        {
+            Calls.Add(callback is null ? "ClearXbox360RumbleCallback" : "SetXbox360RumbleCallback");
+            var ok = SetXbox360RumbleCallbackResults.Count == 0 || SetXbox360RumbleCallbackResults.Dequeue();
+            if (ok) ArmedXbox360RumbleCallback = callback;
+            return ok;
         }
         public bool RemoveXbox360Device(nuint deviceHandle) { Calls.Add("RemoveXbox360Device"); return true; }
 

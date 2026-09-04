@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
@@ -159,6 +160,15 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher> _xbox360PublisherFactory;
     private readonly Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher> _deckPublisherFactory;
 
+    /// <summary>Full1902 production rumble: the one shared physical MSI writer, bound to the same
+    /// process-owned PID1902 physical session that feeds this presentation. Null in unit tests and on
+    /// a machine where the sink was not composed -- feedback is then simply never armed.</summary>
+    private readonly IPhysicalRumbleSink? _rumbleSink;
+    /// <summary>The presentation-scoped feedback callback adapter for the CURRENT active presentation,
+    /// or null when none is armed. Its lifetime is part of the presentation lifecycle serialized by
+    /// <see cref="_gate"/>; it is never a second authority.</summary>
+    private IDisposable? _armedFeedback;
+
     /// <summary>Full1902 A2: the one output-only synthetic Steam/QuickAccess system-button primitive,
     /// shared with the live SteamDeck publisher via <see cref="_deckPublisherFactory"/> so a front
     /// button emits a pulse on the existing continuous publish path -- never a second publication
@@ -176,11 +186,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     internal MsiClawAddonPresentation(
         CanonicalViiperRuntime? viiper,
+        IPhysicalRumbleSink? rumbleSink = null,
         Func<CanonicalViiperRuntime, ICanonicalSteamDeckSession>? deckSessionFactory = null,
         Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher>? xbox360PublisherFactory = null,
         Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? deckPublisherFactory = null)
     {
         _viiper = viiper;
+        _rumbleSink = rumbleSink;
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
         _xbox360PublisherFactory = xbox360PublisherFactory
             ?? ((source, setState, fault) => new PublisherAdapter(new CanonicalXbox360InputPublisher(source, setState, fault: fault)));
@@ -339,6 +351,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
         _publisher = publisher;
         _activeKind = AddonPresentationKind.Xbox360;
+        // Feedback is layered on top of a committed, healthy controller presentation: a callback
+        // registration failure leaves rumble unavailable for this presentation, never tears down input.
+        ArmFeedbackForActivePresentationLocked();
         AppLog.Info("ControllerPresentation", "Initial presentation attached.", ("Event", "InitialPresentationAttached"),
             ("Presentation", AddonPresentationKind.Xbox360), ("PublisherStarted", true));
         await Task.CompletedTask.ConfigureAwait(false);
@@ -377,6 +392,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         _deckSession = session;
         _publisher = publisher;
         _activeKind = AddonPresentationKind.SteamDeck;
+        ArmFeedbackForActivePresentationLocked();
         AppLog.Info("ControllerPresentation", "Initial presentation attached.", ("Event", "InitialPresentationAttached"),
             ("Presentation", AddonPresentationKind.SteamDeck), ("PublisherStarted", true));
         await Task.CompletedTask.ConfigureAwait(false);
@@ -384,6 +400,57 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     }
 
     // ---- publisher runtime fault: async fail-close only, no self-join, no re-attach, no PID touch ----
+
+    // ---- production rumble feedback lifetime (part of the presentation lifecycle, _gate held) ----
+
+    /// <summary>Arms the presentation-scoped feedback callback for the CURRENT active presentation.
+    /// No-op when there is no shared sink or feedback is already armed. A registration failure logs
+    /// and leaves <see cref="_armedFeedback"/> null -- the presentation stays healthy.</summary>
+    private void ArmFeedbackForActivePresentationLocked()
+    {
+        if (_rumbleSink is null || _armedFeedback is not null) return;
+        _armedFeedback = _activeKind switch
+        {
+            AddonPresentationKind.Xbox360 =>
+                Xbox360RumbleFeedbackBridge.TryArm(_rumbleSink, cb => _viiper!.SetXbox360RumbleCallback(cb)),
+            AddonPresentationKind.SteamDeck when _deckSession is { } session =>
+                SteamDeckRumbleFeedbackAdapter.TryArm(_rumbleSink, session.SetOutputCallback, session.ClearOutputCallback),
+            _ => null,
+        };
+    }
+
+    /// <summary>Clears the native feedback callback and requests a best-effort physical STOP, so a
+    /// retired/paused presentation can never leave a motor latched. Ordering: the caller has already
+    /// stopped/joined the publisher; <c>armed.Dispose()</c> clears the native registration, cancels
+    /// the SteamDeck dead-man stop, and DRAINS any callback still inside its physical write, so the
+    /// STOP written below is guaranteed to be the final physical write.</summary>
+    private void DisarmFeedbackAndStopLocked(string reason)
+    {
+        var armed = _armedFeedback;
+        _armedFeedback = null;
+        if (armed is not null)
+        {
+            try { armed.Dispose(); }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Rumble", "Production rumble feedback disarm threw.", exception, ("Reason", reason));
+            }
+        }
+
+        if (_rumbleSink is null) return;
+        try
+        {
+            var result = _rumbleSink.SetRumble(TwoMotorRumble.Stopped);
+            if (result.Status is PhysicalRumbleWriteStatus.Failed or PhysicalRumbleWriteStatus.Disposed)
+                AppLog.Debug("Rumble", "Production rumble STOP was not confirmed.",
+                    ("Event", "ProductionRumbleStopFailed"), ("Reason", reason), ("Status", result.Status));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Rumble", "Production rumble STOP threw.", exception,
+                ("Event", "ProductionRumbleStopFailed"), ("Reason", reason));
+        }
+    }
 
     private void OnPublisherFault(Exception exception)
     {
@@ -429,6 +496,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                     ("Event", "OverlayPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
                 return new(OverlayPauseOutcome.PublisherNotStopped, "PublisherStillRunning");
             }
+
+            // 1b. Clear the feedback callback and request a physical STOP so opening the Overlay can
+            //     never leave a pre-existing vibration latched. Resume re-arms the SAME presentation.
+            DisarmFeedbackAndStopLocked("OverlayPause");
 
             // 2. Write the SAME attached device neutral. A rejected neutral write on a proven-stopped
             //    publisher is a real output-safety failure: fail-close the current presentation
@@ -503,6 +574,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 return LeftNeutral("PublisherStartThrew");
             }
 
+            // Re-arm feedback for the SAME still-active presentation now that the publisher is live.
+            ArmFeedbackForActivePresentationLocked();
             AppLog.Info("OverlayCapture", "Same presentation resumed.", ("Event", "OverlayResumeResumed"), ("Presentation", kind));
             return new(OverlayResumeOutcome.Resumed, "Resumed");
         }
@@ -541,7 +614,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         // publisher (the overlay instance is shared across every SteamDeck publication).
         _systemButtonOverlay.Clear();
 
-        // 2. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
+        // 2-3. Stop accepting old-presentation feedback (clear the native callback) and request a
+        //      best-effort physical STOP before the typed device is detached, so a switch/release/
+        //      shutdown/fail-close can never leave a motor latched.
+        DisarmFeedbackAndStopLocked(reason);
+
+        // 4. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
         if (_activeKind == AddonPresentationKind.Xbox360)
         {
             var detach = _viiper!.DetachXbox360();
@@ -615,9 +693,14 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Fault cleanup task failed during teardown.", exception); }
         }
         // Best-effort controlled teardown: retire the presentation and VIIPER. PID1902 / HidHide are
-        // durable and untouched here (section 18).
+        // durable and untouched here (section 18). RetireAsync already disarmed feedback + requested
+        // a physical STOP through RetireActivePresentationCoreAsync.
         try { await RetireAsync("ProcessTeardown").ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Presentation teardown threw during dispose.", exception); }
+        // Dispose the shared physical rumble sink (and its HID transport) before the physical owner
+        // that backs its identity is disposed -- the host retires the presentation owner first.
+        try { (_rumbleSink as IDisposable)?.Dispose(); }
+        catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Physical rumble sink dispose threw.", exception); }
         _gate.Dispose();
     }
 

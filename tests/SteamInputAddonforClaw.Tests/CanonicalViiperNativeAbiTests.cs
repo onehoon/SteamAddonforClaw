@@ -27,7 +27,7 @@ public sealed class CanonicalViiperNativeAbiTests
             "AttachUSBDeviceEx", "DetachUSBDeviceEx", "GetUSBDeviceAttachmentState",
             "CreateSteamDeckDevice", "SetSteamDeckDeviceState", "SetSteamDeckOutputCallback",
             "RemoveSteamDeckDevice", "RemoveSteamDeckDeviceEx",
-            "CreateXbox360Device", "SetXbox360DeviceState", "RemoveXbox360Device", "RemoveXbox360DeviceEx"
+            "CreateXbox360Device", "SetXbox360DeviceState", "SetXbox360RumbleCallback", "RemoveXbox360Device", "RemoveXbox360DeviceEx"
         };
 
         Assert.Equal(expected, CanonicalViiperNativeApi.RequiredExports);
@@ -37,8 +37,9 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.DoesNotContain("SetSteamControllerOutputCallback", CanonicalViiperNativeApi.RequiredExports);
         Assert.DoesNotContain("RemoveSteamControllerDevice", CanonicalViiperNativeApi.RequiredExports);
         Assert.DoesNotContain("RemoveSteamControllerDeviceEx", CanonicalViiperNativeApi.RequiredExports);
-        // PR1 is buttons/D-pad/sticks/triggers only -- no Xbox360 rumble callback is bound.
-        Assert.DoesNotContain("SetXbox360RumbleCallback", CanonicalViiperNativeApi.RequiredExports);
+        // Full1902 production rumble binds the Xbox360 host-rumble callback (App-side ABI only; the
+        // pinned VIIPER dependency already exported it).
+        Assert.Contains("SetXbox360RumbleCallback", CanonicalViiperNativeApi.RequiredExports);
     }
 
     // Steam Deck ABI (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR #16). Field order,
@@ -201,8 +202,23 @@ public sealed class CanonicalViiperNativeAbiTests
         AssertParameters("GetUsbDeviceAttachmentStateDelegate", typeof(nuint), typeof(USBDeviceAttachmentState).MakeByRefType());
         AssertParameters("CreateXbox360DeviceDelegate", typeof(nuint), typeof(nuint).MakeByRefType(), typeof(uint), typeof(byte), typeof(ushort), typeof(ushort), typeof(byte));
         AssertParameters("SetXbox360DeviceStateDelegate", typeof(nuint), typeof(Xbox360DeviceState));
+        AssertParameters("SetXbox360RumbleCallbackDelegate", typeof(nuint), typeof(Xbox360RumbleCallback));
         AssertParameters("RemoveXbox360DeviceDelegate", typeof(nuint));
         AssertParameters("RemoveXbox360DeviceExDelegate", typeof(nuint));
+    }
+
+    [Fact] // Full1902 production rumble: the managed Xbox360 rumble callback must mirror the pinned
+           // libVIIPER.h typedef -- void (*)(Xbox360DeviceHandle, uint8_t leftMotor, uint8_t rightMotor).
+    public void Xbox360RumbleCallback_IsCdeclAndHasTheExpectedParameterSignature()
+    {
+        Assert.Equal(CallingConvention.Cdecl, typeof(Xbox360RumbleCallback).GetCustomAttribute<UnmanagedFunctionPointerAttribute>()!.CallingConvention);
+
+        var invoke = typeof(Xbox360RumbleCallback).GetMethod("Invoke")!;
+        Assert.Equal(typeof(void), invoke.ReturnType);
+        var parameters = invoke.GetParameters();
+        Assert.Equal(typeof(nuint), parameters[0].ParameterType);
+        Assert.Equal(typeof(byte), parameters[1].ParameterType);
+        Assert.Equal(typeof(byte), parameters[2].ParameterType);
     }
 
     // ---- Classified attachment ABI (USBDeviceAttachResult / USBDeviceDetachResult /
@@ -571,6 +587,110 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.False(weak.TryGetTarget(out _));
     }
 
+    // ---- Full1902 production rumble: Xbox360 rumble callback rooting (work order section 5.4 / 19.1) ----
+
+    private static WeakReference<Xbox360RumbleCallback> RegisterXbox360RumbleCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
+    {
+        var marker = new object();
+        var callback = new Xbox360RumbleCallback((_, _, _) => GC.KeepAlive(marker));
+        var weak = new WeakReference<Xbox360RumbleCallback>(callback);
+        Assert.True(api.SetXbox360RumbleCallback(deviceHandle, callback));
+        return weak;
+    }
+
+    private static WeakReference<Xbox360RumbleCallback> AttemptAndDiscardXbox360RumbleCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
+    {
+        var marker = new object();
+        var callback = new Xbox360RumbleCallback((_, _, _) => GC.KeepAlive(marker));
+        var weak = new WeakReference<Xbox360RumbleCallback>(callback);
+        Assert.False(api.SetXbox360RumbleCallback(deviceHandle, callback));
+        return weak;
+    }
+
+    [Fact]
+    public void Xbox360RumbleCallback_CanBeRegisteredAndIsRooted()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 1, false, 0, 0, 1));
+        var weak = RegisterXbox360RumbleCallback(api, deviceHandle);
+
+        CollectGarbage();
+
+        Assert.True(weak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void Xbox360RumbleCallback_ClearingWithNullReleasesTheRootUnderNativeSuccess()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 1, false, 0, 0, 1));
+        var weak = RegisterXbox360RumbleCallback(api, deviceHandle);
+
+        Assert.True(api.SetXbox360RumbleCallback(deviceHandle, null));
+        CollectGarbage();
+
+        Assert.False(weak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void Xbox360RumbleCallback_RegistrationFailureDoesNotCreateAFalseRoot()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 1, false, 0, 0, 1));
+
+        FakeExports.FailSetXbox360RumbleCallback = true;
+        try
+        {
+            var weak = AttemptAndDiscardXbox360RumbleCallback(api, deviceHandle);
+            CollectGarbage();
+            Assert.False(weak.TryGetTarget(out _));
+        }
+        finally { FakeExports.FailSetXbox360RumbleCallback = false; }
+    }
+
+    [Fact]
+    public void Xbox360RumbleCallback_ClearingFailureKeepsTheManagedRootIntact()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 1, false, 0, 0, 1));
+        var weak = RegisterXbox360RumbleCallback(api, deviceHandle);
+
+        FakeExports.FailSetXbox360RumbleCallback = true;
+        try
+        {
+            Assert.False(api.SetXbox360RumbleCallback(deviceHandle, null));
+            CollectGarbage();
+            Assert.True(weak.TryGetTarget(out _));
+        }
+        finally { FakeExports.FailSetXbox360RumbleCallback = false; }
+    }
+
+    [Fact]
+    public void Xbox360RumbleCallback_DeviceRemovalReleasesTheRoot()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 1, false, 0, 0, 1));
+        var weak = RegisterXbox360RumbleCallback(api, deviceHandle);
+
+        Assert.True(api.RemoveXbox360Device(deviceHandle));
+        CollectGarbage();
+
+        Assert.False(weak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void Xbox360RumbleCallback_ServerCloseReleasesTheRoot()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 1, false, 0, 0, 1));
+        var weak = RegisterXbox360RumbleCallback(api, deviceHandle);
+
+        Assert.True(api.CloseUSBServer(1));
+        CollectGarbage();
+
+        Assert.False(weak.TryGetTarget(out _));
+    }
+
     [Fact]
     public void SteamDeckCallback_ExNonSuccessRetainsOwnedRoot()
     {
@@ -795,6 +915,7 @@ public sealed class CanonicalViiperNativeAbiTests
 
         private static readonly CanonicalViiperNativeApi.CreateXbox360DeviceDelegate CreateXbox360 = CreateXbox360Impl;
         private static readonly CanonicalViiperNativeApi.SetXbox360DeviceStateDelegate SetXbox360State = SetXbox360StateImpl;
+        private static readonly CanonicalViiperNativeApi.SetXbox360RumbleCallbackDelegate SetXbox360RumbleCallback = SetXbox360RumbleCallbackImpl;
         private static readonly CanonicalViiperNativeApi.RemoveXbox360DeviceDelegate RemoveXbox360 = RemoveXbox360Impl;
         private static readonly CanonicalViiperNativeApi.RemoveXbox360DeviceExDelegate RemoveXbox360Ex = RemoveXbox360ExImpl;
 
@@ -809,6 +930,15 @@ public sealed class CanonicalViiperNativeAbiTests
 
         [ThreadStatic]
         private static bool _failSetDeckCallback;
+
+        [ThreadStatic]
+        private static bool _failSetXbox360RumbleCallback;
+
+        internal static bool FailSetXbox360RumbleCallback
+        {
+            get => _failSetXbox360RumbleCallback;
+            set => _failSetXbox360RumbleCallback = value;
+        }
 
         internal static SteamDeckDeviceRemoveResult RemoveDeckDeviceExResult
         {
@@ -908,6 +1038,7 @@ public sealed class CanonicalViiperNativeAbiTests
             ["RemoveSteamDeckDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeckDeviceEx),
             ["CreateXbox360Device"] = Marshal.GetFunctionPointerForDelegate(CreateXbox360),
             ["SetXbox360DeviceState"] = Marshal.GetFunctionPointerForDelegate(SetXbox360State),
+            ["SetXbox360RumbleCallback"] = Marshal.GetFunctionPointerForDelegate(SetXbox360RumbleCallback),
             ["RemoveXbox360Device"] = Marshal.GetFunctionPointerForDelegate(RemoveXbox360),
             ["RemoveXbox360DeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveXbox360Ex)
         };
@@ -997,6 +1128,9 @@ public sealed class CanonicalViiperNativeAbiTests
             LastXbox360State = state;
             return 1;
         }
+
+        private static byte SetXbox360RumbleCallbackImpl(nuint _, Xbox360RumbleCallback? callback)
+            => FailSetXbox360RumbleCallback ? (byte)0 : (byte)1;
 
         private static byte RemoveXbox360Impl(nuint _) => FailRemoveXbox360 ? (byte)0 : (byte)1;
 
