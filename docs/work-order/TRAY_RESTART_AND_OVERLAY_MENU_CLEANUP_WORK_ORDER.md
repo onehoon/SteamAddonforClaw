@@ -230,22 +230,37 @@ However, Restart must still be blocked when there is a real live transition/shut
 
 ### 7.1 Required restart safety
 
-Restart should be refused while at least these existing concrete conditions apply:
+Restart must be refused while any of these existing concrete conditions apply:
 
 ```text
-controller-authority startup / reboot-bound transition is still committing
+Disabled-mode controller startup / authority acquisition is still committing
+Enable/Disable MSI Center M and Restart authority transition is in progress
 Runtime shutdown is already in progress
 ```
 
-Reuse existing facts/gates. In particular, do not create a new restart state machine merely for this feature.
+These are realistic product lifecycle conflicts, not speculative instruction-level races.
 
-The current `AddonProcessHost` already has the concrete deferred Disabled-mode startup fact:
+Reuse existing owner facts/gates. Do not create a new restart state machine merely for this feature.
+
+The current `AddonProcessHost` already has the deferred Disabled-mode startup fact:
 
 ```csharp
 _disabledControllerStartupPending
 ```
 
-and the lower-level Runtime safety evaluation already reports `RuntimeShuttingDown`.
+The current `CenterMRebootAuthorityTransition` already owns the one real Enable/Disable-and-Restart transition and already has its own in-memory `_inProgress` guard.
+
+Expose that existing fact read-only from the owner, for example:
+
+```csharp
+internal bool IsInProgress => Volatile.Read(ref _inProgress) != 0;
+```
+
+or an equivalent minimal current-code shape.
+
+Do not mirror this fact into `AddonProcessHost`; do not add a second authority boolean.
+
+The lower-level Runtime safety evaluation already reports `RuntimeShuttingDown`.
 
 ### 7.2 Recommended shape
 
@@ -255,6 +270,13 @@ Introduce a narrow restart-specific evaluation method, for example:
 internal UserTerminationDecision EvaluateUserRestart()
 {
     if (Volatile.Read(ref _disabledControllerStartupPending) != 0)
+    {
+        return new(
+            false,
+            UserTerminationBlockReason.ControllerAuthorityTransition);
+    }
+
+    if (_centerMAuthorityTransition?.IsInProgress == true)
     {
         return new(
             false,
@@ -275,6 +297,12 @@ Restart safety
 ```
 
 `ControllerAuthorityMandatory` is a rule against leaving the Addon-owned mode without its Runtime; it is not a reason to prohibit replacing that Runtime with another instance.
+
+### 7.3 Do not weaken the existing reboot-bound transition owner
+
+Do not alter the ordering or fail-close semantics inside `CenterMRebootAuthorityTransition` merely to support tray Restart.
+
+The only new requirement is that ordinary `Restart Addon` observes whether that existing owner is busy and refuses to start a competing Runtime replacement while the authority transition is committing.
 
 Do not add:
 
@@ -315,27 +343,69 @@ manual launch + --restart
 
 Do not force-open the Main UI as part of Restart Addon.
 
-## 9. Update Semantics — Restart Addon Is Not an Explicit "Install Update" Command
+## 9. Update Semantics — Restart Addon Reuses the Existing Startup Update Gate
 
 Do not add a second update checker to the tray restart path.
 
-The replacement process enters the same ordinary Addon startup path, so any existing startup-time update behavior should continue to occur exactly as it already does.
-
-This PR must not duplicate Velopack download/apply logic inside `RequestRestart()`.
-
-If the current update subsystem has already downloaded/staged an update and its existing policy applies that update on Runtime exit/restart, preserve that existing behavior; do not create a competing tray-specific mechanism.
-
-Conversely, `Restart Addon` should not promise that selecting it always fetches or installs a newly available release unless the existing startup/update policy already guarantees that.
-
-No new tray labels such as:
+The current production startup path already guarantees the required behavior:
 
 ```text
-Restart and Update
-Check for Updates
-Install Update
+Restart Addon
+→ replacement process starts with --restart
+→ old Runtime performs orderly shutdown
+→ replacement acquires the single-instance gate
+→ normal StartupCoordinator begins
+→ SilentUpdateGate runs before hardware/controller startup
 ```
 
-in this PR.
+If no update is available:
+
+```text
+SilentUpdateGate = Continue
+→ ordinary Runtime startup continues
+```
+
+If an update is available:
+
+```text
+SilentUpdateGate
+→ check GitHub release through Velopack
+→ download update
+→ WaitExitThenApplyUpdates(...)
+→ startup returns RestartScheduled / Runtime startup aborts
+→ Velopack applies the update silently
+→ Velopack restarts the updated Addon
+```
+
+The current Velopack apply call uses:
+
+```text
+silent = true
+restart = true
+restartArgs = existing startup/restart arguments
+```
+
+Therefore selecting `Restart Addon` also causes an available release to be downloaded and applied through the existing startup update policy.
+
+This is a consequence of entering normal startup; `Restart Addon` is still not a second update feature and must not duplicate update logic inside `RequestRestart()`.
+
+Preserve current update behavior exactly. Do not introduce:
+
+```text
+tray-specific update check
+tray-specific download/apply state
+RestartAndUpdate command
+Check for Updates command
+Install Update command
+```
+
+The visible menu label remains:
+
+```text
+Restart Addon
+```
+
+because the command always restarts the Addon, while update installation only occurs when the normal startup update gate finds an available release.
 
 ## 10. Tray Menu Construction
 
@@ -402,15 +472,21 @@ Restart Addon
 
 Verify that exact Center M Disabled / mandatory controller Runtime status by itself does **not** disable Restart Addon.
 
-### 12.3 Real transition still blocks restart
+### 12.3 Disabled-mode startup transition still blocks restart
 
-Verify the current controller-authority transition pending condition blocks Restart Addon.
+Verify `_disabledControllerStartupPending` or the equivalent existing startup-commit fact blocks Restart Addon.
 
-### 12.4 Runtime shutdown still blocks restart
+### 12.4 Center M reboot-bound authority transition still blocks restart
+
+Verify ordinary `Restart Addon` is refused while `CenterMRebootAuthorityTransition` is already committing an `Enable MSI Center M and Restart` or `Disable MSI Center M and Restart` request.
+
+Use the existing owner's in-progress fact; do not invent a second simulated authority state.
+
+### 12.5 Runtime shutdown still blocks restart
 
 Verify lower-level `RuntimeShuttingDown` remains blocking.
 
-### 12.5 Existing replacement arguments
+### 12.6 Existing replacement arguments
 
 Keep or add coverage that:
 
@@ -423,11 +499,27 @@ and the replacement instance follows the existing single-instance wait behavior.
 
 Do not add pathological instruction-level restart race tests unless they model a realistic product lifecycle failure.
 
-### 12.6 Uninstall remains independent
+### 12.7 Restart update path remains the ordinary startup path
+
+Add or preserve focused coverage proving the tray Restart implementation does not bypass or duplicate startup coordination.
+
+Do not mock a second tray-specific updater. Existing `SilentUpdateGate` / `StartupCoordinator` tests remain the authority for:
+
+```text
+update available
+→ download
+→ WaitExitThenApplyUpdates
+→ RestartScheduled
+→ ordinary Runtime startup abort
+```
+
+A lightweight source/contract test may assert that `RequestRestart()` still launches the normal executable with `--restart` rather than invoking update APIs directly.
+
+### 12.8 Uninstall remains independent
 
 Keep tests showing uninstall shutdown uses `RequestExitForUninstall()` / stock-safe preparation and is not coupled to tray Restart.
 
-### 12.7 Overlay production seam remains
+### 12.9 Overlay production seam remains
 
 Add a source/contract check if useful to ensure deleting the tray Overlay callback does not delete `RequestOverlayToggle` or disconnect PR #489 front-button Overlay dispatch.
 
@@ -439,10 +531,12 @@ Expected primary files include:
 src/SteamInputAddonforClaw/Lifecycle/SystemTrayIcon.cs
 src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs
 src/SteamInputAddonforClaw/Hosting/RuntimeProcessApplication.cs
+src/SteamInputAddonforClaw/CenterMStartup/CenterMRebootAuthorityTransition.cs
 src/SteamInputAddonforClaw/Lifecycle/UserTerminationGuard.cs   [only if dead-policy cleanup is justified]
 
 tests/SteamInputAddonforClaw.Tests/UserTerminationGuardTests.cs
 tests/SteamInputAddonforClaw.Tests/ApplicationLifecyclePolicyTests.cs
+tests/SteamInputAddonforClaw.Tests/CenterMRebootAuthorityTransitionTests.cs
 [existing/new tray lifecycle tests as appropriate]
 ```
 
@@ -455,7 +549,7 @@ Do not change:
 ```text
 Full1902 PID1901/PID1902 authority model
 HidHide baseline policy
-Center M Enable/Disable-and-Restart workflow
+Center M Enable/Disable-and-Restart workflow ordering
 VIIPER ownership design
 Steam/BPM detection
 front-button mapping model from PR #489
@@ -473,19 +567,21 @@ Do not add generalized lifecycle/state abstractions for theoretical races.
 3. Ordinary tray `Exit` is removed.
 4. Uninstall retains its dedicated stock-safe Runtime shutdown path.
 5. `Restart Addon` is permitted while Center M is exactly Disabled when no real transition/shutdown hazard exists.
-6. Restart remains blocked during the existing controller-authority transition-pending window.
-7. Restart remains blocked once Runtime shutdown is already underway.
-8. Existing `--restart` replacement-process/single-instance handoff is preserved.
-9. Restart does not intentionally restore PID1901, release persistent HidHide, or enable Center M roots.
-10. Old Runtime teardown preserves current Full1902 ordering and durable PID1902/HidHide semantics.
-11. Replacement Runtime enters ordinary Full1902 startup/admission/reconciliation.
-12. PR #489 front-button `Quick Settings Overlay` action still reaches `AddonProcessHost.RequestOverlayToggle()`.
-13. No tray-specific update subsystem or duplicate Velopack logic is added.
-14. Dead ordinary-exit / historical termination code is removed only where confirmed unused.
-15. Debug build clean.
-16. Release build clean.
-17. Full test suite passes.
+6. Restart remains blocked during the existing Disabled-mode controller startup/authority-acquisition pending window.
+7. Restart remains blocked while `CenterMRebootAuthorityTransition` is already processing Enable/Disable-and-Restart.
+8. Restart remains blocked once Runtime shutdown is already underway.
+9. Existing `--restart` replacement-process/single-instance handoff is preserved.
+10. Restart does not intentionally restore PID1901, release persistent HidHide, or enable Center M roots.
+11. Old Runtime teardown preserves current Full1902 ordering and durable PID1902/HidHide semantics.
+12. Replacement Runtime enters ordinary Full1902 startup/admission/reconciliation.
+13. Replacement Runtime runs the existing `SilentUpdateGate`; when an update is available, the existing Velopack path downloads, schedules, applies, and restarts the updated Addon.
+14. No tray-specific update subsystem or duplicate Velopack logic is added.
+15. PR #489 front-button `Quick Settings Overlay` action still reaches `AddonProcessHost.RequestOverlayToggle()`.
+16. Dead ordinary-exit / historical termination code is removed only where confirmed unused.
+17. Debug build clean.
+18. Release build clean.
+19. Full test suite passes.
 
 ## 16. One-Sentence Design Rule
 
-> **The tray may restart the mandatory Addon Runtime as a controlled replacement, but it may not permanently exit that Runtime or keep a redundant Overlay POC launcher now that Overlay is a real front-button action.**
+> **The tray may restart the mandatory Addon Runtime as a controlled replacement that re-enters the ordinary startup/update path, but it may not compete with a live controller-authority transition, permanently exit the Runtime, or keep a redundant Overlay POC launcher now that Overlay is a real front-button action.**
