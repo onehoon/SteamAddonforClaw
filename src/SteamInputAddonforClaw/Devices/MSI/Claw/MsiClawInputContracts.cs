@@ -9,8 +9,6 @@ public enum MsiClawInputStartStatus
     Started,
     AlreadyRunning,
     InitializationFailed,
-    EnumerationFailed,
-    Pid1902NotFound,
     Indeterminate,
     CreateDeviceFailed,
     AcquireFailed
@@ -50,10 +48,4 @@ internal interface IMsiClawPhysicalInputIdentityProvider
 {
     MsiClawPhysicalInputIdentity? CurrentIdentity { get; }
     long CurrentSessionGeneration { get; }
-}
-
-internal interface IMsiClawInputDiagnostic : IMsiClawPreparedInputSource
-{
-    event EventHandler<MsiClawInputTestSummary>? TestCompleted;
-    MsiClawInputStartResult Start();
 }

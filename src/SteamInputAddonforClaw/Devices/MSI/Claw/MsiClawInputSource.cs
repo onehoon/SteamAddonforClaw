@@ -6,7 +6,7 @@ using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerStateSnapshotSource
+public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControllerStateSnapshotSource
 {
     private static readonly int M1AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M1);
     private static readonly int M2AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M2);
@@ -29,7 +29,9 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     }
 
     public event EventHandler<ControllerState>? StateChanged;
-    public event EventHandler? IndependentVerified;
+    // Full1902 Cleanup G: originally a diagnostic name, this is the one live Full1902 owned-input
+    // completion signal -- AddonProcessHost subscribes to it to classify actual owned DirectInput
+    // session loss and schedule physical recovery. StopReason on the summary carries the cause.
     public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
 
     private sealed class StateBox(ControllerState value) { internal ControllerState Value { get; } = value; }
@@ -52,68 +54,6 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
             {
                 return _currentSession is not null && !_currentSession.Cancellation.IsCancellationRequested;
             }
-        }
-    }
-
-    public MsiClawInputStartResult Start()
-    {
-        AppLog.Info("Diagnostics", "M1/M2 input diagnostic requested.");
-
-        lock (_sync)
-        {
-            if (_disposed)
-            {
-                return new MsiClawInputStartResult(MsiClawInputStartStatus.InitializationFailed, "DirectInput diagnostics are unavailable because the window is closing.");
-            }
-
-            if (_currentSession is not null)
-            {
-                AppLog.Info("Diagnostics", "M1/M2 input diagnostic request ignored.", ("Reason", "DiagnosticAlreadyRunning"), ("Action", "Ignore"));
-                return new MsiClawInputStartResult(MsiClawInputStartStatus.AlreadyRunning, "M1/M2 DirectInput test is already running.");
-            }
-
-            IDirectInputDeviceEnumerator? enumerator = null;
-            try
-            {
-                enumerator = _enumeratorFactory();
-            }
-            catch (Exception exception)
-            {
-                AppLog.Warn("DirectInput", "DirectInput initialization failed.", exception, ("Reason", "DirectInputInitializationFailed"), ("Action", "AbortDiagnostic"), ("NoChangesMade", true));
-                return new MsiClawInputStartResult(MsiClawInputStartStatus.InitializationFailed, "DirectInput initialization failed. No controller settings were changed.");
-            }
-
-            var nextSession = _testSession + 1;
-            IReadOnlyList<DirectInputDeviceDescriptor> candidates;
-            try
-            {
-                candidates = enumerator.EnumerateGameControllers();
-            }
-            catch (Exception exception)
-            {
-                AppLog.Warn("MsiInput", "DirectInput enumeration failed.", exception, ("TestSession", nextSession), ("Reason", "EnumerationFailed"), ("Action", "AbortDiagnostic"), ("NoChangesMade", true));
-                TryDisposeEnumerator(enumerator, nextSession);
-                return new(MsiClawInputStartStatus.EnumerationFailed, "DirectInput device enumeration failed. No controller settings were changed.");
-            }
-
-            var selection = MsiClawDirectInputDeviceSelector.Select(candidates);
-            LogCandidates(candidates, nextSession);
-            if (!selection.IsSelected)
-            {
-                TryDisposeEnumerator(enumerator, nextSession);
-                return MapSelectionFailure(selection);
-            }
-
-            AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.",
-                ("TestSession", nextSession),
-                ("CandidateCount", selection.CandidateCount),
-                ("VID", MsiClawHardware.FormatVendorId()),
-                ("PID", MsiClawHardware.FormatDirectInputProductId()),
-                ("InstanceGuid", selection.Descriptor!.InstanceGuid),
-                ("PnpInstanceId", selection.Descriptor.PnpInstanceId),
-                ("PhysicalIdentity", selection.Descriptor.PhysicalIdentity),
-                ("SelectionReason", selection.Reason));
-            return StartCoreLocked(enumerator, selection.Descriptor!, nextSession, "Diagnostics");
         }
     }
 
@@ -221,29 +161,6 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         }
 
         await StopAsync().ConfigureAwait(false);
-    }
-
-    private static void LogCandidates(IReadOnlyList<DirectInputDeviceDescriptor> candidates, int testSession)
-    {
-        foreach (var candidate in candidates)
-        {
-            var matches = MsiClawHardware.IsDirectInputController(candidate.VendorId, candidate.ProductId);
-            AppLog.Debug("MsiInput", matches ? "DirectInput device candidate." : "DirectInput device ignored.", ("TestSession", testSession), ("InstanceGuid", candidate.InstanceGuid), ("ProductGuid", candidate.ProductGuid), ("ProductName", candidate.ProductName), ("VID", $"0x{candidate.VendorId:X4}"), ("PID", $"0x{candidate.ProductId:X4}"), ("DevicePath", candidate.DevicePath), ("PnpInstanceId", candidate.PnpInstanceId), ("PhysicalIdentity", candidate.PhysicalIdentity), ("UsagePage", candidate.UsagePage), ("Usage", candidate.Usage), ("ButtonCount", candidate.ButtonCount), ("AxisCount", candidate.AxisCount), ("MatchReason", matches ? "KnownMsiClawDirectInput" : "NotMsiClawPid1902"), ("SelectionReason", candidate.TopologyReason));
-        }
-
-        AppLog.Debug("MsiInput", "DirectInput enumeration completed.", ("TestSession", testSession), ("DeviceCount", candidates.Count));
-    }
-
-    private static MsiClawInputStartResult MapSelectionFailure(MsiClawDirectInputSelectionResult selection)
-    {
-        if (selection.Status == MsiClawDirectInputSelectionStatus.NotFound)
-        {
-            AppLog.Info("Diagnostics", "M1/M2 input diagnostic was not started.", ("Reason", selection.Reason), ("Action", "NoChangesMade"));
-            return new(MsiClawInputStartStatus.Pid1902NotFound, "DirectInput PID_1902 device not found. No changes were made.");
-        }
-
-        AppLog.Warn("MsiInput", "MSI Claw DirectInput candidate selection is indeterminate.", null, ("CandidateCount", selection.CandidateCount), ("Reason", selection.Reason), ("Action", "DoNotAcquire"));
-        return new(MsiClawInputStartStatus.Indeterminate, "MSI Claw PID_1902 DirectInput identity could not be verified. No changes were made.");
     }
 
     private async Task PollAsync(InputSession session)
@@ -369,7 +286,6 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                 {
                     independent = true;
                     AppLog.Info("Diagnostics", "Independent M1/M2 input verified.", ("TestSession", session.Id), ("M1OnlyObserved", true), ("M2OnlyObserved", true), ("M1ButtonIndex", MsiClawHardware.M1DirectInputButtonIndex), ("M2ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex));
-                    IndependentVerified?.Invoke(this, EventArgs.Empty);
                 }
 
                 await Task.Delay(PollInterval, session.Cancellation.Token).ConfigureAwait(false);

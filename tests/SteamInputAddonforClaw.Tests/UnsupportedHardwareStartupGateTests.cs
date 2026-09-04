@@ -80,8 +80,6 @@ public sealed class UnsupportedHardwareStartupGateTests
         public string JournalPath => "noop-recovery-journal.json";
         public bool Exists() => false;
         public string ReadText() => throw new NotSupportedException();
-        public void WriteNew(RecoveryJournal journal) => throw new NotSupportedException();
-        public void ReplaceExisting(RecoveryJournal journal) => throw new NotSupportedException();
         public void Delete() => throw new NotSupportedException();
     }
 }

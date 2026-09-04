@@ -14,22 +14,6 @@ public sealed class MsiClawInputSourceTests
     // unaffected.
     private static readonly TimeSpan AwaitTimeout = TimeSpan.FromSeconds(30);
 
-    [Theory]
-    [InlineData(0x0DB0, 0x1901)]
-    [InlineData(0x0DB0, 0x1903)]
-    [InlineData(0x045E, 0x028E)]
-    public void Start_WhenPid1902IsMissing_DoesNotCreateOrAcquireAnyDevice(ushort vendorId, ushort productId)
-    {
-        var enumerator = new FakeEnumerator([Device(vendorId, productId)]);
-        var source = new MsiClawInputSource(enumerator);
-
-        var result = source.Start();
-
-        Assert.Equal(MsiClawInputStartStatus.Pid1902NotFound, result.Status);
-        Assert.Equal(0, enumerator.CreateCount);
-        Assert.True(enumerator.Disposed);
-    }
-
     [Fact]
     public async Task StartPrepared_UsesExactDescriptorWithoutEnumeration()
     {
@@ -47,137 +31,11 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
-    public void Start_WhenPid1902IsMissingAndEnumeratorCleanupFails_PreservesTheNotFoundResult()
-    {
-        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1901)]) { DisposeException = new InvalidOperationException("Dispose failed") };
-        var source = new MsiClawInputSource(enumerator);
-
-        var result = source.Start();
-
-        Assert.Equal(MsiClawInputStartStatus.Pid1902NotFound, result.Status);
-        Assert.Equal(1, enumerator.DisposeCount);
-    }
-
-    [Fact]
-    public void Start_SelectsOnlyPid1902_WhenOtherControllersAlsoExist()
-    {
-        var selected = Device(0x0DB0, 0x1902);
-        var device = new FakeDevice(State());
-        var enumerator = new FakeEnumerator([Device(0x045E, 0x028E), selected], device);
-        var source = new MsiClawInputSource(enumerator);
-
-        Assert.True(source.Start().Started);
-
-        Assert.Equal(selected, enumerator.CreatedDescriptor);
-    }
-
-    [Fact]
-    public void Start_WhenPid1902CandidatesHaveDifferentPhysicalIdentities_DoesNotCreateOrAcquireAnyDevice()
-    {
-        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_A"), Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_B")]);
-        var source = new MsiClawInputSource(enumerator);
-
-        var result = source.Start();
-
-        Assert.Equal(MsiClawInputStartStatus.Indeterminate, result.Status);
-        Assert.Equal(0, enumerator.CreateCount);
-    }
-
-    [Fact]
-    public void Start_WhenPid1902CandidatesAreAliasesOfOnePhysicalRoot_SelectsOneDevice()
-    {
-        var first = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_ROOT");
-        var second = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_ROOT");
-        var enumerator = new FakeEnumerator([first, second], new FakeDevice(State()));
-
-        var result = new MsiClawInputSource(enumerator).Start();
-
-        Assert.True(result.Started);
-        Assert.Equal(1, enumerator.CreateCount);
-        Assert.Contains(enumerator.CreatedDescriptor, new[] { first, second });
-    }
-
-    [Fact]
-    public void Start_WhenPid1902CandidatesSharePhysicalIdentityButHaveDifferentPnpInstances_DoesNotCreateOrAcquireAnyDevice()
-    {
-        var first = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_ROOT", pnpInstanceId: "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST");
-        var second = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_ROOT", pnpInstanceId: "HID\\VID_0DB0&PID_1902&MI_00&COL02\\TEST");
-        var enumerator = new FakeEnumerator([first, second]);
-
-        var result = new MsiClawInputSource(enumerator).Start();
-
-        Assert.Equal(MsiClawInputStartStatus.Indeterminate, result.Status);
-        Assert.Equal(0, enumerator.CreateCount);
-    }
-
-    [Fact]
-    public void Start_WhenPid1902CandidateHasNoVerifiedPhysicalIdentity_DoesNotCreateOrAcquireAnyDevice()
-    {
-        var descriptor = Device(0x0DB0, 0x1902, physicalIdentity: null);
-        var enumerator = new FakeEnumerator([descriptor]);
-
-        Assert.Equal(MsiClawInputStartStatus.Indeterminate, new MsiClawInputSource(enumerator).Start().Status);
-        Assert.Equal(0, enumerator.CreateCount);
-    }
-
-    [Fact]
-    public void Start_WhenSelectedDeviceReportsTooFewButtons_DoesNotCreateOrAcquireAnyDevice()
-    {
-        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902, buttonCount: 16)]);
-
-        Assert.Equal(MsiClawInputStartStatus.Indeterminate, new MsiClawInputSource(enumerator).Start().Status);
-        Assert.Equal(0, enumerator.CreateCount);
-    }
-
-    [Fact]
     public void Start_WhenDirectInputInitializationFails_ReturnsInitializationFailed()
     {
         var source = new MsiClawInputSource(() => throw new InvalidOperationException("DirectInput unavailable"));
 
-        Assert.Equal(MsiClawInputStartStatus.InitializationFailed, source.Start().Status);
-    }
-
-    [Fact]
-    public async Task DirectInputEnumerator_IsCreatedLazily_WhenTheDiagnosticStarts()
-    {
-        var factoryCalls = 0;
-        var source = new MsiClawInputSource(() =>
-        {
-            factoryCalls++;
-            return new FakeEnumerator([Device(0x0DB0, 0x1902)], new FakeDevice(State()));
-        });
-
-        Assert.Equal(0, factoryCalls);
-        Assert.True(source.Start().Started);
-        await source.StopAsync();
-
-        Assert.Equal(1, factoryCalls);
-    }
-
-    [Fact]
-    public void Start_WhenEnumerationFails_ReturnsEnumerationFailed()
-    {
-        var enumerator = new FakeEnumerator([]) { EnumerationException = new InvalidOperationException("Enumeration failed") };
-        var source = new MsiClawInputSource(enumerator);
-
-        Assert.Equal(MsiClawInputStartStatus.EnumerationFailed, source.Start().Status);
-        Assert.True(enumerator.Disposed);
-    }
-
-    [Fact]
-    public void Start_WhenEnumerationAndEnumeratorCleanupFail_PreservesTheEnumerationFailureResult()
-    {
-        var enumerator = new FakeEnumerator([])
-        {
-            EnumerationException = new InvalidOperationException("Enumeration failed"),
-            DisposeException = new InvalidOperationException("Dispose failed")
-        };
-        var source = new MsiClawInputSource(enumerator);
-
-        var result = source.Start();
-
-        Assert.Equal(MsiClawInputStartStatus.EnumerationFailed, result.Status);
-        Assert.Equal(1, enumerator.DisposeCount);
+        Assert.Equal(MsiClawInputStartStatus.InitializationFailed, source.StartPrepared(Device(0x0DB0, 0x1902)).Status);
     }
 
     [Fact]
@@ -186,7 +44,7 @@ public sealed class MsiClawInputSourceTests
         var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902)]) { CreateException = new InvalidOperationException("Create failed") };
         var source = new MsiClawInputSource(enumerator);
 
-        Assert.Equal(MsiClawInputStartStatus.CreateDeviceFailed, source.Start().Status);
+        Assert.Equal(MsiClawInputStartStatus.CreateDeviceFailed, source.StartPrepared(Device(0x0DB0, 0x1902)).Status);
         Assert.True(enumerator.Disposed);
     }
 
@@ -200,7 +58,7 @@ public sealed class MsiClawInputSourceTests
         };
         var source = new MsiClawInputSource(enumerator);
 
-        var result = source.Start();
+        var result = source.StartPrepared(Device(0x0DB0, 0x1902));
 
         Assert.Equal(MsiClawInputStartStatus.CreateDeviceFailed, result.Status);
         Assert.Equal(1, enumerator.DisposeCount);
@@ -213,7 +71,7 @@ public sealed class MsiClawInputSourceTests
         var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902)], device);
         var source = new MsiClawInputSource(enumerator);
 
-        var result = source.Start();
+        var result = source.StartPrepared(Device(0x0DB0, 0x1902));
 
         Assert.Equal(MsiClawInputStartStatus.AcquireFailed, result.Status);
         Assert.False(source.IsRunning);
@@ -230,7 +88,7 @@ public sealed class MsiClawInputSourceTests
         var summaryTask = ObserveSummary(source);
 
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
         await source.StopAsync();
 
@@ -254,7 +112,7 @@ public sealed class MsiClawInputSourceTests
             if (count >= 3) thirdReadAttempt.TrySetResult();
         };
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await thirdReadAttempt.Task.WaitAsync(AwaitTimeout);
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
 
@@ -274,7 +132,7 @@ public sealed class MsiClawInputSourceTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         source.TestCompleted += (_, summary) => observed.TrySetResult((source.LatestState, source.IsRunning, summary.StopReason));
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         var snapshot = await observed.Task.WaitAsync(AwaitTimeout);
 
         Assert.NotEqual(MsiClawInputStopReason.Stopped, snapshot.StopReason);
@@ -289,7 +147,7 @@ public sealed class MsiClawInputSourceTests
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var summaryTask = ObserveSummary(source);
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
 
         Assert.Equal(MsiClawInputStopReason.InvalidButtonLayout, summary.StopReason);
@@ -305,7 +163,7 @@ public sealed class MsiClawInputSourceTests
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var summaryTask = ObserveSummary(source);
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
 
         Assert.Equal(MsiClawInputStopReason.InvalidButtonLayout, summary.StopReason);
@@ -341,7 +199,7 @@ public sealed class MsiClawInputSourceTests
             if (state == new ControllerState(new AuxiliaryButtonState([false, true]))) validStateObserved.TrySetResult();
         };
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await validStateObserved.Task.WaitAsync(AwaitTimeout);
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, true])), source.LatestState);
         await source.StopAsync();
@@ -359,7 +217,7 @@ public sealed class MsiClawInputSourceTests
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var summaryTask = ObserveSummary(source);
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
 
         Assert.Equal(MsiClawInputStopReason.InitialStateNotReady, summary.StopReason);
@@ -378,7 +236,7 @@ public sealed class MsiClawInputSourceTests
         var secondRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         device.ReadPerformed += count => { if (count >= 2) secondRead.TrySetResult(); };
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await secondRead.Task.WaitAsync(AwaitTimeout);
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
 
@@ -394,8 +252,8 @@ public sealed class MsiClawInputSourceTests
         var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902)], device);
         var source = new MsiClawInputSource(enumerator);
 
-        Assert.True(source.Start().Started);
-        Assert.Equal(MsiClawInputStartStatus.AlreadyRunning, source.Start().Status);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
+        Assert.Equal(MsiClawInputStartStatus.AlreadyRunning, source.StartPrepared(Device(0x0DB0, 0x1902)).Status);
         await source.StopAsync();
 
         Assert.Equal(1, enumerator.CreateCount);
@@ -415,7 +273,7 @@ public sealed class MsiClawInputSourceTests
             if (state == new ControllerState(new AuxiliaryButtonState([false, true]))) changedStateObserved.TrySetResult();
         };
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await changedStateObserved.Task.WaitAsync(AwaitTimeout);
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, true])), source.LatestState);
         await source.StopAsync();
@@ -443,7 +301,7 @@ public sealed class MsiClawInputSourceTests
             if (readCount >= reads.Length) expectedReadsObserved.TrySetResult();
         };
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await expectedReadsObserved.Task.WaitAsync(AwaitTimeout);
         await source.StopAsync();
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
@@ -468,7 +326,7 @@ public sealed class MsiClawInputSourceTests
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var summaryTask = ObserveSummary(source);
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await source.StopAsync();
         var summary = await summaryTask.WaitAsync(AwaitTimeout);
 
@@ -484,7 +342,7 @@ public sealed class MsiClawInputSourceTests
         var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902)], device);
         var source = new MsiClawInputSource(enumerator);
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await source.DisposeAsync();
 
         Assert.False(source.IsRunning);
@@ -499,7 +357,7 @@ public sealed class MsiClawInputSourceTests
         var device = new FakeDevice(State());
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await Task.WhenAll(source.StopAsync(), source.StopAsync(), source.DisposeAsync().AsTask());
 
         Assert.False(source.IsRunning);
@@ -515,9 +373,9 @@ public sealed class MsiClawInputSourceTests
         var enumerators = new Queue<FakeEnumerator>([first, second]);
         var source = new MsiClawInputSource(() => enumerators.Dequeue());
 
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await source.StopAsync();
-        Assert.True(source.Start().Started);
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
         await source.StopAsync();
 
         Assert.True(first.Disposed);

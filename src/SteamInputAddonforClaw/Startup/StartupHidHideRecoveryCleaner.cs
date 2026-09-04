@@ -178,9 +178,8 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
     private static bool IsValidHiddenEntry(string entry) =>
         !string.IsNullOrWhiteSpace(entry) && entry == entry.Trim();
 
-    // The recovery writer only ever records Path.GetFullPath()-canonicalized whitelist entries
-    // (see RecoveryManager.BeginHidHideWhitelistLease/RecordHidHideWhitelistAddition), so a
-    // relative, drive-relative, root-relative, UNC, or non-canonical (e.g. containing "..")
+    // A legacy recovery.json only ever recorded Path.GetFullPath()-canonicalized whitelist entries,
+    // so a relative, drive-relative, root-relative, UNC, or non-canonical (e.g. containing "..")
     // path is not evidence this addon produced. HidHidePathConverter.ToFullImageName() would
     // re-resolve such a path against the *current* process, which could target a different file
     // than the journal actually recorded -- fail closed instead of guessing.
