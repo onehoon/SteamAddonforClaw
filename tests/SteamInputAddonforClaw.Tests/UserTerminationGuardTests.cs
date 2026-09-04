@@ -60,25 +60,9 @@ public sealed class UserTerminationGuardTests
     }
 
     [Fact]
-    public void LiveRecoveryMutation_BlocksTermination()
-    {
-        var guard = new UserTerminationGuard(() => false, () => true);
-
-        Assert.Equal(UserTerminationBlockReason.RecoveryMutationOwned, guard.Evaluate().Reason);
-    }
-
-    [Fact]
-    public void RecoveryUnsafeStaleJournal_DoesNotBlock()
-    {
-        var guard = new UserTerminationGuard(() => false, () => false);
-
-        Assert.True(guard.Evaluate().CanTerminate);
-    }
-
-    [Fact]
     public void RuntimeShuttingDown_BlocksTermination()
     {
-        var guard = new UserTerminationGuard(() => true, () => false);
+        var guard = new UserTerminationGuard(() => true);
 
         var decision = guard.Evaluate();
 
@@ -92,6 +76,5 @@ public sealed class UserTerminationGuardTests
     public void TerminationMenuFlagsUseStandardDisabledState(bool canTerminate, uint expected)
         => Assert.Equal(expected, SystemTrayIcon.TerminationMenuFlags(canTerminate));
 
-    private static UserTerminationGuard Guard() =>
-        new(() => false, () => false);
+    private static UserTerminationGuard Guard() => new(() => false);
 }

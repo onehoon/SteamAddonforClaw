@@ -6,7 +6,6 @@ using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Prerequisites;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
@@ -25,7 +24,6 @@ internal static class AddonRuntimeCompositionFactory
 {
     internal static AddonRuntimeComposition Create(
         HandheldDeviceRegistry deviceRegistry,
-        RecoveryManager recoveryManager,
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
         // Full1902 A2 section 11: true only when Center M startup roots are exactly Enabled/Automatic
@@ -81,7 +79,6 @@ internal static class AddonRuntimeCompositionFactory
             powerGate,
             recoverySafetyState,
             recoverySafe,
-            () => recoveryManager.HasIncompleteRecovery,
             establishBaseline);
 
         if (bigPictureStateChanged is not null && steamRuntime.IsBigPictureActive)

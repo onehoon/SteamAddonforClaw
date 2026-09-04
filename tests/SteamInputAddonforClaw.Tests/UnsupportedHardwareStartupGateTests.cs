@@ -4,7 +4,6 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -42,7 +41,7 @@ public sealed class UnsupportedHardwareStartupGateTests
     [Fact]
     public async Task UpdateRestart_PrecedesHardwareGate()
     {
-        var coordinator = new StartupCoordinator(new UpdateGate(UpdateGateResult.RestartScheduled), new ThrowingWaiter(), new ThrowingProbeFactory(), new ThrowingEvaluator(), recoveryJournalStore: new NoOpRecoveryJournalStore());
+        var coordinator = new StartupCoordinator(new UpdateGate(UpdateGateResult.RestartScheduled), new ThrowingWaiter(), new ThrowingProbeFactory(), new ThrowingEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -53,7 +52,7 @@ public sealed class UnsupportedHardwareStartupGateTests
     public async Task SupportedHardware_ContinuesIntoTopologyStabilization()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new RecordingUpdateGate(events), new RecordingWaiter(events), new RecordingProbeFactory(events), new RecordingEvaluator(), recoveryJournalStore: new NoOpRecoveryJournalStore());
+        var coordinator = new StartupCoordinator(new RecordingUpdateGate(events), new RecordingWaiter(events), new RecordingProbeFactory(events), new RecordingEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -63,7 +62,7 @@ public sealed class UnsupportedHardwareStartupGateTests
         Assert.Equal(["UpdateGate", "HardwareCompatibility", "TopologyWaiter"], events);
     }
 
-    private static StartupCoordinator Create(HardwareCompatibilityAssessment assessment) => new(new UpdateGate(UpdateGateResult.Continue), new ThrowingWaiter(), new ProbeFactory(), new Evaluator(assessment), recoveryJournalStore: new NoOpRecoveryJournalStore());
+    private static StartupCoordinator Create(HardwareCompatibilityAssessment assessment) => new(new UpdateGate(UpdateGateResult.Continue), new ThrowingWaiter(), new ProbeFactory(), new Evaluator(assessment));
 
     private sealed class UpdateGate(UpdateGateResult result) : IUpdateGate { public Task<UpdateGateResult> RunAsync(CancellationToken _) => Task.FromResult(result); }
     private sealed class ProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
@@ -75,11 +74,4 @@ public sealed class UnsupportedHardwareStartupGateTests
     private sealed class RecordingEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"); }
     private sealed class RecordingWaiter(List<string> events) : IControllerTopologyWaiter { public Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken _) { events.Add("TopologyWaiter"); return Task.FromResult(ControllerTopologyReadiness.Stable); } }
     private sealed class ThrowingWaiter : IControllerTopologyWaiter { public Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken _) => throw new Xunit.Sdk.XunitException("Topology waiter must not be called."); }
-    private sealed class NoOpRecoveryJournalStore : IRecoveryJournalStore
-    {
-        public string JournalPath => "noop-recovery-journal.json";
-        public bool Exists() => false;
-        public string ReadText() => throw new NotSupportedException();
-        public void Delete() => throw new NotSupportedException();
-    }
 }

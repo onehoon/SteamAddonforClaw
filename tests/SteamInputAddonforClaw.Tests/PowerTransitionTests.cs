@@ -13,7 +13,6 @@ public sealed class PowerTransitionTests
     {
         var observed = 0;
         var coordinator = new PowerTransitionCoordinator(new PowerMutationGate(false), new RecoverySafetyState(RecoverySafety.Unsafe), [],
-            hasIncompleteRecovery: () => false,
             resumeObserved: () => observed++);
 
         var notification = new PowerNotificationObservation(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true);
@@ -31,7 +30,6 @@ public sealed class PowerTransitionTests
         var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
         var baselineCalls = 0;
         var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); });
 
         await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
@@ -53,7 +51,6 @@ public sealed class PowerTransitionTests
         var gateOpenDuringBaseline = true;
         var gateOpenDuringAfterRecovery = false;
         var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ =>
             {
                 gateOpenDuringBaseline = gate.IsOpen;
@@ -70,27 +67,6 @@ public sealed class PowerTransitionTests
         Assert.False(gateOpenDuringBaseline);
         Assert.True(gateOpenDuringAfterRecovery);
         Assert.True(gate.IsOpen);
-    }
-
-    [Fact]
-    public async Task JournalRemainsAfterCanonicalCleanup_FailsClosedWithoutReplayOrBaseline()
-    {
-        var gate = new PowerMutationGate(false);
-        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
-        var baselineCalls = 0;
-        var afterRecoveryCalls = 0;
-        var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
-            afterRecovery: _ => { afterRecoveryCalls++; return Task.FromResult(true); },
-            hasIncompleteRecovery: () => true,
-            establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); });
-
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
-
-        Assert.Equal(0, baselineCalls);
-        Assert.Equal(0, afterRecoveryCalls);
-        Assert.False(gate.IsOpen);
-        Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
-        Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
     }
 
     [Fact]
@@ -238,8 +214,8 @@ public sealed class PowerTransitionTests
     public async Task Resume_failure_keeps_gate_closed_and_recovery_unsafe()
     {
         var gate = new PowerMutationGate(true); var recovery = new RecoverySafetyState(RecoverySafety.Safe);
-        // Default hasIncompleteRecovery reports a journal remains, so resume must fail closed.
-        var coordinator = new PowerTransitionCoordinator(gate, recovery, []);
+        // A failed resume baseline must fail closed.
+        var coordinator = new PowerTransitionCoordinator(gate, recovery, [], establishBaseline: _ => Task.FromResult(false));
         await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         Assert.Equal(PowerTransitionState.Unsafe, coordinator.State); Assert.Equal(RecoverySafety.Unsafe, recovery.Current); Assert.False(gate.IsOpen);
     }
@@ -262,12 +238,36 @@ public sealed class PowerTransitionTests
         Assert.False(gate.IsOpen);
     }
 
+    [Fact] // Cleanup H section 11 / PR #483 review: an authoritative resume while Addon authority is
+           // active (recoveryEnabled=false) must still emit PowerResumeObserved exactly once for the
+           // resume cycle -- AddonProcessHost's Full1902 owned-controller reconcile runs off it --
+           // while the generic forward-mutation gate stays closed and RecoverySafety ends Unsafe.
+    public async Task DisabledRecoveryResume_EmitsObserverOnceThenFailsClosed()
+    {
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var observed = 0;
+        var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
+            establishBaseline: _ => Task.FromResult(true),
+            recoveryEnabled: false,
+            resumeObserved: () => observed++);
+
+        var notification = new PowerNotificationObservation(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true);
+        await coordinator.HandleAsync(notification);
+        await coordinator.HandleAsync(notification); // duplicate for the same cycle
+
+        Assert.Equal(1, observed);
+        Assert.False(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
+        Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
+        await coordinator.DisposeAsync();
+    }
+
     [Fact]
     public async Task Resume_automatic_then_resume_suspend_reconciles_once()
     {
         var gate = new PowerMutationGate(true); var calls = 0;
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [],
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ => { calls++; return Task.FromResult(true); });
         await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         await coordinator.HandleAsync(new(7, PowerSignal.ResumeSuspend, DateTimeOffset.UtcNow, 2, 1, 1, 1, false));
@@ -281,7 +281,6 @@ public sealed class PowerTransitionTests
     {
         var gate = new PowerMutationGate(true); var calls = 0; var source = new FakeSource(true);
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [],
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ => { Interlocked.Increment(ref calls); return Task.FromResult(true); });
         using var watcher = new PowerTransitionWatcher(source, gate, coordinator, () => { }); Assert.True(watcher.Start());
         await watcher.ObserveAsync(4);
@@ -295,7 +294,6 @@ public sealed class PowerTransitionTests
     {
         var gate = new PowerMutationGate(true); var calls = 0; var source = new FakeSource(true);
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [],
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ => Task.FromResult(Interlocked.Increment(ref calls) > 1));
         using var watcher = new PowerTransitionWatcher(source, gate, coordinator, () => { }); Assert.True(watcher.Start());
         source.Raise(4); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Suspended, TimeSpan.FromSeconds(5)));
@@ -310,7 +308,6 @@ public sealed class PowerTransitionTests
         var gate = new PowerMutationGate(true); var recovery = new RecoverySafetyState(RecoverySafety.Safe);
         var pendingBaseline = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ => pendingBaseline.Task);
         var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(5)));
@@ -324,7 +321,6 @@ public sealed class PowerTransitionTests
         var gate = new PowerMutationGate(true); var recovery = new RecoverySafetyState(RecoverySafety.Safe);
         var pendingBaseline = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ => pendingBaseline.Task);
         var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(5)));
@@ -340,7 +336,6 @@ public sealed class PowerTransitionTests
         var afterResume = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
             afterRecovery: _ => afterResume.Task,
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ => Task.FromResult(true));
         var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         Assert.True(SpinWait.SpinUntil(() => gate.IsOpen, TimeSpan.FromSeconds(5)));
@@ -371,7 +366,6 @@ public sealed class PowerTransitionTests
             gate,
             recovery,
             [],
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ =>
             {
                 baselineCalls++;

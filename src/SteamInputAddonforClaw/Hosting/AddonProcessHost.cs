@@ -9,7 +9,6 @@ using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Display;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Startup;
@@ -265,7 +264,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var composition = _runtimeCompositionFactory?.Invoke(startupComposition, startupResult)
             ?? AddonRuntimeCompositionFactory.Create(
                 startupComposition.DeviceRegistry,
-                startupComposition.RuntimeRecoveryManager,
                 startupComposition.StockCenterMBaseline,
                 startupResult.RecoverySafe,
                 // Full1902 A2 section 11: Center M Enabled (stock authority) gates ONLY the stock

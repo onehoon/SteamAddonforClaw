@@ -1,7 +1,6 @@
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Power;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Steam;
 using Xunit;
@@ -20,11 +19,9 @@ public sealed class AddonRuntimeHostTests
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafetyState,
         bool recoverySafe = true,
-        Func<bool>? hasIncompleteRecovery = null,
         Func<CancellationToken, Task<bool>>? establishBaseline = null,
         IPowerSuspendResumeNotificationSource? notificationSource = null) =>
         new(steamRuntime, powerGate, recoverySafetyState, recoverySafe,
-            hasIncompleteRecovery ?? (() => false),
             establishBaseline ?? (_ => Task.FromResult(false)),
             notificationSource);
 
@@ -149,22 +146,7 @@ public sealed class AddonRuntimeHostTests
     }
 
     [Fact]
-    public async Task EvaluateUserTermination_blocks_on_owned_live_recovery_mutation()
-    {
-        using var steamRuntime = new SteamSessionRuntime();
-        var host = NewHost(steamRuntime, new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe),
-            hasIncompleteRecovery: () => true);
-
-        var decision = host.EvaluateUserTermination();
-
-        Assert.False(decision.CanTerminate);
-        Assert.Equal(UserTerminationBlockReason.RecoveryMutationOwned, decision.Reason);
-
-        await host.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task EvaluateUserTermination_allows_termination_when_no_recovery_mutation_is_owned()
+    public async Task EvaluateUserTermination_allows_termination_at_the_lower_level_guard_by_default()
     {
         using var steamRuntime = new SteamSessionRuntime();
         var host = NewHost(steamRuntime, new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));

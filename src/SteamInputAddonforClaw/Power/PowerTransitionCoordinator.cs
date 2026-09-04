@@ -8,7 +8,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly PowerMutationGate _gate;
     private readonly IReadOnlyList<IPowerSuspendParticipant> _participants;
     private readonly RecoverySafetyState _recovery;
-    private readonly Func<bool> _hasIncompleteRecovery;
     private readonly Func<CancellationToken, Task<bool>> _establishBaseline;
     private readonly Func<CancellationToken, Task<bool>>? _afterRecovery;
     private readonly bool _recoveryEnabled;
@@ -23,11 +22,10 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Action? resumeObserved = null)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Action? resumeObserved = null)
     {
         (_gate, _recovery, _participants, _afterRecovery) = (gate, recovery, participants.ToArray(), afterRecovery);
         _recoveryEnabled = recoveryEnabled;
-        _hasIncompleteRecovery = hasIncompleteRecovery ?? (() => true);
         _establishBaseline = establishBaseline ?? (_ => Task.FromResult(true));
         // Real Windows suspend grace period budget for participants to quiesce. Kept as an
         // injectable value (default unchanged) so tests can give slower/contended CI runners
@@ -114,6 +112,17 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             }
             if (!observation.BarrierApplied)
                 _gate.TryEnterBarrier(out _, out recoveryEpoch);
+
+            // Commit the accepted resume cycle and emit the observer BEFORE the disabled-recovery
+            // fail-close: a Sleep/Hibernate -> Resume while Addon authority is active (RecoverySafe=false,
+            // so recoveryEnabled=false) is a real supported lifecycle path, and AddonProcessHost's
+            // current Full1902 owned-controller reconcile hooks run off PowerResumeObserved. The
+            // generic forward-mutation gate still stays closed for that state.
+            State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
+            var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
+            _resumeCycle = cycleForResume;
+            try { _resumeObserved?.Invoke(); } catch (Exception exception) { AppLog.Warn("Power.Resume", "Resume observer failed.", exception); }
+
             if (!_recoveryEnabled)
             {
                 State = PowerTransitionState.Unsafe;
@@ -121,10 +130,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                 AppLog.Warn("Power.Recovery", "Resume recovery is disabled because this process did not establish a safe startup boundary.", null, ("Action", "RemainPassive"));
                 return;
             }
-            State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
-            var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
-            _resumeCycle = cycleForResume;
-            try { _resumeObserved?.Invoke(); } catch (Exception exception) { AppLog.Warn("Power.Resume", "Resume observer failed.", exception); }
             var resumeStartedUtc = DateTimeOffset.UtcNow;
             var recoveryManagerStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var recoveryElapsedMs = 0d;
@@ -132,19 +137,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             var safe = false;
             try
             {
-                if (_hasIncompleteRecovery())
-                {
-                    // A journal still remaining at resume is not state to replay -- it is
-                    // fail-closed evidence that a prior owned mutation did not finish cleanly.
-                    AppLog.Warn("Power.Resume", "Recovery journal remains after canonical cleanup; failing closed instead of replaying it.", null, ("Cycle", cycleForResume), ("Epoch", recoveryEpoch));
-                    recoveryCompleted = true;
-                    _gate.TryCommitRecovery(recoveryEpoch, openGate: false, () =>
-                    {
-                        _recovery.Set(RecoverySafety.Unsafe);
-                        State = PowerTransitionState.Unsafe;
-                    });
-                    return;
-                }
                 safe = await _establishBaseline(cancellationToken).ConfigureAwait(false);
                 AppLog.Info("Power.Resume", "Resume Stock baseline completed.", ("Action", "EstablishStockBaseline"), ("Result", safe ? "Succeeded" : "Failed"));
                 recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds;

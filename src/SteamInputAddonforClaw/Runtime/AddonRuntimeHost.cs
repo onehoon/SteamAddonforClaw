@@ -57,7 +57,6 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafetyState,
         bool recoverySafe,
-        Func<bool> hasIncompleteRecovery,
         Func<CancellationToken, Task<bool>> establishBaseline,
         IPowerSuspendResumeNotificationSource? notificationSource = null)
     {
@@ -71,7 +70,6 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             Array.Empty<IPowerSuspendParticipant>(),
             token => ReconcileFreshAfterResumeAsync(token),
             recoveryEnabled: recoverySafe,
-            hasIncompleteRecovery: hasIncompleteRecovery,
             establishBaseline: establishBaseline,
             resumeObserved: () => PowerResumeObserved?.Invoke());
         _powerWatcher = new PowerTransitionWatcher(
@@ -79,8 +77,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             static () => { });
 
         _userTerminationGuard = new UserTerminationGuard(
-            () => _shutdownCancellation.IsCancellationRequested,
-            () => recoverySafetyState.Current == RecoverySafety.Safe && hasIncompleteRecovery());
+            () => _shutdownCancellation.IsCancellationRequested);
     }
 
     internal DeveloperTestModeState DeveloperTestModeState => _steamRuntime.DeveloperTestModeState;
