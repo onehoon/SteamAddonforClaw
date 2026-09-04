@@ -11,7 +11,6 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Display;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
@@ -27,7 +26,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly StartupSettingsCoordinator _settings;
     private readonly ISystemStatusProvider _status;
     private readonly AddonRuntimeHost? _runtime;
-    private readonly Func<RoutingRuntimeStatusSnapshot> _captureRoutingStatus;
     private readonly DeveloperTestModeState _developer;
     private string _registrationMessage;
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
@@ -87,7 +85,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _centerMStartup = centerMStartup;
@@ -104,7 +102,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _settings = settings;
         _status = status;
         _runtime = runtime;
-        _captureRoutingStatus = captureRoutingStatus ?? (() => _runtime?.CaptureRoutingStatus() ?? throw new InvalidOperationException("Routing status is unavailable."));
         if (_runtime is not null) _runtime.PowerResumeObserved += OnPowerResumeObserved;
         _developer = developer;
         _registrationMessage = registrationMessage;
@@ -328,7 +325,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         var snapshot = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
         var setup = _setupExecutor.Evaluate(snapshot);
-        return FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(snapshot, _captureRoutingStatus()), setup);
+        return FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(snapshot), setup);
     }
 
     public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken cancellationToken = default)
@@ -393,25 +390,16 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(new FrontendVibrationTestResult(true, "SessionOpened", session.FilePath));
     }
 
-    public async Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default)
+    public Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        var testModeEnabled = _developer.IsEnabled;
-        var steamOutputActive = _captureRoutingStatus().SteamOutputActive;
-        if (!testModeEnabled) return new FrontendVibrationTestResult(false, "Enable Test Mode from Developer Menu.", null);
-        if (!steamOutputActive) return new FrontendVibrationTestResult(false, "Steam Deck output is not active.", null);
-
+        _ = cancellationToken;
+        // Full1902 Cleanup A removed the legacy Steam-session routing runtime that owned the developer
+        // vibration-test rumble transport. The diagnostic is unavailable until a dedicated Full1902
+        // rumble path is designed. The session log is still opened so page entry keeps a header file.
         var session = GetOrOpenVibrationSession();
-        var started = Stopwatch.GetTimestamp();
-        WriteVibrationSessionIfCurrent(session, $"Command={command} Opcode={VibrationTestOpcode(command)} TestModeEnabled={testModeEnabled} SteamOutputActive={steamOutputActive}");
-        var outcome = await (_runtime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(new Feedback.DeveloperVibrationTestOutcome(false, null, null))).ConfigureAwait(false);
-        // Accepted (authority/sequence) and physically-successful are different questions: a real MSI
-        // HID write failure must be visible here even when the write was accepted, so PhysicalStatus/
-        // PhysicalReason are logged separately from Succeeded rather than folded into one boolean.
-        WriteVibrationSessionIfCurrent(session, $"Result Command={command} Succeeded={outcome.Succeeded} DurationMs={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} {DecodeFields(outcome.Decode)} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
-
-        var (succeeded, reason) = MapVibrationTestOutcome(outcome);
-        return new FrontendVibrationTestResult(succeeded, reason, session.FilePath);
+        WriteVibrationSessionIfCurrent(session, $"Command={command} Opcode={VibrationTestOpcode(command)} Result=Unavailable Reason=LegacyRoutingRemoved");
+        return Task.FromResult(new FrontendVibrationTestResult(false, "The developer vibration test is unavailable in this build.", session.FilePath));
     }
 
     /// <summary>Pure mapping, factored out for direct unit testing: <see cref="Feedback.DeveloperVibrationTestOutcome.Succeeded"/>
@@ -460,8 +448,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
         if (session is null) return new FrontendVibrationTestResult(true, "NoSessionActive", null);
 
-        var stop = _runtime?.CancelDeveloperVibrationTest();
-        session.Write($"SessionClosed CancelledPendingDeveloperStop=True BestEffortStopRequested=True PhysicalStatus={stop?.Status} PhysicalReason={stop?.Reason}");
+        session.Write("SessionClosed CancelledPendingDeveloperStop=False BestEffortStopRequested=False Reason=DeveloperVibrationTestUnavailable");
         var path = session.FilePath;
         await session.DisposeAsync().ConfigureAwait(false);
         return new FrontendVibrationTestResult(true, "SessionClosed", path);
@@ -473,9 +460,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         {
             if (_vibrationSession is { } existing) return existing;
             var session = new Feedback.VibrationTestSessionWriter(AppLog.DirectoryPath);
-            var routing = _captureRoutingStatus();
             var appVersion = typeof(InProcessAddonFrontendControl).Assembly.GetName().Version?.ToString() ?? "Unknown";
-            session.Write($"SessionStarted AppVersion={appVersion} TestModeEnabled={_developer.IsEnabled} RoutingState={routing.OperationalState} SteamOutputActive={routing.SteamOutputActive} NativeDirectInputActive={routing.NativeDirectInputActive}");
+            session.Write($"SessionStarted AppVersion={appVersion} TestModeEnabled={_developer.IsEnabled} DeveloperVibrationTest=Unavailable");
             _vibrationSession = session;
             return session;
         }
@@ -510,7 +496,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             ("SteamActive", current.Steam.IsActive),
             ("RecoverySafe", current.RecoverySafe),
             ("SetupStatus", setup.Status));
-        var mapped = FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(current, _captureRoutingStatus()), setup);
+        var mapped = FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(current), setup);
         if (!PrerequisiteSetupPromptPolicy.IsInstallable(setup))
             return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
         ThrowIfShuttingDown();
@@ -568,8 +554,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
         if (session is not null)
         {
-            var stop = _runtime?.CancelDeveloperVibrationTest();
-            session.Write($"SessionClosed Reason=RuntimeShutdown CancelledPendingDeveloperStop=True BestEffortStopRequested=True PhysicalStatus={stop?.Status} PhysicalReason={stop?.Reason}");
+            session.Write("SessionClosed Reason=RuntimeShutdown DeveloperVibrationTest=Unavailable");
             session.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
 

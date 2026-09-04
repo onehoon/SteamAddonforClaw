@@ -6,7 +6,6 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using System.Text.Json;
@@ -306,8 +305,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             new FixedSystemStatusProvider(snapshot),
             null,
             new DeveloperTestModeState(),
-            "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
+            "");
     }
 
     private InProcessAddonFrontendControl CreateControl(ISystemStatusProvider statusProvider)
@@ -320,8 +318,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             statusProvider,
             null,
             new DeveloperTestModeState(),
-            "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
+            "");
     }
 
     private static SystemStatusSnapshot ClawFamilySnapshot(HardwareCompatibilityStatus status) => new(

@@ -6,7 +6,6 @@ using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using Xunit;
@@ -318,7 +317,6 @@ public sealed class CpuBoostFrontendTests : IDisposable
             null,
             new DeveloperTestModeState(),
             "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false),
             cpuBoostRuntime: cpuBoostRuntime, gameProfileMutations: gameProfileMutations, actualRunningAppIdSource: actualRunningAppIdSource);
     }
 

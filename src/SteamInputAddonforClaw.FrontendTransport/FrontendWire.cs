@@ -47,7 +47,12 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // SetSteamInputRoutingEnabled RPC and the required FrontendSettingsSnapshot.SteamInputRoutingEnabled
 // member are gone, so a v19 peer would connect and then fail every settings-response
 // deserialization on the missing member -- failing the handshake up front is the honest outcome.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 20; }
+// Version 21: Full1902 Cleanup A removed the legacy Steam-session routing authority and its
+// Status-page Controller Status card. The required FrontendStatusSnapshot.Routing member
+// (FrontendRoutingSnapshot) and the FrontendRoutingOperationalState / FrontendRoutingEligibilityReason
+// enums are gone, so a v20 peer would connect and then fail every status-response deserialization on
+// the missing member -- failing the handshake up front is the honest outcome.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 21; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

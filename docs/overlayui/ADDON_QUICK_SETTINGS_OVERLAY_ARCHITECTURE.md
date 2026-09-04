@@ -33,7 +33,7 @@ Relevant current source seams include:
 - `src/SteamInputAddonforClaw.UI/SteamInputAddonforClaw.UI.csproj`
 - `src/SteamInputAddonforClaw/Input/IControllerStateSnapshotSource.cs`
 - `src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckInputPublisher.cs`
-- `src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckOutputStage.cs`
+- `src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPresentation.cs`
 
 The project is pre-release. Obsolete Game Bar/X360 presentation experiments are not compatibility requirements.
 

@@ -20,7 +20,6 @@ public sealed class FrontendContractTests
         FrontendControllerEnvironmentStatus.Supported, "StockCenterMOnlySupported",
         new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
         new(true, 480, FrontendSteamSource.BigPicture),
-        new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.OverrideActive, true, true, true),
         FrontendAddonOperationalStatus.Ready, "Eligible", true,
         FrontendSetupStatus.Complete, "Complete", false);
 
@@ -156,26 +155,6 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
-    public void Mapper_translates_routing_operational_state_passive() =>
-        Assert.Equal(FrontendRoutingOperationalState.Passive, Snapshot(routingOperationalState: RoutingOperationalState.Passive).Routing.OperationalState);
-
-    [Fact]
-    public void Mapper_translates_routing_operational_state_override_active() =>
-        Assert.Equal(FrontendRoutingOperationalState.OverrideActive, Snapshot(routingOperationalState: RoutingOperationalState.OverrideActive).Routing.OperationalState);
-
-    [Theory]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public void Mapper_preserves_routing_availability(bool available, bool expected) =>
-        Assert.Equal(expected, Snapshot(routingAvailable: available).Routing.Available);
-
-    [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public void Mapper_preserves_steam_output_active(bool steamOutputActive, bool nativeDirectInputActive) =>
-        Assert.Equal(steamOutputActive, Snapshot(steamOutputActive: steamOutputActive, nativeDirectInputActive: nativeDirectInputActive).Routing.SteamOutputActive);
-
-    [Fact]
     public void Mapper_translates_prerequisite_status_ready() =>
         Assert.Equal(FrontendPrerequisiteStatus.Ready, Snapshot(hidHideStatus: PrerequisiteStatus.Ready).Prerequisites.HidHideStatus);
 
@@ -192,18 +171,12 @@ public sealed class FrontendContractTests
     {
         var mapped = Snapshot(
             hardwareStatus: HardwareCompatibilityStatus.Indeterminate,
-            recoverySafe: false,
-            routingReason: RoutingDecisionReason.DeviceCompatibilityIndeterminate);
+            recoverySafe: false);
 
         Assert.False(mapped.RecoverySafe);
         Assert.Equal(FrontendHardwareStatus.Indeterminate, mapped.Hardware.Status);
-        Assert.Equal(FrontendRoutingOperationalState.Passive, mapped.Routing.OperationalState);
         Assert.False(mapped.CanInstallRequiredComponents);
     }
-
-    [Fact]
-    public void Mapper_translates_routing_reason_to_frontend_enum() =>
-        Assert.Equal(FrontendRoutingEligibilityReason.PrerequisitesNotReady, Snapshot(routingReason: RoutingDecisionReason.PrerequisitesNotReady).Routing.EligibilityReason);
 
     [Fact]
     public void Mapper_translates_addon_status_to_frontend_enum() =>
@@ -214,20 +187,6 @@ public sealed class FrontendContractTests
     {
         var unknownSteam = (SteamSessionSource)int.MaxValue;
         Assert.Equal(FrontendSteamSource.Indeterminate, Snapshot(steamSource: unknownSteam).Steam.Source);
-    }
-
-    [Fact]
-    public void Mapper_unknown_routing_operational_state_fails_closed_to_indeterminate()
-    {
-        var unknownOperational = (RoutingOperationalState)int.MaxValue;
-        Assert.Equal(FrontendRoutingOperationalState.Indeterminate, Snapshot(routingOperationalState: unknownOperational).Routing.OperationalState);
-    }
-
-    [Fact]
-    public void Mapper_unknown_routing_reason_fails_closed_to_indeterminate()
-    {
-        var unknownRoutingReason = (RoutingDecisionReason)int.MaxValue;
-        Assert.Equal(FrontendRoutingEligibilityReason.Indeterminate, Snapshot(routingReason: unknownRoutingReason).Routing.EligibilityReason);
     }
 
     [Fact]
@@ -277,10 +236,6 @@ public sealed class FrontendContractTests
         SteamSessionSource steamSource = SteamSessionSource.Actual,
         bool recoverySafe = true,
         RoutingDecisionReason routingReason = RoutingDecisionReason.Eligible,
-        RoutingOperationalState routingOperationalState = RoutingOperationalState.Passive,
-        bool routingAvailable = true,
-        bool steamOutputActive = false,
-        bool nativeDirectInputActive = false,
         PrerequisiteStatus hidHideStatus = PrerequisiteStatus.Ready,
         AddonOperationalStatus addonStatus = AddonOperationalStatus.Ready)
     {
@@ -295,6 +250,6 @@ public sealed class FrontendContractTests
             new(addonStatus, "Test"),
             recoverySafe);
 
-        return FrontendSnapshotMapper.Map(runtime, new RoutingRuntimeStatusSnapshot(routingAvailable, routingOperationalState, steamOutputActive, nativeDirectInputActive));
+        return FrontendSnapshotMapper.Map(runtime);
     }
 }

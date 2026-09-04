@@ -34,20 +34,7 @@ public enum FrontendSteamSource { Actual, BigPicture, DeveloperTest, Indetermina
 public enum FrontendSoftwareInstallationStatus { Installed, NotInstalled, Indeterminate }
 public enum FrontendSoftwareRuntimeStatus { Running, NotRunning, Starting, Indeterminate }
 public enum FrontendPrerequisiteStatus { Ready, Missing, Present, Unusable, Incompatible, Indeterminate }
-public enum FrontendRoutingOperationalState { Passive, OverrideActive, Indeterminate }
 public enum FrontendPrerequisiteSetupResultKind { Ready, Installed, RebootRequired, Cancelled, NotInstallable, Blocked, Failed, AlreadyInProgress }
-public enum FrontendRoutingEligibilityReason
-{
-    SteamInactive,
-    RecoveryUnsafe,
-    UnsupportedDevice,
-    DeviceCompatibilityIndeterminate,
-    ControllerEnvironmentUnsupported,
-    ControllerEnvironmentIndeterminate,
-    PrerequisitesNotReady,
-    Eligible,
-    Indeterminate
-}
 public enum FrontendAddonOperationalStatus
 {
     Ready,
@@ -211,7 +198,6 @@ public sealed record FrontendHardwareSnapshot(FrontendHardwareStatus Status, str
 public sealed record FrontendSteamSnapshot(bool Active, uint AppId, FrontendSteamSource Source);
 public sealed record FrontendSoftwareSnapshot(string Kind, string DisplayName, FrontendSoftwareInstallationStatus Installation, FrontendSoftwareRuntimeStatus Runtime, string Reason);
 public sealed record FrontendPrerequisiteSnapshot(FrontendPrerequisiteStatus HidHideStatus, string HidHideReason, FrontendPrerequisiteStatus UsbIpStatus, string UsbIpReason, FrontendPrerequisiteStatus ViiperStatus, string ViiperReason);
-public sealed record FrontendRoutingSnapshot(FrontendRoutingEligibilityReason EligibilityReason, FrontendRoutingOperationalState OperationalState, bool Available, bool SteamOutputActive, bool NativeDirectInputActive);
 public enum FrontendClawSensorProbeState { Idle, Discovering, Ready, Starting, Countdown, RecordingPhase, Stopping, Completed, Failed }
 public enum FrontendClawSensorProbePhase { Rest, RollLeft, RollRight, PitchUp, PitchDown, YawLeft, YawRight }
 
@@ -270,7 +256,6 @@ public sealed record FrontendStatusSnapshot(
     string ControllerEnvironmentReason,
     FrontendPrerequisiteSnapshot Prerequisites,
     FrontendSteamSnapshot Steam,
-    FrontendRoutingSnapshot Routing,
     FrontendAddonOperationalStatus AddonStatus,
     string AddonReason,
     bool RecoverySafe,

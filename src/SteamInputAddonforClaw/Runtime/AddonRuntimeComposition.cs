@@ -7,7 +7,6 @@ using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Recovery;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
@@ -26,7 +25,6 @@ internal sealed record AddonRuntimeComposition(
 internal static class AddonRuntimeCompositionFactory
 {
     internal static AddonRuntimeComposition Create(
-        IHandheldDeviceAdapter handheldDeviceAdapter,
         HandheldDeviceRegistry deviceRegistry,
         IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider,
         RecoveryManager recoveryManager,
@@ -40,7 +38,6 @@ internal static class AddonRuntimeCompositionFactory
         bool stockCenterMAuthority,
         WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
-        Action? routingReconcileCompleted = null,
         Func<bool>? isLaunchAtWindowsStartupRequired = null,
         // Full1902 0903 cleanup (section 4.6): a read-only override for the final Addon operational
         // status, closing over AddonProcessHost's existing physical/presentation ownership facts.
@@ -78,13 +75,6 @@ internal static class AddonRuntimeCompositionFactory
             () => steamRuntime.State,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             captureFull1902AddonStatus);
-        // Full1902 A2 section 10: no production branch creates AddonRoutingRuntime. Center M Enabled
-        // has no Addon controller ownership at all; Center M Disabled uses the Full1902 VIIPER
-        // presentation owner (PR6/PR7) + the feature-local front-button runtime, both composed in
-        // AddonProcessHost -- not this legacy path.
-        AddonRoutingRuntime? routingRuntime = null;
-        AppLog.Info("Routing", "Legacy Steam-session routing runtime is not composed (Full1902 controller authority).", ("Action", "Passive"));
-
         // Full1902 A2 section 11: sleep/resume while Center M is Disabled must not call the legacy
         // stock XInput baseline; the Enabled (stock authority) state still needs stock PID1901
         // verification on resume. Gated independently of the (now removed) legacy routing selection.
@@ -94,13 +84,11 @@ internal static class AddonRuntimeCompositionFactory
 
         var runtimeHost = new AddonRuntimeHost(
             steamRuntime,
-            routingRuntime,
             powerGate,
             recoverySafetyState,
             recoverySafe,
             () => recoveryManager.HasIncompleteRecovery,
-            establishBaseline,
-            routingReconcileCompleted: routingReconcileCompleted);
+            establishBaseline);
 
         if (bigPictureStateChanged is not null && steamRuntime.IsBigPictureActive)
             bigPictureStateChanged(true);

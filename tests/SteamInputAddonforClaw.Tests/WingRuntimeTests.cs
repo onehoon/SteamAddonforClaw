@@ -19,20 +19,6 @@ public sealed class WingRuntimeTests
         Assert.Equal((WingAction)99, mapping.Single.Action);
     }
     [Fact]
-    public async Task WinG_authority_is_active_only_between_successful_arm_and_rollback()
-    {
-        var stage = new WinGProtectionRoutingStage(() => true, () => { });
-        Assert.False(stage.CaptureAuthority().Active);
-        await stage.ExecuteMutationAsync(CancellationToken.None);
-        var active = stage.CaptureAuthority();
-        Assert.True(active.Active);
-        await stage.RollbackMutationAsync(CancellationToken.None);
-        var inactive = stage.CaptureAuthority();
-        Assert.False(inactive.Active);
-        Assert.NotEqual(active.Epoch, inactive.Epoch);
-    }
-
-    [Fact]
     public void Default_wing_mapping_dispatches_immediate_steam_pulse()
     {
         var requests = 0;

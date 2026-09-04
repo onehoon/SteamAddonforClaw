@@ -3,7 +3,6 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using Xunit;
@@ -90,7 +89,6 @@ public sealed class CenterMStartupFrontendTests : IDisposable
             null,
             new DeveloperTestModeState(),
             "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false),
             centerMStartup: centerM,
             centerMAuthorityTransition: owner);
     }

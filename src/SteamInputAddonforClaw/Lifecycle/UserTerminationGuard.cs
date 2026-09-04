@@ -5,10 +5,10 @@ namespace SteamInputAddonforClaw.Lifecycle;
 internal enum UserTerminationBlockReason
 {
     None,
+    /// <summary>Ordinary user Runtime termination is blocked because a controller-authority
+    /// transition is still committing (e.g. the deferred Center M Disabled physical acquisition +
+    /// Win+G arm from the Policy B work order).</summary>
     RoutingTransition,
-    PendingRoutingCleanup,
-    NativeModeActive,
-    NativeRecoveryOwned,
     RecoveryMutationOwned,
     RuntimeShuttingDown,
     /// <summary>Ordinary user Runtime termination is blocked because MSI Center M is exactly Disabled:
@@ -45,31 +45,20 @@ internal static class UserTerminationComposition
 
 internal sealed class UserTerminationGuard
 {
-    private readonly Func<Routing.RoutingRuntimeTerminationSnapshot> _routingSnapshot;
-    private readonly Func<bool> _nativeModeActive;
-    private readonly Func<bool> _nativeRecoveryOwned;
+    private readonly Func<bool> _runtimeShuttingDown;
     private readonly Func<bool> _liveRecoveryMutationOwned;
 
     internal UserTerminationGuard(
-        Func<Routing.RoutingRuntimeTerminationSnapshot> routingSnapshot,
-        Func<bool> nativeModeActive,
-        Func<bool> nativeRecoveryOwned,
+        Func<bool> runtimeShuttingDown,
         Func<bool> liveRecoveryMutationOwned)
     {
-        _routingSnapshot = routingSnapshot ?? throw new ArgumentNullException(nameof(routingSnapshot));
-        _nativeModeActive = nativeModeActive ?? throw new ArgumentNullException(nameof(nativeModeActive));
-        _nativeRecoveryOwned = nativeRecoveryOwned ?? throw new ArgumentNullException(nameof(nativeRecoveryOwned));
+        _runtimeShuttingDown = runtimeShuttingDown ?? throw new ArgumentNullException(nameof(runtimeShuttingDown));
         _liveRecoveryMutationOwned = liveRecoveryMutationOwned ?? throw new ArgumentNullException(nameof(liveRecoveryMutationOwned));
     }
 
     internal UserTerminationDecision Evaluate()
     {
-        var snapshot = _routingSnapshot();
-        if (snapshot.ShutdownRequested) return new(false, UserTerminationBlockReason.RuntimeShuttingDown);
-        if (snapshot.TransitionInProgress) return new(false, UserTerminationBlockReason.RoutingTransition);
-        if (snapshot.HasPendingCleanup) return new(false, UserTerminationBlockReason.PendingRoutingCleanup);
-        if (_nativeModeActive()) return new(false, UserTerminationBlockReason.NativeModeActive);
-        if (_nativeRecoveryOwned()) return new(false, UserTerminationBlockReason.NativeRecoveryOwned);
+        if (_runtimeShuttingDown()) return new(false, UserTerminationBlockReason.RuntimeShuttingDown);
         if (_liveRecoveryMutationOwned()) return new(false, UserTerminationBlockReason.RecoveryMutationOwned);
         return new(true, UserTerminationBlockReason.None);
     }

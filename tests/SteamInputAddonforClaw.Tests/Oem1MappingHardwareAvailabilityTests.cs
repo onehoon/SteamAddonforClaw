@@ -2,7 +2,6 @@ using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using Xunit;
@@ -88,7 +87,6 @@ public sealed class Oem1MappingHardwareAvailabilityTests : IDisposable
             null,
             new DeveloperTestModeState(),
             "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false),
             oem1MappingAvailable: oem1MappingAvailable);
     }
 

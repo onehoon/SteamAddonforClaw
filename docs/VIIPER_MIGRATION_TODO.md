@@ -1,5 +1,15 @@
 # Steam Deck Runtime Roadmap
 
+> **Superseded internals (Full1902 Cleanup A).** The legacy Steam-session routing
+> authority — `AddonRoutingRuntime`, `RoutingPipelineRuntimeCoordinator`, the
+> `RoutingPipeline*` graph, `MsiClawRoutingComposition` /
+> `IHandheldRoutingComposition`, `CanonicalSteamDeckOutputStage`,
+> `WinGProtectionRoutingStage`, `GameBarForegroundWatcher`, and
+> `RoutingRuntimeStatusSnapshot` — has been deleted. The PR-by-PR notes below are
+> retained as history; their present-tense references to those types no longer
+> describe the tree. Current presentation authority is `MsiClawAddonPresentation`
+> → `CanonicalViiperRuntime` → one live X360 **or** Steam Deck publisher.
+
 ## Current state
 
 The Addon has one active Steam virtual-output architecture: the canonical

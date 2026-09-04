@@ -15,7 +15,7 @@ public sealed class FrontendNamedPipeTransportTests
     private static readonly FrontendStatusSnapshot Status = new(
         new("MSI", "Claw", "Board", ["GPU"]), new(FrontendHardwareStatus.Supported, "Family", "Model", "Ready"), [],
         FrontendControllerEnvironmentStatus.Supported, "Ready", new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
-        new(false, 0, FrontendSteamSource.Actual), new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.Passive, true, false, false),
+        new(false, 0, FrontendSteamSource.Actual),
         FrontendAddonOperationalStatus.Ready, "Ready", true, FrontendSetupStatus.Complete, "Complete", false);
 
     [Fact]
@@ -988,9 +988,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":20,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":20,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":20,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":21,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":21,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":21,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();

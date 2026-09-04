@@ -3,7 +3,6 @@ using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using Xunit;
@@ -149,8 +148,7 @@ public sealed class VibrationTestSessionLifecycleTests : IDisposable
             new ThrowingSystemStatusProvider(),
             null,
             new DeveloperTestModeState(),
-            "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, true, false));
+            "");
     }
 
     public void Dispose()

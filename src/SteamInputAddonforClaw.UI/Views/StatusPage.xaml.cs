@@ -30,11 +30,6 @@ public sealed partial class StatusPage : UserControl
 
         SteamGameStatusText.Text = StatusPresentation.FormatSteamGame(snapshot.Steam);
 
-        var stateTrusted = StatusPresentation.IsControllerStateTrusted(snapshot);
-        // No independent, non-probing signal currently confirms the native mode is XInput ahead
-        // of routing entry; fail conservative and omit the "(XInput)" qualifier rather than guess.
-        ControllerStatusText.Text = StatusPresentation.FormatControllerStatus(stateTrusted, snapshot.Routing, nativeXInputVerified: false);
-
         var isWarning = StatusPresentation.IsWarning(snapshot);
         StatusInfoBar.Severity = InfoBarSeverity.Warning;
         StatusInfoBar.Message = snapshot.AddonReason;
