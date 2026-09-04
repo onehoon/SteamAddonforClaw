@@ -9,7 +9,6 @@ internal enum UserTerminationBlockReason
     /// transition is still committing (e.g. the deferred Center M Disabled physical acquisition +
     /// Win+G arm from the Policy B work order).</summary>
     RoutingTransition,
-    RecoveryMutationOwned,
     RuntimeShuttingDown,
     /// <summary>Ordinary user Runtime termination is blocked because MSI Center M is exactly Disabled:
     /// the background Addon Runtime is the selected controller authority and the only supported way
@@ -46,20 +45,15 @@ internal static class UserTerminationComposition
 internal sealed class UserTerminationGuard
 {
     private readonly Func<bool> _runtimeShuttingDown;
-    private readonly Func<bool> _liveRecoveryMutationOwned;
 
-    internal UserTerminationGuard(
-        Func<bool> runtimeShuttingDown,
-        Func<bool> liveRecoveryMutationOwned)
+    internal UserTerminationGuard(Func<bool> runtimeShuttingDown)
     {
         _runtimeShuttingDown = runtimeShuttingDown ?? throw new ArgumentNullException(nameof(runtimeShuttingDown));
-        _liveRecoveryMutationOwned = liveRecoveryMutationOwned ?? throw new ArgumentNullException(nameof(liveRecoveryMutationOwned));
     }
 
     internal UserTerminationDecision Evaluate()
     {
         if (_runtimeShuttingDown()) return new(false, UserTerminationBlockReason.RuntimeShuttingDown);
-        if (_liveRecoveryMutationOwned()) return new(false, UserTerminationBlockReason.RecoveryMutationOwned);
         return new(true, UserTerminationBlockReason.None);
     }
 }

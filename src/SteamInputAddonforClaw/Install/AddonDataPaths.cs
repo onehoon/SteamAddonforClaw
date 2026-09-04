@@ -8,8 +8,6 @@ internal static class AddonDataPaths
 
     internal static string SettingsPath => ResolveSettingsPath(VelopackAppPaths.RootAppDirectory);
 
-    internal static string RecoveryJournalPath => ResolveRecoveryJournalPath(VelopackAppPaths.RootAppDirectory);
-
     internal static string LogDirectory => ResolveLogDirectory(VelopackAppPaths.RootAppDirectory);
 
     internal static string CefMarkerOwnershipPath => Path.Combine(RootDirectory, "steam-cef-marker.json");
@@ -26,9 +24,6 @@ internal static class AddonDataPaths
 
     internal static string ResolveProfilesPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "profiles.json");
-
-    internal static string ResolveRecoveryJournalPath(string rootAppDirectory) =>
-        Path.Combine(ResolveDataRoot(rootAppDirectory), "recovery.json");
 
     internal static string ResolveLogDirectory(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "logs");

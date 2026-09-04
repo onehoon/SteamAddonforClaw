@@ -4,7 +4,6 @@ using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Power;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Settings;
 using Xunit;
@@ -23,7 +22,6 @@ public sealed class AddonProcessHostStartupTests
             new PowerMutationGate(),
             new RecoverySafetyState(RecoverySafety.Safe),
             recoverySafe: true,
-            hasIncompleteRecovery: () => false,
             establishBaseline: _ => Task.FromResult(true));
         var runtimeComposition = new AddonRuntimeComposition(
             runtimeHost, null!, "test", null!);
@@ -31,7 +29,7 @@ public sealed class AddonProcessHostStartupTests
         var host = new AddonProcessHost(null, (_, _) => runtimeComposition, testDataRoot,
             () => $"SteamInputAddonforClaw.Frontend.Test.{Guid.NewGuid():N}");
         host.TestOnly_SetStartupForInitialization(
-            new AddonStartupComposition(null!, null!, null!, null!, null!, new CenterMStartupControl(available: false)),
+            new AddonStartupComposition(null!, null!, null!, null!, new CenterMStartupControl(available: false)),
             new StartupResult(true));
 
         var initialization = host.InitializeRuntimeAsync();

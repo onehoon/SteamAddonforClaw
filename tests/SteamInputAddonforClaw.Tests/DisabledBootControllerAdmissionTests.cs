@@ -1,26 +1,22 @@
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Prerequisites;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Startup;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>Work order PR4 sections 9-14/25 (Cleanup D: the third-party controller-manager gate is
-/// gone): the read-only Disabled-boot controller admission gate. It classifies Ready/Blocked from
-/// prerequisite / recovery-journal / HidHide-baseline facts only and mutates nothing beyond the
-/// deterministic HidHide baseline normalization.</summary>
+/// <summary>The read-only Disabled-boot controller admission gate (Cleanup D: no third-party manager
+/// gate; Cleanup H: no recovery-journal gate). It classifies Ready/Blocked from prerequisite +
+/// deterministic HidHide-baseline facts only.</summary>
 public sealed class DisabledBootControllerAdmissionTests
 {
     private static DisabledBootControllerAdmission Build(
         RuntimePrerequisiteAssessment? prerequisites = null,
         Func<RuntimePrerequisiteAssessment>? inspect = null,
-        RecoveryResult? recovery = null,
         AddonHidHideBaselineOutcome hidHide = AddonHidHideBaselineOutcome.AlreadyCompliant,
         Func<AddonHidHideBaselineResult>? inspectHidHide = null)
         => new(
             new StubInspector(inspect ?? (() => prerequisites ?? Ready())),
-            () => recovery ?? new RecoveryResult(RecoveryStatus.NoRecoveryNeeded, "none"),
             inspectHidHide ?? (() => new AddonHidHideBaselineResult(hidHide, "r", AddonHidHideBaselineSnapshot.Unknown)));
 
     private static RuntimePrerequisiteAssessment Ready() => new(
@@ -85,16 +81,6 @@ public sealed class DisabledBootControllerAdmissionTests
             DisabledBootAdmissionOutcome.Blocked,
             Build(inspect: () => throw new InvalidOperationException("boom")).Evaluate().Outcome);
 
-    // ---- 25.8 recovery journal ----
-
-    [Theory]
-    [InlineData("Success")]   // a valid old route-scoped journal still exists
-    [InlineData("Failure")]   // malformed / unverifiable
-    public void Any_present_or_unverifiable_recovery_journal_is_blocked(string status)
-        => Assert.Equal(
-            DisabledBootAdmissionOutcome.Blocked,
-            Build(recovery: new RecoveryResult(Enum.Parse<RecoveryStatus>(status), "x")).Evaluate().Outcome);
-
     // ---- PR10 addendum section 22: end-to-end Disabled-boot HidHide normalization gate ----
 
     [Fact]
@@ -114,7 +100,6 @@ public sealed class DisabledBootControllerAdmissionTests
             client, addonExe, () => [officialCli, officialClient]);
         var admission = new DisabledBootControllerAdmission(
             new StubInspector(Ready),
-            () => new RecoveryResult(RecoveryStatus.NoRecoveryNeeded, "none"),
             () => baseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(
                 SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
 
@@ -135,7 +120,6 @@ public sealed class DisabledBootControllerAdmissionTests
             client, addonExe, () => []); // official CLI path cannot be resolved -> Unavailable
         var admission = new DisabledBootControllerAdmission(
             new StubInspector(Ready),
-            () => new RecoveryResult(RecoveryStatus.NoRecoveryNeeded, "none"),
             () => baseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(_ => false));
 
         Assert.Equal(DisabledBootAdmissionOutcome.Blocked, admission.Evaluate().Outcome);

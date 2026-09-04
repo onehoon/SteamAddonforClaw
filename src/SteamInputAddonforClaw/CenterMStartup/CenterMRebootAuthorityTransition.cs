@@ -197,9 +197,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         // the one Runtime status snapshot -- no new authority is introduced here.
         var admission = await _captureAdmission(cancellationToken).ConfigureAwait(false);
 
-        // RecoverySafe=false means stale route-scoped recovery could not be safely retired (e.g. the
-        // validated recovery journal still exists). Establishing the persistent PR2 baseline now would
-        // let the next-boot StartupHidHideRecoveryCleaner mistake it for the old mutation and undo it.
+        // RecoverySafe reflects the live current-process power/recovery boundary (RecoverySafetyState):
+        // e.g. a resume baseline that has not re-established a verified safe state. Committing the
+        // next boot to Addon authority while that is unresolved is not safe.
         if (!admission.RecoverySafe)
             return Fail(snapshot,
                 "Controller recovery is not in a verified safe state, so MSI Center M was not disabled. Resolve controller recovery and retry Disable and Restart.");

@@ -39,7 +39,7 @@ internal static class UninstallBootstrap
         var cefCleaned = Steam.SteamCefDebugBootstrap.RemoveOwnedMarker();
         var fpsCleaned = TryCleanupOwnedIntelFpsForUninstall();
         TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-        if (cefCleaned && fpsCleaned && !File.Exists(AddonDataPaths.RecoveryJournalPath))
+        if (cefCleaned && fpsCleaned)
             AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
     }
 

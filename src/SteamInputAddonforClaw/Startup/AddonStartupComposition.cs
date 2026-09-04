@@ -6,7 +6,6 @@ using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Prerequisites;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
@@ -17,7 +16,6 @@ internal sealed record AddonStartupComposition(
     StartupCoordinator Coordinator,
     HandheldDeviceRegistry DeviceRegistry,
     IHandheldDeviceAdapter HandheldDeviceAdapter,
-    RecoveryManager RuntimeRecoveryManager,
     IStockCenterMStartupBaseline? StockCenterMBaseline,
     // PR4: the ONE shared Center M startup control -- startup reads it for the authority branch, and
     // AddonProcessHost reuses this same instance for the PR2.5 mandatory policy, the PR3 transition,
@@ -32,8 +30,6 @@ internal static class AddonStartupCompositionFactory
         var msiClawAdapter = new MsiClawDeviceAdapter(deviceEnumerator);
         var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
-        var recoveryJournalStore = new RecoveryJournalStore(AddonDataPaths.RecoveryJournalPath);
-        var runtimeRecoveryManager = new RecoveryManager(recoveryJournalStore);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var stockCenterMBaseline = nativeState is null ? null : new StockCenterMStartupBaseline(nativeState);
 
@@ -55,7 +51,6 @@ internal static class AddonStartupCompositionFactory
             ? null
             : new DisabledBootControllerAdmission(
                 prerequisiteInspector,
-                runtimeRecoveryManager.LoadJournal,
                 // PR10 addendum section 7: normalize + verify the persistent HidHide baseline on every
                 // Disabled boot, keeping the one exact Addon-owned primary PID1902 gamepad collection
                 // if it is already persisted so a normal boot does not churn the owned target.
@@ -65,9 +60,7 @@ internal static class AddonStartupCompositionFactory
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(updateRestartArguments),
             new ControllerTopologyWaiter(deviceEnumerator, classifier),
-            recoveryJournalStore: recoveryJournalStore,
             stockCenterMBaseline: stockCenterMBaseline,
-            hidHideRecoveryCleaner: new StartupHidHideRecoveryCleaner(new HidHideDriverClient()),
             disabledBootAdmission: disabledBootAdmission,
             captureCenterMStartup: centerMStartupControl.Capture,
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
@@ -77,7 +70,6 @@ internal static class AddonStartupCompositionFactory
             coordinator,
             deviceRegistry,
             msiClawAdapter,
-            runtimeRecoveryManager,
             stockCenterMBaseline,
             centerMStartupControl);
     }

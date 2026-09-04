@@ -354,8 +354,6 @@ internal static class ElevatedPrerequisiteSetup
         {
             var hardware = CaptureHardwareCompatibility();
             if (!hardware.AllowsMutation) return (false, "Hardware" + hardware.Status);
-            var recoverySafety = new MachineRecoverySafetyInspector().Inspect();
-            if (!AllowsRecoverySafeProvisioning(recoverySafety)) return (false, recoverySafety.Reason);
             using var runningAppId = new SteamRunningAppIdRegistrySource();
             var probe = new SteamBigPictureWindowProbe();
             return ElevatedSteamSafetyGate.Evaluate(runningAppId.GetRunningAppId, probe.Capture);
@@ -366,8 +364,6 @@ internal static class ElevatedPrerequisiteSetup
             return (false, "SafetyGateInspectionFailed");
         }
     }
-
-    internal static bool AllowsRecoverySafeProvisioning(RecoverySafetyAssessment assessment) => assessment.Status == RecoverySafetyStatus.Safe;
 
     internal static HardwareCompatibilityAssessment CaptureHardwareCompatibility(
         IWindowsDeviceProbeContextFactory? probeContextFactory = null,

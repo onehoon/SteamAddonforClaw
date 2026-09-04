@@ -3,7 +3,6 @@ namespace SteamInputAddonforClaw.Startup;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 
@@ -11,9 +10,6 @@ internal sealed class StartupCoordinator
 {
     private readonly IUpdateGate _updateGate;
     private readonly IControllerTopologyWaiter _topologyWaiter;
-    private readonly IRecoveryJournalStore _recoveryJournalStore;
-    private readonly RecoveryManager _recoveryManager;
-    private readonly IStartupHidHideRecoveryCleaner? _hidHideRecoveryCleaner;
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IDisabledBootControllerAdmission? _disabledBootAdmission;
     private readonly Func<FrontendCenterMStartupSnapshot>? _captureCenterMStartup;
@@ -28,9 +24,7 @@ internal sealed class StartupCoordinator
         IControllerTopologyWaiter topologyWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
-        IRecoveryJournalStore recoveryJournalStore,
         IStockCenterMStartupBaseline? stockCenterMBaseline = null,
-        IStartupHidHideRecoveryCleaner? hidHideRecoveryCleaner = null,
         IDisabledBootControllerAdmission? disabledBootAdmission = null,
         Func<FrontendCenterMStartupSnapshot>? captureCenterMStartup = null,
         TimeSpan? hardwareProbePollInterval = null,
@@ -39,9 +33,6 @@ internal sealed class StartupCoordinator
     {
         _updateGate = updateGate;
         _topologyWaiter = topologyWaiter;
-        _recoveryJournalStore = recoveryJournalStore ?? throw new ArgumentNullException(nameof(recoveryJournalStore));
-        _recoveryManager = new RecoveryManager(_recoveryJournalStore);
-        _hidHideRecoveryCleaner = hidHideRecoveryCleaner;
         _stockCenterMBaseline = stockCenterMBaseline;
         _disabledBootAdmission = disabledBootAdmission;
         _captureCenterMStartup = captureCenterMStartup;
@@ -125,15 +116,16 @@ internal sealed class StartupCoordinator
             return new StartupResult(true, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
                 CenterMStartupState: FrontendCenterMStartupState.Enabled);
 
-        var recoverySafe = await ResolveStaleRecoveryAsync(cancellationToken).ConfigureAwait(false);
-        return new StartupResult(true, RecoverySafe: recoverySafe, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+        // Full1902 Cleanup H: the verified stock PID1901 baseline is the whole Enabled-authority
+        // safety fact. Current production cannot create a controller recovery.json, so there is no
+        // stale mutation journal to load, clean, or retire here.
+        return new StartupResult(true, RecoverySafe: true, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
             CenterMStartupState: FrontendCenterMStartupState.Enabled);
     }
 
-    /// <summary>PR4 Disabled branch (work order sections 9-13): read-only only. Waits for a stable
-    /// MSI Claw topology, then runs the read-only admission facts. Never calls
-    /// <see cref="IStockCenterMStartupBaseline.EstablishAsync"/>, the old HidHide recovery cleaner,
-    /// or journal retirement; issues no PID/HidHide/VIIPER mutation.</summary>
+    /// <summary>PR4 Disabled branch: read-only only. Waits for a stable MSI Claw topology, then runs
+    /// the read-only admission facts. Never calls <see cref="IStockCenterMStartupBaseline.EstablishAsync"/>;
+    /// issues no PID/HidHide/VIIPER mutation.</summary>
     private async Task<StartupResult> RunDisabledBootAdmissionAsync(bool hardwareSupported, HardwareCompatibilityAssessment hardware, CancellationToken cancellationToken)
     {
         var deviceModel = hardware.Status == HardwareCompatibilityStatus.Supported ? hardware.DeviceModel : null;
@@ -153,77 +145,6 @@ internal sealed class StartupCoordinator
         return new StartupResult(true,
             RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: deviceModel, HardwareStatus: hardware.Status,
             CenterMStartupState: FrontendCenterMStartupState.Disabled, DisabledBootAdmission: admission);
-    }
-
-    /// <summary>
-    /// Uses the validated stale recovery journal only as immutable ownership evidence for
-    /// removing persistent HidHide mutations proven addon-owned. Previous routing/native/VIIPER
-    /// state is never replayed. The journal is discarded only after any required HidHide cleanup
-    /// has been independently verified to succeed.
-    /// </summary>
-    private async Task<bool> ResolveStaleRecoveryAsync(CancellationToken cancellationToken)
-    {
-        var loaded = _recoveryManager.LoadJournal();
-        switch (loaded.Status)
-        {
-            case RecoveryStatus.NoRecoveryNeeded:
-                return true;
-            case RecoveryStatus.Failure:
-                AppLog.Warn("Recovery", "Stale startup journal could not be validated; routing remains passive.", null,
-                    ("Action", "Passive"), ("Reason", loaded.Reason));
-                return false;
-        }
-
-        var journal = loaded.Journal!;
-        if (StartupHidHideRecoveryCleaner.RequiresCleanup(journal))
-        {
-            if (_hidHideRecoveryCleaner is null)
-            {
-                AppLog.Warn("Recovery", "Stale startup journal requires HidHide cleanup, but no cleaner is configured; routing remains passive.", null, ("Action", "Passive"));
-                return false;
-            }
-            if (!_hidHideRecoveryCleaner.TryClean(journal, out var cleanupReason))
-            {
-                AppLog.Warn("Recovery", "Stale startup HidHide cleanup failed; routing remains passive.", null, ("Action", "Passive"), ("Reason", cleanupReason));
-                return false;
-            }
-        }
-
-        if (!TryRetireStaleStartupJournal(out var reason))
-        {
-            AppLog.Warn("Startup", "Stale startup journal could not be discarded after the live XInput baseline; routing remains passive.", null,
-                ("Action", "Passive"), ("Reason", reason));
-            return false;
-        }
-        return true;
-    }
-
-    private bool TryRetireStaleStartupJournal(out string reason)
-    {
-        try
-        {
-            if (!_recoveryJournalStore.Exists())
-            {
-                reason = "Recovery journal does not exist.";
-                return true;
-            }
-            AppLog.Info("Recovery", "Stale startup journal retirement started.", ("JournalPath", _recoveryJournalStore.JournalPath), ("Action", "DiscardOnly"));
-            _recoveryJournalStore.Delete();
-            if (_recoveryJournalStore.Exists())
-            {
-                reason = "Recovery journal still exists after deletion.";
-                return false;
-            }
-            AppLog.Info("Recovery", "Stale startup journal discarded.", ("JournalPath", _recoveryJournalStore.JournalPath), ("JournalDeleted", true));
-            reason = "Stale startup journal discarded.";
-            return true;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("Recovery", "Stale startup journal could not be discarded.", exception, ("JournalPath", _recoveryJournalStore.JournalPath), ("Action", "Passive"));
-            reason = exception.Message;
-            return false;
-        }
     }
 
     private HardwareCompatibilityAssessment EvaluateHardwareCompatibility()
