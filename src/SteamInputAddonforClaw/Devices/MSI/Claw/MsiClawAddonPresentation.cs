@@ -705,9 +705,39 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // proof there is nothing attached: RetireActivePresentationCoreAsync clears _publisher (a
             // proven-stopped publisher) BEFORE it attempts the canonical neutral+detach, and keeps
             // _activeKind set when that detach is not proven (e.g. DetachXbox360 RetryableFailure).
-            // Review #490: only the true empty pair may certify PausedNoPresentation/Safe=true.
+            // Review #490: only the true empty pair may certify PausedNoPresentation/Safe=true, and
+            // even then only once residual typed-device ownership is structurally ruled out.
+            // AttachXbox360Async / AttachSteamDeckAsync never commit _activeKind/_publisher until
+            // AFTER neutral is proven, so a rejected initial neutral write followed by a failed
+            // cleanup detach can leave a residual attached (non-neutral-proven) device while both
+            // managed fields stay null.
             if (_activeKind is null && _publisher is null)
             {
+                // A retained Deck session is explicit residual ownership evidence from a failed detach.
+                if (_deckSession is not null)
+                {
+                    AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual SteamDeck session ownership evidence.", null,
+                        ("Event", "PresentationSuspendPauseFailed"), ("Reason", "ResidualSteamDeckSession"));
+                    return new(SuspendPauseOutcome.Blocked, "ResidualSteamDeckSession");
+                }
+
+                // X360 has no separate managed session field, so prove the canonical device is detached.
+                if (_viiper is { State: CanonicalViiperRuntimeState.Ready } runtime)
+                {
+                    if (!runtime.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Detached)
+                    {
+                        AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual Xbox360 attachment evidence.", null,
+                            ("Event", "PresentationSuspendPauseFailed"), ("Reason", "ResidualXbox360Attachment"), ("Attachment", attachment));
+                        return new(SuspendPauseOutcome.Blocked, "ResidualXbox360Attachment:" + attachment);
+                    }
+                }
+                else if (_viiper is { State: CanonicalViiperRuntimeState.Unsafe })
+                {
+                    AppLog.Error("ControllerPresentation", "Presentation suspend pause: canonical VIIPER is Unsafe; cannot prove no residual attachment.", null,
+                        ("Event", "PresentationSuspendPauseFailed"), ("Reason", "ViiperUnsafe"));
+                    return new(SuspendPauseOutcome.Blocked, "ViiperUnsafe");
+                }
+
                 AppLog.Info("ControllerPresentation", "Presentation suspend pause: no active presentation.",
                     ("Event", "PresentationSuspendPausedNeutral"), ("Presentation", "None"), ("PublisherWasRunning", false), ("OverlayPaused", _overlayPaused));
                 return new(SuspendPauseOutcome.PausedNoPresentation, wasAlreadyPaused ? "AlreadyPaused" : "NoActivePresentation");

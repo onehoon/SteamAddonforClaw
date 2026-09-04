@@ -1247,6 +1247,48 @@ public sealed class MsiClawAddonPresentationTests
         await h.Owner.DisposeAsync();
     }
 
+    [Fact] // review #490 (2nd pass): a rejected INITIAL Xbox360 neutral write followed by a failed
+           // cleanup detach never commits _activeKind/_publisher, but the device is still attached and
+           // non-neutral-proven -- PausedNoPresentation must not certify that safe.
+    public async Task Suspend_pause_after_a_rejected_initial_xbox360_neutral_and_failed_cleanup_detach_stays_blocked()
+    {
+        var native = new FakeNative();
+        var owner = Build(native, new FakePublisher(), new FakePublisher());
+        native.StateResults.Enqueue(false); // initial Xbox360 neutral rejected
+        native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure); // cleanup detach fails
+
+        var attach = await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        Assert.False(attach.Succeeded);
+        Assert.Null(owner.ActivePresentation); // _activeKind/_publisher were never committed
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.Blocked, pause.Outcome);
+        Assert.False(pause.Safe);
+        Assert.Equal("ResidualXbox360Attachment:Attached", pause.Reason);
+        await owner.DisposeAsync();
+    }
+
+    [Fact] // review #490 (2nd pass): same class of gap for the SteamDeck initial-attach cleanup path.
+    public async Task Suspend_pause_after_a_rejected_initial_steamdeck_neutral_and_failed_cleanup_detach_stays_blocked()
+    {
+        var native = new FakeNative();
+        var owner = Build(native, new FakePublisher(), new FakePublisher());
+        native.StateResults.Enqueue(false); // initial SteamDeck neutral rejected
+        native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure); // cleanup detach fails
+
+        var attach = await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+        Assert.False(attach.Succeeded);
+        Assert.Null(owner.ActivePresentation); // _activeKind/_publisher were never committed
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.Blocked, pause.Outcome);
+        Assert.False(pause.Safe);
+        Assert.Equal("ResidualSteamDeckSession", pause.Reason); // the retained _deckSession is the evidence
+        await owner.DisposeAsync();
+    }
+
     [Fact] // section 16.9 / 10.1
     public async Task Resume_with_an_unavailable_physical_source_keeps_the_suspend_pause_active()
     {
