@@ -1,8 +1,7 @@
 <UserControl x:Class="SteamInputAddonforClaw.Views.ControllerPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls"
-    xmlns:views="using:SteamInputAddonforClaw.Views">
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
@@ -10,8 +9,45 @@
                 <TextBlock Opacity="0.7" Text="Configure controller buttons and controller-specific settings." TextWrapping="Wrap" />
             </StackPanel>
 
-            <TextBlock x:Name="CenterMUnavailableText" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
-            <views:CenterMButtonPage x:Name="CenterMInlineContent" />
+            <TextBlock x:Name="MappingUnavailableText" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
+
+            <StackPanel x:Name="MappingContent" Spacing="12">
+                <TextBlock Text="Button Mapping" FontSize="18" FontWeight="SemiBold" />
+
+                <ctcontrols:SettingsExpander Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="True">
+                    <ctcontrols:SettingsExpander.Items>
+                        <ctcontrols:SettingsCard Header="Normal">
+                            <ComboBox x:Name="GamebarNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard x:Name="GamebarNormalConfigCard" ContentAlignment="Vertical">
+                            <StackPanel x:Name="GamebarNormalConfigPanel" Spacing="8" />
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard Header="Steam Game / Big Picture">
+                            <ComboBox x:Name="GamebarSteamActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard x:Name="GamebarSteamConfigCard" ContentAlignment="Vertical">
+                            <StackPanel x:Name="GamebarSteamConfigPanel" Spacing="8" />
+                        </ctcontrols:SettingsCard>
+                    </ctcontrols:SettingsExpander.Items>
+                </ctcontrols:SettingsExpander>
+
+                <ctcontrols:SettingsExpander Header="Center M Button" Description="The action for the Center M button, per runtime presentation domain." IsExpanded="True">
+                    <ctcontrols:SettingsExpander.Items>
+                        <ctcontrols:SettingsCard Header="Normal">
+                            <ComboBox x:Name="CenterMNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard x:Name="CenterMNormalConfigCard" ContentAlignment="Vertical">
+                            <StackPanel x:Name="CenterMNormalConfigPanel" Spacing="8" />
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard Header="Steam Game / Big Picture">
+                            <ComboBox x:Name="CenterMSteamActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard x:Name="CenterMSteamConfigCard" ContentAlignment="Vertical">
+                            <StackPanel x:Name="CenterMSteamConfigPanel" Spacing="8" />
+                        </ctcontrols:SettingsCard>
+                    </ctcontrols:SettingsExpander.Items>
+                </ctcontrols:SettingsExpander>
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

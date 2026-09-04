@@ -1,45 +1,46 @@
 using SteamInputAddonforClaw.CenterM;
-using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Wing;
 
+/// <summary>
+/// Resolves a delivered WING gesture (Gamebar Button / Event88) to its configured
+/// <see cref="FrontButtonAction"/> and dispatches it. Same domain resolution and action semantics as
+/// the Center M path: the domain is captured fresh from the actual Full1902 SteamDeck presentation,
+/// then the Gamebar binding for that domain is executed through the shared front-button action
+/// executor. A Gamebar action failure is logged and observation continues -- the WING path keeps its
+/// existing epoch/authority lifetime behaviour, it does not fail open to a native Center M.
+/// </summary>
 internal sealed class WingActionDispatcher
 {
-    private readonly Func<WingMapping> _mapping;
-    private readonly Func<bool> _trySteam;
-    private readonly Action<Oem1HotkeyBinding> _hotkey;
-    private readonly Action<Oem1LaunchApplicationBinding> _launch;
-    internal WingActionDispatcher(Func<WingMapping> mapping, Func<bool> trySteam, Action<Oem1HotkeyBinding>? hotkey = null, Action<Oem1LaunchApplicationBinding>? launch = null)
-    { _mapping = mapping; _trySteam = trySteam; _hotkey = hotkey ?? Oem1KeyboardHotkeyExecutor.Send; _launch = launch ?? Oem1ApplicationLauncher.Launch; }
+    private readonly Func<FrontButtonMappingSettings> _captureMapping;
+    private readonly Func<bool> _captureSteamPresentationActive;
+    private readonly FrontButtonActionExecutor _executor;
+
+    internal WingActionDispatcher(
+        Func<FrontButtonMappingSettings> captureMapping,
+        Func<bool> captureSteamPresentationActive,
+        FrontButtonActionExecutor executor)
+    {
+        _captureMapping = captureMapping ?? throw new ArgumentNullException(nameof(captureMapping));
+        _captureSteamPresentationActive = captureSteamPresentationActive ?? throw new ArgumentNullException(nameof(captureSteamPresentationActive));
+        _executor = executor ?? throw new ArgumentNullException(nameof(executor));
+    }
 
     internal void Dispatch(WingGesture gesture)
     {
-        WingAction action = WingAction.None;
+        _ = gesture; // One action per physical press per domain; the gesture value no longer selects anything.
         try
         {
-            var mapping = _mapping();
-            var binding = gesture == WingGesture.Single ? mapping.Single : mapping.Double;
-            action = binding.Action;
-            if (!Enum.IsDefined(action)) { AppLog.Warn("Wing.Action", "Unknown persisted action rejected."); return; }
-            AppLog.Debug("Wing.Action", "MappingResolved", ("Gesture", gesture), ("Action", binding.Action));
-            switch (binding.Action)
-            {
-                case WingAction.None: return;
-                case WingAction.SteamButton:
-                    if (!_trySteam()) AppLog.Debug("Wing.Action", "SteamButtonUnavailable");
-                    else AppLog.Debug("Wing.Action", "SteamButtonRequested");
-                    return;
-                case WingAction.KeyboardHotkey:
-                    if (binding.Hotkey is null || !binding.Hotkey.IsConfigured) return;
-                    if (binding.Hotkey.Modifiers.HasFlag(Oem1HotkeyModifiers.Windows) && binding.Hotkey.Key == Oem1HotkeyKey.G)
-                    { AppLog.Warn("Wing.Action", "InvalidWinGMappingRejected", null); return; }
-                    _hotkey(binding.Hotkey); return;
-                case WingAction.LaunchApplication:
-                    if (binding.Launch is not null) _launch(binding.Launch);
-                    return;
-            }
+            var mapping = _captureMapping();
+            var domain = _captureSteamPresentationActive() ? FrontButtonDomain.Steam : FrontButtonDomain.Normal;
+            var binding = mapping.Resolve(FrontButtonKind.Gamebar, domain);
+            _executor.Execute("Wing.Action", FrontButtonKind.Gamebar, domain, binding);
         }
-        catch (Exception ex) { AppLog.Warn("Wing.Action", "ActionFailed", ex, ("Gesture", gesture), ("Action", action)); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Wing.Action", "WING action selection/execution failed; observation continues.", exception);
+        }
     }
 }

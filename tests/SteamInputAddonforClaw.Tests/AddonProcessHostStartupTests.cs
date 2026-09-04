@@ -4,7 +4,6 @@ using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Power;
-using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Settings;
 using Xunit;
 

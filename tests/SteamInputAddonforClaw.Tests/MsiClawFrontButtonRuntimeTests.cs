@@ -1,45 +1,41 @@
 using SteamInputAddonforClaw.CenterM;
-using SteamInputAddonforClaw.Contracts.Oem1;
-using SteamInputAddonforClaw.Contracts.Wing;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
-/// Full1902 A2 section 15.3 / 15.5 / 15.6: the feature-local OEM1/WING front-button owner is
-/// composable and functional with <c>routingRuntime == null</c>. It never touches
-/// <c>AddonRoutingRuntime</c>, <c>WinGProtectionRoutingStage</c>, or
-/// <c>CanonicalSteamDeckOutputStage</c>; the OEM1 Normal/Routing mapping domain and the OEM1/WING
-/// Steam-pulse actions are all resolved against the supplied Full1902 presentation facts.
+/// App UI PR-C: the feature-local front-button owner composes both physical-button paths (Gamebar /
+/// Event88 and Center M / Event41) against one atomic front-button mapping and the supplied Full1902
+/// presentation facts. It never touches the controller authority / presentation / HidHide lifecycle.
 /// </summary>
 public sealed class MsiClawFrontButtonRuntimeTests
 {
-    // ---- 15.3: the feature path exists independently of the legacy routing owner ----
-
-    [Fact]
-    public async Task Supported_hardware_configures_the_oem1_action_path_without_a_routing_runtime()
-    {
-        var bigPicture = 0;
-        var oem1 = new FakeEventSource();
-        await using var runtime = MsiClawFrontButtonRuntime.Create(
+    private static MsiClawFrontButtonRuntime Create(
+        FrontButtonMappingSettings mapping,
+        FakeEventSource oem1,
+        FakeEventSource wing,
+        bool steamDeckActive = false,
+        Action? requestOverlayToggle = null,
+        Func<bool>? quickAccessPulse = null,
+        Func<bool>? steamPulse = null,
+        Action? launchBigPicture = null,
+        bool suppressionReady = true) =>
+        MsiClawFrontButtonRuntime.Create(
             hardwareSupported: true,
-            oem1MappingPreference: new FakeOem1Pref(Oem1MappingSettings.Default),
-            wingMappingPreference: new FakeWingPref(WingMappingSettings.Default),
-            isSteamDeckPresentationActive: () => false,
-            tryRequestQuickAccessPulse: () => false,
-            tryRequestSteamPulse: () => false,
+            frontButtonMappingPreference: new FakePref(mapping),
+            isSteamDeckPresentationActive: () => steamDeckActive,
+            requestOverlayToggle: requestOverlayToggle ?? (() => { }),
+            tryRequestQuickAccessPulse: quickAccessPulse ?? (() => false),
+            tryRequestSteamPulse: steamPulse ?? (() => false),
+            nativeWinGSuppressionReady: () => suppressionReady,
             oem1EventSourceOverride: oem1,
-            wingEventSourceOverride: new FakeEventSource(),
+            wingEventSourceOverride: wing,
             oem1GestureDelay: new ImmediateDelay(),
             oem1GestureClock: new ZeroClock(),
-            launchBigPictureOverride: () => bigPicture++);
-
-        Assert.True(oem1.StartCalled);
-        oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
-
-        Assert.Equal(1, bigPicture); // Normal-domain single -> SteamBigPicture (default)
-    }
+            launchBigPictureOverride: launchBigPicture,
+            wingGestureDelay: new ImmediateDelay());
 
     [Fact]
     public async Task Unsupported_hardware_wires_nothing()
@@ -47,9 +43,9 @@ public sealed class MsiClawFrontButtonRuntimeTests
         var oem1 = new FakeEventSource();
         await using var runtime = MsiClawFrontButtonRuntime.Create(
             hardwareSupported: false,
-            oem1MappingPreference: new FakeOem1Pref(Oem1MappingSettings.Default),
-            wingMappingPreference: new FakeWingPref(WingMappingSettings.Default),
+            frontButtonMappingPreference: new FakePref(FrontButtonMappingSettings.Default),
             isSteamDeckPresentationActive: () => true,
+            requestOverlayToggle: () => { },
             tryRequestQuickAccessPulse: () => true,
             tryRequestSteamPulse: () => true,
             oem1EventSourceOverride: oem1,
@@ -58,84 +54,113 @@ public sealed class MsiClawFrontButtonRuntimeTests
         Assert.False(oem1.StartCalled);
     }
 
-    // ---- 15.5: OEM1 mapping domain follows the actual Full1902 presentation ----
-
     [Fact]
-    public async Task Oem1_domain_is_routing_only_while_the_steamdeck_presentation_is_active()
+    public async Task Default_normal_domain_center_m_press_launches_big_picture_and_gamebar_press_toggles_overlay()
     {
-        var quickAccess = 0;
+        var overlay = 0;
         var bigPicture = 0;
-        var steamDeckActive = false;
         var oem1 = new FakeEventSource();
-        await using var runtime = MsiClawFrontButtonRuntime.Create(
-            hardwareSupported: true,
-            oem1MappingPreference: new FakeOem1Pref(Oem1MappingSettings.Default), // NormalSingle=BigPicture, RoutingSingle=QuickAccess
-            wingMappingPreference: new FakeWingPref(WingMappingSettings.Default),
-            isSteamDeckPresentationActive: () => steamDeckActive,
-            tryRequestQuickAccessPulse: () => { quickAccess++; return true; },
-            tryRequestSteamPulse: () => false,
-            oem1EventSourceOverride: oem1,
-            wingEventSourceOverride: new FakeEventSource(),
-            oem1GestureDelay: new ImmediateDelay(),
-            oem1GestureClock: new ZeroClock(),
-            launchBigPictureOverride: () => bigPicture++);
+        var wing = new FakeEventSource();
+        await using var runtime = Create(FrontButtonMappingSettings.Default, oem1, wing,
+            requestOverlayToggle: () => overlay++, launchBigPicture: () => bigPicture++);
+
+        Assert.True(oem1.StartCalled);
 
         oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
-        Assert.Equal(1, bigPicture);
-        Assert.Equal(0, quickAccess);
+        Assert.Equal(1, bigPicture);   // Normal / Center M default = Steam Big Picture
 
-        steamDeckActive = true;
-        oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
-        Assert.Equal(1, bigPicture);
-        Assert.Equal(1, quickAccess); // Routing-domain single -> SteamQuickAccess pulse seam
+        wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+        Assert.Equal(1, overlay);      // Normal / Gamebar default = Quick Settings Overlay
     }
 
-    // ---- 15.6: WING SteamButton delegates to the Full1902 presentation pulse seam ----
-
     [Fact]
-    public async Task Wing_steam_button_uses_the_presentation_pulse_seam_when_authority_is_active()
+    public async Task Steam_domain_defaults_route_to_the_system_button_pulse_seams()
     {
         var steamPulses = 0;
+        var quickAccess = 0;
+        var oem1 = new FakeEventSource();
+        var wing = new FakeEventSource();
+        await using var runtime = Create(FrontButtonMappingSettings.Default, oem1, wing,
+            steamDeckActive: true,
+            quickAccessPulse: () => { quickAccess++; return true; },
+            steamPulse: () => { steamPulses++; return true; });
+
+        wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+        oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+
+        Assert.Equal(1, steamPulses);  // Steam / Gamebar default = Steam Button
+        Assert.Equal(1, quickAccess);  // Steam / Center M default = Steam Quick Access
+    }
+
+    [Fact]
+    public async Task Domain_follows_the_actual_steamdeck_presentation_not_raw_steam_demand()
+    {
+        var overlay = 0;
+        var steamPulses = 0;
+        var steamDeckActive = false;
+        var oem1 = new FakeEventSource();
         var wing = new FakeEventSource();
         await using var runtime = MsiClawFrontButtonRuntime.Create(
             hardwareSupported: true,
-            oem1MappingPreference: new FakeOem1Pref(Oem1MappingSettings.Default),
-            wingMappingPreference: new FakeWingPref(WingMappingSettings.Default with { Double = WingSlotBinding.Of(WingAction.SteamButton) }),
-            isSteamDeckPresentationActive: () => true,
+            frontButtonMappingPreference: new FakePref(FrontButtonMappingSettings.Default),
+            isSteamDeckPresentationActive: () => steamDeckActive,
+            requestOverlayToggle: () => overlay++,
             tryRequestQuickAccessPulse: () => false,
             tryRequestSteamPulse: () => { steamPulses++; return true; },
-            // Section 9.2: production leaves this false until Policy B; a test forces authority on.
             nativeWinGSuppressionReady: () => true,
-            oem1EventSourceOverride: new FakeEventSource(),
-            wingEventSourceOverride: wing);
+            oem1EventSourceOverride: oem1,
+            wingEventSourceOverride: wing,
+            oem1GestureDelay: new ImmediateDelay(),
+            oem1GestureClock: new ZeroClock(),
+            wingGestureDelay: new ImmediateDelay());
 
-        // Two Event88 within the double window -> immediate Double delivery -> SteamButton.
         wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
-        wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+        Assert.Equal(1, overlay);
+        Assert.Equal(0, steamPulses);
 
+        steamDeckActive = true;
+        wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+        Assert.Equal(1, overlay);
         Assert.Equal(1, steamPulses);
     }
 
     [Fact]
-    public async Task Wing_delivery_is_gated_off_while_native_wing_suppression_is_not_ready()
+    public async Task Gamebar_delivery_is_gated_off_while_native_wing_suppression_is_not_armed()
     {
-        var steamPulses = 0;
+        var overlay = 0;
         var wing = new FakeEventSource();
+        await using var runtime = Create(FrontButtonMappingSettings.Default, new FakeEventSource(), wing,
+            requestOverlayToggle: () => overlay++, suppressionReady: false);
+
+        wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+
+        Assert.Equal(0, overlay);
+    }
+
+    [Fact]
+    public async Task A_single_press_resolves_immediately_with_no_double_click_delay()
+    {
+        // The recognizers are wired with double-click disabled: one Event41 delivers one action with
+        // no held/heavy delay object involved at all.
+        var overlay = 0;
+        var oem1 = new FakeEventSource();
+        var mapping = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay));
         await using var runtime = MsiClawFrontButtonRuntime.Create(
             hardwareSupported: true,
-            oem1MappingPreference: new FakeOem1Pref(Oem1MappingSettings.Default),
-            wingMappingPreference: new FakeWingPref(WingMappingSettings.Default with { Double = WingSlotBinding.Of(WingAction.SteamButton) }),
-            isSteamDeckPresentationActive: () => true,
+            frontButtonMappingPreference: new FakePref(mapping),
+            isSteamDeckPresentationActive: () => false,
+            requestOverlayToggle: () => overlay++,
             tryRequestQuickAccessPulse: () => false,
-            tryRequestSteamPulse: () => { steamPulses++; return true; },
-            nativeWinGSuppressionReady: () => false, // Policy B: guard reports not armed (arm failed / unavailable)
-            oem1EventSourceOverride: new FakeEventSource(),
-            wingEventSourceOverride: wing);
+            tryRequestSteamPulse: () => false,
+            oem1EventSourceOverride: oem1,
+            wingEventSourceOverride: new FakeEventSource(),
+            oem1GestureDelay: new NeverDelay(),
+            oem1GestureClock: new ZeroClock());
 
-        wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
-        wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+        oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
 
-        Assert.Equal(0, steamPulses); // no unsafe interim double-action before Policy B
+        Assert.Equal(1, overlay);
     }
 
     [Fact]
@@ -143,16 +168,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
     {
         var oem1 = new FakeEventSource();
         var wing = new FakeEventSource();
-        var runtime = MsiClawFrontButtonRuntime.Create(
-            hardwareSupported: true,
-            oem1MappingPreference: new FakeOem1Pref(Oem1MappingSettings.Default),
-            wingMappingPreference: new FakeWingPref(WingMappingSettings.Default),
-            isSteamDeckPresentationActive: () => false,
-            tryRequestQuickAccessPulse: () => false,
-            tryRequestSteamPulse: () => false,
-            nativeWinGSuppressionReady: () => true,
-            oem1EventSourceOverride: oem1,
-            wingEventSourceOverride: wing);
+        var runtime = Create(FrontButtonMappingSettings.Default, oem1, wing);
 
         Assert.True(runtime.CaptureWingAuthority().Active);
         var epochBefore = runtime.CaptureWingAuthority().Epoch;
@@ -166,8 +182,6 @@ public sealed class MsiClawFrontButtonRuntimeTests
         Assert.True(after.Epoch > epochBefore);
     }
 
-    // ---- 15.6 / 16: no legacy routing dependency in the front-button path ----
-
     [Fact]
     public void Front_button_runtime_has_no_legacy_routing_or_deck_output_stage_dependency()
     {
@@ -180,13 +194,11 @@ public sealed class MsiClawFrontButtonRuntimeTests
         {
             "AddonRoutingRuntime", "WinGProtectionRoutingStage", "CanonicalSteamDeckOutputStage",
             "RoutingRuntimeStatusSnapshot", "RoutingPipeline", "HandheldRoutingComposition",
-            "CanonicalViiperRuntime", "MsiClawNativeState", "CenterMOem1LifecycleCoordinator", "CenterMHelperOwnership",
         })
             Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
     }
 
-    [Fact] // Section 7/14: the host composes the front-button owner only on a Disabled boot, after
-           // the presentation attach, and tears it down before the presentation owner it targets.
+    [Fact]
     public void Host_composes_the_front_button_owner_after_attach_and_disposes_it_first()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -201,7 +213,20 @@ public sealed class MsiClawFrontButtonRuntimeTests
             < host.IndexOf("_presentationOwnership.DisposeAsync", StringComparison.Ordinal));
     }
 
-    // ---- fakes ----
+    [Fact]
+    public void Production_binds_wing_authority_to_the_wing_suppression_guard_armed_fact()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
+        var runtime = File.ReadAllText(Path.Combine(dir!.FullName,
+            "src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawFrontButtonRuntime.cs"));
+
+        Assert.Contains("nativeWinGSuppressionReady: () => _winGSuppressionGuard.IsArmed", host, StringComparison.Ordinal);
+        Assert.Contains("requestOverlayToggle: RequestOverlayToggle", host, StringComparison.Ordinal);
+        // The stale "production always false" comment must be gone.
+        Assert.DoesNotContain("currently always", runtime, StringComparison.Ordinal);
+    }
 
     private sealed class FakeEventSource : IMsiEventSource
     {
@@ -218,21 +243,20 @@ public sealed class MsiClawFrontButtonRuntimeTests
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
+    private sealed class NeverDelay : IOem1GestureDelay
+    {
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => new TaskCompletionSource().Task;
+    }
+
     private sealed class ZeroClock : IOem1GestureClock
     {
         public long GetTimestamp() => 0;
         public TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp) => TimeSpan.Zero;
     }
 
-    private sealed class FakeOem1Pref(Oem1MappingSettings initial) : Settings.IOem1MappingPreference
+    private sealed class FakePref(FrontButtonMappingSettings initial) : Settings.IFrontButtonMappingPreference
     {
-        public Oem1MappingSettings Oem1Mapping { get; } = initial;
-        public event EventHandler? Oem1MappingChanged { add { } remove { } }
-    }
-
-    private sealed class FakeWingPref(WingMappingSettings initial) : Settings.IWingMappingPreference
-    {
-        public WingMappingSettings WingMapping { get; } = initial;
-        public event EventHandler? WingMappingChanged { add { } remove { } }
+        public FrontButtonMappingSettings FrontButtonMapping { get; } = initial;
+        public event EventHandler? FrontButtonMappingChanged { add { } remove { } }
     }
 }

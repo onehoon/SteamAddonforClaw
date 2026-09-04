@@ -1,6 +1,6 @@
 using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Prerequisites;
@@ -47,7 +47,7 @@ public sealed class FrontendContractTests
     [Fact]
     public void Settings_snapshot_still_round_trips_the_retained_preferences()
     {
-        var value = new FrontendSettingsSnapshot(FrontendLogLevel.Debug, SuppressDeveloperMenuWarning: true, Oem1MappingSettings.Default)
+        var value = new FrontendSettingsSnapshot(FrontendLogLevel.Debug, SuppressDeveloperMenuWarning: true, FrontButtonMappingSettings.Default)
         {
             DeveloperMenuEnabled = true,
         };
@@ -72,7 +72,7 @@ public sealed class FrontendContractTests
     [Fact]
     public void Settings_snapshot_round_trips_through_SystemTextJson()
     {
-        var value = new FrontendSettingsSnapshot(FrontendLogLevel.Debug, true, Oem1MappingSettings.Default);
+        var value = new FrontendSettingsSnapshot(FrontendLogLevel.Debug, true, FrontButtonMappingSettings.Default);
         var restored = JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
     }
@@ -89,10 +89,10 @@ public sealed class FrontendContractTests
     public void Bootstrap_snapshot_round_trips_through_SystemTextJson()
     {
         var value = new FrontendBootstrapSnapshot(
-            new(FrontendLogLevel.Info, false, Oem1MappingSettings.Default),
+            new(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default),
             new(false),
             @"C:\Logs",
-            Oem1MappingAvailable: true);
+            FrontButtonMappingAvailable: true);
         var restored = JsonSerializer.Deserialize<FrontendBootstrapSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
     }
