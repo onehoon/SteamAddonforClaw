@@ -58,10 +58,10 @@ public sealed partial class MainWindow : Window
         ApplyDefaultWindowSize();
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
-        SettingsContent.Initialize(_frontend, _bootstrap);
+        SettingsContent.Initialize(_bootstrap);
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
-        ControllerContent.Initialize(_frontend, _bootstrap, () => WindowNative.GetWindowHandle(this));
+        ControllerContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
         // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
         // leaving the detail page mid-save and immediately toggling on the Controller page had no
         // ordering relationship between the two pages' independent RPCs, so either could land last
@@ -82,8 +82,7 @@ public sealed partial class MainWindow : Window
         FanHardwareProbeContent.Initialize(_frontend);
         FanHardwareProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
-        StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
-        MainNavigationView.SelectedItem = StatusNavigationItem;
+        MainNavigationView.SelectedItem = DeviceNavigationItem;
         _ = RefreshSystemStatusAsync();
     }
 
@@ -196,7 +195,6 @@ public sealed partial class MainWindow : Window
         var wasProfile = ProfileContent.Visibility == Visibility.Visible;
         var wasClawSensorProbe = ClawSensorProbeContent.Visibility == Visibility.Visible;
         var wasFanHardwareProbe = FanHardwareProbeContent.Visibility == Visibility.Visible;
-        StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
         ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
@@ -206,15 +204,6 @@ public sealed partial class MainWindow : Window
         VibrationTestContent.Visibility = page == MainNavigationPage.VibrationTest ? Visibility.Visible : Visibility.Collapsed;
         ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
         FanHardwareProbeContent.Visibility = page == MainNavigationPage.FanHardwareProbe ? Visibility.Visible : Visibility.Collapsed;
-        if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
-        // The Settings page is initialized once from bootstrap, but a reboot-bound authority
-        // transition (PR3) can change the persisted launch-at-startup value even when it later
-        // returns Cancelled/Failed, and it deliberately raises no StateInvalidated. Re-read on
-        // every entry so the toggle never shows a stale bootstrap value.
-        if (page == MainNavigationPage.Settings) _ = SettingsContent.ActivateAsync();
-        // The Controller page hosts the MSI Center M controller-authority card, which the reboot-bound
-        // transition (PR3) changes without a StateInvalidated broadcast -- re-read on every entry.
-        if (page == MainNavigationPage.Controller) ControllerContent.Activate();
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how
@@ -239,12 +228,10 @@ public sealed partial class MainWindow : Window
             Volatile.Write(ref _statusRefreshPending, 1);
             return;
         }
-        StatusContent.SetRefreshing(true);
         try { RenderSystemStatus(await _frontend.CaptureStatusAsync()); }
         catch (Exception exception) { AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed")); }
         finally
         {
-            StatusContent.SetRefreshing(false);
             Volatile.Write(ref _isRefreshingStatus, 0);
             if (Interlocked.Exchange(ref _statusRefreshPending, 0) != 0)
                 DispatcherQueue.TryEnqueue(() => _ = RefreshSystemStatusAsync());
@@ -254,7 +241,8 @@ public sealed partial class MainWindow : Window
     private void RenderSystemStatus(FrontendStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
-        StatusContent.Render(snapshot);
+        DeviceContent.RenderDeviceSummary(snapshot);
+        SettingsContent.RenderRequiredComponents(snapshot);
         if (snapshot.CanInstallRequiredComponents)
         {
             if (_windowActivatedForUser)
@@ -355,7 +343,7 @@ public sealed partial class MainWindow : Window
         {
             var message = resultKind == FrontendPrerequisiteSetupResultKind.AlreadyInProgress
                 ? "Another setup operation is already in progress."
-                : "Setup couldn't be completed. Check Status or the application log for details.";
+                : "Setup couldn't be completed. Check Settings > Required Components or the application log for details.";
             await new ContentDialog
             {
                 Title = "Setup unavailable",
@@ -364,15 +352,15 @@ public sealed partial class MainWindow : Window
                 XamlRoot = Content.XamlRoot
             }.ShowAsync();
         }
-        // Ready/Installed/Cancelled/NotInstallable need no dialog: Ready/Installed complete silently (Status
-        // already reflects the new state), and Cancelled mirrors the prompt's own "Not now" path.
+        // Ready/Installed/Cancelled/NotInstallable need no dialog: Ready/Installed complete silently (the
+        // Settings Required Components list already reflects the new state), and Cancelled mirrors the
+        // prompt's own "Not now" path.
     }
 
     private void UpdatePrerequisiteSetupBusyUi()
     {
         PrerequisiteSetupBusyOverlay.Visibility = _prerequisiteSetupInProgress ? Visibility.Visible : Visibility.Collapsed;
         MainNavigationView.IsHitTestVisible = !_prerequisiteSetupInProgress;
-        StatusContent.SetRefreshing(_prerequisiteSetupInProgress);
     }
 
     private async void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)

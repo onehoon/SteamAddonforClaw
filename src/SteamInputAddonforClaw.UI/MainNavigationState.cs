@@ -2,7 +2,6 @@ namespace SteamInputAddonforClaw.Windowing;
 
 internal enum MainNavigationPage
 {
-    Status,
     Device,
     Profile,
     Controller,
@@ -17,7 +16,7 @@ internal enum MainNavigationPage
 
 internal sealed class MainNavigationState
 {
-    internal MainNavigationPage CurrentPage { get; private set; } = MainNavigationPage.Status;
+    internal MainNavigationPage CurrentPage { get; private set; } = MainNavigationPage.Device;
 
     internal MainNavigationPage SelectNavigationItem(bool isSettingsSelected, string? selectedTag)
     {
@@ -29,7 +28,7 @@ internal sealed class MainNavigationState
                 "Profile" => MainNavigationPage.Profile,
                 "Controller" => MainNavigationPage.Controller,
                 "HowToUse" => MainNavigationPage.HowToUse,
-                _ => MainNavigationPage.Status
+                _ => MainNavigationPage.Device
             };
 
         return CurrentPage;
