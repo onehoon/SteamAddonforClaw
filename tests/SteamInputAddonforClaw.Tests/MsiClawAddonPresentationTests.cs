@@ -1222,6 +1222,31 @@ public sealed class MsiClawAddonPresentationTests
         await owner.DisposeAsync();
     }
 
+    [Fact] // review #490: a retained-partial retire state (publisher stopped/cleared, active kind
+           // retained because the canonical neutral+detach was not proven) must NOT be certified
+           // PausedNoPresentation/Safe=true -- Suspend must retry the SAME-device neutral write.
+    public async Task Suspend_pause_after_a_failed_retire_retries_neutral_instead_of_certifying_no_presentation_safe()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Snapshot = WantsDeck();
+        h.Native.DetachResults.Enqueue(USBDeviceDetachResult.RetryableFailure); // switch-away retire's detach fails
+
+        var switchResult = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+        Assert.Equal(PresentationReconcileOutcome.Failed, switchResult.Outcome);
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation); // ownership retained
+        Assert.True(h.Xbox360Publishers[0].StopCalled); // publisher already proven stopped/cleared
+        h.Native.Calls.Clear();
+
+        var pause = await h.Owner.PauseForSuspendAsync(default);
+
+        Assert.NotEqual(SuspendPauseOutcome.PausedNoPresentation, pause.Outcome);
+        Assert.Equal(SuspendPauseOutcome.Paused, pause.Outcome);
+        Assert.True(pause.Safe);
+        Assert.Contains("SetXbox360DeviceState", h.Native.Calls); // neutral actually re-attempted and proven
+        await h.Owner.DisposeAsync();
+    }
+
     [Fact] // section 16.9 / 10.1
     public async Task Resume_with_an_unavailable_physical_source_keeps_the_suspend_pause_active()
     {

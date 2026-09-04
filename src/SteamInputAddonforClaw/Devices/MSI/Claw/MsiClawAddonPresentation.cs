@@ -701,15 +701,33 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             var wasAlreadyPaused = _suspendPaused;
             _suspendPaused = true;
 
-            // Section 7.2: Full1902 authority exists but no presentation is attached -> no native work.
-            if (_activeKind is not { } kind || _publisher is not { } publisher)
+            // Section 7.2: the ACTUAL empty state -> no native work. "_publisher is null" alone is not
+            // proof there is nothing attached: RetireActivePresentationCoreAsync clears _publisher (a
+            // proven-stopped publisher) BEFORE it attempts the canonical neutral+detach, and keeps
+            // _activeKind set when that detach is not proven (e.g. DetachXbox360 RetryableFailure).
+            // Review #490: only the true empty pair may certify PausedNoPresentation/Safe=true.
+            if (_activeKind is null && _publisher is null)
             {
                 AppLog.Info("ControllerPresentation", "Presentation suspend pause: no active presentation.",
                     ("Event", "PresentationSuspendPausedNeutral"), ("Presentation", "None"), ("PublisherWasRunning", false), ("OverlayPaused", _overlayPaused));
                 return new(SuspendPauseOutcome.PausedNoPresentation, wasAlreadyPaused ? "AlreadyPaused" : "NoActivePresentation");
             }
 
-            var publisherWasRunning = publisher.IsRunning;
+            // The inverse is an impossible state (a publisher with no active kind) -- never certify
+            // Suspend safe over it.
+            if (_activeKind is not { } kind)
+            {
+                AppLog.Error("ControllerPresentation", "Presentation suspend pause: publisher present without an active presentation kind.", null,
+                    ("Event", "PresentationSuspendPauseFailed"), ("Reason", "InconsistentPresentationState"));
+                return new(SuspendPauseOutcome.Blocked, "InconsistentPresentationState");
+            }
+
+            // A retained active kind with a null publisher means a prior retire already proved the
+            // publisher stopped but could not prove the canonical neutral+detach -- Suspend must still
+            // re-run the pulse-clear / rumble-stop / SAME-device neutral path below, because the
+            // attached device may still be holding the last non-neutral report.
+            var publisher = _publisher;
+            var publisherWasRunning = publisher?.IsRunning == true;
             AppLog.Info("ControllerPresentation", "Presentation suspend pause started.",
                 ("Event", "PresentationSuspendPauseStarted"), ("Presentation", kind), ("PublisherWasRunning", publisherWasRunning), ("OverlayPaused", _overlayPaused));
 
@@ -719,7 +737,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 try
                 {
-                    await publisher.StopAsync().ConfigureAwait(false);
+                    await publisher!.StopAsync().ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
@@ -727,7 +745,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                         ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStopThrew"));
                     return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStopThrew");
                 }
-                if (publisher.IsRunning)
+                if (publisher!.IsRunning)
                 {
                     AppLog.Warn("ControllerPresentation", "Presentation publisher still running after StopAsync for Suspend; pause stays unsafe.", null,
                         ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
@@ -744,10 +762,23 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
             // 7. Write the SAME attached device neutral. A rejected write on a proven-stopped
             //    publisher is a real output-safety failure: fail-close the current presentation
-            //    through the existing owner, no alternate-presentation fallback (section 7.4).
-            var neutral = kind == AddonPresentationKind.Xbox360
-                ? _viiper!.SetXbox360State(default)
-                : _deckSession!.SetNeutral();
+            //    through the existing owner, no alternate-presentation fallback (section 7.4). A
+            //    retained SteamDeck kind with no session left to write through is equally unsafe.
+            bool neutral;
+            if (kind == AddonPresentationKind.Xbox360)
+            {
+                neutral = _viiper!.SetXbox360State(default);
+            }
+            else if (_deckSession is { } deckSession)
+            {
+                neutral = deckSession.SetNeutral();
+            }
+            else
+            {
+                AppLog.Error("ControllerPresentation", "SteamDeck suspend pause has no session to write neutral through; pause stays unsafe.", null,
+                    ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "SteamDeckSessionMissing"));
+                return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, "SteamDeckSessionMissing");
+            }
             if (!neutral)
             {
                 AppLog.Error("ControllerPresentation", "Neutral write rejected on a stopped publisher during Suspend; retiring the current presentation.", null,
