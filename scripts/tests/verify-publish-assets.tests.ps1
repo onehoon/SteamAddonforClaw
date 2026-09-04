@@ -8,7 +8,6 @@ function New-Fixture {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("publish-assets-verify-test-" + [System.Guid]::NewGuid())
     $directories = @(
         $root,
-        (Join-Path $root 'CenterMHelperSource'),
         (Join-Path $root 'Dependencies\HidHide'),
         (Join-Path $root 'Dependencies\UsbIpWin2'),
         (Join-Path $root 'Dependencies\Viiper'),
@@ -21,7 +20,6 @@ function New-Fixture {
     $files = @{
         'SteamInputAddonforClaw.exe' = 'runtime'
         'SteamInputAddonforClaw.TdpHelper.exe' = 'tdp helper'
-        'CenterMHelperSource\CenterMHelper.exe' = 'dormant oem1 helper'
         'Dependencies\HidHide\HidHide_1.5.230_x64.exe' = (Join-Path $dependencyRoot 'HidHide\HidHide_1.5.230_x64.exe')
         'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe' = (Join-Path $dependencyRoot 'UsbIpWin2\USBip-0.9.7.7-x64.exe')
         'Dependencies\Viiper\libVIIPER.dll' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.dll')
@@ -138,21 +136,6 @@ try {
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'ui\Views\HowToUsePage.xbf')
     Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing child-view XBF' -Asset 'ui\Views\HowToUsePage.xbf'
-
-    $root = New-Fixture
-    $fixturesToClean += $root
-    Remove-Item -LiteralPath (Join-Path $root 'CenterMHelperSource\CenterMHelper.exe')
-    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing CenterM helper artifact' -Asset 'CenterMHelperSource\CenterMHelper.exe'
-
-    foreach ($sidecar in @('CenterMHelper.dll', 'CenterMHelper.deps.json', 'CenterMHelper.runtimeconfig.json')) {
-        $root = New-Fixture
-        $fixturesToClean += $root
-        Set-Content -LiteralPath (Join-Path $root "CenterMHelperSource\$sidecar") -Value 'forbidden'
-        $result = Invoke-Verify -PublishDirectory $root
-        if ($result.ExitCode -eq 0) {
-            throw "Expected '$sidecar' to be rejected, but verification succeeded."
-        }
-    }
 
     $root = New-Fixture
     $fixturesToClean += $root

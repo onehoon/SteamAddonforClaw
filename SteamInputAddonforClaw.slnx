@@ -1,7 +1,5 @@
 <Solution>
   <Project Path="src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj" />
-  <Project Path="src/SteamInputAddonforClaw.CenterMHelper/SteamInputAddonforClaw.CenterMHelper.csproj" />
-  <Project Path="src/SteamInputAddonforClaw.CenterMHelperSmoke/SteamInputAddonforClaw.CenterMHelperSmoke.csproj" />
   <Project Path="src/SteamInputAddonforClaw.CenterMStartupHelper/SteamInputAddonforClaw.CenterMStartupHelper.csproj" />
   <Project Path="src/SteamInputAddonforClaw.Contracts/SteamInputAddonforClaw.Contracts.csproj" />
   <Project Path="src/SteamInputAddonforClaw.FrontendTransport/SteamInputAddonforClaw.FrontendTransport.csproj" />

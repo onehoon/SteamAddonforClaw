@@ -15,7 +15,6 @@ if (-not (Test-Path -LiteralPath $PublishDirectory -PathType Container)) {
 $requiredAssets = @(
     'SteamInputAddonforClaw.exe',
     'SteamInputAddonforClaw.TdpHelper.exe',
-    'CenterMHelperSource\CenterMHelper.exe',
     'Dependencies\HidHide\HidHide_1.5.230_x64.exe',
     'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe',
     'Dependencies\Viiper\libVIIPER.dll',
@@ -81,14 +80,6 @@ foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), 
     if ($runtimePayload.Count -gt 0) {
         throw "Framework-dependent publish contains runtime payload in '$directory': $($runtimePayload.Name -join ', ')"
     }
-}
-
-$centerMHelperSource = Join-Path $PublishDirectory 'CenterMHelperSource'
-$centerMHelperSidecars = @(Get-ChildItem -LiteralPath $centerMHelperSource -File | Where-Object {
-    $_.Name -match '\.(dll|deps\.json|runtimeconfig\.json)$'
-})
-if ($centerMHelperSidecars.Count -gt 0) {
-    throw "CenterMHelperSource contains NativeAOT-forbidden sidecar payload: $($centerMHelperSidecars.Name -join ', ')"
 }
 
 $uiDirectory = Join-Path $PublishDirectory 'ui'
