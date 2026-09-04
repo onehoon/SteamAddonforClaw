@@ -238,6 +238,31 @@ public sealed class PowerTransitionTests
         Assert.False(gate.IsOpen);
     }
 
+    [Fact] // Cleanup H section 11 / PR #483 review: an authoritative resume while Addon authority is
+           // active (recoveryEnabled=false) must still emit PowerResumeObserved exactly once for the
+           // resume cycle -- AddonProcessHost's Full1902 owned-controller reconcile runs off it --
+           // while the generic forward-mutation gate stays closed and RecoverySafety ends Unsafe.
+    public async Task DisabledRecoveryResume_EmitsObserverOnceThenFailsClosed()
+    {
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var observed = 0;
+        var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
+            establishBaseline: _ => Task.FromResult(true),
+            recoveryEnabled: false,
+            resumeObserved: () => observed++);
+
+        var notification = new PowerNotificationObservation(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true);
+        await coordinator.HandleAsync(notification);
+        await coordinator.HandleAsync(notification); // duplicate for the same cycle
+
+        Assert.Equal(1, observed);
+        Assert.False(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
+        Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
+        await coordinator.DisposeAsync();
+    }
+
     [Fact]
     public async Task Resume_automatic_then_resume_suspend_reconciles_once()
     {

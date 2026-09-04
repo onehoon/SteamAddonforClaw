@@ -112,6 +112,17 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             }
             if (!observation.BarrierApplied)
                 _gate.TryEnterBarrier(out _, out recoveryEpoch);
+
+            // Commit the accepted resume cycle and emit the observer BEFORE the disabled-recovery
+            // fail-close: a Sleep/Hibernate -> Resume while Addon authority is active (RecoverySafe=false,
+            // so recoveryEnabled=false) is a real supported lifecycle path, and AddonProcessHost's
+            // current Full1902 owned-controller reconcile hooks run off PowerResumeObserved. The
+            // generic forward-mutation gate still stays closed for that state.
+            State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
+            var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
+            _resumeCycle = cycleForResume;
+            try { _resumeObserved?.Invoke(); } catch (Exception exception) { AppLog.Warn("Power.Resume", "Resume observer failed.", exception); }
+
             if (!_recoveryEnabled)
             {
                 State = PowerTransitionState.Unsafe;
@@ -119,10 +130,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                 AppLog.Warn("Power.Recovery", "Resume recovery is disabled because this process did not establish a safe startup boundary.", null, ("Action", "RemainPassive"));
                 return;
             }
-            State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
-            var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
-            _resumeCycle = cycleForResume;
-            try { _resumeObserved?.Invoke(); } catch (Exception exception) { AppLog.Warn("Power.Resume", "Resume observer failed.", exception); }
             var resumeStartedUtc = DateTimeOffset.UtcNow;
             var recoveryManagerStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var recoveryElapsedMs = 0d;
