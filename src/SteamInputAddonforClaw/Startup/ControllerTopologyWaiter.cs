@@ -5,19 +5,14 @@ using SteamInputAddonforClaw.Devices.MSI.Claw;
 
 namespace SteamInputAddonforClaw.Startup;
 
-internal interface IControllerEnvironmentWaiter
+internal interface IControllerTopologyWaiter
 {
-    Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken);
+    Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken cancellationToken);
 }
 
-internal enum ControllerEnvironmentReadiness { NotApplicable, Stable, Indeterminate }
+internal enum ControllerTopologyReadiness { Stable, Indeterminate }
 
-// Full1902 Cleanup D: the third-party controller-manager detection graph that once produced other
-// modes is gone; production always resolves StockCenterM. The enum shape is kept for the startup
-// result / topology-waiter contract until Cleanup E collapses it.
-internal enum ControllerEnvironmentMode { Unsupported, StockCenterM, ClawTweaks, HHCManaged, Indeterminate }
-
-internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
+internal sealed class ControllerTopologyWaiter : IControllerTopologyWaiter
 {
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
     private readonly ControllerDeviceClassifier _classifier;
@@ -25,7 +20,7 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
     private readonly TimeSpan _sampleInterval;
     private readonly TimeSpan _timeout;
 
-    public ControllerEnvironmentWaiter(
+    public ControllerTopologyWaiter(
         IControllerDeviceEnumerator deviceEnumerator,
         ControllerDeviceClassifier classifier,
         int requiredStableSnapshots = 3,
@@ -39,19 +34,18 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         _timeout = timeout ?? TimeSpan.FromSeconds(5);
     }
 
-    public async Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken)
+    /// <summary>Answers only: is the supported MSI Claw's relevant physical controller topology
+    /// stable and usable for the caller's next step? It does not decide controller authority --
+    /// startup-root state does. Unsupported/indeterminate hardware is already handled before this
+    /// runs.</summary>
+    public async Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
     {
-        if (mode == ControllerEnvironmentMode.Unsupported)
-        {
-            AppLog.Info("Environment", "Environment readiness wait skipped.", ("Mode", mode), ("Result", ControllerEnvironmentReadiness.NotApplicable), ("Reason", "UnsupportedHardware"));
-            return ControllerEnvironmentReadiness.NotApplicable;
-        }
         string? previousSnapshot = null;
         var stableSnapshotCount = 0;
         var deadline = DateTimeOffset.UtcNow + _timeout;
         var stopwatch = Stopwatch.StartNew();
         var attempt = 0;
-        AppLog.Info("Environment", "Environment readiness wait started.", ("Mode", mode), ("TimeoutMs", _timeout.TotalMilliseconds), ("PollIntervalMs", _sampleInterval.TotalMilliseconds));
+        AppLog.Info("ControllerTopology", "Topology readiness wait started.", ("TimeoutMs", _timeout.TotalMilliseconds), ("PollIntervalMs", _sampleInterval.TotalMilliseconds));
 
         try
         {
@@ -59,8 +53,8 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 attempt++;
-                var (snapshot, ready) = CreateRelevantTopologySnapshot(mode);
-                AppLog.Debug("Environment", "Readiness poll.", ("Attempt", attempt), ("Ready", ready), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+                var (snapshot, ready) = CreateRelevantTopologySnapshot();
+                AppLog.Debug("ControllerTopology", "Topology readiness poll.", ("Attempt", attempt), ("Ready", ready), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
                 if (!ready)
                 {
                     stableSnapshotCount = 0;
@@ -71,8 +65,8 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
                 stableSnapshotCount = snapshot == previousSnapshot ? stableSnapshotCount + 1 : 1;
                 if (stableSnapshotCount >= _requiredStableSnapshots)
                 {
-                    AppLog.Info("Environment", "Environment readiness stable.", ("Mode", mode), ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
-                    return ControllerEnvironmentReadiness.Stable;
+                    AppLog.Info("ControllerTopology", "Topology readiness stable.", ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+                    return ControllerTopologyReadiness.Stable;
                 }
 
                 previousSnapshot = snapshot;
@@ -81,19 +75,19 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            AppLog.Debug("Environment", "Environment readiness wait cancelled.");
+            AppLog.Debug("ControllerTopology", "Topology readiness wait cancelled.");
             throw;
         }
         catch (Exception exception)
         {
-            AppLog.Warn("Environment", "Environment readiness wait failed.", exception, ("Action", "Passive"));
+            AppLog.Warn("ControllerTopology", "Topology readiness wait failed.", exception, ("Action", "Passive"));
         }
 
-        AppLog.Warn("Environment", "Environment readiness timeout.", null, ("Mode", mode), ("Action", "Passive"), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
-        return ControllerEnvironmentReadiness.Indeterminate;
+        AppLog.Warn("ControllerTopology", "Topology readiness timeout.", null, ("Action", "Passive"), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+        return ControllerTopologyReadiness.Indeterminate;
     }
 
-    private (string Snapshot, bool Ready) CreateRelevantTopologySnapshot(ControllerEnvironmentMode mode)
+    private (string Snapshot, bool Ready) CreateRelevantTopologySnapshot()
     {
         var devices = _deviceEnumerator.EnumeratePresentDevices();
         var topology = new ControllerTopologySnapshot(devices);
@@ -110,15 +104,13 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
                 device.ParentInstanceId ?? string.Empty,
                 string.Join(',', device.AncestorInstanceIds)))
             .OrderBy(identity => identity, StringComparer.OrdinalIgnoreCase));
-        var ready = mode switch
-        {
-            // An MSI VID/PID device existing at all is not sufficient: the mode-switch step immediately
-            // after startup readiness resolves a specific control HID collection (see
-            // MsiClawModeTopology/MsiClawControlHidResolver), not just "some MSI device". If that control
-            // HID hasn't enumerated yet, readiness must not settle on the gamepad-usage interface alone.
-            ControllerEnvironmentMode.StockCenterM => relevantDevices.Length > 0 && HasResolvableControlHid(relevantDevices),
-            _ => false
-        };
+        // An MSI VID/PID device existing at all is not sufficient: the mode-switch step immediately
+        // after startup readiness resolves a specific control HID collection (see
+        // MsiClawModeTopology/MsiClawControlHidResolver), not just "some MSI device". If that control
+        // HID hasn't enumerated yet, readiness must not settle on the gamepad-usage interface alone.
+        // Either a PID1901 XInput or a PID1902 DirectInput control HID satisfies readiness -- PnP /
+        // mode-transition timing may legitimately expose either while the caller is stabilizing.
+        var ready = relevantDevices.Length > 0 && HasResolvableControlHid(relevantDevices);
         return (snapshot, ready);
     }
 

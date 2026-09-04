@@ -5,16 +5,16 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-public sealed class ControllerEnvironmentWaiterTests
+public sealed class ControllerTopologyWaiterTests
 {
     [Fact]
     public async Task WaitUntilStableAsync_WhenInternalHandheldIsAbsent_ReturnsIndeterminate()
     {
         var waiter = CreateWaiter([], requiredStableSnapshots: 3, timeout: TimeSpan.FromMilliseconds(20));
 
-        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
 
-        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, readiness);
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
     }
 
     // A realistic Stock Center M topology requires both the gamepad-usage interface AND the
@@ -28,9 +28,9 @@ public sealed class ControllerEnvironmentWaiterTests
         var directInputControlHid = DirectInputControlHid();
         var waiter = CreateWaiter([gamepadInterface, directInputControlHid], requiredStableSnapshots: 3, timeout: TimeSpan.FromSeconds(1));
 
-        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
 
-        Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
+        Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
     }
 
     // Same good path as above, but exercises the XInput control HID topology (PID 1901, UsagePage
@@ -58,9 +58,9 @@ public sealed class ControllerEnvironmentWaiterTests
             0x0001);
         var waiter = CreateWaiter([gamepadInterface, xInputControlHid], requiredStableSnapshots: 3, timeout: TimeSpan.FromSeconds(1));
 
-        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
 
-        Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
+        Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
     }
 
     // Regression: the MSI gamepad-usage interface enumerating (and staying constant) is not enough on
@@ -73,9 +73,9 @@ public sealed class ControllerEnvironmentWaiterTests
         var gamepadInterface = GamepadInterface();
         var waiter = CreateWaiter([gamepadInterface], requiredStableSnapshots: 3, timeout: TimeSpan.FromMilliseconds(30));
 
-        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
 
-        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, readiness);
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
     }
 
     private static ControllerDeviceInfo GamepadInterface() => new(
@@ -147,16 +147,16 @@ public sealed class ControllerEnvironmentWaiterTests
             0xFF00,
             0x0001);
         var enumerator = new HotplugNoiseEnumerator(stableDevices, [xboxController, steamControllerReceiver]);
-        var waiter = new ControllerEnvironmentWaiter(
+        var waiter = new ControllerTopologyWaiter(
             enumerator,
             new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
             requiredStableSnapshots: 3,
             sampleInterval: TimeSpan.Zero,
             timeout: TimeSpan.FromSeconds(2));
 
-        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
 
-        Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
+        Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
     }
 
     // Regression for the startup race: the MSI Claw's gamepad-usage HID interface (the one that
@@ -185,21 +185,21 @@ public sealed class ControllerEnvironmentWaiterTests
         // The control interface never settles: its InstanceId changes on every poll, simulating PnP
         // enumeration still in progress.
         var enumerator = new SettlingControlInterfaceEnumerator(gamepadInterface, settleAfterTick: int.MaxValue);
-        var waiter = new ControllerEnvironmentWaiter(
+        var waiter = new ControllerTopologyWaiter(
             enumerator,
             new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
             requiredStableSnapshots: 3,
             sampleInterval: TimeSpan.Zero,
             timeout: TimeSpan.FromMilliseconds(30));
 
-        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
 
         // Prior to the fix, IsInternalHandheld required IsGameControllerCandidate, which the vendor
         // control interface never satisfies, so it was silently excluded from the stability snapshot
         // entirely and the gamepad interface alone would report Stable almost immediately within this
         // same short timeout. With the fix, the still-changing control interface keeps resetting
         // stability, so readiness times out to Indeterminate instead.
-        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, readiness);
+        Assert.Equal(ControllerTopologyReadiness.Indeterminate, readiness);
     }
 
     [Fact]
@@ -220,24 +220,24 @@ public sealed class ControllerEnvironmentWaiterTests
             0x1902,
             true);
         var enumerator = new SettlingControlInterfaceEnumerator(gamepadInterface, settleAfterTick: 2);
-        var waiter = new ControllerEnvironmentWaiter(
+        var waiter = new ControllerTopologyWaiter(
             enumerator,
             new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
             requiredStableSnapshots: 3,
             sampleInterval: TimeSpan.Zero,
             timeout: TimeSpan.FromSeconds(2));
 
-        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
 
-        Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
+        Assert.Equal(ControllerTopologyReadiness.Stable, readiness);
     }
 
-    private static ControllerEnvironmentWaiter CreateWaiter(
+    private static ControllerTopologyWaiter CreateWaiter(
         IReadOnlyList<ControllerDeviceInfo> devices,
         int requiredStableSnapshots,
         TimeSpan timeout)
     {
-        return new ControllerEnvironmentWaiter(
+        return new ControllerTopologyWaiter(
             new FakeEnumerator(devices),
             new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
             requiredStableSnapshots,
