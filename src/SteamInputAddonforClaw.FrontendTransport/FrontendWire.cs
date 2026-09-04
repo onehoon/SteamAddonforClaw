@@ -58,7 +58,11 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // / FrontendSoftwareInstallationStatus / FrontendSoftwareRuntimeStatus types are gone, so a v21 peer
 // would connect and then fail every status-response deserialization on the missing members -- failing
 // the handshake up front is the honest outcome.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 22; }
+// Version 23: Full1902 Cleanup J removes the disconnected legacy Vibration Test RPC/session contract
+// (RunVibrationTest, OpenVibrationTestSession, CloseVibrationTestSession and RunVibrationTestRequest /
+// FrontendVibrationTestCommand / FrontendVibrationTestResult). A v22 peer could otherwise connect and
+// attempt methods the Runtime no longer implements, so fail the handshake up front.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 23; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -90,7 +94,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetLogLevel, SetOem1Mapping, SetWingMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, RunVibrationTest, OpenVibrationTestSession, CloseVibrationTestSession, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetLogLevel, SetOem1Mapping, SetWingMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -100,7 +104,6 @@ internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetOem1MappingRequest(SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Mapping);
 internal sealed record SetWingMappingRequest(SteamInputAddonforClaw.Contracts.Wing.WingMappingSettings Mapping);
 internal sealed record SetDeveloperTestModeRequest(bool Enabled);
-internal sealed record RunVibrationTestRequest(FrontendVibrationTestCommand Command);
 internal sealed record RunFanProbeRequest(FrontendFanProbeOperation Operation);
 internal sealed record SetDeviceCpuBoostAcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetDeviceCpuBoostDcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);

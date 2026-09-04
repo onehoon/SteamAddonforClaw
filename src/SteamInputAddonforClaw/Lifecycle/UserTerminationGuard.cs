@@ -5,10 +5,10 @@ namespace SteamInputAddonforClaw.Lifecycle;
 internal enum UserTerminationBlockReason
 {
     None,
-    /// <summary>Ordinary user Runtime termination is blocked because a controller-authority
-    /// transition is still committing (e.g. the deferred Center M Disabled physical acquisition +
-    /// Win+G arm from the Policy B work order).</summary>
-    RoutingTransition,
+    /// <summary>Ordinary user Runtime termination is blocked because a controller-authority startup
+    /// transition is still committing (e.g. the deferred Center M Disabled physical PID1902
+    /// acquisition + Win+G suppression arm from the Policy B work order).</summary>
+    ControllerAuthorityTransition,
     RuntimeShuttingDown,
     /// <summary>Ordinary user Runtime termination is blocked because MSI Center M is exactly Disabled:
     /// the background Addon Runtime is the selected controller authority and the only supported way

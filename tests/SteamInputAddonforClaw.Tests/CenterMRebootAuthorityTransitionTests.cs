@@ -71,7 +71,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             StartEnabled = true,
-            Safety = new UserTerminationDecision(false, UserTerminationBlockReason.RoutingTransition),
+            Safety = new UserTerminationDecision(false, UserTerminationBlockReason.ControllerAuthorityTransition),
         };
         var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
 
@@ -364,7 +364,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             StartEnabled = false,
-            Safety = new UserTerminationDecision(false, UserTerminationBlockReason.RoutingTransition),
+            Safety = new UserTerminationDecision(false, UserTerminationBlockReason.ControllerAuthorityTransition),
         };
         var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
@@ -612,7 +612,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     [Fact] // 22.12 -- a lower-level routing/native operation in progress blocks preparation.
     public async Task Prepare_for_uninstall_is_blocked_while_a_lower_level_operation_owns_the_controller()
     {
-        var h = new Harness(this) { Safety = new UserTerminationDecision(false, UserTerminationBlockReason.RoutingTransition) };
+        var h = new Harness(this) { Safety = new UserTerminationDecision(false, UserTerminationBlockReason.ControllerAuthorityTransition) };
 
         var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
 

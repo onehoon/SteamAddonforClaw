@@ -63,12 +63,6 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(fake.SetupResult.Result, setupResult.Result);
         Assert.Equivalent(fake.SetupResult.Status, setupResult.Status, strict: true);
         Assert.Equal(fake.EnvironmentResult, await client.GenerateEnvironmentReportAsync());
-        var opened = await client.OpenVibrationTestSessionAsync();
-        Assert.Equal(fake.VibrationResult, opened);
-        foreach (var command in Enum.GetValues<FrontendVibrationTestCommand>())
-            Assert.Equal(fake.VibrationResult, await client.RunVibrationTestAsync(command));
-        Assert.Equal(fake.VibrationResult, await client.CloseVibrationTestSessionAsync());
-        Assert.Equal(Enum.GetValues<FrontendVibrationTestCommand>(), fake.VibrationCommands);
     }
 
     [Fact]
@@ -988,9 +982,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":22,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":22,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":22,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":23,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":23,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":23,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1275,8 +1269,6 @@ public sealed class FrontendNamedPipeTransportTests
         public Oem1MappingSettings? LastOem1Mapping { get; private set; }
         public bool LastDeveloperTestModeEnabled { get; private set; }
         public int SuppressDeveloperWarningCount { get; private set; }
-        public FrontendVibrationTestResult VibrationResult { get; } = new(true, "OK", "vibration-test.log");
-        public List<FrontendVibrationTestCommand> VibrationCommands { get; } = [];
         public bool BlockPrerequisiteSetup { get; init; }
         public bool ThrowOperationCanceledWithoutToken { get; init; }
         public TaskCompletionSource PrerequisiteSetupStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1291,9 +1283,6 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastDeveloperTestModeEnabled = enabled; return Task.FromResult(new FrontendDeveloperSnapshot(enabled)); }
         public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken t = default) { TotalCalls++; if (!BlockPrerequisiteSetup) return SetupResult; PrerequisiteSetupStarted.TrySetResult(); try { await Task.Delay(Timeout.InfiniteTimeSpan, t); throw new UnreachableException(); } catch (OperationCanceledException) { PrerequisiteSetupCancelled.TrySetResult(); throw; } }
         public Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(EnvironmentResult); }
-        public Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken t = default) { TotalCalls++; VibrationCommands.Add(command); return Task.FromResult(VibrationResult); }
-        public Task<FrontendVibrationTestResult> OpenVibrationTestSessionAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(VibrationResult); }
-        public Task<FrontendVibrationTestResult> CloseVibrationTestSessionAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(VibrationResult); }
         public FrontendCpuBoostSnapshot CpuBoostSnapshot { get; } = new(
             new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, null),
             new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, null),

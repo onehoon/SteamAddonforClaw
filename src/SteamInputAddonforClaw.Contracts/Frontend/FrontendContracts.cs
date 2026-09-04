@@ -26,7 +26,6 @@ public sealed record FrontendGameProfileMutationResult(FrontendGameProfileMutati
 {
     public bool Succeeded => Outcome == FrontendGameProfileMutationOutcome.Succeeded;
 }
-public enum FrontendVibrationTestCommand { Rumble = 0, Haptic = 1, Stop = 3 }
 public enum FrontendSetupStatus { Complete, Required, Blocked, RestartRequired, NotApplicable, Indeterminate }
 public enum FrontendHardwareStatus { Supported, Unsupported, Indeterminate }
 public enum FrontendSteamSource { Actual, BigPicture, DeveloperTest, Indeterminate }
@@ -180,7 +179,6 @@ public sealed record FrontendCenterMStartupMutationResult(
 {
     public bool Succeeded => Outcome == FrontendCenterMStartupMutationOutcome.Succeeded;
 }
-public sealed record FrontendVibrationTestResult(bool Succeeded, string Reason, string? LogFilePath);
 /// <param name="Oem1MappingAvailable">Whether the Center M (OEM1) mapping feature exists at all on
 /// this machine. It is the runtime's single startup hardware-support result (a supported MSI Claw),
 /// NOT a routing/Steam/BPM/runtime condition, and NOT the persisted remapping switch -- a machine
@@ -287,19 +285,6 @@ public interface IAddonFrontendControl
     /// authority); <see langword="false"/> = Disable and Restart (switch authority to the Addon).</param>
     Task<FrontendCenterMStartupMutationResult> RequestCenterMAuthorityTransitionAsync(bool centerMEnabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable."));
-    Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendVibrationTestResult(false, "Vibration test is unavailable.", null));
-    /// <summary>Opens the dedicated Vibration Test diagnostic session: creates the session log file
-    /// (even if no command is ever run) and records a header with current Test Mode/routing state.
-    /// Call when the Vibration Test detail page is entered, before/alongside the status refresh.
-    /// Idempotent: a call while a session is already open returns that same session's file.</summary>
-    Task<FrontendVibrationTestResult> OpenVibrationTestSessionAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendVibrationTestResult(true, "SessionUnavailable", null));
-    /// <summary>Closes the dedicated Vibration Test diagnostic session, if one is open: cancels any
-    /// pending developer-owned delayed STOP, issues a best-effort production-path STOP, and flushes/
-    /// closes the session log. Call when the Vibration Test detail page is left, regardless of how.</summary>
-    Task<FrontendVibrationTestResult> CloseVibrationTestSessionAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendVibrationTestResult(true, "NoSessionActive", null));
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);
     Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default);
     /// <summary>Captures the current CPU Boost frontend snapshot. Never mutates anything -- opening
