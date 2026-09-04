@@ -1023,13 +1023,260 @@ public sealed class MsiClawAddonPresentationTests
         await owner.DisposeAsync();
     }
 
+    // ================= Full1902 Suspend/Resume: power-suspend neutral presentation =================
+
+    [Fact] // section 16.2
+    public async Task Xbox360_suspend_pause_stops_publisher_disarms_feedback_writes_neutral_and_keeps_the_device_attached()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var xbox360 = new FakePublisher();
+        var owner = BuildWithSink(native, xbox360, new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        sink.Writes.Clear();
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.Paused, pause.Outcome);
+        Assert.True(pause.Safe);
+        Assert.True(((IMsiClawAddonPresentation)owner).IsSuspendPaused);
+        Assert.True(xbox360.StopCalled);
+        Assert.False(xbox360.IsRunning);
+        Assert.Equal(AddonPresentationKind.Xbox360, owner.ActivePresentation); // device stays attached
+        Assert.Contains("ClearXbox360RumbleCallback", native.Calls);
+        Assert.Contains(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes);
+        Assert.Contains("SetXbox360DeviceState", native.Calls); // neutral written
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact] // section 16.1
+    public async Task SteamDeck_suspend_pause_stops_publisher_disarms_feedback_writes_neutral_and_keeps_the_device_attached()
+    {
+        var native = new FakeNative();
+        var deck = new FakePublisher();
+        var owner = Build(native, new FakePublisher(), deck);
+        await owner.AttachInitialAsync(new FakeSource(), WantsDeck(), default);
+        native.Calls.Clear();
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.Paused, pause.Outcome);
+        Assert.True(deck.StopCalled);
+        Assert.False(deck.IsRunning);
+        Assert.Equal(AddonPresentationKind.SteamDeck, owner.ActivePresentation);
+        Assert.Contains("SetSteamDeckDeviceState", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact] // section 16.3
+    public async Task No_live_presentation_mutation_while_suspend_paused()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsDeck(), default);
+        Assert.Equal(SuspendPauseOutcome.Paused, (await h.Owner.PauseForSuspendAsync(default)).Outcome);
+        h.Native.Calls.Clear();
+
+        h.Snapshot = WantsXbox();
+        var reconcile = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+        Assert.Equal(PresentationReconcileOutcome.Blocked, reconcile.Outcome);
+        Assert.Equal("SuspendPaused", reconcile.Reason);
+
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).TryRequestSteamPulse());
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).TryRequestQuickAccessPulse());
+
+        Assert.DoesNotContain("AttachUSBDeviceEx", h.Native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", h.Native.Calls);
+        Assert.Equal(AddonPresentationKind.SteamDeck, h.Owner.ActivePresentation);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Theory] // section 16.4
+    [InlineData(false)] // Xbox360
+    [InlineData(true)]  // SteamDeck
+    public async Task Same_presentation_resume_restarts_the_same_publisher_with_zero_detach_or_attach(bool deck)
+    {
+        var h = new SwitchHarness();
+        var wanted = deck ? WantsDeck() : WantsXbox();
+        h.Snapshot = wanted;
+        await h.Owner.AttachInitialAsync(h.Source, wanted, default);
+        var publisher = deck ? h.DeckPublishers[0] : h.Xbox360Publishers[0];
+        Assert.Equal(SuspendPauseOutcome.Paused, (await h.Owner.PauseForSuspendAsync(default)).Outcome);
+        h.Native.Calls.Clear();
+
+        var resume = await h.Owner.ResumeAfterSuspendAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(SuspendResumeOutcome.SamePublisherResumed, resume.Outcome);
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).IsSuspendPaused);
+        Assert.True(publisher.IsRunning);
+        Assert.Single(deck ? h.DeckPublishers : h.Xbox360Publishers); // SAME object, not recreated
+        Assert.DoesNotContain("DetachUSBDeviceEx", h.Native.Calls);
+        Assert.DoesNotContain("AttachUSBDeviceEx", h.Native.Calls);
+        Assert.DoesNotContain("NewUSBServer", h.Native.Calls);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact] // section 16.5
+    public async Task Desired_kind_changed_during_sleep_leaves_the_old_publisher_stopped_and_requires_a_pr7_reconcile()
+    {
+        var h = new SwitchHarness();
+        h.Snapshot = WantsDeck();
+        await h.Owner.AttachInitialAsync(h.Source, WantsDeck(), default);
+        Assert.Equal(SuspendPauseOutcome.Paused, (await h.Owner.PauseForSuspendAsync(default)).Outcome);
+        h.Native.Calls.Clear();
+
+        h.Snapshot = WantsXbox(); // BPM exited while sleeping
+        var resume = await h.Owner.ResumeAfterSuspendAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(SuspendResumeOutcome.ReconcileRequired, resume.Outcome);
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).IsSuspendPaused);
+        Assert.False(h.DeckPublishers[0].IsRunning); // old publisher NOT briefly restarted
+        Assert.Single(h.DeckPublishers);
+        Assert.Empty(h.Xbox360Publishers);
+        Assert.DoesNotContain("AttachUSBDeviceEx", h.Native.Calls);
+
+        // The existing PR7 reconcile performs the actual Deck -> X360 switch.
+        var switched = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+        Assert.Equal(PresentationReconcileOutcome.Switched, switched.Outcome);
+        Assert.Equal(AddonPresentationKind.Xbox360, h.Owner.ActivePresentation);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact] // section 16.6
+    public async Task Suspend_after_overlay_pause_then_resume_leaves_overlay_owning_the_neutral_pause()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        Assert.Equal(OverlayPauseOutcome.Paused, (await h.Owner.PauseForOverlayAsync(default)).Outcome);
+        Assert.Equal(SuspendPauseOutcome.Paused, (await h.Owner.PauseForSuspendAsync(default)).Outcome);
+
+        var resume = await h.Owner.ResumeAfterSuspendAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(SuspendResumeOutcome.LeftNeutral, resume.Outcome);
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).IsSuspendPaused);
+        Assert.True(h.Owner.IsOverlayPaused);
+        Assert.False(h.Xbox360Publishers[0].IsRunning); // still neutral under the Overlay pause
+
+        // Ending the Overlay pause then resumes the same publisher normally.
+        Assert.Equal(OverlayResumeOutcome.Resumed, (await h.Owner.ResumeAfterOverlayAsync(h.Source, default)).Outcome);
+        Assert.True(h.Xbox360Publishers[0].IsRunning);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact] // section 16.6
+    public async Task Overlay_pause_request_is_blocked_while_suspend_paused_and_never_restarts_publication()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        Assert.Equal(SuspendPauseOutcome.Paused, (await h.Owner.PauseForSuspendAsync(default)).Outcome);
+
+        var overlay = await h.Owner.PauseForOverlayAsync(default);
+
+        Assert.Equal(OverlayPauseOutcome.Blocked, overlay.Outcome);
+        Assert.Equal("SuspendPaused", overlay.Reason);
+        Assert.True(((IMsiClawAddonPresentation)h.Owner).IsSuspendPaused);
+        Assert.False(h.Owner.IsOverlayPaused);
+        Assert.False(h.Xbox360Publishers[0].IsRunning);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact] // section 13.1
+    public async Task Suspend_pause_publisher_join_failure_keeps_the_pause_and_never_writes_neutral_or_detaches()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Xbox360Publishers[0].StopThrows = true;
+        h.Native.Calls.Clear();
+
+        var pause = await h.Owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.PublisherNotStopped, pause.Outcome);
+        Assert.False(pause.Safe);
+        Assert.True(((IMsiClawAddonPresentation)h.Owner).IsSuspendPaused); // stays paused
+        Assert.DoesNotContain("SetXbox360DeviceState", h.Native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", h.Native.Calls);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact] // section 13.2
+    public async Task Suspend_pause_with_a_rejected_neutral_write_retires_the_presentation_through_the_owner()
+    {
+        var native = new FakeNative();
+        var xbox360 = new FakePublisher();
+        var deck = new FakePublisher();
+        var owner = Build(native, xbox360, deck);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        native.StateResults.Enqueue(false); // suspend neutral write rejected
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.NeutralRejectedPresentationRetired, pause.Outcome);
+        Assert.True(pause.Safe);
+        Assert.Null(owner.ActivePresentation);
+        Assert.Contains("DetachUSBDeviceEx", native.Calls);
+        Assert.False(deck.Started); // no alternate presentation fallback
+        await owner.DisposeAsync();
+    }
+
+    [Fact] // section 16.9 / 10.1
+    public async Task Resume_with_an_unavailable_physical_source_keeps_the_suspend_pause_active()
+    {
+        var h = new SwitchHarness();
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        Assert.Equal(SuspendPauseOutcome.Paused, (await h.Owner.PauseForSuspendAsync(default)).Outcome);
+
+        var resume = await h.Owner.ResumeAfterSuspendAsync(new FakeSource { Running = false }, h.Capture, default);
+
+        Assert.Equal(SuspendResumeOutcome.DeferredSourceUnavailable, resume.Outcome);
+        Assert.True(resume.StillBlocked);
+        Assert.True(((IMsiClawAddonPresentation)h.Owner).IsSuspendPaused);
+        Assert.False(h.Xbox360Publishers[0].IsRunning);
+
+        // Once a live source is provided (existing PR8/PR10 recovery), the same release path finishes.
+        var recovered = await h.Owner.ResumeAfterSuspendAsync(h.Source, h.Capture, default);
+        Assert.Equal(SuspendResumeOutcome.SamePublisherResumed, recovered.Outcome);
+        Assert.False(((IMsiClawAddonPresentation)h.Owner).IsSuspendPaused);
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact] // section 16.10: reuse the #488 blocked-callback technique
+    public async Task A_rumble_callback_pending_in_the_sink_cannot_land_a_non_zero_write_after_the_suspend_stop()
+    {
+        var native = new FakeNative();
+        var gate = new ManualResetEventSlim(false);
+        var sink = new FakeRumbleSink { BlockFirstNonZeroWrite = gate };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+
+        var callback = Task.Run(() => native.ArmedXbox360RumbleCallback!(0, 200, 100));
+        Assert.True(sink.FirstNonZeroWriteEntered.Wait(TimeSpan.FromSeconds(2)));
+
+        var pause = Task.Run(() => owner.PauseForSuspendAsync(default));
+        await Task.Delay(100);
+        Assert.False(pause.IsCompleted); // draining the blocked callback before the STOP
+
+        gate.Set();
+        Assert.True((await pause).Safe);
+        await callback;
+
+        Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes[^1]);
+        Assert.Single(sink.Writes, w => w.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped));
+        await owner.DisposeAsync();
+    }
+
     // ---- fakes ----
 
     private sealed class FakeSource : IMsiClawPreparedInputSource
     {
         public bool Running { get; set; } = true;
         public bool IsRunning => Running;
-        public ControllerState LatestState => default;
+        public ControllerState LatestState { get; set; }
+        public int ResetLatestStateToNeutralCalls { get; private set; }
+        public void ResetLatestStateToNeutral() { ResetLatestStateToNeutralCalls++; LatestState = default; }
         public event EventHandler<ControllerState>? StateChanged { add { } remove { } }
         public MsiClawInputStartResult StartPrepared(Input.DirectInput.DirectInputDeviceDescriptor descriptor) => new(MsiClawInputStartStatus.Started, "");
         public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken) => Task.FromResult(true);

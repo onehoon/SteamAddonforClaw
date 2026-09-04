@@ -31,7 +31,11 @@ internal static class AddonRuntimeCompositionFactory
         Action<bool>? bigPictureStateChanged = null,
         // Full1902 0903 cleanup (section 4.6): a read-only override for the final Addon operational
         // status, closing over AddonProcessHost's existing physical/presentation ownership facts.
-        Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null)
+        Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null,
+        // Full1902 Suspend/Resume section 5.2 / addendum A.3: the one host-local Full1902 suspend
+        // participant, created by AddonProcessHost and passed through unchanged. Its quiesce callback
+        // reads AddonProcessHost's current presentation ownership with a null guard at execution time.
+        IPowerSuspendParticipant? full1902SuspendParticipant = null)
     {
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
@@ -81,7 +85,8 @@ internal static class AddonRuntimeCompositionFactory
             powerGate,
             recoverySafetyState,
             recoverySafe,
-            establishBaseline);
+            establishBaseline,
+            suspendParticipant: full1902SuspendParticipant);
 
         if (bigPictureStateChanged is not null && steamRuntime.IsBigPictureActive)
             bigPictureStateChanged(true);

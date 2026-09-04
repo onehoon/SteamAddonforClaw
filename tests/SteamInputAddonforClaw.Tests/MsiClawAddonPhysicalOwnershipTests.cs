@@ -1361,6 +1361,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     private sealed class FakeInputSource : IMsiClawPreparedInputSource
     {
         public SteamInputAddonforClaw.Input.ControllerState LatestState => default;
+        public void ResetLatestStateToNeutral() { }
         public MsiClawInputStartStatus StartResult { get; set; } = MsiClawInputStartStatus.Started;
         public bool FirstValidState { get; set; } = true;
         public bool StartCalled { get; private set; }

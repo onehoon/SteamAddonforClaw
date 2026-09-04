@@ -54,6 +54,7 @@ public sealed class OverlayControllerInputRouterTests
         public event EventHandler<ControllerState>? StateChanged;
         public void Raise(GamepadButtons buttons) { LatestState = State(buttons); StateChanged?.Invoke(this, LatestState); }
         public void RaiseState(ControllerState state) { LatestState = state; StateChanged?.Invoke(this, state); }
+        public void ResetLatestStateToNeutral() => LatestState = default;
         public MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor) => new(MsiClawInputStartStatus.Started, "");
         public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken) => Task.FromResult(true);
         public Task StopAsync() => Task.CompletedTask;

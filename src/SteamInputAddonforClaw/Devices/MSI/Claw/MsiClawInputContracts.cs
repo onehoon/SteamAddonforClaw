@@ -37,6 +37,15 @@ internal interface IMsiClawPreparedInputSource : IAsyncDisposable, IControllerSt
     // the Full-1902 presentation publisher consumes the SAME PR5 physical source.
     event EventHandler<ControllerState>? StateChanged;
     bool IsRunning { get; }
+
+    /// <summary>Full1902 Suspend/Resume section 9: explicitly overwrite the published snapshot with a
+    /// neutral <see cref="Input.ControllerState"/> immediately before suspend-paused publication is
+    /// released, so the first resumed publish cannot replay a stale pre-suspend snapshot. This does
+    /// NOT stop the DirectInput session, reset <c>TestSession</c>, change the physical session
+    /// generation, reacquire the device, or raise <see cref="StateChanged"/>. The existing poll loop
+    /// writes the current mapped state back on the next successful read.</summary>
+    void ResetLatestStateToNeutral();
+
     MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor);
     Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken);
     Task StopAsync();
