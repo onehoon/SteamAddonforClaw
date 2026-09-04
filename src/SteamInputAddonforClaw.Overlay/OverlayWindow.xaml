@@ -3,19 +3,19 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid x:Name="AnimationViewport">
-        <Grid x:Name="OpaquePanel" Background="#FFF3F3F3" Padding="28">
-            <Grid x:Name="AnimatedContent" RowSpacing="16">
+        <Grid x:Name="OpaquePanel" Background="#FFF3F3F3" Padding="16,14,16,16">
+            <Grid x:Name="AnimatedContent" RowSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock
                     Grid.Row="0"
                     Text="Quick Settings"
-                    Style="{ThemeResource TitleTextBlockStyle}" />
+                    FontSize="24"
+                    FontWeight="SemiBold" />
 
                 <Grid x:Name="TabStrip" Grid.Row="1" ColumnSpacing="4">
                     <Grid.ColumnDefinitions>
@@ -30,17 +30,11 @@
                 <ScrollViewer
                     x:Name="BodyScroll"
                     Grid.Row="2"
-                    VerticalScrollBarVisibility="Auto"
-                    HorizontalScrollBarVisibility="Disabled">
-                    <Grid x:Name="TabBody" />
+                    VerticalScrollBarVisibility="Hidden"
+                    HorizontalScrollBarVisibility="Disabled"
+                    HorizontalContentAlignment="Stretch">
+                    <Grid x:Name="TabBody" HorizontalAlignment="Stretch" />
                 </ScrollViewer>
-
-                <TextBlock
-                    x:Name="FooterHint"
-                    Grid.Row="3"
-                    Text="LB/RB  Tabs&#x2003;B  Close"
-                    Style="{ThemeResource CaptionTextBlockStyle}"
-                    Opacity="0.75" />
             </Grid>
         </Grid>
     </Grid>
