@@ -8,18 +8,17 @@ using Microsoft.Windows.Storage.Pickers;
 namespace SteamInputAddonforClaw.Views;
 
 /// <summary>
-/// The one Center M Button detail page: the global remapping switch plus the four mapping slots,
-/// grouped by mapping domain.
+/// The Center M Button detail page: the normal Center M button action used in Xbox360 presentation.
 /// </summary>
 /// <remarks>
-/// Every action ComboBox is populated from <see cref="Oem1ActionCapabilities.ActionsFor"/> -- the
+/// The action ComboBox is populated from <see cref="Oem1ActionCapabilities.ActionsFor"/> -- the
 /// SAME table the runtime dispatcher validates persisted bindings against -- so the UI can never
 /// offer a combination the runtime would refuse, and neither side restates the matrix.
 ///
 /// <para>
 /// Editing is whole-record: any change sends the complete <see cref="Oem1MappingSettings"/> back, so
-/// flipping the remapping switch off carries the four bindings through untouched instead of relying
-/// on the backend to remember them.
+/// the other persisted bindings carry through untouched instead of relying on the backend to
+/// remember them.
 /// </para>
 /// </remarks>
 public sealed partial class CenterMButtonPage : UserControl

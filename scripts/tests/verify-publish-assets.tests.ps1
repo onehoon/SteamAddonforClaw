@@ -31,7 +31,6 @@ function New-Fixture {
         'ui\SteamInputAddonforClaw.UI.pri' = 'application pri'
         'ui\App.xbf' = 'app xbf'
         'ui\MainWindow.xbf' = 'main window xbf'
-        'ui\Views\StatusPage.xbf' = 'status xbf'
         'ui\Views\HowToUsePage.xbf' = 'how-to-use xbf'
         'ui\Views\ControllerPage.xbf' = 'controller xbf'
         'ui\Views\SettingsPage.xbf' = 'settings xbf'

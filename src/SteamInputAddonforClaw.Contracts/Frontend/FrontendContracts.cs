@@ -119,15 +119,10 @@ public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeSt
 /// The frontend deliberately carries the SAME <see cref="Oem1MappingSettings"/> the runtime persists
 /// and the dispatcher validates against, rather than a parallel frontend-shaped copy -- the settings
 /// UI and runtime capability validation must never be able to disagree.</remarks>
-public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping)
+public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping)
 {
     public bool DeveloperMenuEnabled { get; init; }
     public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
-    /// <summary>While true (MSI Center M startup config is exactly Disabled, PR2.5) the Runtime
-    /// enforces <see cref="LaunchAtWindowsStartup"/> ON -- an OFF request is rejected and this
-    /// snapshot comes back with <see cref="LaunchAtWindowsStartup"/> still true. Optional, defaulted:
-    /// an older peer that omits it simply renders the toggle unlocked.</summary>
-    public bool LaunchAtWindowsStartupRequired { get; init; }
 }
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
 
@@ -184,8 +179,7 @@ public sealed record FrontendCenterMStartupMutationResult(
 /// NOT a routing/Steam/BPM/runtime condition, and NOT the persisted remapping switch -- a machine
 /// that is not a recognized Claw reports false while its saved mapping stays untouched. A startup
 /// fact, so it lives on bootstrap rather than on the settings snapshot every setter returns.</param>
-public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string StartupRegistrationMessage, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool Oem1MappingAvailable, bool WingMappingAvailable = false);
-public sealed record FrontendLaunchAtStartupResult(FrontendSettingsSnapshot Settings, string RegistrationMessage);
+public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool Oem1MappingAvailable, bool WingMappingAvailable = false);
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
 public sealed record FrontendDeviceSnapshot(string Manufacturer, string Model, string BaseBoard, IReadOnlyList<string> GpuModels);
@@ -259,7 +253,6 @@ public interface IAddonFrontendControl
     event EventHandler? StateInvalidated;
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
-    Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);
     /// <summary>Persists a COMPLETE new OEM1 mapping (remapping switch + all four slot bindings).
     /// Whole-record, not per-slot: it is what makes "turning remapping off never erases the mappings"

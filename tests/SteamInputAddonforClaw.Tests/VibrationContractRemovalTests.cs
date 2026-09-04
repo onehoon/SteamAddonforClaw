@@ -9,8 +9,8 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class VibrationContractRemovalTests
 {
     [Fact]
-    public void Frontend_protocol_is_v23()
-        => Assert.Equal(23, FrontendTransportProtocol.CurrentVersion);
+    public void Frontend_protocol_is_current()
+        => Assert.Equal(24, FrontendTransportProtocol.CurrentVersion);
 
     [Fact]
     public void No_vibration_test_rpc_methods_remain()

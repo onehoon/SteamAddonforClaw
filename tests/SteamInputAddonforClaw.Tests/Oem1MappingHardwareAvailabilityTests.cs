@@ -86,7 +86,6 @@ public sealed class Oem1MappingHardwareAvailabilityTests : IDisposable
             new ThrowingSystemStatusProvider(),
             null,
             new DeveloperTestModeState(),
-            "",
             oem1MappingAvailable: oem1MappingAvailable);
     }
 

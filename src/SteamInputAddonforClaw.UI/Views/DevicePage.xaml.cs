@@ -463,12 +463,12 @@ public sealed partial class DevicePage : UserControl
 
     /// <summary>Renders the compact device identity/support line at the top of the page from the
     /// authoritative frontend status snapshot. This is identity/context, not a status dashboard --
-    /// it reuses the existing <see cref="StatusPresentation"/> formatting rather than restating it.</summary>
+    /// it reuses the existing <see cref="DeviceSummaryPresentation"/> formatting rather than restating it.</summary>
     internal void RenderDeviceSummary(FrontendStatusSnapshot snapshot)
     {
-        DeviceManufacturerText.Text = StatusPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
+        DeviceManufacturerText.Text = DeviceSummaryPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
         DeviceModelText.Text = snapshot.Device.Model;
-        DeviceSupportText.Text = StatusPresentation.FormatDeviceCompatibility(snapshot.Hardware.Status);
+        DeviceSupportText.Text = DeviceSummaryPresentation.FormatDeviceCompatibility(snapshot.Hardware.Status);
         DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoard} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
     }
 

@@ -39,7 +39,6 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     }
     public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) => SendAsync<FrontendBootstrapSnapshot>(FrontendRpcMethod.GetBootstrap, null, t);
     public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) => SendAsync<FrontendStatusSnapshot>(FrontendRpcMethod.CaptureStatus, null, t);
-    public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken t = default) => SendAsync<FrontendLaunchAtStartupResult>(FrontendRpcMethod.SetLaunchAtWindowsStartup, FrontendWireCodec.Payload(new SetLaunchAtWindowsStartupRequest(enabled)), t);
     public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) => SendAsync<FrontendSettingsSnapshot>(FrontendRpcMethod.SetLogLevel, FrontendWireCodec.Payload(new SetLogLevelRequest(level)), t);
     public Task<FrontendSettingsSnapshot> SetOem1MappingAsync(SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings mapping, CancellationToken t = default) => SendAsync<FrontendSettingsSnapshot>(FrontendRpcMethod.SetOem1Mapping, FrontendWireCodec.Payload(new SetOem1MappingRequest(mapping)), t);
     public Task<FrontendSettingsSnapshot> SetWingMappingAsync(SteamInputAddonforClaw.Contracts.Wing.WingMappingSettings mapping, CancellationToken t = default) => SendAsync<FrontendSettingsSnapshot>(FrontendRpcMethod.SetWingMapping, FrontendWireCodec.Payload(new SetWingMappingRequest(mapping)), t);

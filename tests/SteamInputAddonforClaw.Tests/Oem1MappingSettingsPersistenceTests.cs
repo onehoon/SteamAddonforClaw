@@ -49,7 +49,6 @@ public sealed class Oem1MappingSettingsPersistenceTests : IDisposable
 
         var settings = new SettingsStore(SettingsPath).Load();
 
-        Assert.False(settings.LaunchAtWindowsStartup);
         Assert.False(settings.Oem1Mapping.RemappingEnabled);
         Assert.Equal(Oem1MappingSettings.Default.NormalSingle, settings.Oem1Mapping.NormalSingle);
         Assert.Equal(Oem1MappingSettings.Default.NormalDouble, settings.Oem1Mapping.NormalDouble);
@@ -174,10 +173,11 @@ public sealed class Oem1MappingSettingsPersistenceTests : IDisposable
         var store = new SettingsStore(SettingsPath);
         var coordinator = new StartupSettingsCoordinator(store.Load(), store, new NoOpStartupManager());
 
+        coordinator.ChangeLogLevel(AppLogPreference.Debug);
         coordinator.ChangeOem1Mapping(coordinator.Oem1Mapping with { RemappingEnabled = false });
 
         Assert.False(new SettingsStore(SettingsPath).Load().Oem1Mapping.RemappingEnabled);
-        Assert.True(coordinator.Settings.LaunchAtWindowsStartup);
+        Assert.Equal(AppLogPreference.Debug, new SettingsStore(SettingsPath).Load().LogLevel);
     }
 
     public void Dispose()

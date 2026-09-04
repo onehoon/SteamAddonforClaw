@@ -304,8 +304,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             coordinator,
             new FixedSystemStatusProvider(snapshot),
             null,
-            new DeveloperTestModeState(),
-            "");
+            new DeveloperTestModeState());
     }
 
     private InProcessAddonFrontendControl CreateControl(ISystemStatusProvider statusProvider)
@@ -317,8 +316,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             coordinator,
             statusProvider,
             null,
-            new DeveloperTestModeState(),
-            "");
+            new DeveloperTestModeState());
     }
 
     private static SystemStatusSnapshot ClawFamilySnapshot(HardwareCompatibilityStatus status) => new(

@@ -24,7 +24,7 @@ public sealed class AddonProcessHostStartupTests
             recoverySafe: true,
             establishBaseline: _ => Task.FromResult(true));
         var runtimeComposition = new AddonRuntimeComposition(
-            runtimeHost, null!, "test", null!);
+            runtimeHost, null!, null!);
         var testDataRoot = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw-HostTests", Guid.NewGuid().ToString("N"));
         var host = new AddonProcessHost(null, (_, _) => runtimeComposition, testDataRoot,
             () => $"SteamInputAddonforClaw.Frontend.Test.{Guid.NewGuid():N}");

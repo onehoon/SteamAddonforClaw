@@ -11,7 +11,7 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class FrontendNamedPipeTransportTests
 {
-    private static readonly FrontendSettingsSnapshot Settings = new(true, FrontendLogLevel.Debug, false, Oem1MappingSettings.Default);
+    private static readonly FrontendSettingsSnapshot Settings = new(FrontendLogLevel.Debug, false, Oem1MappingSettings.Default);
     private static readonly FrontendStatusSnapshot Status = new(
         new("MSI", "Claw", "Board", ["GPU"]), new(FrontendHardwareStatus.Supported, "Family", "Model", "Ready"),
         new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
@@ -51,8 +51,6 @@ public sealed class FrontendNamedPipeTransportTests
 
         Assert.Equal(fake.Bootstrap, await client.GetBootstrapAsync());
         Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
-        Assert.Equal(fake.LaunchResult, await client.SetLaunchAtWindowsStartupAsync(false));
-        Assert.False(fake.LastLaunchAtStartupEnabled);
         Assert.Equal(Settings, await client.SetLogLevelAsync(FrontendLogLevel.Info));
         Assert.Equal(FrontendLogLevel.Info, fake.LastLogLevel);
         Assert.Equal(Settings, await client.SuppressDeveloperMenuWarningAsync());
@@ -570,7 +568,7 @@ public sealed class FrontendNamedPipeTransportTests
             Assert.Equal(FrontendWireMessageKind.CancelRequest, cancel.Kind);
             await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, request.RequestId, request.Method, Error: new(FrontendRemoteErrorCode.Cancelled, "Operation cancelled.")), writeGate, CancellationToken.None);
             var next = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
-            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method, Payload: FrontendWireCodec.Payload(new FrontendBootstrapSnapshot(new(true, FrontendLogLevel.Debug, false, Oem1MappingSettings.Default), "Registered", new(false), @"C:\Logs", true))), writeGate, CancellationToken.None);
+            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method, Payload: FrontendWireCodec.Payload(new FrontendBootstrapSnapshot(new(FrontendLogLevel.Debug, false, Oem1MappingSettings.Default), new(false), @"C:\Logs", true))), writeGate, CancellationToken.None);
         });
 
         await using var client = new NamedPipeAddonFrontendClient(pipeName);
@@ -982,9 +980,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":23,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":23,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":23,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":24,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":24,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":24,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1018,13 +1016,10 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Theory]
-    [InlineData("SetLaunchAtWindowsStartup", "{}")]
     [InlineData("SetDeveloperTestMode", "{}")]
     [InlineData("SetLogLevel", "{}")]
-    [InlineData("SetLaunchAtWindowsStartup", "null")]
     [InlineData("SetDeveloperTestMode", "null")]
     [InlineData("SetLogLevel", "null")]
-    [InlineData("SetLaunchAtWindowsStartup", "{\"Enabled\":\"false\"}")]
     [InlineData("SetDeveloperTestMode", "{\"Enabled\":\"false\"}")]
     [InlineData("SetLogLevel", "{\"Level\":123}")]
     public async Task Malformed_mutation_payload_is_rejected_without_invoking_frontend(string method, string payload)
@@ -1259,12 +1254,10 @@ public sealed class FrontendNamedPipeTransportTests
     private sealed class RecordingFrontendControl : IAddonFrontendControl
     {
         public event EventHandler? StateInvalidated;
-        public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, "Registered", new(false), @"C:\Logs", true);
-        public FrontendLaunchAtStartupResult LaunchResult { get; } = new(Settings, "Updated");
+        public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, new(false), @"C:\Logs", true);
         public FrontendPrerequisiteSetupResult SetupResult { get; } = new(FrontendPrerequisiteSetupResultKind.Installed, Status);
         public FrontendEnvironmentReportResult EnvironmentResult { get; } = new(true, null);
         public int TotalCalls { get; private set; }
-        public bool LastLaunchAtStartupEnabled { get; private set; }
         public FrontendLogLevel LastLogLevel { get; private set; }
         public Oem1MappingSettings? LastOem1Mapping { get; private set; }
         public bool LastDeveloperTestModeEnabled { get; private set; }
@@ -1276,7 +1269,6 @@ public sealed class FrontendNamedPipeTransportTests
         public void RaiseStateInvalidated() => StateInvalidated?.Invoke(this, EventArgs.Empty);
         public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) { TotalCalls++; if (ThrowOperationCanceledWithoutToken) throw new OperationCanceledException(); return Task.FromResult(Bootstrap); }
         public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(Status); }
-        public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastLaunchAtStartupEnabled = enabled; return Task.FromResult(LaunchResult); }
         public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) { TotalCalls++; LastLogLevel = level; return Task.FromResult(Settings); }
         public Task<FrontendSettingsSnapshot> SetOem1MappingAsync(Oem1MappingSettings mapping, CancellationToken t = default) { TotalCalls++; LastOem1Mapping = mapping; return Task.FromResult(Settings); }
         public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken t = default) { TotalCalls++; SuppressDeveloperWarningCount++; return Task.FromResult(Settings); }

@@ -37,13 +37,10 @@ public sealed class SettingsStore
 
             using var document = JsonDocument.Parse(File.ReadAllText(_settingsPath));
             var root = document.RootElement;
-            var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty) && startupProperty.ValueKind is JsonValueKind.False or JsonValueKind.True
-                ? startupProperty.GetBoolean() : true;
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
             var developerMenuEnabled = root.TryGetProperty("DeveloperMenuEnabled", out var developerMenuProperty) && developerMenuProperty.ValueKind == JsonValueKind.True && developerMenuProperty.GetBoolean();
             var settings = new AppSettings(
-                LaunchAtWindowsStartup: startup,
                 LogLevel: logLevel,
                 SuppressDeveloperMenuWarning: suppressDeveloperMenuWarning)
             {
@@ -52,7 +49,7 @@ public sealed class SettingsStore
                 WingMapping = ReadWingMapping(root),
                 OverlayTabOrder = ReadOverlayTabOrder(root)
             };
-            AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
+            AppLog.Debug("Settings", "Settings loaded.", ("LogLevel", settings.LogLevel));
             return settings;
         }
         catch (JsonException exception)
@@ -168,12 +165,12 @@ public sealed class SettingsStore
     public void Save(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
+        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LogLevel", settings.LogLevel));
 
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.Oem1Mapping, settings.WingMapping, OverlayTabOrder = OverlayTabOrderContract.NormalizeOrDefault(settings.OverlayTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.Oem1Mapping, settings.WingMapping, OverlayTabOrder = OverlayTabOrderContract.NormalizeOrDefault(settings.OverlayTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");
