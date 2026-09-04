@@ -362,8 +362,6 @@ public sealed class StartupCoordinatorTests
             return JsonSerializer.Serialize(effective);
         }
 
-        public void WriteNew(RecoveryJournal journal) => throw new NotSupportedException("StartupCoordinator must never write recovery journal contents.");
-        public void ReplaceExisting(RecoveryJournal journal) => throw new NotSupportedException("StartupCoordinator must never replace recovery journal contents.");
 
         public void Delete()
         {

@@ -1,39 +1,40 @@
-using System.Text.Json;
 using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+// Full1902 Cleanup G: RecoveryJournalStore is read/delete only -- current production has no API
+// that can create or update recovery.json.
 public sealed class RecoveryJournalStoreTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "ClawRecoveryStoreTests", Guid.NewGuid().ToString("N"));
     private string JournalPath => Path.Combine(_directory, "recovery.json");
 
     [Fact]
-    public void ReplaceExisting_ReplacesJournalWithoutTemporaryResidue()
+    public void Exists_ReflectsFilePresence_AndReadTextReturnsTheContent()
     {
         var store = new RecoveryJournalStore(JournalPath);
-        var first = Journal(Guid.NewGuid());
-        var second = Journal(Guid.NewGuid());
-        store.WriteNew(first);
+        Assert.False(store.Exists());
 
-        store.ReplaceExisting(second);
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(JournalPath, "{\"SchemaVersion\":5}");
 
-        var loaded = JsonSerializer.Deserialize<RecoveryJournal>(File.ReadAllText(JournalPath));
-        Assert.Equal(second.RecoverySessionId, loaded!.RecoverySessionId);
-        Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp-*"));
+        Assert.True(store.Exists());
+        Assert.Equal("{\"SchemaVersion\":5}", store.ReadText());
+        Assert.Equal(JournalPath, store.JournalPath);
     }
 
     [Fact]
-    public void ReplaceExisting_RequiresExistingJournal()
+    public void Delete_RemovesTheJournalFile()
     {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(JournalPath, "{}");
         var store = new RecoveryJournalStore(JournalPath);
 
-        Assert.Throws<IOException>(() => store.ReplaceExisting(Journal(Guid.NewGuid())));
-    }
+        store.Delete();
 
-    private static RecoveryJournal Journal(Guid sessionId) =>
-        new(RecoveryManager.CurrentSchemaVersion, sessionId, DateTimeOffset.UtcNow, null, new(ExecutableWhitelistAdditions: ["C:\\addon.exe"]));
+        Assert.False(store.Exists());
+    }
 
     public void Dispose()
     {
