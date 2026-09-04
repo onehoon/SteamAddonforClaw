@@ -29,27 +29,25 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint MF_STRING = 0;
     private const uint MF_GRAYED = 0x00000001;
     private const uint MF_SEPARATOR = 0x0800;
+    private const uint OpenCommand = 1;
+    private const uint RestartCommand = 2;
     private readonly IntPtr _windowHandle;
     private readonly Action _open;
     private readonly Action _restart;
-    private readonly Action _exit;
-    private readonly Action _overlayToggle;
-    private readonly Func<UserTerminationDecision> _terminationDecision;
+    private readonly Func<UserTerminationDecision> _restartDecision;
     private readonly uint _taskbarCreatedMessage;
     private readonly SubclassProc _subclassProc;
     private readonly IntPtr _icon;
 
     public bool IsAvailable { get; private set; }
 
-    public SystemTrayIcon(IntPtr windowHandle, Action open, Action restart, Action exit, Func<UserTerminationDecision> terminationDecision, Action? overlayToggle = null)
+    public SystemTrayIcon(IntPtr windowHandle, Action open, Action restart, Func<UserTerminationDecision> restartDecision)
     {
         AppLog.Info("Tray", "Tray initialization started.", ("HWND", $"0x{windowHandle:X}"));
         _windowHandle = windowHandle;
         _open = open;
         _restart = restart;
-        _exit = exit;
-        _overlayToggle = overlayToggle ?? (() => { });
-        _terminationDecision = terminationDecision ?? throw new ArgumentNullException(nameof(terminationDecision));
+        _restartDecision = restartDecision ?? throw new ArgumentNullException(nameof(restartDecision));
         _icon = ExtractIconW(IntPtr.Zero, Environment.ProcessPath!, 0);
         AppLog.Debug("Tray", "ExtractIconW completed.", ("Success", _icon != IntPtr.Zero));
         _taskbarCreatedMessage = RegisterWindowMessageW("TaskbarCreated");
@@ -162,34 +160,22 @@ internal sealed class SystemTrayIcon : IDisposable
         var menu = CreatePopupMenu();
         try
         {
-            AppendMenuW(menu, MF_STRING, 1, "Open");
-            AppendMenuW(menu, MF_STRING, 4, "Overlay POC: Toggle");
+            AppendMenuW(menu, MF_STRING, OpenCommand, "Open");
             AppendMenuW(menu, MF_SEPARATOR, 0, null);
-            var termination = _terminationDecision();
-            var terminationFlags = TerminationMenuFlags(termination.CanTerminate);
-            AppendMenuW(menu, terminationFlags, 2, "Restart");
-            AppendMenuW(menu, terminationFlags, 3, "Exit");
+            var restart = _restartDecision();
+            var restartFlags = TerminationMenuFlags(restart.CanTerminate);
+            AppendMenuW(menu, restartFlags, RestartCommand, "Restart Addon");
             SetForegroundWindow(_windowHandle);
             var command = TrackPopupMenuEx(menu, TPM_RETURNCMD, point.X, point.Y, _windowHandle, IntPtr.Zero);
-            if (command == 1)
+            if (command == OpenCommand)
             {
                 AppLog.Info("Tray", "Open command selected.");
                 _open();
             }
-            if (command == 2)
+            if (command == RestartCommand)
             {
                 AppLog.Info("Tray", "Restart command selected.");
                 _restart();
-            }
-            if (command == 4)
-            {
-                AppLog.Info("Tray", "Overlay POC toggle selected.");
-                _overlayToggle();
-            }
-            if (command == 3)
-            {
-                AppLog.Info("Tray", "Exit command selected.");
-                _exit();
             }
             PostMessageW(_windowHandle, WM_NULL, IntPtr.Zero, IntPtr.Zero);
         }

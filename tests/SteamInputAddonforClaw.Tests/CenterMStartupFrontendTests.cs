@@ -118,6 +118,8 @@ public sealed class CenterMStartupFrontendTests : IDisposable
 
         public Task<SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult> PrepareForUninstallAsync(CancellationToken cancellationToken)
             => Task.FromResult(SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult.Ok());
+
+        public bool IsInProgress { get; set; }
     }
 
     private sealed class FakeInvoker : ICenterMStartupHelperInvoker

@@ -193,6 +193,26 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, (await first).Outcome);
     }
 
+    [Fact] // Tray restart/overlay cleanup work order section 7.1: IsInProgress is the existing owner
+           // fact AddonProcessHost.EvaluateUserRestart reads to refuse a competing Runtime replacement.
+    public async Task IsInProgress_reflects_only_a_real_in_flight_transition()
+    {
+        var h = new Harness(this) { StartEnabled = true };
+        var gate = new TaskCompletionSource();
+        h.BeforeCenterMMutation = () => gate.Task;
+        var transition = h.Build();
+
+        Assert.False(transition.IsInProgress);
+
+        var inFlight = transition.RequestAsync(centerMEnabled: false, CancellationToken.None);
+        Assert.True(transition.IsInProgress);
+
+        gate.SetResult();
+        await inFlight;
+
+        Assert.False(transition.IsInProgress);
+    }
+
     [Fact]
     public async Task Disable_stops_before_any_mutation_when_a_controller_prerequisite_is_known_not_ready()
     {

@@ -306,8 +306,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // narrow owners -- the shared CenterMStartupControl, the composition's single
         // StartupSettingsCoordinator, and the persistent PR2 HidHide baseline (production-wired here
         // for the first time) -- plus the RAW lower-level Runtime safety decision (not
-        // AddonProcessHost.EvaluateUserTermination, whose ControllerAuthorityMandatory outer rule
-        // must never block the official Enable-and-Restart release path).
+        // AddonProcessHost.EvaluateUserRestart, whose ordinary-restart-safety rules must never block
+        // the official Enable-and-Restart release path).
         var authorityHidHideBaseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
             new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
             Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable."));
@@ -1112,10 +1112,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
-    internal UserTerminationDecision EvaluateUserTermination() =>
-        UserTerminationComposition.Compose(
-            _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None),
-            IsControllerRuntimeMandatory());
+    /// <summary>Restart-specific safety only: a real live transition/shutdown hazard, never the
+    /// permanent mandatory-Runtime policy (tray restart/overlay cleanup work order section 7). A
+    /// controlled Runtime replacement does not compete with Disabled-mode startup still committing,
+    /// an in-progress Enable/Disable MSI Center M and Restart transition, or an already-shutting-down
+    /// Runtime -- but Center M being exactly Disabled does not, by itself, block a restart.</summary>
+    internal UserTerminationDecision EvaluateUserRestart()
+    {
+        if (Volatile.Read(ref _disabledControllerStartupPending) != 0)
+            return new(false, UserTerminationBlockReason.ControllerAuthorityTransition);
+
+        if (_centerMAuthorityTransition?.IsInProgress == true)
+            return new(false, UserTerminationBlockReason.ControllerAuthorityTransition);
+
+        return _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
+    }
 
     /// <summary>Full1902 0903 cleanup (section 4.4): a conservative, read-only override for the final
     /// Addon operational status. Returns <see cref="AddonOperationalStatus.Ready"/> only when the
@@ -1139,29 +1150,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _physicalOwnership?.LiveInputSource is { IsRunning: true },
             _presentationOwnership?.ActivePresentation);
 
-    /// <summary>The mandatory-controller-authority fact for a user action, read fresh from the shared
-    /// Center M startup reader (never cached from process startup). A read that cannot prove an
-    /// exactly-Disabled configuration is not treated as Addon-owned authority (PR2.5 section 14).</summary>
-    private bool IsControllerRuntimeMandatory()
-    {
-        try
-        {
-            return MandatoryControllerRuntimePolicy.IsMandatory(
-                _centerMStartupControl?.Capture().State ?? FrontendCenterMStartupState.Unavailable);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Lifecycle", "MSI Center M startup state read for the mandatory Runtime policy failed; not classifying mandatory.", exception);
-            return false;
-        }
-    }
-
-    internal bool TryInitializeTray(Action restart, Action exit)
+    internal bool TryInitializeTray(Action restart)
     {
         try
         {
             _trayHostWindow = new NativeTrayHostWindow();
-            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, exit, EvaluateUserTermination, RequestOverlayToggle);
+            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, EvaluateUserRestart);
             return true;
         }
         catch (Exception exception)

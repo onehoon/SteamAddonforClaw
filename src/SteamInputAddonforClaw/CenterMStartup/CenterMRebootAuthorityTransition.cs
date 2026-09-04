@@ -85,6 +85,11 @@ internal interface ICenterMRebootAuthorityTransition
     /// before the Addon may be removed from the machine. Shares the <c>Enable Center M</c> stock
     /// restoration core but issues NO Windows restart. Fails closed on any ambiguous/unsafe state.</summary>
     Task<StockUninstallPrepareResult> PrepareForUninstallAsync(CancellationToken cancellationToken);
+
+    /// <summary>Read-only: whether an Enable/Disable-and-Restart transition (or uninstall stock
+    /// preparation) is currently committing. A controlled ordinary Runtime restart must not start a
+    /// competing replacement while this is true.</summary>
+    bool IsInProgress { get; }
 }
 
 /// <summary>
@@ -124,6 +129,8 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly Action _onStockAuthorityRestored;
     private readonly IWindowsRestartRequester _restartRequester;
     private int _inProgress;
+
+    public bool IsInProgress => Volatile.Read(ref _inProgress) != 0;
 
     internal CenterMRebootAuthorityTransition(
         CenterMStartupControl centerMStartup,

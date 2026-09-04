@@ -74,4 +74,46 @@ public sealed class SystemTrayIconTests
         Assert.Equal(x, point.X);
         Assert.Equal(y, point.Y);
     }
+
+    // ---- Tray restart/overlay cleanup work order sections 5/6/10: the menu is built natively via
+    // Win32 AppendMenuW against a real HWND, so it is proven from source rather than a live popup. ----
+
+    private static string ShowMenuBody()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Lifecycle/SystemTrayIcon.cs"));
+        var body = source[source.IndexOf("private void ShowMenu(POINT point)", StringComparison.Ordinal)..];
+        return body[..body.IndexOf("internal static uint TerminationMenuFlags", StringComparison.Ordinal)];
+    }
+
+    [Fact]
+    public void Tray_menu_is_exactly_Open_separator_RestartAddon()
+    {
+        var menu = ShowMenuBody();
+
+        Assert.Contains("\"Open\"", menu, StringComparison.Ordinal);
+        Assert.Contains("MF_SEPARATOR", menu, StringComparison.Ordinal);
+        Assert.Contains("\"Restart Addon\"", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("Overlay POC", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Exit\"", menu, StringComparison.Ordinal);
+        // Open before the separator before Restart Addon.
+        var open = menu.IndexOf("\"Open\"", StringComparison.Ordinal);
+        var separator = menu.IndexOf("MF_SEPARATOR", StringComparison.Ordinal);
+        var restart = menu.IndexOf("\"Restart Addon\"", StringComparison.Ordinal);
+        Assert.True(open < separator && separator < restart);
+    }
+
+    [Fact]
+    public void Tray_no_longer_takes_an_exit_or_overlay_toggle_delegate()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Lifecycle/SystemTrayIcon.cs"));
+
+        Assert.Contains("public SystemTrayIcon(IntPtr windowHandle, Action open, Action restart, Func<UserTerminationDecision> restartDecision)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("_exit", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("_overlayToggle", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("overlayToggle", source, StringComparison.Ordinal);
+    }
 }
