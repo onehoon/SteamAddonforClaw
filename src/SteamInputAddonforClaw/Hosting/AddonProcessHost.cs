@@ -265,7 +265,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var composition = _runtimeCompositionFactory?.Invoke(startupComposition, startupResult)
             ?? AddonRuntimeCompositionFactory.Create(
                 startupComposition.DeviceRegistry,
-                startupComposition.ControllerEnvironmentAssessmentProvider,
                 startupComposition.RuntimeRecoveryManager,
                 startupComposition.StockCenterMBaseline,
                 startupResult.RecoverySafe,
@@ -321,7 +320,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             () => Volatile.Read(ref _disabledControllerStartupPending) != 0
                 ? new SteamInputAddonforClaw.Lifecycle.UserTerminationDecision(false, SteamInputAddonforClaw.Lifecycle.UserTerminationBlockReason.RoutingTransition)
                 : _runtimeHost.EvaluateUserTermination(),
-            () => IsConflictingControllerEnvironment(startupComposition.ControllerEnvironmentAssessmentProvider),
             async token =>
             {
                 var status = await composition.StatusProvider.CaptureAsync(token).ConfigureAwait(false);
@@ -1138,26 +1136,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Warn("Lifecycle", "MSI Center M startup state read for the mandatory Runtime policy failed; not classifying mandatory.", exception);
             return false;
-        }
-    }
-
-    /// <summary>A fresh check (evaluated at transition-request time, not startup) that no other
-    /// controller manager may coexist with Addon controller authority (work order PR3 section
-    /// 6.2/13). This is the one-shot ENTRY admission for the Disable path, so it fails closed:
-    /// entering exclusive Addon authority is allowed only when the existing detector positively
-    /// proves <see cref="Status.ControllerManagerKind.None"/>. An unresolved (<c>Indeterminate</c>)
-    /// read or a throwing assessment blocks and lets the user retry. Reuses the existing environment
-    /// detector; adds no new scanner. The Enable-and-Restart release path never consults this.</summary>
-    internal static bool IsConflictingControllerEnvironment(Status.IControllerEnvironmentAssessmentProvider provider)
-    {
-        try
-        {
-            return provider.Capture().Manager.Kind != Status.ControllerManagerKind.None;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("CenterM.Authority", "Controller-environment admission could not be verified; blocking Addon authority entry.", exception);
-            return true;
         }
     }
 

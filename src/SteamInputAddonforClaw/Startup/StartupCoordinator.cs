@@ -11,7 +11,6 @@ using SteamInputAddonforClaw.Status;
 internal sealed class StartupCoordinator
 {
     private readonly IUpdateGate _updateGate;
-    private readonly IControllerEnvironmentAssessmentProvider _environmentAssessmentProvider;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
     private readonly IRecoveryJournalStore _recoveryJournalStore;
     private readonly RecoveryManager _recoveryManager;
@@ -27,7 +26,6 @@ internal sealed class StartupCoordinator
 
     public StartupCoordinator(
         IUpdateGate updateGate,
-        IControllerEnvironmentAssessmentProvider environmentAssessmentProvider,
         IControllerEnvironmentWaiter environmentWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
@@ -41,7 +39,6 @@ internal sealed class StartupCoordinator
         Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null)
     {
         _updateGate = updateGate;
-        _environmentAssessmentProvider = environmentAssessmentProvider;
         _environmentWaiter = environmentWaiter;
         _recoveryJournalStore = recoveryJournalStore ?? throw new ArgumentNullException(nameof(recoveryJournalStore));
         _recoveryManager = new RecoveryManager(_recoveryJournalStore);
@@ -113,40 +110,29 @@ internal sealed class StartupCoordinator
                 CenterMStartupState: centerMStartupState, LegacyRoutingAllowed: false);
         }
 
-        AppLog.Info("Environment", "Initial environment detection started.");
-        var assessment = _environmentAssessmentProvider.Capture();
-        var environment = StartupControllerEnvironmentMapper.Map(assessment);
-        AppLog.Info("Environment", "Environment detection completed.", ("Mode", environment.Mode));
-        if (environment.Mode == ControllerEnvironmentMode.Indeterminate)
-        {
-            AppLog.Warn("Environment", "Environment decision is indeterminate.", null, ("Action", "Passive"), ("Reason", "EnvironmentDetectionIndeterminate"));
-            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
-        }
-        if (environment.Mode != ControllerEnvironmentMode.StockCenterM)
-        {
-            AppLog.Warn("Environment", "Stock MSI Center M baseline is not permitted for this controller environment.", null,
-                ("Mode", environment.Mode), ("Action", "Passive"));
-            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
-        }
+        // Full1902 Cleanup D: the third-party controller-manager detection graph is gone. When Center M
+        // startup roots are exactly Enabled the stock authority path always applies -- there is no
+        // software scan that could downgrade it.
+        const ControllerEnvironmentMode environmentMode = ControllerEnvironmentMode.StockCenterM;
         var readinessStopwatch = Stopwatch.StartNew();
-        AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environment.Mode));
-        var readiness = await _environmentWaiter.WaitUntilStableAsync(environment.Mode, cancellationToken).ConfigureAwait(false);
+        AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environmentMode));
+        var readiness = await _environmentWaiter.WaitUntilStableAsync(environmentMode, cancellationToken).ConfigureAwait(false);
         AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
         if (readiness != ControllerEnvironmentReadiness.Stable)
-            return new StartupResult(true, environment.Mode, readiness, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
+            return new StartupResult(true, environmentMode, readiness, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
 
         if (_stockCenterMBaseline is null)
         {
             AppLog.Warn("Startup", "Stock MSI Center M baseline service is unavailable; routing remains passive.", null, ("Action", "Passive"));
-            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
+            return new StartupResult(true, environmentMode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
         }
 
         var baseline = await _stockCenterMBaseline.EstablishAsync(cancellationToken).ConfigureAwait(false);
         if (!baseline.Succeeded)
-            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
+            return new StartupResult(true, environmentMode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
 
         var recoverySafe = await ResolveStaleRecoveryAsync(cancellationToken).ConfigureAwait(false);
-        return new StartupResult(true, environment.Mode, readiness, RecoverySafe: recoverySafe, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+        return new StartupResult(true, environmentMode, readiness, RecoverySafe: recoverySafe, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
             CenterMStartupState: FrontendCenterMStartupState.Enabled);
     }
 

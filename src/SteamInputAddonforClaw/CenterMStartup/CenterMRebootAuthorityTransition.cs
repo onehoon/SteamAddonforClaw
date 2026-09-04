@@ -106,7 +106,6 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly StartupSettingsCoordinator _startupSettings;
     private readonly AddonControllerHidHideBaseline _hidHideBaseline;
     private readonly Func<UserTerminationDecision> _lowerLevelRuntimeSafety;
-    private readonly Func<bool> _conflictingControllerEnvironment;
     private readonly Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> _captureAdmission;
     private readonly Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> _releasePhysicalOwnership;
     // PR12 section 6: independent current-world proof that the physical MSI Claw is PID1901/XInput --
@@ -131,7 +130,6 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         StartupSettingsCoordinator startupSettings,
         AddonControllerHidHideBaseline hidHideBaseline,
         Func<UserTerminationDecision> lowerLevelRuntimeSafety,
-        Func<bool> conflictingControllerEnvironment,
         Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> captureAdmission,
         // PR5 section 16: retire the process-owned DirectInput session and restore the same physical
         // MSI Claw to PID1901 BEFORE HidHide is cleared. Returns the exact PR5-persisted target so the
@@ -147,7 +145,6 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _startupSettings = startupSettings;
         _hidHideBaseline = hidHideBaseline;
         _lowerLevelRuntimeSafety = lowerLevelRuntimeSafety;
-        _conflictingControllerEnvironment = conflictingControllerEnvironment;
         _captureAdmission = captureAdmission;
         _releasePhysicalOwnership = releasePhysicalOwnership;
         _establishStockBaseline = establishStockBaseline;
@@ -194,8 +191,6 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         // --- read-only preflight (honors the caller token) ---
         if (!_lowerLevelRuntimeSafety().CanTerminate)
             return Fail(snapshot, "Controller authority cannot change while a routing, native-mode, or recovery operation is in progress. Try again once it finishes.");
-        if (_conflictingControllerEnvironment())
-            return Fail(snapshot, "A conflicting or unverified controller-manager environment prevents entering Addon controller authority. Close or remove other controller software, then retry Disable and Restart.");
 
         // Disable is the point where the next boot is committed to Addon controller authority, so it
         // must not run on top of an unverified controller state. Both facts are already captured by
@@ -254,8 +249,6 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         if (snapshot.State == FrontendCenterMStartupState.Unavailable)
             return Unavailable(snapshot);
 
-        // A conflicting-controller environment blocks ENTERING Addon authority, never the official
-        // release path (section 7.3).
         if (!_lowerLevelRuntimeSafety().CanTerminate)
             return Fail(snapshot, "Controller authority cannot change while a routing, native-mode, or recovery operation is in progress. Try again once it finishes.");
 

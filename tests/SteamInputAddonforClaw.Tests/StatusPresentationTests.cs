@@ -45,26 +45,6 @@ public sealed class StatusPresentationTests
         Assert.Equal("Not Running", StatusPresentation.FormatSteamGame(new FrontendSteamSnapshot(true, 123, FrontendSteamSource.Indeterminate)));
 
     [Fact]
-    public void FormatControllerSoftwareStatus_Running_ReportsRunningRegardlessOfInstallation() =>
-        Assert.Equal("Running", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Indeterminate, FrontendSoftwareRuntimeStatus.Running, "")));
-
-    [Fact]
-    public void FormatControllerSoftwareStatus_Starting_ReportsStarting() =>
-        Assert.Equal("Starting", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Installed, FrontendSoftwareRuntimeStatus.Starting, "")));
-
-    [Fact]
-    public void FormatControllerSoftwareStatus_IndeterminateRuntime_ReportsIndeterminate() =>
-        Assert.Equal("Indeterminate", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Installed, FrontendSoftwareRuntimeStatus.Indeterminate, "")));
-
-    [Fact]
-    public void FormatControllerSoftwareStatus_InstalledButNotRunning_ReportsInstalledSlashNotRunning() =>
-        Assert.Equal("Installed / Not running", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Installed, FrontendSoftwareRuntimeStatus.NotRunning, "")));
-
-    [Fact]
-    public void FormatControllerSoftwareStatus_NotInstalled_ReportsNotInstalled() =>
-        Assert.Equal("Not installed", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.NotInstalled, FrontendSoftwareRuntimeStatus.NotRunning, "")));
-
-    [Fact]
     public void IsWarning_RecoveryUnsafe_RemainsWarning() =>
         Assert.True(StatusPresentation.IsWarning(Snapshot(recoverySafe: false)));
 
@@ -77,10 +57,6 @@ public sealed class StatusPresentationTests
     [Fact]
     public void IsWarning_HardwareCompatibilityIndeterminate_RemainsVisible() =>
         Assert.True(StatusPresentation.IsWarning(Snapshot(hardwareStatus: FrontendHardwareStatus.Indeterminate)));
-
-    [Fact]
-    public void IsWarning_ControllerEnvironmentIndeterminate_RemainsVisible() =>
-        Assert.True(StatusPresentation.IsWarning(Snapshot(environmentStatus: FrontendControllerEnvironmentStatus.Indeterminate)));
 
     [Fact]
     public void IsWarning_SetupRequired_IsWarning() =>
@@ -97,14 +73,10 @@ public sealed class StatusPresentationTests
     private static FrontendStatusSnapshot Snapshot(
         bool recoverySafe = true,
         FrontendAddonOperationalStatus addonStatus = FrontendAddonOperationalStatus.Ready,
-        FrontendHardwareStatus hardwareStatus = FrontendHardwareStatus.Supported,
-        FrontendControllerEnvironmentStatus environmentStatus = FrontendControllerEnvironmentStatus.Supported) =>
+        FrontendHardwareStatus hardwareStatus = FrontendHardwareStatus.Supported) =>
         new(
             new("Test", "Test", "Test", []),
             new(hardwareStatus, "", "", "Test"),
-            [],
-            environmentStatus,
-            "Test",
             new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
             new(false, 0, FrontendSteamSource.Actual),
             addonStatus, "Test", recoverySafe,

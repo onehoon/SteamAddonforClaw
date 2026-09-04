@@ -18,7 +18,7 @@ public sealed class PrerequisiteSetupPromptPolicyTests
     [Theory]
     [InlineData((int)FirstTimeSetupStatus.Complete, (int)FirstTimeSetupReason.Complete, false)]
     [InlineData((int)FirstTimeSetupStatus.Blocked, (int)FirstTimeSetupReason.RecoveryUnsafe, false)]
-    [InlineData((int)FirstTimeSetupStatus.Indeterminate, (int)FirstTimeSetupReason.CompatibilityIndeterminate, false)]
+    [InlineData((int)FirstTimeSetupStatus.Indeterminate, (int)FirstTimeSetupReason.HardwareIndeterminate, false)]
     [InlineData((int)FirstTimeSetupStatus.Required, (int)FirstTimeSetupReason.SteamActive, false)]
     public void NonInstallableStateStaysPassive(int status, int reason, bool canInstall)
     {

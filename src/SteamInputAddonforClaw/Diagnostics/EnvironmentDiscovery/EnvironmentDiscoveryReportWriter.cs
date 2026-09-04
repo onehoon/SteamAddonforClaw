@@ -17,7 +17,6 @@ internal sealed class EnvironmentDiscoveryReportWriter
         text.AppendLine($"AppVersion: {snapshot.System.AppVersion}");
         Header(text, "REPORT");
         WriteSystem(text, snapshot.System);
-        WriteCurrentDetection(text, snapshot.CurrentDetection);
         WriteProcesses(text, snapshot.Processes);
         WriteServices(text, snapshot.Services);
         WriteInstalledApplications(text, snapshot.InstalledApplications);
@@ -37,19 +36,6 @@ internal sealed class EnvironmentDiscoveryReportWriter
         Field(text, "Manufacturer", system.Manufacturer); Field(text, "Model", system.Model);
         if (system.Gpus.Count == 0) Field(text, "GPU", "Unknown");
         else foreach (var gpu in system.Gpus.OrderBy(value => value, StringComparer.OrdinalIgnoreCase)) Field(text, "GPU", gpu);
-    }
-
-    private static void WriteCurrentDetection(StringBuilder text, DiscoverySection<CurrentDetectionDiscoveryInfo> section)
-    {
-        Header(text, "CURRENT DETECTION");
-        if (Failure(text, section)) return;
-        var current = section.Items.Single();
-        foreach (var software in current.Software.OrderBy(value => value.Kind))
-        {
-            text.AppendLine($"{software.DisplayName}: Installation={software.Installation}; Runtime={software.Runtime}; Reason={software.Reason}");
-        }
-        text.AppendLine($"ControllerEnvironmentMode: {current.Environment.Mode}");
-        text.AppendLine($"EnvironmentReadiness: {current.EnvironmentReadiness}");
     }
 
     private static void WriteProcesses(StringBuilder text, DiscoverySection<ProcessDiscoveryInfo> section)

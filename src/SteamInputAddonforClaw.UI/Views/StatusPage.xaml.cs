@@ -35,12 +35,6 @@ public sealed partial class StatusPage : UserControl
         StatusInfoBar.Message = snapshot.AddonReason;
         StatusInfoBar.IsOpen = isWarning;
 
-        var software = snapshot.ControllerSoftware
-            .Select(item => new StatusCardViewModel(item.DisplayName, StatusPresentation.FormatControllerSoftwareStatus(item), item.Reason))
-            .ToList();
-        RenderGroup(ControllerSoftwareExpander, software, "installed",
-            status => status is not ("Not installed" or "Indeterminate"));
-
         var routing = new List<StatusCardViewModel>
         {
             new("HidHide", snapshot.Prerequisites.HidHideStatus.ToString(), snapshot.Prerequisites.HidHideReason),

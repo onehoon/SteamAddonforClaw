@@ -14,8 +14,8 @@ public sealed class CenterMStartupContractTests
         // PR3: the PR1 SetCenterMStartupEnabled RPC is renamed to the reboot-bound authority transition.
         Assert.Equal("RequestCenterMAuthorityTransition", FrontendRpcMethod.RequestCenterMAuthorityTransition.ToString());
         Assert.DoesNotContain("SetCenterMStartupEnabled", Enum.GetNames<FrontendRpcMethod>());
-        // Bumped to 21 by Full1902 Cleanup A (legacy routing status contract / Controller Status card removed).
-        Assert.Equal(21, FrontendTransportProtocol.CurrentVersion);
+        // Bumped to 22 by Full1902 Cleanup D (controller-software / manager compatibility status contract removed).
+        Assert.Equal(22, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]

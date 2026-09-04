@@ -1,5 +1,17 @@
 # OEM1 / Center M Native Runtime Foundation — Status
 
+> **Superseded internals (Full1902 Cleanup A + B + D).** Cleanup D additionally
+> deleted the third-party controller-software / manager compatibility authority:
+> `ControllerEnvironmentAssessmentProvider`, `ControllerManagerClassification`,
+> `ControllerEnvironmentCompatibility`, the ClawTweaks / Handheld Companion /
+> MSI Center M software-status providers and probes, `MsiCenterMRuntimeDetection`,
+> `StartupControllerEnvironmentMapper`, `ClawTweaksCompatibilitySnapshotLogger`,
+> the Status-page Controller Software card, and the manager/compatibility gates in
+> Disabled-boot admission / Disable-and-Restart / first-time setup / HidHide
+> provisioning. Center M startup-root authority (`CenterMStartupControl`,
+> `CenterMStartupHelper`, `StockCenterMStartupBaseline`,
+> `CenterMRebootAuthorityTransition`) is unchanged.
+>
 > **Superseded internals (Full1902 Cleanup A + B).** Cleanup A deleted
 > `MsiClawRoutingComposition`, `AddonRoutingRuntime`, the `RoutingPipeline*` graph,
 > and `CenterMMainUiRoutingGuardStage`. Cleanup B deleted the entire Center M

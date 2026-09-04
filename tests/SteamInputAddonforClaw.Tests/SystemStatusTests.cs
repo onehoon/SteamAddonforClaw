@@ -2,8 +2,6 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
-using SteamInputAddonforClaw.Startup;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
@@ -35,19 +33,9 @@ public sealed class SystemStatusTests
         Assert.Equal(expected, WindowsDeviceInformationProvider.IsPhysicalGpu(name, pnpDeviceId));
     }
 
-    [Fact]
-    public void SoftwareSorting_RanksRunningThenInstalledThenNotInstalledWithStableKindOrder()
-    {
-        var sorted = ControllerSoftwareStatusSorter.Sort(
-        [
-            Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)
-        ]);
-
-        Assert.Equal([ControllerSoftwareKind.MsiCenterM], sorted.Select(item => item.Kind));
-    }
-
-    // ---- Full1902 Cleanup A: non-owned Addon status (Center M Enabled / startup still settling)
-    //      derives from the safety/setup facts, not a Steam-session routing decision. ----
+    // ---- Full1902 Cleanup A/D: non-owned Addon status (Center M Enabled / startup still settling)
+    //      derives from the safety/setup facts, not a Steam-session routing decision and not a
+    //      third-party controller-manager compatibility scan. ----
 
     [Fact]
     public async Task NonOwnedStatus_HealthySupportedEnvironment_IsPassiveCenterMOwned()
@@ -72,7 +60,6 @@ public sealed class SystemStatusTests
         var provider = new SystemStatusProvider(
             new FakeDeviceProvider(), SupportedProbeFactory(),
             new FakeHardwareEvaluator(new(HardwareCompatibilityStatus.Unsupported, null, null, "test")),
-            [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => new SteamPresentationSnapshot(0, false), () => true);
 
@@ -86,12 +73,11 @@ public sealed class SystemStatusTests
     public async Task SystemStatusProvider_ReusesPrerequisiteAssessmentAndBuildsOneSnapshot()
     {
         var prerequisites = Prerequisites(PrerequisiteStatus.Missing);
-        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))], new FakePrerequisiteInspector(prerequisites), () => new SteamPresentationSnapshot(0, false), () => true);
+        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), new FakePrerequisiteInspector(prerequisites), () => new SteamPresentationSnapshot(0, false), () => true);
 
         var snapshot = await provider.CaptureAsync();
 
         Assert.Same(prerequisites, snapshot.Prerequisites);
-        Assert.Equal([ControllerSoftwareKind.MsiCenterM], snapshot.ControllerSoftware.Select(item => item.Kind));
         Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
         Assert.True(snapshot.RecoverySafe);
     }
@@ -103,9 +89,6 @@ public sealed class SystemStatusTests
             new FakeDeviceProvider(),
             SupportedProbeFactory(),
             SupportedHardware(),
-            [
-                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))
-            ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => new SteamPresentationSnapshot(1, false),
             () => false);
@@ -134,7 +117,6 @@ public sealed class SystemStatusTests
 
     private static SystemStatusProvider NonOwnedProvider(RuntimePrerequisiteAssessment prerequisites, SteamPresentationSnapshot? presentation = null) =>
         new(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
-            new[] { (IControllerSoftwareStatusProvider)new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)) },
             new FakePrerequisiteInspector(prerequisites),
             () => presentation ?? new SteamPresentationSnapshot(0, false), () => true);
 
@@ -142,23 +124,19 @@ public sealed class SystemStatusTests
 
     private static SystemStatusProvider ProviderWithFull1902Override(Func<AddonStatusSnapshot?>? capture) =>
         new(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
-            new ControllerEnvironmentAssessmentProvider(
-                [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning))]),
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => new SteamPresentationSnapshot(0, false), () => true, capture);
 
     [Fact]
-    public async Task Full1902_override_null_keeps_the_legacy_addon_status()
+    public async Task Full1902_override_null_keeps_the_non_owned_addon_status()
     {
         var snapshot = await ProviderWithFull1902Override(() => null).CaptureAsync();
 
-        // Center M not running -> legacy stock compatibility fact is still MsiCenterMNotOperational.
-        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, snapshot.Compatibility.Status);
-        Assert.NotEqual(AddonOperationalStatus.Ready, snapshot.Addon.Status);
+        Assert.Equal(AddonOperationalStatus.Passive, snapshot.Addon.Status);
     }
 
     [Fact]
-    public async Task Full1902_override_ready_replaces_only_the_final_addon_status_not_the_legacy_facts()
+    public async Task Full1902_override_ready_replaces_the_final_addon_status()
     {
         var snapshot = await ProviderWithFull1902Override(
             () => new AddonStatusSnapshot(AddonOperationalStatus.Ready, "Full1902 controller authority is active (SteamDeck)."))
@@ -166,149 +144,22 @@ public sealed class SystemStatusTests
 
         Assert.Equal(AddonOperationalStatus.Ready, snapshot.Addon.Status);
         Assert.Contains("SteamDeck", snapshot.Addon.Reason);
-        // The legacy compatibility fact is intentionally untouched in Full1902 Disabled mode.
-        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, snapshot.Compatibility.Status);
     }
 
     [Fact]
-    public async Task Full1902_override_that_throws_does_not_crash_capture_and_falls_back_to_legacy()
+    public async Task Full1902_override_that_throws_does_not_crash_capture_and_falls_back_to_non_owned()
     {
         var snapshot = await ProviderWithFull1902Override(
             () => throw new InvalidOperationException("status read failed")).CaptureAsync();
 
-        Assert.NotEqual(AddonOperationalStatus.Ready, snapshot.Addon.Status);
-        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, snapshot.Compatibility.Status);
+        Assert.Equal(AddonOperationalStatus.Passive, snapshot.Addon.Status);
     }
 
-    [Fact]
-    public void MsiCenterM_BootBaselineWithoutDesktopUi_IsOperational()
-    {
-        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, true, false))).Detect();
-
-        Assert.Equal(SoftwareRuntimeStatus.Running, assessment.Status);
-        Assert.Equal("MsiCenterMOperational", assessment.Reason);
-    }
-
-    [Fact]
-    public void MsiCenterM_BackendOperationalWithoutQuickSettingsWidget_IsOperational()
-    {
-        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, false, false))).Detect();
-
-        Assert.Equal(SoftwareRuntimeStatus.Running, assessment.Status);
-        Assert.Equal("MsiCenterMOperational", assessment.Reason);
-        Assert.False(assessment.QuickSettingsWidgetRunning);
-    }
-
-    [Fact]
-    public void MsiCenterM_DesktopUiDoesNotAffectOperationalAssessment()
-    {
-        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, true, true))).Detect();
-
-        Assert.Equal(SoftwareRuntimeStatus.Running, assessment.Status);
-        Assert.Equal("MsiCenterMOperational", assessment.Reason);
-    }
-
-    [Fact]
-    public void MsiCenterM_DesktopUiOnly_IsNotRunning()
-    {
-        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(false, false, false, true, false, true))).Detect();
-
-        Assert.Equal(SoftwareRuntimeStatus.NotRunning, assessment.Status);
-        Assert.Equal("MsiCenterMNotRunning", assessment.Reason);
-    }
-
-    [Fact]
-    public void MsiCenterM_UsesExactStockBackendIdentities()
-    {
-        Assert.Equal("MSI_Center_M_Server", MsiCenterMIdentity.ServerProcessName);
-        Assert.Equal("MSI_Center_M_Server_ControlMode", MsiCenterMIdentity.ControlModeProcessName);
-        Assert.NotEqual("Center_M_Server", MsiCenterMIdentity.ServerProcessName);
-    }
-
-    [Theory]
-    [InlineData(false, true, true, true, true, "MsiCenterMFoundationServiceNotReady")]
-    [InlineData(true, false, true, true, true, "MsiCenterMBackendNotReady")]
-    [InlineData(true, true, false, true, true, "MsiCenterMControlModeNotReady")]
-    [InlineData(true, true, true, false, true, "MsiCenterMQuickSettingsNotReady")]
-    public void MsiCenterM_PartialStack_IsStarting(bool foundation, bool server, bool controlMode, bool package, bool widget, string reason)
-    {
-        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(foundation, server, controlMode, package, widget, false))).Detect();
-
-        Assert.Equal(SoftwareRuntimeStatus.Starting, assessment.Status);
-        Assert.Equal(reason, assessment.Reason);
-    }
-
-    [Fact]
-    public void MsiCenterM_RuntimeInspectionFailure_IsIndeterminate()
-    {
-        var assessment = new MsiCenterMRuntimeDetector(new ThrowingMsiRuntimeSignals()).Detect();
-
-        Assert.Equal(SoftwareRuntimeStatus.Indeterminate, assessment.Status);
-        Assert.Equal("MsiCenterMInspectionFailed", assessment.Reason);
-    }
-
-    [Theory]
-    [InlineData("HKLM64", "MSI Center M", true)]
-    [InlineData("HKLM32", "MSI Center M SDK", true)]
-    [InlineData("HKCU", "MSI Center M", true)]
-    [InlineData("HKLM32", "msi center m sdk", true)]
-    [InlineData("HKLM32", "MSI Center", false)]
-    [InlineData("HKLM32", "MSI Foundation Service", false)]
-    [InlineData("HKLM32", "MSI Center SDK", false)]
-    public void UninstallRegistrationProbe_UsesKnownNamesWithCaseInsensitiveExactMatch(string source, string displayName, bool expectedInstalled)
-    {
-        var probe = new TestUninstallProbe(new FakeUninstallRegistrationSource([new(source, displayName)]));
-        Assert.Equal(expectedInstalled, probe.Detect().Installed);
-    }
-
-    [Fact]
-    public void MsiCenterM_InstalledButNotRunning_PreservesInstallation()
-    {
-        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(true), new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(false, false, false, true, false, false)))).Capture();
-        Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
-        Assert.Equal(SoftwareRuntimeStatus.NotRunning, status.Runtime);
-        Assert.Equal("MsiCenterMNotRunning", status.Reason);
-    }
-
-    [Fact]
-    public void MsiCenterM_RunningPromotesInstallation()
-    {
-        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(false), new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, true, false)))).Capture();
-        Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
-        Assert.Equal(SoftwareRuntimeStatus.Running, status.Runtime);
-        Assert.Equal("MsiCenterMOperational", status.Reason);
-    }
-
-    [Theory]
-    [InlineData((int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.Starting, "Starting")]
-    [InlineData((int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.NotRunning, "Installed / Not running")]
-    public void SoftwareStatusFormatting_PreservesStarting(int installationValue, int runtimeValue, string expected) =>
-        Assert.Equal(expected, ControllerSoftwareStatusFormatter.Format(Software(ControllerSoftwareKind.MsiCenterM, (SoftwareInstallationStatus)installationValue, (SoftwareRuntimeStatus)runtimeValue)));
-
-    [Theory]
-    [InlineData(@"C:\Packages\MSIQuickSettings_1.0", @"C:\Packages\MSIQuickSettings_1.0\Gamebar_Widget.exe", true)]
-    [InlineData("C:\\Packages\\MSIQuickSettings_1.0\\", @"C:\Packages\MSIQuickSettings_1.0\Gamebar_Widget.exe", true)]
-    [InlineData(@"C:\Packages\MSIQuickSettings", @"C:\Packages\MSIQuickSettings_evil\Gamebar_Widget.exe", false)]
-    [InlineData(@"C:\Packages\MSIQuickSettings_1.0", @"C:\Packages\AnotherPackage\Gamebar_Widget.exe", false)]
-    [InlineData(@"C:\Packages\MSIQuickSettings_1.0", @"C:\Packages\MSIQuickSettings_1.0\Gamebar_Widget_Backup.exe", false)]
-    public void QuickSettingsWidgetOwnership_RequiresPackageChildBoundaryAndExactFilename(string root, string executable, bool expected) =>
-        Assert.Equal(expected, WindowsMsiCenterMRuntimeSignalSource.IsPackageOwnedWidget(root, executable));
-
-    private static ControllerSoftwareStatus[] SoftwareStates() => [Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning)];
-    private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareInstallationStatus installation, SoftwareRuntimeStatus runtime) => new(kind, kind.ToString(), installation, runtime, "test");
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteStatus status) => new(new(PrerequisiteKind.HidHide, status, "test"), new(PrerequisiteKind.UsbIpWin2, status, "test"), new(PrerequisiteKind.Viiper, status, "test"));
-    private static ControllerEnvironmentCompatibilityAssessment Compatibility(ControllerEnvironmentCompatibilityStatus status) => new(status, status == ControllerEnvironmentCompatibilityStatus.Supported ? ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported : ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate);
-    private static ControllerDeviceInfo Device(string? friendlyName, ushort? vendorId, ushort? productId) => new("USB\\test", null, null, [], "USB", [], [], "HIDClass", null, null, vendorId, productId, true, friendlyName);
     private static IWindowsDeviceProbeContextFactory SupportedProbeFactory() => new FakeProbeFactory(new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(baseBoardProduct: "MS-1T91"), "test"));
     private static IHardwareCompatibilityEvaluator SupportedHardware() => new FakeHardwareEvaluator(new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test"));
     private sealed class FakeDeviceProvider : IDeviceInformationProvider { public DeviceStatusSnapshot Capture(DeviceProbeContext context) => new("MSI", "Claw", context.BaseBoardProduct ?? "Unknown", ["Intel Arc"]); }
     private sealed class FakeProbeFactory(DeviceProbeContextCapture capture) : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => capture; }
     private sealed class FakeHardwareEvaluator(HardwareCompatibilityAssessment assessment) : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture capture) => assessment; }
-    private sealed class FakeSoftwareProvider(ControllerSoftwareStatus status) : IControllerSoftwareStatusProvider { public ControllerSoftwareStatus Capture() => status; }
-    private sealed class FakeInstallationProbe(bool installed) : IApplicationInstallationProbe { public ApplicationInstallationInfo Detect() => new(installed, "test"); }
     private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }
-    private sealed class FakeMsiRuntimeSignals(MsiCenterMRuntimeSignals signals) : IMsiCenterMRuntimeSignalSource { public MsiCenterMRuntimeSignals Capture() => signals; }
-    private sealed class ThrowingMsiRuntimeSignals : IMsiCenterMRuntimeSignalSource { public MsiCenterMRuntimeSignals Capture() => throw new InvalidOperationException(); }
-    private sealed class TestUninstallProbe(IUninstallRegistrationSource source) : UninstallRegistrationInstallationProbe(MsiCenterMIdentity.InstallationDisplayNames, [], source) { }
-    private sealed class FakeUninstallRegistrationSource(IReadOnlyList<InstalledApplicationRegistration> registrations) : IUninstallRegistrationSource { public IReadOnlyList<InstalledApplicationRegistration> Enumerate() => registrations; }
 }

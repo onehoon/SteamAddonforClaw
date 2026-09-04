@@ -25,7 +25,6 @@ internal static class AddonRuntimeCompositionFactory
 {
     internal static AddonRuntimeComposition Create(
         HandheldDeviceRegistry deviceRegistry,
-        IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider,
         RecoveryManager recoveryManager,
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
@@ -61,7 +60,6 @@ internal static class AddonRuntimeCompositionFactory
             new WindowsDeviceInformationProvider(),
             new WindowsDeviceProbeContextFactory(),
             new HardwareCompatibilityEvaluator(deviceRegistry),
-            controllerEnvironmentAssessmentProvider,
             new RuntimePrerequisiteInspector(
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
