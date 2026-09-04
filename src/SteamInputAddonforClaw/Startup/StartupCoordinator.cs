@@ -6,12 +6,11 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
-using SteamInputAddonforClaw.Status;
 
 internal sealed class StartupCoordinator
 {
     private readonly IUpdateGate _updateGate;
-    private readonly IControllerEnvironmentWaiter _environmentWaiter;
+    private readonly IControllerTopologyWaiter _topologyWaiter;
     private readonly IRecoveryJournalStore _recoveryJournalStore;
     private readonly RecoveryManager _recoveryManager;
     private readonly IStartupHidHideRecoveryCleaner? _hidHideRecoveryCleaner;
@@ -26,7 +25,7 @@ internal sealed class StartupCoordinator
 
     public StartupCoordinator(
         IUpdateGate updateGate,
-        IControllerEnvironmentWaiter environmentWaiter,
+        IControllerTopologyWaiter topologyWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
         IRecoveryJournalStore recoveryJournalStore,
@@ -39,7 +38,7 @@ internal sealed class StartupCoordinator
         Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null)
     {
         _updateGate = updateGate;
-        _environmentWaiter = environmentWaiter;
+        _topologyWaiter = topologyWaiter;
         _recoveryJournalStore = recoveryJournalStore ?? throw new ArgumentNullException(nameof(recoveryJournalStore));
         _recoveryManager = new RecoveryManager(_recoveryJournalStore);
         _hidHideRecoveryCleaner = hidHideRecoveryCleaner;
@@ -63,7 +62,7 @@ internal sealed class StartupCoordinator
         if (updateResult == UpdateGateResult.RestartScheduled)
         {
             AppLog.Info("Startup", "Runtime startup aborted because update restart was scheduled.", ("Action", "Exit"));
-            return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: false);
+            return new StartupResult(false, RecoverySafe: false);
         }
 
         var hardware = await EvaluateHardwareCompatibilityWithStabilizationAsync(cancellationToken).ConfigureAwait(false);
@@ -75,12 +74,8 @@ internal sealed class StartupCoordinator
         AppLog.Info("Hardware", "Startup hardware compatibility assessment completed.",
             ("Status", hardware.Status), ("DeviceFamily", hardware.DeviceFamily), ("DeviceModel", hardware.DeviceModel), ("Reason", hardware.Reason),
             ("Action", hardwareSupported ? "Continue" : "Passive"));
-        if (hardware.Status == HardwareCompatibilityStatus.Unsupported)
-            return new StartupResult(false, ControllerEnvironmentMode.Unsupported, ControllerEnvironmentReadiness.NotApplicable,
-                HardwareStatus: hardware.Status, HardwareDeviceModel: hardware.DeviceModel);
-        if (hardware.Status == HardwareCompatibilityStatus.Indeterminate)
-            return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate,
-                HardwareStatus: hardware.Status, HardwareDeviceModel: hardware.DeviceModel);
+        if (hardware.Status is HardwareCompatibilityStatus.Unsupported or HardwareCompatibilityStatus.Indeterminate)
+            return new StartupResult(false, HardwareStatus: hardware.Status, HardwareDeviceModel: hardware.DeviceModel);
 
         // PR4: make startup authority-aware. The actual Center M startup roots decide whether the
         // legacy stock baseline path or the new read-only Addon Disabled-boot admission runs. A
@@ -105,34 +100,33 @@ internal sealed class StartupCoordinator
         {
             AppLog.Warn("CenterM.StartupAuthority", "Center M startup roots are neither exactly Enabled nor Disabled; no controller owner is selected.", null,
                 ("State", centerMStartupState), ("Action", "Passive"));
-            return new StartupResult(true, ControllerEnvironmentMode.StockCenterM, ControllerEnvironmentReadiness.NotApplicable,
+            return new StartupResult(true,
                 RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
-                CenterMStartupState: centerMStartupState, LegacyRoutingAllowed: false);
+                CenterMStartupState: centerMStartupState);
         }
 
-        // Full1902 Cleanup D: the third-party controller-manager detection graph is gone. When Center M
-        // startup roots are exactly Enabled the stock authority path always applies -- there is no
-        // software scan that could downgrade it.
-        const ControllerEnvironmentMode environmentMode = ControllerEnvironmentMode.StockCenterM;
         var readinessStopwatch = Stopwatch.StartNew();
-        AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environmentMode));
-        var readiness = await _environmentWaiter.WaitUntilStableAsync(environmentMode, cancellationToken).ConfigureAwait(false);
-        AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
-        if (readiness != ControllerEnvironmentReadiness.Stable)
-            return new StartupResult(true, environmentMode, readiness, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
+        AppLog.Info("ControllerTopology", "Controller topology readiness wait started.");
+        var readiness = await _topologyWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
+        AppLog.Info("ControllerTopology", "Controller topology readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
+        if (readiness != ControllerTopologyReadiness.Stable)
+            return new StartupResult(true, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+                CenterMStartupState: FrontendCenterMStartupState.Enabled);
 
         if (_stockCenterMBaseline is null)
         {
             AppLog.Warn("Startup", "Stock MSI Center M baseline service is unavailable; routing remains passive.", null, ("Action", "Passive"));
-            return new StartupResult(true, environmentMode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
+            return new StartupResult(true, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+                CenterMStartupState: FrontendCenterMStartupState.Enabled);
         }
 
         var baseline = await _stockCenterMBaseline.EstablishAsync(cancellationToken).ConfigureAwait(false);
         if (!baseline.Succeeded)
-            return new StartupResult(true, environmentMode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status);
+            return new StartupResult(true, RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+                CenterMStartupState: FrontendCenterMStartupState.Enabled);
 
         var recoverySafe = await ResolveStaleRecoveryAsync(cancellationToken).ConfigureAwait(false);
-        return new StartupResult(true, environmentMode, readiness, RecoverySafe: recoverySafe, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
+        return new StartupResult(true, RecoverySafe: recoverySafe, HardwareSupported: hardwareSupported, HardwareDeviceModel: hardwareDeviceModel, HardwareStatus: hardware.Status,
             CenterMStartupState: FrontendCenterMStartupState.Enabled);
     }
 
@@ -145,20 +139,20 @@ internal sealed class StartupCoordinator
         var deviceModel = hardware.Status == HardwareCompatibilityStatus.Supported ? hardware.DeviceModel : null;
 
         var readinessStopwatch = Stopwatch.StartNew();
-        AppLog.Info("Environment", "Disabled-boot controller topology stabilization started.", ("Mode", ControllerEnvironmentMode.StockCenterM));
-        var readiness = await _environmentWaiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, cancellationToken).ConfigureAwait(false);
+        AppLog.Info("ControllerTopology", "Disabled-boot controller topology stabilization started.");
+        var readiness = await _topologyWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("ControllerAdmission", "Disabled-boot controller topology stabilization completed.", ("Topology", readiness), ("ElapsedMs", readinessStopwatch.ElapsedMilliseconds));
 
         DisabledBootControllerAdmissionResult admission;
-        if (readiness != ControllerEnvironmentReadiness.Stable)
+        if (readiness != ControllerTopologyReadiness.Stable)
             admission = DisabledBootControllerAdmissionResult.Blocked("ControllerTopologyNotStable:" + readiness);
         else
             admission = _disabledBootAdmission?.Evaluate()
                 ?? DisabledBootControllerAdmissionResult.Blocked("DisabledBootAdmissionUnavailable");
 
-        return new StartupResult(true, ControllerEnvironmentMode.StockCenterM, readiness,
+        return new StartupResult(true,
             RecoverySafe: false, HardwareSupported: hardwareSupported, HardwareDeviceModel: deviceModel, HardwareStatus: hardware.Status,
-            CenterMStartupState: FrontendCenterMStartupState.Disabled, LegacyRoutingAllowed: false, DisabledBootAdmission: admission);
+            CenterMStartupState: FrontendCenterMStartupState.Disabled, DisabledBootAdmission: admission);
     }
 
     /// <summary>
@@ -290,21 +284,18 @@ internal sealed class StartupCoordinator
 /// supported MSI Claw (<see cref="HardwareCompatibilityStatus.Supported"/>). Defaults to false so a
 /// construction path that does not reach the hardware gate can never report support it never
 /// established. Consumed by the OEM1 mapping availability gate; never recomputed downstream.</param>
-/// <param name="CenterMStartupState">PR4: the actual Center M startup-root classification captured
-/// once at startup (not persisted). <see cref="FrontendCenterMStartupState.Unavailable"/> on paths
-/// that never reached the authority branch.</param>
-/// <param name="LegacyRoutingAllowed">PR4: false once Center M is exactly Disabled/Partial/Unavailable
-/// -- the old Steam-session physical routing owner must not be selected in those authority states.</param>
+/// <param name="CenterMStartupState">The sole startup controller-authority fact: the actual Center M
+/// startup-root classification captured once at startup (not persisted). Enabled = MSI/stock
+/// authority (stock PID1901 baseline applicable, including on resume); Disabled = Addon authority;
+/// Partial/Unavailable = no owner selected. <see cref="FrontendCenterMStartupState.Unavailable"/> on
+/// paths that never reached the authority branch.</param>
 /// <param name="DisabledBootAdmission">PR4: the read-only Disabled-boot admission result PR5 will
 /// consume. Null unless Center M roots were exactly Disabled.</param>
 internal sealed record StartupResult(
     bool ShouldStartRuntime,
-    ControllerEnvironmentMode EnvironmentMode,
-    ControllerEnvironmentReadiness EnvironmentReadiness,
     bool RecoverySafe = false,
     bool HardwareSupported = false,
     HandheldDeviceModelId? HardwareDeviceModel = null,
     HardwareCompatibilityStatus? HardwareStatus = null,
     Contracts.Frontend.FrontendCenterMStartupState CenterMStartupState = Contracts.Frontend.FrontendCenterMStartupState.Unavailable,
-    bool LegacyRoutingAllowed = true,
     DisabledBootControllerAdmissionResult? DisabledBootAdmission = null);

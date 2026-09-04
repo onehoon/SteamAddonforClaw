@@ -17,10 +17,10 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.True(result.RecoverySafe);
-        Assert.Equal(["UpdateGate", "EnvironmentWaiter", "Baseline", "Discard"], events);
+        Assert.Equal(["UpdateGate", "TopologyWaiter", "Baseline", "Discard"], events);
         Assert.Equal(0, store.DeleteCallCount);
     }
 
@@ -30,7 +30,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: true, existsAfterDelete: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.True(result.RecoverySafe);
         Assert.Equal(1, store.DeleteCallCount);
@@ -46,7 +46,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: true, readTextThrows: true);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -61,7 +61,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: true, malformedJson: true);
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -82,7 +82,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: true, rawJson: unsupportedSchemaJson);
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -101,7 +101,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -120,7 +120,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -140,7 +140,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
         var cleaner = new FakeStartupHidHideRecoveryCleaner(succeeds: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -158,7 +158,7 @@ public sealed class StartupCoordinatorTests
             new(ExecutableWhitelistAdditions: ["C:\\addon.exe"]));
         var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -183,7 +183,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -206,7 +206,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -222,7 +222,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: true, deleteThrows: true);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -237,7 +237,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: true, existsAfterDelete: true);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -251,11 +251,11 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events, false));
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events, false));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.False(result.RecoverySafe);
-        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
-        Assert.Equal(["UpdateGate", "EnvironmentWaiter", "Baseline"], events);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
+        Assert.Equal(["UpdateGate", "TopologyWaiter", "Baseline"], events);
         Assert.Equal(0, store.DeleteCallCount);
     }
 
@@ -267,7 +267,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: true);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events, false));
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events, false));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -282,7 +282,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: true);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
-            new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+            new ThrowingTopologyWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -299,12 +299,12 @@ public sealed class StartupCoordinatorTests
         using var cancellation = new CancellationTokenSource();
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new ThrowingBaseline(events, new OperationCanceledException(cancellation.Token)));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.RunAsync(cancellation.Token));
 
-        Assert.Equal(["UpdateGate", "EnvironmentWaiter", "Baseline"], events);
+        Assert.Equal(["UpdateGate", "TopologyWaiter", "Baseline"], events);
         Assert.Equal(0, store.DeleteCallCount);
     }
 
@@ -315,14 +315,14 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(
             new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store);
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.True(result.ShouldStartRuntime);
-        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.False(result.RecoverySafe);
-        Assert.Equal(["UpdateGate", "EnvironmentWaiter"], events);
+        Assert.Equal(["UpdateGate", "TopologyWaiter"], events);
         Assert.Equal(0, store.DeleteCallCount);
     }
 
@@ -333,12 +333,11 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(
             new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store);
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.False(result.ShouldStartRuntime);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
         Assert.Equal(["UpdateGate"], events);
         Assert.Equal(0, store.DeleteCallCount);
     }
@@ -418,7 +417,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: false);
         // Indeterminate is retried by the hardware probe stabilization; this fake never
         // resolves, so use a non-waiting fake delay and a short timeout to avoid a real 5s wait.
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentWaiter(),
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), new FixedHardwareEvaluator(status), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
             hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
 
@@ -435,7 +434,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: true);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FixedEnvironmentWaiter(events, ControllerEnvironmentReadiness.Indeterminate), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FixedTopologyWaiter(events, ControllerTopologyReadiness.Indeterminate), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -452,13 +451,12 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
-        Assert.Equal(ControllerEnvironmentReadiness.Stable, result.EnvironmentReadiness);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.Contains("Baseline", events);
         Assert.True(result.RecoverySafe);
     }
@@ -481,23 +479,23 @@ public sealed class StartupCoordinatorTests
         }
     }
 
-    private sealed class FakeEnvironmentWaiter(List<string> events) : IControllerEnvironmentWaiter
+    private sealed class FakeTopologyWaiter(List<string> events) : IControllerTopologyWaiter
     {
-        public List<ControllerEnvironmentMode> Modes { get; } = [];
+        public int Calls { get; private set; }
 
-        public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken)
+        public Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
         {
-            events.Add("EnvironmentWaiter");
-            Modes.Add(mode);
-            return Task.FromResult(ControllerEnvironmentReadiness.Stable);
+            events.Add("TopologyWaiter");
+            Calls++;
+            return Task.FromResult(ControllerTopologyReadiness.Stable);
         }
     }
 
-    private sealed class FixedEnvironmentWaiter(List<string> events, ControllerEnvironmentReadiness readiness) : IControllerEnvironmentWaiter
+    private sealed class FixedTopologyWaiter(List<string> events, ControllerTopologyReadiness readiness) : IControllerTopologyWaiter
     {
-        public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken)
+        public Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
         {
-            events.Add("EnvironmentWaiter");
+            events.Add("TopologyWaiter");
             return Task.FromResult(readiness);
         }
     }
@@ -512,7 +510,7 @@ public sealed class StartupCoordinatorTests
             new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test")
         ]);
         var delay = new RecordingHardwareProbeDelay();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeEnvironmentWaiter(events),
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeTopologyWaiter(events),
             new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -532,7 +530,7 @@ public sealed class StartupCoordinatorTests
             new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test")
         ]);
         var delay = new RecordingHardwareProbeDelay();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeEnvironmentWaiter(events),
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeTopologyWaiter(events),
             new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -549,14 +547,14 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Unsupported, null, null, "MsiClawModelUnsupported")]);
         var delay = new RecordingHardwareProbeDelay();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentWaiter(),
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.Equal(1, evaluator.CallCount);
         Assert.Empty(delay.Delays);
-        Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
+        Assert.Equal(HardwareCompatibilityStatus.Unsupported, result.HardwareStatus);
     }
 
     [Fact]
@@ -565,7 +563,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var delay = new RecordingHardwareProbeDelay();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeEnvironmentWaiter(events),
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeTopologyWaiter(events),
             new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -580,14 +578,13 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Indeterminate, null, null, "test")], repeatLast: true);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentWaiter(),
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
             hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.True(evaluator.CallCount > 1);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
         Assert.False(result.RecoverySafe);
     }
 
@@ -598,7 +595,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: false);
         using var cancellation = new CancellationTokenSource();
         var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Indeterminate, null, null, "test")], repeatLast: true);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentWaiter(),
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
             hardwareProbeDelay: (_, token) => { cancellation.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; });
 
@@ -617,7 +614,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         // A stale journal is present: the Disabled path must not read, clean, or delete it.
         var store = new FakeRecoveryJournalStore(events, exists: true);
-        var waiter = new FakeEnvironmentWaiter(events);
+        var waiter = new FakeTopologyWaiter(events);
         var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
             waiter, new FakeProbeFactory(), new FakeHardwareEvaluator(),
@@ -629,12 +626,12 @@ public sealed class StartupCoordinatorTests
         Assert.True(result.ShouldStartRuntime);
         Assert.True(result.DisabledBootAdmission!.IsReady);
         Assert.Equal(FrontendCenterMStartupState.Disabled, result.CenterMStartupState);
-        Assert.False(result.LegacyRoutingAllowed);
-        Assert.Equal(["UpdateGate", "EnvironmentWaiter", "Admission"], events);
+        Assert.NotEqual(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
+        Assert.Equal(["UpdateGate", "TopologyWaiter", "Admission"], events);
         Assert.DoesNotContain("Baseline", events);
         Assert.DoesNotContain("Discard", events);
         Assert.Equal(0, store.DeleteCallCount);
-        Assert.Equal([ControllerEnvironmentMode.StockCenterM], waiter.Modes);
+        Assert.Equal(1, waiter.Calls);
     }
 
     [Fact]
@@ -644,7 +641,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FixedEnvironmentWaiter(events, ControllerEnvironmentReadiness.Indeterminate),
+            new FixedTopologyWaiter(events, ControllerTopologyReadiness.Indeterminate),
             new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
             disabledBootAdmission: admission, captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
@@ -654,7 +651,7 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(DisabledBootAdmissionOutcome.Blocked, result.DisabledBootAdmission!.Outcome);
         Assert.Equal(0, admission.EvaluateCount);
         Assert.True(result.ShouldStartRuntime); // mandatory Runtime stays alive
-        Assert.False(result.LegacyRoutingAllowed);
+        Assert.NotEqual(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.DoesNotContain("Baseline", events);
     }
 
@@ -664,7 +661,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
             disabledBootAdmission: new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Blocked),
             captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
@@ -686,7 +683,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
             disabledBootAdmission: admission, captureCenterMStartup: () => Roots(Enum.Parse<FrontendCenterMStartupState>(state)));
 
@@ -695,7 +692,7 @@ public sealed class StartupCoordinatorTests
         Assert.True(result.ShouldStartRuntime);
         Assert.Null(result.DisabledBootAdmission);
         Assert.Equal(Enum.Parse<FrontendCenterMStartupState>(state), result.CenterMStartupState);
-        Assert.False(result.LegacyRoutingAllowed);
+        Assert.NotEqual(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.Equal(0, admission.EvaluateCount);
         Assert.DoesNotContain("Baseline", events);
     }
@@ -707,7 +704,7 @@ public sealed class StartupCoordinatorTests
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
             disabledBootAdmission: admission, captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Enabled));
 
@@ -716,7 +713,7 @@ public sealed class StartupCoordinatorTests
         Assert.Contains("Baseline", events);
         Assert.Equal(0, admission.EvaluateCount);
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
-        Assert.True(result.LegacyRoutingAllowed);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.True(result.RecoverySafe);
     }
 
@@ -726,13 +723,13 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.Contains("Baseline", events);
-        Assert.True(result.LegacyRoutingAllowed);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
     }
 
     [Fact]
@@ -821,7 +818,7 @@ public sealed class StartupCoordinatorTests
     {
         public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(status, null, null, "test");
     }
-    private sealed class ThrowingEnvironmentWaiter : IControllerEnvironmentWaiter { public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode _, CancellationToken __) => throw new Xunit.Sdk.XunitException("Environment wait must not run after recovery failure."); }
+    private sealed class ThrowingTopologyWaiter : IControllerTopologyWaiter { public Task<ControllerTopologyReadiness> WaitUntilStableAsync(CancellationToken _) => throw new Xunit.Sdk.XunitException("Topology wait must not run after recovery failure."); }
     private sealed class ThrowingProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => throw new Xunit.Sdk.XunitException("Hardware probe must not run after recovery failure."); }
     private sealed class ThrowingHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => throw new Xunit.Sdk.XunitException("Hardware evaluator must not run after recovery failure."); }
     private sealed class UnsafeInspector : IStartupVirtualOutputRecoveryInspector

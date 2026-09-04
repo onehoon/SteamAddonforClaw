@@ -255,7 +255,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         var startupComposition = _startupComposition ?? throw new InvalidOperationException("Startup composition is unavailable.");
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
-        AppLog.Info($"Starting runtime. Environment={startupResult.EnvironmentMode}; Readiness={startupResult.EnvironmentReadiness}.");
+        AppLog.Info($"Starting runtime. CenterMStartupState={startupResult.CenterMStartupState}; HardwareStatus={startupResult.HardwareStatus}; HardwareDeviceModel={startupResult.HardwareDeviceModel}.");
 
         // PR4: reuse the ONE Center M startup control constructed by the startup composition -- the
         // same instance the authority branch read -- for the mandatory policy, PR3 transition, and
@@ -268,10 +268,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 startupComposition.RuntimeRecoveryManager,
                 startupComposition.StockCenterMBaseline,
                 startupResult.RecoverySafe,
-                // Full1902 A2 section 11: Center M Enabled (stock authority) -- gates only the stock
-                // PID1901 resume baseline. `LegacyRoutingAllowed` is `true` iff roots are exactly
-                // Enabled/Automatic; the legacy routing owner it once selected is no longer composed.
-                stockCenterMAuthority: startupResult.LegacyRoutingAllowed,
+                // Full1902 A2 section 11: Center M Enabled (stock authority) gates ONLY the stock
+                // PID1901 resume baseline. Derived directly from the sole startup authority fact --
+                // Disabled / Partial / Unavailable all resolve to false.
+                stockCenterMAuthority: startupResult.CenterMStartupState == Contracts.Frontend.FrontendCenterMStartupState.Enabled,
                 // PR7: forward the raw BPM bool to QAM unchanged, then request a Full-1902 runtime
                 // presentation reconcile (BPM is half of the X360 <-> SteamDeck policy).
                 bigPictureStateChanged: OnBigPictureStateChanged,
@@ -289,8 +289,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
         _runtimeHost.PowerResumeObserved += OnPowerResumeObserved;
         _qamHostController.OnActualRunningAppIdChanged(_runtimeHost.ActualRunningAppId);
-        if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
-            && startupResult.HardwareDeviceModel is { } tdpModel
+        // TDP / game-profile support is a supported-hardware/model capability, not a controller
+        // authority state -- it applies in both Center M Enabled and Disabled boots.
+        if (startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
         {
             _gameProfileMutations.SetModelId(tdpModel);

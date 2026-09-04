@@ -64,7 +64,7 @@ internal static class AddonStartupCompositionFactory
 
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(updateRestartArguments),
-            new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
+            new ControllerTopologyWaiter(deviceEnumerator, classifier),
             recoveryJournalStore: recoveryJournalStore,
             stockCenterMBaseline: stockCenterMBaseline,
             hidHideRecoveryCleaner: new StartupHidHideRecoveryCleaner(new HidHideDriverClient()),
