@@ -220,11 +220,7 @@ public sealed partial class OverlayWindow : Window
         if (id != OverlayTabId.Device)
             return CreatePlaceholderPage(id);
 
-        var stack = new StackPanel
-        {
-            Spacing = 4,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
+        var stack = new StackPanel { Spacing = 4 };
 
         // OQ5-UI-05 temporary fixture: not product features, no persistence, no Runtime transport.
         // The enabled preview's requestChange is a local echo standing in for a future Runtime
@@ -299,22 +295,14 @@ public sealed partial class OverlayWindow : Window
     // OverlayTabId. ApplyTabOrder repositions them via Grid.SetRow -- instances are never recreated.
     private FrameworkElement BuildTabOrderEditorPage(List<OverlayRow> rows)
     {
-        var section = new StackPanel
-        {
-            Spacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
+        var section = new StackPanel { Spacing = 8 };
 
         var heading = new TextBlock { Text = "Tab Order" };
         if (Application.Current.Resources.TryGetValue("BodyStrongTextBlockStyle", out var style) && style is Style headingStyle)
             heading.Style = headingStyle;
         section.Children.Add(heading);
 
-        var grid = new Grid
-        {
-            RowSpacing = 4,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
+        var grid = new Grid { RowSpacing = 4 };
         var order = _tabState.Order;
         for (var i = 0; i < order.Count; i++)
         {
@@ -351,7 +339,6 @@ public sealed partial class OverlayWindow : Window
         {
             ColumnSpacing = 8,
             RowSpacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
             ColumnDefinitions =
             {
                 new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
@@ -439,7 +426,6 @@ public sealed partial class OverlayWindow : Window
             Text = LabelFor(id),
             Opacity = 0.6,
             TextWrapping = TextWrapping.Wrap,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
             page.Style = bodyStyle;

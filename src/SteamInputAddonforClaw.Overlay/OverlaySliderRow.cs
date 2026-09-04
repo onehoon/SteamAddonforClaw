@@ -131,7 +131,6 @@ internal sealed class OverlaySliderRow
         Container = new Border
         {
             Child = stack,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(12, 6, 12, 6),
             CornerRadius = new CornerRadius(4),
             BorderThickness = new Thickness(2),

@@ -63,7 +63,6 @@ internal sealed class OverlayTabOrderRow
         Container = new Border
         {
             Child = grid,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(12, 6, 12, 6),
             CornerRadius = new CornerRadius(4),
             BorderThickness = new Thickness(2),

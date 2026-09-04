@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid x:Name="AnimationViewport">
         <Grid x:Name="OpaquePanel" Background="#FFF3F3F3" Padding="24,24,24,16">
-            <Grid x:Name="AnimatedContent" HorizontalAlignment="Stretch" RowSpacing="12">
+            <Grid x:Name="AnimatedContent" RowSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -26,7 +26,10 @@
                     VerticalScrollBarVisibility="Hidden"
                     HorizontalScrollBarVisibility="Disabled"
                     HorizontalContentAlignment="Stretch">
-                    <Grid x:Name="TabBody" HorizontalAlignment="Stretch" />
+                    <Grid
+                        x:Name="TabBody"
+                        HorizontalAlignment="Stretch"
+                        Width="{Binding ElementName=BodyScroll, Path=ViewportWidth}" />
                 </ScrollViewer>
             </Grid>
         </Grid>
