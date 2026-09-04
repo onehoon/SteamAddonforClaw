@@ -60,26 +60,12 @@ public sealed class MandatoryLaunchAtStartupFrontendTests : IDisposable
         Assert.True(restored!.LaunchAtWindowsStartupRequired);
     }
 
-    [Fact]
-    public void Settings_page_locks_the_toggle_only_when_required()
-    {
-        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml.cs"));
-        Assert.Contains("LaunchAtWindowsStartupToggleSwitch.IsEnabled = !settings.LaunchAtWindowsStartupRequired;", source, StringComparison.Ordinal);
-    }
-
     private InProcessAddonFrontendControl CreateControl(Func<bool> mandatory)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _dir;
         var store = new SettingsStore(Path.Combine(_dir, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager(), mandatory);
         return new InProcessAddonFrontendControl(coordinator, new ThrowingStatusProvider(), null, new DeveloperTestModeState(), "");
-    }
-
-    private static string RepositoryRoot()
-    {
-        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)
-            if (File.Exists(Path.Combine(d.FullName, "SteamInputAddonforClaw.slnx"))) return d.FullName;
-        throw new DirectoryNotFoundException("Repository root was not found.");
     }
 
     public void Dispose()

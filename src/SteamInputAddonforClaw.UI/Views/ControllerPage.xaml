@@ -7,21 +7,8 @@
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
-                <TextBlock Opacity="0.7" Text="Configure controller settings." TextWrapping="Wrap" />
+                <TextBlock Opacity="0.7" Text="Configure controller buttons and controller-specific settings." TextWrapping="Wrap" />
             </StackPanel>
-
-            <InfoBar x:Name="CenterMStartupInfoBar" IsClosable="False" IsOpen="False" Severity="Informational" />
-            <ctcontrols:SettingsCard x:Name="CenterMStartupCard" Header="MSI Center M"
-                Description="Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE7FC;" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <TextBlock x:Name="CenterMStartupStatusText" VerticalAlignment="Center" Text="Status: —" />
-                    <Button x:Name="CenterMStartupEnableButton" Content="Enable" Click="CenterMStartupEnableButton_Click" />
-                    <Button x:Name="CenterMStartupDisableButton" Content="Disable" Click="CenterMStartupDisableButton_Click" />
-                </StackPanel>
-            </ctcontrols:SettingsCard>
 
             <TextBlock x:Name="CenterMUnavailableText" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
             <views:CenterMButtonPage x:Name="CenterMInlineContent" />

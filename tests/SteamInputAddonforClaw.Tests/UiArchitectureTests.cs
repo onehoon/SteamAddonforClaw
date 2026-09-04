@@ -127,67 +127,128 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Controller_page_owns_the_msi_center_m_startup_card_at_the_top_with_explicit_buttons()
+    public void Device_page_owns_the_msi_center_m_startup_card_below_the_identity_summary_with_explicit_buttons()
     {
         var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
-        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
-        var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
+        var controllerPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
 
-        // The card lives on the Controller page and is no longer on the Device page.
-        Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal) >= 0);
-        Assert.DoesNotContain("CenterMStartupCard", devicePage, StringComparison.Ordinal);
+        // App UI PR-A: the card moved from Controller to Device and is no longer on Controller.
+        Assert.Contains("x:Name=\"CenterMStartupCard\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CenterMStartupCard", controllerPage, StringComparison.Ordinal);
+
+        // Ordering: device identity/support summary above Center M, Center M above TDP Control.
+        Assert.True(xaml.IndexOf("x:Name=\"DeviceSummaryCard\"", StringComparison.Ordinal) >= 0);
+        Assert.True(xaml.IndexOf("x:Name=\"DeviceSummaryCard\"", StringComparison.Ordinal)
+            < xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("x:Name=\"CenterMStartupCard\"", StringComparison.Ordinal)
+            < xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal));
 
         // Full1902 removed the user-configurable Steam Input Routing switch entirely.
         Assert.DoesNotContain("SteamInputRouting", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SteamInputRouting", codeBehind, StringComparison.Ordinal);
 
-        // Re-read on every entry to the Controller page (the reboot-bound transition raises no StateInvalidated).
-        Assert.Contains("internal void Activate() => _ = RefreshCenterMStartupAsync();", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("if (page == MainNavigationPage.Controller) ControllerContent.Activate();", mainWindow, StringComparison.Ordinal);
+        // Re-read on every entry to the Device page (the reboot-bound transition raises no StateInvalidated).
+        Assert.Contains("_ = RefreshCenterMStartupAsync();", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("if (page == MainNavigationPage.Device) DeviceContent.Activate();", mainWindow, StringComparison.Ordinal);
 
-        // Explicit Enable/Disable buttons, not an inverted toggle (work order PR1 section 4).
+        // Explicit Enable/Disable buttons, not an inverted toggle.
         Assert.Contains("x:Name=\"CenterMStartupEnableButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"CenterMStartupDisableButton\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Disable MSI Center M", xaml, StringComparison.Ordinal);
 
-        // PR3: the buttons confirm a reboot-bound transition and restart immediately -- the labels
-        // say so, and there is no "Restart Later" / deferred-restart mode.
+        // The buttons confirm a reboot-bound transition and restart immediately -- the labels say so,
+        // and there is no "Restart Later" / deferred-restart mode.
         Assert.Contains("and Restart", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("Restart Later", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("Restart now", codeBehind, StringComparison.Ordinal);
 
-        // PR3: no sticky UI restart flag -- the info bar is a pure function of the latest snapshot
-        // state (the successful transition ends the session by restarting Windows).
+        // No sticky UI restart flag -- the info bar is a pure function of the latest snapshot state.
         Assert.DoesNotContain("_centerMRestartRequired", codeBehind, StringComparison.Ordinal);
         Assert.Contains("CenterMStartupPresentation.ResolveInfoBar(snapshot.State)", codeBehind, StringComparison.Ordinal);
 
-        // PR3: the UI never starts the OS restart itself -- that is the Runtime transition owner's job.
+        // The UI never starts the OS restart itself -- that is the Runtime transition owner's job.
         Assert.DoesNotContain("shutdown.exe", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("shutdown", xaml, StringComparison.Ordinal);
 
-        // PR3: a failed/cancelled Disable that left preparation behind (roots still Enabled) must
-        // re-expose "Enable and Restart" -- the cleanup path the backend message advertises -- even
-        // though a plain Enabled snapshot would otherwise disable the redundant Enable button.
+        // A failed/cancelled Disable that left preparation behind (roots still Enabled) must re-expose
+        // "Enable and Restart" -- the cleanup path the backend message advertises.
         Assert.Contains("!centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled", codeBehind, StringComparison.Ordinal);
         Assert.Contains("CenterMStartupEnableButton.IsEnabled = true;", codeBehind, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Settings_page_re_reads_the_authoritative_snapshot_on_every_entry()
+    public void Main_navigation_drops_status_and_defaults_to_device()
     {
         var root = FindRepositoryRoot();
-        var settings = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml.cs"));
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var navigationState = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainNavigationState.cs"));
+
+        // No Status navigation destination and no Status page instance survive in the shell.
+        Assert.DoesNotContain("Tag=\"Status\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("StatusContent", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("StatusContent", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("MainNavigationPage.Status", navigationState, StringComparison.Ordinal);
+
+        // Top-level menu order is Device < Controller < Profile < HowToUse.
+        Assert.True(xaml.IndexOf("Tag=\"Device\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Controller\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Tag=\"Controller\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
+
+        // Device is the default page in both the shell and the navigation state.
+        Assert.Contains("MainNavigationView.SelectedItem = DeviceNavigationItem;", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("CurrentPage { get; private set; } = MainNavigationPage.Device;", navigationState, StringComparison.Ordinal);
+        Assert.Contains("_ => MainNavigationPage.Device", navigationState, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Removing_status_ui_keeps_the_window_level_status_capture_and_prerequisite_setup_path()
+    {
+        var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
-        // A PR3 reboot-bound authority transition can persist a new launch-at-startup value even when
-        // it returns Cancelled/Failed, and it raises no StateInvalidated -- so the Settings page must
-        // re-read bootstrap on activation instead of trusting its once-from-bootstrap render.
-        Assert.Contains("internal async Task ActivateAsync()", settings, StringComparison.Ordinal);
-        Assert.Contains("await _frontend.GetBootstrapAsync()", settings, StringComparison.Ordinal);
-        Assert.Contains("RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage)", settings, StringComparison.Ordinal);
-        Assert.Contains("if (page == MainNavigationPage.Settings) _ = SettingsContent.ActivateAsync();", mainWindow, StringComparison.Ordinal);
+        // The Status page is gone but the frontend status snapshot pipeline that drives the
+        // prerequisite setup prompt must remain intact.
+        Assert.Contains("_frontend.CaptureStatusAsync()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("snapshot.CanInstallRequiredComponents", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("PromptForPrerequisiteSetupAsync", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_frontend.StateInvalidated += OnFrontendStateInvalidated", mainWindow, StringComparison.Ordinal);
+
+        // The snapshot is now routed to the owner pages instead of a Status page.
+        Assert.Contains("DeviceContent.RenderDeviceSummary(snapshot)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("SettingsContent.RenderRequiredComponents(snapshot)", mainWindow, StringComparison.Ordinal);
+
+        // The removed "Check Status" wording no longer points users at a page that does not exist.
+        Assert.DoesNotContain("Check Status", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Settings_page_shows_read_only_required_components_and_no_launch_at_startup_toggle()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml.cs"));
+
+        // Required Components (read-only) replaces the Status page's Routing Components group.
+        Assert.Contains("x:Name=\"RequiredComponentsExpander\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Required Components\"", xaml, StringComparison.Ordinal);
+        foreach (var component in new[] { "\"HidHide\"", "\"usbip-win2\"", "\"VIIPER\"" })
+            Assert.Contains(component, codeBehind, StringComparison.Ordinal);
+        Assert.Contains("snapshot.Prerequisites.HidHideStatus", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("snapshot.Prerequisites.UsbIpStatus", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("snapshot.Prerequisites.ViiperStatus", codeBehind, StringComparison.Ordinal);
+
+        // The Developer Menu entry stays.
+        Assert.Contains("x:Name=\"DeveloperMenuCard\"", xaml, StringComparison.Ordinal);
+
+        // The launch-at-startup preference UI and its page-local state are gone.
+        Assert.DoesNotContain("LaunchAtStartupCard", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LaunchAtWindowsStartupToggleSwitch", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LaunchAtWindowsStartup", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("ActivateAsync", codeBehind, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -19,6 +19,32 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void Default_page_is_device()
+    {
+        Assert.Equal(MainNavigationPage.Device, new MainNavigationState().CurrentPage);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Status")]
+    [InlineData("Unknown")]
+    public void Unknown_top_level_tag_falls_back_to_device(string? tag)
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.Device, navigation.SelectNavigationItem(false, tag));
+    }
+
+    [Fact]
+    public void HowToUse_navigation_tag_opens_how_to_use_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.HowToUse, navigation.SelectNavigationItem(false, "HowToUse"));
+    }
+
+    [Fact]
     public void Controller_navigation_item_opens_controller_page()
     {
         var navigation = new MainNavigationState();

@@ -7,16 +7,11 @@
         <StackPanel Spacing="16">
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="Settings" />
 
-            <ctcontrols:SettingsCard x:Name="LaunchAtStartupCard" Header="Launch at Windows startup">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Play" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch
-                    x:Name="LaunchAtWindowsStartupToggleSwitch"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="LaunchAtWindowsStartupToggleSwitch_Toggled" />
-            </ctcontrols:SettingsCard>
+            <ctcontrols:SettingsExpander x:Name="RequiredComponentsExpander" Header="Required Components">
+                <ctcontrols:SettingsExpander.HeaderIcon>
+                    <SymbolIcon Symbol="Repair" />
+                </ctcontrols:SettingsExpander.HeaderIcon>
+            </ctcontrols:SettingsExpander>
 
             <ctcontrols:SettingsCard
                 x:Name="DeveloperMenuCard"

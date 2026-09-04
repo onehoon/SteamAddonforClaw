@@ -1,15 +1,14 @@
+using CommunityToolkit.WinUI.Controls;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class SettingsPage : UserControl
 {
-    private IAddonFrontendControl? _frontend;
-    private bool _isLoadingStartupSettings;
-    private bool _lastKnownLaunchAtWindowsStartup;
-
     public event EventHandler? DeveloperMenuRequested;
 
     public SettingsPage()
@@ -17,88 +16,45 @@ public sealed partial class SettingsPage : UserControl
         InitializeComponent();
     }
 
-    internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap)
+    internal void Initialize(FrontendBootstrapSnapshot bootstrap)
     {
-        _frontend = frontend;
         DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
-        RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage);
     }
 
-    // PR2.5: while MSI Center M is Disabled the Runtime forces launch-at-startup ON and rejects an
-    // OFF request; lock the control and explain why rather than let a user toggle something the
-    // backend immediately reverts.
-    private void RenderLaunchAtStartup(FrontendSettingsSnapshot settings, string registrationMessage)
+    /// <summary>Renders the read-only Required Components list (moved here from the Status page) from
+    /// the same authoritative frontend status snapshot MainWindow already captures. Diagnostic only --
+    /// no repair/install controls: Runtime lifecycle/reconciliation stays the authority for setup.</summary>
+    internal void RenderRequiredComponents(FrontendStatusSnapshot snapshot)
     {
-        _isLoadingStartupSettings = true;
-        LaunchAtWindowsStartupToggleSwitch.IsOn = settings.LaunchAtWindowsStartup;
-        _lastKnownLaunchAtWindowsStartup = settings.LaunchAtWindowsStartup;
-        _isLoadingStartupSettings = false;
-        LaunchAtWindowsStartupToggleSwitch.IsEnabled = !settings.LaunchAtWindowsStartupRequired;
-        LaunchAtStartupCard.Description = settings.LaunchAtWindowsStartupRequired
-            ? "Required while MSI Center M is disabled."
-            : registrationMessage;
-    }
+        var components = new List<StatusCardViewModel>
+        {
+            new("HidHide", snapshot.Prerequisites.HidHideStatus.ToString(), snapshot.Prerequisites.HidHideReason),
+            new("usbip-win2", snapshot.Prerequisites.UsbIpStatus.ToString(), snapshot.Prerequisites.UsbIpReason),
+            new("VIIPER", snapshot.Prerequisites.ViiperStatus.ToString(), snapshot.Prerequisites.ViiperReason),
+        };
 
-    /// <summary>Re-reads the authoritative settings snapshot on every entry to the Settings page.
-    /// A PR3 reboot-bound authority transition can persist a new launch-at-startup value (and its
-    /// mandatory-lock state) without a StateInvalidated broadcast, so the once-from-bootstrap render
-    /// would otherwise stay stale until the UI process restarts.</summary>
-    internal async Task ActivateAsync()
-    {
-        if (_frontend is null)
+        var readyCount = components.Count(item => string.Equals(item.Status, "Ready", StringComparison.OrdinalIgnoreCase));
+        RequiredComponentsExpander.Description = new TextBlock
         {
-            return;
-        }
+            Text = $"{readyCount} of {components.Count} ready",
+            FontSize = 14,
+            FontWeight = FontWeights.SemiBold,
+        };
 
-        try
+        RequiredComponentsExpander.Items.Clear();
+        foreach (var item in components)
         {
-            var bootstrap = await _frontend.GetBootstrapAsync();
-            DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
-            RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Settings", "Settings refresh on activation failed.", exception);
+            RequiredComponentsExpander.Items.Add(new SettingsCard
+            {
+                Header = item.Name,
+                Description = item.Secondary,
+                Content = new TextBlock { Text = item.Status, Opacity = 0.7 },
+            });
         }
     }
 
     internal static Visibility GetDeveloperMenuCardVisibility(bool developerMenuEnabled) =>
         developerMenuEnabled ? Visibility.Visible : Visibility.Collapsed;
-
-    private async void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_isLoadingStartupSettings || _frontend is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var result = await _frontend.SetLaunchAtWindowsStartupAsync(LaunchAtWindowsStartupToggleSwitch.IsOn);
-            RenderLaunchAtStartup(result.Settings, result.RegistrationMessage);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Settings", "Launch-at-startup update failed.", exception);
-            try
-            {
-                var bootstrap = await _frontend.GetBootstrapAsync();
-                RenderLaunchAtStartup(bootstrap.Settings, bootstrap.StartupRegistrationMessage);
-            }
-            catch (Exception refreshException)
-            {
-                AppLog.Warn("Settings", "Launch-at-startup state refresh failed.", refreshException);
-                SetLaunchAtWindowsStartupToggle(_lastKnownLaunchAtWindowsStartup);
-            }
-        }
-    }
-
-    private void SetLaunchAtWindowsStartupToggle(bool value)
-    {
-        _isLoadingStartupSettings = true;
-        LaunchAtWindowsStartupToggleSwitch.IsOn = value;
-        _isLoadingStartupSettings = false;
-    }
 
     private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)
     {

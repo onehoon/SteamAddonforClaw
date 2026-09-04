@@ -17,16 +17,11 @@
         SelectionChanged="MainNavigationView_SelectionChanged">
         <NavigationView.MenuItems>
             <NavigationViewItem
-                x:Name="StatusNavigationItem"
-                Content="Status"
-                Tag="Status">
+                x:Name="DeviceNavigationItem"
+                Content="Device"
+                Tag="Device">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Home" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
-            <NavigationViewItem Content="How to Use" Tag="HowToUse">
-                <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Help" />
+                    <SymbolIcon Symbol="AllApps" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="Controller" Tag="Controller">
@@ -34,22 +29,20 @@
                     <SymbolIcon Symbol="Repair" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Device" Tag="Device">
-                <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="AllApps" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
             <NavigationViewItem Content="Profile" Tag="Profile">
                 <NavigationViewItem.Icon>
                     <SymbolIcon Symbol="Contact" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="How to Use" Tag="HowToUse">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="Help" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
         </NavigationView.MenuItems>
 
         <Grid>
-            <views:StatusPage x:Name="StatusContent" />
-
-            <views:DevicePage x:Name="DeviceContent" Visibility="Collapsed" />
+            <views:DevicePage x:Name="DeviceContent" />
 
             <views:ProfilePage x:Name="ProfileContent" Visibility="Collapsed" />
 
