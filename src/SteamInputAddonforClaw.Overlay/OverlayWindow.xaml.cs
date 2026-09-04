@@ -36,6 +36,16 @@ public sealed partial class OverlayWindow : Window
     private readonly Brush _rowSelectedBrush;
     private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Colors.Transparent);
 
+    // OQ5 UI Polish A s.4.8: ordinary list rows use a subtle selected-row fill instead of the
+    // former 2-DIP accent border outline. The Shortcut 2x2 tiles are an explicit exception (s.4.8
+    // "Shortcut exception") and keep their existing border-based selection treatment.
+    private readonly Brush _rowSelectedFillBrush;
+    private static readonly Brush RowUnselectedFillBrush = new SolidColorBrush(Colors.Transparent);
+
+    // OQ5 UI Polish A s.4.4: compact accent-filled selected tab / low-chrome inactive tab.
+    private readonly Brush _tabSelectedBackgroundBrush;
+    private readonly Brush _tabSelectedForegroundBrush;
+
     // OQ5-UI-11: the fixed 2x2 Shortcut grid -- one pure selection model + the four tile borders.
     private readonly OverlayShortcutSelection _shortcutSelection = new();
     private readonly Dictionary<OverlayShortcutSlotId, Border> _shortcutTiles = new();
@@ -56,6 +66,15 @@ public sealed partial class OverlayWindow : Window
             Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var accent) && accent is Brush brush
                 ? brush
                 : new SolidColorBrush(Colors.SlateGray);
+        _rowSelectedFillBrush =
+            Application.Current.Resources.TryGetValue("SubtleFillColorSecondaryBrush", out var subtleFill) && subtleFill is Brush subtleBrush
+                ? subtleBrush
+                : new SolidColorBrush(Colors.Gray) { Opacity = 0.25 };
+        _tabSelectedBackgroundBrush = _rowSelectedBrush;
+        _tabSelectedForegroundBrush =
+            Application.Current.Resources.TryGetValue("TextOnAccentFillColorPrimaryBrush", out var onAccent) && onAccent is Brush onAccentBrush
+                ? onAccentBrush
+                : new SolidColorBrush(Colors.White);
         BuildShell();
         Closed += (_, _) => _sliderPreviewCommit?.Dispose();
     }
@@ -166,7 +185,12 @@ public sealed partial class OverlayWindow : Window
                 Content = LabelFor(id),
                 Tag = id,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Padding = new Thickness(4, 6, 4, 6),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                Padding = new Thickness(6, 6, 6, 6),
+                MinWidth = 0,
+                MinHeight = 34,
+                CornerRadius = new CornerRadius(8),
+                FontSize = 13,
             };
             button.Click += OnTabHeaderClick;
             Grid.SetColumn(button, column);
@@ -553,7 +577,22 @@ public sealed partial class OverlayWindow : Window
     {
         var selected = _tabState.SelectedTab;
         foreach (var (id, button) in _tabButtons)
-            button.FontWeight = id == selected ? FontWeights.SemiBold : FontWeights.Normal;
+        {
+            var isSelected = id == selected;
+            button.FontWeight = isSelected ? FontWeights.SemiBold : FontWeights.Normal;
+            if (isSelected)
+            {
+                button.Background = _tabSelectedBackgroundBrush;
+                button.Foreground = _tabSelectedForegroundBrush;
+            }
+            else
+            {
+                // Restore the standard WinUI Button chrome/foreground for the low-chrome inactive
+                // state instead of hardcoding a second product color.
+                button.ClearValue(Control.BackgroundProperty);
+                button.ClearValue(Control.ForegroundProperty);
+            }
+        }
     }
 
     // s.12: deterministic tab-change ordering -- tab visuals, then show the page and reset the
@@ -598,7 +637,7 @@ public sealed partial class OverlayWindow : Window
         if (!_pageRows.TryGetValue(_tabState.SelectedTab, out var rows)) return;
         var selectedIndex = _rowSelection.SelectedIndex;
         for (var i = 0; i < rows.Count; i++)
-            rows[i].Container.BorderBrush = i == selectedIndex ? _rowSelectedBrush : RowUnselectedBrush;
+            rows[i].Container.Background = i == selectedIndex ? _rowSelectedFillBrush : RowUnselectedFillBrush;
     }
 
     private void BringSelectedRowIntoView()
