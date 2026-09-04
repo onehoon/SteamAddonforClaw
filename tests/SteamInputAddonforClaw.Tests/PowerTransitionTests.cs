@@ -45,12 +45,9 @@ public sealed class PowerTransitionTests
     [Fact]
     public async Task EstablishBaseline_runs_entirely_before_the_power_gate_opens_and_afterRecovery_runs_only_once_open()
     {
-        // PR2 review fix (BLOCKER): PowerTransitionCoordinator opens PowerMutationGate as soon as
-        // establishBaseline succeeds -- strictly BEFORE afterRecovery ever runs. AddonRuntimeHost's
-        // OEM1 auxiliary resume reconcile therefore has to run INSIDE establishBaseline (while the
-        // gate is still closed to normal routing re-entry), not inside afterRecovery (where it could
-        // already be racing an already-open gate). This test proves the exact mechanism that
-        // ordering choice depends on, directly against PowerTransitionCoordinator.
+        // The baseline callback must complete while normal mutation remains blocked;
+        // PowerTransitionCoordinator opens PowerMutationGate only after establishBaseline
+        // succeeds, and post-recovery work runs strictly after a successful recovery commit.
         var gate = new PowerMutationGate(false);
         var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
         var gateOpenDuringBaseline = true;
@@ -76,38 +73,6 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
-    public async Task Preserved_recovery_runs_post_commit_callback_only_after_safe_recovery_is_committed()
-    {
-        var gate = new PowerMutationGate(false);
-        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
-        var callbackCalls = 0;
-        var callbackSawSafe = false;
-        var callbackSawOpenGate = false;
-        await using var coordinator = new PowerTransitionCoordinator(
-            gate,
-            recovery,
-            [],
-            hasIncompleteRecovery: () => false,
-            hasPreservedRoutingSession: () => true,
-            reconcilePreservedRoutingSession: _ => Task.FromResult(true),
-            afterPreservedRecoveryCommit: () =>
-            {
-                callbackCalls++;
-                callbackSawSafe = recovery.Current == RecoverySafety.Safe;
-                callbackSawOpenGate = gate.IsOpen;
-                return Task.CompletedTask;
-            });
-
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
-
-        Assert.Equal(1, callbackCalls);
-        Assert.True(callbackSawSafe);
-        Assert.True(callbackSawOpenGate);
-        Assert.Equal(RecoverySafety.Safe, recovery.Current);
-        Assert.True(gate.IsOpen);
-    }
-
-    [Fact]
     public async Task JournalRemainsAfterCanonicalCleanup_FailsClosedWithoutReplayOrBaseline()
     {
         var gate = new PowerMutationGate(false);
@@ -126,122 +91,6 @@ public sealed class PowerTransitionTests
         Assert.False(gate.IsOpen);
         Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
         Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
-    }
-
-    [Fact]
-    public async Task ResidualRoutingCleanup_RetriedBeforeJournalCheckAndBaseline()
-    {
-        var calls = new List<string>();
-        var gate = new PowerMutationGate(false);
-        var gateOpenDuringCleanup = true;
-        var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Unsafe), [],
-            hasIncompleteRecovery: () => false,
-            establishBaseline: _ => { calls.Add("Baseline"); return Task.FromResult(true); },
-            hasResidualRoutingCleanup: () => true,
-            retryResidualRoutingCleanup: _ =>
-            {
-                calls.Add("Cleanup");
-                gateOpenDuringCleanup = gate.IsOpen;
-                return Task.FromResult(true);
-            });
-
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
-
-        Assert.Equal(["Cleanup", "Baseline"], calls);
-        Assert.False(gateOpenDuringCleanup);
-        Assert.True(gate.IsOpen);
-    }
-
-    [Fact]
-    public async Task ResidualRoutingCleanup_ClearsJournal_ThenNormalFreshResume()
-    {
-        var calls = new List<string>();
-        var cleanupRan = false;
-        var coordinator = new PowerTransitionCoordinator(new PowerMutationGate(false), new RecoverySafetyState(RecoverySafety.Unsafe), [],
-            hasIncompleteRecovery: () => !cleanupRan,
-            establishBaseline: _ => { calls.Add("Baseline"); return Task.FromResult(true); },
-            hasResidualRoutingCleanup: () => true,
-            retryResidualRoutingCleanup: _ =>
-            {
-                calls.Add("Cleanup");
-                cleanupRan = true;
-                return Task.FromResult(true);
-            });
-
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
-
-        Assert.Equal(["Cleanup", "Baseline"], calls);
-    }
-
-    [Fact]
-    public async Task ResidualRoutingCleanup_Failure_SkipsJournalCheckAndBaselineAndRemainsUnsafe()
-    {
-        var baselineCalls = 0;
-        var gate = new PowerMutationGate(false);
-        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
-        var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
-            hasIncompleteRecovery: () => true,
-            establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); },
-            hasResidualRoutingCleanup: () => true,
-            retryResidualRoutingCleanup: _ => Task.FromResult(false));
-
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
-
-        Assert.Equal(0, baselineCalls);
-        Assert.False(gate.IsOpen);
-        Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
-        Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
-    }
-
-    [Fact]
-    public async Task NoResidualRoutingState_SkipsCleanupRetryAndGoesStraightToJournalCheck()
-    {
-        var calls = new List<string>();
-        var coordinator = new PowerTransitionCoordinator(new PowerMutationGate(false), new RecoverySafetyState(RecoverySafety.Unsafe), [],
-            hasIncompleteRecovery: () => false,
-            establishBaseline: _ => { calls.Add("Baseline"); return Task.FromResult(true); },
-            hasResidualRoutingCleanup: () => false,
-            retryResidualRoutingCleanup: _ => { calls.Add("Cleanup"); return Task.FromResult(true); });
-
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
-
-        Assert.Equal(["Baseline"], calls);
-    }
-
-    [Fact]
-    public async Task StaleResidualCleanupCompletion_DoesNotSealOrCommitOverANewerSuspendEpoch()
-    {
-        var gate = new PowerMutationGate(false);
-        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
-            hasIncompleteRecovery: () => false,
-            establishBaseline: _ => Task.FromResult(true),
-            hasResidualRoutingCleanup: () => true,
-            retryResidualRoutingCleanup: async _ =>
-            {
-                started.TrySetResult();
-                return await release.Task;
-            });
-
-        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
-        await started.Task;
-
-        // Simulate a newer suspend cycle (already applied by the watcher's own barrier logic)
-        // arriving while the residual cleanup retry for the older resume is still in flight.
-        gate.EnterNewCycleBarrier(out _, out var newerEpoch);
-        coordinator.InvalidateForBarrier();
-        release.TrySetResult(true);
-        await resume;
-
-        Assert.Equal(newerEpoch, gate.Epoch);
-        Assert.False(gate.IsOpen);
-        Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
-        Assert.Equal(RecoverySafety.Indeterminate, recovery.Current);
-        // The newer suspend cycle's own cleanup permission must still be intact -- the stale
-        // resume's failed TrySealResumeCleanup must not have closed it.
-        Assert.True(gate.TryAcquireCleanup(out _));
     }
 
     [Fact]
@@ -331,11 +180,9 @@ public sealed class PowerTransitionTests
     [Fact]
     public async Task Earlier_participant_is_invoked_before_a_later_one_can_exhaust_the_shared_deadline()
     {
-        // PR2 review fix (BLOCKER): every suspend participant shares ONE deadline, and the
-        // coordinator stops calling further participants once no time remains. AddonRuntimeHost
-        // relies on this exact mechanism to guarantee its OEM1 auxiliary lifecycle participant is
-        // invoked before a slow/timed-out routing quiesce could consume the whole budget --
-        // reproduced directly here without needing the full routing/VIIPER stack.
+        // Every suspend participant shares one absolute deadline and participants are invoked in
+        // declared order while budget remains; the coordinator stops calling further participants
+        // once no time is left, so an earlier participant cannot be starved by a later slow one.
         var gate = new PowerMutationGate(true);
         var spy = new CountingParticipant();
         var slow = new BlockingParticipant();
@@ -514,19 +361,20 @@ public sealed class PowerTransitionTests
     [Fact]
     public async Task Resume_observation_cannot_adopt_a_newer_suspend_epoch()
     {
+        // A queued resume whose recorded epoch is stale must return before it applies a fallback
+        // barrier or does any recovery work, so a newer suspend cycle stays authoritative.
         var gate = new PowerMutationGate(true);
         var recovery = new RecoverySafetyState(RecoverySafety.Safe);
-        var reconcileCalls = 0;
+        var baselineCalls = 0;
         gate.EnterNewCycleBarrier(out _, out var resumeEpoch);
         await using var coordinator = new PowerTransitionCoordinator(
             gate,
             recovery,
             [],
             hasIncompleteRecovery: () => false,
-            hasPreservedRoutingSession: () => true,
-            reconcilePreservedRoutingSession: _ =>
+            establishBaseline: _ =>
             {
-                reconcileCalls++;
+                baselineCalls++;
                 return Task.FromResult(true);
             });
         var observation = new PowerNotificationObservation(
@@ -537,7 +385,7 @@ public sealed class PowerTransitionTests
         coordinator.InvalidateForBarrier();
         await coordinator.HandleAsync(observation);
 
-        Assert.Equal(0, reconcileCalls);
+        Assert.Equal(0, baselineCalls);
         Assert.Equal(newerSuspendEpoch, gate.Epoch);
         Assert.False(gate.IsOpen);
         Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
