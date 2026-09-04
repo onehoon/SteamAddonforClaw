@@ -78,38 +78,6 @@ public sealed class DiagnosticLoggingTests : IDisposable
     }
 
     [Fact]
-    public async Task RoutingTrace_IsDebugOnlyAndCorrelatesExecutions()
-    {
-        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
-        await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
-        await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
-
-        AppLog.DrainForTests();
-        var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
-        var executions = System.Text.RegularExpressions.Regex.Matches(log, @"RoutingExecution=(\d+)")
-            .Select(match => match.Groups[1].Value).Distinct().ToArray();
-        Assert.True(executions.Length >= 2);
-        Assert.Contains("[DEBUG] [P", log);
-        Assert.Contains("[RoutingTrace] Routing activation started.", log);
-        Assert.Contains("[RoutingTrace] Routing activation completed.", log);
-    }
-
-    [Fact]
-    public async Task RoutingTrace_ContextFlowsToStageDetailsWithoutDuplicateStageLog()
-    {
-        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
-        var stage = new CorrelatedStage();
-        await new RoutingPipelineExecutor([stage]).ExecuteAsync(RoutingPipelinePlan.AllDisabled with { PhysicalInput = RoutingStageMode.ObserveOnly }, CancellationToken.None);
-
-        AppLog.DrainForTests();
-        var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
-        Assert.Contains("StageDetail", log);
-        Assert.Contains("RoutingExecution=", log);
-        Assert.DoesNotContain("Stage operation", log);
-        Assert.Single(log.Split("StageDetail", StringSplitOptions.None).Skip(1));
-    }
-
-    [Fact]
     public async Task RoutingTrace_ContextFlowsAcrossAsyncPollingContinuation()
     {
         using var scope = RoutingTraceContext.Begin(1234);
@@ -122,33 +90,11 @@ public sealed class DiagnosticLoggingTests : IDisposable
         Assert.Equal(1234, observed);
     }
 
-    [Fact]
-    public async Task RoutingTrace_IsFilteredAtInfoLevel()
-    {
-        AppLog.MinimumLevelOverride = AppLogLevel.Info;
-        await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
-
-        Assert.False(Directory.Exists(_directory) && Directory.GetFiles(_directory).Any(file => LogFileTestHelper.ReadAllText(file).Contains("[RoutingTrace]", StringComparison.Ordinal)));
-    }
-
     public void Dispose()
     {
         AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
-    }
-
-    private sealed class CorrelatedStage : IRoutingPipelineStage
-    {
-        public RoutingStageKind Kind => RoutingStageKind.PhysicalInput;
-        public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)
-        {
-            AppLog.Debug("RoutingTrace", "StageDetail", ("RoutingExecution", RoutingTraceContext.Current));
-            return ValueTask.FromResult(RoutingStageOperationResult.Success());
-        }
-        public ValueTask<RoutingStageOperationResult> PrepareMutationAsync(CancellationToken cancellationToken) => ValueTask.FromResult(RoutingStageOperationResult.Success());
-        public ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken) => ValueTask.FromResult(RoutingStageOperationResult.Success());
-        public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken) => ValueTask.FromResult(RoutingStageOperationResult.Success());
     }
 }

@@ -63,19 +63,15 @@ public sealed partial class VibrationTestPage : UserControl
     internal async Task RefreshAsync()
     {
         if (_frontend is null) return;
-        var bootstrap = await _frontend.GetBootstrapAsync();
-        var status = await _frontend.CaptureStatusAsync();
-        var enabled = bootstrap.Developer.TestModeEnabled && status.Routing.SteamOutputActive;
+        _ = await _frontend.GetBootstrapAsync();
 
-        RumbleButton.IsEnabled = enabled;
-        HapticButton.IsEnabled = enabled;
-        StopButton.IsEnabled = enabled;
+        // Full1902 Cleanup A removed the legacy Steam-session routing runtime that owned the
+        // developer vibration transport. The test is unavailable until a Full1902 rumble path exists.
+        RumbleButton.IsEnabled = false;
+        HapticButton.IsEnabled = false;
+        StopButton.IsEnabled = false;
 
-        StatusText.Text = !bootstrap.Developer.TestModeEnabled
-            ? "Enable Test Mode from Developer Menu."
-            : !status.Routing.SteamOutputActive
-                ? "Steam Deck output is not active."
-                : "Developer Test Mode active. Steam Deck output active.";
+        StatusText.Text = "The developer vibration test is unavailable in this build.";
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);

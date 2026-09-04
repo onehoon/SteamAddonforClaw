@@ -382,7 +382,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             StartEnabled = false,
-            Safety = new UserTerminationDecision(false, UserTerminationBlockReason.NativeModeActive),
+            Safety = new UserTerminationDecision(false, UserTerminationBlockReason.RoutingTransition),
         };
         var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
         Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);

@@ -3,7 +3,6 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using Xunit;
@@ -73,8 +72,7 @@ public sealed class MandatoryLaunchAtStartupFrontendTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _dir;
         var store = new SettingsStore(Path.Combine(_dir, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager(), mandatory);
-        return new InProcessAddonFrontendControl(coordinator, new ThrowingStatusProvider(), null, new DeveloperTestModeState(), "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
+        return new InProcessAddonFrontendControl(coordinator, new ThrowingStatusProvider(), null, new DeveloperTestModeState(), "");
     }
 
     private static string RepositoryRoot()

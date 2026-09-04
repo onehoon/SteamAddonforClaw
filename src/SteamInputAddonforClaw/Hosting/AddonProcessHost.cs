@@ -10,7 +10,6 @@ using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Display;
 using SteamInputAddonforClaw.Recovery;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Startup;
@@ -67,8 +66,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // Not another controller authority. Never persisted, never restored across process restart.
     private bool _overlayCaptureActive;
     private OverlayControllerInputRouter? _overlayInputRouter;
-    private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
-    private readonly GameBarForegroundPresentationDelivery _gameBarDelivery;
     private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
 
     // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
@@ -155,9 +152,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
         _overlayController.OverlayDismissRequested += () => _ = HandleOverlayCloseReasonAsync("OutsideClick", surfaceAlreadyGone: false);
         _overlayController.VisibleSessionLost += () => _ = HandleOverlayCloseReasonAsync("VisibleSessionLost", surfaceAlreadyGone: true);
-        _gameBarForegroundWatcher = new GameBarForegroundWatcher();
-        _gameBarDelivery = new GameBarForegroundPresentationDelivery(
-            foreground => _runtimeHost?.HandleGameBarForegroundChangedAsync(foreground) ?? Task.FromResult(false));
     }
 
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
@@ -270,22 +264,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         var composition = _runtimeCompositionFactory?.Invoke(startupComposition, startupResult)
             ?? AddonRuntimeCompositionFactory.Create(
-                startupComposition.HandheldDeviceAdapter,
                 startupComposition.DeviceRegistry,
                 startupComposition.ControllerEnvironmentAssessmentProvider,
                 startupComposition.RuntimeRecoveryManager,
                 startupComposition.StockCenterMBaseline,
                 startupResult.RecoverySafe,
-                startupResult.HardwareSupported,
                 // Full1902 A2 section 11: Center M Enabled (stock authority) -- gates only the stock
                 // PID1901 resume baseline. `LegacyRoutingAllowed` is `true` iff roots are exactly
                 // Enabled/Automatic; the legacy routing owner it once selected is no longer composed.
                 stockCenterMAuthority: startupResult.LegacyRoutingAllowed,
-                winGSuppressionGuard: _winGSuppressionGuard,
                 // PR7: forward the raw BPM bool to QAM unchanged, then request a Full-1902 runtime
                 // presentation reconcile (BPM is half of the X360 <-> SteamDeck policy).
                 bigPictureStateChanged: OnBigPictureStateChanged,
-                routingReconcileCompleted: null,
                 // PR2.5: while Center M startup config is exactly Disabled, launch-at-startup is a
                 // mandatory-ON policy the Repair()/setter enforce -- not a user preference.
                 isLaunchAtWindowsStartupRequired: IsControllerRuntimeMandatory,
@@ -575,7 +565,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private VirtualOutput.Viiper.CanonicalViiperRuntime? LoadAndInitializeCanonicalViiper()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
-        var native = Routing.AddonRoutingRuntime.TryLoadViiper(path);
+        VirtualOutput.Viiper.ICanonicalViiperNativeApi? native;
+        try
+        {
+            native = VirtualOutput.Viiper.CanonicalViiperNativeApi.Load(path);
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
+        {
+            AppLog.Error("SteamOutput", "Canonical VIIPER module could not be loaded; Steam output is unavailable for this process lifetime.", exception);
+            return null;
+        }
         return native is null ? null : VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
     }
 
@@ -1043,13 +1042,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             }
 
             StartPowerObservation();
-            var reconcile = ReconcileAsync(cancellationToken);
             ReconcileDeviceProfileStartup();
-            await reconcile.ConfigureAwait(false);
         }, cancellationToken);
     }
-
-    internal Task ReconcileAsync(CancellationToken cancellationToken = default) => GetRuntimeHost().ReconcileAsync(cancellationToken);
 
     /// <summary>
     /// CPU Boost Device/Profile Runtime startup reconcile -- a sibling capability, deliberately
@@ -1112,8 +1107,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// existing process-owned facts positively prove a healthy Center M Disabled / Addon-authority
     /// controller path -- an exactly-Disabled startup that has finished committing, with a running
     /// PR5 physical input source and an attached virtual presentation. Every other state returns
-    /// <see langword="null"/>, which keeps the existing legacy <c>AddonStatusEvaluator</c> result
-    /// (so incomplete / recovering / blocked states are never falsely reported Ready). No new PnP /
+    /// <see langword="null"/>, which falls back to <c>SystemStatusProvider</c>'s non-owned status
+    /// mapping (so incomplete / recovering / blocked states are never falsely reported Ready). No new PnP /
     /// HidHide / VIIPER probe is done here -- those owners already passed their real safety
     /// boundaries before this state was reached.</summary>
     /// <summary>The already-known boot-time authority fact: this Runtime booted into an exactly-Disabled
@@ -1216,9 +1211,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         overlayRouter?.StopAcceptingNavigation();
         overlayRouter?.Dispose();
         _overlayController.BeginShutdown();
-        _gameBarDelivery.StopAccepting();
-        _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
-        _gameBarForegroundWatcher.Dispose();
         _qamHostController.BeginShutdown();
         _tdpRuntime?.BeginShutdown();
         _tdpCenterMRegistryWatcher?.Dispose();
@@ -1241,7 +1233,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
         BeginProcessShutdown();
-        await _gameBarDelivery.DrainAsync().ConfigureAwait(false);
         if (_deferredRuntimeStartup is not null)
         {
             try { await _deferredRuntimeStartup.ConfigureAwait(false); }
@@ -1306,15 +1297,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _trayHostWindow = null;
         if (_runtimeHost is not null)
         {
-            var runtimeHost = _runtimeHost;
-            await runtimeHost.DisposeAsync().ConfigureAwait(false);
+            await _runtimeHost.DisposeAsync().ConfigureAwait(false);
             _runtimeHost = null;
-            FinalizeWinGGuardAfterRoutingShutdown(_winGSuppressionGuard, runtimeHost.RoutingShutdownSucceeded);
         }
-        else
-        {
-            _winGSuppressionGuard.Dispose();
-        }
+        // The Win+G suppression hook lives for the whole process lifetime under Full1902 Policy B;
+        // it is released here at process shutdown regardless of controller-authority state.
+        _winGSuppressionGuard.Dispose();
         if (_tdpRuntime is not null)
         {
             await _tdpRuntime.DisposeAsync().ConfigureAwait(false);
@@ -1331,15 +1319,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // in-flight visible-surface coordination has already unwound and released the gate.
         try { _visibleSurfaceTransition.Dispose(); } catch (ObjectDisposedException) { }
         _startupComposition = null;
-    }
-
-    internal static void FinalizeWinGGuardAfterRoutingShutdown(WinGSuppressionGuard guard, bool routingShutdownSucceeded)
-    {
-        ArgumentNullException.ThrowIfNull(guard);
-        if (routingShutdownSucceeded)
-            guard.Dispose();
-        else
-            AppLog.Warn("Wing.Guard", "Win+G hook retained until process exit because routing shutdown did not complete safely.");
     }
 
     private AddonRuntimeHost GetRuntimeHost() => _runtimeHost ?? throw new InvalidOperationException("Runtime has not been initialized.");
@@ -1509,12 +1488,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     private void OnIntelFpsPowerSourceChanged() => _ = Task.Run(() => _intelFpsRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0, "PowerSourceChanged"));
-
-    private void OnGameBarForegroundChanged(object? sender, EventArgs args) =>
-        _gameBarDelivery.Request(_gameBarForegroundWatcher.IsForeground);
-
-    private void RequestGameBarPresentationReconcile() =>
-        _gameBarDelivery.Request(_gameBarForegroundWatcher.IsForeground);
 }
 
 internal static class NativeStartupWarning
@@ -1526,94 +1499,4 @@ internal static class NativeStartupWarning
 
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern int MessageBoxW(nint hWnd, string lpText, string lpCaption, uint uType);
-}
-
-internal sealed class GameBarForegroundPresentationDelivery
-{
-    private readonly Lock _sync = new();
-    private readonly Func<bool, Task<bool>> _apply;
-    private bool _desired;
-    private bool _running;
-    private bool _accepting = true;
-    private long _requestVersion;
-    private Task? _dispatch;
-
-    internal GameBarForegroundPresentationDelivery(Func<bool, Task<bool>> apply) =>
-        _apply = apply ?? throw new ArgumentNullException(nameof(apply));
-
-    internal void Request(bool foreground)
-    {
-        lock (_sync)
-        {
-            if (!_accepting) return;
-            _desired = foreground;
-            _requestVersion++;
-            if (_running) return;
-            _running = true;
-            _dispatch = Task.Run(DispatchAsync);
-        }
-    }
-
-    internal void StopAccepting()
-    {
-        lock (_sync) _accepting = false;
-    }
-
-    internal async Task DrainAsync()
-    {
-        Task? dispatch;
-        lock (_sync) dispatch = _dispatch;
-        if (dispatch is not null) await dispatch.ConfigureAwait(false);
-    }
-
-    private async Task DispatchAsync()
-    {
-        try
-        {
-            while (true)
-            {
-                bool desired;
-                long observedVersion;
-                lock (_sync)
-                {
-                    if (!_accepting) return;
-                    desired = _desired;
-                    observedVersion = _requestVersion;
-                }
-
-                var applied = false;
-                try
-                {
-                    AppLog.Debug("GameBar", "Game Bar presentation delivery started.", ("Foreground", desired));
-                    applied = await _apply(desired).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    AppLog.Warn("GameBar", "Game Bar presentation delivery was contained.", exception);
-                }
-
-                lock (_sync)
-                {
-                    if (!_accepting)
-                    {
-                        _running = false;
-                        return;
-                    }
-
-                    var requestArrived = _requestVersion != observedVersion;
-                    var latestStillSame = _desired == desired;
-                    if (!requestArrived || (applied && latestStillSame))
-                    {
-                        _running = false;
-                        return;
-                    }
-                }
-            }
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("GameBar", "Game Bar presentation dispatcher failed.", exception);
-            lock (_sync) _running = false;
-        }
-    }
 }

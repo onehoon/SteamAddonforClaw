@@ -199,8 +199,9 @@ public sealed class Full1902WinGSuppressionAuthorityTests
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
         var composition = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Runtime/AddonRuntimeComposition.cs"));
 
-        Assert.Contains("AddonRoutingRuntime? routingRuntime = null;", composition);
-        Assert.DoesNotContain("AddonRoutingRuntime.Create(", composition);
+        // Full1902 Cleanup A deleted the legacy routing authority graph outright -- the runtime
+        // composition no longer references it in any form.
+        Assert.DoesNotContain("AddonRoutingRuntime", composition);
         Assert.DoesNotContain("StartRoutingObservation(", composition);
 
         var front = File.ReadAllText(Path.Combine(dir.FullName, "src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawFrontButtonRuntime.cs"));

@@ -52,48 +52,6 @@ internal static class StatusPresentation
     };
 
     /// <summary>
-    /// True only when recovery/compatibility state is trustworthy enough to report an
-    /// actual controller status. RoutingEligibilityPolicy checks these same conditions first and
-    /// fails routing safe on them, so Status must not guess a controller state past this point.
-    /// </summary>
-    internal static bool IsControllerStateTrusted(FrontendStatusSnapshot snapshot) =>
-        snapshot.RecoverySafe
-        && snapshot.Hardware.Status == FrontendHardwareStatus.Supported
-        && snapshot.ControllerEnvironmentStatus == FrontendControllerEnvironmentStatus.Supported
-        && snapshot.Routing.EligibilityReason is not (FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate
-            or FrontendRoutingEligibilityReason.ControllerEnvironmentIndeterminate
-            or FrontendRoutingEligibilityReason.Indeterminate);
-
-    /// <summary>
-    /// Reports what controller path is actually active, derived from the frontend routing
-    /// snapshot (actual pipeline session/plan state), never from eligibility alone -- eligibility
-    /// only means routing is *eligible* to start, not that it has actually entered and the Steam
-    /// output stage is live.
-    /// </summary>
-    internal static string FormatControllerStatus(
-        bool stateTrusted,
-        FrontendRoutingSnapshot routingStatus,
-        bool nativeXInputVerified)
-    {
-        if (!stateTrusted || !routingStatus.Available) return "Unavailable";
-
-        if (routingStatus.OperationalState == FrontendRoutingOperationalState.Indeterminate)
-            return "Unavailable";
-
-        if (routingStatus.OperationalState == FrontendRoutingOperationalState.OverrideActive
-            && routingStatus.SteamOutputActive
-            && routingStatus.NativeDirectInputActive)
-            return "Steam Controller (DInput)";
-
-        if (routingStatus.OperationalState == FrontendRoutingOperationalState.OverrideActive)
-            // Override is engaged but the active plan doesn't prove the stock Steam output path
-            // (e.g. a non-stock controller-manager plan) -- fail conservative rather than guess.
-            return "Unavailable";
-
-        return nativeXInputVerified ? "MSI Center M Native (XInput)" : "MSI Center M Native";
-    }
-
-    /// <summary>
     /// True when the addon's derived operational status is a safety-boundary condition that must
     /// stay visible as a warning InfoBar on supported hardware.
     /// </summary>
@@ -103,9 +61,8 @@ internal static class StatusPresentation
             return false;
 
         return !snapshot.RecoverySafe
-        || snapshot.Routing.EligibilityReason is FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate
-            or FrontendRoutingEligibilityReason.ControllerEnvironmentIndeterminate
-            or FrontendRoutingEligibilityReason.Indeterminate
+        || snapshot.Hardware.Status == FrontendHardwareStatus.Indeterminate
+        || snapshot.ControllerEnvironmentStatus == FrontendControllerEnvironmentStatus.Indeterminate
         || snapshot.AddonStatus is FrontendAddonOperationalStatus.SetupRequired
             or FrontendAddonOperationalStatus.RecoveryRequired
             or FrontendAddonOperationalStatus.Unsupported

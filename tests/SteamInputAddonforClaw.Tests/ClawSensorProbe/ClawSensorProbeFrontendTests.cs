@@ -6,7 +6,6 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using System.Text.Json;
@@ -306,8 +305,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             new FixedSystemStatusProvider(snapshot),
             null,
             new DeveloperTestModeState(),
-            "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
+            "");
     }
 
     private InProcessAddonFrontendControl CreateControl(ISystemStatusProvider statusProvider)
@@ -320,19 +318,18 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             statusProvider,
             null,
             new DeveloperTestModeState(),
-            "",
-            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
+            "");
     }
 
     private static SystemStatusSnapshot ClawFamilySnapshot(HardwareCompatibilityStatus status) => new(
         new("MSI", "Claw A1M", "Claw A1M board", []),
         new HardwareCompatibilityAssessment(status, new HandheldDeviceId("msi.claw"), null, "test"),
-        [], null!, null!, null!, null!, null!, true);
+        [], null!, null!, null!, null!, true);
 
     private static SystemStatusSnapshot NonClawSnapshot() => new(
         new("Dell", "G Series", "Board", []),
         new HardwareCompatibilityAssessment(HardwareCompatibilityStatus.Unsupported, null, null, "No handheld-device adapter matched."),
-        [], null!, null!, null!, null!, null!, true);
+        [], null!, null!, null!, null!, true);
 
     public void Dispose()
     {

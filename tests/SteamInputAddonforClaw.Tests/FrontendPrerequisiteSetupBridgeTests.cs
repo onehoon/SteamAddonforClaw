@@ -105,7 +105,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
     }
 
     private static InProcessAddonFrontendControl CreateControl(ISystemStatusProvider status, FakeExecutor executor) =>
-        new(null!, status, null, null!, "", executor, () => "test-runtime.exe", () => new(true, RoutingOperationalState.Passive, false, false));
+        new(null!, status, null, null!, "", executor, () => "test-runtime.exe");
 
     private sealed class ThrowingStatusProvider(SystemStatusSnapshot initial) : ISystemStatusProvider
     {
@@ -123,7 +123,6 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
         new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported),
         new(new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Test")),
         new(false, 0),
-        new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible),
         new(AddonOperationalStatus.Ready, "Test"), true);
 
     private sealed class QueueStatusProvider(IEnumerable<SystemStatusSnapshot> snapshots) : ISystemStatusProvider

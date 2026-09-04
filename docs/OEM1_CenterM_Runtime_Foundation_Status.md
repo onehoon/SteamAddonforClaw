@@ -1,5 +1,12 @@
 # OEM1 / Center M Native Runtime Foundation — Status
 
+> **Superseded internals (Full1902 Cleanup A).** `MsiClawRoutingComposition`,
+> `AddonRoutingRuntime`, the `RoutingPipeline*` graph, and
+> `CenterMMainUiRoutingGuardStage` have been deleted. OEM1 / WING button action
+> ownership now lives in `MsiClawFrontButtonRuntime` (composed in `AddonProcessHost`
+> on a Center M Disabled boot). The PR notes below are historical; their
+> references to the routing composition wiring no longer describe the tree.
+
 This tracks the OEM1 (Center M button) remapping feature across PRs. See the
 research handoff (`MSI_CenterM_OEM1_Remapping_Research_Design_Handoff_2026-08-14`)
 for hardware test results, static reverse-engineering findings, and the

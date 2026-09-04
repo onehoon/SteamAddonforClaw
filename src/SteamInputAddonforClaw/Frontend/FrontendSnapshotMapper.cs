@@ -1,7 +1,6 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Prerequisites;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 
@@ -9,14 +8,13 @@ namespace SteamInputAddonforClaw.Frontend;
 
 internal static class FrontendSnapshotMapper
 {
-    internal static FrontendStatusSnapshot Map(SystemStatusSnapshot snapshot, RoutingRuntimeStatusSnapshot routing) => new(
+    internal static FrontendStatusSnapshot Map(SystemStatusSnapshot snapshot) => new(
         new(snapshot.Device.Manufacturer, snapshot.Device.Model, snapshot.Device.BaseBoardProduct, snapshot.Device.GpuModels),
         new(MapHardwareStatus(snapshot.HardwareCompatibility.Status), snapshot.HardwareCompatibility.DeviceFamily?.Value, snapshot.HardwareCompatibility.DeviceModel?.Value, snapshot.HardwareCompatibility.Reason),
         snapshot.ControllerSoftware.Select(x => new FrontendSoftwareSnapshot(x.Kind.ToString(), x.DisplayName, MapInstallation(x.Installation), MapRuntime(x.Runtime), x.Reason)).ToArray(),
         MapControllerEnvironmentStatus(snapshot.Compatibility.Status), snapshot.Compatibility.Reason.ToString(),
         new(MapPrerequisite(snapshot.Prerequisites.HidHide.Status), snapshot.Prerequisites.HidHide.Reason, MapPrerequisite(snapshot.Prerequisites.UsbIpWin2.Status), snapshot.Prerequisites.UsbIpWin2.Reason, MapPrerequisite(snapshot.Prerequisites.Viiper.Status), snapshot.Prerequisites.Viiper.Reason),
         new(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, MapSteamSource(snapshot.Steam.Source)),
-        new(MapRoutingReason(snapshot.RoutingDecision.Reason), MapOperationalState(routing.OperationalState), routing.Available, routing.SteamOutputActive, routing.NativeDirectInputActive),
         MapAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason, snapshot.RecoverySafe,
         FrontendSetupStatus.Indeterminate, "Status must be refreshed before setup evaluation.", false);
 
@@ -47,19 +45,6 @@ internal static class FrontendSnapshotMapper
         SteamSessionSource.BigPicture => FrontendSteamSource.BigPicture,
         SteamSessionSource.DeveloperTest => FrontendSteamSource.DeveloperTest,
         _ => FrontendSteamSource.Indeterminate
-    };
-
-    private static FrontendRoutingEligibilityReason MapRoutingReason(RoutingDecisionReason reason) => reason switch
-    {
-        RoutingDecisionReason.SteamInactive => FrontendRoutingEligibilityReason.SteamInactive,
-        RoutingDecisionReason.RecoveryUnsafe => FrontendRoutingEligibilityReason.RecoveryUnsafe,
-        RoutingDecisionReason.UnsupportedDevice => FrontendRoutingEligibilityReason.UnsupportedDevice,
-        RoutingDecisionReason.DeviceCompatibilityIndeterminate => FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate,
-        RoutingDecisionReason.ControllerEnvironmentUnsupported => FrontendRoutingEligibilityReason.ControllerEnvironmentUnsupported,
-        RoutingDecisionReason.ControllerEnvironmentIndeterminate => FrontendRoutingEligibilityReason.ControllerEnvironmentIndeterminate,
-        RoutingDecisionReason.PrerequisitesNotReady => FrontendRoutingEligibilityReason.PrerequisitesNotReady,
-        RoutingDecisionReason.Eligible => FrontendRoutingEligibilityReason.Eligible,
-        _ => FrontendRoutingEligibilityReason.Indeterminate
     };
 
     private static FrontendAddonOperationalStatus MapAddonStatus(AddonOperationalStatus status) => status switch
@@ -97,13 +82,6 @@ internal static class FrontendSnapshotMapper
         PrerequisiteStatus.Unusable => FrontendPrerequisiteStatus.Unusable,
         PrerequisiteStatus.Incompatible => FrontendPrerequisiteStatus.Incompatible,
         _ => FrontendPrerequisiteStatus.Indeterminate
-    };
-
-    private static FrontendRoutingOperationalState MapOperationalState(RoutingOperationalState state) => state switch
-    {
-        RoutingOperationalState.Passive => FrontendRoutingOperationalState.Passive,
-        RoutingOperationalState.OverrideActive => FrontendRoutingOperationalState.OverrideActive,
-        _ => FrontendRoutingOperationalState.Indeterminate
     };
 
     private static FrontendSetupStatus MapSetupStatus(FirstTimeSetupStatus status) => status switch

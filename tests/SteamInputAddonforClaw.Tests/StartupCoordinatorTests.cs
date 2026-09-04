@@ -800,9 +800,9 @@ public sealed class StartupCoordinatorTests
     public void RuntimeComposition_NeverComposesLegacyRouting_ButKeepsTheStockResumeBaselineGated()
     {
         var source = File.ReadAllText(Path.Combine(RepoRoot(), "src/SteamInputAddonforClaw/Runtime/AddonRuntimeComposition.cs"));
-        // Full1902 A2 section 10: no production branch creates the legacy Steam-session routing owner.
-        Assert.Contains("AddonRoutingRuntime? routingRuntime = null;", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("AddonRoutingRuntime.Create(", source, StringComparison.Ordinal);
+        // Full1902 Cleanup A: the legacy Steam-session routing authority graph is deleted -- the
+        // runtime composition no longer references it at all.
+        Assert.DoesNotContain("AddonRoutingRuntime", source, StringComparison.Ordinal);
         Assert.DoesNotContain("StartRoutingObservation(", source, StringComparison.Ordinal);
         // Section 11: the stock PID1901 resume baseline is still gated on the Center M Enabled
         // authority state -- independently, not via the removed legacy routing selection.

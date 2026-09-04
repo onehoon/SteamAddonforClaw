@@ -1,6 +1,5 @@
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 
@@ -22,7 +21,6 @@ internal sealed record SystemStatusSnapshot(
     ControllerEnvironmentCompatibilityAssessment Compatibility,
     RuntimePrerequisiteAssessment Prerequisites,
     SteamStatusSnapshot Steam,
-    RoutingDecision RoutingDecision,
     AddonStatusSnapshot Addon,
     // This is a safety-boundary field with no safe default: a snapshot-construction
     // path that forgets to pass one must fail to compile rather than silently resolve to "safe".

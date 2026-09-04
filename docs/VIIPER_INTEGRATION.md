@@ -1,5 +1,15 @@
 # VIIPER Integration Contract
 
+> **Superseded internals (Full1902 Cleanup A).** The legacy Steam-session routing
+> authority (`AddonRoutingRuntime`, the `RoutingPipeline*` graph,
+> `IHandheldRoutingComposition`, `CanonicalSteamDeckOutputStage`, the Game Bar
+> foreground presentation path) has been deleted. Passages below that describe a
+> "routing pipeline", route epochs, `AddonRoutingRuntime` ownership, or Game Bar
+> foreground presentation selection are retained as history only. Current
+> presentation authority is `MsiClawAddonPresentation` → `CanonicalViiperRuntime`
+> → exactly one live X360 **or** Steam Deck publisher, owned by `AddonProcessHost`
+> while Center M is Disabled.
+
 This document defines the current Addon integration with the canonical typed
 VIIPER API. The sole production Steam presentation is Steam Deck `28DE:1205`.
 Game Bar foreground does not select another virtual controller.

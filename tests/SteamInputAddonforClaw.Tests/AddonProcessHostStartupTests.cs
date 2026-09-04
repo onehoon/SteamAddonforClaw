@@ -20,7 +20,6 @@ public sealed class AddonProcessHostStartupTests
     {
         var runtimeHost = new AddonRuntimeHost(
             new SteamSessionRuntime(),
-            routingRuntime: null,
             new PowerMutationGate(),
             new RecoverySafetyState(RecoverySafety.Safe),
             recoverySafe: true,

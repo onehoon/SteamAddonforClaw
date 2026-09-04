@@ -19,7 +19,6 @@ public sealed class SteamSessionRuntimeTests
 
         Assert.NotNull(observed);
         Assert.Equal(SteamSessionSource.DeveloperTest, observed.Current.Source);
-        Assert.Equal(SteamSessionSource.DeveloperTest, runtime.State.Source);
     }
 
     [Fact]
@@ -32,7 +31,7 @@ public sealed class SteamSessionRuntimeTests
     }
 
     [Fact]
-    public void ActualObservation_tracksAppId_withoutStartingRoutingObservation()
+    public void ActualObservation_tracksAppId()
     {
         var source = new FakeRunningAppIdSource();
         using var runtime = new SteamSessionRuntime(source);
@@ -44,7 +43,7 @@ public sealed class SteamSessionRuntimeTests
 
         Assert.Equal([123u], observed);
         Assert.Equal(123u, runtime.ActualRunningAppId);
-        Assert.False(runtime.State.IsActive);
+        Assert.Equal(123u, runtime.CapturePresentationSnapshot().RunningAppId);
     }
 
     private sealed class FakeRunningAppIdSource : IRunningAppIdSource

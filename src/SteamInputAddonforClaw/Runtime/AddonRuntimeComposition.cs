@@ -7,13 +7,11 @@ using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Recovery;
-using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
-using SteamInputAddonforClaw.GameBar;
 
 namespace SteamInputAddonforClaw.Runtime;
 
@@ -26,27 +24,20 @@ internal sealed record AddonRuntimeComposition(
 internal static class AddonRuntimeCompositionFactory
 {
     internal static AddonRuntimeComposition Create(
-        IHandheldDeviceAdapter handheldDeviceAdapter,
         HandheldDeviceRegistry deviceRegistry,
         IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider,
         RecoveryManager recoveryManager,
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
-        bool hardwareSupported,
         // Full1902 A2 section 11: true only when Center M startup roots are exactly Enabled/Automatic
-        // (MSI / stock controller authority). It gates ONLY the stock PID1901 resume baseline. It is
-        // NOT permission to run the legacy Steam-session physical routing owner -- that owner is never
-        // production-composed (section 10).
+        // (MSI / stock controller authority). It gates ONLY the stock PID1901 resume baseline.
         bool stockCenterMAuthority,
-        WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
-        Action? routingReconcileCompleted = null,
         Func<bool>? isLaunchAtWindowsStartupRequired = null,
         // Full1902 0903 cleanup (section 4.6): a read-only override for the final Addon operational
         // status, closing over AddonProcessHost's existing physical/presentation ownership facts.
         Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null)
     {
-        ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
@@ -75,16 +66,11 @@ internal static class AddonRuntimeCompositionFactory
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
                 new ViiperRuntimeInspector()),
-            () => steamRuntime.State,
+            // Full1902 Cleanup A: raw Steam/BPM presentation facts for the Steam status card --
+            // the legacy effective-routing-session state is no longer consulted.
+            () => steamRuntime.CapturePresentationSnapshot(),
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             captureFull1902AddonStatus);
-        // Full1902 A2 section 10: no production branch creates AddonRoutingRuntime. Center M Enabled
-        // has no Addon controller ownership at all; Center M Disabled uses the Full1902 VIIPER
-        // presentation owner (PR6/PR7) + the feature-local front-button runtime, both composed in
-        // AddonProcessHost -- not this legacy path.
-        AddonRoutingRuntime? routingRuntime = null;
-        AppLog.Info("Routing", "Legacy Steam-session routing runtime is not composed (Full1902 controller authority).", ("Action", "Passive"));
-
         // Full1902 A2 section 11: sleep/resume while Center M is Disabled must not call the legacy
         // stock XInput baseline; the Enabled (stock authority) state still needs stock PID1901
         // verification on resume. Gated independently of the (now removed) legacy routing selection.
@@ -94,13 +80,11 @@ internal static class AddonRuntimeCompositionFactory
 
         var runtimeHost = new AddonRuntimeHost(
             steamRuntime,
-            routingRuntime,
             powerGate,
             recoverySafetyState,
             recoverySafe,
             () => recoveryManager.HasIncompleteRecovery,
-            establishBaseline,
-            routingReconcileCompleted: routingReconcileCompleted);
+            establishBaseline);
 
         if (bigPictureStateChanged is not null && steamRuntime.IsBigPictureActive)
             bigPictureStateChanged(true);
