@@ -57,7 +57,10 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         RecoverySafetyState recoverySafetyState,
         bool recoverySafe,
         Func<CancellationToken, Task<bool>> establishBaseline,
-        IPowerSuspendResumeNotificationSource? notificationSource = null)
+        IPowerSuspendResumeNotificationSource? notificationSource = null,
+        // Full1902 Suspend/Resume section 5.2: the ONE optional Full1902 controller-presentation
+        // suspend participant. Fixed at construction; never mutable after startup.
+        IPowerSuspendParticipant? suspendParticipant = null)
     {
         _steamRuntime = steamRuntime;
         _powerGate = powerGate;
@@ -65,7 +68,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         _steamRuntime.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
 
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState,
-            Array.Empty<IPowerSuspendParticipant>(),
+            suspendParticipant is null ? Array.Empty<IPowerSuspendParticipant>() : [suspendParticipant],
             token => ReconcileFreshAfterResumeAsync(token),
             recoveryEnabled: recoverySafe,
             establishBaseline: establishBaseline,

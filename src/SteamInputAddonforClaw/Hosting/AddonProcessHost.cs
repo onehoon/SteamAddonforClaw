@@ -275,7 +275,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 bigPictureStateChanged: OnBigPictureStateChanged,
                 // Full1902 0903 cleanup (section 4): read-only override for the final Addon operational
                 // status, closing over this host's existing physical/presentation ownership facts.
-                captureFull1902AddonStatus: TryCaptureFull1902AddonStatus);
+                captureFull1902AddonStatus: TryCaptureFull1902AddonStatus,
+                // Full1902 Suspend/Resume section 5 / addendum A: one host-local suspend participant.
+                // Its callback reads _presentationOwnership with a null guard at execution time, so it
+                // tolerates the legitimate state where this host exists but Full1902 controller
+                // ownership has not committed (or is unavailable).
+                full1902SuspendParticipant: new Full1902SuspendParticipant(QuiesceFull1902PresentationForSuspendAsync));
 
         _runtimeHost = composition.RuntimeHost;
         _cpuBoostRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
@@ -1416,6 +1421,35 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     ("Trigger", trigger), ("Event", "Full1902WinGSuppressionArmFailed"));
                 return;
             }
+
+            // Full1902 Suspend/Resume section 11.1 / review addendum B: the suspend-release pre-step
+            // runs ONLY after the existing source and Win+G suppression fail-close guards have passed,
+            // so clearing the suspend pause can never leave the publisher stopped with no live-
+            // presentation preconditions met. ResetLatestStateToNeutral erases any stale pre-suspend
+            // snapshot immediately before publication is allowed to restart (section 9).
+            if (presentation.IsSuspendPaused)
+            {
+                if (!source.IsRunning)
+                {
+                    // Addendum B.1: physical source not running -> leave the suspend pause active and
+                    // output neutral; existing PR8/PR10 recovery repairs it and re-enters here.
+                    AppLog.Info("ControllerPresentation", "Suspend pause retained; physical source is not running.",
+                        ("Trigger", trigger), ("Event", "PresentationResumeDeferredSourceUnavailable"));
+                    return;
+                }
+                source.ResetLatestStateToNeutral();
+                var resume = await presentation.ResumeAfterSuspendAsync(
+                    source,
+                    () => _runtimeHost!.CapturePresentationSnapshot(),
+                    cancellationToken).ConfigureAwait(false);
+                AppLog.Info("ControllerPresentation", "Runtime presentation suspend-release completed.",
+                    ("Trigger", trigger), ("Outcome", resume.Outcome), ("Reason", resume.Reason));
+                if (resume.StillBlocked || resume.Outcome is Devices.MSI.Claw.SuspendResumeOutcome.SamePublisherResumed
+                    or Devices.MSI.Claw.SuspendResumeOutcome.LeftNeutral)
+                    return;
+                // ReconcileRequired / NotPaused -> fall through to the normal PR7 reconcile below.
+            }
+
             var result = await presentation.ReconcileDesiredPresentationAsync(
                 source,
                 () => _runtimeHost!.CapturePresentationSnapshot(),
@@ -1430,9 +1464,52 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
+    /// <summary>Full1902 Suspend/Resume section 5 / review addendum A.2: the one narrow host-side
+    /// quiesce callback the suspend participant invokes. Reads the CURRENT process-owned presentation
+    /// field at execution time -- a missing presentation (stock runtime, or a Disabled boot whose
+    /// controller startup has not committed) is a legitimate no-op success, not a suspend failure.
+    /// No attach/detach/recovery is ever attempted from here.</summary>
+    private Task<bool> QuiesceFull1902PresentationForSuspendAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0)
+            return Task.FromResult(true);
+
+        var presentation = _presentationOwnership;
+        if (presentation is null)
+            return Task.FromResult(true);
+
+        return QuiesceCoreAsync();
+
+        async Task<bool> QuiesceCoreAsync()
+        {
+            var pause = await presentation.PauseForSuspendAsync(cancellationToken).ConfigureAwait(false);
+            AppLog.Info("ControllerPresentation", "Full1902 suspend participant quiesced.",
+                ("Event", "PresentationSuspendPauseParticipant"), ("Outcome", pause.Outcome), ("Reason", pause.Reason), ("Safe", pause.Safe));
+            return pause.Safe;
+        }
+    }
+
+    /// <summary>Full1902 Suspend/Resume review addendum A.1: the one small host-local adapter. It is
+    /// NOT a generic power participant, a registry, or a new authority -- it just forwards the fixed
+    /// coordinator contract to <see cref="QuiesceFull1902PresentationForSuspendAsync"/>.</summary>
+    private sealed class Full1902SuspendParticipant(Func<CancellationToken, Task<bool>> quiesce)
+        : SteamInputAddonforClaw.Power.IPowerSuspendParticipant
+    {
+        public string Name => "Full1902ControllerPresentation";
+
+        public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
+            => quiesce(cancellationToken);
+    }
+
     private void OnPowerResumeObserved()
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+
+        // Full1902 Suspend/Resume section 11: request the Full1902 controller-presentation reconcile
+        // immediately -- it carries the suspend-pause release pre-step and must not wait behind the
+        // unrelated 2.5 s CPU Boost / Power Mode profile settle below.
+        RequestControllerPresentationReconcile("PowerResume");
+
         _ = ReconcilePerformanceAfterResumeAsync(
             _startupCancellationTokenSource.Token,
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken),

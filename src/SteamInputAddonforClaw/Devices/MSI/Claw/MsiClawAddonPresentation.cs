@@ -82,6 +82,72 @@ internal sealed record OverlayResumeResult(OverlayResumeOutcome Outcome, string 
     internal bool Succeeded => Outcome == OverlayResumeOutcome.Resumed;
 }
 
+internal enum SuspendPauseOutcome
+{
+    /// <summary>The game-facing publisher was proven stopped/joined and the SAME attached device (if
+    /// any) was written neutral without detaching it. Suspend quiesce may report success.</summary>
+    Paused,
+    /// <summary>Full1902 authority exists but no presentation was attached. Nothing native happened;
+    /// the suspend barrier is still recorded so a queued Steam/BPM event cannot attach a live
+    /// presentation after it. Suspend quiesce may report success.</summary>
+    PausedNoPresentation,
+    /// <summary>The publisher could not be proven stopped/joined. Nothing was written neutral, nothing
+    /// detached; the suspend pause fact is retained. Suspend quiesce must classify this unsafe.</summary>
+    PublisherNotStopped,
+    /// <summary>Fail-close: the publisher was proven stopped but the neutral write was rejected, so
+    /// the current presentation was retired through the existing owner. Output is safe.</summary>
+    NeutralRejectedPresentationRetired,
+    /// <summary>Fail-close reached but the retirement could not itself be proven. Output was not
+    /// proven neutral; suspend quiesce must classify this unsafe.</summary>
+    NeutralRejectedRetireFailed,
+    /// <summary>A precondition (owner disposed) was not met.</summary>
+    Blocked,
+}
+
+/// <summary>The in-memory result of one Full1902 suspend-pause. Not persisted.</summary>
+internal sealed record SuspendPauseResult(SuspendPauseOutcome Outcome, string Reason)
+{
+    /// <summary>The game-facing output is proven safe (stopped + neutral, or retired). Suspend
+    /// quiesce may report success for this participant.</summary>
+    internal bool Safe => Outcome is SuspendPauseOutcome.Paused or SuspendPauseOutcome.PausedNoPresentation
+        or SuspendPauseOutcome.NeutralRejectedPresentationRetired;
+}
+
+internal enum SuspendResumeOutcome
+{
+    /// <summary>There was no suspend pause to release.</summary>
+    NotPaused,
+    /// <summary>The suspend pause was cleared and the SAME publisher was restarted against a healthy
+    /// source for the still-desired presentation. No attach/detach/VIIPER recreation.</summary>
+    SamePublisherResumed,
+    /// <summary>The suspend pause was cleared but the presentation must be reconciled by the existing
+    /// PR7 owner (desired kind changed, no presentation attached, or structural attachment unproven).
+    /// The old publisher, if any, is left stopped + neutral.</summary>
+    ReconcileRequired,
+    /// <summary>The physical source is not available yet. The suspend pause and neutral/stopped
+    /// output are retained; the existing PR8/PR10 recovery owns physical repair and will re-enter
+    /// this release path through <c>PhysicalInputRecovered</c>.</summary>
+    DeferredSourceUnavailable,
+    /// <summary>Review #490 (3rd pass): the managed active-kind/publisher pair is empty, but residual
+    /// typed-device ownership evidence (a retained Deck session, or a still-attached canonical X360)
+    /// survives from a failed initial-attach cleanup detach -- the same structural proof
+    /// <see cref="MsiClawAddonPresentation.PauseForSuspendAsync"/> requires. The suspend pause is
+    /// retained; the caller must NOT fall through into PR7 mutation.</summary>
+    DeferredUnsafePresentation,
+    /// <summary>The suspend pause was cleared but game-facing publication is intentionally left
+    /// stopped/neutral (Overlay capture still owns its own neutral pause, or owner disposed).</summary>
+    LeftNeutral,
+}
+
+/// <summary>The in-memory result of one Full1902 suspend-release. Not persisted.</summary>
+internal sealed record SuspendResumeResult(SuspendResumeOutcome Outcome, string Reason)
+{
+    /// <summary>The suspend pause is still active -- the caller must not continue into normal
+    /// presentation reconciliation.</summary>
+    internal bool StillBlocked => Outcome is SuspendResumeOutcome.DeferredSourceUnavailable
+        or SuspendResumeOutcome.DeferredUnsafePresentation;
+}
+
 /// <summary>A narrow abstraction over the two canonical VIIPER input publishers so the presentation
 /// owner can be tested without the production worker thread. Production adapters forward verbatim to
 /// <see cref="CanonicalXbox360InputPublisher"/> / <see cref="CanonicalSteamDeckInputPublisher"/>.</summary>
@@ -142,6 +208,28 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// restarted only when the source is healthy and the presentation is still structurally valid
     /// (no attach/detach/VIIPER recreate); otherwise output is left neutral.</summary>
     Task<OverlayResumeResult> ResumeAfterOverlayAsync(IMsiClawPreparedInputSource? source, CancellationToken cancellationToken);
+
+    /// <summary>Full1902 Suspend/Resume: process-memory-only fact -- live game-facing publication is
+    /// intentionally blocked because the current power cycle entered Suspend and has not yet been
+    /// safely released. Never persisted; not controller authority.</summary>
+    bool IsSuspendPaused { get; }
+
+    /// <summary>Full1902 Suspend/Resume section 7: mark suspend-pause active, stop + JOIN the current
+    /// publisher, clear pending synthetic Steam/QuickAccess pulses, disarm + drain the rumble
+    /// feedback callback, request a physical rumble STOP, then write the SAME currently-attached
+    /// virtual device neutral without detaching a healthy typed device. A publisher that cannot be
+    /// proven stopped leaves the pause active and reports failure (no unsafe neutral write). A
+    /// rejected neutral write on a stopped publisher retires the current presentation (fail-close).</summary>
+    Task<SuspendPauseResult> PauseForSuspendAsync(CancellationToken cancellationToken);
+
+    /// <summary>Full1902 Suspend/Resume section 10: release the suspend pause at the Resume boundary.
+    /// The caller must have already reset the physical snapshot to neutral. Restarts the SAME
+    /// publisher only when the freshly-captured desired kind still matches the attached presentation,
+    /// the source is running, VIIPER is Ready, and the typed device is still proven attached;
+    /// otherwise the pause is cleared and the existing PR7 reconcile owns the transition. An
+    /// unavailable source keeps the pause and defers to existing physical recovery.</summary>
+    Task<SuspendResumeResult> ResumeAfterSuspendAsync(
+        IMsiClawPreparedInputSource? source, Func<SteamPresentationSnapshot> captureSnapshot, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -183,6 +271,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private Task? _faultCleanup;
     private bool _disposed;
     private bool _overlayPaused;
+    // Full1902 Suspend/Resume section 6: one in-memory, never-persisted fact. Live game-facing
+    // publication is blocked because the current power cycle entered Suspend and has not been safely
+    // released. The existing _gate remains the serialization authority; this is not a second one.
+    private bool _suspendPaused;
 
     internal MsiClawAddonPresentation(
         CanonicalViiperRuntime? viiper,
@@ -211,6 +303,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
     internal bool IsOverlayPaused => _overlayPaused;
 
+    public bool IsSuspendPaused => _suspendPaused;
+
     public bool TryRequestSteamPulse() => TryRequestSystemButtonPulse(_systemButtonOverlay.RequestSteamPulse);
 
     public bool TryRequestQuickAccessPulse() => TryRequestSystemButtonPulse(_systemButtonOverlay.RequestQuickAccessPulse);
@@ -226,6 +320,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         {
             if (_disposed) return false;
             if (_overlayPaused) return false;
+            // Full1902 Suspend/Resume section 8.2: a pre-suspend Steam/QuickAccess pulse must never
+            // survive Sleep and assert after Resume.
+            if (_suspendPaused) return false;
             if (_activeKind != AddonPresentationKind.SteamDeck) return false;
             if (_publisher is not { IsRunning: true }) return false;
             if (_deckSession is not { State: CanonicalSteamDeckSessionState.Active }) return false;
@@ -273,6 +370,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // one normal reconcile with fresh Steam/BPM facts AFTER capture ends.
             if (_overlayPaused)
                 return Blocked("OverlayCaptureActive");
+            // Full1902 Suspend/Resume section 8.1: no attach/detach/publisher restart until the
+            // suspend pause is explicitly released by ResumeAfterSuspendAsync.
+            if (_suspendPaused)
+                return Blocked("SuspendPaused");
             if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
                 return Blocked("ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"));
             if (source is null || !source.IsRunning)
@@ -471,6 +572,11 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         {
             if (_disposed) return PauseBlocked("OwnerDisposed");
             if (_overlayPaused) return new(OverlayPauseOutcome.Paused, "AlreadyPaused");
+            // Full1902 Suspend/Resume section 8.3: suspend already owns a neutral pause. The publisher
+            // is already stopped and the device already neutral, so an Overlay capture request must
+            // not run its own publication transition on top -- the visible Overlay still opens (the
+            // host handles the surface), it just does not touch game-facing publication.
+            if (_suspendPaused) return PauseBlocked("SuspendPaused");
             if (_activeKind is not { } kind || _publisher is not { } publisher)
                 return PauseBlocked("NoActivePresentation");
             if (!publisher.IsRunning)
@@ -539,6 +645,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // longer blocked, even when the same presentation cannot be resumed.
             _overlayPaused = false;
 
+            // Full1902 Suspend/Resume section 10.5: if a suspend pause is still active, it stays
+            // authoritative for neutral output. Ending the Overlay pause must not restart game-facing
+            // publication -- the later PowerResume release path (ResumeAfterSuspendAsync) owns that.
+            if (_suspendPaused)
+                return LeftNeutral("SuspendPaused");
+
             if (_disposed || _activeKind is not { } kind || _publisher is not { } publisher)
                 return LeftNeutral("NoActivePresentation");
             if (source is null || !source.IsRunning)
@@ -580,6 +692,324 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             return new(OverlayResumeOutcome.Resumed, "Resumed");
         }
         finally { _gate.Release(); }
+    }
+
+    // ---- Full1902 Suspend/Resume: power-suspend neutral presentation (work order sections 7 / 10) ----
+
+    public async Task<SuspendPauseResult> PauseForSuspendAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return SuspendPauseBlocked("OwnerDisposed");
+
+            // Section 7.1 step 1: record the barrier first. Even when the rest is a no-op this blocks
+            // a queued Steam/BPM event from attaching a live presentation after the suspend barrier.
+            var wasAlreadyPaused = _suspendPaused;
+            _suspendPaused = true;
+
+            // Section 7.2: the ACTUAL empty state -> no native work. "_publisher is null" alone is not
+            // proof there is nothing attached: RetireActivePresentationCoreAsync clears _publisher (a
+            // proven-stopped publisher) BEFORE it attempts the canonical neutral+detach, and keeps
+            // _activeKind set when that detach is not proven (e.g. DetachXbox360 RetryableFailure).
+            // Review #490: only the true empty pair may certify PausedNoPresentation/Safe=true, and
+            // even then only once residual typed-device ownership is structurally ruled out.
+            // AttachXbox360Async / AttachSteamDeckAsync never commit _activeKind/_publisher until
+            // AFTER neutral is proven, so a rejected initial neutral write followed by a failed
+            // cleanup detach can leave a residual attached (non-neutral-proven) device while both
+            // managed fields stay null.
+            if (_activeKind is null && _publisher is null)
+            {
+                if (!TryProveNoResidualPresentationLocked(out var residualReason))
+                {
+                    AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual typed-device ownership evidence.", null,
+                        ("Event", "PresentationSuspendPauseFailed"), ("Reason", residualReason));
+                    return new(SuspendPauseOutcome.Blocked, residualReason);
+                }
+
+                AppLog.Info("ControllerPresentation", "Presentation suspend pause: no active presentation.",
+                    ("Event", "PresentationSuspendPausedNeutral"), ("Presentation", "None"), ("PublisherWasRunning", false), ("OverlayPaused", _overlayPaused));
+                return new(SuspendPauseOutcome.PausedNoPresentation, wasAlreadyPaused ? "AlreadyPaused" : "NoActivePresentation");
+            }
+
+            // The inverse is an impossible state (a publisher with no active kind) -- never certify
+            // Suspend safe over it.
+            if (_activeKind is not { } kind)
+            {
+                AppLog.Error("ControllerPresentation", "Presentation suspend pause: publisher present without an active presentation kind.", null,
+                    ("Event", "PresentationSuspendPauseFailed"), ("Reason", "InconsistentPresentationState"));
+                return new(SuspendPauseOutcome.Blocked, "InconsistentPresentationState");
+            }
+
+            // A retained active kind with a null publisher means a prior retire already proved the
+            // publisher stopped but could not prove the canonical neutral+detach -- Suspend must still
+            // re-run the pulse-clear / rumble-stop / SAME-device neutral path below, because the
+            // attached device may still be holding the last non-neutral report.
+            var publisher = _publisher;
+            var publisherWasRunning = publisher?.IsRunning == true;
+            AppLog.Info("ControllerPresentation", "Presentation suspend pause started.",
+                ("Event", "PresentationSuspendPauseStarted"), ("Presentation", kind), ("PublisherWasRunning", publisherWasRunning), ("OverlayPaused", _overlayPaused));
+
+            // 1. Stop + prove the publisher joined. Never write neutral underneath a possibly-live
+            //    publisher; never detach here (sections 7.1 / 7.3).
+            if (publisherWasRunning)
+            {
+                try
+                {
+                    await publisher!.StopAsync().ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("ControllerPresentation", "Presentation publisher could not be stopped for Suspend; pause stays unsafe.", exception,
+                        ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStopThrew"));
+                    return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStopThrew");
+                }
+                if (publisher!.IsRunning)
+                {
+                    AppLog.Warn("ControllerPresentation", "Presentation publisher still running after StopAsync for Suspend; pause stays unsafe.", null,
+                        ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
+                    return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStillRunning");
+                }
+            }
+
+            // 2. Clear any pending/active synthetic Steam/QuickAccess pulse (section 7.5).
+            _systemButtonOverlay.Clear();
+
+            // 3-6. Clear the feedback callback, DRAIN any in-progress physical rumble write, then
+            //       request a final physical STOP (sections 7.1 / 12). Reuses the #488 helper.
+            DisarmFeedbackAndStopLocked("Suspend");
+
+            // 7. Write the SAME attached device neutral. A rejected write on a proven-stopped
+            //    publisher is a real output-safety failure: fail-close the current presentation
+            //    through the existing owner, no alternate-presentation fallback (section 7.4). A
+            //    retained SteamDeck kind with no session left to write through is equally unsafe.
+            bool neutral;
+            if (kind == AddonPresentationKind.Xbox360)
+            {
+                neutral = _viiper!.SetXbox360State(default);
+            }
+            else if (_deckSession is { } deckSession)
+            {
+                neutral = deckSession.SetNeutral();
+            }
+            else
+            {
+                AppLog.Error("ControllerPresentation", "SteamDeck suspend pause has no session to write neutral through; pause stays unsafe.", null,
+                    ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "SteamDeckSessionMissing"));
+                return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, "SteamDeckSessionMissing");
+            }
+            if (!neutral)
+            {
+                AppLog.Error("ControllerPresentation", "Neutral write rejected on a stopped publisher during Suspend; retiring the current presentation.", null,
+                    ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "NeutralRejected"));
+                if (!await RetireActivePresentationCoreAsync("SuspendNeutralRejected").ConfigureAwait(false))
+                    return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, "NeutralRejectedRetireFailed");
+                return new(SuspendPauseOutcome.NeutralRejectedPresentationRetired, "NeutralRejected");
+            }
+
+            // 8. Keep the typed device attached (section 7.1 step 8) -- a healthy device is not
+            //    detached/recreated merely because Windows is going to sleep.
+            AppLog.Info("ControllerPresentation", "Presentation suspend paused neutral.",
+                ("Event", "PresentationSuspendPausedNeutral"), ("Presentation", kind), ("PublisherWasRunning", publisherWasRunning));
+            return new(SuspendPauseOutcome.Paused, "Paused");
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<SuspendResumeResult> ResumeAfterSuspendAsync(
+        IMsiClawPreparedInputSource? source, Func<SteamPresentationSnapshot> captureSnapshot, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_suspendPaused)
+                return new(SuspendResumeOutcome.NotPaused, "NotPaused");
+
+            // Section 10.1: the physical source is not available yet -> keep the suspend pause and
+            // neutral/stopped output. The existing PR8/PR10 recovery repairs the source and re-enters
+            // this release path through the "PhysicalInputRecovered" reconcile.
+            if (source is null || !source.IsRunning)
+            {
+                AppLog.Info("ControllerPresentation", "Presentation resume deferred; physical source unavailable.",
+                    ("Event", "PresentationResumeDeferredSourceUnavailable"), ("Presentation", _activeKind?.ToString() ?? "None"));
+                return new(SuspendResumeOutcome.DeferredSourceUnavailable, "SourceUnavailable");
+            }
+
+            AppLog.Info("ControllerPresentation", "Presentation resume requested.",
+                ("Event", "PresentationResumeRequested"), ("Presentation", _activeKind?.ToString() ?? "None"), ("OverlayPaused", _overlayPaused));
+
+            // Section 10.5: Overlay capture owns its own neutral pause. Suspend safety is established
+            // here, so clear the suspend fact, but leave game-facing publication stopped -- the later
+            // ResumeAfterOverlayAsync is responsible for ending the visible Overlay session.
+            if (_overlayPaused)
+            {
+                _suspendPaused = false;
+                AppLog.Info("ControllerPresentation", "Presentation suspend pause released; Overlay capture still owns neutral pause.",
+                    ("Event", "PresentationResumeLeftNeutral"), ("Reason", "OverlayPaused"));
+                return new(SuspendResumeOutcome.LeftNeutral, "OverlayPaused");
+            }
+
+            if (_disposed)
+            {
+                _suspendPaused = false;
+                return new(SuspendResumeOutcome.LeftNeutral, "OwnerDisposed");
+            }
+
+            // Section 10.2: capture the fresh Steam/BPM desired kind at the actual resume boundary --
+            // never the pre-sleep desired presentation.
+            var desired = captureSnapshot().WantsSteamDeck ? AddonPresentationKind.SteamDeck : AddonPresentationKind.Xbox360;
+
+            // Section 7.2 pause case: the ACTUAL empty state -> nothing to resume. Review #490 (3rd
+            // pass): apply the SAME structural residual-attachment proof PauseForSuspendAsync requires
+            // before releasing the pause -- a rejected initial neutral write + failed cleanup detach
+            // can leave a residual attached device while both managed fields stay null, and that
+            // residual ownership must stay fail-closed across Resume too, not just across Suspend.
+            if (_activeKind is null && _publisher is null)
+            {
+                if (!TryProveNoResidualPresentationLocked(out var residualReason))
+                {
+                    AppLog.Warn("ControllerPresentation", "Presentation suspend pause retained on Resume; residual typed-device ownership evidence unresolved.", null,
+                        ("Event", "PresentationResumeDeferredUnsafePresentation"), ("Reason", residualReason));
+                    return new(SuspendResumeOutcome.DeferredUnsafePresentation, residualReason);
+                }
+
+                _suspendPaused = false;
+                AppLog.Info("ControllerPresentation", "Presentation suspend pause released; no attached presentation, reconcile required.",
+                    ("Event", "PresentationResumeReconcileRequired"), ("DesiredPresentation", desired));
+                return new(SuspendResumeOutcome.ReconcileRequired, "NoActivePresentation");
+            }
+
+            // The inverse impossible state (a publisher with no active kind) is never resumed through.
+            if (_activeKind is not { } kind)
+            {
+                AppLog.Warn("ControllerPresentation", "Presentation suspend pause retained on Resume; publisher present without an active presentation kind.", null,
+                    ("Event", "PresentationResumeDeferredUnsafePresentation"), ("Reason", "InconsistentPresentationState"));
+                return new(SuspendResumeOutcome.DeferredUnsafePresentation, "InconsistentPresentationState");
+            }
+
+            // A retained active kind with a null publisher (PauseForSuspendAsync already proved this
+            // device neutral before Sleep, per review #490 1st pass) has no publisher object to
+            // restart -- release the pause and let the existing PR7 reconcile retry detach/re-attach.
+            if (_publisher is not { } publisher)
+            {
+                _suspendPaused = false;
+                AppLog.Info("ControllerPresentation", "Presentation suspend pause released; no publisher to restart, reconcile required.",
+                    ("Event", "PresentationResumeReconcileRequired"), ("ActivePresentation", kind), ("DesiredPresentation", desired));
+                return new(SuspendResumeOutcome.ReconcileRequired, "PublisherNotAttached");
+            }
+
+            // Section 10.4: desired kind changed during Sleep -> do not briefly restart the old
+            // publisher; leave it stopped + neutral and let the existing PR7 switch do the transition.
+            if (desired != kind)
+            {
+                _suspendPaused = false;
+                AppLog.Info("ControllerPresentation", "Presentation suspend pause released; desired presentation changed, PR7 switch required.",
+                    ("Event", "PresentationResumeReconcileRequired"), ("ActivePresentation", kind), ("DesiredPresentation", desired));
+                return new(SuspendResumeOutcome.ReconcileRequired, "DesiredKindChanged");
+            }
+
+            // Section 10.6: the typed device must still be proven structurally attached before the
+            // publisher is restarted against it -- otherwise clear the pause and let the existing
+            // reconcile / fail-close policy run. No sleep-only attachment repair here.
+            if (_viiper is not { State: CanonicalViiperRuntimeState.Ready })
+            {
+                _suspendPaused = false;
+                return SuspendResumeReconcile("ViiperNotReady:" + (ViiperState?.ToString() ?? "Unavailable"), kind);
+            }
+            if (kind == AddonPresentationKind.Xbox360)
+            {
+                if (!_viiper!.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                {
+                    _suspendPaused = false;
+                    return SuspendResumeReconcile("Xbox360AttachmentNotAttached:" + attachment, kind);
+                }
+            }
+            else
+            {
+                if (_deckSession is not { State: CanonicalSteamDeckSessionState.Active } session)
+                {
+                    _suspendPaused = false;
+                    return SuspendResumeReconcile("SteamDeckSessionNotActive:" + (_deckSession?.State.ToString() ?? "None"), kind);
+                }
+                if (!session.TryGetTrackedAttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                {
+                    _suspendPaused = false;
+                    return SuspendResumeReconcile("SteamDeckAttachmentNotAttached:" + attachment, kind);
+                }
+            }
+
+            // Section 10.3: same kind + healthy source + Ready VIIPER + attached device + no Overlay
+            // pause -> restart the SAME publisher object, re-arm feedback for the SAME presentation.
+            // No detach, no attach, no VIIPER recreation.
+            try
+            {
+                publisher.Start();
+            }
+            catch (Exception exception)
+            {
+                _suspendPaused = false;
+                AppLog.Error("ControllerPresentation", "Publisher restart threw after Suspend; leaving output neutral for PR7 reconcile.", exception,
+                    ("Event", "PresentationResumeReconcileRequired"), ("Presentation", kind));
+                return new(SuspendResumeOutcome.ReconcileRequired, "PublisherStartThrew");
+            }
+
+            ArmFeedbackForActivePresentationLocked();
+            _suspendPaused = false;
+            AppLog.Info("ControllerPresentation", "Presentation resume restarted the same publisher.",
+                ("Event", "PresentationResumeSamePublisher"), ("Presentation", kind));
+            return new(SuspendResumeOutcome.SamePublisherResumed, "SamePublisher");
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Review #490 (3rd pass): the shared structural proof that no residual typed-device
+    /// attachment/ownership evidence survives when both <see cref="_activeKind"/> and
+    /// <see cref="_publisher"/> are null. A rejected INITIAL neutral write followed by a failed
+    /// cleanup detach (in <c>AttachXbox360Async</c> / <c>AttachSteamDeckAsync</c>) never commits
+    /// either managed field, so their emptiness alone is not proof of "nothing attached". Shared by
+    /// <see cref="PauseForSuspendAsync"/> and the empty-state branch of
+    /// <see cref="ResumeAfterSuspendAsync"/> so Suspend and Resume apply the identical fail-close
+    /// rule. Assumes <see cref="_gate"/> is already held.</summary>
+    private bool TryProveNoResidualPresentationLocked(out string reason)
+    {
+        // A retained Deck session is explicit residual ownership evidence from a failed detach.
+        if (_deckSession is not null)
+        {
+            reason = "ResidualSteamDeckSession";
+            return false;
+        }
+
+        // X360 has no separate managed session field, so prove the canonical device is detached.
+        if (_viiper is { State: CanonicalViiperRuntimeState.Ready } runtime)
+        {
+            if (!runtime.TryGetXbox360AttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Detached)
+            {
+                reason = "ResidualXbox360Attachment:" + attachment;
+                return false;
+            }
+        }
+        else if (_viiper is { State: CanonicalViiperRuntimeState.Unsafe })
+        {
+            reason = "ViiperUnsafe";
+            return false;
+        }
+
+        reason = "None";
+        return true;
+    }
+
+    private static SuspendPauseResult SuspendPauseBlocked(string reason)
+    {
+        AppLog.Info("ControllerPresentation", "Presentation suspend pause not attempted.",
+            ("Event", "PresentationSuspendPauseBlocked"), ("Reason", reason));
+        return new(SuspendPauseOutcome.Blocked, reason);
+    }
+
+    private static SuspendResumeResult SuspendResumeReconcile(string reason, AddonPresentationKind kind)
+    {
+        AppLog.Warn("ControllerPresentation", "Presentation suspend pause released; structural attachment not proven, reconcile required.", null,
+            ("Event", "PresentationResumeReconcileRequired"), ("Presentation", kind), ("Reason", reason));
+        return new(SuspendResumeOutcome.ReconcileRequired, reason);
     }
 
     /// <summary>Retire ONLY the current active presentation (stop/join publisher -&gt; canonical

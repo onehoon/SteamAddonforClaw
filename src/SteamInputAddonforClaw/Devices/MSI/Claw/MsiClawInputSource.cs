@@ -39,6 +39,12 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     private StateBox _latestState = new(NeutralState());
     public ControllerState LatestState => Volatile.Read(ref _latestState).Value;
 
+    /// <summary>Full1902 Suspend/Resume section 9: overwrite ONLY the published snapshot with neutral.
+    /// This is the exact write the poll loop's finally block already performs on stop; it never
+    /// touches the DirectInput session, its generation, or the <see cref="StateChanged"/> event. The
+    /// next successful poll read writes the current mapped state straight back.</summary>
+    public void ResetLatestStateToNeutral() => Volatile.Write(ref _latestState, new StateBox(NeutralState()));
+
     internal static bool IsM1Pressed(ControllerState state) => state.Auxiliary[M1AuxiliaryIndex];
     internal static bool IsM2Pressed(ControllerState state) => state.Auxiliary[M2AuxiliaryIndex];
 

@@ -210,6 +210,37 @@ public sealed class MsiClawInputSourceTests
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
     }
 
+    [Fact] // Full1902 Suspend/Resume section 9 / 16.7
+    public async Task ResetLatestStateToNeutral_neutralizes_the_snapshot_without_stopping_the_session_and_the_next_read_restores_it()
+    {
+        var device = new FakeDevice(State(15)); // steady non-neutral physical state (M2 held)
+        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902)], device);
+        var source = new MsiClawInputSource(enumerator);
+        var summaryTask = ObserveSummary(source);
+        var nonNeutral = new ControllerState(new AuxiliaryButtonState([false, true]));
+
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
+        Assert.True(SpinWait.SpinUntil(() => source.LatestState == nonNeutral, AwaitTimeout));
+        var readsBefore = device.ReadCount;
+
+        source.ResetLatestStateToNeutral();
+
+        // The published snapshot is immediately neutral; the DirectInput session is untouched.
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
+        Assert.True(source.IsRunning);
+        Assert.Equal(1, enumerator.CreateCount); // no reacquire / new session
+
+        // The next successful poll writes the current mapped physical state straight back, even
+        // though no StateChanged transition is raised (the value equals the previous mapped state).
+        Assert.True(SpinWait.SpinUntil(() => source.LatestState == nonNeutral, AwaitTimeout));
+        Assert.True(device.ReadCount > readsBefore);
+
+        await source.StopAsync();
+        var summary = await summaryTask.WaitAsync(AwaitTimeout);
+        Assert.Equal(MsiClawInputStopReason.Stopped, summary.StopReason);
+        Assert.Equal(1, summary.TestSession); // same session throughout
+    }
+
     [Fact]
     public async Task PersistentKnownInvalidInitialState_StopsAndCleansUpAfterBoundedAllowance()
     {
