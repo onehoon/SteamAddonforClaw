@@ -1,83 +1,33 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Views;
 
+/// <summary>Full1902 Cleanup J: the Vibration Test page is parked as a static, unavailable
+/// placeholder for a future Full1902 rumble feature. Entering or leaving it performs no Runtime
+/// work -- there is no diagnostic session, no state subscription, and no vibration RPC. The buttons
+/// stay disabled and the status text says the feature is unavailable in this build.</summary>
 public sealed partial class VibrationTestPage : UserControl
 {
-    private IAddonFrontendControl? _frontend;
-    private bool _active;
     public event EventHandler? BackRequested;
     public VibrationTestPage() => InitializeComponent();
-    internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap) { _frontend = frontend; }
 
-    /// <summary>Page entry: opens the dedicated diagnostic session (so a file exists even if no
-    /// command is ever run), subscribes to live state changes, and pulls a fresh Test Mode / Steam
-    /// Deck output status so the buttons and status text reflect current reality rather than the
-    /// state captured once at process startup.</summary>
+    // Kept for the existing MainWindow navigation shell; the frontend/bootstrap are not used while
+    // the feature is unavailable.
+    internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap) { }
+
     internal void Activate()
     {
-        _active = true;
-        if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated;
-        _ = OpenSessionAsync();
-        _ = RefreshAsync();
-    }
-
-    private async Task OpenSessionAsync()
-    {
-        if (_frontend is null) return;
-        try { await _frontend.OpenVibrationTestSessionAsync(); }
-        catch (Exception exception) { AppLog.Warn("Window", "Vibration test session open failed.", exception, ("Reason", exception.GetType().Name)); }
-    }
-
-    /// <summary>Page exit, however it happens (Back button, mouse-back, or navigating elsewhere):
-    /// unsubscribes from live state changes and closes the dedicated Vibration Test diagnostic
-    /// session (cancels any pending developer-owned delayed STOP and issues a best-effort physical
-    /// STOP so leaving the page never leaves the motors running or a stale STOP armed).</summary>
-    internal void Deactivate()
-    {
-        _ = DeactivateAsync();
-    }
-
-    internal async Task DeactivateAsync()
-    {
-        if (!_active) return;
-        _active = false;
-        if (_frontend is not null) _frontend.StateInvalidated -= OnStateInvalidated;
-        if (_frontend is null) return;
-        try { await _frontend.CloseVibrationTestSessionAsync().ConfigureAwait(true); }
-        catch (Exception exception) { AppLog.Warn("Window", "Vibration test session close failed.", exception, ("Reason", exception.GetType().Name)); }
-    }
-
-    private void OnStateInvalidated(object? sender, EventArgs e)
-    {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (_active)
-                _ = RefreshAsync();
-        });
-    }
-
-    internal async Task RefreshAsync()
-    {
-        if (_frontend is null) return;
-        _ = await _frontend.GetBootstrapAsync();
-
-        // Full1902 Cleanup A removed the legacy Steam-session routing runtime that owned the
-        // developer vibration transport. The test is unavailable until a Full1902 rumble path exists.
         RumbleButton.IsEnabled = false;
         HapticButton.IsEnabled = false;
         StopButton.IsEnabled = false;
-
         StatusText.Text = "The developer vibration test is unavailable in this build.";
     }
 
+    internal void Deactivate() { }
+
+    internal Task DeactivateAsync() => Task.CompletedTask;
+
     private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
-    private async void Rumble_Click(object s, RoutedEventArgs e) => await RunAsync(FrontendVibrationTestCommand.Rumble);
-    private async void Haptic_Click(object s, RoutedEventArgs e) => await RunAsync(FrontendVibrationTestCommand.Haptic);
-    private async void Stop_Click(object s, RoutedEventArgs e) => await RunAsync(FrontendVibrationTestCommand.Stop);
-    private async Task RunAsync(FrontendVibrationTestCommand command)
-    { if (_frontend is null) return; var result = await _frontend.RunVibrationTestAsync(command); ResultText.Text = $"{command}: {result.Reason}"; }
 }

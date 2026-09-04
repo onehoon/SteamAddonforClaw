@@ -317,7 +317,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // Disabled-mode physical acquisition + Win+G arm is still committing, so Enable-and-Restart
             // never races the physical owner. Otherwise the raw lower-level Runtime safety decision.
             () => Volatile.Read(ref _disabledControllerStartupPending) != 0
-                ? new SteamInputAddonforClaw.Lifecycle.UserTerminationDecision(false, SteamInputAddonforClaw.Lifecycle.UserTerminationBlockReason.RoutingTransition)
+                ? new SteamInputAddonforClaw.Lifecycle.UserTerminationDecision(false, SteamInputAddonforClaw.Lifecycle.UserTerminationBlockReason.ControllerAuthorityTransition)
                 : _runtimeHost.EvaluateUserTermination(),
             async token =>
             {

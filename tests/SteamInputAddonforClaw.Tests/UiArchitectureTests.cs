@@ -66,14 +66,23 @@ public sealed class UiArchitectureTests
         Assert.Contains("XamlControlsResources", appXaml, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Vibration_test_state_invalidations_are_marshaled_to_the_ui_queue()
+    [Fact] // Full1902 Cleanup J: the Vibration Test page stays in the Developer navigation shell but
+           // is a static unavailable placeholder -- it must not open/close a Runtime vibration session
+           // or send any vibration RPC while the feature is disconnected.
+    public void Vibration_test_page_is_a_static_unavailable_shell_with_no_vibration_rpc_dependency()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
+        var mainWindowXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
-        Assert.Contains("DispatcherQueue.TryEnqueue", page, StringComparison.Ordinal);
-        Assert.Contains("if (_active)", page, StringComparison.Ordinal);
+        Assert.Contains("VibrationTestPage", mainWindowXaml, StringComparison.Ordinal);
+        Assert.Contains("unavailable in this build", page, StringComparison.Ordinal);
+        foreach (var forbidden in new[] { "RunVibrationTestAsync", "OpenVibrationTestSessionAsync", "CloseVibrationTestSessionAsync" })
+        {
+            Assert.DoesNotContain(forbidden, page, StringComparison.Ordinal);
+            Assert.DoesNotContain(forbidden, mainWindow, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

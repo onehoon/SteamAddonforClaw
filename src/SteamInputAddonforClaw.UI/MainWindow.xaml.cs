@@ -94,7 +94,6 @@ public sealed partial class MainWindow : Window
     internal async Task CloseVibrationTestForUiShutdownAsync()
     {
         await VibrationTestContent.DeactivateAsync().ConfigureAwait(true);
-        await _frontend.CloseVibrationTestSessionAsync().ConfigureAwait(true);
         FanHardwareProbeContent.Deactivate();
     }
 

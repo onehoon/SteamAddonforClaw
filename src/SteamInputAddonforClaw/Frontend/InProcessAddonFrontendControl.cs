@@ -32,8 +32,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<string?> _processPath;
     private readonly bool _oem1MappingAvailable;
     private int _shutdownStarted;
-    private readonly object _vibrationSessionGate = new();
-    private Feedback.VibrationTestSessionWriter? _vibrationSession;
     private readonly object _clawSensorProbeGate = new();
     private ClawSensorProbeSession? _clawSensorProbe;
     private readonly object _fanProbeGate = new();
@@ -378,110 +376,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(new FrontendDeveloperSnapshot(_developer.IsEnabled));
     }
 
-    /// <summary>Called when the Vibration Test detail page is entered: creates the dedicated session
-    /// log immediately (even if no command is ever run) so the file always has a header recording
-    /// current Test Mode/routing state at page entry. Idempotent -- a call while a session is
-    /// already open returns that same session's file rather than starting a second one.</summary>
-    public Task<FrontendVibrationTestResult> OpenVibrationTestSessionAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        var session = GetOrOpenVibrationSession();
-        return Task.FromResult(new FrontendVibrationTestResult(true, "SessionOpened", session.FilePath));
-    }
-
-    public Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        _ = cancellationToken;
-        // Full1902 Cleanup A removed the legacy Steam-session routing runtime that owned the developer
-        // vibration-test rumble transport. The diagnostic is unavailable until a dedicated Full1902
-        // rumble path is designed. The session log is still opened so page entry keeps a header file.
-        var session = GetOrOpenVibrationSession();
-        WriteVibrationSessionIfCurrent(session, $"Command={command} Opcode={VibrationTestOpcode(command)} Result=Unavailable Reason=LegacyRoutingRemoved");
-        return Task.FromResult(new FrontendVibrationTestResult(false, "The developer vibration test is unavailable in this build.", session.FilePath));
-    }
-
-    /// <summary>Pure mapping, factored out for direct unit testing: <see cref="Feedback.DeveloperVibrationTestOutcome.Succeeded"/>
-    /// only means the write was ACCEPTED (authority/sequence), not that the physical MSI HID write
-    /// succeeded -- a truthful diagnostic result must require the actual write(s) to have succeeded
-    /// too, or a real hardware failure would be reported to the page as "Succeeded".</summary>
-    internal static (bool Succeeded, string Reason) MapVibrationTestOutcome(Feedback.DeveloperVibrationTestOutcome outcome)
-    {
-        var commandPhysicalOk = outcome.CommandResult is { } commandResult && commandResult.Succeeded;
-        var stopPhysicalOk = outcome.StopResult is not { } stopResult || stopResult.Succeeded;
-        var succeeded = outcome.Succeeded && commandPhysicalOk && stopPhysicalOk;
-        var reason = !outcome.Succeeded
-            ? "Feedback bridge is unavailable, superseded, or the test was cancelled."
-            : !commandPhysicalOk
-                ? $"Physical write failed: {outcome.CommandResult?.Reason ?? "Unknown"}"
-                : !stopPhysicalOk
-                    ? $"Physical STOP failed: {outcome.StopResult?.Reason ?? "Unknown"}"
-                    : "Succeeded";
-        return (succeeded, reason);
-    }
-
-    /// <summary>Test-only seam so the disposed-writer race fix can be exercised directly without
-    /// reproducing the exact 250ms async interleaving through a real runtime.</summary>
-    internal Feedback.VibrationTestSessionWriter? TestOnly_CurrentVibrationSession { get { lock (_vibrationSessionGate) return _vibrationSession; } }
-
-    /// <summary>Writes to the session only if it is still the currently open one: a page exit can
-    /// close (detach + dispose) the session while an in-flight EB/EA developer command is still
-    /// awaiting its 250ms delayed STOP, and writing to an already-disposed <c>StreamWriter</c> would
-    /// throw from an <c>async void</c> UI click handler. Serializes against the same
-    /// <see cref="_vibrationSessionGate"/> <see cref="CloseVibrationTestSessionAsync"/> detaches
-    /// under, so a write either completes before detach or observes the session is stale and no-ops.</summary>
-    internal void WriteVibrationSessionIfCurrent(Feedback.VibrationTestSessionWriter session, string message)
-    {
-        lock (_vibrationSessionGate)
-        {
-            if (ReferenceEquals(_vibrationSession, session)) session.Write(message);
-        }
-    }
-
-    /// <summary>Called when the Vibration Test detail page is left, regardless of how: cancels any
-    /// pending developer-owned delayed STOP so it cannot later stop newer real Steam feedback, issues
-    /// a best-effort production-path STOP, and flushes/closes the dedicated session log.</summary>
-    public async Task<FrontendVibrationTestResult> CloseVibrationTestSessionAsync(CancellationToken cancellationToken = default)
-    {
-        Feedback.VibrationTestSessionWriter? session;
-        lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
-        if (session is null) return new FrontendVibrationTestResult(true, "NoSessionActive", null);
-
-        session.Write("SessionClosed CancelledPendingDeveloperStop=False BestEffortStopRequested=False Reason=DeveloperVibrationTestUnavailable");
-        var path = session.FilePath;
-        await session.DisposeAsync().ConfigureAwait(false);
-        return new FrontendVibrationTestResult(true, "SessionClosed", path);
-    }
-
-    private Feedback.VibrationTestSessionWriter GetOrOpenVibrationSession()
-    {
-        lock (_vibrationSessionGate)
-        {
-            if (_vibrationSession is { } existing) return existing;
-            var session = new Feedback.VibrationTestSessionWriter(AppLog.DirectoryPath);
-            var appVersion = typeof(InProcessAddonFrontendControl).Assembly.GetName().Version?.ToString() ?? "Unknown";
-            session.Write($"SessionStarted AppVersion={appVersion} TestModeEnabled={_developer.IsEnabled} DeveloperVibrationTest=Unavailable");
-            _vibrationSession = session;
-            return session;
-        }
-    }
-
-    private static string VibrationTestOpcode(FrontendVibrationTestCommand command) => command switch
-    {
-        FrontendVibrationTestCommand.Rumble => "0xEB",
-        FrontendVibrationTestCommand.Haptic => "0xEA",
-        FrontendVibrationTestCommand.Stop => "0xEB(zero)",
-        _ => "Unknown"
-    };
-
-    private static string DecodeFields(Feedback.SteamDeckFeedbackDecodeResult? decoded) => decoded switch
-    {
-        { Command: Feedback.SteamDeckFeedbackCommand.Rumble, Rumble: var rumble } => $"Decode=Rumble Large16={rumble.LargeMotor} Small16={rumble.SmallMotor} Large8={rumble.LargeMotor >> 8} Small8={rumble.SmallMotor >> 8}",
-        { Command: Feedback.SteamDeckFeedbackCommand.Haptic, Rumble: var rumble, Haptic: var haptic, Strength8: var strength } => $"Decode=Haptic PayloadLength={haptic?.DeclaredPayloadLength} ModernSdl={haptic?.IsModernSdlLayout} Side={haptic?.Side} Type={haptic?.CommandType} UiIntensity={haptic?.UiIntensity} DbGain={haptic?.DbGain} Frequency={haptic?.Frequency} DurationMs={haptic?.DurationMilliseconds} NoiseIntensity={haptic?.NoiseIntensity} LfoFrequency={haptic?.LfoFrequency} LfoDepth={haptic?.LfoDepth} RandomToneGain={haptic?.RandomToneGain} ScriptId={haptic?.ScriptId} SweepStartFrequency={haptic?.SweepStartFrequency} SweepEndFrequency={haptic?.SweepEndFrequency} FallbackStrength8={strength} FallbackStrength16={rumble.LargeMotor}",
-        { Command: Feedback.SteamDeckFeedbackCommand.HapticPulse, HapticPulse: var pulse } => $"Decode=HapticPulse PayloadLength={pulse?.DeclaredPayloadLength} LinuxLayout={pulse?.IsLinuxLayout} Side={pulse?.Side} OnDurationUs={pulse?.OnDurationMicroseconds} OffIntervalUs={pulse?.OffIntervalMicroseconds} Count={pulse?.Count} GainRaw={pulse?.GainRaw} PhysicalTranslation=None",
-        _ => "Decode=Unavailable"
-    };
-
     public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -547,14 +441,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             }
             catch (Exception exception) { AppLog.Warn("MsiFanProbe", "Armed fan probe shutdown cleanup failed.", exception); }
         }
-        Feedback.VibrationTestSessionWriter? session;
-        lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
-        if (session is not null)
-        {
-            session.Write("SessionClosed Reason=RuntimeShutdown DeveloperVibrationTest=Unavailable");
-            session.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-
         ClawSensorProbeSession? probe;
         lock (_clawSensorProbeGate) { probe = _clawSensorProbe; _clawSensorProbe = null; }
         if (probe is not null)

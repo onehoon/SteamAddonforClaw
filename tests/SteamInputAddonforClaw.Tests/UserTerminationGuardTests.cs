@@ -35,12 +35,12 @@ public sealed class UserTerminationGuardTests
     [Fact]
     public void Compose_preserves_an_existing_lower_level_block_reason()
     {
-        var inner = new UserTerminationDecision(false, UserTerminationBlockReason.RoutingTransition);
+        var inner = new UserTerminationDecision(false, UserTerminationBlockReason.ControllerAuthorityTransition);
 
         var decision = UserTerminationComposition.Compose(inner, controllerRuntimeMandatory: true);
 
         Assert.False(decision.CanTerminate);
-        Assert.Equal(UserTerminationBlockReason.RoutingTransition, decision.Reason);
+        Assert.Equal(UserTerminationBlockReason.ControllerAuthorityTransition, decision.Reason);
     }
 
     [Fact]
