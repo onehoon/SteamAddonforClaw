@@ -72,7 +72,9 @@ internal static class AddonRuntimeCompositionFactory
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
                 new ViiperRuntimeInspector()),
-            () => steamRuntime.State,
+            // Full1902 Cleanup A: raw Steam/BPM presentation facts for the Steam status card --
+            // the legacy effective-routing-session state is no longer consulted.
+            () => steamRuntime.CapturePresentationSnapshot(),
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             captureFull1902AddonStatus);
         // Full1902 A2 section 11: sleep/resume while Center M is Disabled must not call the legacy

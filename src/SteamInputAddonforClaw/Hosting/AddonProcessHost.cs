@@ -1109,8 +1109,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// existing process-owned facts positively prove a healthy Center M Disabled / Addon-authority
     /// controller path -- an exactly-Disabled startup that has finished committing, with a running
     /// PR5 physical input source and an attached virtual presentation. Every other state returns
-    /// <see langword="null"/>, which keeps the existing legacy <c>AddonStatusEvaluator</c> result
-    /// (so incomplete / recovering / blocked states are never falsely reported Ready). No new PnP /
+    /// <see langword="null"/>, which falls back to <c>SystemStatusProvider</c>'s non-owned status
+    /// mapping (so incomplete / recovering / blocked states are never falsely reported Ready). No new PnP /
     /// HidHide / VIIPER probe is done here -- those owners already passed their real safety
     /// boundaries before this state was reached.</summary>
     /// <summary>The already-known boot-time authority fact: this Runtime booted into an exactly-Disabled

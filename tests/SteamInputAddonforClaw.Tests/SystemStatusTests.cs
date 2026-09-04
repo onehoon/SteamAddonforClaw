@@ -46,40 +46,52 @@ public sealed class SystemStatusTests
         Assert.Equal([ControllerSoftwareKind.MsiCenterM], sorted.Select(item => item.Kind));
     }
 
-    [Theory]
-    [InlineData((int)RoutingDecisionKind.Eligible, (int)AddonOperationalStatus.Ready)]
-    [InlineData((int)RoutingDecisionKind.WaitingForSteam, (int)AddonOperationalStatus.WaitingForSteam)]
-    [InlineData((int)RoutingDecisionKind.SetupRequired, (int)AddonOperationalStatus.SetupRequired)]
-    [InlineData((int)RoutingDecisionKind.Indeterminate, (int)AddonOperationalStatus.Indeterminate)]
-    public void AddonStatus_MapsCanonicalRoutingDecision(int kindValue, int expectedValue)
-    {
-        var status = AddonStatusEvaluator.Map(new((RoutingDecisionKind)kindValue, RoutingDecisionReason.Eligible), Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
+    // ---- Full1902 Cleanup A: non-owned Addon status (Center M Enabled / startup still settling)
+    //      derives from the safety/setup facts, not a Steam-session routing decision. ----
 
-        Assert.Equal((AddonOperationalStatus)expectedValue, status.Status);
+    [Fact]
+    public async Task NonOwnedStatus_HealthySupportedEnvironment_IsPassiveCenterMOwned()
+    {
+        var snapshot = await NonOwnedProvider(Prerequisites(PrerequisiteStatus.Ready)).CaptureAsync();
+
+        Assert.Equal(AddonOperationalStatus.Passive, snapshot.Addon.Status);
+        Assert.Contains("MSI Center M", snapshot.Addon.Reason);
     }
 
     [Fact]
-    public void AddonStatus_UnsupportedHardwareMapsToUnsupportedPresentation()
+    public async Task NonOwnedStatus_MissingPrerequisites_IsSetupRequired()
     {
-        var status = AddonStatusEvaluator.Map(
-            new(RoutingDecisionKind.Passive, RoutingDecisionReason.UnsupportedDevice),
-            Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
+        var snapshot = await NonOwnedProvider(Prerequisites(PrerequisiteStatus.Missing)).CaptureAsync();
 
-        Assert.Equal(AddonOperationalStatus.Unsupported, status.Status);
-        Assert.Contains("handheld model", status.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
+    }
+
+    [Fact]
+    public async Task NonOwnedStatus_UnsupportedHardware_IsUnsupported()
+    {
+        var provider = new SystemStatusProvider(
+            new FakeDeviceProvider(), SupportedProbeFactory(),
+            new FakeHardwareEvaluator(new(HardwareCompatibilityStatus.Unsupported, null, null, "test")),
+            [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))],
+            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
+            () => new SteamPresentationSnapshot(0, false), () => true);
+
+        var snapshot = await provider.CaptureAsync();
+
+        Assert.Equal(AddonOperationalStatus.Unsupported, snapshot.Addon.Status);
+        Assert.Contains("handheld model", snapshot.Addon.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task SystemStatusProvider_ReusesPrerequisiteAssessmentAndBuildsOneSnapshot()
     {
         var prerequisites = Prerequisites(PrerequisiteStatus.Missing);
-        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => true);
+        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))], new FakePrerequisiteInspector(prerequisites), () => new SteamPresentationSnapshot(0, false), () => true);
 
         var snapshot = await provider.CaptureAsync();
 
         Assert.Same(prerequisites, snapshot.Prerequisites);
         Assert.Equal([ControllerSoftwareKind.MsiCenterM], snapshot.ControllerSoftware.Select(item => item.Kind));
-        Assert.Equal(RoutingDecisionKind.SetupRequired, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
         Assert.True(snapshot.RecoverySafe);
     }
@@ -95,15 +107,36 @@ public sealed class SystemStatusTests
                 new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running))
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
-            () => SteamSessionState.FromRunningAppId(1),
+            () => new SteamPresentationSnapshot(1, false),
             () => false);
 
         var snapshot = await provider.CaptureAsync();
 
         Assert.False(snapshot.RecoverySafe);
-        Assert.Equal(RoutingDecisionKind.Indeterminate, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.Indeterminate, snapshot.Addon.Status);
     }
+
+    [Fact]
+    public async Task SystemStatusProvider_SteamCard_UsesRawPresentationFacts()
+    {
+        var running = await NonOwnedProvider(Prerequisites(PrerequisiteStatus.Ready), new SteamPresentationSnapshot(480, false)).CaptureAsync();
+        Assert.True(running.Steam.IsActive);
+        Assert.Equal(480u, running.Steam.RunningAppId);
+        Assert.Equal(SteamSessionSource.Actual, running.Steam.Source);
+
+        var bigPicture = await NonOwnedProvider(Prerequisites(PrerequisiteStatus.Ready), new SteamPresentationSnapshot(0, true)).CaptureAsync();
+        Assert.True(bigPicture.Steam.IsActive);
+        Assert.Equal(SteamSessionSource.BigPicture, bigPicture.Steam.Source);
+
+        var idle = await NonOwnedProvider(Prerequisites(PrerequisiteStatus.Ready), new SteamPresentationSnapshot(0, false)).CaptureAsync();
+        Assert.False(idle.Steam.IsActive);
+    }
+
+    private static SystemStatusProvider NonOwnedProvider(RuntimePrerequisiteAssessment prerequisites, SteamPresentationSnapshot? presentation = null) =>
+        new(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(),
+            new[] { (IControllerSoftwareStatusProvider)new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)) },
+            new FakePrerequisiteInspector(prerequisites),
+            () => presentation ?? new SteamPresentationSnapshot(0, false), () => true);
 
     // ---- Full1902 0903 cleanup section 9.1: optional Full1902 Addon-status override ----
 
@@ -112,7 +145,7 @@ public sealed class SystemStatusTests
             new ControllerEnvironmentAssessmentProvider(
                 [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning))]),
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
-            () => SteamSessionState.FromRunningAppId(0), () => true, capture);
+            () => new SteamPresentationSnapshot(0, false), () => true, capture);
 
     [Fact]
     public async Task Full1902_override_null_keeps_the_legacy_addon_status()

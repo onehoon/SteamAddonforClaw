@@ -49,7 +49,6 @@ internal sealed class SteamSessionRuntime : IDisposable
     }
 
     internal DeveloperTestModeState DeveloperTestModeState { get; }
-    internal SteamSessionState State => _effectiveSource.State;
     internal uint ActualRunningAppId => _runningAppIdSource.GetRunningAppId();
     internal event EventHandler<SteamSessionStateChangedEventArgs>? StateChanged;
     internal event Action<uint>? ActualRunningAppIdChanged;
@@ -67,18 +66,6 @@ internal sealed class SteamSessionRuntime : IDisposable
         if (_actualObservationStarted) return;
         _actualObservationStarted = true;
         _runningAppIdSource.Changed += OnActualRunningAppIdChanged;
-    }
-
-    /// <summary>
-    /// Starts the primary Steam session watcher and refreshes the effective state. Callers must
-    /// only invoke this when recovery is safe -- mirrors the previous inline
-    /// <c>if (recoverySafe) { watcher.Start(); effectiveSource.Refresh(); }</c> gate.
-    /// </summary>
-    internal void StartRoutingObservation()
-    {
-        _sessionWatcher.Start();
-        StartActualObservation();
-        _effectiveSource.Refresh();
     }
 
     /// <summary>One-shot raw Steam/BPM read for the Full-1902 first-presentation decision (work order

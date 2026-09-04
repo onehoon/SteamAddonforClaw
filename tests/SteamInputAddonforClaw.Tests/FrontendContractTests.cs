@@ -235,7 +235,6 @@ public sealed class FrontendContractTests
         uint steamAppId = 0,
         SteamSessionSource steamSource = SteamSessionSource.Actual,
         bool recoverySafe = true,
-        RoutingDecisionReason routingReason = RoutingDecisionReason.Eligible,
         PrerequisiteStatus hidHideStatus = PrerequisiteStatus.Ready,
         AddonOperationalStatus addonStatus = AddonOperationalStatus.Ready)
     {
@@ -246,7 +245,6 @@ public sealed class FrontendContractTests
             new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported),
             new(new(PrerequisiteKind.HidHide, hidHideStatus, "Test"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Test")),
             new(steamActive, steamAppId, steamSource),
-            new(RoutingDecisionKind.Eligible, routingReason),
             new(addonStatus, "Test"),
             recoverySafe);
 
