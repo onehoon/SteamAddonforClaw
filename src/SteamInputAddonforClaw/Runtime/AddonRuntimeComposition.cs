@@ -12,7 +12,6 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
-using SteamInputAddonforClaw.GameBar;
 
 namespace SteamInputAddonforClaw.Runtime;
 
@@ -30,20 +29,15 @@ internal static class AddonRuntimeCompositionFactory
         RecoveryManager recoveryManager,
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
-        bool hardwareSupported,
         // Full1902 A2 section 11: true only when Center M startup roots are exactly Enabled/Automatic
-        // (MSI / stock controller authority). It gates ONLY the stock PID1901 resume baseline. It is
-        // NOT permission to run the legacy Steam-session physical routing owner -- that owner is never
-        // production-composed (section 10).
+        // (MSI / stock controller authority). It gates ONLY the stock PID1901 resume baseline.
         bool stockCenterMAuthority,
-        WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
         Func<bool>? isLaunchAtWindowsStartupRequired = null,
         // Full1902 0903 cleanup (section 4.6): a read-only override for the final Addon operational
         // status, closing over AddonProcessHost's existing physical/presentation ownership facts.
         Func<AddonStatusSnapshot?>? captureFull1902AddonStatus = null)
     {
-        ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
