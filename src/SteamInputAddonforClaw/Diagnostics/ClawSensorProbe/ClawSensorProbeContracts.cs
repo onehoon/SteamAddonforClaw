@@ -215,8 +215,12 @@ internal sealed class ClawSensorProbeTimingStatistics
             if (readDurationMs >= longReadThresholdMs) _longReadCount++;
             if (freshAgeMs is { } age)
             {
-                _freshAgeMs = age;
+                // FreshAgeMs reflects the CURRENT freshness gap: a Fresh outcome means the source just
+                // reported, so the gap resets to zero even though the age passed in here is the pre-reset
+                // value measured just before RunAsync() updates lastFreshReport. MaxFreshAgeMs still keeps
+                // the peak, so a prior stale/quiet period remains visible in the report.
                 if (age > _maxFreshAgeMs) _maxFreshAgeMs = age;
+                _freshAgeMs = outcome == ClawSensorReadOutcome.Fresh ? 0 : age;
             }
             switch (outcome)
             {
@@ -412,8 +416,19 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
             .Concat(DroppedSampleCount > 0 ? new[] { "The diagnostic writer queue was full and samples were dropped." } : Array.Empty<string>())
             .Concat(_shutdownTimedOut ? new[] { "Sensor reader shutdown exceeded the bounded wait." } : Array.Empty<string>())
             .ToArray();
-        var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, Discovery = new { LegacyCategoryAll = _discovery?.LegacyCategoryAll, LegacyDirectTypeQueries = _discovery?.LegacyDirectTypeQueries, WinRtGyrometer = _discovery?.WinRtGyrometer, WinRtAccelerometer = _discovery?.WinRtAccelerometer }, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, SourceConfiguration = new { Gyroscope = _gyroConfiguration, Accelerometer = _accelConfiguration }, DataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false) }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
-        await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, cancellationToken);
+        var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, Discovery = new { LegacyCategoryAll = _discovery?.LegacyCategoryAll, LegacyDirectTypeQueries = _discovery?.LegacyDirectTypeQueries, WinRtGyrometer = _discovery?.WinRtGyrometer, WinRtAccelerometer = _discovery?.WinRtAccelerometer }, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, SourceConfiguration = new { Gyroscope = _gyroConfiguration, Accelerometer = _accelConfiguration }, LegacyCustomDataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false) }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
+        await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, ReportSerializerOptions), Encoding.UTF8, cancellationToken);
+    }
+
+    // Enums (Backend, UnitBasis, ...) must serialize as their named diagnostic values -- e.g. "WinRtGyrometer",
+    // "DegreesPerSecond" -- rather than System.Text.Json's default numeric ordinals, so the standalone report
+    // stays self-describing without the source enum declarations.
+    private static readonly JsonSerializerOptions ReportSerializerOptions = CreateReportSerializerOptions();
+    private static JsonSerializerOptions CreateReportSerializerOptions()
+    {
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        return options;
     }
     private static object? TimingSummaryOf(ClawSensorProbeTimingSnapshot? timing) => timing is null ? null : new
     {

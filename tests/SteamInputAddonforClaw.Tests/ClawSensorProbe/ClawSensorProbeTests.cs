@@ -621,6 +621,61 @@ public sealed class ClawSensorProbeTests
         Assert.Equal(1, timing.LongReadCount);
     }
 
+    [Fact] public void TimingStatistics_FreshOutcomeResetsCurrentAgeWhilePreservingMaxFreshAge()
+    {
+        // A prior stale/quiet gap must remain visible via MaxFreshAgeMs, but the CURRENT freshness age
+        // (FreshAgeMs) must reflect that the source just reported -- otherwise a snapshot taken right
+        // after recovery would still claim the source is 10 seconds stale.
+        var timing = new ClawSensorProbeTimingStatistics();
+        timing.Observe(ClawSensorReadOutcome.NoData, 1, 10_000);
+
+        timing.Observe(ClawSensorReadOutcome.Fresh, 2, 10_000, 5);
+
+        Assert.Equal(0, timing.FreshAgeMs);
+        Assert.Equal(10_000, timing.MaxFreshAgeMs);
+    }
+
+    [Fact] public async Task Writer_SerializesEnumsAsNamedValuesNotNumericOrdinals()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-enum-names-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var winRtGyro = new ClawSensorProbeCandidate("WinRT Gyrometer", "winrt-gyro", "Unavailable", "Unavailable", Backend: ClawSensorProbeBackend.WinRtGyrometer, UnitBasis: ClawSensorProbeUnitBasis.DegreesPerSecond);
+            var discovery = ClawSensorDiscovery.Select([winRtGyro, new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+            var writer = new ClawSensorProbeSessionWriter(root, "session");
+            writer.SetDiscovery(discovery);
+            await writer.DisposeAsync();
+
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.Contains("\"Backend\": \"WinRtGyrometer\"", report);
+            Assert.Contains("\"UnitBasis\": \"DegreesPerSecond\"", report);
+            Assert.DoesNotContain("\"Backend\": 1", report);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_ScopesCustomDataKeysToLegacyBackendInsteadOfGlobalField()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-legacy-keys-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var writer = new ClawSensorProbeSessionWriter(root, "session");
+            await writer.DisposeAsync();
+
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.Contains("\"LegacyCustomDataKeys\"", report);
+            Assert.DoesNotContain("\"DataKeys\"", report);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     [Fact] public async Task Writer_EmitsSchemaVersionTwoWithTimingSummaryAndNoMisleadingBackendField()
     {
         var root = Path.Combine(Path.GetTempPath(), "claw-probe-schema-v2-" + Guid.NewGuid().ToString("N"));
