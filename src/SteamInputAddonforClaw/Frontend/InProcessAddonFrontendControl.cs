@@ -1035,6 +1035,31 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode);
     }
 
+    /// <summary>Shared Quick Settings product seam (Shared Frontend V2, SF-V2-03 section 22/23):
+    /// Device is projected from <see cref="CaptureDeviceQuickSettingsAsync"/>; Profile is not
+    /// implemented yet and fails closed without any capture/scan side effect.</summary>
+    public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return pageId == QuickSettingsPageId.Device && appId is null
+            ? CaptureDeviceQuickSettingsPageAsync(cancellationToken)
+            : Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, appId));
+    }
+
+    private async Task<QuickSettingsPageSnapshot> CaptureDeviceQuickSettingsPageAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = await CaptureDeviceQuickSettingsAsync(cancellationToken).ConfigureAwait(false);
+        return QuickSettingsPresentation.BuildDevice(snapshot);
+    }
+
+    /// <summary>Shared Quick Settings mutation seam (section 22/24): validates and dispatches onto
+    /// the existing typed Device mutation methods via <see cref="QuickSettingsMutationAdapter"/>.</summary>
+    public Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return QuickSettingsMutationAdapter.MutateAsync(this, intent, cancellationToken);
+    }
+
     public Task<FrontendCenterMStartupSnapshot> CaptureCenterMStartupAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
