@@ -1,15 +1,15 @@
 # Steam Addon for Claw — Shared Frontend Architecture V2
 
 > **Date:** 2026-09-05  
-> **Status:** Current design authority for shared Runtime → frontend feature projection  
-> **Baseline reviewed:** `main` at `b97c012156b3734ce2230f7e469db91aad94b784`  
-> **Scope:** Addon Runtime, desktop Main UI, Steam QAM, Addon Quick Settings Overlay, typed frontend contracts, and surface-specific exposure boundaries
+> **Status:** Current design authority for shared Runtime/frontend projection and shared Quick Settings product semantics  
+> **Baseline reviewed:** `main` at `ed27976ff756ecb5bfc42569d642acb413b452a9` after PR #498  
+> **Scope:** Addon Runtime, desktop Main UI, Steam QAM, Addon Quick Settings Overlay, shared typed feature state, shared Quick Settings page semantics, surface-specific transport/admission, and renderer boundaries
 
 ---
 
 ## 1. Purpose
 
-The Addon now has three materially different user-facing frontend surfaces:
+The Addon now has three materially different frontend surfaces:
 
 ```text
 SteamInputAddonforClaw.UI.exe
@@ -22,885 +22,1180 @@ SteamInputAddonforClaw.Overlay.exe
 → Addon-owned native WinUI Quick Settings overlay
 ```
 
-All three need access to some of the same Runtime-owned feature state.
+The original Shared Frontend V2 decision was correct in one important way:
 
-The architecture must therefore share **truth and typed semantics** without creating duplicate feature owners, duplicate hardware readers, duplicate persisted state, or a generic cross-surface UI framework.
+```text
+Runtime feature truth must be shared.
+Frontend processes must remain disposable.
+```
 
-The target is:
+However, current product direction is now more specific for **Steam QAM and Addon Overlay**:
+
+> For shared Quick Settings pages such as Device and Profile, QAM and Overlay are intended to expose the **same product controls with the same names, order, value semantics, mutation behavior, and debounce policy**. The only intentional difference is how each surface renders and navigates those controls.
+
+Therefore the architecture must share one more layer than the previous version described.
+
+The target is now:
 
 ```text
 one Runtime authority per real feature
         ↓
-one typed frontend projection where sharing is useful
+one typed frontend feature projection
         ↓
-explicit per-surface transport/allowlist
+one shared Quick Settings product definition
         ↓
-surface-specific UI and interaction policy
+explicit surface admission + transport
+        ↓
+QAM renderer / Overlay renderer
 ```
 
-This document replaces the planning assumptions in `SHARED_FRONTEND_01_DEVICE_QUICK_SETTINGS_SNAPSHOT_WORK_ORDER.md` when they conflict with current `main`. The older work order remains useful as historical design rationale.
-
-`SHARED_FRONTEND_01_SURFACE_EXPOSURE_POLICY_ADDENDUM.md` remains conceptually valid and is incorporated here as a core rule.
+This is **not** a generic UI framework. It is a narrow shared product-definition layer for the Quick Settings surfaces that are intentionally kept in parity.
 
 ---
 
 ## 2. Required authority documents
 
-Read this document together with the current Full1902 authority set, in its documented precedence order:
+Read this document together with the current Full1902 authority set in its documented precedence order:
 
 1. `docs/Full 1902 Implementation/HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md`
 2. `docs/Full 1902 Implementation/REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md`
 3. `docs/Full 1902 Implementation/FULL_1902_IMPLEMENTATION_ARCHITECTURE.md`
-4. current `docs/work-order/` implementation work orders/addenda
+4. current `docs/work-order/*` implementation work orders/addenda
 
-Also read the current frontend/UI design documents:
+Also read:
 
 - `docs/appui/APP_UI_INFORMATION_ARCHITECTURE_2026-09-04.md`
-- `docs/overlayui/README.md`
-- `docs/overlayui/ADDON_QUICK_SETTINGS_OVERLAY_ARCHITECTURE.md`
 - `docs/overlayui/ADDON_QUICK_SETTINGS_OVERLAY_UI_DESIGN.md`
-- `docs/overlayui/OVERLAY_UI_IMPLEMENTATION_PR_PLAN.md`
-- `docs/shared-frontend/SHARED_FRONTEND_01_SURFACE_EXPOSURE_POLICY_ADDENDUM.md`
+- `docs/work-order/OQ4_CONTROLLER_CAPTURE_NEUTRAL_PUBLICATION_WORK_ORDER.md`
+- `docs/shared-frontend/SF_V2_01_DEVICE_QUICK_SETTINGS_SHARED_AGGREGATE_WORK_ORDER.md`
+- `docs/shared-frontend/SF_V2_02_OVERLAY_DEVICE_QUICK_SETTINGS_TRANSPORT_WORK_ORDER.md`
+- `docs/shared-frontend/SHARED_FRONTEND_IMPLEMENTATION_PR_PLAN_V2.md`
 
-When an older Overlay document says the Overlay process/transport is still design-only, current source and newer OQ work orders take precedence: the warm Overlay process, `.Overlay` transport, controller capture/navigation, five-tab shell, and tab-order transport now exist on `main`.
+SF-V2-01 and SF-V2-02 are completed implementation records. Where their future-UI planning differs from this document, this document is the current architecture authority.
 
 ---
 
-## 3. Frozen product/lifecycle invariants
+## 3. Frozen Full1902 / lifecycle invariants
 
-Shared frontend work is presentation/data projection work. It must not become controller authority.
+Shared frontend and Quick Settings work must not become controller authority.
 
-The following remain Runtime-owned and outside frontend authority:
+The following remain Runtime-owned and outside this architecture layer:
 
 ```text
-Center M Enabled/Disabled authority
+Center M Enabled / Disabled authority
 PID1901 / PID1902 ownership
 DirectInput physical ownership
 HidHide deterministic baseline
 VIIPER native/runtime ownership
-X360 / SteamDeck presentation ownership
+Xbox360 / SteamDeck presentation ownership
 physical-device loss / PnP recovery
 sleep / hibernate / resume handling
 restart / shutdown teardown
-Win+G suppression ownership
+OQ4 controller capture / neutral publication
 Full1902 fail-close and stock-restoration paths
 ```
 
-The Addon Overlay is a transient UI surface. Main UI and QAM are also disposable clients of Runtime truth.
+Independent Device features such as TDP, CPU Boost, Power Mode, future fan control, and future battery charge limit may continue regardless of controller presentation where their own feature contract permits it.
 
-A frontend crash, disconnect, stale page, failed render, or failed feature capture must not change controller authority or trigger controller teardown.
+Frontend lifetime remains separate from Runtime lifetime:
+
+```text
+QAM closes
+→ Runtime survives
+
+Overlay closes/crashes
+→ Runtime survives
+→ existing OQ4/session-loss path owns capture cleanup
+
+Main UI closes
+→ Runtime survives
+```
+
+No shared Quick Settings component may acquire or restore PID1901/PID1902, touch HidHide, own VIIPER, or become a controller recovery participant.
 
 ---
 
-## 4. Current implementation facts on `main`
+## 4. Current production baseline after SF-V2-01 / 02
 
-### 4.1 One common Runtime/frontend projection object already exists
+### 4.1 One Runtime/frontend projection already exists
 
-`AddonProcessHost` constructs one production `InProcessAddonFrontendControl` and stores it as `_frontendControl`.
+`AddonProcessHost` owns one production `InProcessAddonFrontendControl`.
 
-The same object projects existing Runtime-owned capabilities including, among others:
+Existing Runtime feature authorities are already projected through it, including:
 
 ```text
-CpuBoostRuntime
-TdpRuntime
-PowerModeRuntime
-GameProfileMutations
-IntelFrameLimiterRuntime
-CenterMStartupControl
+CPU Boost
+TDP
+Windows Power Mode
+Game Profile
+Intel FPS Limit
+Center M startup authority
 front-button settings
 ```
 
-This is already the correct common Runtime/frontend projection boundary.
-
-Do not add:
+Do not add a second feature owner such as:
 
 ```text
 QuickSettingsRuntime
 SharedFrontendRuntime
-DeviceSettingsManager
 OverlayFeatureManager
 QamFeatureManager
 SharedDeviceStateCache
 FrontendAuthorityManager
 ```
 
-### 4.2 Main UI and QAM already share the same Runtime authority
+### 4.2 SF-V2-01 is complete
 
-Current composition is:
-
-```text
-same _frontendControl
-      │
-      ├─ .Frontend → NamedPipeAddonFrontendServer → Main UI
-      │
-      └─ .Qam      → NamedPipeAddonFrontendServer → QamHost
-```
-
-The two pipe endpoints have different process lifetimes, but they do not represent different feature authorities.
-
-Current common frontend transport protocol is:
-
-```text
-FrontendTransportProtocol.CurrentVersion = 25
-```
-
-### 4.3 Overlay intentionally uses a different transport
-
-Current Overlay composition is conceptually:
-
-```text
-Runtime / OverlayProcessController
-        ↓
-existing .Overlay named pipe
-        ↓
-NamedPipeOverlayServer / NamedPipeOverlayClient
-        ↓
-SteamInputAddonforClaw.Overlay.exe
-```
-
-Current Overlay protocol is:
-
-```text
-OverlayTransportProtocol.CurrentVersion = 5
-```
-
-It currently carries lifecycle/navigation/preference traffic such as:
-
-```text
-Handshake / Ready
-Show / Hide / Shutdown
-Visible / Hidden
-semantic Navigation
-DismissRequested
-TabOrderState
-SetTabOrder
-```
-
-This narrow protocol exists for real Overlay lifecycle and OQ4 input-capture reasons.
-
-Do **not** replace it with a third full `NamedPipeAddonFrontendServer`.
-
-Do **not** make Overlay connect to `.Frontend` or `.Qam`.
-
-### 4.4 The Device shared-read problem still exists
-
-Current Main UI `DevicePage.RefreshAsync()` still performs separate reads for:
-
-```text
-CaptureCpuBoostAsync
-CaptureTdpAsync
-CapturePowerModeAsync
-```
-
-Current QAM device-scope refresh likewise requests the three Device features separately through `QamFrontendBridge` / `qam.js`.
-
-The original reason for a typed Device aggregate therefore still exists.
-
----
-
-## 5. Core architecture rule: share semantics, not surfaces
-
-The term **Shared Frontend** means:
-
-```text
-shared Runtime truth
-+
-shared typed feature projection where appropriate
-```
-
-It does **not** mean:
-
-```text
-shared XAML/React UI
-shared navigation model
-shared visibility policy
-one common pipe for every frontend
-one giant settings snapshot
-all features visible on all surfaces
-```
-
-Keep these four concerns separate:
-
-```text
-1. Runtime authority
-2. typed frontend data/mutation semantics
-3. surface exposure + transport
-4. surface-specific presentation/interaction
-```
-
-This separation is required to avoid accidental authority duplication and accidental feature exposure.
-
----
-
-## 6. Surface exposure is an explicit product allowlist
-
-A feature existing in Runtime does not imply that every frontend may expose it.
-
-For every feature, decide explicitly:
-
-```text
-Main UI: Yes / No
-Steam QAM: Yes / No
-Addon Overlay: Yes / No
-```
-
-Examples of valid product shapes:
-
-```text
-Main UI only
-Main UI + QAM
-Main UI + Overlay
-Main UI + QAM + Overlay
-```
-
-Do not infer exposure from:
-
-- which Main UI page contains the feature;
-- whether the feature is global/device-scoped;
-- whether a typed frontend contract exists;
-- whether another surface already exposes a similar control;
-- whether transport support would be easy to add.
-
-Do not build a second authority such as:
-
-```text
-FeatureSurfaceMatrix
-FrontendCapabilityRegistry
-FeatureVisibilityRegistry
-SurfacePolicyManager
-VisibleInMainUi / VisibleInQam / VisibleInOverlay metadata
-```
-
-The supported surface set is small. Explicit work orders and explicit dispatch/allowlists are preferred.
-
----
-
-## 7. Domain-oriented typed projections
-
-Do not create a single `QuickSettingsEverythingSnapshot` or `AppFrontendState`.
-
-Use small typed projections around real product domains.
-
-### 7.1 Device Quick Settings — first shared aggregate
-
-The first shared aggregate remains:
+PR #496 established:
 
 ```text
 FrontendDeviceQuickSettingsSnapshot
-├─ FrontendCpuBoostSnapshot CpuBoost
-├─ FrontendTdpSnapshot Tdp
-└─ FrontendPowerModeSnapshot PowerMode
+├─ CpuBoost
+├─ Tdp
+└─ PowerMode
 ```
 
-Recommended contract shape:
+and `CaptureDeviceQuickSettingsAsync()`.
 
-```csharp
-public sealed record FrontendDeviceQuickSettingsSnapshot(
-    FrontendCpuBoostSnapshot CpuBoost,
-    FrontendTdpSnapshot Tdp,
-    FrontendPowerModeSnapshot PowerMode)
-{
-    public static readonly FrontendDeviceQuickSettingsSnapshot Unavailable = new(
-        FrontendCpuBoostSnapshot.Unavailable,
-        FrontendTdpSnapshot.Unavailable,
-        FrontendPowerModeSnapshot.Unavailable);
-}
-```
+Main UI and QAM now read this aggregate instead of independently capturing the three Device features for normal Device refresh.
 
-These three features are a good first aggregate because:
+The aggregate remains a typed read projection only. It is not presentation metadata and not a new feature authority.
 
-- all three are Runtime-owned today;
-- Main UI already reads all three together on the Device page;
-- QAM already reads all three together in Device scope;
-- Overlay Device is intended to expose compact runtime controls for the same class of settings;
-- their feature-specific typed contracts already exist.
+### 4.3 SF-V2-02 is complete
 
-### 7.2 Do not put Center M authority into this aggregate
-
-MSI Center M authority lives on the Device page, but page placement does not make it an ordinary quick setting.
-
-Center M authority is:
+PR #498 established `.Overlay` Device transport v6:
 
 ```text
-reboot-bound
-controller-authority changing
-Full1902 lifecycle critical
-separately refreshed in current DevicePage
-not currently an approved QAM/Overlay quick mutation
+DeviceQuickSettingsState
+DeviceMutationRequest
+DeviceMutationResult
 ```
 
-Therefore keep:
+for the eight approved Device mutations.
+
+The v6 transport correctly preserves:
+
+- one `_frontendControl` authority;
+- visible/captured Overlay admission;
+- non-blocking mutation execution so slow TDP apply cannot block Hide/Dismiss/other read-loop traffic;
+- `StateInvalidated`-driven visible-session refresh;
+- OQ4 capture-before-feature-publish safety;
+- no polling.
+
+This v6 Device transport is an important foundation, but it was deliberately created before real Device UI binding. Therefore it may be superseded cleanly by the shared Quick Settings wire before product UI consumes it.
+
+### 4.4 Current protocol versions
+
+At this baseline:
 
 ```text
-CaptureCenterMStartupAsync
-RequestCenterMAuthorityTransitionAsync
+FrontendTransportProtocol.CurrentVersion = 27
+OverlayTransportProtocol.CurrentVersion  = 6
 ```
 
-outside `FrontendDeviceQuickSettingsSnapshot`.
+Frontend v27 includes later unrelated Claw Sensor Probe work after SF-V2-01 claimed v26.
 
-Do not expose the reboot-bound authority transition through QAM or Overlay without a separate explicit product work order.
+Do not use stale `25`/`26` planning numbers when preparing future work orders.
 
-### 7.3 Profile already has the shared typed contract it needs
+### 4.5 Current duplication now matters
 
-Current source already contains:
+QAM and Overlay currently still encode Quick Settings interaction policy separately.
+
+QAM currently hard-codes, among other things:
 
 ```text
-FrontendGameProfileSnapshot
-FrontendGameProfileMutationResult
+QAM_SLIDER_COMMIT_DELAY_MS = 2000
+Device row names/order
+CPU Boost mode labels
+Windows Power Mode labels
+TDP PL1/PL2 adjustment policy
+per-feature mutation method names
+pending-draft keys
 ```
 
-including typed CPU Boost, TDP, Power Mode, FPS limit, resolution, enabled state, and persistence semantics.
-
-Do not create:
+Overlay currently has a separate:
 
 ```text
-SharedProfileSnapshot
-OverlayProfileSnapshot
-QamProfileSnapshot
+OverlayDelayedSliderCommit.ProductionDelay = 2000 ms
 ```
 
-merely to give Overlay access later.
+and temporary preview rows rather than real Device controls.
 
-Overlay Profile work should reuse `FrontendGameProfileSnapshot` and existing typed mutation results, while exposing only approved operations on the `.Overlay` wire.
+If real Overlay Device/Profile binding continues from here without another shared layer, every product change would need to be repeated in QAM JavaScript and Overlay C#.
 
-### 7.4 Controller grows feature-by-feature
-
-Current/future Controller features include:
-
-```text
-front-button mapping
-M1/M2 mapping
-Joystick LED
-Vibration Strength
-```
-
-Do not create a generic `FrontendControllerQuickSettingsSnapshot` before there is a concrete group of Runtime-owned controller features that multiple surfaces genuinely consume together.
-
-Existing typed settings contracts such as `FrontButtonMappingSettings` should be reused where appropriate rather than copied into Overlay-specific DTOs.
-
-### 7.5 Settings and diagnostics are not automatically shared
-
-Developer probes, environment reports, component diagnostics, setup/recovery operations, and other Main-UI-oriented tools do not belong in shared Quick Settings merely because `IAddonFrontendControl` exposes them.
-
-The desktop Main UI remains the superset-capable management surface.
+That is the duplication this revision removes.
 
 ---
 
-## 8. `IAddonFrontendControl` remains the common projection boundary
+## 5. Product decision: QAM + Overlay are two renderers of the same Quick Settings product
 
-Add one aggregate read seam conceptually:
-
-```csharp
-Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(
-    CancellationToken cancellationToken = default);
-```
-
-Keep the existing focused methods:
+For a page admitted to the shared Quick Settings set, QAM and Overlay must agree on:
 
 ```text
-CaptureCpuBoostAsync
-CaptureTdpAsync
-CapturePowerModeAsync
+page identity
+section order
+row order
+row label
+control kind
+current authoritative value
+available / writable state
+numeric min / max / step
+ordered discrete options and labels
+mutation identity
+commit mode
+debounce delay
+mutation grouping
+pending-draft behavior
+linked-value constraints
+authoritative settlement/readback behavior
 ```
 
-and existing feature-specific mutation methods.
-
-Reasons:
-
-- mutation results remain feature-specific;
-- focused reads remain useful to focused callers/tests;
-- deleting them would create unrelated churn;
-- the aggregate is a convenience/projection seam, not a replacement feature framework.
-
-Do not change `IAddonFrontendControl` into a generic method bag such as:
+They may differ only in surface implementation details such as:
 
 ```text
-GetFeature(string name)
-InvokeSetting(...)
-Dictionary<string, JsonElement>
-FeatureDescriptor[]
+Steam React / CEF controls vs WinUI 3 controls
+Steam PanelSection chrome vs Overlay row chrome
+QAM focus/navigation vs OQ4 semantic Overlay navigation
+surface-specific busy/error presentation details
+surface-specific admission and lifetime
 ```
+
+The intended invariant is:
+
+> **If a user sees the shared Device page in QAM and in Overlay, the product controls and their behavior are the same even though the pixels/widgets are rendered by different UI technologies.**
 
 ---
 
-## 9. Aggregate capture semantics
+## 6. Main UI is intentionally not part of the shared Quick Settings renderer contract
 
-`CaptureDeviceQuickSettingsAsync` must aggregate the existing Runtime authorities only.
+The desktop Main UI remains the superset management/configuration surface.
+
+Current Main UI Device ownership includes items such as:
+
+```text
+Device identity/support
+Center M authority
+TDP
+CPU Boost
+Windows Power Mode
+future Fan Control
+future Battery Charge Limit
+```
+
+The Main UI may use cards, expanders, ComboBox controls, explanations, confirmation dialogs, or reboot-bound flows that do not belong in a handheld Quick Settings surface.
+
+Therefore the architecture is:
+
+```text
+Runtime typed feature contracts
+        ├─ Main UI
+        │    → existing desktop-specific UI
+        │
+        └─ Shared Quick Settings product model
+             ├─ Steam QAM renderer
+             └─ Addon Overlay renderer
+```
+
+Do not force the Main UI to become schema-rendered merely to reduce code.
+
+---
+
+## 7. Shared Quick Settings product model
+
+The shared model is a **closed, typed presentation contract** generated from Runtime-owned typed feature snapshots.
+
+It is not persisted.
+
+It does not read hardware directly.
+
+It does not own feature state.
+
+It does not replace `FrontendDeviceQuickSettingsSnapshot` or `FrontendGameProfileSnapshot`.
+
+A practical conceptual shape is:
+
+```text
+QuickSettingsPageSnapshot
+├─ PageId
+├─ Context
+├─ Message / availability summary
+└─ Sections[]
+     └─ QuickSettingsSectionSnapshot
+          ├─ SectionId
+          ├─ Label?              // product text, optional
+          └─ Rows[]
+               └─ QuickSettingsRowSnapshot
+                    ├─ RowId
+                    ├─ Label
+                    ├─ ControlKind
+                    ├─ Available
+                    ├─ Writable
+                    ├─ Value
+                    ├─ SliderSpec? / options?
+                    ├─ CommitPolicy
+                    └─ CommitGroupId?
+```
+
+Exact record names may vary, but the semantics above are frozen.
+
+### 7.1 Page identity
+
+Initial implemented page IDs should be only those already proven product surfaces:
+
+```text
+Device
+Profile
+```
+
+Do not pre-add Controller/Shortcut/Setting page IDs merely because the Overlay has those tabs.
+
+Add another shared page only when QAM + Overlay genuinely share its contents.
+
+### 7.2 Section identity
+
+Sections preserve product grouping and order without prescribing visual chrome.
+
+Example Device grouping:
+
+```text
+Device
+├─ TDP
+├─ CPU Boost
+└─ Windows Power Mode
+```
+
+QAM may render these as Steam `PanelSection`s.
+
+Overlay may render the same sections as simple grouped rows with no extra card chrome.
+
+Both must preserve the shared order.
+
+### 7.3 Row identity
+
+Use an explicit enum, not strings as feature authority.
 
 Conceptually:
 
 ```text
-CpuBoostRuntime ───────────────┐
-TdpRuntime ────────────────────┼─→ existing mapping semantics
-PowerModeRuntime ──────────────┘
-                                  ↓
-                   FrontendDeviceQuickSettingsSnapshot
+DeviceTdpEnabled
+DeviceTdpAcPl1
+DeviceTdpAcPl2
+DeviceTdpDcPl1
+DeviceTdpDcPl2
+
+DeviceCpuBoostEnabled
+DeviceCpuBoostAc
+DeviceCpuBoostDc
+
+DevicePowerModeEnabled
+DevicePowerModeAc
+DevicePowerModeDc
 ```
 
-It must not:
+Later Profile row IDs are likewise explicit.
 
-- create new hardware readers;
-- create a cache;
-- persist anything;
-- reconcile/apply merely because state was read;
-- trigger controller/presentation changes;
-- create an aggregate transaction.
-
-### 9.1 Feature-local failure isolation
-
-A failure in one child capture must not erase valid sibling state.
-
-Desired behavior:
+Do not use:
 
 ```text
-CPU capture fails
-→ CpuBoost = Unavailable
-→ TDP + Power Mode still returned
-
-TDP capture fails
-→ Tdp = Unavailable
-→ CPU + Power Mode still returned
-
-Power capture fails
-→ PowerMode = Unavailable
-→ CPU + TDP still returned
+"setDeviceCpuBoostAc"
+"feature:tdp/ac/pl1"
+arbitrary plugin keys
+reflection names
 ```
 
-Cancellation/process shutdown may still terminate the aggregate request through existing lifecycle semantics.
+as the product contract.
 
-### 9.2 No cross-feature synchronization machinery
+### 7.4 Supported control kinds
 
-The aggregate is a UI projection, not a hardware transaction.
-
-Do not add:
+Start with only the controls actually required now:
 
 ```text
-QuickSettingsSnapshotLock
-epoch
-revision vector
-barrier
-transaction coordinator
-atomic multi-feature read
+Toggle
+Slider
 ```
 
-Adjacent Runtime snapshots are sufficient for a Quick Settings UI. Existing feature authorities remain responsible for their own synchronization.
+A slider spec may be either:
+
+```text
+Numeric
+→ min / max / step / display suffix
+
+Discrete
+→ ordered value + label options
+```
+
+This covers current Device Quick Settings:
+
+- TDP numeric watt sliders;
+- CPU Boost seven-step discrete sliders;
+- Windows Power Mode three-step discrete sliders.
+
+Do not introduce `Choice`, `Action`, `Color`, `KeyBinding`, nested editors, or generic form schemas before a real shared feature requires them.
+
+When a genuinely new control kind is needed later, add it deliberately to the shared contract and implement one renderer adapter in QAM and one in Overlay.
 
 ---
 
-## 10. Main UI transport and consumption
+## 8. Shared labels, order, options, and value semantics
 
-The desktop Main UI should consume the shared Device aggregate through the existing `.Frontend` transport.
+The Runtime-side Quick Settings projection is the single source for product presentation semantics.
 
-After the foundation change:
-
-```text
-DevicePage.RefreshAsync
-        ↓
-CaptureDeviceQuickSettingsAsync
-        ↓
-Render CpuBoost
-Render Tdp
-Render PowerMode
-```
-
-Keep separate:
+For Device, it should define the existing QAM product layout centrally, for example:
 
 ```text
-Center M authority refresh
-Device identity/support information
-other Device-page-specific operations
+TDP Control                    Toggle
+Plugged in · PL1              Numeric slider
+Plugged in · PL2              Numeric slider
+On battery · PL1              Numeric slider
+On battery · PL2              Numeric slider
+
+CPU Boost                     Toggle
+Plugged in                    Discrete slider
+On battery                    Discrete slider
+
+Windows Power Mode            Toggle
+Plugged in                    Discrete slider
+On battery                    Discrete slider
 ```
 
-Preserve current UI-specific behaviors including:
+CPU Boost discrete options are centrally defined:
 
-- TDP dirty draft preservation;
-- mutation-result authoritative readback;
-- per-feature unavailable/error rendering;
-- `StateInvalidated` refresh behavior.
+```text
+Disabled
+Enabled
+Aggressive
+Efficient Enabled
+Efficient Aggressive
+Aggressive At Guaranteed
+Efficient Aggressive At Guaranteed
+```
 
-The Main UI must never become a state authority/cache.
+Windows Power Mode discrete options are centrally defined:
+
+```text
+Best power efficiency
+Balanced
+Best performance
+```
+
+If a product label, row order, option label, or numeric step changes, the shared projection changes once and both renderers receive the same result.
+
+No Device/Profile product labels should remain independently hard-coded in both QAM and Overlay after migration.
 
 ---
 
-## 11. Steam QAM transport and consumption
+## 9. Shared commit policy
 
-QAM continues to use:
+Commit timing is product behavior, not renderer policy.
 
-```text
-.Qam
-→ NamedPipeAddonFrontendServer
-→ same IAddonFrontendControl
-→ QamFrontendBridge explicit JS allowlist
-```
+Represent it in the shared row contract.
 
-The QAM no-active-game Device refresh should move from three individual requests to one aggregate request.
-
-Keep separate:
+Conceptually:
 
 ```text
-captureStatus
-captureActiveGameProfile
+QuickSettingsCommitPolicy
+├─ Immediate
+└─ TrailingDebounce(delayMs)
 ```
 
-because Status/QAM eligibility and active Profile are different scopes.
+Current Device policy is:
 
-### 11.1 QAM-specific admission remains QAM-specific
+```text
+Toggle
+→ Immediate
 
-Current QAM Device mutation policy checks Big Picture / no-running-game conditions in `QamFrontendBridge`.
+Slider
+→ TrailingDebounce(2000 ms)
+```
 
-That is surface policy.
+The important outcome is:
 
-Do not move it into:
+```text
+change 2000 ms → 1000 ms in the shared product definition
+→ QAM uses 1000 ms
+→ Overlay uses 1000 ms
+→ no surface-specific policy edit
+```
 
-- `IAddonFrontendControl`;
-- `FrontendDeviceQuickSettingsSnapshot`;
-- `CpuBoostRuntime`;
-- `TdpRuntime`;
-- `PowerModeRuntime`.
+After migration:
 
-Main UI and Overlay must not inherit QAM-only admission rules simply because they share typed state.
+- QAM must not own a product constant such as `QAM_SLIDER_COMMIT_DELAY_MS`;
+- Overlay must not own a product constant such as `OverlayDelayedSliderCommit.ProductionDelay`.
+
+The generic surface interaction engines may still implement the mechanics of a timer/generation in their own language, but the **policy and delay value** come from the shared row snapshot.
 
 ---
 
-## 12. Overlay transport architecture
+## 10. Pending draft behavior is shared product behavior
 
-Overlay must consume shared typed semantics without consuming the full desktop/QAM RPC surface.
-
-Target direction:
+Both surfaces must implement the same observable rule:
 
 ```text
-Runtime feature authorities
-        ↓
-InProcessAddonFrontendControl
-        ↓
-shared typed snapshot / mutation semantics
-        ↓
-small explicit binding at Runtime/Overlay boundary
-        ↓
-existing .Overlay pipe
-        ↓
-Overlay.exe
+user edits slider
+→ visible draft updates immediately
+→ authoritative mutation is delayed according to CommitPolicy
+
+another edit before delay expires
+→ old unsubmitted commit is replaced
+→ newest draft remains visible
+→ timer restarts
+
+StateInvalidated / fresh authoritative snapshot arrives while draft is pending
+→ pending local draft remains visible for that commit group
+→ unrelated rows adopt new Runtime state
+
+current commit settles
+→ pending group clears
+→ authoritative page/result becomes visible
 ```
 
-### 12.1 Keep `.Overlay` narrow
+The implementation is intentionally surface-local because QAM is JavaScript and Overlay is C#.
 
-Do not add:
+But it must be **generic per renderer**, driven by shared row/group metadata, not reimplemented feature-by-feature.
 
-```text
-.Overlay.Feature
-another named pipe
-third full NamedPipeAddonFrontendServer
-Overlay connects to .Frontend
-Overlay connects to .Qam
-reflection/generic frontend passthrough
-```
-
-The existing `.Overlay` endpoint should be extended with only the exact approved Device Quick Settings messages.
-
-### 12.2 Reuse typed frontend contracts on the wire where useful
-
-Do not create duplicate shapes such as:
-
-```text
-OverlayCpuBoostSnapshot
-OverlayTdpSnapshot
-OverlayPowerModeSnapshot
-```
-
-The transport may carry the existing typed frontend snapshot/result records directly when their semantics are exactly what Overlay needs.
-
-Overlay-specific protocol messages should describe **wire intent** such as state delivery or a specific mutation request, not duplicate the feature data model.
-
-### 12.3 Bind to the existing authority with the smallest seam
-
-`OverlayProcessController` / `NamedPipeOverlayServer` may receive narrow capture/mutation delegates or the smallest adjacent explicit access seam needed to call the existing `_frontendControl`.
-
-Do not introduce a new long-lived manager/interface hierarchy solely to route three features.
-
-The exact code shape should be chosen in the focused Overlay transport work order after reviewing current `OverlayProcessController` and `OverlayWire` implementation.
+A small generation/token protecting a current delayed commit is still appropriate for normal async I/O. Do not generalize it into epochs/barriers/revision vectors.
 
 ---
 
-## 13. Overlay state delivery and invalidation
+## 11. Mutation groups
 
-Use event-driven, low-rate authoritative refresh.
+Some slider edits are logically independent.
 
-Do not add feature polling merely because Overlay is visible.
+Examples:
 
-Preferred behavior:
+```text
+DeviceCpuBoostAc
+DeviceCpuBoostDc
+DevicePowerModeAc
+DevicePowerModeDc
+```
+
+Each may use its own commit group.
+
+TDP is different.
+
+Current product behavior treats all four TDP sliders as edits to one configuration:
+
+```text
+AC PL1
+AC PL2
+DC PL1
+DC PL2
+        ↓
+one FrontendTdpConfiguration draft
+        ↓
+one trailing commit group
+```
+
+Represent this explicitly with a shared commit-group identity.
+
+Conceptually:
+
+```text
+CommitGroupId = DeviceTdpConfiguration
+```
+
+for all four TDP sliders.
+
+A new edit to any member restarts the same trailing window and the submitted intent carries the latest whole TDP draft.
+
+This preserves current QAM behavior while making it generic and available to Overlay without separate TDP debounce architecture.
+
+---
+
+## 12. Linked slider constraints — narrow support only
+
+Current QAM contains TDP-specific local PL1/PL2 correction logic, including the current Claw limit-dependent minimum gap policy.
+
+That rule must not remain duplicated in QAM JavaScript and future Overlay C#.
+
+Move the **policy data** into the shared Runtime projection.
+
+A narrow linked-slider constraint is sufficient, conceptually:
+
+```text
+LowerRow = AC PL1
+UpperRow = AC PL2
+MinimumGapWatts = computed from current Runtime TDP limits
+```
+
+and likewise for DC.
+
+The projection computes the current minimum gap once from the real TDP limit contract.
+
+The two generic renderers apply one small linked-slider rule when updating a local draft.
+
+Do not build:
+
+```text
+expression trees
+arbitrary validation DSL
+formula engine
+schema-driven dependency graph
+```
+
+The only required initial linked-value rule is the proven TDP PL1/PL2 relationship.
+
+If a later feature needs a materially different constraint, add another explicit typed rule only then.
+
+---
+
+## 13. Shared mutation intent and central dispatch
+
+UI parity is incomplete if QAM and Overlay still maintain separate feature-name-to-Runtime mappings.
+
+Add one closed Quick Settings mutation intent.
+
+Conceptually:
+
+```text
+QuickSettingsMutationIntent
+├─ PageId
+├─ ContextId
+├─ EditedRowId
+└─ Values[]
+     ├─ RowId
+     └─ typed value
+```
+
+For a toggle or independent slider, `Values` contains one row.
+
+For a grouped TDP commit, `Values` contains the complete current group draft.
+
+The value representation must be closed and validated, for example a strict union of:
+
+```text
+Boolean
+Integer/discrete value
+Number
+```
+
+Do not use arbitrary JSON/object payloads as the feature contract.
+
+### 13.1 One explicit Runtime mapping
+
+One central dispatch maps `QuickSettingsRowId` / group intent onto the existing typed frontend methods:
+
+```text
+DeviceCpuBoostEnabled
+→ SetDeviceCpuBoostEnabledAsync
+
+DeviceCpuBoostAc
+→ SetDeviceCpuBoostAcAsync
+
+DeviceTdpConfiguration group
+→ SetDeviceTdpAsync
+
+DevicePowerModeDc
+→ SetDevicePowerModeDcAsync
+```
+
+and later Profile IDs map to the existing Game Profile mutation methods.
+
+This dispatch does **not** replace those typed feature methods.
+
+It is only the Quick Settings adapter onto them.
+
+No new hardware reader, persistence path, or feature authority is created.
+
+### 13.2 Authoritative mutation result
+
+The generic Quick Settings mutation result should return enough information for a renderer to reconcile without feature-specific knowledge.
+
+Preferred semantics:
+
+```text
+Succeeded / FailureMessage
++ fresh authoritative QuickSettingsPageSnapshot
+```
+
+A typed feature mutation remains the underlying operation and retains its own internal outcome semantics.
+
+The Quick Settings adapter converts that outcome into the generic surface result and reprojects current page state.
+
+This means the renderer never needs to know what `FrontendCpuBoostMutationResult` versus `FrontendTdpMutationResult` looks like.
+
+---
+
+## 14. Profile context safety
+
+Device scope has no game identity.
+
+Profile scope does.
+
+A shared Profile page snapshot must carry the active target identity, at minimum:
+
+```text
+AppId
+```
+
+A Profile mutation intent must carry the same context.
+
+Before a Runtime Profile mutation is invoked, the shared adapter must verify the target is still the intended active/valid profile target under the existing product rules.
+
+This protects the realistic sequence:
+
+```text
+Profile page shown for Game A
+→ game context changes to Game B
+→ stale UI submits a delayed mutation
+```
+
+The mutation must not silently apply Game A's delayed draft to Game B.
+
+Do not add an epoch/revision counter for this. The real stable product identity is the AppId already present in the profile contract.
+
+---
+
+## 15. Surface admission remains separate
+
+Shared product semantics do not mean shared admission.
+
+### QAM Device admission
+
+Keep current QAM policy:
+
+```text
+Steam Big Picture active
+AND no running Steam AppId
+→ Device mutation admitted
+```
+
+QAM may decide to show Profile instead of Device when a game is active.
+
+### Overlay admission
+
+Keep current `.Overlay` / OQ4 policy:
 
 ```text
 Overlay connection Ready
-→ Runtime can provide current Device snapshot
-
-Overlay Show
-→ current OQ4 lifecycle/capture ordering remains authoritative
-→ Runtime sends/re-sends a fresh Device snapshot for this visible session
-
-Runtime feature mutation / StateInvalidated
-→ while Overlay is visible, send a fresh Device snapshot
-
-Overlay hidden
-→ no periodic feature refresh
+AND Visible
+AND _overlayCaptureActive
+AND process not shutting down
+→ Quick Settings mutation admitted
 ```
 
-The exact placement of the first state message relative to Show/Visible acknowledgement must preserve current OQ4 capture safety and must not make controller neutralization depend on Device capture success.
+The Overlay Device tab remains Device/global scope even while a game is running.
 
-Feature snapshot failure is feature-local:
+### Main UI
 
-```text
-snapshot unavailable
-→ Overlay disables/marks affected controls unavailable
-→ Overlay may still open/close safely
-→ controller capture/lifecycle remains correct
-```
+Main UI retains its own desktop UI admission/persistence behavior and does not route through the shared Quick Settings renderer contract.
 
-Do not make Overlay visibility fail merely because TDP/CPU/Power state could not be read.
+Do not move QAM or Overlay admission into Runtime feature implementations.
 
 ---
 
-## 14. Overlay mutation semantics
+## 16. Transport architecture
 
-For approved Device controls, Overlay mutations must call the same Runtime-owned feature methods already used by Main UI/QAM.
-
-Conceptually:
+Transport lifetimes remain intentionally different.
 
 ```text
-Overlay user action
-→ explicit .Overlay mutation message
-→ existing Runtime/frontend mutation method
-→ typed mutation result / authoritative snapshot
-→ Overlay render
+.Frontend / .Qam
+→ full explicit frontend RPC transport
+
+.Overlay
+→ dedicated narrow lifecycle/navigation/Quick Settings transport
 ```
 
-No Overlay-side speculative state may become authoritative.
+The shared Quick Settings payload contracts may be reused by both transports.
 
-For sliders/toggles:
+The transports themselves remain separate.
 
-- local transient preview/draft is allowed for interaction quality;
-- commit must use Runtime mutation methods;
-- returned Runtime state wins;
-- transport failure must fail closed in the UI and re-read when possible;
-- no new persisted Overlay copy of Device settings.
+### 16.1 Frontend/QAM transport
 
-Do not add a generic `InvokeFeature` message.
+Add explicit frontend RPC operations conceptually equivalent to:
+
+```text
+CaptureQuickSettingsPage
+MutateQuickSetting
+```
+
+QAM uses these through its existing `QamFrontendBridge` allowlist.
+
+Main UI need not use them.
+
+Adding these wire operations requires a normal `FrontendTransportProtocol` version bump from the current version at implementation time.
+
+### 16.2 Overlay transport
+
+Before real Device UI binding, replace/supersede the v6 Device-specific wire with generic Quick Settings messages, conceptually:
+
+```text
+QuickSettingsPageState
+QuickSettingsMutationRequest
+QuickSettingsMutationResult
+```
+
+The existing Overlay lifecycle/navigation/tab-order messages remain unchanged.
+
+Because v6 is pre-release and no production Device UI consumes it yet, do **not** keep both Device-specific and generic Quick Settings mutation APIs indefinitely for compatibility.
+
+Prefer:
+
+```text
+v6 Device transport
+→ superseded by v7 Quick Settings transport
+→ remove dead v6 Device message/types/methods
+```
+
+rather than maintaining two parallel ways to change the same Device feature.
+
+### 16.3 Overlay remains narrow
+
+Generic here means **generic only within the closed Quick Settings contract**.
+
+Do not expose:
+
+```text
+full IAddonFrontendControl
+Developer probes
+Center M authority transition
+prerequisite repair
+environment reports
+arbitrary method names
+reflection dispatch
+```
+
+through `.Overlay`.
+
+The Runtime binding still explicitly allows only approved Quick Settings pages/rows.
 
 ---
 
-## 15. Protocol version policy from current baseline
+## 17. Runtime-side product projection is the one source of page content
 
-Current baseline:
-
-```text
-FrontendTransportProtocol = 25
-OverlayTransportProtocol  = 5
-```
-
-When `CaptureDeviceQuickSettings` is added to the desktop/QAM frontend protocol:
+The preferred implementation is one small stateless projection adjacent to the existing frontend layer, for example conceptually:
 
 ```text
-FrontendTransportProtocol 25 → 26
+QuickSettingsPresentation
+BuildDevice(FrontendDeviceQuickSettingsSnapshot)
+BuildProfile(FrontendGameProfileSnapshot)
 ```
 
-Do not bump Overlay solely for that change.
+and one explicit mutation adapter.
 
-When `.Overlay` gains real Device feature state/mutation messages:
+This should live in the existing Runtime/frontend codebase rather than creating a new process or service.
 
-```text
-OverlayTransportProtocol 5 → 6
-```
+Do not create a new project solely to hold these two pure mappings unless the actual dependency graph proves it necessary.
 
-If later PRs change the Overlay wire again, bump again. The product is pre-release; prefer honest handshake mismatch over compatibility aliases.
+The projection owns no mutable state.
 
-Do not renumber historical protocol comments/tests.
+It simply turns current typed feature truth into shared Quick Settings product rows.
 
 ---
 
-## 16. Main UI / QAM / Overlay presentation remains independent
+## 18. QAM renderer boundary
 
-Shared typed contracts do not imply shared UI code.
+After migration, `qam.js` should become a generic Quick Settings renderer/interaction adapter rather than a second Device/Profile product definition.
 
-Correct model:
+It may own:
 
 ```text
-same FrontendCpuBoostSnapshot
-        ↓
-Main UI → WinUI Expander / ComboBox / Toggle
-QAM     → JS/React-like Steam UI adapter
-Overlay → compact controller-navigable WinUI row/control
+Steam component discovery
+Steam React element creation
+Steam PanelSection / ToggleField / SliderField mapping
+surface-local transient drafts
+timers/generation mechanics driven by row CommitPolicy
+bridge request plumbing
+QAM-specific focus/navigation
 ```
 
-Each surface may have different:
+It should not own:
 
-- layout;
-- labels;
-- navigation;
-- busy indicators;
-- draft behavior;
-- mutation admission;
-- visibility policy.
+```text
+Device/Profile product row names
+row order
+CPU Boost option labels
+Power Mode option labels
+2000 ms product delay
+TDP limit/gap policy
+feature-specific mutation method names for migrated Quick Settings rows
+```
 
-Do not create a cross-framework UI component abstraction.
+A page snapshot should be enough to render and interact with the page.
 
 ---
 
-## 17. Current product placement and likely sharing
+## 19. Overlay renderer boundary
 
-Current Main UI information architecture is:
-
-```text
-Device
-Controller
-Profile
-How to Use
-Settings
-```
-
-Current Overlay tabs are:
+Overlay should use the same page model with its existing primitives:
 
 ```text
-Device
-Profile
-Controller
-Shortcut
-Setting
+Toggle row
+→ OverlayToggleRow
+
+Slider row
+→ OverlaySliderRow
 ```
 
-This does not mean the tabs must expose identical content.
+The Overlay renderer may own:
 
-Current initial sharing decision:
+```text
+WinUI row creation
+OQ5 logical selection registration
+pointer/touch event hookup
+OQ4 semantic Left/Right/A navigation
+surface-local draft/timer/generation mechanics driven by row CommitPolicy
+scroll-into-view behavior
+```
 
-| Feature/domain | Main UI | QAM | Overlay | Shared-contract direction |
-|---|---:|---:|---:|---|
-| CPU Boost | Yes | Yes | Yes | `FrontendDeviceQuickSettingsSnapshot` child |
-| TDP | Yes | Yes | Yes | `FrontendDeviceQuickSettingsSnapshot` child |
-| Windows Power Mode | Yes | Yes | Yes | `FrontendDeviceQuickSettingsSnapshot` child |
-| Active game Profile | Yes | Yes | Planned | reuse existing `FrontendGameProfileSnapshot` |
-| Center M authority | Yes | No | No | keep separate / Main UI only for now |
-| Front-button mapping | Yes | product-specific | product-specific | reuse existing typed mapping contract when approved |
-| Component diagnostics | Settings/Main UI | No | No | no shared Quick Settings aggregate |
-| Developer diagnostics | Main UI | No | No | no shared Quick Settings aggregate |
-| Battery Charge Limit | future | undecided | undecided | no placeholder; decide surface scope with feature work order |
-| Fan Control | future | undecided | undecided | no placeholder; decide surface scope with feature work order |
-| Joystick LED | future | undecided | undecided | no placeholder; decide surface scope with feature work order |
-| Vibration Strength | future | undecided | undecided | no placeholder; decide surface scope with feature work order |
+It should not own the migrated product labels/order/policy.
 
-Future feature work must explicitly state supported surfaces rather than infer them from this table.
+`OverlayDelayedSliderCommit` may remain as a narrow timing helper, but its delay must come from the shared row policy rather than `ProductionDelay`.
+
+If grouped TDP drafts require a small generic page interaction helper, keep it page-local and data-driven. Do not create a global mutation manager/service.
 
 ---
 
-## 18. State invalidation policy
+## 20. State refresh and invalidation
 
-Keep the existing low-rate invalidation model where practical:
+Keep event-driven authoritative refresh.
 
-```text
-Runtime mutation/external authoritative change
-→ StateInvalidated
-→ disposable frontend re-reads authoritative state
-```
-
-Do not pre-build:
+### QAM
 
 ```text
-FeatureChanged<T>
-per-feature event bus
-revision counters
-feature dirty bitmasks
-observable state graph
+initial page capture
++ StateInvalidated-driven re-capture
++ mutation-result authoritative page
 ```
 
-If a future hardware-backed feature proves aggregate refresh too expensive, add targeted invalidation only after measurement demonstrates a real need.
+### Overlay
+
+```text
+successful OQ4 capture commit
+→ Runtime best-effort publishes current shared page state
+
+StateInvalidated while captured/visible
+→ Runtime republishes current shared page state
+
+hidden
+→ no feature polling
+```
+
+When Profile becomes shared, Runtime may publish both Device and Profile pages while Overlay is visible. This is acceptable because the number of shared pages is small and refresh is event-driven.
+
+Do not add page-selection IPC or high-frequency polling merely to avoid one low-rate extra projection.
+
+If measurement later proves projection cost material, optimize from evidence.
 
 ---
 
-## 19. Failure policy
+## 21. Failure behavior
 
-### Runtime feature failure
+### Feature capture failure
 
-Feature-local unless the feature's own contract says otherwise.
+The shared page projection renders affected rows unavailable while healthy siblings remain usable where the underlying typed contract permits it.
 
-### Frontend pipe disconnect
+### Mutation returns typed feature failure
 
-Surface fails closed / disables stale mutation, Runtime remains alive.
+Convert it to the generic Quick Settings mutation result:
 
-### Overlay feature transport failure
+```text
+Succeeded = false
+FailureMessage = feature result message
+Page = fresh authoritative projection
+```
 
-Overlay shell/lifecycle remains usable; controller capture safety must follow existing OQ4/session-loss policy independently of feature state.
+Do not tear down QAM/Overlay or controller capture.
 
-### Overlay process crash
+### Transport failure
 
-Runtime remains controller authority; current Overlay capture/session-loss cleanup owns recovery. Shared frontend work must not invent a second recovery path.
+The affected surface stops trusting editable stale state and fails closed locally.
 
-### Main UI/QAM crash
+Runtime feature/controller authority survives.
 
-No Runtime feature/controller authority changes.
+### Overlay process/pipe failure while captured
+
+Existing OQ4/session-loss retirement owns capture recovery.
+
+A Quick Settings feature failure must never be reclassified as an Overlay visible-session loss.
+
+### Hide while debounce is pending
+
+Unsubmitted Overlay-local draft work may be discarded immediately.
+
+OQ4 close must not wait for the debounce window.
+
+An already-submitted Runtime mutation may settle normally; hidden/disposed UI ignores obsolete settlement according to its current-generation rule.
 
 ---
 
-## 20. Explicit non-goals
+## 22. Shared-page inclusion rule
 
-Do not implement or design toward:
+A page or feature enters the shared Quick Settings product model only when product policy intends parity between QAM and Overlay.
 
-- a generic settings engine;
-- a dynamic feature registry;
-- a plugin/provider framework;
-- a global frontend state cache;
-- a unified Main UI/QAM/Overlay renderer;
-- one pipe shared by all processes;
-- full `IAddonFrontendControl` exposure to Overlay;
-- a fourth pipe endpoint;
-- a generic RPC framework/reflection dispatcher;
-- cross-feature locks/epochs/barriers;
-- frontend ownership of hardware state;
-- automatic surface parity;
-- speculative placeholders for future features;
+For included shared pages:
+
+```text
+same rows
+same labels
+same order
+same control kinds
+same value semantics
+same mutation behavior
+same commit policy
+```
+
+If a feature is intentionally QAM-only or Overlay-only, keep it outside the shared page until product policy changes.
+
+Do not add a per-row surface-visibility matrix just to support hypothetical divergence.
+
+The simplest model is:
+
+> **inside shared page = parity**  
+> **outside shared page = surface-specific**
+
+Main UI remains separate regardless.
+
+---
+
+## 23. Current intended shared pages
+
+### 23.1 Device
+
+The initial shared Device page is:
+
+```text
+TDP Control
+CPU Boost
+Windows Power Mode
+```
+
+Center M authority remains Main-UI-only/reboot-bound and is not a Quick Settings row.
+
+Future Fan Control / Battery Charge Limit are not placeholders. Add them only after their Runtime contracts exist and product explicitly approves QAM + Overlay parity.
+
+### 23.2 Profile
+
+Current QAM already has real Profile behavior based on `FrontendGameProfileSnapshot`.
+
+The shared Profile page should initially mirror only the controls actually intended to be visible in QAM at the time its migration work order is prepared.
+
+Current source includes profile mutation support for:
+
+```text
+Profile enable
+TDP
+CPU Boost
+Windows Power Mode
+Intel FPS Limit
+Resolution data
+```
+
+but transport capability alone does not imply visible shared Quick Settings exposure.
+
+For example, current `qam.js` contains an Intel FPS Limit path behind `SHOW_INTEL_FPS_LIMIT = false`; that hidden path must not become visible in both surfaces accidentally during generic migration.
+
+Freeze the exact visible Profile row set in the focused Profile work order against then-current source.
+
+---
+
+## 24. Future feature extension rule
+
+Once the generic QAM and Overlay renderers exist, adding a feature that uses an existing shared control kind should normally require only:
+
+```text
+1. real Runtime feature/typed contract exists
+2. product approves QAM + Overlay parity
+3. add row(s) to shared Quick Settings projection
+4. add explicit central mutation mapping
+5. add/adjust focused contract tests
+```
+
+No QAM renderer change.
+
+No Overlay renderer change.
+
+No duplicated label/order/debounce edit.
+
+A renderer change is required only when a genuinely new shared control kind is introduced.
+
+That is the primary maintenance goal of this architecture.
+
+---
+
+## 25. Explicit non-goals
+
+Do not build:
+
+- a generic settings database;
+- JSON-authored dynamic forms;
+- a plugin/provider UI system;
+- a feature registry discovered by reflection;
+- arbitrary string RPC dispatch;
+- a cross-framework visual component abstraction;
+- a universal Main UI/QAM/Overlay renderer;
+- a new frontend process;
+- a new hardware/state cache;
+- a second Runtime feature authority;
+- a page/layout designer;
+- a formula/expression engine;
+- generalized dependency graph;
+- generic surface capability matrix;
+- new lifecycle epochs/barriers/transactions;
+- high-frequency feature polling;
 - Full1902 controller lifecycle changes.
 
----
-
-## 21. Review standard
-
-Block shared-frontend PRs for realistic issues such as:
-
-- duplicate Runtime/hardware authority;
-- stale editable UI after a real transport failure;
-- one child failure discarding healthy sibling state;
-- incorrect serialization/protocol handling;
-- QAM-only admission policy leaking into shared Runtime semantics;
-- accidental exposure of Main-UI-only operations through QAM/Overlay;
-- Overlay feature traffic weakening OQ4 capture/close safety;
-- transport teardown causing controller/presentation teardown;
-- real resource leaks or deadlocks in normal lifecycle.
-
-Do not block for theoretical adjacent-read races that converge through authoritative refresh, or demand locks/epochs/barriers without a realistic supported-product failure path.
+The shared model is intentionally a small closed list of known Quick Settings pages, sections, rows, control kinds, values, commit policies, and mutation intents.
 
 ---
 
-## 22. Architecture target
+## 26. Review standard
 
-The final target is intentionally simple:
+Block future Shared Quick Settings PRs for realistic defects such as:
+
+- QAM and Overlay rendering different product rows from the same page snapshot;
+- duplicate hard-coded product labels/order/policies remaining after migration;
+- a debounce policy change still requiring edits in both surfaces;
+- stale Profile context mutating the wrong AppId;
+- invalid grouped TDP draft reaching Runtime;
+- one feature failure discarding healthy shared rows;
+- malformed mutation value shape reaching an unrelated Runtime method;
+- QAM-specific admission leaking into Overlay or feature authority;
+- Overlay Quick Settings traffic blocking OQ4 Hide/Dismiss processing;
+- feature failure triggering controller teardown;
+- transport disconnect leaving stale editable UI;
+- real resource leaks/deadlocks in normal lifecycle.
+
+Do not block for theoretical instruction-level races when current owner/gate/generation behavior converges safely in supported lifecycle.
+
+Do not add state/locks/epochs/barriers solely because an artificial test can interleave operations at a single instruction boundary.
+
+---
+
+## 27. Final architecture target
 
 ```text
-                         Addon Runtime
-                              │
-             one authority per real feature
-                              │
-                InProcessAddonFrontendControl
-                              │
-                    typed projections
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-   .Frontend              .Qam                 .Overlay
-   full explicit          full explicit         narrow explicit
-   RPC transport          RPC transport         lifecycle + approved
-        │                     │                  quick-setting messages
-        ↓                     ↓                     ↓
-     Main UI               QamHost              Overlay
+                              Addon Runtime
+                                   │
+                    one authority per real feature
+                                   │
+                     InProcessAddonFrontendControl
+                                   │
+           typed feature snapshots / typed mutations
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │                             │
+                    │                  Shared Quick Settings
+                    │                    product projection
+                    │                             │
+                    │          same pages / rows / labels / order
+                    │          same values / options / constraints
+                    │          same commit/debounce policy
+                    │          same mutation intents
+                    │                             │
+                    │                ┌────────────┴────────────┐
+                    │                │                         │
+                    │              .Qam                    .Overlay
+                    │                │                         │
+                    ▼                ▼                         ▼
+                 Main UI          QamHost                  Overlay.exe
+              desktop-specific       │                         │
+                   UI           Steam renderer             WinUI renderer
+                                   │                         │
+                             QAM admission              OQ4 admission
 ```
 
-The reusable layer is **Runtime truth and typed semantics**.
+The final rule is:
 
-The surface-specific layer is **exposure, transport policy, and UI**.
-
-That separation is the Shared Frontend architecture.
+> **Runtime owns truth. Shared Quick Settings owns the product definition for parity pages. QAM and Overlay own only how that same product definition is rendered and interacted with on their respective surfaces.**
