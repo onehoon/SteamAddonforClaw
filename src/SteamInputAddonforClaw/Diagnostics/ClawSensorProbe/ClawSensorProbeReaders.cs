@@ -20,6 +20,8 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
     internal ClawSensorDiscovery Discovery { get; }
     internal ClawSensorProbeTimingStatistics GyroscopeTiming { get; } = new();
     internal ClawSensorProbeTimingStatistics AccelerometerTiming { get; } = new();
+    internal ClawSensorProbeSourceConfiguration? GyroscopeConfiguration { get; private set; }
+    internal ClawSensorProbeSourceConfiguration? AccelerometerConfiguration { get; private set; }
     internal IReadOnlyList<string> Errors { get { lock (_errors) return _errors.ToArray(); } }
     internal bool ShutdownTimedOut { get; private set; }
     internal bool HasCompleted => _workers.All(x => x.IsCompleted);
@@ -32,7 +34,9 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
         _clock = clock;
         Discovery = discovery;
         if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
-        _workers = [RunAsync(discovery.Gyroscope!, "GYRO", writer, GyroscopeTiming), RunAsync(discovery.Accelerometer!, "ACCEL", writer, AccelerometerTiming)];
+        _workers = [
+            RunAsync(discovery.Gyroscope!, "GYRO", writer, GyroscopeTiming, config => GyroscopeConfiguration = config),
+            RunAsync(discovery.Accelerometer!, "ACCEL", writer, AccelerometerTiming, config => AccelerometerConfiguration = config)];
     }
 
     private IClawSensorProbeSourceHandle OpenSource(ClawSensorProbeCandidate candidate) => candidate.Backend switch
@@ -42,7 +46,16 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
         _ => new ClawSensorProbeLegacySourceHandle(_api.GetSensorById(Guid.Parse(candidate.SensorId)))
     };
 
-    private Task RunAsync(ClawSensorProbeCandidate candidate, string sensorName, ClawSensorProbeSessionWriter writer, ClawSensorProbeTimingStatistics timing)
+    // The sample's own SensorTimestamp reflects when the backend produced the reading, which can lag well
+    // behind "now" under a blocking/stalled read (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md
+    // section 4/8: the WSGM ~200ms accelerometer stall this diagnostic exists to catch). This is deliberately
+    // distinct from FreshAgeMs (time since the last accepted report, used for stale/quiet-source tracking) --
+    // a fast, freshly-accepted sample can still carry an old sensor timestamp, and that is exactly the signal
+    // sensor_age_ms must preserve.
+    internal static double? ComputeSensorAgeMs(DateTimeOffset receiveUtc, DateTimeOffset sensorTimestamp) =>
+        sensorTimestamp == default ? null : Math.Max(0, (receiveUtc - sensorTimestamp).TotalMilliseconds);
+
+    private Task RunAsync(ClawSensorProbeCandidate candidate, string sensorName, ClawSensorProbeSessionWriter writer, ClawSensorProbeTimingStatistics timing, Action<ClawSensorProbeSourceConfiguration> onConfigured)
     {
         return Task.Run(() =>
         {
@@ -50,6 +63,7 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
             try
             {
                 handle = OpenSource(candidate);
+                onConfigured(handle.Configuration);
                 var previous = 0L;
                 var deduplicator = new ClawSensorReportDeduplicator();
                 var lastFreshReport = _clock.ElapsedTicks;
@@ -59,16 +73,16 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                     var values = handle.Read();
                     var readDurationMs = Stopwatch.GetElapsedTime(readStart).TotalMilliseconds;
                     var now = _clock.ElapsedTicks;
-                    var ageMs = ClawSensorProbeSessionClock.TicksToMilliseconds(now - lastFreshReport);
+                    var freshAgeMs = ClawSensorProbeSessionClock.TicksToMilliseconds(now - lastFreshReport);
                     if (!values.HasData)
                     {
-                        timing.Observe(ClawSensorReadOutcome.NoData, readDurationMs, ageMs);
+                        timing.Observe(ClawSensorReadOutcome.NoData, readDurationMs, freshAgeMs);
                         Thread.Sleep(1);
                         continue;
                     }
                     if (!deduplicator.ShouldAccept(values))
                     {
-                        timing.Observe(ClawSensorReadOutcome.Duplicate, readDurationMs, ageMs);
+                        timing.Observe(ClawSensorReadOutcome.Duplicate, readDurationMs, freshAgeMs);
                         Thread.Sleep(1);
                         continue;
                     }
@@ -77,8 +91,10 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                     var interval = previous == 0 ? 0 : ClawSensorProbeSessionClock.TicksToMilliseconds(now - previous);
                     previous = now;
                     var elapsed = ClawSensorProbeSessionClock.TicksToMilliseconds(now);
-                    timing.Observe(ClawSensorReadOutcome.Fresh, readDurationMs, ageMs, interval);
-                    writer.Write(new(Interlocked.Increment(ref _sequence), DateTimeOffset.UtcNow, elapsed, context.Mode, context.Phase, context.Pass, sensorName, values.X, values.Y, values.Z, interval, values.SensorTimestamp, candidate.Backend.ToString(), readDurationMs, ageMs));
+                    var receiveUtc = DateTimeOffset.UtcNow;
+                    var sensorAgeMs = ComputeSensorAgeMs(receiveUtc, values.SensorTimestamp);
+                    timing.Observe(ClawSensorReadOutcome.Fresh, readDurationMs, freshAgeMs, interval);
+                    writer.Write(new(Interlocked.Increment(ref _sequence), receiveUtc, elapsed, context.Mode, context.Phase, context.Pass, sensorName, values.X, values.Y, values.Z, interval, values.SensorTimestamp, candidate.Backend.ToString(), readDurationMs, sensorAgeMs));
                     Snapshot.Observe(sensorName, values.X, values.Y, values.Z, interval);
                 }
             }

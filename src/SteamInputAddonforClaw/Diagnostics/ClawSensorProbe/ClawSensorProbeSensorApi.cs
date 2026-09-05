@@ -53,16 +53,23 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     // between them is left entirely to ClawSensorDiscovery.Select; this method only collects evidence.
     internal ClawSensorDiscovery Discover()
     {
+        var categoryAll = EnumerateByCategory(SensorCategoryAll);
+        var direct = EnumerateByType(A2VmReferenceAccelerometerType, A2VmReferenceAccelerometerLabel);
+        var winRtGyrometer = ClawSensorProbeWinRtDiscovery.ProbeGyrometer();
+        var winRtAccelerometer = ClawSensorProbeWinRtDiscovery.ProbeAccelerometer();
+
         var candidates = new List<ClawSensorProbeCandidate>();
-        candidates.AddRange(EnumerateByCategory(SensorCategoryAll).Candidates.Select(ToProbeCandidate));
-        candidates.AddRange(EnumerateByType(A2VmReferenceAccelerometerType, A2VmReferenceAccelerometerLabel).Candidates
+        candidates.AddRange(categoryAll.Candidates.Select(ToProbeCandidate));
+        candidates.AddRange(direct.Candidates
             .Where(x => x.SupportsCustomX == "True" && x.SupportsCustomY == "True" && x.SupportsCustomZ == "True")
             .Select(x => ToProbeCandidate(x) with { IsDirectTypeMatch = true, SelectionReason = "Matched a direct GetSensorsByType lookup with required X/Y/Z field support." }));
-        var gyrometer = ClawSensorProbeWinRtDiscovery.TryDiscoverGyrometer();
-        if (gyrometer is not null) candidates.Add(gyrometer);
-        var accelerometer = ClawSensorProbeWinRtDiscovery.TryDiscoverAccelerometer();
-        if (accelerometer is not null) candidates.Add(accelerometer);
-        return ClawSensorDiscovery.Select(candidates);
+        if (winRtGyrometer.Candidate is { } gyroCandidate) candidates.Add(gyroCandidate);
+        if (winRtAccelerometer.Candidate is { } accelCandidate) candidates.Add(accelCandidate);
+
+        // Preserve the query/projection evidence on the result even though candidates were already
+        // merged above -- a real case such as CategoryAll failing with 0x80070490 while the direct-type
+        // lookup or WinRT still succeeds must remain visible in the finalized report (section 5.2/10).
+        return ClawSensorDiscovery.Select(candidates, categoryAll, [direct], winRtGyrometer, winRtAccelerometer);
     }
 
     private static ClawSensorProbeCandidate ToProbeCandidate(LegacySensorCandidateInfo info) => new(

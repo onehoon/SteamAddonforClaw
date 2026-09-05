@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
 namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 
@@ -38,7 +39,22 @@ internal sealed record ClawSensorProbeCandidate(
     bool IsDirectTypeMatch = false,
     string? SelectionReason = null);
 
-internal sealed record ClawSensorDiscovery(IReadOnlyList<ClawSensorProbeCandidate> Sensors, ClawSensorProbeCandidate? Gyroscope, ClawSensorProbeCandidate? Accelerometer, IReadOnlyList<string> Errors)
+// One WinRT source's discovery evidence: whether GetDefault()+a live reading succeeded, the exact
+// failure/HRESULT when it did not, and the resulting candidate (null when unavailable/unreadable).
+internal sealed record ClawSensorProbeWinRtEvidence(bool Available, int? HResult, string? Failure, ClawSensorProbeCandidate? Candidate)
+{
+    internal static readonly ClawSensorProbeWinRtEvidence Unavailable = new(false, null, "Unavailable", null);
+}
+
+internal sealed record ClawSensorDiscovery(
+    IReadOnlyList<ClawSensorProbeCandidate> Sensors,
+    ClawSensorProbeCandidate? Gyroscope,
+    ClawSensorProbeCandidate? Accelerometer,
+    IReadOnlyList<string> Errors,
+    LegacySensorQueryInfo? LegacyCategoryAll = null,
+    IReadOnlyList<LegacySensorQueryInfo>? LegacyDirectTypeQueries = null,
+    ClawSensorProbeWinRtEvidence? WinRtGyrometer = null,
+    ClawSensorProbeWinRtEvidence? WinRtAccelerometer = null)
 {
     public bool IsValid => Gyroscope is not null && Accelerometer is not null && Errors.Count == 0;
 
@@ -47,12 +63,25 @@ internal sealed record ClawSensorDiscovery(IReadOnlyList<ClawSensorProbeCandidat
     // accel prefers a unique WinRT Accelerometer candidate, then a unique legacy candidate validated through a direct
     // GetSensorsByType lookup, then finally the unique broad-enumeration "Physical Accelerometer" match. Ambiguous
     // candidates at any preferred tier fail closed rather than falling through to a weaker tier.
-    public static ClawSensorDiscovery Select(IReadOnlyList<ClawSensorProbeCandidate> sensors)
+    //
+    // The optional query/projection evidence (legacyCategoryAll, legacyDirectTypeQueries, winRtGyrometer,
+    // winRtAccelerometer) is preserved on the result even when selection fails or picks a different backend,
+    // so a real case such as CategoryAll failing with 0x80070490 while a direct-type lookup still succeeds
+    // remains visible in the finalized report instead of being projected away to just the merged candidates.
+    public static ClawSensorDiscovery Select(IReadOnlyList<ClawSensorProbeCandidate> sensors) =>
+        Select(sensors, null, null, null, null);
+
+    public static ClawSensorDiscovery Select(
+        IReadOnlyList<ClawSensorProbeCandidate> sensors,
+        LegacySensorQueryInfo? legacyCategoryAll,
+        IReadOnlyList<LegacySensorQueryInfo>? legacyDirectTypeQueries,
+        ClawSensorProbeWinRtEvidence? winRtGyrometer,
+        ClawSensorProbeWinRtEvidence? winRtAccelerometer)
     {
         var errors = new List<string>();
         var gyroscope = SelectGyroscope(sensors, errors);
         var accelerometer = SelectAccelerometer(sensors, errors);
-        return new(sensors, gyroscope, accelerometer, errors);
+        return new(sensors, gyroscope, accelerometer, errors, legacyCategoryAll, legacyDirectTypeQueries, winRtGyrometer, winRtAccelerometer);
     }
 
     private static ClawSensorProbeCandidate? SelectGyroscope(IReadOnlyList<ClawSensorProbeCandidate> sensors, List<string> errors)
@@ -108,6 +137,12 @@ internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTi
     {
     }
 }
+// Report-interval evidence for the source actually opened at capture time (docs/gyro/SD6A_CLAW_SENSOR_PROBE_
+// CHARACTERIZATION_WORK_ORDER.md section 6.1): distinguishes the sensor's own minimum from what the probe
+// requested and what Windows actually granted, so later CG3EM analysis can tell configuration from cadence.
+// Legacy sources report null requested/effective values -- that request/grant negotiation is a WinRT concept.
+internal sealed record ClawSensorProbeSourceConfiguration(ClawSensorProbeBackend Backend, uint? MinimumReportIntervalMs, uint? RequestedReportIntervalMs, uint? EffectiveReportIntervalMs);
+
 internal sealed record ClawSensorProbePhaseLog(string name, int pass, double transition_start_elapsed_ms, double recording_start_elapsed_ms, double end_elapsed_ms, long sample_count, string capture_status);
 internal sealed record ClawSensorProbeError(string Code, string Message);
 
@@ -206,6 +241,8 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     private ClawSensorDiscovery? _discovery;
     private ClawSensorProbeTimingStatistics? _gyroTiming;
     private ClawSensorProbeTimingStatistics? _accelTiming;
+    private ClawSensorProbeSourceConfiguration? _gyroConfiguration;
+    private ClawSensorProbeSourceConfiguration? _accelConfiguration;
     private object _device = new { Manufacturer = "Unavailable", ProductName = "Unavailable", BaseBoardProduct = "Unavailable", ResolvedAddonDevice = "MSI Claw", ResolvedAddonModel = "Unknown / unresolved" };
     private object _compatibility = new { Status = "Indeterminate", DeviceFamily = "Unavailable", DeviceModel = "Unavailable", Reason = "Not captured" };
     private readonly List<string> _errors = [];
@@ -224,6 +261,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     public ClawSensorProbeStatistics AccelerometerSummary => _accel;
     public void SetDiscovery(ClawSensorDiscovery discovery) => _discovery = discovery;
     public void SetTiming(ClawSensorProbeTimingStatistics gyroscope, ClawSensorProbeTimingStatistics accelerometer) { _gyroTiming = gyroscope; _accelTiming = accelerometer; }
+    public void SetSourceConfiguration(ClawSensorProbeSourceConfiguration? gyroscope, ClawSensorProbeSourceConfiguration? accelerometer) { _gyroConfiguration = gyroscope; _accelConfiguration = accelerometer; }
     public void SetDevice(object device) => _device = device;
     public void SetCompatibility(object compatibility) => _compatibility = compatibility;
     public void AddError(string error) { lock (_errors) _errors.Add(error); }
@@ -321,7 +359,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
             .Concat(DroppedSampleCount > 0 ? new[] { "The diagnostic writer queue was full and samples were dropped." } : Array.Empty<string>())
             .Concat(_shutdownTimedOut ? new[] { "Sensor reader shutdown exceeded the bounded wait." } : Array.Empty<string>())
             .ToArray();
-        var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, DataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false) }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
+        var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, Discovery = new { LegacyCategoryAll = _discovery?.LegacyCategoryAll, LegacyDirectTypeQueries = _discovery?.LegacyDirectTypeQueries, WinRtGyrometer = _discovery?.WinRtGyrometer, WinRtAccelerometer = _discovery?.WinRtAccelerometer }, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, SourceConfiguration = new { Gyroscope = _gyroConfiguration, Accelerometer = _accelConfiguration }, DataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false) }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
         await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, cancellationToken);
     }
     private static object? TimingSummaryOf(ClawSensorProbeTimingStatistics? timing) => timing is null ? null : new
