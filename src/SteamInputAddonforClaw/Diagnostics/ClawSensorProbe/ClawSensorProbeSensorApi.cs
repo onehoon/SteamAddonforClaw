@@ -18,6 +18,10 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     }
     internal static readonly Guid SensorCategoryAll = new("C317C286-C468-4288-9975-D4C4587C442C");
     internal static readonly Guid SensorDataTypeCustomGuid = new("B14C764F-07CF-41E8-9D82-EBE3D0776A6F");
+    // A2VM reference custom accelerometer type (WSGM/A2VM diagnostic evidence only, not a CG3EM production contract).
+    // See docs/gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md.
+    internal static readonly Guid A2VmReferenceAccelerometerType = new("E83AF229-8640-4D18-A213-E22675EBB2C3");
+    private const string A2VmReferenceAccelerometerLabel = "A2VM reference custom accelerometer type";
     private const int HResultFromWin32ErrorNoData = unchecked((int)0x800700E8);
     private static readonly Guid SensorManagerClass = new("77A1C827-FCD2-4689-8915-9D613CC5FA3E");
     private ISensorManager? _manager;
@@ -28,14 +32,6 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     }
     public void Dispose() { if (_manager is not null) { Marshal.FinalReleaseComObject(_manager); _manager = null; } GC.SuppressFinalize(this); }
     ~ClawSensorProbeSensorApi() => Dispose();
-    internal IntPtr GetAllSensors()
-    {
-        var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));
-        var category = SensorCategoryAll;
-        var hr = manager.GetSensorsByCategory(ref category, out var collection);
-        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
-        return collection;
-    }
     internal IntPtr GetSensorById(Guid sensorId)
     {
         var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));
@@ -51,29 +47,43 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
         return count;
     }
+    // Backend-aware discovery (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 5): broad legacy
+    // enumeration remains evidence, a direct GetSensorsByType lookup validates the A2VM reference accelerometer type
+    // independently of it, and WinRT Gyrometer/Accelerometer are probed as separate candidate backends. Selection
+    // between them is left entirely to ClawSensorDiscovery.Select; this method only collects evidence.
     internal ClawSensorDiscovery Discover()
     {
-        var sensors = new List<ClawSensorProbeCandidate>();
-        using var ownedCollection = new OwnedComPointer(GetAllSensors());
-        var collection = ownedCollection.Pointer;
-        for (var i = 0; i < GetCollectionCount(collection); i++)
-        {
-            var sensor = GetCollectionItem(collection, i);
-            try { sensors.Add(ReadCandidate(sensor)); }
-            finally
-            {
-                if (sensor != IntPtr.Zero)
-                {
-                    using var ownedSensor = new OwnedComPointer(sensor);
-                }
-            }
-        }
-        return ClawSensorDiscovery.Select(sensors);
+        var categoryAll = EnumerateByCategory(SensorCategoryAll);
+        var direct = EnumerateByType(A2VmReferenceAccelerometerType, A2VmReferenceAccelerometerLabel);
+        var winRtGyrometer = ClawSensorProbeWinRtDiscovery.ProbeGyrometer();
+        var winRtAccelerometer = ClawSensorProbeWinRtDiscovery.ProbeAccelerometer();
+
+        var candidates = new List<ClawSensorProbeCandidate>();
+        candidates.AddRange(categoryAll.Candidates.Select(ToProbeCandidate));
+        // Preserve every direct-type candidate as evidence regardless of X/Y/Z support; ClawSensorDiscovery.Select
+        // is the single place that rejects an unusable candidate (missing required fields or an explicit
+        // NotAvailable/AccessDenied/Error state) so raw discovery evidence is never silently dropped here.
+        candidates.AddRange(direct.Candidates.Select(x => ToProbeCandidate(x) with { IsDirectTypeMatch = true, SelectionReason = "Matched a direct GetSensorsByType lookup." }));
+        if (winRtGyrometer.Candidate is { } gyroCandidate) candidates.Add(gyroCandidate);
+        if (winRtAccelerometer.Candidate is { } accelCandidate) candidates.Add(accelCandidate);
+
+        // Preserve the query/projection evidence on the result even though candidates were already
+        // merged above -- a real case such as CategoryAll failing with 0x80070490 while the direct-type
+        // lookup or WinRT still succeeds must remain visible in the finalized report (section 5.2/10).
+        return ClawSensorDiscovery.Select(candidates, categoryAll, [direct], winRtGyrometer, winRtAccelerometer);
     }
 
-    // Diagnostics-only one-shot queries for Environment Discovery. These preserve the raw HRESULT
-    // and every returned candidate as report evidence instead of throwing, unlike Discover() above,
-    // which remains the interactive probe's existing selection behavior and is left unchanged.
+    private static ClawSensorProbeCandidate ToProbeCandidate(LegacySensorCandidateInfo info) => new(
+        info.FriendlyName, info.SensorId, info.TypeGuid, info.CategoryGuid,
+        Manufacturer: info.Manufacturer, Model: info.Model, PersistentUniqueId: info.PersistentUniqueId,
+        MinimumReportInterval: info.MinimumReportInterval, CustomUsage: info.HidUsage,
+        Backend: ClawSensorProbeBackend.LegacySensorApi, State: info.State, DevicePath: info.DevicePath,
+        SupportsX: ParseSupport(info.SupportsCustomX), SupportsY: ParseSupport(info.SupportsCustomY), SupportsZ: ParseSupport(info.SupportsCustomZ));
+
+    private static bool? ParseSupport(string value) => value switch { "True" => true, "False" => false, _ => null };
+
+    // Diagnostics-only one-shot queries shared by Environment Discovery and the Discover() method above.
+    // These preserve the raw HRESULT and every returned candidate as evidence instead of throwing.
     internal LegacySensorQueryInfo EnumerateByCategory(Guid category, string? label = null)
     {
         var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));

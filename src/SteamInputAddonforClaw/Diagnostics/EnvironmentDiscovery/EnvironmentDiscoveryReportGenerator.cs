@@ -82,10 +82,6 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
             CaptureMotionSensors());
     }
 
-    // A2VM reference custom accelerometer type (WSGM/A2VM diagnostic evidence only, not a CG3EM production contract).
-    // See docs/gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md.
-    private static readonly Guid A2VmReferenceAccelerometerType = new("E83AF229-8640-4D18-A213-E22675EBB2C3");
-
     private static MotionSensorDiscoverySnapshot CaptureMotionSensors()
     {
         var (categoryAll, direct) = CaptureLegacyMotionSensors();
@@ -122,13 +118,13 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
         {
             using var sensorApi = new ClawSensorProbeSensorApi();
             var categoryAll = SafeLegacyQuery(() => sensorApi.EnumerateByCategory(ClawSensorProbeSensorApi.SensorCategoryAll), "CategoryAll", ClawSensorProbeSensorApi.SensorCategoryAll, null);
-            var direct = SafeLegacyQuery(() => sensorApi.EnumerateByType(A2VmReferenceAccelerometerType, "A2VM reference custom accelerometer type"), "DirectType", A2VmReferenceAccelerometerType, "A2VM reference custom accelerometer type");
+            var direct = SafeLegacyQuery(() => sensorApi.EnumerateByType(ClawSensorProbeSensorApi.A2VmReferenceAccelerometerType, "A2VM reference custom accelerometer type"), "DirectType", ClawSensorProbeSensorApi.A2VmReferenceAccelerometerType, "A2VM reference custom accelerometer type");
             return (categoryAll, [direct]);
         }
         catch (Exception exception)
         {
             var categoryAllFailure = new LegacySensorQueryInfo("CategoryAll", ClawSensorProbeSensorApi.SensorCategoryAll.ToString("D"), null, false, null, exception.GetType().Name, []);
-            var directFailure = new LegacySensorQueryInfo("DirectType", A2VmReferenceAccelerometerType.ToString("D"), "A2VM reference custom accelerometer type", false, null, exception.GetType().Name, []);
+            var directFailure = new LegacySensorQueryInfo("DirectType", ClawSensorProbeSensorApi.A2VmReferenceAccelerometerType.ToString("D"), "A2VM reference custom accelerometer type", false, null, exception.GetType().Name, []);
             return (categoryAllFailure, [directFailure]);
         }
     }
