@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Overlay;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
@@ -16,14 +18,57 @@ internal static class OverlayTransportProtocol
     // Runtime) carrying the shared OverlayTabId list. The Runtime sends the authoritative order right
     // after HandshakeAccepted and the Overlay must apply it before it reports Ready. No fallback --
     // a v4 peer must fail the handshake.
-    internal const int CurrentVersion = 5;
+    // Version 6 (SF-V2-02): adds typed Device Quick Settings state delivery
+    // (DeviceQuickSettingsState) and the explicit CPU Boost/TDP/Power Mode mutation
+    // request/result messages (DeviceMutationRequest / DeviceMutationResult). A v5 peer must fail
+    // the handshake rather than silently miss the new frames.
+    internal const int CurrentVersion = 6;
     internal const int MaxFrameBytes = 64 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, SetTabOrder }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, SetTabOrder, DeviceQuickSettingsState, DeviceMutationRequest, DeviceMutationResult }
 internal enum OverlayCommand { Show, Hide, Shutdown }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
+
+/// <summary>The eight Device/global mutations approved for the Overlay transport (SF-V2-02 section
+/// 9). Transport-specific wire intent only -- not a feature registry, and not exhaustive of every
+/// CPU Boost/TDP/Power Mode operation <see cref="IAddonFrontendControl"/> exposes elsewhere.</summary>
+internal enum OverlayDeviceMutationKind
+{
+    SetCpuBoostEnabled,
+    SetCpuBoostAc,
+    SetCpuBoostDc,
+    SetTdpEnabled,
+    SetTdp,
+    SetPowerModeEnabled,
+    SetPowerModeAc,
+    SetPowerModeDc,
+}
+
+/// <summary>One Overlay -> Runtime Device mutation request. Exactly one of the value fields is
+/// populated, matching <see cref="Kind"/> -- <see cref="OverlayWireValidation.IsValidDeviceMutationRequest"/>
+/// enforces the shape before any Runtime method is invoked.</summary>
+internal sealed record OverlayDeviceMutationRequest(
+    long RequestId,
+    OverlayDeviceMutationKind Kind,
+    bool? Enabled = null,
+    CpuBoostMode? CpuBoostMode = null,
+    FrontendTdpConfiguration? TdpConfiguration = null,
+    WindowsPowerMode? PowerMode = null);
+
+/// <summary>The Runtime -> Overlay reply to one <see cref="OverlayDeviceMutationRequest"/>. A typed
+/// feature failure (PersistenceFailed/ApplyFailed/InvalidTarget/Unavailable) is a normal result in
+/// one of the three typed fields, not a transport failure. <see cref="Error"/> is reserved for a
+/// thrown operation/transport-side failure or an unadmitted request -- never a second copy of the
+/// frontend mutation outcome enums.</summary>
+internal sealed record OverlayDeviceMutationResponse(
+    long RequestId,
+    OverlayDeviceMutationKind Kind,
+    FrontendCpuBoostMutationResult? CpuBoost = null,
+    FrontendTdpMutationResult? Tdp = null,
+    FrontendPowerModeMutationResult? PowerMode = null,
+    string? Error = null);
 
 internal sealed record OverlayWireMessage(
     int ProtocolVersion,
@@ -32,7 +77,69 @@ internal sealed record OverlayWireMessage(
     OverlayNavigationAction? Navigation = null,
     OverlayState? State = null,
     string? Error = null,
-    IReadOnlyList<OverlayTabId>? TabOrder = null);
+    IReadOnlyList<OverlayTabId>? TabOrder = null,
+    FrontendDeviceQuickSettingsSnapshot? DeviceState = null,
+    OverlayDeviceMutationRequest? DeviceMutationRequest = null,
+    OverlayDeviceMutationResponse? DeviceMutationResponse = null);
+
+/// <summary>Strict Overlay Device mutation request-shape validation (SF-V2-02 section 10.1): each
+/// mutation kind accepts exactly one matching value field and rejects every other combination
+/// before any Runtime method is invoked. Kept separate from feature outcome construction so the
+/// same shape rule is not duplicated between the server dispatcher and any future caller.</summary>
+internal static class OverlayWireValidation
+{
+    internal static bool IsValidDeviceMutationRequest(OverlayDeviceMutationRequest request) => request.RequestId > 0 && request.Kind switch
+    {
+        OverlayDeviceMutationKind.SetCpuBoostEnabled or OverlayDeviceMutationKind.SetTdpEnabled or OverlayDeviceMutationKind.SetPowerModeEnabled =>
+            request.Enabled is not null && request.CpuBoostMode is null && request.TdpConfiguration is null && request.PowerMode is null,
+        OverlayDeviceMutationKind.SetCpuBoostAc or OverlayDeviceMutationKind.SetCpuBoostDc =>
+            request.CpuBoostMode is not null && request.Enabled is null && request.TdpConfiguration is null && request.PowerMode is null,
+        OverlayDeviceMutationKind.SetTdp =>
+            request.TdpConfiguration is not null && request.Enabled is null && request.CpuBoostMode is null && request.PowerMode is null,
+        OverlayDeviceMutationKind.SetPowerModeAc or OverlayDeviceMutationKind.SetPowerModeDc =>
+            request.PowerMode is not null && request.Enabled is null && request.CpuBoostMode is null && request.TdpConfiguration is null,
+        _ => false,
+    };
+
+    /// <summary>The narrow "this Device mutation is not currently admitted" reply (SF-V2-02 section
+    /// 15): reuses the existing typed feature outcome shapes -- never a second copy of the frontend
+    /// mutation outcome enums -- with zero Runtime invocation.</summary>
+    internal static OverlayDeviceMutationResponse NotAdmitted(OverlayDeviceMutationRequest request, string message) => request.Kind switch
+    {
+        OverlayDeviceMutationKind.SetCpuBoostEnabled or OverlayDeviceMutationKind.SetCpuBoostAc or OverlayDeviceMutationKind.SetCpuBoostDc =>
+            new(request.RequestId, request.Kind, CpuBoost: new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, message, FrontendCpuBoostSnapshot.Unavailable)),
+        OverlayDeviceMutationKind.SetTdpEnabled or OverlayDeviceMutationKind.SetTdp =>
+            new(request.RequestId, request.Kind, Tdp: new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, message, FrontendTdpSnapshot.Unavailable)),
+        _ =>
+            new(request.RequestId, request.Kind, PowerMode: new FrontendPowerModeMutationResult(FrontendPowerModeMutationOutcome.PersistenceFailed, message, FrontendPowerModeSnapshot.Unavailable)),
+    };
+}
+
+/// <summary>The SF-V2-02 section 9/14 mapping from one approved <see cref="OverlayDeviceMutationKind"/>
+/// onto the exact matching <see cref="IAddonFrontendControl"/> method already used by Main UI/QAM --
+/// kept independently testable from <c>AddonProcessHost</c>'s much heavier composition. Admission
+/// (Ready/Visible/_overlayCaptureActive/shutdown) is decided by the caller before this runs; this
+/// class only ever touches the eight approved methods, never the full frontend surface.</summary>
+internal static class OverlayDeviceMutationDispatch
+{
+    /// <summary>Invokes exactly the one <see cref="IAddonFrontendControl"/> method matching
+    /// <see cref="OverlayDeviceMutationRequest.Kind"/>. Does not itself catch a thrown Runtime
+    /// exception (including <see cref="OperationCanceledException"/>) -- the caller decides how to
+    /// log it and turn it into the response's narrow <see cref="OverlayDeviceMutationResponse.Error"/>
+    /// field (SF-V2-02 section 20 "Runtime mutation throws").</summary>
+    internal static async Task<OverlayDeviceMutationResponse> DispatchAsync(IAddonFrontendControl control, OverlayDeviceMutationRequest request, CancellationToken token) => request.Kind switch
+    {
+        OverlayDeviceMutationKind.SetCpuBoostEnabled => new(request.RequestId, request.Kind, CpuBoost: await control.SetDeviceCpuBoostEnabledAsync(request.Enabled!.Value, token).ConfigureAwait(false)),
+        OverlayDeviceMutationKind.SetCpuBoostAc => new(request.RequestId, request.Kind, CpuBoost: await control.SetDeviceCpuBoostAcAsync(request.CpuBoostMode!.Value, token).ConfigureAwait(false)),
+        OverlayDeviceMutationKind.SetCpuBoostDc => new(request.RequestId, request.Kind, CpuBoost: await control.SetDeviceCpuBoostDcAsync(request.CpuBoostMode!.Value, token).ConfigureAwait(false)),
+        OverlayDeviceMutationKind.SetTdpEnabled => new(request.RequestId, request.Kind, Tdp: await control.SetDeviceTdpEnabledAsync(request.Enabled!.Value, token).ConfigureAwait(false)),
+        OverlayDeviceMutationKind.SetTdp => new(request.RequestId, request.Kind, Tdp: await control.SetDeviceTdpAsync(request.TdpConfiguration!, token).ConfigureAwait(false)),
+        OverlayDeviceMutationKind.SetPowerModeEnabled => new(request.RequestId, request.Kind, PowerMode: await control.SetDevicePowerModeEnabledAsync(request.Enabled!.Value, token).ConfigureAwait(false)),
+        OverlayDeviceMutationKind.SetPowerModeAc => new(request.RequestId, request.Kind, PowerMode: await control.SetDevicePowerModeAcAsync(request.PowerMode!.Value, token).ConfigureAwait(false)),
+        OverlayDeviceMutationKind.SetPowerModeDc => new(request.RequestId, request.Kind, PowerMode: await control.SetDevicePowerModeDcAsync(request.PowerMode!.Value, token).ConfigureAwait(false)),
+        _ => new OverlayDeviceMutationResponse(request.RequestId, request.Kind, Error: "Unsupported Overlay Device mutation."),
+    };
+}
 
 internal static class OverlayWireCodec
 {
@@ -99,6 +206,10 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private readonly Func<NamedPipeServerStream> _pipeFactory;
     private readonly Func<IReadOnlyList<OverlayTabId>> _getTabOrder;
     private readonly Func<IReadOnlyList<OverlayTabId>, bool> _tryChangeTabOrder;
+    // SF-V2-02: bound once by OverlayProcessController onto the ONE _frontendControl. Without a bind
+    // (tests, no-authority contexts) every Device mutation request is answered "not admitted" and
+    // invokes zero Runtime operations.
+    private readonly Func<OverlayDeviceMutationRequest, CancellationToken, Task<OverlayDeviceMutationResponse>>? _mutateDevice;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _commandGate = new(1, 1);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -117,17 +228,19 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
     internal NamedPipeOverlayServer(string pipeName,
         Func<IReadOnlyList<OverlayTabId>>? getTabOrder = null,
-        Func<IReadOnlyList<OverlayTabId>, bool>? tryChangeTabOrder = null)
+        Func<IReadOnlyList<OverlayTabId>, bool>? tryChangeTabOrder = null,
+        Func<OverlayDeviceMutationRequest, CancellationToken, Task<OverlayDeviceMutationResponse>>? mutateDevice = null)
         : this(pipeName, () => new NamedPipeServerStream(
             pipeName,
             PipeDirection.InOut,
             1,
             PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly), getTabOrder, tryChangeTabOrder) { }
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly), getTabOrder, tryChangeTabOrder, mutateDevice) { }
 
     internal NamedPipeOverlayServer(string pipeName, Func<NamedPipeServerStream> pipeFactory,
         Func<IReadOnlyList<OverlayTabId>>? getTabOrder = null,
-        Func<IReadOnlyList<OverlayTabId>, bool>? tryChangeTabOrder = null)
+        Func<IReadOnlyList<OverlayTabId>, bool>? tryChangeTabOrder = null,
+        Func<OverlayDeviceMutationRequest, CancellationToken, Task<OverlayDeviceMutationResponse>>? mutateDevice = null)
     {
         _pipeName = pipeName;
         _pipeFactory = pipeFactory;
@@ -135,6 +248,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         // (tests, no-authority contexts) the server reports the frozen default and rejects mutations.
         _getTabOrder = getTabOrder ?? (() => OverlayTabOrderContract.DefaultOrder);
         _tryChangeTabOrder = tryChangeTabOrder ?? (_ => false);
+        _mutateDevice = mutateDevice;
     }
 
     internal bool IsReady { get { lock (_sync) return _readyState; } }
@@ -210,6 +324,32 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
             await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.Navigation, Navigation: action), _writeGate, linked.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
+        {
+            return false;
+        }
+    }
+
+    // SF-V2-02 section 16.1/16.2: best-effort state publish, only delivered while the connection is
+    // Ready and the surface is Visible -- re-checked here at write time so a caller that captured the
+    // snapshot before the surface became hidden does not still push it to a hidden session (section
+    // 17.2). Uses the same server write gate as commands/navigation/tab-order so frames never
+    // interleave on the one byte stream.
+    internal async Task<bool> SendDeviceQuickSettingsStateAsync(FrontendDeviceQuickSettingsSnapshot snapshot, CancellationToken token = default)
+    {
+        NamedPipeServerStream? pipe;
+        lock (_sync)
+        {
+            if (!_readyState || _state != OverlayState.Visible) return false;
+            pipe = _activePipe;
+        }
+        if (pipe is null) return false;
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.DeviceQuickSettingsState, DeviceState: snapshot), _writeGate, linked.Token).ConfigureAwait(false);
             return true;
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
@@ -295,7 +435,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
             if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                 throw new FrontendProtocolException("Invalid Overlay state message.");
 
-            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null && message.TabOrder is null)
+            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null && message.TabOrder is null && message.DeviceState is null && message.DeviceMutationRequest is null && message.DeviceMutationResponse is null)
             {
                 DismissRequested?.Invoke(this);
                 continue;
@@ -303,7 +443,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             if (message.Kind == OverlayWireMessageKind.SetTabOrder)
             {
-                if (message.TabOrder is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null)
+                if (message.TabOrder is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.DeviceState is not null || message.DeviceMutationRequest is not null || message.DeviceMutationResponse is not null)
                     throw new FrontendProtocolException("Invalid Overlay SetTabOrder message.");
                 // The authoritative state reply IS the mutation result: accepted / rejected-no-op /
                 // invalid / persistence-failure all resolve to "read the coordinator again and send
@@ -311,6 +451,22 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 try { _tryChangeTabOrder(message.TabOrder); }
                 catch { /* feature-local: the coordinator keeps its previous authoritative order */ }
                 await SendTabOrderStateAsync(pipe, connection.Token).ConfigureAwait(false);
+                continue;
+            }
+
+            if (message.Kind == OverlayWireMessageKind.DeviceMutationRequest)
+            {
+                if (message.DeviceMutationRequest is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrder is not null || message.DeviceState is not null || message.DeviceMutationResponse is not null)
+                    throw new FrontendProtocolException("Invalid Overlay Device mutation request.");
+                var request = message.DeviceMutationRequest;
+                if (!OverlayWireValidation.IsValidDeviceMutationRequest(request))
+                    throw new FrontendProtocolException("Invalid Overlay Device mutation request shape.");
+                // SF-V2-02 section 12 [CRITICAL]: a TDP mutation may await real hardware apply
+                // completion. Handling it inline here would block this sole read loop and delay/break
+                // a concurrent Hide/DismissRequested/SetTabOrder frame while the Overlay is modal.
+                // Run it as one exception-contained fire-and-forget operation and resume reading
+                // immediately; the response is written later through the shared _writeGate.
+                _ = HandleDeviceMutationRequestAsync(pipe, request, connection.Token);
                 continue;
             }
 
@@ -335,6 +491,34 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
+    // SF-V2-02 section 12/15: runs OUTSIDE the ServeAsync read loop so a long TDP hardware-apply wait
+    // never delays Hide/DismissRequested/SetTabOrder processing. Admission (Ready + Visible) is the
+    // one transport-level fact this class owns; _mutateDevice (bound by AddonProcessHost) separately
+    // checks _overlayCaptureActive/process-shutdown before touching any Runtime frontend method.
+    // Exception-contained: nothing here may become an unobserved exception.
+    private async Task HandleDeviceMutationRequestAsync(Stream pipe, OverlayDeviceMutationRequest request, CancellationToken token)
+    {
+        try
+        {
+            bool admitted;
+            lock (_sync) admitted = _readyState && _state == OverlayState.Visible;
+            var mutate = _mutateDevice;
+            OverlayDeviceMutationResponse response;
+            if (!admitted || mutate is null)
+            {
+                response = OverlayWireValidation.NotAdmitted(request, "The Overlay is not visible.");
+            }
+            else
+            {
+                try { response = await mutate(request, token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+                catch (Exception) { response = new OverlayDeviceMutationResponse(request.RequestId, request.Kind, Error: "Overlay Device mutation failed."); }
+            }
+            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.DeviceMutationResult, DeviceMutationResponse: response), _writeGate, token).ConfigureAwait(false);
+        }
+        catch { /* connection torn down or disposed while this ran -- there is nothing left to notify */ }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
@@ -354,21 +538,38 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     private readonly string _pipeName;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+    // SF-V2-02 section 11: Device mutations are correlation-specific to this client only -- Show/
+    // Hide/Navigation/State/TabOrder never gain a request id. Serializing sends through one gate is
+    // an accepted foundation-level simplification; the id/pending-TCS pair is what actually prevents
+    // a late, retired result from completing a newer request (section 23.9), not the gate itself.
+    private readonly SemaphoreSlim _deviceMutationGate = new(1, 1);
+    private readonly object _deviceMutationSync = new();
+    private long _deviceRequestSequence;
+    private long _pendingDeviceRequestId;
+    private TaskCompletionSource<OverlayDeviceMutationResponse>? _pendingDeviceMutation;
     private NamedPipeClientStream? _pipe;
     private int _disposed;
 
     internal NamedPipeOverlayClient(string pipeName) => _pipeName = pipeName;
 
     internal async Task RunAsync(Func<OverlayCommand, Task> commandHandler, CancellationToken token = default)
-        => await RunAsync(commandHandler, null, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, null, null, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(Func<OverlayCommand, Task> commandHandler, Func<OverlayNavigationAction, Task>? navigationHandler, CancellationToken token = default)
-        => await RunAsync(commandHandler, navigationHandler, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, navigationHandler, null, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(
         Func<OverlayCommand, Task> commandHandler,
         Func<OverlayNavigationAction, Task>? navigationHandler,
         Func<IReadOnlyList<OverlayTabId>, Task>? tabOrderHandler,
+        CancellationToken token = default)
+        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, null, token).ConfigureAwait(false);
+
+    internal async Task RunAsync(
+        Func<OverlayCommand, Task> commandHandler,
+        Func<OverlayNavigationAction, Task>? navigationHandler,
+        Func<IReadOnlyList<OverlayTabId>, Task>? tabOrderHandler,
+        Func<FrontendDeviceQuickSettingsSnapshot, Task>? deviceQuickSettingsHandler,
         CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -408,6 +609,26 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     throw new FrontendProtocolException("Invalid Overlay navigation message.");
                 if (navigationHandler is not null)
                     await navigationHandler(message.Navigation.Value).ConfigureAwait(false);
+                continue;
+            }
+            if (message.Kind == OverlayWireMessageKind.DeviceQuickSettingsState)
+            {
+                if (message.DeviceState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrder is not null || message.DeviceMutationRequest is not null || message.DeviceMutationResponse is not null)
+                    throw new FrontendProtocolException("Invalid Overlay Device state message.");
+                if (deviceQuickSettingsHandler is not null)
+                    await deviceQuickSettingsHandler(message.DeviceState).ConfigureAwait(false);
+                continue;
+            }
+            if (message.Kind == OverlayWireMessageKind.DeviceMutationResult)
+            {
+                if (message.DeviceMutationResponse is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrder is not null || message.DeviceState is not null || message.DeviceMutationRequest is not null)
+                    throw new FrontendProtocolException("Invalid Overlay Device mutation result.");
+                // Section 23.9: only complete the CURRENT pending request. A late result whose id was
+                // superseded by a newer send must never complete that newer request.
+                TaskCompletionSource<OverlayDeviceMutationResponse>? pending;
+                lock (_deviceMutationSync)
+                    pending = message.DeviceMutationResponse.RequestId == _pendingDeviceRequestId ? _pendingDeviceMutation : null;
+                pending?.TrySetResult(message.DeviceMutationResponse);
                 continue;
             }
             if (message.Kind != OverlayWireMessageKind.Command || message.Command is null || message.Navigation is not null || message.TabOrder is not null)
@@ -452,6 +673,73 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
         {
             return false;
+        }
+    }
+
+    // SF-V2-02 sections 10/11/18.3: the eight approved Device mutations. Each returns the same typed
+    // frontend result the desktop/QAM surfaces already use -- a typed feature failure is a normal
+    // result here, not an exception. Serialized through _deviceMutationGate (section 11); the request
+    // id/pending-TCS pair still governs correctness if a wait is abandoned mid-flight.
+    internal Task<FrontendCpuBoostMutationResult> SendDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken token = default) =>
+        RequireCpuBoost(SendDeviceMutationAsync(OverlayDeviceMutationKind.SetCpuBoostEnabled, enabled: enabled, cpuBoostMode: null, tdpConfiguration: null, powerMode: null, token));
+    internal Task<FrontendCpuBoostMutationResult> SendDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken token = default) =>
+        RequireCpuBoost(SendDeviceMutationAsync(OverlayDeviceMutationKind.SetCpuBoostAc, enabled: null, cpuBoostMode: mode, tdpConfiguration: null, powerMode: null, token));
+    internal Task<FrontendCpuBoostMutationResult> SendDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken token = default) =>
+        RequireCpuBoost(SendDeviceMutationAsync(OverlayDeviceMutationKind.SetCpuBoostDc, enabled: null, cpuBoostMode: mode, tdpConfiguration: null, powerMode: null, token));
+    internal Task<FrontendTdpMutationResult> SendDeviceTdpEnabledAsync(bool enabled, CancellationToken token = default) =>
+        RequireTdp(SendDeviceMutationAsync(OverlayDeviceMutationKind.SetTdpEnabled, enabled: enabled, cpuBoostMode: null, tdpConfiguration: null, powerMode: null, token));
+    internal Task<FrontendTdpMutationResult> SendDeviceTdpAsync(FrontendTdpConfiguration configuration, CancellationToken token = default) =>
+        RequireTdp(SendDeviceMutationAsync(OverlayDeviceMutationKind.SetTdp, enabled: null, cpuBoostMode: null, tdpConfiguration: configuration, powerMode: null, token));
+    internal Task<FrontendPowerModeMutationResult> SendDevicePowerModeEnabledAsync(bool enabled, CancellationToken token = default) =>
+        RequirePowerMode(SendDeviceMutationAsync(OverlayDeviceMutationKind.SetPowerModeEnabled, enabled: enabled, cpuBoostMode: null, tdpConfiguration: null, powerMode: null, token));
+    internal Task<FrontendPowerModeMutationResult> SendDevicePowerModeAcAsync(WindowsPowerMode mode, CancellationToken token = default) =>
+        RequirePowerMode(SendDeviceMutationAsync(OverlayDeviceMutationKind.SetPowerModeAc, enabled: null, cpuBoostMode: null, tdpConfiguration: null, powerMode: mode, token));
+    internal Task<FrontendPowerModeMutationResult> SendDevicePowerModeDcAsync(WindowsPowerMode mode, CancellationToken token = default) =>
+        RequirePowerMode(SendDeviceMutationAsync(OverlayDeviceMutationKind.SetPowerModeDc, enabled: null, cpuBoostMode: null, tdpConfiguration: null, powerMode: mode, token));
+
+    private static async Task<FrontendCpuBoostMutationResult> RequireCpuBoost(Task<OverlayDeviceMutationResponse> response)
+    {
+        var result = await response.ConfigureAwait(false);
+        return result.CpuBoost ?? throw new FrontendProtocolException(result.Error ?? "Overlay Device mutation failed.");
+    }
+
+    private static async Task<FrontendTdpMutationResult> RequireTdp(Task<OverlayDeviceMutationResponse> response)
+    {
+        var result = await response.ConfigureAwait(false);
+        return result.Tdp ?? throw new FrontendProtocolException(result.Error ?? "Overlay Device mutation failed.");
+    }
+
+    private static async Task<FrontendPowerModeMutationResult> RequirePowerMode(Task<OverlayDeviceMutationResponse> response)
+    {
+        var result = await response.ConfigureAwait(false);
+        return result.PowerMode ?? throw new FrontendProtocolException(result.Error ?? "Overlay Device mutation failed.");
+    }
+
+    private async Task<OverlayDeviceMutationResponse> SendDeviceMutationAsync(
+        OverlayDeviceMutationKind kind, bool? enabled, CpuBoostMode? cpuBoostMode,
+        FrontendTdpConfiguration? tdpConfiguration, WindowsPowerMode? powerMode, CancellationToken token)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
+        await _deviceMutationGate.WaitAsync(token).ConfigureAwait(false);
+        var requestId = Interlocked.Increment(ref _deviceRequestSequence);
+        try
+        {
+            var tcs = new TaskCompletionSource<OverlayDeviceMutationResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_deviceMutationSync) { _pendingDeviceRequestId = requestId; _pendingDeviceMutation = tcs; }
+            var request = new OverlayDeviceMutationRequest(requestId, kind, enabled, cpuBoostMode, tdpConfiguration, powerMode);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.DeviceMutationRequest, DeviceMutationRequest: request),
+                _writeGate, linked.Token).ConfigureAwait(false);
+            return await tcs.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            // A cancelled/abandoned wait must not let a later, unrelated result complete this same
+            // slot -- only clear the pending fields if nothing newer already replaced them.
+            lock (_deviceMutationSync) { if (_pendingDeviceRequestId == requestId) _pendingDeviceMutation = null; }
+            _deviceMutationGate.Release();
         }
     }
 

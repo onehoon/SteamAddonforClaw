@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.FrontendTransport;
@@ -11,6 +12,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(3);
     private readonly object _sync = new();
     private readonly SemaphoreSlim _transition = new(1, 1);
+    // SF-V2-02 section 17.1: keeps captures/publications sequential when a Show publish and a
+    // StateInvalidated refresh land close together. Not a cross-feature transaction -- just avoids
+    // two concurrent CaptureDeviceQuickSettingsAsync calls racing to write the connection.
+    private readonly SemaphoreSlim _deviceRefreshGate = new(1, 1);
     private readonly string _executablePath;
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
@@ -19,6 +24,11 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     // start. FrontendTransport never sees the coordinator -- only these two narrow operations.
     private Func<IReadOnlyList<OverlayTabId>>? _getTabOrder;
     private Func<IReadOnlyList<OverlayTabId>, bool>? _tryChangeTabOrder;
+    // SF-V2-02 section 14: bound once by AddonProcessHost onto the ONE _frontendControl. `_mutateDevice`
+    // is handed to each new NamedPipeOverlayServer so a request arriving on its read loop can reach
+    // Runtime; `_captureDeviceQuickSettings` is used here for the Runtime-initiated publish path.
+    private Func<CancellationToken, Task<FrontendDeviceQuickSettingsSnapshot>>? _captureDeviceQuickSettings;
+    private Func<OverlayDeviceMutationRequest, CancellationToken, Task<OverlayDeviceMutationResponse>>? _mutateDevice;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
@@ -41,7 +51,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _startProcess = startProcess ?? Process.Start;
         // The default factory reads the bound authority at connection time (StartCoreAsync), which
         // always runs after AddonProcessHost has called BindTabOrderAuthority.
-        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _getTabOrder, _tryChangeTabOrder));
+        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _getTabOrder, _tryChangeTabOrder, _mutateDevice));
     }
 
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
@@ -52,6 +62,18 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     {
         _getTabOrder = getTabOrder ?? throw new ArgumentNullException(nameof(getTabOrder));
         _tryChangeTabOrder = tryChangeTabOrder ?? throw new ArgumentNullException(nameof(tryChangeTabOrder));
+    }
+
+    // SF-V2-02 section 14: wire the Overlay Device transport to the ONE _frontendControl. Must be
+    // called before the first warm start, same as BindTabOrderAuthority; a later call replaces the
+    // delegates for the next connection only (an already-connected Overlay keeps its bound mutate
+    // delegate for its lifetime).
+    internal void BindDeviceQuickSettingsAuthority(
+        Func<CancellationToken, Task<FrontendDeviceQuickSettingsSnapshot>> capture,
+        Func<OverlayDeviceMutationRequest, CancellationToken, Task<OverlayDeviceMutationResponse>> mutate)
+    {
+        _captureDeviceQuickSettings = capture ?? throw new ArgumentNullException(nameof(capture));
+        _mutateDevice = mutate ?? throw new ArgumentNullException(nameof(mutate));
     }
 
     internal string ExecutablePath => _executablePath;
@@ -112,6 +134,42 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             AppLog.Warn("Overlay", "Overlay navigation send failed; Overlay remains Runtime-owned.", exception, ("Action", action));
             return false;
         }
+    }
+
+    // SF-V2-02 sections 16/17: best-effort Runtime -> Overlay Device state publish. Called after OQ4
+    // capture commits on Show, and from a StateInvalidated handler while a captured session stays
+    // visible. Never awaited by a caller that must not be delayed -- feature snapshot work is always
+    // less important than OQ4 capture/lifecycle timing (section 4.6).
+    internal async Task RefreshDeviceQuickSettingsAsync()
+    {
+        NamedPipeOverlayServer? server;
+        lock (_sync) server = _server;
+        var capture = _captureDeviceQuickSettings;
+        if (server is null || capture is null) return;
+        // A cheap pre-check avoids most no-op captures; SendDeviceQuickSettingsStateAsync still
+        // re-checks Ready/Visible at write time (section 17.2), which is the actual authority.
+        if (!server.IsReady || server.State != OverlayState.Visible) return;
+
+        await _deviceRefreshGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            FrontendDeviceQuickSettingsSnapshot snapshot;
+            try { snapshot = await capture(CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception exception)
+            {
+                // Section 16.3: a whole aggregate capture failure is feature-local -- deliver
+                // Unavailable rather than silently skipping the refresh, unless delivery itself is
+                // impossible (checked by the send call below via its own live Ready/Visible check).
+                AppLog.Warn("Overlay", "Overlay Device Quick Settings capture failed.", exception);
+                snapshot = FrontendDeviceQuickSettingsSnapshot.Unavailable;
+            }
+            try { await server.SendDeviceQuickSettingsStateAsync(snapshot).ConfigureAwait(false); }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Overlay", "Overlay Device Quick Settings publish failed.", exception);
+            }
+        }
+        finally { _deviceRefreshGate.Release(); }
     }
 
     private async Task<bool> SetVisibilityAsync(bool? requestedShow)
@@ -183,6 +241,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         {
             _transition.Release();
             _transition.Dispose();
+            _deviceRefreshGate.Dispose();
         }
     }
 
