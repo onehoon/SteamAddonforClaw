@@ -41,9 +41,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
             object result = method switch
             {
                 "captureStatus" => await _client.CaptureStatusAsync(token),
-                "captureCpuBoost" => await _client.CaptureCpuBoostAsync(token),
-                "captureTdp" => await _client.CaptureTdpAsync(token),
-                "capturePowerMode" => await _client.CapturePowerModeAsync(token),
+                "captureDeviceQuickSettings" => await _client.CaptureDeviceQuickSettingsAsync(token),
                 "captureActiveGameProfile" => await _client.CaptureActiveGameProfileAsync(token),
                 "setActiveGameProfileEnabled" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileEnabledAsync(id, p.GetProperty("enabled").GetBoolean(), p.TryGetProperty("displayName", out var name) ? name.GetString() : null, t)),
                 "setActiveGameCpuBoostEnabled" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileCpuBoostEnabledAsync(id, p.GetProperty("enabled").GetBoolean(), t)),

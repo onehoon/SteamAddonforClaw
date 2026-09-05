@@ -81,30 +81,24 @@ public sealed partial class DevicePage : UserControl
     internal async Task RefreshAsync()
     {
         if (_frontend is null) return;
-        FrontendCpuBoostSnapshot snapshot = FrontendCpuBoostSnapshot.Unavailable;
-        try { snapshot = await _frontend.CaptureCpuBoostAsync(); }
+        // Shared Frontend V2 (SF-V2-01): one aggregate read replaces the three separate Device
+        // captures. A failed child capture is isolated server-side into that child's Unavailable
+        // snapshot (Render/RenderTdp/RenderPowerMode already render Unavailable correctly), so only
+        // a whole-transport failure needs to be handled here -- and it must fail closed rather than
+        // leave stale editable controls (work order section 10.4).
+        FrontendDeviceQuickSettingsSnapshot snapshot;
+        try { snapshot = await _frontend.CaptureDeviceQuickSettingsAsync(); }
         catch (Exception exception)
         {
-            AppLog.Warn("Device", "CPU Boost snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
-        }
-        Render(snapshot);
-        try { RenderTdp(await _frontend.CaptureTdpAsync()); }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Device", "TDP snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
-            TdpInfoBar.Severity = InfoBarSeverity.Error;
-            TdpInfoBar.Message = "TDP settings could not be loaded.";
-            TdpInfoBar.IsOpen = true;
-        }
-        try { RenderPowerMode(await _frontend.CapturePowerModeAsync()); }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Device", "Power Mode snapshot capture failed.", exception);
+            AppLog.Warn("Device", "Device Quick Settings snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
+            Render(FrontendCpuBoostSnapshot.Unavailable);
+            RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: false);
             RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);
-            PowerModeInfoBar.Severity = InfoBarSeverity.Error;
-            PowerModeInfoBar.Message = "Power Mode settings could not be loaded.";
-            PowerModeInfoBar.IsOpen = true;
+            return;
         }
+        Render(snapshot.CpuBoost);
+        RenderTdp(snapshot.Tdp);
+        RenderPowerMode(snapshot.PowerMode);
     }
 
     private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];

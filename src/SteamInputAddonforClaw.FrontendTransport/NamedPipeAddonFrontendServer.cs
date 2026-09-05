@@ -154,7 +154,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.StartClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.StartClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
@@ -210,6 +210,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.CaptureCenterMStartupAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RequestCenterMAuthorityTransition
         ? FrontendWireCodec.Payload(await _inner.RequestCenterMAuthorityTransitionAsync(FrontendWireCodec.Decode<RequestCenterMAuthorityTransitionRequest>(p).CenterMEnabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureDeviceQuickSettings
+        ? FrontendWireCodec.Payload(await _inner.CaptureDeviceQuickSettingsAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.OpenFanProbe
         ? FrontendWireCodec.Payload(await _inner.OpenFanProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RunFanProbe

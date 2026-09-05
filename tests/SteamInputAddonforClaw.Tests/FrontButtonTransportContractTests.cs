@@ -11,8 +11,10 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class FrontButtonTransportContractTests
 {
     [Fact]
-    public void Protocol_is_exactly_v25()
-        => Assert.Equal(25, FrontendTransportProtocol.CurrentVersion);
+    public void Protocol_is_current()
+        // PR-C bumped 24 -> 25; Shared Frontend V2 SF-V2-01 subsequently bumped 25 -> 26
+        // (CaptureDeviceQuickSettings aggregate).
+        => Assert.Equal(26, FrontendTransportProtocol.CurrentVersion);
 
     [Fact]
     public void The_split_oem1_wing_rpcs_and_snapshot_members_are_gone()

@@ -560,9 +560,10 @@
           }
           activeProfileAppIdRef.current = nextAppId;
           const activeGame = nextAppId > 0;
-          const nextCpu = activeGame ? null : await request("captureCpuBoost");
-          const nextPowerMode = activeGame ? null : await request("capturePowerMode");
-          const nextTdp = activeGame ? null : await request("captureTdp");
+          const nextDevice = activeGame ? null : await request("captureDeviceQuickSettings");
+          const nextCpu = nextDevice?.cpuBoost ?? null;
+          const nextPowerMode = nextDevice?.powerMode ?? null;
+          const nextTdp = nextDevice?.tdp ?? null;
           const nextDraft = nextTdp?.configuration ? {
             enabled: nextTdp.configuration.enabled,
             ac: { ...nextTdp.configuration.ac },
