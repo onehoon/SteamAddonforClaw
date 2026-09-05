@@ -230,9 +230,12 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         _readers = null;
         if (readers is not null)
         {
-            _writer?.SetTiming(readers.GyroscopeTiming, readers.AccelerometerTiming);
-            _writer?.SetSourceConfiguration(readers.GyroscopeConfiguration, readers.AccelerometerConfiguration);
             await readers.DisposeAsync();
+            // Snapshot immutably after the bounded dispose attempt returns rather than handing the writer a
+            // live, still-mutable statistics object: on the timeout path a reader worker can still be running
+            // (see ClawSensorProbeReaders.DisposeAsync) and would otherwise race report serialization.
+            _writer?.SetTiming(readers.GyroscopeTiming.Snapshot(), readers.AccelerometerTiming.Snapshot());
+            _writer?.SetSourceConfiguration(readers.GyroscopeConfiguration, readers.AccelerometerConfiguration);
             foreach (var error in readers.Errors) { lock (_readerErrors) _readerErrors.Add(error); _writer?.AddError(error); }
             if (readers.ShutdownTimedOut)
             {

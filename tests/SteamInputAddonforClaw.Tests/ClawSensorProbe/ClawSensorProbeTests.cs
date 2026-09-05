@@ -570,7 +570,7 @@ public sealed class ClawSensorProbeTests
             var writer = new ClawSensorProbeSessionWriter(root, "session");
             var timing = new ClawSensorProbeTimingStatistics();
             timing.Observe(ClawSensorReadOutcome.Fresh, 2, 0, 10);
-            writer.SetTiming(timing, new ClawSensorProbeTimingStatistics());
+            writer.SetTiming(timing.Snapshot(), new ClawSensorProbeTimingStatistics().Snapshot());
             await writer.DisposeAsync();
 
             var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
@@ -583,6 +583,54 @@ public sealed class ClawSensorProbeTests
         {
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
+    }
+
+    [Fact] public async Task Writer_FreezesTimingSnapshotSoLateObserveAfterTeardownCannotCorruptFinalization()
+    {
+        // Reproduces the bounded-teardown race: a reader worker can still be running (still blocked in a
+        // backend read) after ClawSensorProbeReaders.DisposeAsync() returns on the timeout path. The
+        // coordinator must snapshot before handing timing to the writer, so a later Observe() call on the
+        // still-live statistics object must not affect what was already frozen for finalization.
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-timing-freeze-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var timing = new ClawSensorProbeTimingStatistics();
+            timing.Observe(ClawSensorReadOutcome.Fresh, 2, 0, 10);
+            var frozen = timing.Snapshot();
+
+            // Simulate the worker still running after the coordinator already captured its snapshot.
+            timing.Observe(ClawSensorReadOutcome.Fresh, 3, 0, 12);
+            timing.Observe(ClawSensorReadOutcome.Duplicate, 1, 5);
+
+            var writer = new ClawSensorProbeSessionWriter(root, "session");
+            writer.SetTiming(frozen, new ClawSensorProbeTimingStatistics().Snapshot());
+            await writer.DisposeAsync();
+
+            Assert.Equal(1, frozen.FreshCount);
+            Assert.Equal(2, timing.FreshCount);
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.Contains("\"FreshCount\": 1", report);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task TimingStatistics_ConcurrentObserveAndSnapshotDoNotThrow()
+    {
+        var timing = new ClawSensorProbeTimingStatistics();
+        using var stop = new CancellationTokenSource();
+        var mutator = Task.Run(() =>
+        {
+            var i = 0;
+            while (!stop.IsCancellationRequested) timing.Observe(ClawSensorReadOutcome.Fresh, 1, 0, ++i % 50 + 1);
+        });
+
+        for (var i = 0; i < 2000; i++) _ = timing.Snapshot();
+
+        stop.Cancel();
+        await mutator;
     }
 
     [Fact] public async Task Writer_CsvHeaderAndRowsIncludeBackendReadDurationAndSensorAge()

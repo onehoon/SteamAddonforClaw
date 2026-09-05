@@ -146,44 +146,82 @@ internal sealed record ClawSensorProbeSourceConfiguration(ClawSensorProbeBackend
 internal sealed record ClawSensorProbePhaseLog(string name, int pass, double transition_start_elapsed_ms, double recording_start_elapsed_ms, double end_elapsed_ms, long sample_count, string capture_status);
 internal sealed record ClawSensorProbeError(string Code, string Message);
 
+// Immutable point-in-time copy of ClawSensorProbeTimingStatistics. The writer/report must only ever consume
+// this, never the live mutable object: the bounded reader-teardown wait can return while a worker is still
+// blocked in a backend read, so a live object handed to the writer could still be mutated concurrently with
+// report serialization (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 17).
+internal sealed record ClawSensorProbeTimingSnapshot(
+    long FreshCount,
+    long DuplicateCount,
+    long NoDataCount,
+    long ReadFailureCount,
+    double AverageFreshIntervalMs,
+    double EffectiveFreshHz,
+    double LastReadDurationMs,
+    double MaxReadDurationMs,
+    double FreshAgeMs,
+    double MaxFreshAgeMs,
+    long LongReadCount);
+
 // Diagnostic-only timing/freshness evidence per docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 8.
 // The 100ms long-read threshold and 5s stale-age threshold are labels for this developer capture, not a production
 // freshness contract: a quiet/duplicate/no-data source keeps accumulating age here rather than terminating the session.
+// All state is guarded by one lock: a running sum/count (not a List<double>.Average() on every read) backs
+// AverageFreshIntervalMs so no shared collection is ever enumerated concurrently with a mutation.
 internal sealed class ClawSensorProbeTimingStatistics
 {
     internal const double DefaultLongReadThresholdMs = 100;
-    private readonly List<double> _freshIntervalsMs = [];
-    public long FreshCount { get; private set; }
-    public long DuplicateCount { get; private set; }
-    public long NoDataCount { get; private set; }
-    public long ReadFailureCount { get; private set; }
-    public long LongReadCount { get; private set; }
-    public double LastReadDurationMs { get; private set; }
-    public double MaxReadDurationMs { get; private set; }
-    public double FreshAgeMs { get; private set; }
-    public double MaxFreshAgeMs { get; private set; }
-    public double AverageFreshIntervalMs => _freshIntervalsMs.Count == 0 ? 0 : _freshIntervalsMs.Average();
-    public double EffectiveFreshHz => AverageFreshIntervalMs <= 0 ? 0 : 1000d / AverageFreshIntervalMs;
+    private readonly object _gate = new();
+    private double _freshIntervalTotalMs;
+    private long _freshIntervalCount;
+    private long _freshCount, _duplicateCount, _noDataCount, _readFailureCount, _longReadCount;
+    private double _lastReadDurationMs, _maxReadDurationMs, _freshAgeMs, _maxFreshAgeMs;
+
+    public long FreshCount { get { lock (_gate) return _freshCount; } }
+    public long DuplicateCount { get { lock (_gate) return _duplicateCount; } }
+    public long NoDataCount { get { lock (_gate) return _noDataCount; } }
+    public long ReadFailureCount { get { lock (_gate) return _readFailureCount; } }
+    public long LongReadCount { get { lock (_gate) return _longReadCount; } }
+    public double LastReadDurationMs { get { lock (_gate) return _lastReadDurationMs; } }
+    public double MaxReadDurationMs { get { lock (_gate) return _maxReadDurationMs; } }
+    public double FreshAgeMs { get { lock (_gate) return _freshAgeMs; } }
+    public double MaxFreshAgeMs { get { lock (_gate) return _maxFreshAgeMs; } }
+    public double AverageFreshIntervalMs { get { lock (_gate) return ComputeAverageFreshIntervalMs(); } }
+    public double EffectiveFreshHz { get { lock (_gate) { var average = ComputeAverageFreshIntervalMs(); return average <= 0 ? 0 : 1000d / average; } } }
+
+    private double ComputeAverageFreshIntervalMs() => _freshIntervalCount == 0 ? 0 : _freshIntervalTotalMs / _freshIntervalCount;
 
     public void Observe(ClawSensorReadOutcome outcome, double readDurationMs, double? freshAgeMs = null, double? freshIntervalMs = null, double longReadThresholdMs = DefaultLongReadThresholdMs)
     {
-        LastReadDurationMs = readDurationMs;
-        if (readDurationMs > MaxReadDurationMs) MaxReadDurationMs = readDurationMs;
-        if (readDurationMs >= longReadThresholdMs) LongReadCount++;
-        if (freshAgeMs is { } age)
+        lock (_gate)
         {
-            FreshAgeMs = age;
-            if (age > MaxFreshAgeMs) MaxFreshAgeMs = age;
+            _lastReadDurationMs = readDurationMs;
+            if (readDurationMs > _maxReadDurationMs) _maxReadDurationMs = readDurationMs;
+            if (readDurationMs >= longReadThresholdMs) _longReadCount++;
+            if (freshAgeMs is { } age)
+            {
+                _freshAgeMs = age;
+                if (age > _maxFreshAgeMs) _maxFreshAgeMs = age;
+            }
+            switch (outcome)
+            {
+                case ClawSensorReadOutcome.Fresh:
+                    _freshCount++;
+                    if (freshIntervalMs is > 0) { _freshIntervalTotalMs += freshIntervalMs.Value; _freshIntervalCount++; }
+                    break;
+                case ClawSensorReadOutcome.Duplicate: _duplicateCount++; break;
+                case ClawSensorReadOutcome.NoData: _noDataCount++; break;
+                case ClawSensorReadOutcome.Failure: _readFailureCount++; break;
+            }
         }
-        switch (outcome)
+    }
+
+    public ClawSensorProbeTimingSnapshot Snapshot()
+    {
+        lock (_gate)
         {
-            case ClawSensorReadOutcome.Fresh:
-                FreshCount++;
-                if (freshIntervalMs is > 0) _freshIntervalsMs.Add(freshIntervalMs.Value);
-                break;
-            case ClawSensorReadOutcome.Duplicate: DuplicateCount++; break;
-            case ClawSensorReadOutcome.NoData: NoDataCount++; break;
-            case ClawSensorReadOutcome.Failure: ReadFailureCount++; break;
+            var average = ComputeAverageFreshIntervalMs();
+            return new(_freshCount, _duplicateCount, _noDataCount, _readFailureCount, average, average <= 0 ? 0 : 1000d / average, _lastReadDurationMs, _maxReadDurationMs, _freshAgeMs, _maxFreshAgeMs, _longReadCount);
         }
     }
 }
@@ -239,8 +277,8 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     private readonly Dictionary<string, double> _pendingPhaseEnds = new(StringComparer.Ordinal);
     private readonly object _phaseGate = new();
     private ClawSensorDiscovery? _discovery;
-    private ClawSensorProbeTimingStatistics? _gyroTiming;
-    private ClawSensorProbeTimingStatistics? _accelTiming;
+    private ClawSensorProbeTimingSnapshot? _gyroTiming;
+    private ClawSensorProbeTimingSnapshot? _accelTiming;
     private ClawSensorProbeSourceConfiguration? _gyroConfiguration;
     private ClawSensorProbeSourceConfiguration? _accelConfiguration;
     private object _device = new { Manufacturer = "Unavailable", ProductName = "Unavailable", BaseBoardProduct = "Unavailable", ResolvedAddonDevice = "MSI Claw", ResolvedAddonModel = "Unknown / unresolved" };
@@ -260,7 +298,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     public ClawSensorProbeStatistics GyroscopeSummary => _gyro;
     public ClawSensorProbeStatistics AccelerometerSummary => _accel;
     public void SetDiscovery(ClawSensorDiscovery discovery) => _discovery = discovery;
-    public void SetTiming(ClawSensorProbeTimingStatistics gyroscope, ClawSensorProbeTimingStatistics accelerometer) { _gyroTiming = gyroscope; _accelTiming = accelerometer; }
+    public void SetTiming(ClawSensorProbeTimingSnapshot? gyroscope, ClawSensorProbeTimingSnapshot? accelerometer) { _gyroTiming = gyroscope; _accelTiming = accelerometer; }
     public void SetSourceConfiguration(ClawSensorProbeSourceConfiguration? gyroscope, ClawSensorProbeSourceConfiguration? accelerometer) { _gyroConfiguration = gyroscope; _accelConfiguration = accelerometer; }
     public void SetDevice(object device) => _device = device;
     public void SetCompatibility(object compatibility) => _compatibility = compatibility;
@@ -362,7 +400,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
         var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, Discovery = new { LegacyCategoryAll = _discovery?.LegacyCategoryAll, LegacyDirectTypeQueries = _discovery?.LegacyDirectTypeQueries, WinRtGyrometer = _discovery?.WinRtGyrometer, WinRtAccelerometer = _discovery?.WinRtAccelerometer }, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, SourceConfiguration = new { Gyroscope = _gyroConfiguration, Accelerometer = _accelConfiguration }, DataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false) }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
         await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, cancellationToken);
     }
-    private static object? TimingSummaryOf(ClawSensorProbeTimingStatistics? timing) => timing is null ? null : new
+    private static object? TimingSummaryOf(ClawSensorProbeTimingSnapshot? timing) => timing is null ? null : new
     {
         timing.FreshCount,
         timing.DuplicateCount,
