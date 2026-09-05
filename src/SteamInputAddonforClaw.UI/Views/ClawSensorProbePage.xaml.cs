@@ -388,8 +388,7 @@ public sealed partial class ClawSensorProbePage : UserControl
         // The JSON report is the authoritative detailed artifact -- this compact page summary shows
         // only the evidence needed to confirm the run and locate the report (work order section 19).
         var biasLine = snapshot.Mode == FrontendClawSensorProbeMode.StationaryBias && snapshot.BiasSummary is { } bias
-            ? $"{Environment.NewLine}Bias gyro mean: X={bias.GyroMeanX:0.###}, Y={bias.GyroMeanY:0.###}, Z={bias.GyroMeanZ:0.###} | stddev: X={bias.GyroStandardDeviationX:0.###}, Y={bias.GyroStandardDeviationY:0.###}, Z={bias.GyroStandardDeviationZ:0.###}" +
-              $"{Environment.NewLine}Bias accel span: X={bias.AccelSpanX:0.###}, Y={bias.AccelSpanY:0.###}, Z={bias.AccelSpanZ:0.###}" + (bias.AccelMagnitudeGMean is { } meanG ? $" | |g| mean={meanG:0.###}, span={bias.AccelMagnitudeGSpan:0.###}" : string.Empty)
+            ? FormatBiasSummaryLine(bias)
             : string.Empty;
         var gyroTiming = snapshot.GyroTiming;
         var accelTiming = snapshot.AccelTiming;
@@ -400,6 +399,16 @@ public sealed partial class ClawSensorProbePage : UserControl
             (accelTiming is { } at ? $", duplicate: {at.DuplicateCount}, no-data: {at.NoDataCount}, read-failure: {at.ReadFailureCount}, max read: {at.MaxReadDurationMs:0.##} ms, max fresh age: {at.MaxFreshAgeMs:0} ms" : string.Empty) + Environment.NewLine +
             $"Dropped samples total: {snapshot.DroppedSampleCount}" + biasLine;
     }
+
+    // Extracted so the required gyro mean/stddev/span + accel span fields (work order section 19)
+    // cannot silently disappear from the compact Bias completion summary again without a test failing
+    // (PR B review follow-up finding #1) -- mirrors ProfilePage's testable-static-helper pattern.
+    internal static string FormatBiasSummaryLine(FrontendClawSensorProbeBiasSummary bias) =>
+        $"{Environment.NewLine}Bias gyro mean: X={bias.GyroMeanX:0.###}, Y={bias.GyroMeanY:0.###}, Z={bias.GyroMeanZ:0.###}" +
+        $" | stddev: X={bias.GyroStandardDeviationX:0.###}, Y={bias.GyroStandardDeviationY:0.###}, Z={bias.GyroStandardDeviationZ:0.###}" +
+        $" | span: X={bias.GyroSpanX:0.###}, Y={bias.GyroSpanY:0.###}, Z={bias.GyroSpanZ:0.###}" +
+        $"{Environment.NewLine}Bias accel span: X={bias.AccelSpanX:0.###}, Y={bias.AccelSpanY:0.###}, Z={bias.AccelSpanZ:0.###}" +
+        (bias.AccelMagnitudeGMean is { } meanG ? $" | |g| mean={meanG:0.###}, span={bias.AccelMagnitudeGSpan:0.###}" : string.Empty);
 
     private static string PhaseLabel(FrontendClawSensorProbePhase phase) => phase switch
     {

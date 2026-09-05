@@ -744,7 +744,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             BaseBoard: session.BaseBoard,
             ResolvedModel: session.ResolvedModel,
             Mode: modeKnown ? MapClawSensorProbeMode(coordinator.Mode) : null,
-            ElapsedMs: coordinator.ElapsedMs,
+            ElapsedMs: coordinator.RecordingElapsedMs,
             GyroTiming: MapClawSensorProbeTiming(gyroTiming),
             AccelTiming: MapClawSensorProbeTiming(accelTiming),
             BiasSummary: MapClawSensorProbeBiasSummary(coordinator.BiasSummary));

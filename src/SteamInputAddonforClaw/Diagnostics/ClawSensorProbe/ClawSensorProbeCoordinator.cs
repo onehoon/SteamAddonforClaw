@@ -23,6 +23,8 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private readonly CancellationTokenSource _lifecycleCancellation = new();
     private ClawSensorCaptureContext _captureContext = new(ClawSensorCaptureMode.Transition, ClawSensorProbePhase.REST, 1);
     private ClawSensorProbeMode _mode = ClawSensorProbeMode.AxisCharacterization;
+    private double? _recordingStartedElapsedMs;
+    private double? _recordingEndedElapsedMs;
     public CancellationToken LifecycleCancellation => _lifecycleCancellation.Token;
     public ClawSensorProbeState State => _workflow.State;
     public ClawSensorProbeWorkflow Workflow => _workflow;
@@ -107,6 +109,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     {
         ThrowIfReaderFaulted();
         _workflow.BeginRecording();
+        _recordingStartedElapsedMs ??= ElapsedMs;
         if (_mode == ClawSensorProbeMode.AxisCharacterization)
         {
             var visit = Workflow.Visits.Last();
@@ -124,6 +127,25 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     public void Back() => _workflow.Back();
     public void Write(ClawSensorProbeSample sample) => _writer?.Write(sample);
     public double ElapsedMs => _clock?.ElapsedMs ?? 0;
+    // Recording-relative capture duration for the frontend's "elapsed capture time" evidence -- unlike
+    // ElapsedMs (the absolute session clock, used for CSV/report phase timestamps and still running
+    // pre-discovery and after Stop/Fail), this excludes pre-recording discovery/countdown time and
+    // freezes at teardown instead of continuing to grow while the completed-session UI keeps polling
+    // (PR B review follow-up finding #2).
+    public double RecordingElapsedMs
+    {
+        get
+        {
+            if (_recordingStartedElapsedMs is not { } start) return 0;
+            var end = _recordingEndedElapsedMs ?? ElapsedMs;
+            return Math.Max(0, end - start);
+        }
+    }
+    private void FreezeRecordingElapsed()
+    {
+        if (_recordingStartedElapsedMs is not null && _recordingEndedElapsedMs is null)
+            _recordingEndedElapsedMs = ElapsedMs;
+    }
     public void WriteTransition() => _writer?.WriteTransition(Workflow.Visits.LastOrDefault().Phase, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public void EndCurrentPhase() => _writer?.EndPhase((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public void BeginPhaseTransition() => WriteTransition();
@@ -231,6 +253,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private async Task StopCoreAsync(CancellationToken cancellationToken)
     {
         _lifecycleCancellation.Cancel();
+        FreezeRecordingElapsed();
         if (_workflow.State == ClawSensorProbeState.RecordingPhase)
         {
             if (_mode == ClawSensorProbeMode.AxisCharacterization)
@@ -257,6 +280,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private async Task FailCoreAsync(string error, CancellationToken cancellationToken)
     {
         _lifecycleCancellation.Cancel();
+        FreezeRecordingElapsed();
         if (_workflow.State == ClawSensorProbeState.RecordingPhase)
         {
             if (_mode == ClawSensorProbeMode.AxisCharacterization)
@@ -312,6 +336,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         try
         {
             _lifecycleCancellation.Cancel();
+            FreezeRecordingElapsed();
             await ShutdownReadersAndApiAsync(CancellationToken.None);
             if (_writer is not null) await _writer.FinalizeAsync();
         }

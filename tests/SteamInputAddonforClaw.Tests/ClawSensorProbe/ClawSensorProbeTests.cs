@@ -1332,6 +1332,50 @@ public sealed class ClawSensorProbeTests
         }
     }
 
+    [Fact] public async Task Coordinator_RecordingElapsedMsIsZeroBeforeRecordingBegins()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-recording-elapsed-zero-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(ClawSensorProbeMode.LiveSanity, root);
+            Assert.Equal(0, coordinator.RecordingElapsedMs);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Coordinator_RecordingElapsedMsFreezesAtStopInsteadOfContinuingToGrow()
+    {
+        // The frontend labels this "elapsed capture time" -- it must exclude pre-recording discovery
+        // time and stop advancing once the session has completed, rather than growing on every
+        // subsequent ~200ms poll while the state is already Completed (PR B review follow-up finding #2).
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-recording-elapsed-freeze-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(ClawSensorProbeMode.LiveSanity, root);
+            coordinator.BeginRecording();
+            await Task.Delay(20);
+            await coordinator.StopAsync();
+
+            var frozen = coordinator.RecordingElapsedMs;
+            Assert.True(frozen >= 0);
+            await Task.Delay(50);
+            Assert.Equal(frozen, coordinator.RecordingElapsedMs);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     [Fact] public async Task Coordinator_StartOverloadWithoutModeDefaultsToAxisCharacterization()
     {
         // Existing PR-A call sites that omit the mode argument must keep exercising exactly the
