@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
@@ -312,6 +313,81 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
 
         Assert.Equal(FrontendClawSensorProbeState.Ready, next.State);
         Assert.Equal(FrontendClawSensorProbeState.Ready, previous.State);
+    }
+
+    [Fact]
+    public void MapClawSensorProbeCandidate_projects_backend_devicePath_unitBasis_and_selectionReason()
+    {
+        // The frontend candidate contract must carry the PR-A evidence the UI now needs (work order
+        // section 17), not just the pre-existing identity fields (PR B review finding #1).
+        var candidate = new ClawSensorProbeCandidate(
+            "Physical Gyrometer", "sensor-id", "type-guid", "category-guid",
+            Backend: ClawSensorProbeBackend.WinRtGyrometer,
+            State: "Ready",
+            DevicePath: @"\\?\HID#VID_1234",
+            UnitBasis: ClawSensorProbeUnitBasis.DegreesPerSecond,
+            SelectionReason: "Selected as the unique WinRT Gyrometer candidate.");
+
+        var mapped = InProcessAddonFrontendControl.MapClawSensorProbeCandidate(candidate);
+
+        Assert.Equal(FrontendClawSensorProbeBackend.WinRtGyrometer, mapped.Backend);
+        Assert.Equal("Ready", mapped.State);
+        Assert.Equal(@"\\?\HID#VID_1234", mapped.DevicePath);
+        Assert.Equal(FrontendClawSensorProbeUnitBasis.DegreesPerSecond, mapped.UnitBasis);
+        Assert.Equal("Selected as the unique WinRT Gyrometer candidate.", mapped.SelectionReason);
+    }
+
+    [Fact]
+    public void MapClawSensorProbeTiming_projects_duplicate_noData_readFailure_and_maxima()
+    {
+        // The compact timing DTO is what lets the completed-session UI show duplicate/no-data/read-
+        // failure counts and worst-case read duration/fresh age (PR B review finding #1) -- verify the
+        // projection actually carries every one of those fields, not just the happy-path ones already
+        // shown live.
+        var timing = new ClawSensorProbeTimingSnapshot(
+            FreshCount: 100, DuplicateCount: 5, NoDataCount: 3, ReadFailureCount: 1,
+            AverageFreshIntervalMs: 10, EffectiveFreshHz: 100,
+            LastReadDurationMs: 2.5, MaxReadDurationMs: 120,
+            FreshAgeMs: 8, MaxFreshAgeMs: 6000, LongReadCount: 2);
+
+        var mapped = InProcessAddonFrontendControl.MapClawSensorProbeTiming(timing);
+
+        Assert.NotNull(mapped);
+        Assert.Equal(100, mapped!.FreshCount);
+        Assert.Equal(5, mapped.DuplicateCount);
+        Assert.Equal(3, mapped.NoDataCount);
+        Assert.Equal(1, mapped.ReadFailureCount);
+        Assert.Equal(120, mapped.MaxReadDurationMs);
+        Assert.Equal(6000, mapped.MaxFreshAgeMs);
+        Assert.Equal(2, mapped.LongReadCount);
+    }
+
+    [Fact]
+    public void MapClawSensorProbeTiming_returns_null_for_null_snapshot()
+    {
+        Assert.Null(InProcessAddonFrontendControl.MapClawSensorProbeTiming(null));
+    }
+
+    [Fact]
+    public void MapClawSensorProbeBiasSummary_projects_gyro_and_accel_evidence_needed_for_completion_display()
+    {
+        var summary = new ClawSensorProbeBiasSummarySnapshot(
+            GyroSampleCount: 500, GyroEffectiveHz: 100,
+            GyroMeanX: 0.1, GyroMeanY: -0.2, GyroMeanZ: 0.05,
+            GyroStandardDeviationX: 0.01, GyroStandardDeviationY: 0.02, GyroStandardDeviationZ: 0.015,
+            GyroSpanX: 0.3, GyroSpanY: 0.4, GyroSpanZ: 0.2,
+            AccelSampleCount: 500, AccelEffectiveHz: 100,
+            AccelSpanX: 0.02, AccelSpanY: 0.03, AccelSpanZ: 0.01,
+            AccelMagnitudeGMean: 1.0, AccelMagnitudeGSpan: 0.02);
+
+        var mapped = InProcessAddonFrontendControl.MapClawSensorProbeBiasSummary(summary);
+
+        Assert.NotNull(mapped);
+        Assert.Equal(500, mapped!.GyroSampleCount);
+        Assert.Equal(0.1, mapped.GyroMeanX);
+        Assert.Equal(0.01, mapped.GyroStandardDeviationX);
+        Assert.Equal(1.0, mapped.AccelMagnitudeGMean);
+        Assert.Equal(0.02, mapped.AccelMagnitudeGSpan);
     }
 
     [Fact]

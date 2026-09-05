@@ -780,7 +780,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _ => FrontendClawSensorProbePhase.YawRight
     };
 
-    private static FrontendClawSensorProbeDiscovery? MapClawSensorProbeDiscovery(ClawSensorDiscovery? discovery)
+    internal static FrontendClawSensorProbeDiscovery? MapClawSensorProbeDiscovery(ClawSensorDiscovery? discovery)
     {
         if (discovery is null) return null;
         return new FrontendClawSensorProbeDiscovery(
@@ -791,7 +791,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             discovery.IsValid);
     }
 
-    private static FrontendClawSensorProbeCandidate MapClawSensorProbeCandidate(ClawSensorProbeCandidate candidate) => new(
+    internal static FrontendClawSensorProbeCandidate MapClawSensorProbeCandidate(ClawSensorProbeCandidate candidate) => new(
         candidate.FriendlyName, candidate.SensorId, candidate.TypeGuid, candidate.CategoryGuid,
         candidate.Manufacturer, candidate.Model, candidate.PersistentUniqueId, candidate.MinimumReportInterval, candidate.CustomUsage,
         MapClawSensorProbeBackend(candidate.Backend), candidate.State, candidate.DevicePath, MapClawSensorProbeUnitBasis(candidate.UnitBasis), candidate.SelectionReason);
@@ -824,11 +824,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _ => FrontendClawSensorProbeMode.AxisCharacterization
     };
 
-    private static FrontendClawSensorProbeTiming? MapClawSensorProbeTiming(ClawSensorProbeTimingSnapshot? timing) => timing is null
+    internal static FrontendClawSensorProbeTiming? MapClawSensorProbeTiming(ClawSensorProbeTimingSnapshot? timing) => timing is null
         ? null
         : new(timing.FreshCount, timing.DuplicateCount, timing.NoDataCount, timing.ReadFailureCount, timing.EffectiveFreshHz, timing.LastReadDurationMs, timing.MaxReadDurationMs, timing.FreshAgeMs, timing.MaxFreshAgeMs, timing.LongReadCount);
 
-    private static FrontendClawSensorProbeBiasSummary? MapClawSensorProbeBiasSummary(ClawSensorProbeBiasSummarySnapshot? summary) => summary is null
+    internal static FrontendClawSensorProbeBiasSummary? MapClawSensorProbeBiasSummary(ClawSensorProbeBiasSummarySnapshot? summary) => summary is null
         ? null
         : new(summary.GyroSampleCount, summary.GyroEffectiveHz,
             summary.GyroMeanX, summary.GyroMeanY, summary.GyroMeanZ,
@@ -838,7 +838,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             summary.AccelSpanX, summary.AccelSpanY, summary.AccelSpanZ,
             summary.AccelMagnitudeGMean, summary.AccelMagnitudeGSpan);
 
-    private static FrontendClawSensorProbeStatistics? MapClawSensorProbeStatistics(ClawSensorProbeStatistics? statistics) => statistics is null
+    internal static FrontendClawSensorProbeStatistics? MapClawSensorProbeStatistics(ClawSensorProbeStatistics? statistics) => statistics is null
         ? null
         : new(statistics.SampleCount, statistics.DroppedSampleCount, statistics.DurationMs, statistics.AverageIntervalMs, statistics.MinimumIntervalMs, statistics.MaximumIntervalMs, statistics.EffectiveHz);
 

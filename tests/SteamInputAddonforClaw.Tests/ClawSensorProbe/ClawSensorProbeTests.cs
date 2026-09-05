@@ -813,6 +813,48 @@ public sealed class ClawSensorProbeTests
         await mutator;
     }
 
+    [Fact] public async Task ClawSensorProbeStatistics_ConcurrentAddAndReadDoNotThrow()
+    {
+        // WriteLoopAsync() calls Add() at sensor cadence while the frontend's ~200ms poll concurrently
+        // reads AverageIntervalMs/MinimumIntervalMs/MaximumIntervalMs -- previously backed by a raw
+        // List<double> enumerated on every read, so a normal live probe could intermittently throw
+        // "Collection was modified" (PR B review finding #3). This is real producer/poller
+        // concurrency, not a theoretical race.
+        var statistics = new ClawSensorProbeStatistics();
+        using var stop = new CancellationTokenSource();
+        var mutator = Task.Run(() =>
+        {
+            var i = 0;
+            while (!stop.IsCancellationRequested) statistics.Add(++i % 20 + 1);
+        });
+
+        for (var i = 0; i < 2000; i++)
+        {
+            _ = statistics.SampleCount;
+            _ = statistics.AverageIntervalMs;
+            _ = statistics.MinimumIntervalMs;
+            _ = statistics.MaximumIntervalMs;
+            _ = statistics.EffectiveHz;
+        }
+
+        stop.Cancel();
+        await mutator;
+    }
+
+    [Fact] public void ClawSensorProbeStatistics_MinimumAndMaximumIntervalMsReflectAllAddedIntervals()
+    {
+        var statistics = new ClawSensorProbeStatistics();
+        statistics.Add(5);
+        statistics.Add(1);
+        statistics.Add(9);
+        statistics.Add(0); // non-positive intervals do not count toward min/max/average
+
+        Assert.Equal(4, statistics.SampleCount);
+        Assert.Equal(1, statistics.MinimumIntervalMs);
+        Assert.Equal(9, statistics.MaximumIntervalMs);
+        Assert.Equal(5, statistics.AverageIntervalMs);
+    }
+
     [Fact] public async Task Writer_CsvHeaderAndRowsIncludeBackendReadDurationAndSensorAge()
     {
         var root = Path.Combine(Path.GetTempPath(), "claw-probe-backend-columns-" + Guid.NewGuid().ToString("N"));
@@ -1136,6 +1178,39 @@ public sealed class ClawSensorProbeTests
             Assert.Equal(2, summaries.Length);
             Assert.Contains(summaries, e => e.GetProperty("Pass").GetInt32() == 1 && e.GetProperty("MeanX").GetDouble() == 1);
             Assert.Contains(summaries, e => e.GetProperty("Pass").GetInt32() == 2 && e.GetProperty("MeanX").GetDouble() == 9);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_AxisModePerPhaseSummaryIncludesZeroSampleSensorRatherThanDroppingIt()
+    {
+        // A source can be quiet/duplicate/no-data for an entire visit while the other source still
+        // produces Fresh samples -- a realistic sensor behavior this diagnostic exists to characterize
+        // (PR B review finding #2). The visit's GYRO summary must still appear with an explicit
+        // SampleCount=0 rather than being silently absent from PerPhaseSummaries.
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-zero-sensor-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session", ClawSensorProbeMode.AxisCharacterization))
+            {
+                writer.BeginRecordingPhase(ClawSensorProbePhase.REST, 1, 10);
+                writer.Write(new(1, DateTimeOffset.UtcNow, 20, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 0, 0, 1, 10));
+                writer.EndPhase(ClawSensorProbePhase.REST, 1, 30);
+            }
+
+            using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
+            var summaries = report.RootElement.GetProperty("PerPhaseSummaries").EnumerateArray()
+                .Where(e => e.GetProperty("Phase").GetString() == "REST" && e.GetProperty("Pass").GetInt32() == 1)
+                .ToArray();
+
+            Assert.Equal(2, summaries.Length);
+            var gyro = Assert.Single(summaries, e => e.GetProperty("Sensor").GetString() == "GYRO");
+            Assert.Equal(0, gyro.GetProperty("SampleCount").GetInt64());
+            var accel = Assert.Single(summaries, e => e.GetProperty("Sensor").GetString() == "ACCEL");
+            Assert.Equal(1, accel.GetProperty("SampleCount").GetInt64());
         }
         finally
         {

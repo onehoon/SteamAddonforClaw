@@ -249,18 +249,39 @@ internal sealed class ClawSensorProbeTimingStatistics
     }
 }
 
+// Guarded the same way as ClawSensorProbeTimingStatistics above: WriteLoopAsync() (the single channel
+// consumer) calls Add() at sensor cadence while the frontend's ~200ms poll concurrently reads these
+// properties through MapClawSensorProbeStatistics. A running sum/min/max (not a List<double> scanned
+// on every read) backs Average/Minimum/MaximumIntervalMs so no shared collection is ever enumerated
+// concurrently with a mutation -- unguarded enumeration here previously risked "Collection was
+// modified" on a normal live probe, not just a theoretical race (PR B review).
 internal sealed class ClawSensorProbeStatistics
 {
-    private readonly List<double> _intervals = [];
-    public long SampleCount { get; private set; }
-    public long DroppedSampleCount { get; private set; }
-    public double DurationMs { get; private set; }
-    public double AverageIntervalMs => _intervals.Count == 0 ? 0 : _intervals.Average();
-    public double MinimumIntervalMs => _intervals.Count == 0 ? 0 : _intervals.Min();
-    public double MaximumIntervalMs => _intervals.Count == 0 ? 0 : _intervals.Max();
-    public double EffectiveHz => AverageIntervalMs <= 0 ? 0 : 1000 / AverageIntervalMs;
-    public void Add(double intervalMs) { SampleCount++; DurationMs += intervalMs; if (intervalMs > 0) _intervals.Add(intervalMs); }
-    public void AddDropped() => DroppedSampleCount++;
+    private readonly object _gate = new();
+    private long _sampleCount, _droppedSampleCount, _intervalCount;
+    private double _durationMs, _intervalTotalMs, _minimumIntervalMs = double.MaxValue, _maximumIntervalMs;
+    public long SampleCount { get { lock (_gate) return _sampleCount; } }
+    public long DroppedSampleCount { get { lock (_gate) return _droppedSampleCount; } }
+    public double DurationMs { get { lock (_gate) return _durationMs; } }
+    public double AverageIntervalMs { get { lock (_gate) return ComputeAverageIntervalMs(); } }
+    public double MinimumIntervalMs { get { lock (_gate) return _intervalCount == 0 ? 0 : _minimumIntervalMs; } }
+    public double MaximumIntervalMs { get { lock (_gate) return _maximumIntervalMs; } }
+    public double EffectiveHz { get { lock (_gate) { var average = ComputeAverageIntervalMs(); return average <= 0 ? 0 : 1000 / average; } } }
+    private double ComputeAverageIntervalMs() => _intervalCount == 0 ? 0 : _intervalTotalMs / _intervalCount;
+    public void Add(double intervalMs)
+    {
+        lock (_gate)
+        {
+            _sampleCount++;
+            _durationMs += intervalMs;
+            if (intervalMs <= 0) return;
+            _intervalTotalMs += intervalMs;
+            _intervalCount++;
+            if (intervalMs < _minimumIntervalMs) _minimumIntervalMs = intervalMs;
+            if (intervalMs > _maximumIntervalMs) _maximumIntervalMs = intervalMs;
+        }
+    }
+    public void AddDropped() { lock (_gate) _droppedSampleCount++; }
 }
 
 internal sealed class ClawSensorProbeLiveSnapshot
@@ -373,12 +394,14 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     private readonly Dictionary<string, double> _pendingPhaseEnds = new(StringComparer.Ordinal);
     private readonly object _phaseGate = new();
     private readonly ClawSensorProbeMode _mode;
-    // Axis per-(Phase, Pass, Sensor) accumulators, in first-seen order so PerPhaseSummaries reads in
-    // visit order; Bias's two accumulators are simpler since a bias session has exactly one implicit
-    // "visit". Both are mutated only from WriteLoopAsync (the single channel consumer), same as the
-    // pre-existing _restGyro/_restAccel/_phases fields above.
+    // Axis per-(Phase, Pass, Sensor) accumulators, keyed by "{Phase}:{Pass}:{Sensor}"; Bias's two
+    // accumulators are simpler since a bias session has exactly one implicit "visit". Mutated only
+    // from WriteLoopAsync (the single channel consumer), same as the pre-existing
+    // _restGyro/_restAccel/_phases fields above. A sensor that produced zero accepted Fresh samples
+    // during a visit (quiet/duplicate/no-data for the whole window) simply has no entry here --
+    // BuildPerPhaseSummaries() must still emit an explicit SampleCount=0 summary for it rather than
+    // silently dropping that source from the visit (PR B review finding #2).
     private readonly Dictionary<string, ClawSensorVectorAccumulator> _phaseAccumulators = new(StringComparer.Ordinal);
-    private readonly List<(ClawSensorProbePhase Phase, int Pass, string Sensor)> _phaseAccumulatorOrder = [];
     private readonly ClawSensorVectorAccumulator _biasGyro = new();
     private readonly ClawSensorVectorAccumulator _biasAccel = new();
     private ClawSensorDiscovery? _discovery;
@@ -497,7 +520,6 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
                 {
                     accumulator = new ClawSensorVectorAccumulator();
                     _phaseAccumulators[accumulatorKey] = accumulator;
-                    _phaseAccumulatorOrder.Add((sample.Phase, sample.PhasePass, sample.Sensor));
                 }
                 accumulator.Add(sample.X, sample.Y, sample.Z, sample.ElapsedMs);
             }
@@ -550,41 +572,69 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
         await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, ReportSerializerOptions), Encoding.UTF8, cancellationToken);
     }
 
-    // Axis-only: one entry per (Phase, Pass, Sensor) actually recorded, in first-seen (visit) order
-    // (docs/gyro/SD6A_CLAW_SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md section 10).
-    // Live Sanity / Stationary Bias never populate _phaseAccumulators (see WriteLoopAsync), so this is
-    // an empty array for those modes, matching the required JSON shape.
-    private object[] BuildPerPhaseSummaries(bool includeAccelMagnitudeG) => [.. _phaseAccumulatorOrder.Select(entry =>
+    // Axis-only: one entry per (Phase, Pass, Sensor) for every visit that actually reached Recording,
+    // in visit order (docs/gyro/SD6A_CLAW_SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md
+    // section 10). The phase log (_phases), not _phaseAccumulators, is the visit authority: a source
+    // that was quiet/duplicate/no-data for an entire visit has no accumulator entry, but the visit
+    // still happened, so it still gets an explicit SampleCount=0 summary rather than being silently
+    // dropped (PR B review finding #2). Live Sanity / Stationary Bias never populate _phases for
+    // recording (IsAxis gate in WriteLoopAsync), so this is an empty array for those modes.
+    private object[] BuildPerPhaseSummaries(bool includeAccelMagnitudeG)
     {
-        var accumulator = _phaseAccumulators[$"{entry.Phase}:{entry.Pass}:{entry.Sensor}"];
-        var includeMagnitude = includeAccelMagnitudeG && entry.Sensor == "ACCEL";
-        var result = new Dictionary<string, object?>
+        // A visit "actually reached Recording" when either the coordinator explicitly started
+        // recording for it (recording_start_elapsed_ms > 0 in the normal production flow) or at least
+        // one Recording sample from either sensor was accepted for it (capture_status == "Captured",
+        // covering a phase whose first Recording sample happens to land at elapsed=0). Either
+        // condition alone can miss a real visit; matching either is the visit authority.
+        List<ClawSensorProbePhaseLog> phases;
+        lock (_phaseGate) phases = _phases.Where(p => p.recording_start_elapsed_ms > 0 || p.capture_status == "Captured").ToList();
+        var result = new List<object>(phases.Count * 2);
+        foreach (var phaseLog in phases)
         {
-            ["Phase"] = entry.Phase,
-            ["Pass"] = entry.Pass,
-            ["Sensor"] = entry.Sensor,
-            ["Backend"] = entry.Sensor == "GYRO" ? _discovery?.Gyroscope?.Backend : _discovery?.Accelerometer?.Backend,
-            ["SampleCount"] = accumulator.Count,
-            ["MeanX"] = accumulator.MeanX, ["MeanY"] = accumulator.MeanY, ["MeanZ"] = accumulator.MeanZ,
-            ["MinX"] = accumulator.MinX, ["MinY"] = accumulator.MinY, ["MinZ"] = accumulator.MinZ,
-            ["MaxX"] = accumulator.MaxX, ["MaxY"] = accumulator.MaxY, ["MaxZ"] = accumulator.MaxZ,
-            ["SpanX"] = accumulator.SpanX, ["SpanY"] = accumulator.SpanY, ["SpanZ"] = accumulator.SpanZ,
-            ["DurationMs"] = accumulator.DurationMs,
-            ["EffectiveHz"] = accumulator.EffectiveHz,
-            ["StartElapsedMs"] = accumulator.StartElapsedMs,
-            ["EndElapsedMs"] = accumulator.EndElapsedMs,
-        };
-        // MagnitudeG* keys are omitted entirely (not merely null) when the source's unit basis is not
-        // proven G, matching the existing AxisSummary/RestSummary convention (docs section 10).
-        if (includeMagnitude)
-        {
-            result["MagnitudeGMean"] = accumulator.MagnitudeGMean;
-            result["MagnitudeGMin"] = accumulator.MagnitudeGMin;
-            result["MagnitudeGMax"] = accumulator.MagnitudeGMax;
-            result["MagnitudeGSpan"] = accumulator.MagnitudeGSpan;
+            if (!Enum.TryParse<ClawSensorProbePhase>(phaseLog.name, out var phase)) continue;
+            foreach (var sensor in new[] { "GYRO", "ACCEL" })
+            {
+                _phaseAccumulators.TryGetValue($"{phase}:{phaseLog.pass}:{sensor}", out var accumulator);
+                // A source that produced zero accepted Fresh samples for this visit (quiet/duplicate/
+                // no-data the whole window) has no accumulator entry -- fall back to the phase log's
+                // own start/end so the summary still reports an explicit SampleCount=0 rather than
+                // being silently dropped (PR B review finding #2), while a populated accumulator keeps
+                // reporting its own actual first/last sample timing as before.
+                var hasData = accumulator is not null;
+                accumulator ??= new ClawSensorVectorAccumulator();
+                var startElapsedMs = hasData ? accumulator.StartElapsedMs : phaseLog.recording_start_elapsed_ms;
+                var endElapsedMs = hasData ? accumulator.EndElapsedMs : phaseLog.end_elapsed_ms;
+                var includeMagnitude = includeAccelMagnitudeG && sensor == "ACCEL";
+                var entry = new Dictionary<string, object?>
+                {
+                    ["Phase"] = phase,
+                    ["Pass"] = phaseLog.pass,
+                    ["Sensor"] = sensor,
+                    ["Backend"] = sensor == "GYRO" ? _discovery?.Gyroscope?.Backend : _discovery?.Accelerometer?.Backend,
+                    ["SampleCount"] = accumulator.Count,
+                    ["MeanX"] = accumulator.MeanX, ["MeanY"] = accumulator.MeanY, ["MeanZ"] = accumulator.MeanZ,
+                    ["MinX"] = accumulator.MinX, ["MinY"] = accumulator.MinY, ["MinZ"] = accumulator.MinZ,
+                    ["MaxX"] = accumulator.MaxX, ["MaxY"] = accumulator.MaxY, ["MaxZ"] = accumulator.MaxZ,
+                    ["SpanX"] = accumulator.SpanX, ["SpanY"] = accumulator.SpanY, ["SpanZ"] = accumulator.SpanZ,
+                    ["StartElapsedMs"] = startElapsedMs,
+                    ["EndElapsedMs"] = endElapsedMs,
+                    ["DurationMs"] = hasData ? accumulator.DurationMs : Math.Max(0, endElapsedMs - startElapsedMs),
+                    ["EffectiveHz"] = accumulator.EffectiveHz,
+                };
+                // MagnitudeG* keys are omitted entirely (not merely null) when the source's unit basis is
+                // not proven G, matching the existing AxisSummary/RestSummary convention (docs section 10).
+                if (includeMagnitude)
+                {
+                    entry["MagnitudeGMean"] = accumulator.MagnitudeGMean;
+                    entry["MagnitudeGMin"] = accumulator.MagnitudeGMin;
+                    entry["MagnitudeGMax"] = accumulator.MagnitudeGMax;
+                    entry["MagnitudeGSpan"] = accumulator.MagnitudeGSpan;
+                }
+                result.Add(entry);
+            }
         }
-        return result;
-    })];
+        return [.. result];
+    }
 
     // StationaryBias-only (docs section 11): a gyro zero-rate bias CANDIDATE and accelerometer
     // stability check -- never applied anywhere, purely reported for later human/offline analysis.

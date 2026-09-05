@@ -315,10 +315,10 @@ public sealed partial class ClawSensorProbePage : UserControl
         if (snapshot.Discovery is { } discovery)
         {
             GyroDiscoveryText.Text = discovery.Gyroscope is { } gyro
-                ? $"Gyroscope: {gyro.FriendlyName} | ID: {gyro.SensorId} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage}"
+                ? $"Gyroscope: {gyro.Backend} | {gyro.FriendlyName} | ID: {gyro.SensorId} | Path: {gyro.DevicePath} | State: {gyro.State} | Unit: {gyro.UnitBasis} | Selection: {gyro.SelectionReason ?? "Unavailable"} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage}"
                 : "Gyroscope: Not discovered";
             AccelDiscoveryText.Text = discovery.Accelerometer is { } accel
-                ? $"Accelerometer: {accel.FriendlyName} | ID: {accel.SensorId} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage}"
+                ? $"Accelerometer: {accel.Backend} | {accel.FriendlyName} | ID: {accel.SensorId} | Path: {accel.DevicePath} | State: {accel.State} | Unit: {accel.UnitBasis} | Selection: {accel.SelectionReason ?? "Unavailable"} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage}"
                 : "Accelerometer: Not discovered";
         }
 
@@ -341,10 +341,14 @@ public sealed partial class ClawSensorProbePage : UserControl
             _ => PhaseInstruction(snapshot.Phase)
         };
 
-        LiveText.Text = $"Status: {snapshot.State}{Environment.NewLine}" +
-            $"Gyroscope raw: X={snapshot.Gyro.X:0.###}, Y={snapshot.Gyro.Y:0.###}, Z={snapshot.Gyro.Z:0.###} | {snapshot.Gyro.Hz:0.0} Hz | {snapshot.Gyro.Count} samples | fresh age {snapshot.Gyro.FreshAgeMs:0} ms | last read {snapshot.Gyro.LastReadDurationMs:0.##} ms | {(snapshot.Gyro.IsFresh ? "fresh" : "stale")}{Environment.NewLine}" +
+        var gyroTiming = snapshot.GyroTiming;
+        var accelTiming = snapshot.AccelTiming;
+        LiveText.Text = $"Status: {snapshot.State} | Elapsed: {snapshot.ElapsedMs / 1000d:0.0}s{Environment.NewLine}" +
+            $"Gyroscope raw: X={snapshot.Gyro.X:0.###}, Y={snapshot.Gyro.Y:0.###}, Z={snapshot.Gyro.Z:0.###} | {snapshot.Gyro.Hz:0.0} Hz | {snapshot.Gyro.Count} samples | fresh age {snapshot.Gyro.FreshAgeMs:0} ms | last read {snapshot.Gyro.LastReadDurationMs:0.##} ms | {(snapshot.Gyro.IsFresh ? "fresh" : "stale")}" +
+            (gyroTiming is { } gt ? $" | dup {gt.DuplicateCount} | no-data {gt.NoDataCount} | fail {gt.ReadFailureCount} | max read {gt.MaxReadDurationMs:0.##} ms | max age {gt.MaxFreshAgeMs:0} ms" : string.Empty) + Environment.NewLine +
             $"Accelerometer raw: X={snapshot.Accel.X:0.###}, Y={snapshot.Accel.Y:0.###}, Z={snapshot.Accel.Z:0.###} | {snapshot.Accel.Hz:0.0} Hz | {snapshot.Accel.Count} samples | fresh age {snapshot.Accel.FreshAgeMs:0} ms | last read {snapshot.Accel.LastReadDurationMs:0.##} ms | {(snapshot.Accel.IsFresh ? "fresh" : "stale")}" +
-            (snapshot.Accel.MagnitudeG is { } magnitude ? $" | |g|={magnitude:0.###}" : string.Empty);
+            (snapshot.Accel.MagnitudeG is { } magnitude ? $" | |g|={magnitude:0.###}" : string.Empty) +
+            (accelTiming is { } at ? $" | dup {at.DuplicateCount} | no-data {at.NoDataCount} | fail {at.ReadFailureCount} | max read {at.MaxReadDurationMs:0.##} ms | max age {at.MaxFreshAgeMs:0} ms" : string.Empty);
 
         var recording = snapshot.State == FrontendClawSensorProbeState.RecordingPhase;
         StartButton.IsEnabled = snapshot.State == FrontendClawSensorProbeState.Ready;
@@ -387,9 +391,13 @@ public sealed partial class ClawSensorProbePage : UserControl
             ? $"{Environment.NewLine}Bias gyro mean: X={bias.GyroMeanX:0.###}, Y={bias.GyroMeanY:0.###}, Z={bias.GyroMeanZ:0.###} | stddev: X={bias.GyroStandardDeviationX:0.###}, Y={bias.GyroStandardDeviationY:0.###}, Z={bias.GyroStandardDeviationZ:0.###}" +
               $"{Environment.NewLine}Bias accel span: X={bias.AccelSpanX:0.###}, Y={bias.AccelSpanY:0.###}, Z={bias.AccelSpanZ:0.###}" + (bias.AccelMagnitudeGMean is { } meanG ? $" | |g| mean={meanG:0.###}, span={bias.AccelMagnitudeGSpan:0.###}" : string.Empty)
             : string.Empty;
+        var gyroTiming = snapshot.GyroTiming;
+        var accelTiming = snapshot.AccelTiming;
         SummaryText.Text = $"{result}{Environment.NewLine}Mode: {snapshot.Mode?.ToString() ?? "Unknown"}{Environment.NewLine}Output directory: {snapshot.OutputDirectory ?? "Unavailable"}{Environment.NewLine}" +
-            $"Gyroscope samples: {gyro?.SampleCount ?? 0}, average rate: {gyro?.EffectiveHz ?? 0:0.0} Hz, interval: {gyro?.MinimumIntervalMs ?? 0:0.###}-{gyro?.MaximumIntervalMs ?? 0:0.###} ms, dropped: {snapshot.DroppedGyroscopeCount}{Environment.NewLine}" +
-            $"Accelerometer samples: {accel?.SampleCount ?? 0}, average rate: {accel?.EffectiveHz ?? 0:0.0} Hz, interval: {accel?.MinimumIntervalMs ?? 0:0.###}-{accel?.MaximumIntervalMs ?? 0:0.###} ms, dropped: {snapshot.DroppedAccelerometerCount}{Environment.NewLine}" +
+            $"Gyroscope samples: {gyro?.SampleCount ?? 0}, average rate: {gyro?.EffectiveHz ?? 0:0.0} Hz, interval: {gyro?.MinimumIntervalMs ?? 0:0.###}-{gyro?.MaximumIntervalMs ?? 0:0.###} ms, dropped: {snapshot.DroppedGyroscopeCount}" +
+            (gyroTiming is { } gt ? $", duplicate: {gt.DuplicateCount}, no-data: {gt.NoDataCount}, read-failure: {gt.ReadFailureCount}, max read: {gt.MaxReadDurationMs:0.##} ms, max fresh age: {gt.MaxFreshAgeMs:0} ms" : string.Empty) + Environment.NewLine +
+            $"Accelerometer samples: {accel?.SampleCount ?? 0}, average rate: {accel?.EffectiveHz ?? 0:0.0} Hz, interval: {accel?.MinimumIntervalMs ?? 0:0.###}-{accel?.MaximumIntervalMs ?? 0:0.###} ms, dropped: {snapshot.DroppedAccelerometerCount}" +
+            (accelTiming is { } at ? $", duplicate: {at.DuplicateCount}, no-data: {at.NoDataCount}, read-failure: {at.ReadFailureCount}, max read: {at.MaxReadDurationMs:0.##} ms, max fresh age: {at.MaxFreshAgeMs:0} ms" : string.Empty) + Environment.NewLine +
             $"Dropped samples total: {snapshot.DroppedSampleCount}" + biasLine;
     }
 
