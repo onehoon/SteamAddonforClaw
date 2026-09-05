@@ -107,6 +107,24 @@ public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcom
     public bool Succeeded => Outcome == FrontendTdpMutationOutcome.Succeeded;
 }
 
+/// <summary>Shared Device Quick Settings read projection (Shared Frontend V2, SF-V2-01) used by
+/// Main UI and Steam QAM to read CPU Boost/TDP/Power Mode in one round trip. Each child is captured
+/// independently, so one child being <see cref="FrontendCpuBoostSnapshot.Unavailable"/>/<see
+/// cref="FrontendTdpSnapshot.Unavailable"/>/<see cref="FrontendPowerModeSnapshot.Unavailable"/> must
+/// not imply the others are unavailable. This is a UI projection convenience only -- it is not a new
+/// Device/Quick Settings authority and must not gain Center M, Status, active Profile, or other
+/// feature members.</summary>
+public sealed record FrontendDeviceQuickSettingsSnapshot(
+    FrontendCpuBoostSnapshot CpuBoost,
+    FrontendTdpSnapshot Tdp,
+    FrontendPowerModeSnapshot PowerMode)
+{
+    public static readonly FrontendDeviceQuickSettingsSnapshot Unavailable = new(
+        FrontendCpuBoostSnapshot.Unavailable,
+        FrontendTdpSnapshot.Unavailable,
+        FrontendPowerModeSnapshot.Unavailable);
+}
+
 public enum FrontendFanProbeState { Unavailable, Ready, Running, Completed, Failed }
 public enum FrontendFanProbeOperation { Capture, AutomaticTest, RestoreAuto, PhysicalResponse, ArmSuspendResume }
 public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeState State, string Status, string Manufacturer, string Model, string BaseBoard, string ProbeModel, string? ReportPath, bool HasReport, string? ErrorMessage)
@@ -309,6 +327,13 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
     Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
+    /// <summary>Shared Device Quick Settings aggregate read (Shared Frontend V2, SF-V2-01): captures
+    /// CPU Boost/TDP/Power Mode in one round trip for Main UI/QAM Device refresh. A UI projection
+    /// convenience over <see cref="CaptureCpuBoostAsync"/>/<see cref="CaptureTdpAsync"/>/<see
+    /// cref="CapturePowerModeAsync"/> -- it must not replace those focused methods, must not persist
+    /// or mutate anything, and one child capture failing must not discard healthy siblings.</summary>
+    Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendDeviceQuickSettingsSnapshot.Unavailable);
     Task<FrontendFanProbeSnapshot> OpenFanProbeAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
     Task<FrontendFanProbeSnapshot> RunFanProbeAsync(FrontendFanProbeOperation operation, CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);

@@ -945,6 +945,34 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }, result.FailureMessage, snapshot));
     }
 
+    /// <summary>Shared Device Quick Settings aggregate read (Shared Frontend V2, SF-V2-01 section
+    /// 8): reuses the existing Runtime authorities/mappers, performs the three reads sequentially
+    /// (no cross-feature lock/epoch/parallelization), and isolates a real capture failure to that
+    /// child so healthy siblings are still returned. Read-only: never persists, mutates, reconciles,
+    /// or raises <see cref="StateInvalidated"/> merely because state was requested.</summary>
+    public async Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var cpuBoost = FrontendCpuBoostSnapshot.Unavailable;
+        try { cpuBoost = await CaptureCpuBoostAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) { AppLog.Warn("Device", "CPU Boost snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
+
+        var tdp = FrontendTdpSnapshot.Unavailable;
+        try { tdp = await CaptureTdpAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) { AppLog.Warn("Device", "TDP snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
+
+        var powerMode = FrontendPowerModeSnapshot.Unavailable;
+        try { powerMode = await CapturePowerModeAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) { AppLog.Warn("Device", "Power Mode snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
+
+        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode);
+    }
+
     public Task<FrontendCenterMStartupSnapshot> CaptureCenterMStartupAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();

@@ -87,6 +87,17 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_bridge_has_one_device_read_path_through_the_shared_aggregate()
+    {
+        var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
+
+        Assert.Contains("\"captureDeviceQuickSettings\" => await _client.CaptureDeviceQuickSettingsAsync(token),", bridge);
+        Assert.DoesNotContain("\"captureCpuBoost\"", bridge);
+        Assert.DoesNotContain("\"captureTdp\"", bridge);
+        Assert.DoesNotContain("\"capturePowerMode\"", bridge);
+    }
+
+    [Fact]
     public void Qam_uninstall_retires_pending_bridge_consumers_without_resetting_ids()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
@@ -265,7 +276,8 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("AC Mode", source);
         Assert.DoesNotContain("DC Mode", source);
         Assert.Contains("request(\"captureStatus\")", source);
-        Assert.Contains("request(\"captureCpuBoost\")", source);
+        Assert.Contains("request(\"captureDeviceQuickSettings\")", source);
+        Assert.DoesNotContain("request(\"captureCpuBoost\")", source);
         Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", source);
         Assert.Contains("scheduleQamSliderCommit(`device-cpu-${key}`", source);
         var cpuModeMutation = source[source.IndexOf("const scheduleMode", StringComparison.Ordinal)..source.IndexOf("const setEnabled", StringComparison.Ordinal)];
@@ -279,7 +291,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("setTimeout(async () =>", source);
         Assert.Contains("state.onStateInvalidated", source);
         Assert.DoesNotContain("setInterval", source);
-        Assert.Contains("request(\"captureTdp\")", source);
+        Assert.DoesNotContain("request(\"captureTdp\")", source);
+        Assert.DoesNotContain("request(\"capturePowerMode\")", source);
         Assert.Contains("cancelQamSliderCommits", source);
         Assert.Contains("setPreviewAc(null); setPreviewDc(null);", source);
         Assert.Contains("state.onStateInvalidated === handler", source);
@@ -381,6 +394,27 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("keydown", source);
         Assert.DoesNotContain("gamepad", source);
+    }
+
+    [Fact]
+    public void Qam_no_active_game_device_refresh_uses_the_shared_aggregate()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var refreshStart = source.IndexOf("const refresh = React.useCallback(async () => {", StringComparison.Ordinal);
+        Assert.True(refreshStart >= 0);
+        var refresh = source[refreshStart..source.IndexOf("const beginMutation", refreshStart, StringComparison.Ordinal)];
+
+        Assert.Contains("const nextDevice = activeGame ? null : await request(\"captureDeviceQuickSettings\");", refresh);
+        Assert.Contains("const nextCpu = nextDevice?.cpuBoost ?? null;", refresh);
+        Assert.Contains("const nextPowerMode = nextDevice?.powerMode ?? null;", refresh);
+        Assert.Contains("const nextTdp = nextDevice?.tdp ?? null;", refresh);
+        Assert.DoesNotContain("captureCpuBoost", refresh);
+        Assert.DoesNotContain("capturePowerMode", refresh);
+        Assert.DoesNotContain("\"captureTdp\"", refresh);
+        // Status/active Profile stay their own separate reads (work order section 11.3).
+        Assert.Contains("await request(\"captureStatus\")", refresh);
+        Assert.Contains("await request(\"captureActiveGameProfile\")", refresh);
     }
 
     [Fact]

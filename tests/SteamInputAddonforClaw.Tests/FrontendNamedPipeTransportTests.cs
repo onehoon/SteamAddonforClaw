@@ -95,6 +95,40 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Device_quick_settings_aggregate_round_trips_through_the_named_pipe()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var snapshot = await client.CaptureDeviceQuickSettingsAsync();
+
+        Assert.Equal(fake.DeviceQuickSettingsSnapshot, snapshot);
+        Assert.Equal(1, fake.CaptureDeviceQuickSettingsCount);
+    }
+
+    [Fact]
+    public async Task Device_quick_settings_aggregate_rejects_unexpected_payload_without_invoking_frontend()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"CaptureDeviceQuickSettings\",\"Payload\":{{}}}}");
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.CaptureDeviceQuickSettingsCount);
+    }
+
+    [Fact]
     public async Task Game_profile_operations_round_trip_through_the_named_pipe()
     {
         var fake = new RecordingFrontendControl();
@@ -980,9 +1014,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":25,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":25,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":25,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":26,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":26,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":26,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1341,6 +1375,13 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendClawSensorProbeSnapshot> PreviousClawSensorProbePhaseAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbePreviousCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> StopClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeStopCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeCloseCount++; ClawSensorProbeClosed.TrySetResult(); return Task.FromResult(ClawSensorProbeSnapshot); }
+
+        public FrontendDeviceQuickSettingsSnapshot DeviceQuickSettingsSnapshot { get; } = new(
+            new(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), true, true, null),
+            new(true, true, new(true, new(20, 30), new(15, 25)), new(8, 30, 8, 40)),
+            new(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null));
+        public int CaptureDeviceQuickSettingsCount { get; private set; }
+        public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) { TotalCalls++; CaptureDeviceQuickSettingsCount++; return Task.FromResult(DeviceQuickSettingsSnapshot); }
     }
 
     private sealed class PartialReadStream : MemoryStream

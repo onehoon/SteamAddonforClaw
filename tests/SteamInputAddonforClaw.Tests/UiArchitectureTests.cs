@@ -96,6 +96,36 @@ public sealed class UiArchitectureTests
         Assert.Contains("if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit(isAc);", page, StringComparison.Ordinal);
     }
 
+    [Fact] // Shared Frontend V2, SF-V2-01: the normal Device refresh path performs one aggregate
+           // read instead of three separate Device captures, while Center M's own separate refresh
+           // (reboot-bound, work order section 10.1) is untouched.
+    public void Device_refresh_uses_one_shared_aggregate_capture_and_fails_closed_on_whole_transport_failure()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+
+        var refreshStart = page.IndexOf("internal async Task RefreshAsync()", StringComparison.Ordinal);
+        Assert.True(refreshStart >= 0);
+        var refresh = page[refreshStart..page.IndexOf("private static readonly PowerModeItem[] PowerModes", refreshStart, StringComparison.Ordinal)];
+
+        Assert.Contains("await _frontend.CaptureDeviceQuickSettingsAsync()", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureCpuBoostAsync()", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureTdpAsync()", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("CapturePowerModeAsync()", refresh, StringComparison.Ordinal);
+        Assert.Contains("Render(snapshot.CpuBoost);", refresh, StringComparison.Ordinal);
+        Assert.Contains("RenderTdp(snapshot.Tdp);", refresh, StringComparison.Ordinal);
+        Assert.Contains("RenderPowerMode(snapshot.PowerMode);", refresh, StringComparison.Ordinal);
+        // Whole-transport failure fails closed: all three children render Unavailable and the TDP
+        // dirty draft is not preserved as if it were still authoritative/editable (section 10.4).
+        Assert.Contains("Render(FrontendCpuBoostSnapshot.Unavailable);", refresh, StringComparison.Ordinal);
+        Assert.Contains("RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: false);", refresh, StringComparison.Ordinal);
+        Assert.Contains("RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);", refresh, StringComparison.Ordinal);
+
+        // Center M keeps its own separate, reboot-bound page-entry refresh.
+        Assert.Contains("_ = RefreshCenterMStartupAsync();", page, StringComparison.Ordinal);
+        Assert.Contains("private async Task RefreshCenterMStartupAsync()", page, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Power_mode_ui_failures_clear_stale_state()
     {
@@ -103,8 +133,11 @@ public sealed class UiArchitectureTests
         var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
         var profilePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
 
+        // Shared Frontend V2 SF-V2-01: RefreshAsync no longer catches each Device feature capture
+        // separately -- a whole-transport failure renders all three children Unavailable and
+        // RenderPowerMode itself is responsible for the concise per-feature failure message.
         Assert.Contains("RenderPowerMode(FrontendPowerModeSnapshot.Unavailable)", devicePage, StringComparison.Ordinal);
-        Assert.Contains("PowerModeInfoBar.Message = \"Power Mode settings could not be loaded.\"", devicePage, StringComparison.Ordinal);
+        Assert.Contains("\"Windows Power Mode could not be initialized.\"", devicePage, StringComparison.Ordinal);
         Assert.Contains("PowerModeAcComboBox.SelectedItem = null", profilePage, StringComparison.Ordinal);
         Assert.Contains("PowerModeDcComboBox.SelectedItem = null", profilePage, StringComparison.Ordinal);
     }
