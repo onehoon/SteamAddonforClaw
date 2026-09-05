@@ -17,6 +17,16 @@ This folder is the single documentation home for MSI Claw gyro / accelerometer r
 3. [`DEVELOPER_CLAW_SENSOR_PROBE_GYRO_REVIEW_2026-09-05.md`](./DEVELOPER_CLAW_SENSOR_PROBE_GYRO_REVIEW_2026-09-05.md)  
    Review of the Developer Menu **Claw Sensor Probe / Gyro Test** and the concrete changes needed to characterize CG3EM correctly.
 
+## Implementation work orders
+
+Recommended implementation order:
+
+1. [`SD6A_ENVIRONMENT_DISCOVERY_SENSOR_EVIDENCE_WORK_ORDER.md`](./SD6A_ENVIRONMENT_DISCOVERY_SENSOR_EVIDENCE_WORK_ORDER.md)  
+   Extend the existing one-shot Environment Discovery Report with WinRT motion projection status, legacy Sensor API broad/direct-query evidence, exact HRESULTs, and a motion-focused view of the already-captured all-class PnP inventory. This should land first so the interactive probe can reuse the same low-level legacy query behavior.
+
+2. [`SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md`](./SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md)  
+   Upgrade Claw Sensor Probe to backend-aware gyro/accelerometer acquisition, live freshness/read-duration diagnostics, per-phase axis summaries, and a stationary-bias capture mode. This remains developer-only and must not connect to production Steam Deck IMU output.
+
 ## Historical / source documents
 
 - [`Reference Research_CG3EM Gyro Driver Correction_2026-08-15.txt`](./Reference%20Research_CG3EM%20Gyro%20Driver%20Correction_2026-08-15.txt)  
