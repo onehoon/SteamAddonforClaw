@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Linq;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
@@ -413,6 +414,67 @@ public sealed class OverlayTransportTests
             Assert.False(controller.IsVisible);
             await Task.Delay(100);
             lock (commands) Assert.Equal([OverlayCommand.Show, OverlayCommand.Hide], commands);
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // SF-V2-02 section 17.2: a refresh started while visible must not intentionally publish to a
+    // session that became hidden before the (possibly slow) capture completed.
+    [Fact]
+    public async Task RefreshDeviceQuickSettingsAsync_does_not_publish_after_the_session_is_hidden_mid_capture()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var captureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCapture = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // `pause` with a redirected-but-never-written stdin blocks reliably; `timeout` exits early
+        // when stdin is not a console, which would race the process-exit path into this test.
+        Process? StartTestProcess(ProcessStartInfo _) => Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe", Arguments = "/c pause",
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true
+        });
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.BindDeviceQuickSettingsAuthority(
+                capture: async _ =>
+                {
+                    captureEntered.TrySetResult();
+                    await releaseCapture.Task;
+                    return FrontendDeviceQuickSettingsSnapshot.Unavailable;
+                },
+                mutate: (request, _) => Task.FromResult(OverlayWireValidation.NotAdmitted(request, "unused")));
+
+            var deviceFrames = new List<FrontendDeviceQuickSettingsSnapshot>();
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null,
+                snapshot => { lock (deviceFrames) deviceFrames.Add(snapshot); return Task.CompletedTask; });
+
+            Assert.True(await controller.ShowAsync());
+            Assert.True(controller.IsVisible);
+
+            var refreshTask = controller.RefreshDeviceQuickSettingsAsync();
+            await captureEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(await controller.EnsureHiddenAsync());
+
+            releaseCapture.TrySetResult();
+            await refreshTask.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(200);
+            lock (deviceFrames) Assert.Empty(deviceFrames);
 
             await controller.DisposeAsync();
             try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }

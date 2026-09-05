@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
@@ -63,7 +64,7 @@ public partial class App : Application
         {
             _client = new NamedPipeOverlayClient(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
             OverlayLog.Info("Transport", "Overlay command loop starting.");
-            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync).ConfigureAwait(false);
+            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleDeviceQuickSettingsAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -102,6 +103,17 @@ public partial class App : Application
             completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for tab-order application."));
         }
         return completion.Task;
+    }
+
+    // SF-V2-02 section 19: receives the shared typed Device Quick Settings aggregate. For this
+    // transport-foundation PR this is transport-verification-only -- no persistence, no direct
+    // hardware access, and no binding to the current preview Toggle/Slider fixtures (that starts in
+    // SF-V2-03/04).
+    private Task HandleDeviceQuickSettingsAsync(FrontendDeviceQuickSettingsSnapshot snapshot)
+    {
+        OverlayLog.Debug("Device", "Device Quick Settings snapshot received.",
+            ("CpuBoostEnabled", snapshot.CpuBoost.Enabled), ("TdpAvailable", snapshot.Tdp.Available), ("PowerModeEnabled", snapshot.PowerMode.Enabled));
+        return Task.CompletedTask;
     }
 
     // OQ5-UI-10: the Setting-page editor proposed a one-position tab move. Forward it through the

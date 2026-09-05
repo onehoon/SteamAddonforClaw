@@ -448,6 +448,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     return false;
                 }
             });
+        // SF-V2-02 section 14.2: bind the Overlay Device transport onto the SAME _frontendControl at
+        // the same stage as BindTabOrderAuthority, before the first warm Overlay connection.
+        _overlayController.BindDeviceQuickSettingsAuthority(
+            capture: token => _frontendControl!.CaptureDeviceQuickSettingsAsync(token),
+            mutate: (request, token) => HandleOverlayDeviceMutationAsync(request, token));
+        // SF-V2-02 section 17: refresh a currently visible/captured Overlay on ordinary Runtime
+        // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
+        // scheduled once shutdown admission closes.
+        _frontendControl.StateInvalidated += OnFrontendStateInvalidatedForOverlay;
         _overlayStartup = StartOverlayWarmupAsync();
 
         // Full1902 Policy B: _startupComposition is retained (nulled at dispose) so the deferred
@@ -907,12 +916,52 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _overlayInputRouter = router;
             _overlayCaptureActive = true;
             AppLog.Info("OverlayCapture", "Capture committed.", ("Event", "OverlayCaptureCommitted"));
+            // SF-V2-02 section 16.2: Device state publish happens strictly AFTER capture is
+            // committed, and is fire-and-forget -- a slow/failed snapshot must never extend how long
+            // this method (and the _visibleSurfaceTransition it holds) delays a concurrent Hide.
+            _ = _overlayController.RefreshDeviceQuickSettingsAsync();
         }
         catch (Exception exception)
         {
             AppLog.Warn("UiSurface", "Overlay visible-surface coordination failed.", exception);
         }
         finally { _visibleSurfaceTransition.Release(); }
+    }
+
+    // SF-V2-02 section 17: refresh only while the Overlay is both currently captured (OQ4 authority)
+    // and currently visible (OverlayProcessController's own acknowledgement-based fact). No polling --
+    // this only runs from the Runtime's own StateInvalidated event.
+    private void OnFrontendStateInvalidatedForOverlay(object? sender, EventArgs e)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        if (!_overlayCaptureActive) return;
+        if (!_overlayController.IsVisible) return;
+        _ = _overlayController.RefreshDeviceQuickSettingsAsync();
+    }
+
+    // SF-V2-02 section 15: the admission Runtime-side fact this class owns (_overlayCaptureActive +
+    // process shutdown). NamedPipeOverlayServer separately checks its own Ready/Visible fact before
+    // ever calling this delegate. Explicit switch onto the SAME _frontendControl methods Main UI/QAM
+    // already use -- no direct ProfileStore/hardware/registry access from the Overlay transport.
+    private async Task<OverlayDeviceMutationResponse> HandleOverlayDeviceMutationAsync(OverlayDeviceMutationRequest request, CancellationToken token)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive)
+            return OverlayWireValidation.NotAdmitted(request, "The Overlay is not the active captured surface.");
+
+        var control = _frontendControl;
+        if (control is null)
+            return OverlayWireValidation.NotAdmitted(request, "The Overlay is not the active captured surface.");
+
+        try
+        {
+            return await OverlayDeviceMutationDispatch.DispatchAsync(control, request, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
+        {
+            AppLog.Warn("OverlayDevice", "Overlay Device mutation failed.", exception, ("Kind", request.Kind));
+            return new OverlayDeviceMutationResponse(request.RequestId, request.Kind, Error: "Overlay Device mutation failed.");
+        }
     }
 
     private async Task HandleOverlayCloseReasonAsync(string reason, bool surfaceAlreadyGone)
@@ -1191,6 +1240,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
         _frontendLauncher.StopAcceptingRequests();
+        // SF-V2-02 section 21: no new Overlay Device refresh may be scheduled once shutdown admission
+        // closes. _overlayCaptureActive is also cleared below, which independently blocks a mutation
+        // that is already in flight from reaching the Runtime.
+        if (_frontendControl is not null)
+            _frontendControl.StateInvalidated -= OnFrontendStateInvalidatedForOverlay;
         // OQ4 section 15: abandon Overlay navigation / capture without waiting for the user to
         // release buttons. _processShutdownStarted already blocks any new capture transition; the
         // existing presentation teardown remains authoritative and never resumes a publisher here.
