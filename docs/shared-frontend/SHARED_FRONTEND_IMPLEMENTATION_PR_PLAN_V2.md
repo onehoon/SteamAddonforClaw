@@ -2,773 +2,1059 @@
 
 > **Date:** 2026-09-05  
 > **Status:** Current implementation roadmap  
-> **Source baseline reviewed:** `main` at `b97c012156b3734ce2230f7e469db91aad94b784`  
-> **Architecture authority:** `docs/shared-frontend/SHARED_FRONTEND_ARCHITECTURE_V2.md`
+> **Production code baseline reviewed:** `main` at `ed27976ff756ecb5bfc42569d642acb413b452a9` after PR #498  
+> **Architecture authority:** `docs/shared-frontend/SHARED_FRONTEND_ARCHITECTURE_V2.md` as revised after PR #498  
+> **Core product decision:** QAM and Addon Overlay share one Quick Settings product definition; only their renderer/admission/lifecycle remain surface-specific.
 
 ---
 
 ## 1. Goal
 
-Implement the Shared Frontend architecture in small, reviewable PRs without creating a new frontend authority, a generic settings framework, or a second Overlay feature transport.
+Finish Shared Frontend V2 so the Steam QAM and Addon Overlay do **not** become two separately maintained implementations of the same Device/Profile Quick Settings product.
 
-The immediate product need is to make the real Addon Quick Settings Overlay consume the same Runtime-owned Device/Profile state already used by the desktop Main UI and Steam QAM.
-
-The implementation sequence must preserve:
+The intended maintenance outcome is:
 
 ```text
-Runtime = feature authority
-Main UI / QAM / Overlay = disposable presentation clients
+change Device/Profile row name once
+→ QAM + Overlay both change
+
+change row order once
+→ QAM + Overlay both change
+
+change slider option/range once
+→ QAM + Overlay both change
+
+change debounce 2000 ms → 1000 ms once
+→ QAM + Overlay both change
+
+add a new shared Toggle/Slider feature once
+→ both existing renderers show it
 ```
 
-and:
+while preserving:
 
 ```text
-Frontend typed semantics may be shared
-surface exposure / IPC / UI remain explicit and surface-specific
+Runtime = feature/hardware/persistence authority
+Shared Quick Settings = product-definition projection only
+QAM = Steam renderer + QAM admission/lifecycle
+Overlay = WinUI renderer + OQ4 admission/lifecycle
+Main UI = independent desktop management UI
 ```
 
 ---
 
-## 2. Current baseline that drives the split
+## 2. Current baseline
 
-Current `main` already has:
+### Completed foundation
 
-```text
-one InProcessAddonFrontendControl
-one .Frontend NamedPipeAddonFrontendServer
-one .Qam NamedPipeAddonFrontendServer
-one narrow .Overlay transport
-Overlay process warm lifecycle
-OQ4 controller capture/navigation
-five-tab Overlay shell
-runtime-owned Overlay tab order
-```
+SF-V2-01 and SF-V2-02 are complete.
 
-Current protocol versions:
+#### SF-V2-01 — merged PR #496
+
+Established:
 
 ```text
-FrontendTransportProtocol = 25
-OverlayTransportProtocol  = 5
+FrontendDeviceQuickSettingsSnapshot
+CaptureDeviceQuickSettingsAsync
+Main UI aggregate Device refresh
+QAM aggregate Device refresh
 ```
 
-Current Device reads are still duplicated across Main UI/QAM:
+#### SF-V2-02 — merged PR #498
+
+Established `.Overlay` v6 Device feature transport:
 
 ```text
-CaptureCpuBoostAsync
-CaptureTdpAsync
-CapturePowerModeAsync
+DeviceQuickSettingsState
+DeviceMutationRequest
+DeviceMutationResult
 ```
 
-Overlay currently has no production Device/Profile feature state transport.
+with:
 
-Therefore implementation should proceed from shared contracts outward, not from Overlay UI inward.
+- explicit eight-operation Device allowlist;
+- visible/captured-session mutation admission;
+- non-blocking slow mutation execution;
+- `StateInvalidated` visible refresh;
+- no polling;
+- OQ4 Show/Hide/capture safety preserved.
+
+### Current protocol versions
+
+At the production baseline:
+
+```text
+FrontendTransportProtocol = 27
+OverlayTransportProtocol  = 6
+```
+
+Frontend v27 comes from the later Claw Sensor Probe work merged after SF-V2-01.
+
+Every future work order must re-check current versions immediately before coding. If an unrelated PR has already consumed the expected next version, increment from then-current source rather than forcing the numbers below.
+
+### Current duplication to remove
+
+QAM still hard-codes Device/Profile product semantics in `qam.js`, including:
+
+```text
+labels/order
+control construction
+CPU Boost option labels
+Power Mode option labels
+TDP local adjustment rules
+feature-specific mutation method names
+QAM_SLIDER_COMMIT_DELAY_MS = 2000
+pending mutation keys
+```
+
+Overlay has separate primitives and:
+
+```text
+OverlayDelayedSliderCommit.ProductionDelay = 2000 ms
+```
+
+but no real Device binding yet.
+
+This is the correct point to introduce the shared product layer before duplicated real Overlay feature UI is created.
 
 ---
 
-## 3. PR-size / review policy
-
-Keep each PR focused enough that its architectural effect is obvious from the diff.
+## 3. PR size / review policy
 
 Preferred target:
 
 ```text
-roughly 250–500 LOC changed/added per PR when practical
+~250–500 changed/added LOC per PR when practical
 ```
 
-This is not a hard correctness limit. Do not split a single invariant across PRs merely to hit an arbitrary line count.
+This is not a hard limit. Do not split one correctness invariant purely for LOC.
 
-Conversely, if one PR starts adding:
+Prefer focused PRs because the repository is pre-release and the QAM JavaScript / Overlay C# renderers are materially different codebases.
 
-- new projects;
-- new manager hierarchies;
-- generic RPC abstractions;
-- feature registries;
-- caches/state stores;
-- new pipe endpoints;
-- controller lifecycle changes;
+Do not introduce merely for this plan:
 
-stop and reassess for overengineering/scope drift.
+```text
+new process
+new hardware owner
+new settings database
+new project/csproj unless dependency graph proves necessary
+generic feature registry
+plugin UI framework
+reflection dispatcher
+JSON form engine
+new controller state machine
+new lifecycle epochs/barriers
+```
 
 ---
 
-# Phase A — Shared Device foundation
+# Completed phases
 
-## 4. SF-V2-01 — Device Quick Settings shared aggregate
+## 4. SF-V2-01 — Device aggregate foundation — COMPLETE
+
+Status:
+
+```text
+Merged PR #496
+```
+
+Keep its work order as a historical implementation record.
+
+No further action except regression preservation.
+
+---
+
+## 5. SF-V2-02 — Overlay Device transport foundation — COMPLETE
+
+Status:
+
+```text
+Merged PR #498
+OverlayTransportProtocol = 6
+```
+
+The v6 Device-specific wire is intentionally allowed to be superseded before real Device UI binding because the product is pre-release and the shared Quick Settings decision was made after this foundation landed.
+
+Do not delete the SF-V2-02 work order; it records the lifecycle/non-blocking invariants that the generic v7 replacement must preserve.
+
+---
+
+# Phase C — Shared Quick Settings product model
+
+## 6. SF-V2-03 — Shared Quick Settings product contract + Device projection/dispatch
 
 ### Purpose
 
-Create the one shared typed Device aggregate and migrate the two existing consumers that already need all three child features.
+Create the one Runtime-side Quick Settings product definition without changing either visible surface yet.
+
+This is the key architecture PR.
 
 ### Production scope
 
-Add:
+Add a small closed contract set under the existing frontend/contracts structure, conceptually:
+
+```text
+QuickSettingsPageId
+QuickSettingsSectionId
+QuickSettingsRowId
+QuickSettingsControlKind
+QuickSettingsSliderSpec
+QuickSettingsOption
+QuickSettingsCommitPolicy
+QuickSettingsCommitGroupId
+QuickSettingsLinkedSliderConstraint
+QuickSettingsPageSnapshot
+QuickSettingsMutationIntent
+QuickSettingsMutationResult
+```
+
+Exact names may differ if the code is clearer.
+
+### Initial identity vocabulary
+
+Define identities for:
+
+```text
+Page:
+  Device
+  Profile
+```
+
+Device rows:
+
+```text
+DeviceTdpEnabled
+DeviceTdpAcPl1
+DeviceTdpAcPl2
+DeviceTdpDcPl1
+DeviceTdpDcPl2
+DeviceCpuBoostEnabled
+DeviceCpuBoostAc
+DeviceCpuBoostDc
+DevicePowerModeEnabled
+DevicePowerModeAc
+DevicePowerModeDc
+```
+
+Also reserve only the **currently intended visible Profile parity rows** needed by the immediately following Profile milestone so the generic wire does not need another schema change before Profile is activated. Do not include hidden/developer/future rows merely because Runtime methods exist.
+
+At implementation time, re-check current `qam.js` and freeze the exact visible Profile row set. Current source does not justify automatically enabling the hidden `SHOW_INTEL_FPS_LIMIT = false` path.
+
+### Device page projection
+
+Add one stateless projection from:
 
 ```text
 FrontendDeviceQuickSettingsSnapshot
-IAddonFrontendControl.CaptureDeviceQuickSettingsAsync
-InProcessAddonFrontendControl aggregate implementation
-Frontend RPC CaptureDeviceQuickSettings
-NamedPipe client/server support
+        ↓
+QuickSettingsPageSnapshot(Device)
 ```
 
-Migrate:
+The Device page definition becomes the single source for:
 
 ```text
-Main UI DevicePage normal refresh
-QAM no-active-game Device refresh
+section order
+row order
+labels
+Toggle vs Slider
+numeric TDP limits/steps
+CPU Boost seven-option labels/order
+Power Mode three-option labels/order
+availability/writability
+current authoritative value
+commit policy
+commit group
+linked TDP constraints
 ```
 
-### Contract
+### Commit policy
+
+Freeze current behavior in the shared model:
 
 ```text
-FrontendDeviceQuickSettingsSnapshot
-├─ CpuBoost
-├─ Tdp
-└─ PowerMode
+Toggle → Immediate
+Slider → TrailingDebounce(2000 ms)
 ```
 
-Do not add Center M, Status, active Profile, component diagnostics, front-button mapping, or future feature placeholders.
+Do not yet remove QAM/Overlay constants in this PR because neither surface consumes the new model yet.
 
-### Failure behavior
+### TDP grouping
 
-Each child remains feature-local:
+All four TDP numeric rows share:
 
 ```text
-one child capture failure
-→ that child Unavailable
-→ healthy siblings still returned
+CommitGroupId = DeviceTdpConfiguration
 ```
 
-Do not add cross-feature locks/epochs/barriers.
+The Runtime projection computes the existing TDP PL1/PL2 minimum-gap policy from current `FrontendTdpLimits` and expresses it as the narrow linked-slider constraint.
 
-### Protocol
+Move the **policy calculation** out of QAM-specific code into this shared projection.
 
-Current:
+### Central mutation adapter
+
+Add one explicit Quick Settings mutation dispatch that maps validated Device intents onto the existing typed methods:
 
 ```text
-FrontendTransportProtocol = 25
+SetDeviceCpuBoostEnabledAsync
+SetDeviceCpuBoostAcAsync
+SetDeviceCpuBoostDcAsync
+SetDeviceTdpEnabledAsync
+SetDeviceTdpAsync
+SetDevicePowerModeEnabledAsync
+SetDevicePowerModeAcAsync
+SetDevicePowerModeDcAsync
 ```
 
-This PR changes the wire contract:
+Do not bypass these methods or duplicate their persistence/apply logic.
+
+The generic mutation result should provide:
 
 ```text
-25 → 26
+Succeeded
+FailureMessage
+fresh authoritative Device QuickSettingsPageSnapshot
 ```
 
-Do not change `OverlayTransportProtocol`.
+### IAddonFrontendControl seam
 
-### Main UI rules
-
-`DevicePage.RefreshAsync()` becomes one aggregate read for CPU/TDP/Power.
-
-Keep separate:
+Add the smallest explicit methods needed, conceptually:
 
 ```text
-RefreshCenterMStartupAsync
-Device identity/support paths
-mutation methods
+CaptureQuickSettingsPageAsync(page/context)
+MutateQuickSettingAsync(intent)
 ```
 
-Preserve TDP dirty draft and existing per-feature failure UI.
+No frontend wire change yet.
 
-### QAM rules
-
-Add one explicit bridge operation:
-
-```text
-captureDeviceQuickSettings
-```
-
-Use it in the no-active-game Device path.
-
-Keep separate:
-
-```text
-captureStatus
-captureActiveGameProfile
-```
-
-Preserve current Big Picture/no-running-game mutation admission in `QamFrontendBridge`.
-
-### Likely production files
-
-```text
-src/SteamInputAddonforClaw.Contracts/Frontend/FrontendContracts.cs
-src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs
-src/SteamInputAddonforClaw.FrontendTransport/FrontendWire.cs
-src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendServer.cs
-src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs
-src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs
-src/SteamInputAddonforClaw.QamHost/QamFrontendBridge.cs
-src/SteamInputAddonforClaw.QamHost/Frontend/qam.js
-```
+Main UI does not migrate to these methods.
 
 ### Required tests
 
 At minimum:
 
-- aggregate contract/Unavailable shape;
-- each child maps existing Runtime semantics exactly;
-- one failed/unavailable child does not discard siblings;
-- aggregate read causes no persistence/apply side effect;
-- named-pipe round trip;
-- malformed payload rejection for no-payload method;
-- protocol current-version update to 26;
-- Main UI normal refresh uses one aggregate capture;
-- QAM Device refresh uses `captureDeviceQuickSettings`;
-- QAM active-game/Profile behavior unchanged;
-- existing Overlay tests remain green.
+- Device page exact section/row order;
+- exact labels;
+- CPU Boost option ordering/labels;
+- Power Mode option ordering/labels;
+- TDP min/max/step from Runtime limits;
+- TDP linked gap policy for known current limit shapes;
+- partial child unavailability maps only affected rows unavailable;
+- Toggle policy is Immediate;
+- Slider policy is 2000ms trailing;
+- all four TDP sliders share one commit group;
+- each Device mutation intent reaches exactly one existing typed mutation method;
+- malformed/mismatched value shape invokes zero mutations;
+- grouped TDP request requires a complete valid group draft;
+- result reprojects authoritative state;
+- no hardware/state owner added.
+
+### Expected protocol impact
+
+```text
+Frontend protocol: unchanged
+Overlay protocol: unchanged
+```
 
 ### Explicit non-goals
 
-- no `.Overlay` changes;
-- no Overlay UI changes;
-- no Center M changes;
-- no controller lifecycle changes;
-- no new cache/manager;
-- no deletion of focused CPU/TDP/Power capture methods.
+- no QAM renderer change;
+- no Overlay renderer change;
+- no `.Overlay` v7 yet;
+- no Profile projection implementation yet;
+- no Main UI change;
+- no new manager/service.
 
 ---
 
-# Phase B — Overlay Device transport
+# Phase D — QAM migration to the shared product
 
-## 5. SF-V2-02 — Overlay Device Quick Settings transport
+## 7. SF-V2-04 — Frontend/QAM generic Quick Settings RPC seam
 
 ### Purpose
 
-Extend the existing narrow `.Overlay` protocol so the real Overlay process can consume and mutate the same Device Quick Settings semantics without gaining access to the full desktop/QAM frontend API.
+Make the shared page/mutation contract reachable by QamHost without changing the visible QAM implementation in the same PR.
 
-### Required reading before implementation
+### Frontend transport
 
-Re-read current implementations of:
-
-```text
-OverlayWire.cs
-OverlayProcessController.cs
-Overlay App.xaml.cs
-OverlayWindow.xaml.cs
-AddonProcessHost.cs
-OQ4 capture/navigation tests
-OQ5 tab-order transport tests
-```
-
-Do not implement from older OQ planning snippets alone.
-
-### Transport direction
+Add explicit RPC methods conceptually:
 
 ```text
-same Runtime-owned CPU/TDP/Power authorities
-        ↓
-InProcessAddonFrontendControl
-        ↓
-FrontendDeviceQuickSettingsSnapshot + existing mutation semantics
-        ↓
-small explicit Runtime/Overlay binding
-        ↓
-existing .Overlay endpoint
-        ↓
-Overlay.exe
+CaptureQuickSettingsPage
+MutateQuickSetting
 ```
 
-### Wire scope
+Use the shared typed payloads from SF-V2-03.
 
-Add only explicit Device feature messages required by approved Overlay controls.
-
-The transport must support:
+Expected current-baseline bump:
 
 ```text
-fresh Device Quick Settings state delivery
-visible-session invalidation refresh
-approved CPU Boost mutations
-approved TDP mutations
-approved Power Mode mutations
+FrontendTransportProtocol 27 → 28
 ```
 
-Reuse the shared typed frontend snapshot/result records where their semantics already fit.
+If current main has already moved beyond 27, bump exactly once from that value.
 
-Do not create duplicate Overlay CPU/TDP/Power DTOs.
+### QamFrontendBridge
 
-### Exact request/result shape
+Add a narrow JS allowlist path for the generic Quick Settings operations.
 
-Choose the smallest explicit shape that fits current `OverlayWire` architecture.
+Preserve the existing surface admission:
 
-Acceptable direction:
+```text
+Device mutation
+→ Big Picture active
+→ AppId == 0
+```
+
+Do not move this policy into `IAddonFrontendControl` or the feature Runtime.
+
+During this transition PR, the old feature-specific QAM bridge operations may remain temporarily because current `qam.js` still uses them.
+
+Mark them for mandatory removal in SF-V2-05.
+
+### Required tests
+
+- frontend protocol current-version bump;
+- page snapshot named-pipe round trip;
+- mutation intent/result round trip;
+- invalid page/row/value rejection;
+- QAM Device admission still rejects running-game/non-BPM mutation;
+- generic mutation reaches the same SF-V2-03 dispatch;
+- old QAM Device UI remains behaviorally unchanged in this transition PR;
+- no `.Overlay` change.
+
+### Explicit non-goals
+
+- no qam.js generic renderer yet;
+- no Overlay change;
+- no Profile migration yet.
+
+---
+
+## 8. SF-V2-05 — QAM Device generic renderer migration
+
+### Purpose
+
+Make Steam QAM the first real consumer of the shared Quick Settings product model and remove QAM as a second Device product-definition authority.
+
+### QAM renderer
+
+Refactor only the Device page path so it renders `QuickSettingsPageSnapshot(Device)` generically.
+
+Map shared controls onto existing Steam UI primitives:
+
+```text
+Toggle → native ToggleField
+Slider → native SliderField
+Section → native PanelSection / PanelSectionRow as appropriate
+```
+
+Do not rewrite Steam webpack/component discovery.
+
+Do not change the outer QAM tab injection architecture.
+
+### Generic interaction engine
+
+QAM JavaScript should have one generic pending draft/commit path driven by:
+
+```text
+RowId
+CommitGroupId
+CommitPolicy
+linked constraint metadata
+```
+
+Observable behavior remains:
+
+```text
+slider preview immediate
+latest draft wins
+trailing delay from row policy
+grouped TDP draft commits whole group
+pending draft survives invalidation
+authoritative mutation result wins
+```
+
+### Mandatory duplicate removal
+
+Remove migrated Device hard-coding from `qam.js`, including product-owned copies of:
+
+```text
+QAM_SLIDER_COMMIT_DELAY_MS
+Device labels/order
+CPU Boost mode labels
+Power Mode labels
+TDP limit/gap product policy
+feature-specific Device mutation method names
+feature-specific pending keys
+```
+
+Remove the temporary old feature-specific Device bridge operations from `QamFrontendBridge` once no JS callsite uses them.
+
+Do **not** remove the focused `NamedPipeAddonFrontendClient` typed feature methods used by Main UI/other code merely because QAM no longer calls them directly.
+
+### UI parity requirement
+
+This PR is a refactor of product definition ownership, not a QAM redesign.
+
+The resulting Device page should preserve the current intended product content and order.
+
+### Required tests
+
+- qam.js has no hard-coded `QAM_SLIDER_COMMIT_DELAY_MS` product constant;
+- Device row labels/order come from page payload;
+- changing test page delay changes scheduler delay without JS source edit;
+- Toggle uses Immediate policy;
+- independent sliders use their own commit groups;
+- four TDP rows share one pending group;
+- linked TDP constraints apply to immediate local draft;
+- invalidation preserves pending group draft;
+- stale old completion cannot replace a newer draft;
+- generic mutation response restores authoritative page state on success/failure;
+- old Device bridge method names no longer appear in qam.js;
+- no polling introduced;
+- current QAM Profile behavior remains unchanged.
+
+### Expected protocol impact
+
+```text
+No additional protocol bump after SF-V2-04.
+```
+
+---
+
+# Phase E — Overlay generic transport + Device binding
+
+## 9. SF-V2-06 — Replace `.Overlay` v6 Device wire with generic Quick Settings v7
+
+### Purpose
+
+Preserve everything SF-V2-02 proved about lifecycle/non-blocking behavior while replacing its Device-specific product API with the shared Quick Settings payload before real Device UI consumes v6.
+
+### Wire replacement
+
+Replace/supersede:
 
 ```text
 DeviceQuickSettingsState
-explicit Device mutation request kinds
-explicit mutation result/state refresh
+DeviceMutationRequest
+DeviceMutationResult
+OverlayDeviceMutationKind
+OverlayDeviceMutationDispatch
 ```
 
-Do not redesign `.Overlay` into a generic RPC framework just to gain request IDs or generic dispatch.
-
-If mutation correlation is needed for actual current UI behavior, add only the minimum concrete correlation required; do not add speculative sequence/epoch machinery.
-
-### Initial state/invalidation behavior
-
-Required semantics:
+with narrow generic Quick Settings messages conceptually:
 
 ```text
-Overlay Ready
-→ Runtime can send authoritative Device state
-
-Overlay Show
-→ current OQ4 capture/show ordering remains authoritative
-→ fresh Device state sent for the visible session
-
-StateInvalidated while Overlay visible
-→ fresh Device aggregate sent
-
-Overlay hidden
-→ no polling loop
+QuickSettingsPageState
+QuickSettingsMutationRequest
+QuickSettingsMutationResult
 ```
 
-A Device snapshot failure must not prevent Overlay Show/Hide or weaken OQ4 controller capture safety.
+Reuse the shared page/intent/result contracts from SF-V2-03.
 
-### Runtime binding
+Keep transport-specific request correlation only where needed by the pipe.
 
-Use the existing `_frontendControl` as the source of truth.
-
-Bind the Overlay controller/server with explicit delegates or the smallest adjacent seam.
-
-Do not create:
-
-```text
-OverlayFeatureManager
-OverlayDeviceRuntime
-QuickSettingsService
-third NamedPipeAddonFrontendServer
-.Overlay.Feature pipe
-```
+Do not put request IDs into unrelated Show/Hide/Navigation/TabOrder messages.
 
 ### Protocol
 
-Current:
-
-```text
-OverlayTransportProtocol = 5
-```
-
-This PR changes the wire:
-
-```text
-5 → 6
-```
-
-`FrontendTransportProtocol` remains 26 from SF-V2-01 unless another actual desktop/QAM wire change is required.
-
-### UI scope
-
-Do **not** bind the production Device controls yet beyond the minimum state receiver/store needed for transport tests.
-
-The Overlay may keep placeholder/sample rows until the following UI-binding PRs.
-
-### Required tests
-
-At minimum:
-
-- v6 handshake / v5 rejection;
-- Device state round trip;
-- partial child unavailability survives serialization;
-- approved mutation request reaches the same Runtime/frontend operation;
-- mutation failure does not close Overlay or alter controller capture;
-- `StateInvalidated` refresh only delivers while appropriate;
-- no feature polling loop;
-- show/hide/navigation/tab-order frames still serialize correctly through the existing write gate;
-- OQ4 visible-session-loss/capture tests remain green;
-- Overlay process disconnect does not affect Runtime feature/controller ownership.
-
-### Explicit non-goals
-
-- no new pipe;
-- no full `IAddonFrontendControl` exposure;
-- no Profile transport;
-- no Controller-feature transport;
-- no UI redesign;
-- no Full1902 lifecycle change.
-
----
-
-# Phase C — Overlay Device UI binding
-
-## 6. SF-V2-03 — Overlay CPU Boost + Power Mode binding
-
-### Purpose
-
-Replace placeholder Device rows for the lower-complexity Device features with real Runtime-backed controls.
-
-Group CPU Boost and Windows Power Mode because they share similar toggle/selection interaction and should fit comfortably in one focused PR without touching TDP slider commit behavior.
-
-### Runtime authority
-
-Use only:
-
-```text
-FrontendDeviceQuickSettingsSnapshot.CpuBoost
-FrontendDeviceQuickSettingsSnapshot.PowerMode
-existing typed mutation results
-```
-
-No direct Windows power APIs or ProfileStore access from Overlay.
-
-### UI behavior
-
-- authoritative initial render from Device snapshot;
-- disabled/unavailable rendering per child;
-- toggle/selection writes through `.Overlay` v6 explicit mutation messages;
-- returned Runtime snapshot/result wins;
-- transport failure disables speculative mutation and surfaces a compact failure state;
-- no local persistence;
-- controller navigation uses existing Overlay row/control primitives.
-
-### Preserve
-
-- B global close;
-- LB/RB tab navigation;
-- OQ4 controller capture/neutral publication;
-- current show/hide animation/lifecycle;
-- current internal inset/layout authority;
-- five-tab shell/tab order.
-
-### Likely files
-
-Primarily:
-
-```text
-src/SteamInputAddonforClaw.Overlay/OverlayWindow.xaml.cs
-existing Overlay row/control helpers
-possibly minimal Overlay App/client state wiring
-focused tests
-```
-
-Do not create a ViewModel framework solely for these controls.
-
-### Protocol
-
-No protocol bump if SF-V2-02 already froze the required Device messages.
-
-If implementation discovers a real missing wire operation, stop and update the transport contract deliberately rather than silently adding UI-local workarounds.
-
----
-
-## 7. SF-V2-04 — Overlay TDP binding and commit behavior
-
-### Purpose
-
-Bind TDP separately because it has materially different slider/draft/commit semantics and deserves focused validation.
-
-### Runtime authority
-
-Use:
-
-```text
-FrontendDeviceQuickSettingsSnapshot.Tdp
-FrontendTdpMutationResult
-```
-
-No direct TDP helper/hardware access from Overlay.
-
-### Required interaction policy
-
-Preserve the Overlay/QAM-style relaxed slider behavior already chosen for Quick Settings:
-
-```text
-Left/Right changes local visible draft immediately
-→ debounce/commit according to current agreed Overlay control policy
-→ Runtime mutation
-→ authoritative result/snapshot applied
-```
-
-Do not introduce an A-to-enter-edit-mode unless product UI design changes explicitly.
-
-### Draft safety
-
-A normal invalidation must not destroy an in-progress local slider gesture/draft in a way that makes the control jump backward during ordinary use.
-
-Solve this with the smallest existing local UI draft/suppression pattern.
-
-Do not create global versions/epochs/transactions to defend theoretical interleavings.
-
-### Failure behavior
-
-- invalid/unavailable TDP disables mutation;
-- persistence/hardware failure surfaces concise feedback;
-- Runtime result wins after commit;
-- Overlay/controller lifecycle remains unaffected.
-
-### Required tests
-
-- range/step uses Runtime-provided limits;
-- AC/DC PL1/PL2 values render correctly;
-- toggle state renders correctly;
-- draft survives ordinary invalidation while editing;
-- commit reaches one explicit Runtime mutation path;
-- failed mutation does not leave a false committed value;
-- navigation and B-close remain correct while a debounce is pending;
-- close cancels/discards only transient UI work, not Runtime authority.
-
----
-
-# Phase D — Profile reuse
-
-## 8. SF-V2-05 — Overlay Profile transport using existing profile contracts
-
-### Purpose
-
-Add Overlay access to current active-game profile state without inventing a second Profile model.
-
-### Reuse
-
-Use existing:
-
-```text
-FrontendGameProfileSnapshot
-FrontendGameProfileMutationResult
-```
-
-and existing Runtime profile mutation methods.
-
-Do not add:
-
-```text
-FrontendOverlayProfileSnapshot
-SharedProfileSnapshot
-OverlayProfileStore
-```
-
-### Exposure
-
-Only approved compact Profile controls should cross `.Overlay`.
-
-The current profile contract contains more capability than Overlay may ultimately present; transport exposure remains explicit.
-
-### Active-game behavior
-
-Overlay Profile must derive state from Runtime's active-game/profile authority, not from a second process scan or Steam probe inside Overlay.
-
-If no active supported profile exists:
-
-```text
-show deliberate unavailable/empty Profile state
-```
-
-Do not silently fall back to Device settings while still labeling the page Profile.
-
-### Wire/version choice
-
-Because this PR changes `.Overlay` wire after v6, expect:
+Expected current-baseline bump:
 
 ```text
 OverlayTransportProtocol 6 → 7
 ```
 
-unless the full Profile wire was intentionally and explicitly frozen earlier. Do not pre-add unused Profile messages in SF-V2-02 merely to avoid a future version bump.
+If another PR has already moved v6, increment from then-current.
 
-### UI scope
+### No compatibility dual-path
 
-Prefer transport/state foundation first. If full Profile UI binding would push the diff too large or mix transport and interaction bugs, leave visible binding to SF-V2-06.
+The product is pre-release and no real Overlay Device UI consumes v6.
+
+Therefore do **not** retain both:
+
+```text
+old Device mutation API
++
+new Quick Settings mutation API
+```
+
+inside current protocol.
+
+Remove dead v6 production types/methods/tests as they are replaced, while preserving historical protocol comments.
+
+### Preserve SF-V2-02 lifecycle invariants
+
+The generic mutation operation must still:
+
+- execute outside the sole Overlay read loop;
+- use the existing single write gate;
+- require Ready + Visible at transport level;
+- require `_overlayCaptureActive` + not-shutting-down at Runtime admission;
+- never delay OQ4 Hide/Dismiss processing on slow TDP hardware apply;
+- ignore late retired request results correctly;
+- publish state only after OQ4 capture commits;
+- refresh from `StateInvalidated` only while appropriate;
+- use no polling.
+
+### Page publication scope
+
+Initially publish only:
+
+```text
+Device
+```
+
+The generic wire must carry PageId so Profile can be added later without another transport redesign.
+
+### Overlay App scope
+
+Receive/store/forward generic page snapshots only.
+
+Do not replace Device preview rows yet in this PR.
+
+### Required tests
+
+- v7 handshake / v6 rejection;
+- Device page state round trip;
+- strict mutation request/value validation;
+- generic mutation dispatch reaches SF-V2-03 only after Overlay admission;
+- slow mutation cannot block Hidden acknowledgement;
+- `StateInvalidated` refresh only while visible/captured;
+- state started visible but hidden before capture/send does not intentionally publish to hidden session;
+- lifecycle/navigation/tab order unchanged;
+- old v6 Device message path removed from current production code;
+- no polling.
 
 ---
 
-## 9. SF-V2-06 — Overlay Profile UI binding
+## 10. SF-V2-07 — Overlay generic Device renderer + real Device binding
 
 ### Purpose
 
-Bind the approved active-game Profile controls to the v7 Profile transport.
+Replace the temporary Device preview fixture with the real shared Device Quick Settings page.
 
-Likely reusable feature semantics:
+After this PR, the Device milestone is complete.
+
+### Renderer
+
+Create the smallest Overlay-local generic page renderer/binder needed to map:
 
 ```text
+Toggle → OverlayToggleRow
+Slider → OverlaySliderRow
+```
+
+and register those rows with the existing OQ5 logical selection model.
+
+Do not create a ViewModel framework, renderer plugin system, or global feature manager.
+
+A small page-local renderer/binding helper is acceptable because it directly removes repeated feature UI code and is reused by Profile later.
+
+### Delayed commit
+
+Reuse `OverlayDelayedSliderCommit` mechanics where useful, but remove product ownership from it:
+
+```text
+ProductionDelay = 2000 ms
+```
+
+must no longer be the production policy source.
+
+Pass the delay from each shared `CommitPolicy`.
+
+If the existing helper's one-double/one-slider shape is insufficient for grouped TDP drafts, add the smallest generic **commit-group** layer above it or refine it narrowly. Do not add a scheduler service/manager.
+
+### TDP
+
+The renderer must consume the shared TDP group/linked-constraint metadata:
+
+```text
+4 rows
+→ one local group draft
+→ linked PL1/PL2 correction
+→ one trailing group commit
+```
+
+No Overlay-specific duplicate of the Claw TDP gap policy.
+
+### Toggle behavior
+
+Toggle rows submit immediately according to shared policy.
+
+When an immediate parent toggle disables a feature, any still-unsubmitted child slider draft for that feature/group must be retired so it cannot fire later against the newly disabled state.
+
+Do not make OQ4 close wait for any draft/timer.
+
+### Authoritative state
+
+When a generic mutation result or `StateInvalidated` page arrives:
+
+- non-pending rows adopt authoritative state;
+- current pending group draft remains visible;
+- current mutation settlement clears its group and applies authoritative page;
+- failure must not leave a false committed value.
+
+### Remove preview fixture
+
+Delete/replace:
+
+```text
+Toggle Preview
+Unavailable Toggle Preview
+Slider Preview
+Unavailable Slider Preview
+Navigation Preview XX rows
+```
+
+from Device.
+
+Do not change other tabs.
+
+### Required hardware validation
+
+On real MSI Claw:
+
+- Device page order/labels match QAM;
+- CPU Boost toggle + AC/DC modes;
+- Power Mode toggle + AC/DC modes;
+- TDP toggle + AC/DC PL1/PL2;
+- 2-second current shared delay observed on sliders;
+- rapid left/right sends only latest grouped/row commit;
+- touch and controller both work;
+- reopen shows Runtime truth;
+- QAM and Overlay agree after mutation;
+- B close / outside click / hide never wait for debounce;
+- game/Steam input remains neutral while Overlay capture is active.
+
+### Expected protocol impact
+
+```text
+No bump after SF-V2-06.
+```
+
+---
+
+# Phase F — Profile parity
+
+## 11. SF-V2-08 — Shared Profile projection/dispatch + QAM generic Profile migration
+
+### Purpose
+
+Extend the already-proven shared model to the current QAM Profile product, then migrate QAM Profile onto the same generic renderer.
+
+### Freeze actual visible scope first
+
+Immediately before coding, inspect current `qam.js` and current Profile contracts.
+
+The implementation must mirror the **actually intended visible QAM Profile controls**, not every mutation method in `QamFrontendBridge`.
+
+Current source has mutation capability for:
+
+```text
+Profile enabled
 TDP
-Intel FPS Limit
 CPU Boost
 Windows Power Mode
-Resolution
+Intel FPS Limit
 ```
 
-Do not assume every existing Main UI Profile control must appear in Overlay. The exact visible subset must be explicitly frozen in the focused work order before implementation.
+and `FrontendGameProfileSnapshot` also contains Resolution.
 
-### Requirements
+But current `qam.js` keeps Intel FPS Limit behind:
 
-- Runtime snapshot is authoritative;
-- no profile persistence in Overlay;
-- local slider/dropdown draft only as needed for UX;
-- mutation results applied from Runtime;
-- no active game = clear unavailable state;
-- Device/Profile scopes never silently alias each other;
-- no new game detector in Overlay.
+```text
+SHOW_INTEL_FPS_LIMIT = false
+```
+
+Do not make hidden capability visible simply because the generic renderer can render it.
+
+### Shared Profile projection
+
+Build:
+
+```text
+FrontendGameProfileSnapshot
+        ↓
+QuickSettingsPageSnapshot(Profile)
+```
+
+with:
+
+- same labels/order/control kinds for both surfaces;
+- AppId context;
+- same commit policies/groups;
+- same typed options/limits;
+- clear no-active-game/unavailable state.
+
+### Mutation dispatch
+
+Map Profile row intents centrally onto the existing typed Game Profile mutation methods.
+
+Validate the request AppId/current target before mutation.
+
+No game scanning in QAM/Overlay.
+
+No second Profile store/model.
+
+### QAM migration
+
+Replace the feature-specific Profile React construction with the same generic Quick Settings renderer used by Device.
+
+Page-selection behavior remains QAM-specific:
+
+```text
+no active game → Device shared page
+active game    → Profile shared page
+```
+
+### Required tests
+
+- exact Profile visible row set frozen from current policy;
+- AppId carried in page context;
+- stale AppId mutation rejected;
+- no-active-game page is explicit;
+- QAM Profile uses generic renderer;
+- shared debounce/group behavior works identically to Device;
+- hidden FPS path does not accidentally become visible;
+- no duplicated Profile product labels/policies remain in qam.js for migrated rows;
+- Device behavior unchanged.
+
+### Expected protocol impact
+
+If SF-V2-03 included the required current Profile identity vocabulary and the generic page/value contract is unchanged:
+
+```text
+No protocol bump expected.
+```
+
+If implementation discovers that a genuinely new wire shape/control kind is required, stop and bump the affected protocol explicitly rather than smuggling incompatible fields through the existing version.
 
 ---
 
-# Phase E — Controller and future Device features
+## 12. SF-V2-09 — Overlay Profile publication + generic binding
 
-## 10. Do not create a Controller shared-foundation PR yet
+### Purpose
 
-Current/future Controller features are not mature enough to justify a speculative aggregate.
+Make the existing Overlay Profile tab render the same shared Profile product with no new feature-specific Overlay UI implementation.
 
-Examples:
+### Runtime publication
 
-```text
-front-button mapping
-M1/M2 mapping
-Joystick LED
-Vibration Strength
-```
-
-Proceed feature-by-feature when real Runtime contracts and product surface decisions exist.
-
-For each future feature work order, explicitly state:
+While Overlay is visible/captured, publish current shared pages event-driven:
 
 ```text
-Supported frontend surfaces
-Main UI: Yes/No
-Steam QAM: Yes/No
-Addon Overlay: Yes/No
+Device
+Profile
 ```
 
-Then reuse existing typed contracts or add the smallest typed feature contract needed.
+on successful Show and relevant `StateInvalidated` refresh.
 
-Do not create a generic `FrontendControllerQuickSettingsSnapshot` now simply because an Overlay Controller tab exists.
+Publishing both low-rate pages is preferred over adding page-selection IPC/polling solely to save one small projection.
+
+### Overlay renderer
+
+Reuse the generic renderer/binder from SF-V2-07.
+
+No new Profile-specific control construction should be required for Toggle/Slider rows.
+
+If there is no active game/profile:
+
+```text
+Profile tab remains visible
+→ deliberate unavailable/empty state
+→ no mutation target
+```
+
+Do not alias Device state into the Profile tab.
+
+### Profile mutation admission
+
+Overlay admission remains:
+
+```text
+Ready + Visible + _overlayCaptureActive + not shutting down
+```
+
+Then the shared Profile mutation adapter validates the AppId context.
+
+### Required validation
+
+- current running Steam game shows same Profile rows/order/labels as QAM;
+- no game shows explicit unavailable state;
+- Profile toggle/sliders mutate the same Runtime methods as QAM;
+- stale active-game change does not mutate wrong AppId;
+- Device and Profile pending drafts remain isolated;
+- B/Hide/OQ4 lifecycle remains correct during pending/submitted Profile mutation;
+- no polling;
+- no protocol bump if v7 generic contract already carries Profile page data.
 
 ---
 
-## 11. Future Device features follow the same rule
+# Phase G — Future shared Quick Settings features
 
-Examples:
+## 13. Extension rule after SF-V2-09
+
+Once Device/Profile are migrated, a future QAM+Overlay parity feature using existing Toggle/Slider controls should normally require only:
+
+```text
+Runtime feature/typed contract
+        ↓
+shared Quick Settings projection row(s)
+        ↓
+central mutation mapping
+        ↓
+contract tests
+```
+
+The two renderers should not need feature-specific edits.
+
+Examples that may later qualify after their Runtime contracts/product policy exist:
 
 ```text
 Fan Control
 Battery Charge Limit
+Controller vibration strength
+Joystick LED if its shared UI can be expressed by an approved control kind
 ```
 
-A future Runtime implementation does not automatically enter `FrontendDeviceQuickSettingsSnapshot`.
+Do not add placeholders now.
 
-Decision sequence:
+### New control kind
+
+If a future shared feature genuinely requires a new kind such as Choice:
 
 ```text
-1. real Runtime feature implemented and validated
-2. product decides supported frontend surfaces
-3. if shared Quick Settings exposure is approved, add the smallest typed shared projection
-4. update only the transports/surfaces that actually expose it
+1. add one explicit shared control kind/spec
+2. add one QAM renderer adapter
+3. add one Overlay renderer adapter
+4. test parity
 ```
 
-No placeholder members.
+After that, features using that kind should again be data-driven.
+
+Do not evolve toward arbitrary form schemas.
 
 ---
 
 # Cross-PR invariants
 
-## 12. Full1902 lifecycle must remain untouched
+## 14. Main UI stays outside generic Quick Settings rendering
 
-None of SF-V2-01 through SF-V2-06 may change, except for purely mechanical compile wiring that does not alter behavior:
+Main UI continues to use existing typed feature contracts and its desktop layout.
 
-```text
-Center M authority policy
-PID1901/PID1902 transitions
-DirectInput ownership
-HidHide baseline
-VIIPER ownership
-presentation selection
-physical-device recovery
-suspend/resume
-restart/shutdown teardown
-Win+G suppression
-stock restoration
-OQ4 capture safety
-```
+Do not migrate Center M authority or desktop management flows into Quick Settings.
 
-If a Shared Frontend PR appears to require changing any of the above, stop and re-evaluate the design.
+`FrontendDeviceQuickSettingsSnapshot` remains useful beneath both Main UI and shared Device projection.
 
 ---
 
-## 13. No new authority/caching layer
+## 15. Transport boundaries remain separate
 
-Across the whole track, do not add:
-
-```text
-SharedFrontendManager
-QuickSettingsManager
-DeviceSettingsManager
-OverlayFeatureManager
-FrontendStateCache
-FeatureRegistry
-SurfaceRegistry
-EventBus
-```
-
-The intended owners already exist.
-
-A frontend can hold transient presentation state/drafts while visible, but it is never persistence or hardware authority.
-
----
-
-## 14. Transport boundaries stay intentionally different
-
-After the Device foundation:
+Final intended shape:
 
 ```text
 .Frontend
-→ explicit full frontend RPC surface needed by desktop UI
+→ full explicit frontend RPC
+→ Main UI
 
 .Qam
-→ same typed frontend RPC transport
-→ QamFrontendBridge explicit JS allowlist
+→ full explicit frontend RPC
+→ QamFrontendBridge allowlist
+→ shared Quick Settings renderer
 
 .Overlay
-→ dedicated narrow lifecycle/navigation/approved-feature protocol
+→ narrow lifecycle/navigation/Quick Settings protocol
+→ shared Quick Settings renderer
 ```
 
-Do not unify them merely to reduce duplicate switch cases.
+Do not merge the pipe endpoints.
 
-Some explicit dispatch duplication is desirable because it preserves the product allowlist.
+Do not let Overlay connect to `.Qam` or `.Frontend`.
+
+Do not expose full `IAddonFrontendControl` to Overlay.
 
 ---
 
-## 15. State refresh remains event-driven
+## 16. Surface admission remains surface-specific
 
-Normal feature UI should use:
+Shared rows do not imply shared admission.
+
+QAM Device:
 
 ```text
-authoritative initial capture
-+
-StateInvalidated-driven re-read
-+
-mutation-result readback
+BPM + no running game
 ```
 
-Do not add high-frequency polling to Main UI, QAM, or Overlay as part of Shared Frontend work.
+Overlay:
 
-Diagnostic sensor/probe polling is a separate developer-feature concern and does not justify a generic frontend polling architecture.
+```text
+Ready + Visible + capture committed + not shutting down
+```
+
+Profile additionally validates AppId context at the shared mutation boundary.
 
 ---
 
-## 16. Failure handling standard
+## 17. Refresh remains event-driven
 
-Every PR should preserve this hierarchy:
+Use:
 
 ```text
-feature read/mutation failure
-→ feature-local UI failure
-
-frontend/Overlay transport failure
-→ surface fails closed
-→ Runtime survives
-
-Overlay UI/process failure
-→ OQ4/session-loss cleanup handles capture
-→ controller Runtime survives
-
-controller/hardware/lifecycle operation failure
-→ existing Full1902 fail-close policy
+initial authoritative page
++ StateInvalidated re-projection
++ mutation-result authoritative page
 ```
 
-Do not escalate a CPU/TDP/Power UI error into controller ownership teardown.
+Do not add a feature polling timer.
+
+Sensor/diagnostic polling remains unrelated developer functionality.
+
+---
+
+## 18. OQ4 lifecycle safety is higher priority than Quick Settings feature work
+
+Never insert feature capture/mutation waits into the critical Show sequence before presentation neutralization/capture commit.
+
+Never make Hide/retirement wait for:
+
+```text
+debounce timer
+TDP hardware apply
+feature refresh
+```
+
+Slow feature work remains feature-local and async from the Overlay read loop as established by SF-V2-02.
+
+---
+
+## 19. No overengineering for theoretical races
+
+Preserve realistic protections:
+
+- current delayed commit generation/token;
+- request correlation on the pipe;
+- profile AppId target check;
+- current Runtime owner gates;
+- OQ4 capture admission;
+- authoritative result/readback.
+
+Do not add:
+
+```text
+snapshot epochs
+revision vectors
+cross-feature transactions
+barriers
+global mutation scheduler
+feature graph manager
+```
+
+for artificial instruction-level interleavings that do not represent supported lifecycle failures.
 
 ---
 
 # Verification strategy
 
-## 17. Per-PR verification
+## 20. Per-PR verification
 
 Every implementation PR should run at minimum:
 
@@ -781,183 +1067,169 @@ git diff --check
 
 No new warnings.
 
-Use focused tests during development, then full regression before completion.
+Use focused tests first, full regression before completion.
 
 ---
 
-## 18. Hardware validation points
+## 21. Parity regression tests
 
-### SF-V2-01
+Add durable tests that make the maintenance goal enforceable.
 
-No new hardware behavior should be introduced; code-level regression is primary. Existing Device/QAM behavior should remain functionally identical.
+Required direction:
 
-### SF-V2-02
+```text
+shared Device snapshot contract
+→ exact row/section/order/policy tests
 
-Validate on real MSI Claw:
+QAM renderer policy test
+→ consumes shared row metadata
+→ no Device product delay/label duplication
 
-- Overlay still opens/closes reliably;
-- controller navigation capture remains safe;
-- Device state arriving/failing does not change presentation;
-- hidden Overlay causes no measurable polling activity.
+Overlay renderer policy test
+→ consumes shared row metadata
+→ no Device product delay/label duplication
+```
 
-### SF-V2-03 / 04
+For a policy such as debounce delay, tests should make it impossible to silently reintroduce two product constants.
 
-Validate actual Device mutations from Overlay:
-
-- CPU Boost AC/DC + Enabled;
-- Power Mode AC/DC + Enabled;
-- TDP Enabled + AC/DC PL1/PL2;
-- state agrees with Main UI/QAM after mutation;
-- reopen Overlay shows Runtime truth;
-- game/controller input does not leak through while Overlay capture is active.
-
-### Profile PRs
-
-Validate an actual running Steam game/profile plus no-active-game state.
+The shared contract test should be the one place asserting the production value.
 
 ---
 
 # Dependency graph
 
-## 19. Recommended sequence
+## 22. Recommended sequence
 
 ```text
-SF-V2-01
-Device shared aggregate
-Main UI + QAM migration
-Frontend protocol 25 → 26
+COMPLETE
+SF-V2-01  Device typed aggregate / Main UI + QAM read foundation
         │
         ▼
-SF-V2-02
-Overlay Device feature transport
-Overlay protocol 5 → 6
+COMPLETE
+SF-V2-02  Overlay Device v6 transport foundation
         │
-        ├───────────────┐
-        ▼               ▼
-SF-V2-03           SF-V2-04
-CPU + Power UI     TDP UI
-        │               │
-        └───────┬───────┘
-                ▼
-        Device Overlay complete
-                │
-                ▼
-SF-V2-05
-Overlay Profile transport
-Overlay protocol 6 → 7
-                │
-                ▼
-SF-V2-06
-Overlay Profile UI binding
+        ▼
+SF-V2-03  Shared Quick Settings product contract
+          + Device projection
+          + central Device mutation dispatch
+        │
+        ▼
+SF-V2-04  Frontend/QAM generic Quick Settings RPC
+          Frontend protocol current → next
+        │
+        ▼
+SF-V2-05  QAM Device generic renderer migration
+          remove QAM Device product duplication
+        │
+        ▼
+SF-V2-06  Overlay generic Quick Settings v7 transport
+          remove v6 Device-specific current API
+        │
+        ▼
+SF-V2-07  Overlay Device generic renderer/binding
+          Device parity milestone complete
+        │
+        ▼
+SF-V2-08  Shared Profile projection/dispatch
+          + QAM Profile generic migration
+        │
+        ▼
+SF-V2-09  Overlay Profile publication/binding
+          Profile parity milestone complete
 ```
 
-SF-V2-03 and SF-V2-04 can be implemented sequentially in either order after SF-V2-02. Do not run them concurrently if they would heavily modify the same Overlay page construction code and create avoidable merge churn.
+Prefer this sequential order for the first implementation because it validates the shared model on the mature QAM surface before deleting the v6 Overlay feature API and binding real Overlay controls.
 
-Controller/future Device feature work starts only when each real feature contract is ready.
+After SF-V2-03 stabilizes, some transport work is technically separable, but parallel implementation is not necessary and may create avoidable shared-contract churn.
 
 ---
 
-## 20. Why this split is preferred
+## 23. Why seven follow-up PRs is reasonable
 
-This sequence avoids two bad extremes.
+The codebase is pre-release and the user-visible product semantics are still being consolidated.
 
-### Bad extreme A — giant frontend rewrite
-
-```text
-new generic shared frontend framework
-+ all Main UI migration
-+ QAM migration
-+ Overlay transport
-+ Device UI
-+ Profile UI
-+ Controller framework
-```
-
-Too much scope, weak review boundaries, and high risk of accidental authority changes.
-
-### Bad extreme B — one transport/DTO per control
+The split keeps distinct review questions separate:
 
 ```text
-OverlayCpuBoostPipe
-OverlayTdpDto
-OverlayPowerState
-separate mini managers
+03: Is the shared product model correct and small?
+04: Is QAM transport/admission correct?
+05: Does QAM render the model without product duplication?
+06: Does Overlay transport preserve OQ4/SF-V2-02 lifecycle safety?
+07: Does WinUI render/operate the same Device model?
+08: Does Profile map correctly and keep AppId safety?
+09: Does Overlay reuse Profile without another UI implementation?
 ```
 
-Creates duplicate semantics and permanent fragmentation.
-
-The proposed split instead freezes reusable typed truth first, then adds one narrow surface transport, then binds UI by interaction complexity.
+Combining these into one large PR would make it difficult to distinguish product-model defects from transport/lifecycle defects.
 
 ---
 
-# Completion criteria
+# Milestones
 
-## 21. Shared Frontend V2 Device milestone complete
+## 24. Device parity milestone — after SF-V2-07
 
-The Device milestone is complete after SF-V2-01 through SF-V2-04 when all of the following are true:
+Complete when:
 
 ```text
-one Runtime CPU authority
-one Runtime TDP authority
-one Runtime Power Mode authority
+Runtime CPU/TDP/Power authorities
         ↓
-one FrontendDeviceQuickSettingsSnapshot
+FrontendDeviceQuickSettingsSnapshot
         ↓
-Main UI + QAM + Overlay consume same typed state
+shared Device Quick Settings product page
         ↓
-all mutations return to same Runtime-owned feature methods
+QAM generic renderer + Overlay generic renderer
 ```
 
 and:
 
-- no duplicate state cache exists;
-- no new hardware reader exists;
-- no new named-pipe endpoint exists;
-- QAM admission remains QAM-specific;
-- Overlay remains on its narrow protocol;
-- controller/Full1902 lifecycle remains untouched;
-- real-device Overlay mutations are validated.
+- one shared row order/label definition;
+- one shared 2000ms current commit policy;
+- one shared CPU/Power option definition;
+- one shared TDP gap/group policy;
+- one central Quick Settings mutation mapping;
+- QAM Device hard-coded feature implementation removed;
+- Overlay Device preview removed;
+- both surfaces show/operate the same Device product;
+- Main UI remains independent;
+- no new feature authority/cache/pipe endpoint exists.
 
 ---
 
-## 22. Shared Frontend V2 Profile milestone complete
+## 25. Profile parity milestone — after SF-V2-09
 
-After SF-V2-05/06:
+Complete when:
 
-- Overlay reuses existing `FrontendGameProfileSnapshot` / mutation semantics;
-- no second Profile model/store exists;
-- no-active-game state is explicit;
-- Overlay does not scan games independently;
-- Device and Profile scopes remain distinct;
-- only approved compact Profile features are exposed.
-
----
-
-## 23. Review policy
-
-Review for realistic production defects:
-
-- duplicate authority/readers;
-- protocol mismatch or serialization failure;
-- stale editable state after disconnect;
-- feature-local failure becoming aggregate/surface-wide failure;
-- incorrect Main UI/QAM/Overlay state agreement;
-- accidental surface widening;
-- Overlay feature traffic disturbing OQ4 capture/navigation/close safety;
-- real lifecycle/resource leaks.
-
-Do not require locks, epochs, barriers, registries, or generalized managers solely to defend theoretical instruction-level races when existing Runtime owners and event-driven refresh converge safely in normal supported lifecycle.
+- one shared Profile page definition exists;
+- QAM and Overlay render the same approved Profile controls;
+- no active game is explicit;
+- AppId context prevents stale wrong-game mutation;
+- QAM Profile feature-specific UI duplication is removed;
+- Overlay Profile adds no second feature-specific implementation;
+- hidden/unapproved Profile capability remains hidden;
+- no independent game detector/store exists in Overlay.
 
 ---
 
-## 24. Next action
+## 26. Final maintenance acceptance test
 
-Prepare the focused implementation work order for:
+After both milestones, the following should be true in code review:
+
+> **A request such as “change shared Quick Settings slider debounce from 2 seconds to 1 second” is implemented by changing the shared product policy and its tests, without editing QAM-specific or Overlay-specific feature definitions.**
+
+Likewise, adding a new shared Toggle/Slider row should not require adding one feature-specific QAM renderer path and one feature-specific Overlay renderer path.
+
+If that is not true, the architecture has not achieved its primary maintenance goal.
+
+---
+
+## 27. Next action
+
+Prepare the focused work order for:
 
 ```text
-SF-V2-01 — Device Quick Settings shared aggregate
+SF-V2-03 — Shared Quick Settings product contract + Device projection/dispatch
 ```
 
-against the latest `main` immediately before coding.
+against the latest `main` immediately before implementation.
 
-Do not reuse the old `SHARED_FRONTEND_01_DEVICE_QUICK_SETTINGS_SNAPSHOT_WORK_ORDER.md` verbatim; use it only as historical rationale together with `SHARED_FRONTEND_ARCHITECTURE_V2.md` and the current source.
+Do not begin the old planned `SF-V2-03 — Overlay CPU Boost + Power Mode binding`; that plan is superseded by this shared QAM/Overlay product-model architecture.
