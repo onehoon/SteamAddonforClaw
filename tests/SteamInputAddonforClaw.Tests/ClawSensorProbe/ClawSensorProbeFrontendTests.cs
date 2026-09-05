@@ -98,7 +98,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
 
-        var snapshot = await control.StartClawSensorProbeAsync();
+        var snapshot = await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
 
         Assert.Equal(FrontendClawSensorProbeState.Failed, snapshot.State);
         Assert.NotNull(snapshot.ErrorMessage);
@@ -123,7 +123,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         // stable rather than looping or re-throwing.
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
-        var failed = await control.StartClawSensorProbeAsync();
+        var failed = await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
         Assert.Equal(FrontendClawSensorProbeState.Failed, failed.State);
 
         var polled = await control.CaptureClawSensorProbeAsync();
@@ -144,7 +144,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
 
-        var started = await control.StartClawSensorProbeAsync();
+        var started = await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
 
         Assert.Equal(FrontendClawSensorProbeState.Failed, started.State);
         Assert.NotNull(started.OutputDirectory);
@@ -171,7 +171,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
 
-        var startTask = control.StartClawSensorProbeAsync();
+        var startTask = control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
         control.BeginProcessShutdown();
         var exception = await Record.ExceptionAsync(() => startTask);
 
@@ -184,7 +184,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     {
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
-        await control.StartClawSensorProbeAsync();
+        await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
 
         var closed = await control.CloseClawSensorProbeAsync();
 
@@ -196,7 +196,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     {
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
-        var failed = await control.StartClawSensorProbeAsync();
+        var failed = await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
         Assert.Equal(FrontendClawSensorProbeState.Failed, failed.State);
 
         var reopened = await control.OpenClawSensorProbeAsync();
@@ -279,6 +279,39 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             // escaping the race.
             Assert.True(exception is null, $"Iteration {i}: expected no exception, got {exception?.GetType()}: {exception?.Message}");
         }
+    }
+
+    [Theory]
+    [InlineData(FrontendClawSensorProbeMode.LiveSanity)]
+    [InlineData(FrontendClawSensorProbeMode.AxisCharacterization)]
+    [InlineData(FrontendClawSensorProbeMode.StationaryBias)]
+    public async Task Start_failure_reports_the_requested_mode_regardless_of_mode(FrontendClawSensorProbeMode mode)
+    {
+        // No real Windows Sensor API exists in this test environment, so discovery always fails before
+        // any mode-specific countdown/recording behavior runs -- but the Runtime must still have stored
+        // and projected the requested mode onto the session before that failure (work order section 6).
+        var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+        await control.OpenClawSensorProbeAsync();
+
+        var snapshot = await control.StartClawSensorProbeAsync(mode);
+
+        Assert.Equal(FrontendClawSensorProbeState.Failed, snapshot.State);
+        Assert.Equal(mode, snapshot.Mode);
+    }
+
+    [Fact]
+    public async Task Next_and_previous_phase_are_no_ops_before_a_session_has_started()
+    {
+        // Axis-only navigation (work order section 7): with no session started yet (Ready state), Next/
+        // Previous must not throw or otherwise misbehave -- they simply report the unchanged snapshot.
+        var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+        await control.OpenClawSensorProbeAsync();
+
+        var next = await control.NextClawSensorProbePhaseAsync();
+        var previous = await control.PreviousClawSensorProbePhaseAsync();
+
+        Assert.Equal(FrontendClawSensorProbeState.Ready, next.State);
+        Assert.Equal(FrontendClawSensorProbeState.Ready, previous.State);
     }
 
     [Fact]

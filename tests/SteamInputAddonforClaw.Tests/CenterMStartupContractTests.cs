@@ -15,8 +15,9 @@ public sealed class CenterMStartupContractTests
         Assert.Equal("RequestCenterMAuthorityTransition", FrontendRpcMethod.RequestCenterMAuthorityTransition.ToString());
         Assert.DoesNotContain("SetCenterMStartupEnabled", Enum.GetNames<FrontendRpcMethod>());
         // Bumped to 25 by App UI PR-C; 24 by App UI PR-B (obsolete LaunchAtWindowsStartup user-preference contract removed);
-        // 26 by Shared Frontend V2 SF-V2-01 (CaptureDeviceQuickSettings aggregate).
-        Assert.Equal(26, FrontendTransportProtocol.CurrentVersion);
+        // 26 by Shared Frontend V2 SF-V2-01 (CaptureDeviceQuickSettings aggregate); 27 by SD6A PR B (Claw
+        // Sensor Probe capture modes).
+        Assert.Equal(27, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]
