@@ -536,6 +536,93 @@ public sealed class ClawSensorProbeTests
         Assert.Contains(result.Errors, x => x.Contains("Accelerometer", StringComparison.Ordinal));
     }
 
+    // Real CG3EM hardware evidence (docs/work-order/SD6A_CG3EM_SENSOR_SELECTION_DUPLICATE_HOTFIX_WORK_ORDER.md
+    // section 4): the same physical LSM6DSO accelerometer and gyrometer are returned by both CategoryAll and a
+    // direct GetSensorsByType(A2VM reference GUID) lookup, and that same direct query also returns the physical
+    // gyrometer, "Simple DMD", and "Shake Gesture" rows.
+    [Fact] public void Discovery_Cg3emDuplicateQueryFixtureSelectsUniqueGyroAndAccelerometer()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Accelerometer", "A", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Simple DMD", "D", "t", "c"),
+            new("Physical Gyrometer", "G", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Shake Gesture", "S", "t", "c"),
+            new("Simple Orientation", "O", "t", "c"),
+            new("Physical Accelerometer", "A", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true),
+            new("Simple DMD", "D", "t", "c", IsDirectTypeMatch: true),
+            new("Physical Gyrometer", "G", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true),
+            new("Shake Gesture", "S", "t", "c", IsDirectTypeMatch: true)]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("G", result.Gyroscope?.SensorId);
+        Assert.Equal("A", result.Accelerometer?.SensorId);
+    }
+
+    [Fact] public void Discovery_Cg3emDuplicateQueryFixtureCollapsesToFiveLogicalSourcesAndPropagatesDirectMatch()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Accelerometer", "A", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Simple DMD", "D", "t", "c"),
+            new("Physical Gyrometer", "G", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Shake Gesture", "S", "t", "c"),
+            new("Simple Orientation", "O", "t", "c"),
+            new("Physical Accelerometer", "A", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true),
+            new("Simple DMD", "D", "t", "c", IsDirectTypeMatch: true),
+            new("Physical Gyrometer", "G", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true),
+            new("Shake Gesture", "S", "t", "c", IsDirectTypeMatch: true)]);
+
+        Assert.Equal(5, result.Sensors.Count);
+        Assert.True(result.Sensors.Single(x => x.SensorId == "A").IsDirectTypeMatch);
+        Assert.True(result.Sensors.Single(x => x.SensorId == "G").IsDirectTypeMatch);
+        Assert.True(result.Sensors.Single(x => x.SensorId == "D").IsDirectTypeMatch);
+        Assert.True(result.Sensors.Single(x => x.SensorId == "S").IsDirectTypeMatch);
+        Assert.False(result.Sensors.Single(x => x.SensorId == "O").IsDirectTypeMatch);
+    }
+
+    [Fact] public void Discovery_RoleMismatchedDirectCandidateDoesNotCountTowardAccelerometerAmbiguity()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Accelerometer", "A", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true),
+            new("Physical Gyrometer", "G", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true)]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("A", result.Accelerometer?.SensorId);
+    }
+
+    [Fact] public void Discovery_DirectOnlyAccelerometerRemainsSelectableWithoutMatchingCategoryAllRow()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "G", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Accelerometer", "A", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true)]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("A", result.Accelerometer?.SensorId);
+    }
+
+    [Fact] public void Discovery_DistinctGyroscopeSensorIdsStillFailCloseAsAmbiguous()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "G1", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Gyrometer", "G2", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Accelerometer", "A", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+        Assert.False(result.IsValid);
+        Assert.Null(result.Gyroscope);
+        Assert.Contains(result.Errors, x => x.Contains("Multiple Physical Gyrometer candidates", StringComparison.Ordinal));
+    }
+
+    [Fact] public void Discovery_DistinctDirectAccelerometerSensorIdsStillFailCloseAsAmbiguous()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Accelerometer", "A1", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true),
+            new("Physical Accelerometer", "A2", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true),
+            new("Physical Gyrometer", "G", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+        Assert.False(result.IsValid);
+        Assert.Null(result.Accelerometer);
+        Assert.Contains(result.Errors, x => x.Contains("Multiple direct-type accelerometer candidates", StringComparison.Ordinal));
+    }
+
     [Fact] public void Discovery_PreservesBroadQueryFailureAlongsideSuccessfulDirectTypeLookup()
     {
         var categoryAll = new LegacySensorQueryInfo("CategoryAll", "C317C286-C468-4288-9975-D4C4587C442C", null, false, unchecked((int)0x80070490), "COMException", []);

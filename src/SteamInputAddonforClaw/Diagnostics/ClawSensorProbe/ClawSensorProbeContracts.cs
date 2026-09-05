@@ -86,10 +86,48 @@ internal sealed record ClawSensorDiscovery(
         ClawSensorProbeWinRtEvidence? winRtAccelerometer)
     {
         var errors = new List<string>();
-        var gyroscope = SelectGyroscope(sensors, errors);
-        var accelerometer = SelectAccelerometer(sensors, errors);
-        return new(sensors, gyroscope, accelerometer, errors, legacyCategoryAll, legacyDirectTypeQueries, winRtGyrometer, winRtAccelerometer);
+        var selectionCandidates = BuildSelectionCandidates(sensors);
+        var gyroscope = SelectGyroscope(selectionCandidates, errors);
+        var accelerometer = SelectAccelerometer(selectionCandidates, errors);
+        return new(selectionCandidates, gyroscope, accelerometer, errors, legacyCategoryAll, legacyDirectTypeQueries, winRtGyrometer, winRtAccelerometer);
     }
+
+    // The same physical legacy sensor can be returned by both GetSensorsByCategory(SENSOR_CATEGORY_ALL) and a
+    // direct GetSensorsByType lookup (real CG3EM evidence: docs/work-order/SD6A_CG3EM_SENSOR_SELECTION_DUPLICATE_
+    // HOTFIX_WORK_ORDER.md section 4). Collapse duplicate legacy rows sharing an exact usable SensorId into one
+    // logical candidate before role selection, propagating IsDirectTypeMatch and preferring the broad-enumeration
+    // (CategoryAll) row's metadata as canonical when both exist. WinRT candidates and legacy rows with an empty/
+    // placeholder SensorId are never merged.
+    private static IReadOnlyList<ClawSensorProbeCandidate> BuildSelectionCandidates(IReadOnlyList<ClawSensorProbeCandidate> sensors)
+    {
+        var result = new List<ClawSensorProbeCandidate>();
+        var legacyIndexBySensorId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sensor in sensors)
+        {
+            if (sensor.Backend != ClawSensorProbeBackend.LegacySensorApi || !HasUsableSensorId(sensor.SensorId))
+            {
+                result.Add(sensor);
+                continue;
+            }
+
+            if (legacyIndexBySensorId.TryGetValue(sensor.SensorId, out var index))
+            {
+                var existing = result[index];
+                var isDirectTypeMatch = existing.IsDirectTypeMatch || sensor.IsDirectTypeMatch;
+                var canonical = existing.IsDirectTypeMatch && !sensor.IsDirectTypeMatch ? sensor : existing;
+                result[index] = canonical with { IsDirectTypeMatch = isDirectTypeMatch };
+                continue;
+            }
+
+            legacyIndexBySensorId[sensor.SensorId] = result.Count;
+            result.Add(sensor);
+        }
+
+        return result;
+    }
+
+    private static bool HasUsableSensorId(string sensorId) =>
+        !string.IsNullOrWhiteSpace(sensorId) && !string.Equals(sensorId, "Unavailable", StringComparison.OrdinalIgnoreCase);
 
     // A present sensor projection can still be unusable during normal driver/device lifecycle (no X/Y/Z
     // support reported, or an explicit not-available/access-denied/error state); such a candidate must not
@@ -121,7 +159,7 @@ internal sealed record ClawSensorDiscovery(
         if (winRt.Length == 1) return winRt[0];
         if (winRt.Length > 1) { errors.Add("Multiple WinRT Accelerometer candidates were found."); return null; }
 
-        var direct = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && x.IsDirectTypeMatch && IsUsableLegacyCandidate(x)).ToArray();
+        var direct = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && x.IsDirectTypeMatch && string.Equals(x.FriendlyName, "Physical Accelerometer", StringComparison.OrdinalIgnoreCase) && IsUsableLegacyCandidate(x)).ToArray();
         if (direct.Length == 1) return direct[0];
         if (direct.Length > 1) { errors.Add("Multiple direct-type accelerometer candidates were found."); return null; }
 
