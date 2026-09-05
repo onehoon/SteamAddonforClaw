@@ -98,10 +98,10 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
         {
             var sensor = Gyrometer.GetDefault();
             return sensor is null
-                ? new WinRtSensorDiscoveryInfo(false, null, null, "Unavailable")
-                : new WinRtSensorDiscoveryInfo(true, sensor.DeviceId, sensor.MinimumReportInterval, null);
+                ? new WinRtSensorDiscoveryInfo(false, null, null, null, "Unavailable")
+                : new WinRtSensorDiscoveryInfo(true, sensor.DeviceId, sensor.MinimumReportInterval, null, null);
         }
-        catch (Exception exception) { return new WinRtSensorDiscoveryInfo(false, null, null, exception.GetType().Name); }
+        catch (Exception exception) { return new WinRtSensorDiscoveryInfo(false, null, null, exception.HResult, exception.GetType().Name); }
     }
 
     private static WinRtSensorDiscoveryInfo CaptureWinRtAccelerometer()
@@ -110,10 +110,10 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
         {
             var sensor = Accelerometer.GetDefault();
             return sensor is null
-                ? new WinRtSensorDiscoveryInfo(false, null, null, "Unavailable")
-                : new WinRtSensorDiscoveryInfo(true, sensor.DeviceId, sensor.MinimumReportInterval, null);
+                ? new WinRtSensorDiscoveryInfo(false, null, null, null, "Unavailable")
+                : new WinRtSensorDiscoveryInfo(true, sensor.DeviceId, sensor.MinimumReportInterval, null, null);
         }
-        catch (Exception exception) { return new WinRtSensorDiscoveryInfo(false, null, null, exception.GetType().Name); }
+        catch (Exception exception) { return new WinRtSensorDiscoveryInfo(false, null, null, exception.HResult, exception.GetType().Name); }
     }
 
     private static (LegacySensorQueryInfo CategoryAll, IReadOnlyList<LegacySensorQueryInfo> DirectTypeQueries) CaptureLegacyMotionSensors()

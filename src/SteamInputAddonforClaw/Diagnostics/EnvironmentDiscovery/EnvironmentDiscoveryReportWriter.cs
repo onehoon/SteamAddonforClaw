@@ -99,10 +99,7 @@ internal sealed class EnvironmentDiscoveryReportWriter
     private static void WriteMotionSensors(StringBuilder text, EnvironmentDiscoverySnapshot snapshot)
     {
         Header(text, "WINDOWS MOTION / SENSOR DISCOVERY");
-        var relevant = snapshot.Devices.Items.Where(IsMotionRelevant).OrderBy(item => item.InstanceId, StringComparer.OrdinalIgnoreCase).ToArray();
-        text.AppendLine($"PnPRelevantCount: {relevant.Length}");
-        foreach (var item in relevant)
-            text.AppendLine($"FriendlyName={Safe(item.FriendlyName)}; InstanceId={Safe(item.InstanceId)}; Class={Safe(item.ClassName)}; ClassGuid={Safe(item.ClassGuid)}; Service={Safe(item.Service)}; UsagePage={FormatHex(item.UsagePage)}; Usage={FormatHex(item.Usage)}; HardwareIds={Safe(string.Join('|', item.HardwareIds))}");
+        WriteMotionPnP(text, snapshot.Devices);
 
         text.AppendLine();
         text.AppendLine("WinRT Gyrometer:");
@@ -122,6 +119,20 @@ internal sealed class EnvironmentDiscoveryReportWriter
         }
     }
 
+    private static void WriteMotionPnP(StringBuilder text, DiscoverySection<ControllerDeviceInfo> devices)
+    {
+        if (devices.Failure is { } failure)
+        {
+            text.AppendLine($"PnPInspectionFailed={Safe(failure)}");
+            return;
+        }
+
+        var relevant = devices.Items.Where(IsMotionRelevant).OrderBy(item => item.InstanceId, StringComparer.OrdinalIgnoreCase).ToArray();
+        text.AppendLine($"PnPRelevantCount: {relevant.Length}");
+        foreach (var item in relevant)
+            text.AppendLine($"FriendlyName={Safe(item.FriendlyName)}; InstanceId={Safe(item.InstanceId)}; ContainerId={item.ContainerId}; ParentInstanceId={Safe(item.ParentInstanceId)}; AncestorInstanceIds={Safe(string.Join('|', item.AncestorInstanceIds))}; Class={Safe(item.ClassName)}; ClassGuid={Safe(item.ClassGuid)}; Enumerator={Safe(item.EnumeratorName)}; Service={Safe(item.Service)}; UsagePage={FormatHex(item.UsagePage)}; Usage={FormatHex(item.Usage)}; HardwareIds={Safe(string.Join('|', item.HardwareIds))}; CompatibleIds={Safe(string.Join('|', item.CompatibleIds))}");
+    }
+
     private static void WriteWinRtSensor(StringBuilder text, WinRtSensorDiscoveryInfo info)
     {
         text.AppendLine($"Available={info.Available}");
@@ -130,7 +141,11 @@ internal sealed class EnvironmentDiscoveryReportWriter
             text.AppendLine($"DeviceId={Safe(info.DeviceId)}");
             text.AppendLine($"MinimumReportIntervalMs={(info.MinimumReportIntervalMs.HasValue ? info.MinimumReportIntervalMs.Value.ToString(CultureInfo.InvariantCulture) : "<Unavailable>")}");
         }
-        else text.AppendLine($"Failure={Safe(info.Failure)}");
+        else
+        {
+            text.AppendLine($"HResult={FormatHResult(info.HResult)}");
+            text.AppendLine($"Failure={Safe(info.Failure)}");
+        }
     }
 
     private static void WriteLegacyQuery(StringBuilder text, LegacySensorQueryInfo query)

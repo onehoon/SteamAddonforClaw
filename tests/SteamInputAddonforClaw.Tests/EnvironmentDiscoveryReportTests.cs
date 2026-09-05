@@ -35,14 +35,14 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         {
             MotionSensors = DefaultMotionSensors() with
             {
-                WinRtGyrometer = new WinRtSensorDiscoveryInfo(false, null, null, "TypeLoadException"),
-                WinRtAccelerometer = new WinRtSensorDiscoveryInfo(true, "\\\\?\\ACCEL#1", 10, null)
+                WinRtGyrometer = new WinRtSensorDiscoveryInfo(false, null, null, unchecked((int)0x80070005), "UnauthorizedAccessException"),
+                WinRtAccelerometer = new WinRtSensorDiscoveryInfo(true, "\\\\?\\ACCEL#1", 10, null, null)
             }
         };
 
         var report = new EnvironmentDiscoveryReportWriter().Write(snapshot);
 
-        Assert.Contains("WinRT Gyrometer:\r\nAvailable=False\r\nFailure=TypeLoadException", report);
+        Assert.Contains("WinRT Gyrometer:\r\nAvailable=False\r\nHResult=0x80070005\r\nFailure=UnauthorizedAccessException", report);
         Assert.Contains("WinRT Accelerometer:\r\nAvailable=True\r\nDeviceId=\\\\?\\ACCEL#1\r\nMinimumReportIntervalMs=10", report);
         Assert.Contains("=== ROUTING PREREQUISITES ===", report);
     }
@@ -103,6 +103,47 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         Assert.Contains("PnPRelevantCount: 1", motionSection);
         Assert.Contains("FriendlyName=Intel(R) ISH Sensor", motionSection);
         Assert.DoesNotContain("Some Keyboard", motionSection);
+    }
+
+    [Fact]
+    public void Writer_PreservesPnPTopologyInMotionSection()
+    {
+        var containerId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var snapshot = Snapshot(
+            processes: [],
+            devices:
+            [
+                new("HID\\SENSOR\\1", containerId, "ACPI\\INTC1001\\0", ["ACPI\\INTC1001\\0"], "HID", ["HID\\INTC_ISH_SENSOR"], ["HID\\SENSOR"], "Sensor", "{Sensor}", "hidsensor", null, null, true, "Intel(R) ISH Sensor", 0x20, 0x0200)
+            ]);
+
+        var report = new EnvironmentDiscoveryReportWriter().Write(snapshot);
+        var motionSectionStart = report.IndexOf("=== WINDOWS MOTION / SENSOR DISCOVERY ===", StringComparison.Ordinal);
+        var motionSectionEnd = report.IndexOf("=== ROUTING PREREQUISITES ===", StringComparison.Ordinal);
+        var motionSection = report[motionSectionStart..motionSectionEnd];
+
+        Assert.Contains($"ContainerId={containerId}", motionSection);
+        Assert.Contains("ParentInstanceId=ACPI\\INTC1001\\0", motionSection);
+        Assert.Contains("AncestorInstanceIds=ACPI\\INTC1001\\0", motionSection);
+        Assert.Contains("Enumerator=HID", motionSection);
+        Assert.Contains("HardwareIds=HID\\INTC_ISH_SENSOR", motionSection);
+        Assert.Contains("CompatibleIds=HID\\SENSOR", motionSection);
+    }
+
+    [Fact]
+    public void Writer_ReportsFailedPnPScanAsFailureNotEmptyInventory()
+    {
+        var snapshot = Snapshot(processes: []) with
+        {
+            Devices = new DiscoverySection<ControllerDeviceInfo>([], "UnauthorizedAccessException")
+        };
+
+        var report = new EnvironmentDiscoveryReportWriter().Write(snapshot);
+        var motionSectionStart = report.IndexOf("=== WINDOWS MOTION / SENSOR DISCOVERY ===", StringComparison.Ordinal);
+        var motionSectionEnd = report.IndexOf("=== ROUTING PREREQUISITES ===", StringComparison.Ordinal);
+        var motionSection = report[motionSectionStart..motionSectionEnd];
+
+        Assert.Contains("PnPInspectionFailed=UnauthorizedAccessException", motionSection);
+        Assert.DoesNotContain("PnPRelevantCount", motionSection);
     }
 
     [Fact]
@@ -202,8 +243,8 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         DefaultMotionSensors());
 
     private static MotionSensorDiscoverySnapshot DefaultMotionSensors() => new(
-        new WinRtSensorDiscoveryInfo(false, null, null, "Unavailable"),
-        new WinRtSensorDiscoveryInfo(false, null, null, "Unavailable"),
+        new WinRtSensorDiscoveryInfo(false, null, null, null, "Unavailable"),
+        new WinRtSensorDiscoveryInfo(false, null, null, null, "Unavailable"),
         new LegacySensorQueryInfo("CategoryAll", ClawSensorProbeSensorApi.SensorCategoryAll.ToString("D"), null, false, unchecked((int)0x80070490), "COMException", []),
         [new LegacySensorQueryInfo("DirectType", "E83AF229-8640-4D18-A213-E22675EBB2C3", "A2VM reference custom accelerometer type", false, unchecked((int)0x80070490), "COMException", [])]);
 

@@ -30,7 +30,7 @@ internal sealed record MotionSensorDiscoverySnapshot(
     LegacySensorQueryInfo LegacyCategoryAll,
     IReadOnlyList<LegacySensorQueryInfo> LegacyDirectTypeQueries);
 
-internal sealed record WinRtSensorDiscoveryInfo(bool Available, string? DeviceId, uint? MinimumReportIntervalMs, string? Failure);
+internal sealed record WinRtSensorDiscoveryInfo(bool Available, string? DeviceId, uint? MinimumReportIntervalMs, int? HResult, string? Failure);
 
 internal sealed record LegacySensorQueryInfo(
     string QueryKind,
