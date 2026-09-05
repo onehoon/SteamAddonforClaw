@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
@@ -6,7 +7,7 @@ namespace SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
 internal sealed class EnvironmentDiscoveryReportWriter
 {
-    internal const int SnapshotVersion = 1;
+    internal const int SnapshotVersion = 2;
 
     public string Write(EnvironmentDiscoverySnapshot snapshot)
     {
@@ -24,6 +25,7 @@ internal sealed class EnvironmentDiscoveryReportWriter
         WriteStartup(text, snapshot.StartupRegistrations);
         WriteTasks(text, snapshot.ScheduledTasks);
         WriteDevices(text, snapshot.Devices);
+        WriteMotionSensors(text, snapshot);
         WritePrerequisites(text, snapshot.Prerequisites);
         WriteKeywordMatches(text, snapshot);
         return text.ToString();
@@ -93,6 +95,83 @@ internal sealed class EnvironmentDiscoveryReportWriter
         foreach (var item in section.Items.OrderBy(value => value.InstanceId, StringComparer.OrdinalIgnoreCase))
             text.AppendLine($"FriendlyName={Safe(item.FriendlyName)}; InstanceId={Safe(item.InstanceId)}; ContainerId={item.ContainerId}; Class={Safe(item.ClassName)}; ClassGuid={Safe(item.ClassGuid)}; Enumerator={Safe(item.EnumeratorName)}; Service={Safe(item.Service)}; VID={FormatHex(item.VendorId)}; PID={FormatHex(item.ProductId)}; HardwareIds={Safe(string.Join('|', item.HardwareIds))}; CompatibleIds={Safe(string.Join('|', item.CompatibleIds))}; Present={item.Present}");
     }
+
+    private static void WriteMotionSensors(StringBuilder text, EnvironmentDiscoverySnapshot snapshot)
+    {
+        Header(text, "WINDOWS MOTION / SENSOR DISCOVERY");
+        WriteMotionPnP(text, snapshot.Devices);
+
+        text.AppendLine();
+        text.AppendLine("WinRT Gyrometer:");
+        WriteWinRtSensor(text, snapshot.MotionSensors.WinRtGyrometer);
+        text.AppendLine();
+        text.AppendLine("WinRT Accelerometer:");
+        WriteWinRtSensor(text, snapshot.MotionSensors.WinRtAccelerometer);
+        text.AppendLine();
+        text.AppendLine("Legacy CategoryAll:");
+        WriteLegacyQuery(text, snapshot.MotionSensors.LegacyCategoryAll);
+        foreach (var query in snapshot.MotionSensors.LegacyDirectTypeQueries)
+        {
+            text.AppendLine();
+            text.AppendLine("Legacy DirectType:");
+            if (query.Label is not null) text.AppendLine($"Label={Safe(query.Label)}");
+            WriteLegacyQuery(text, query);
+        }
+    }
+
+    private static void WriteMotionPnP(StringBuilder text, DiscoverySection<ControllerDeviceInfo> devices)
+    {
+        if (devices.Failure is { } failure)
+        {
+            text.AppendLine($"PnPInspectionFailed={Safe(failure)}");
+            return;
+        }
+
+        var relevant = devices.Items.Where(IsMotionRelevant).OrderBy(item => item.InstanceId, StringComparer.OrdinalIgnoreCase).ToArray();
+        text.AppendLine($"PnPRelevantCount: {relevant.Length}");
+        foreach (var item in relevant)
+            text.AppendLine($"FriendlyName={Safe(item.FriendlyName)}; InstanceId={Safe(item.InstanceId)}; ContainerId={item.ContainerId}; ParentInstanceId={Safe(item.ParentInstanceId)}; AncestorInstanceIds={Safe(string.Join('|', item.AncestorInstanceIds))}; Class={Safe(item.ClassName)}; ClassGuid={Safe(item.ClassGuid)}; Enumerator={Safe(item.EnumeratorName)}; Service={Safe(item.Service)}; UsagePage={FormatHex(item.UsagePage)}; Usage={FormatHex(item.Usage)}; HardwareIds={Safe(string.Join('|', item.HardwareIds))}; CompatibleIds={Safe(string.Join('|', item.CompatibleIds))}");
+    }
+
+    private static void WriteWinRtSensor(StringBuilder text, WinRtSensorDiscoveryInfo info)
+    {
+        text.AppendLine($"Available={info.Available}");
+        if (info.Available)
+        {
+            text.AppendLine($"DeviceId={Safe(info.DeviceId)}");
+            text.AppendLine($"MinimumReportIntervalMs={(info.MinimumReportIntervalMs.HasValue ? info.MinimumReportIntervalMs.Value.ToString(CultureInfo.InvariantCulture) : "<Unavailable>")}");
+        }
+        else
+        {
+            text.AppendLine($"HResult={FormatHResult(info.HResult)}");
+            text.AppendLine($"Failure={Safe(info.Failure)}");
+        }
+    }
+
+    private static void WriteLegacyQuery(StringBuilder text, LegacySensorQueryInfo query)
+    {
+        text.AppendLine($"TypeGuid={query.QueryGuid}");
+        text.AppendLine($"Succeeded={query.Succeeded}");
+        text.AppendLine($"HResult={FormatHResult(query.HResult)}");
+        if (!query.Succeeded) text.AppendLine($"Failure={Safe(query.Failure)}");
+        text.AppendLine($"CandidateCount={query.Candidates.Count}");
+        foreach (var candidate in query.Candidates)
+            text.AppendLine($"FriendlyName={Safe(candidate.FriendlyName)}; SensorId={Safe(candidate.SensorId)}; TypeGuid={Safe(candidate.TypeGuid)}; CategoryGuid={Safe(candidate.CategoryGuid)}; State={Safe(candidate.State)}; Manufacturer={Safe(candidate.Manufacturer)}; Model={Safe(candidate.Model)}; PersistentUniqueId={Safe(candidate.PersistentUniqueId)}; DevicePath={Safe(candidate.DevicePath)}; MinimumReportInterval={Safe(candidate.MinimumReportInterval)}; HidUsage={Safe(candidate.HidUsage)}; SupportsCustomX={Safe(candidate.SupportsCustomX)}; SupportsCustomY={Safe(candidate.SupportsCustomY)}; SupportsCustomZ={Safe(candidate.SupportsCustomZ)}");
+    }
+
+    private static bool IsMotionRelevant(ControllerDeviceInfo item) =>
+        string.Equals(item.ClassName, "Sensor", StringComparison.OrdinalIgnoreCase)
+        || item.UsagePage == 0x20
+        || ContainsIshIdentity(item);
+
+    private static bool ContainsIshIdentity(ControllerDeviceInfo item) =>
+        ContainsIshKeyword(item.FriendlyName) || ContainsIshKeyword(item.InstanceId) || ContainsIshKeyword(item.Service)
+        || item.HardwareIds.Any(ContainsIshKeyword) || item.CompatibleIds.Any(ContainsIshKeyword);
+
+    private static bool ContainsIshKeyword(string? value) => value is not null
+        && (value.Contains("ISH", StringComparison.OrdinalIgnoreCase) || value.Contains("Integrated Sensor", StringComparison.OrdinalIgnoreCase));
+
+    private static string FormatHResult(int? value) => value is null ? "<Unavailable>" : $"0x{unchecked((uint)value.Value):X8}";
 
     private static void WritePrerequisites(StringBuilder text, DiscoverySection<RuntimePrerequisiteAssessment> section)
     {

@@ -5,10 +5,12 @@ using Microsoft.Win32;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
+using Windows.Devices.Sensors;
 using Windows.Management.Deployment;
 
 namespace SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
@@ -76,7 +78,65 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
             Section(CaptureStartupRegistrations),
             Section(CaptureScheduledTasks),
             Section(devices.EnumeratePresentDevices),
-            Section(() => (IReadOnlyList<RuntimePrerequisiteAssessment>)[new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices), new WindowsUsbIpWin2PackageProbe()), new ViiperRuntimeInspector()).Inspect()]));
+            Section(() => (IReadOnlyList<RuntimePrerequisiteAssessment>)[new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices), new WindowsUsbIpWin2PackageProbe()), new ViiperRuntimeInspector()).Inspect()]),
+            CaptureMotionSensors());
+    }
+
+    // A2VM reference custom accelerometer type (WSGM/A2VM diagnostic evidence only, not a CG3EM production contract).
+    // See docs/gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md.
+    private static readonly Guid A2VmReferenceAccelerometerType = new("E83AF229-8640-4D18-A213-E22675EBB2C3");
+
+    private static MotionSensorDiscoverySnapshot CaptureMotionSensors()
+    {
+        var (categoryAll, direct) = CaptureLegacyMotionSensors();
+        return new MotionSensorDiscoverySnapshot(CaptureWinRtGyrometer(), CaptureWinRtAccelerometer(), categoryAll, direct);
+    }
+
+    private static WinRtSensorDiscoveryInfo CaptureWinRtGyrometer()
+    {
+        try
+        {
+            var sensor = Gyrometer.GetDefault();
+            return sensor is null
+                ? new WinRtSensorDiscoveryInfo(false, null, null, null, "Unavailable")
+                : new WinRtSensorDiscoveryInfo(true, sensor.DeviceId, sensor.MinimumReportInterval, null, null);
+        }
+        catch (Exception exception) { return new WinRtSensorDiscoveryInfo(false, null, null, exception.HResult, exception.GetType().Name); }
+    }
+
+    private static WinRtSensorDiscoveryInfo CaptureWinRtAccelerometer()
+    {
+        try
+        {
+            var sensor = Accelerometer.GetDefault();
+            return sensor is null
+                ? new WinRtSensorDiscoveryInfo(false, null, null, null, "Unavailable")
+                : new WinRtSensorDiscoveryInfo(true, sensor.DeviceId, sensor.MinimumReportInterval, null, null);
+        }
+        catch (Exception exception) { return new WinRtSensorDiscoveryInfo(false, null, null, exception.HResult, exception.GetType().Name); }
+    }
+
+    private static (LegacySensorQueryInfo CategoryAll, IReadOnlyList<LegacySensorQueryInfo> DirectTypeQueries) CaptureLegacyMotionSensors()
+    {
+        try
+        {
+            using var sensorApi = new ClawSensorProbeSensorApi();
+            var categoryAll = SafeLegacyQuery(() => sensorApi.EnumerateByCategory(ClawSensorProbeSensorApi.SensorCategoryAll), "CategoryAll", ClawSensorProbeSensorApi.SensorCategoryAll, null);
+            var direct = SafeLegacyQuery(() => sensorApi.EnumerateByType(A2VmReferenceAccelerometerType, "A2VM reference custom accelerometer type"), "DirectType", A2VmReferenceAccelerometerType, "A2VM reference custom accelerometer type");
+            return (categoryAll, [direct]);
+        }
+        catch (Exception exception)
+        {
+            var categoryAllFailure = new LegacySensorQueryInfo("CategoryAll", ClawSensorProbeSensorApi.SensorCategoryAll.ToString("D"), null, false, null, exception.GetType().Name, []);
+            var directFailure = new LegacySensorQueryInfo("DirectType", A2VmReferenceAccelerometerType.ToString("D"), "A2VM reference custom accelerometer type", false, null, exception.GetType().Name, []);
+            return (categoryAllFailure, [directFailure]);
+        }
+    }
+
+    private static LegacySensorQueryInfo SafeLegacyQuery(Func<LegacySensorQueryInfo> query, string queryKind, Guid guid, string? label)
+    {
+        try { return query(); }
+        catch (Exception exception) { return new LegacySensorQueryInfo(queryKind, guid.ToString("D"), label, false, null, exception.GetType().Name, []); }
     }
 
     private static IReadOnlyList<ProcessDiscoveryInfo> CaptureProcesses() => Process.GetProcesses()

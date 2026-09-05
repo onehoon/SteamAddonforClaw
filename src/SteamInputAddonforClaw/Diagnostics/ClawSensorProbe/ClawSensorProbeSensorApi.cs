@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
 namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 
@@ -68,6 +69,86 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
             }
         }
         return ClawSensorDiscovery.Select(sensors);
+    }
+
+    // Diagnostics-only one-shot queries for Environment Discovery. These preserve the raw HRESULT
+    // and every returned candidate as report evidence instead of throwing, unlike Discover() above,
+    // which remains the interactive probe's existing selection behavior and is left unchanged.
+    internal LegacySensorQueryInfo EnumerateByCategory(Guid category, string? label = null)
+    {
+        var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));
+        return Enumerate("CategoryAll", category, label, manager.GetSensorsByCategory);
+    }
+    internal LegacySensorQueryInfo EnumerateByType(Guid type, string? label = null)
+    {
+        var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));
+        return Enumerate("DirectType", type, label, manager.GetSensorsByType);
+    }
+    private delegate int SensorEnumerationMethod(ref Guid guid, out IntPtr collection);
+    private static LegacySensorQueryInfo Enumerate(string queryKind, Guid guid, string? label, SensorEnumerationMethod query)
+    {
+        var target = guid;
+        var hr = query(ref target, out var collection);
+        if (hr < 0) return new LegacySensorQueryInfo(queryKind, guid.ToString("D"), label, false, hr, DescribeFailure(hr), []);
+        using var ownedCollection = new OwnedComPointer(collection);
+        var candidates = new List<LegacySensorCandidateInfo>();
+        for (var i = 0; i < GetCollectionCount(collection); i++)
+        {
+            var sensor = GetCollectionItem(collection, i);
+            try { candidates.Add(ReadDiagnosticCandidate(sensor)); }
+            finally { if (sensor != IntPtr.Zero) { using var ownedSensor = new OwnedComPointer(sensor); } }
+        }
+        return new LegacySensorQueryInfo(queryKind, guid.ToString("D"), label, true, hr, null, candidates);
+    }
+    private static string DescribeFailure(int hr)
+    {
+        try { return Marshal.GetExceptionForHR(hr)?.Message ?? "Unavailable"; }
+        catch { return "Unavailable"; }
+    }
+    private static LegacySensorCandidateInfo ReadDiagnosticCandidate(IntPtr sensor)
+    {
+        var candidate = ReadCandidate(sensor);
+        return new LegacySensorCandidateInfo(
+            candidate.FriendlyName,
+            candidate.SensorId,
+            candidate.TypeGuid,
+            candidate.CategoryGuid,
+            ReadPropertyState(sensor),
+            candidate.Manufacturer,
+            candidate.Model,
+            candidate.PersistentUniqueId,
+            ReadPropertyString(sensor, SensorPropertyDevicePath),
+            candidate.MinimumReportInterval,
+            candidate.CustomUsage,
+            ReadSupportsDataField(sensor, 7),
+            ReadSupportsDataField(sensor, 8),
+            ReadSupportsDataField(sensor, 9));
+    }
+    private static string ReadPropertyState(IntPtr sensor)
+    {
+        try
+        {
+            var value = ReadProperty(sensor, SensorPropertyState);
+            try { return value.VarType == 19 ? DescribeState(value.UInt32) : "Unavailable"; }
+            finally { value.Dispose(); }
+        }
+        catch { return "Unavailable"; }
+    }
+    private static string DescribeState(uint state) => state switch
+    {
+        0 => "Min", 1 => "Ready", 2 => "NotAvailable", 3 => "NoData", 4 => "Initializing", 5 => "AccessDenied", 6 => "Error", _ => "Unavailable"
+    };
+    private static string ReadSupportsDataField(IntPtr sensor, int pid)
+    {
+        try
+        {
+            var vtable = Marshal.ReadIntPtr(sensor);
+            var call = Marshal.GetDelegateForFunctionPointer<SupportsDataField>(Marshal.ReadIntPtr(vtable, SensorSupportsDataFieldSlot * IntPtr.Size));
+            var key = new PropertyKey(SensorDataTypeCustomGuid, pid);
+            var hr = call(sensor, ref key, out var supported);
+            return hr < 0 ? "Unavailable" : (supported != 0).ToString();
+        }
+        catch { return "Unavailable"; }
     }
     internal static ClawSensorProbeCandidate ReadMetadata(IntPtr sensor)
     {
@@ -202,8 +283,10 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     }
     // The returned Sensor API interfaces are intentionally consumed through the validated raw vtable slots.
     private static readonly Guid SensorPropertyCommonGuid = new("7F8383EC-D3EC-495C-A8CF-B8BBE85C2920");
-    private const int SensorPropertyPersistentUniqueId = 5, SensorPropertyManufacturer = 6, SensorPropertyModel = 7, SensorPropertyMinReportInterval = 12, SensorPropertyHidUsage = 22;
-    internal const int CollectionGetAtSlot = 3, CollectionGetCountSlot = 4, SensorGetIdSlot = 3, SensorGetCategorySlot = 4, SensorGetTypeSlot = 5, SensorGetFriendlyNameSlot = 6, SensorGetPropertySlot = 7, SensorGetDataSlot = 13, ReportGetTimestampSlot = 3, ReportGetSensorValueSlot = 4;
+    private const int SensorPropertyPersistentUniqueId = 5, SensorPropertyManufacturer = 6, SensorPropertyModel = 7, SensorPropertyState = 3, SensorPropertyMinReportInterval = 12, SensorPropertyDevicePath = 15, SensorPropertyHidUsage = 22;
+    // ISensor vtable order (sensorsapi.h, confirmed against Windows SDK SensorsApi.h): GetID=3, GetCategory=4, GetType=5,
+    // GetFriendlyName=6, GetProperty=7, GetProperties=8, GetSupportedDataFields=9, SetProperties=10, SupportsDataField=11, GetState=12, GetData=13.
+    internal const int CollectionGetAtSlot = 3, CollectionGetCountSlot = 4, SensorGetIdSlot = 3, SensorGetCategorySlot = 4, SensorGetTypeSlot = 5, SensorGetFriendlyNameSlot = 6, SensorGetPropertySlot = 7, SensorSupportsDataFieldSlot = 11, SensorGetDataSlot = 13, ReportGetTimestampSlot = 3, ReportGetSensorValueSlot = 4;
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetCount(IntPtr self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetAt(IntPtr self, int index, out IntPtr sensor);
@@ -213,6 +296,7 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetReport(IntPtr self, out IntPtr report);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetSensorValue(IntPtr self, ref PropertyKey key, out PropVariant value);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetTimestamp(IntPtr self, out SystemTime timestamp);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int SupportsDataField(IntPtr self, ref PropertyKey key, out short supported);
 
     [StructLayout(LayoutKind.Sequential)] private struct PropertyKey(Guid formatId, int propertyId) { public Guid FormatId = formatId; public int PropertyId = propertyId; }
     [StructLayout(LayoutKind.Explicit, Size = 24)] internal struct PropVariant
