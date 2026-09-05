@@ -70,7 +70,22 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                 while (!_stop.IsCancellationRequested)
                 {
                     var readStart = Stopwatch.GetTimestamp();
-                    var values = handle.Read();
+                    ClawSensorReportReadResult values;
+                    try
+                    {
+                        values = handle.Read();
+                    }
+                    catch
+                    {
+                        // A blocking/stalled backend call that then fails is exactly the stall evidence this
+                        // diagnostic exists to capture; record the attempt's duration before the outer catch
+                        // turns this into a terminal reader error, instead of losing it as readDurationMs=0.
+                        var failedReadDurationMs = Stopwatch.GetElapsedTime(readStart).TotalMilliseconds;
+                        var failedNow = _clock.ElapsedTicks;
+                        var failedFreshAgeMs = ClawSensorProbeSessionClock.TicksToMilliseconds(failedNow - lastFreshReport);
+                        timing.Observe(ClawSensorReadOutcome.Failure, failedReadDurationMs, failedFreshAgeMs);
+                        throw;
+                    }
                     var readDurationMs = Stopwatch.GetElapsedTime(readStart).TotalMilliseconds;
                     var now = _clock.ElapsedTicks;
                     var freshAgeMs = ClawSensorProbeSessionClock.TicksToMilliseconds(now - lastFreshReport);
@@ -101,7 +116,9 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
             catch (Exception exception)
             {
-                timing.Observe(ClawSensorReadOutcome.Failure, 0);
+                // The failing read's duration/age is already recorded above, at the point of failure;
+                // recording it again here (as readDurationMs=0) would both lose the real value and
+                // double-count ReadFailureCount.
                 lock (_errors) _errors.Add($"{sensorName} reader failed: {exception.Message}");
             }
             finally { handle?.Dispose(); }

@@ -37,7 +37,10 @@ internal sealed record ClawSensorProbeCandidate(
     string DevicePath = "Unavailable",
     ClawSensorProbeUnitBasis UnitBasis = ClawSensorProbeUnitBasis.Unknown,
     bool IsDirectTypeMatch = false,
-    string? SelectionReason = null);
+    string? SelectionReason = null,
+    bool? SupportsX = null,
+    bool? SupportsY = null,
+    bool? SupportsZ = null);
 
 // One WinRT source's discovery evidence: whether GetDefault()+a live reading succeeded, the exact
 // failure/HRESULT when it did not, and the resulting candidate (null when unavailable/unreadable).
@@ -84,15 +87,27 @@ internal sealed record ClawSensorDiscovery(
         return new(sensors, gyroscope, accelerometer, errors, legacyCategoryAll, legacyDirectTypeQueries, winRtGyrometer, winRtAccelerometer);
     }
 
+    // A present sensor projection can still be unusable during normal driver/device lifecycle (no X/Y/Z
+    // support reported, or an explicit not-available/access-denied/error state); such a candidate must not
+    // win selection over a genuinely usable fallback merely because its friendly name matched.
+    private static bool HasRequiredLegacyXyz(ClawSensorProbeCandidate candidate) =>
+        candidate.SupportsX == true && candidate.SupportsY == true && candidate.SupportsZ == true;
+
+    private static bool HasExplicitUnusableState(ClawSensorProbeCandidate candidate) =>
+        candidate.State is "NotAvailable" or "AccessDenied" or "Error";
+
+    private static bool IsUsableLegacyCandidate(ClawSensorProbeCandidate candidate) =>
+        HasRequiredLegacyXyz(candidate) && !HasExplicitUnusableState(candidate);
+
     private static ClawSensorProbeCandidate? SelectGyroscope(IReadOnlyList<ClawSensorProbeCandidate> sensors, List<string> errors)
     {
         var winRt = sensors.Where(x => x.Backend == ClawSensorProbeBackend.WinRtGyrometer).ToArray();
         if (winRt.Length == 1) return winRt[0];
         if (winRt.Length > 1) { errors.Add("Multiple WinRT Gyrometer candidates were found."); return null; }
 
-        var legacy = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && string.Equals(x.FriendlyName, "Physical Gyrometer", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var legacy = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && string.Equals(x.FriendlyName, "Physical Gyrometer", StringComparison.OrdinalIgnoreCase) && IsUsableLegacyCandidate(x)).ToArray();
         if (legacy.Length == 1) return legacy[0];
-        errors.Add(legacy.Length == 0 ? "No Physical Gyrometer was found." : "Multiple Physical Gyrometer candidates were found.");
+        errors.Add(legacy.Length == 0 ? "No usable Physical Gyrometer was found." : "Multiple Physical Gyrometer candidates were found.");
         return null;
     }
 
@@ -102,13 +117,13 @@ internal sealed record ClawSensorDiscovery(
         if (winRt.Length == 1) return winRt[0];
         if (winRt.Length > 1) { errors.Add("Multiple WinRT Accelerometer candidates were found."); return null; }
 
-        var direct = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && x.IsDirectTypeMatch).ToArray();
+        var direct = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && x.IsDirectTypeMatch && IsUsableLegacyCandidate(x)).ToArray();
         if (direct.Length == 1) return direct[0];
         if (direct.Length > 1) { errors.Add("Multiple direct-type accelerometer candidates were found."); return null; }
 
-        var legacy = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && string.Equals(x.FriendlyName, "Physical Accelerometer", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var legacy = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && string.Equals(x.FriendlyName, "Physical Accelerometer", StringComparison.OrdinalIgnoreCase) && IsUsableLegacyCandidate(x)).ToArray();
         if (legacy.Length == 1) return legacy[0];
-        errors.Add(legacy.Length == 0 ? "No Physical Accelerometer was found." : "Multiple Physical Accelerometer candidates were found.");
+        errors.Add(legacy.Length == 0 ? "No usable Physical Accelerometer was found." : "Multiple Physical Accelerometer candidates were found.");
         return null;
     }
 }

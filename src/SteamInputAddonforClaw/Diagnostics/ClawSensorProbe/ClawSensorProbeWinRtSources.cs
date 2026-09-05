@@ -11,13 +11,18 @@ namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 // instead of collapsing to "no candidate" alongside a healthy legacy path.
 internal static class ClawSensorProbeWinRtDiscovery
 {
+    internal static bool IsFinite(double x, double y, double z) => double.IsFinite(x) && double.IsFinite(y) && double.IsFinite(z);
+
     internal static ClawSensorProbeWinRtEvidence ProbeGyrometer()
     {
         try
         {
             var sensor = Gyrometer.GetDefault();
             if (sensor is null) return new(false, null, "Unavailable", null);
-            if (sensor.GetCurrentReading() is null) return new(false, null, "No live reading was returned.", null);
+            var reading = sensor.GetCurrentReading();
+            if (reading is null) return new(false, null, "No live reading was returned.", null);
+            if (!IsFinite(reading.AngularVelocityX, reading.AngularVelocityY, reading.AngularVelocityZ))
+                return new(false, null, "Live reading was not finite.", null);
             return new(true, null, null, new ClawSensorProbeCandidate(
                 FriendlyName: "WinRT Gyrometer",
                 SensorId: sensor.DeviceId,
@@ -39,7 +44,10 @@ internal static class ClawSensorProbeWinRtDiscovery
         {
             var sensor = Accelerometer.GetDefault();
             if (sensor is null) return new(false, null, "Unavailable", null);
-            if (sensor.GetCurrentReading() is null) return new(false, null, "No live reading was returned.", null);
+            var reading = sensor.GetCurrentReading();
+            if (reading is null) return new(false, null, "No live reading was returned.", null);
+            if (!IsFinite(reading.AccelerationX, reading.AccelerationY, reading.AccelerationZ))
+                return new(false, null, "Live reading was not finite.", null);
             return new(true, null, null, new ClawSensorProbeCandidate(
                 FriendlyName: "WinRT Accelerometer",
                 SensorId: sensor.DeviceId,
@@ -100,10 +108,16 @@ internal sealed class ClawSensorProbeWinRtSourceHandle : IClawSensorProbeSourceH
         if (_gyrometer is not null)
         {
             var reading = _gyrometer.GetCurrentReading();
-            return reading is null ? ClawSensorReportReadResult.NoData() : ClawSensorReportReadResult.Data(reading.AngularVelocityX, reading.AngularVelocityY, reading.AngularVelocityZ, reading.Timestamp);
+            if (reading is null) return ClawSensorReportReadResult.NoData();
+            if (!ClawSensorProbeWinRtDiscovery.IsFinite(reading.AngularVelocityX, reading.AngularVelocityY, reading.AngularVelocityZ))
+                throw new InvalidOperationException("WinRT Gyrometer returned a non-finite reading.");
+            return ClawSensorReportReadResult.Data(reading.AngularVelocityX, reading.AngularVelocityY, reading.AngularVelocityZ, reading.Timestamp);
         }
         var accelReading = _accelerometer!.GetCurrentReading();
-        return accelReading is null ? ClawSensorReportReadResult.NoData() : ClawSensorReportReadResult.Data(accelReading.AccelerationX, accelReading.AccelerationY, accelReading.AccelerationZ, accelReading.Timestamp);
+        if (accelReading is null) return ClawSensorReportReadResult.NoData();
+        if (!ClawSensorProbeWinRtDiscovery.IsFinite(accelReading.AccelerationX, accelReading.AccelerationY, accelReading.AccelerationZ))
+            throw new InvalidOperationException("WinRT Accelerometer returned a non-finite reading.");
+        return ClawSensorReportReadResult.Data(accelReading.AccelerationX, accelReading.AccelerationY, accelReading.AccelerationZ, accelReading.Timestamp);
     }
 
     public void Dispose()

@@ -19,19 +19,19 @@ public sealed class ClawSensorProbeTests
     }
     [Fact] public void Discovery_FailsClosedForAmbiguousCandidates()
     {
-        var result = ClawSensorDiscovery.Select([new("Physical Gyrometer", "g1", "t", "c"), new("Physical Gyrometer", "g2", "t", "c"), new("Physical Accelerometer", "a1", "t", "c"), new("Other", "o", "t", "c")]);
+        var result = ClawSensorDiscovery.Select([new("Physical Gyrometer", "g1", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true), new("Physical Gyrometer", "g2", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true), new("Physical Accelerometer", "a1", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true), new("Other", "o", "t", "c")]);
         Assert.False(result.IsValid); Assert.Null(result.Gyroscope); Assert.NotNull(result.Accelerometer); Assert.Contains(result.Sensors, x => x.FriendlyName == "Other");
     }
     [Fact] public void Discovery_FailsClosedWhenEitherRequiredSensorIsMissing()
     {
-        Assert.False(ClawSensorDiscovery.Select([new("Physical Gyrometer", "g", "t", "c")]).IsValid);
-        Assert.False(ClawSensorDiscovery.Select([new("Physical Accelerometer", "a", "t", "c")]).IsValid);
+        Assert.False(ClawSensorDiscovery.Select([new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]).IsValid);
+        Assert.False(ClawSensorDiscovery.Select([new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]).IsValid);
     }
     [Fact] public void Discovery_PreservesAllMetadataForUnrelatedSensors()
     {
         var result = ClawSensorDiscovery.Select([
-            new("Physical Gyrometer", "g", "gyro-type", "gyro-category", "M", "G", "g-persist", "10", "usage-g"),
-            new("Physical Accelerometer", "a", "accel-type", "accel-category", "M", "A", "a-persist", "20", "usage-a"),
+            new("Physical Gyrometer", "g", "gyro-type", "gyro-category", "M", "G", "g-persist", "10", "usage-g", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Accelerometer", "a", "accel-type", "accel-category", "M", "A", "a-persist", "20", "usage-a", SupportsX: true, SupportsY: true, SupportsZ: true),
             new("Magnetometer", "m", "mag-type", "mag-category", "M", "M", "m-persist", "30", "usage-m")]);
         Assert.True(result.IsValid);
         Assert.Equal("m-persist", result.Sensors.Single(x => x.SensorId == "m").PersistentUniqueId);
@@ -39,8 +39,42 @@ public sealed class ClawSensorProbeTests
     }
     [Fact] public void Candidate_DoesNotTreatSensorIdAsPersistentUniqueId()
     {
-        var result = ClawSensorDiscovery.Select([new("Physical Gyrometer", "sensor-id", "t", "c"), new("Physical Accelerometer", "a", "t", "c")]);
+        var result = ClawSensorDiscovery.Select([new("Physical Gyrometer", "sensor-id", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true), new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
         Assert.Equal("Unavailable", result.Gyroscope?.PersistentUniqueId);
+    }
+
+    [Fact] public void Discovery_RejectsLegacyCandidateMissingRequiredXyzSupport()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: false),
+            new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+        Assert.False(result.IsValid);
+        Assert.Null(result.Gyroscope);
+        Assert.NotNull(result.Accelerometer);
+        Assert.Contains(result.Errors, x => x.Contains("Gyrometer", StringComparison.Ordinal));
+    }
+
+    [Fact] public void Discovery_RejectsLegacyCandidateWithExplicitUnusableState()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, State: "AccessDenied"),
+            new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+        Assert.False(result.IsValid);
+        Assert.Null(result.Gyroscope);
+        Assert.NotNull(result.Accelerometer);
+    }
+
+    [Fact] public void Discovery_RejectsDirectTypeCandidateWithExplicitUnusableState()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Accelerometer", "a1", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true, IsDirectTypeMatch: true, State: "Error"),
+            new("Physical Accelerometer", "a2", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+        Assert.True(result.IsValid);
+        Assert.Equal("a2", result.Accelerometer?.SensorId);
     }
     [Fact] public void Statistics_CalculatesRateAndBounds()
     {
@@ -460,10 +494,10 @@ public sealed class ClawSensorProbeTests
     [Fact] public void Discovery_PrefersUniqueWinRtGyroscopeOverAmbiguousLegacyCandidates()
     {
         var result = ClawSensorDiscovery.Select([
-            new("Physical Gyrometer", "g1", "t", "c"),
-            new("Physical Gyrometer", "g2", "t", "c"),
+            new("Physical Gyrometer", "g1", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Gyrometer", "g2", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
             new("WinRT Gyrometer", "winrt-gyro", "Unavailable", "Unavailable", Backend: ClawSensorProbeBackend.WinRtGyrometer),
-            new("Physical Accelerometer", "a", "t", "c")]);
+            new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
 
         Assert.Equal(ClawSensorProbeBackend.WinRtGyrometer, result.Gyroscope?.Backend);
         Assert.True(result.IsValid);
@@ -472,9 +506,9 @@ public sealed class ClawSensorProbeTests
     [Fact] public void Discovery_PrefersDirectTypeValidatedAccelerometerOverBroadEnumerationMatch()
     {
         var result = ClawSensorDiscovery.Select([
-            new("Physical Gyrometer", "g", "t", "c"),
-            new("Physical Accelerometer", "a1", "t", "c"),
-            new("Physical Accelerometer", "a2", "t2", "c2", IsDirectTypeMatch: true)]);
+            new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Accelerometer", "a1", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Accelerometer", "a2", "t2", "c2", IsDirectTypeMatch: true, SupportsX: true, SupportsY: true, SupportsZ: true)]);
 
         Assert.Equal("a2", result.Accelerometer?.SensorId);
         Assert.True(result.Accelerometer?.IsDirectTypeMatch);
@@ -484,7 +518,7 @@ public sealed class ClawSensorProbeTests
     {
         var result = ClawSensorDiscovery.Select([
             new("WinRT Gyrometer", "winrt-gyro", "Unavailable", "Unavailable", Backend: ClawSensorProbeBackend.WinRtGyrometer),
-            new("Physical Accelerometer", "a", "t", "c")]);
+            new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
 
         Assert.Equal(ClawSensorProbeBackend.WinRtGyrometer, result.Gyroscope?.Backend);
         Assert.Equal(ClawSensorProbeBackend.LegacySensorApi, result.Accelerometer?.Backend);
@@ -509,7 +543,7 @@ public sealed class ClawSensorProbeTests
         var winRtAccel = ClawSensorProbeWinRtEvidence.Unavailable;
 
         var result = ClawSensorDiscovery.Select(
-            [new("Physical Gyrometer", "g", "t", "c"), new("Physical Accelerometer", "a", "t2", "c2", IsDirectTypeMatch: true)],
+            [new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true), new("Physical Accelerometer", "a", "t2", "c2", IsDirectTypeMatch: true, SupportsX: true, SupportsY: true, SupportsZ: true)],
             categoryAll, [direct], winRtGyro, winRtAccel);
 
         Assert.True(result.IsValid);
@@ -529,7 +563,7 @@ public sealed class ClawSensorProbeTests
             var categoryAll = new LegacySensorQueryInfo("CategoryAll", "C317C286-C468-4288-9975-D4C4587C442C", null, false, hresult, "COMException", []);
             var direct = new LegacySensorQueryInfo("DirectType", "E83AF229-8640-4D18-A213-E22675EBB2C3", "A2VM reference custom accelerometer type", true, 0, null, []);
             var discovery = ClawSensorDiscovery.Select(
-                [new("Physical Gyrometer", "g", "t", "c"), new("Physical Accelerometer", "a", "t2", "c2", IsDirectTypeMatch: true)],
+                [new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true), new("Physical Accelerometer", "a", "t2", "c2", IsDirectTypeMatch: true, SupportsX: true, SupportsY: true, SupportsZ: true)],
                 categoryAll, [direct], ClawSensorProbeWinRtEvidence.Unavailable, ClawSensorProbeWinRtEvidence.Unavailable);
 
             var writer = new ClawSensorProbeSessionWriter(root, "session");
@@ -560,6 +594,31 @@ public sealed class ClawSensorProbeTests
     [Fact] public void ComputeSensorAgeMs_ReturnsNullForDefaultSensorTimestamp()
     {
         Assert.Null(ClawSensorProbeReaders.ComputeSensorAgeMs(DateTimeOffset.UtcNow, default));
+    }
+
+    [Theory]
+    [InlineData(1.0, 2.0, 3.0, true)]
+    [InlineData(double.NaN, 2.0, 3.0, false)]
+    [InlineData(1.0, double.PositiveInfinity, 3.0, false)]
+    [InlineData(1.0, 2.0, double.NegativeInfinity, false)]
+    public void WinRtDiscovery_IsFiniteRejectsNaNAndInfiniteValues(double x, double y, double z, bool expected)
+    {
+        Assert.Equal(expected, ClawSensorProbeWinRtDiscovery.IsFinite(x, y, z));
+    }
+
+    [Fact] public void TimingStatistics_FailureOutcomeStillContributesToMaxReadDurationAndLongReadCount()
+    {
+        // Reproduces the fix: a backend read that blocks for a while and then throws must not lose its
+        // read-duration evidence -- ClawSensorProbeReaders.RunAsync() now measures the failing attempt
+        // and calls Observe(Failure, readDurationMs, freshAgeMs) with the real duration before rethrowing.
+        var timing = new ClawSensorProbeTimingStatistics();
+
+        timing.Observe(ClawSensorReadOutcome.Failure, 150, 5);
+
+        Assert.Equal(1, timing.ReadFailureCount);
+        Assert.Equal(150, timing.MaxReadDurationMs);
+        Assert.Equal(150, timing.LastReadDurationMs);
+        Assert.Equal(1, timing.LongReadCount);
     }
 
     [Fact] public async Task Writer_EmitsSchemaVersionTwoWithTimingSummaryAndNoMisleadingBackendField()

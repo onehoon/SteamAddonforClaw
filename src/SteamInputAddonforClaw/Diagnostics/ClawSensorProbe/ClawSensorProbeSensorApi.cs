@@ -60,9 +60,10 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
 
         var candidates = new List<ClawSensorProbeCandidate>();
         candidates.AddRange(categoryAll.Candidates.Select(ToProbeCandidate));
-        candidates.AddRange(direct.Candidates
-            .Where(x => x.SupportsCustomX == "True" && x.SupportsCustomY == "True" && x.SupportsCustomZ == "True")
-            .Select(x => ToProbeCandidate(x) with { IsDirectTypeMatch = true, SelectionReason = "Matched a direct GetSensorsByType lookup with required X/Y/Z field support." }));
+        // Preserve every direct-type candidate as evidence regardless of X/Y/Z support; ClawSensorDiscovery.Select
+        // is the single place that rejects an unusable candidate (missing required fields or an explicit
+        // NotAvailable/AccessDenied/Error state) so raw discovery evidence is never silently dropped here.
+        candidates.AddRange(direct.Candidates.Select(x => ToProbeCandidate(x) with { IsDirectTypeMatch = true, SelectionReason = "Matched a direct GetSensorsByType lookup." }));
         if (winRtGyrometer.Candidate is { } gyroCandidate) candidates.Add(gyroCandidate);
         if (winRtAccelerometer.Candidate is { } accelCandidate) candidates.Add(accelCandidate);
 
@@ -76,7 +77,10 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         info.FriendlyName, info.SensorId, info.TypeGuid, info.CategoryGuid,
         Manufacturer: info.Manufacturer, Model: info.Model, PersistentUniqueId: info.PersistentUniqueId,
         MinimumReportInterval: info.MinimumReportInterval, CustomUsage: info.HidUsage,
-        Backend: ClawSensorProbeBackend.LegacySensorApi, State: info.State, DevicePath: info.DevicePath);
+        Backend: ClawSensorProbeBackend.LegacySensorApi, State: info.State, DevicePath: info.DevicePath,
+        SupportsX: ParseSupport(info.SupportsCustomX), SupportsY: ParseSupport(info.SupportsCustomY), SupportsZ: ParseSupport(info.SupportsCustomZ));
+
+    private static bool? ParseSupport(string value) => value switch { "True" => true, "False" => false, _ => null };
 
     // Diagnostics-only one-shot queries shared by Environment Discovery and the Discover() method above.
     // These preserve the raw HRESULT and every returned candidate as evidence instead of throwing.
