@@ -21,7 +21,41 @@ internal sealed record EnvironmentDiscoverySnapshot(
     DiscoverySection<StartupRegistrationDiscoveryInfo> StartupRegistrations,
     DiscoverySection<ScheduledTaskDiscoveryInfo> ScheduledTasks,
     DiscoverySection<ControllerDeviceInfo> Devices,
-    DiscoverySection<RuntimePrerequisiteAssessment> Prerequisites);
+    DiscoverySection<RuntimePrerequisiteAssessment> Prerequisites,
+    MotionSensorDiscoverySnapshot MotionSensors);
+
+internal sealed record MotionSensorDiscoverySnapshot(
+    WinRtSensorDiscoveryInfo WinRtGyrometer,
+    WinRtSensorDiscoveryInfo WinRtAccelerometer,
+    LegacySensorQueryInfo LegacyCategoryAll,
+    IReadOnlyList<LegacySensorQueryInfo> LegacyDirectTypeQueries);
+
+internal sealed record WinRtSensorDiscoveryInfo(bool Available, string? DeviceId, uint? MinimumReportIntervalMs, string? Failure);
+
+internal sealed record LegacySensorQueryInfo(
+    string QueryKind,
+    string QueryGuid,
+    string? Label,
+    bool Succeeded,
+    int? HResult,
+    string? Failure,
+    IReadOnlyList<LegacySensorCandidateInfo> Candidates);
+
+internal sealed record LegacySensorCandidateInfo(
+    string FriendlyName,
+    string SensorId,
+    string TypeGuid,
+    string CategoryGuid,
+    string State,
+    string Manufacturer,
+    string Model,
+    string PersistentUniqueId,
+    string DevicePath,
+    string MinimumReportInterval,
+    string HidUsage,
+    string SupportsCustomX,
+    string SupportsCustomY,
+    string SupportsCustomZ);
 
 internal interface IEnvironmentDiscoverySnapshotSource { EnvironmentDiscoverySnapshot Capture(DateTimeOffset capturedAt); }
 internal interface IEnvironmentDiscoveryReportStore { string Write(DateTimeOffset capturedAt, string content); string DirectoryPath { get; } }
