@@ -204,8 +204,9 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(@"C:\Logs\ClawSensorProbe\session-1", opened.OutputDirectory);
         Assert.Contains("reader warning", opened.ReaderErrors);
 
-        Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.StartClawSensorProbeAsync(), strict: true);
+        Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization), strict: true);
         Assert.Equal(1, fake.ClawSensorProbeStartCount);
+        Assert.Equal(FrontendClawSensorProbeMode.AxisCharacterization, fake.LastClawSensorProbeStartMode);
         Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.CaptureClawSensorProbeAsync(), strict: true);
         Assert.Equal(1, fake.ClawSensorProbeCaptureCount);
         Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.NextClawSensorProbePhaseAsync(), strict: true);
@@ -1014,9 +1015,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":26,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":26,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":26,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":27,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":27,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":27,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1056,6 +1057,10 @@ public sealed class FrontendNamedPipeTransportTests
     [InlineData("SetLogLevel", "null")]
     [InlineData("SetDeveloperTestMode", "{\"Enabled\":\"false\"}")]
     [InlineData("SetLogLevel", "{\"Level\":123}")]
+    [InlineData("StartClawSensorProbe", "{}")]
+    [InlineData("StartClawSensorProbe", "null")]
+    [InlineData("StartClawSensorProbe", "{\"Mode\":\"Bogus\"}")]
+    [InlineData("StartClawSensorProbe", "{\"Mode\":123}")]
     public async Task Malformed_mutation_payload_is_rejected_without_invoking_frontend(string method, string payload)
     {
         var fake = new RecordingFrontendControl();
@@ -1368,8 +1373,9 @@ public sealed class FrontendNamedPipeTransportTests
         public int ClawSensorProbeStopCount { get; private set; }
         public int ClawSensorProbeCloseCount { get; private set; }
         public TaskCompletionSource ClawSensorProbeClosed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public FrontendClawSensorProbeMode? LastClawSensorProbeStartMode { get; private set; }
         public Task<FrontendClawSensorProbeSnapshot> OpenClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeOpenCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
-        public Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeStartCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
+        public Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(FrontendClawSensorProbeMode mode, CancellationToken t = default) { TotalCalls++; ClawSensorProbeStartCount++; LastClawSensorProbeStartMode = mode; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeCaptureCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> NextClawSensorProbePhaseAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeNextCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> PreviousClawSensorProbePhaseAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbePreviousCount++; return Task.FromResult(ClawSensorProbeSnapshot); }

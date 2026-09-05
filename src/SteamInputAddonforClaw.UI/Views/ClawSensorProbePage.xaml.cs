@@ -124,6 +124,7 @@ public sealed partial class ClawSensorProbePage : UserControl
         if (!_active) return;
         ErrorText.Text = $"Runtime connection lost: {exception.Message}";
         StartButton.IsEnabled = false;
+        ModeComboBox.IsEnabled = false;
         StopButton.IsEnabled = false;
         BackPhaseButton.IsEnabled = false;
         NextPhaseButton.IsEnabled = false;
@@ -137,9 +138,10 @@ public sealed partial class ClawSensorProbePage : UserControl
         {
             if (_frontend is null) return;
             StartButton.IsEnabled = false;
+            ModeComboBox.IsEnabled = false;
             StatusText.Text = "Discovering Windows motion sensors...";
             var token = _pageCancellation?.Token ?? CancellationToken.None;
-            var snapshot = await _frontend.StartClawSensorProbeAsync(token);
+            var snapshot = await _frontend.StartClawSensorProbeAsync(SelectedMode(), token);
             if (_active) Render(snapshot);
         }
         catch (OperationCanceledException) { /* page left during Start */ }
@@ -151,9 +153,16 @@ public sealed partial class ClawSensorProbePage : UserControl
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe start failed.", exception, ("Reason", exception.GetType().Name));
-            if (_active) { ErrorText.Text = $"Test failed to start: {exception.Message}"; StartButton.IsEnabled = true; }
+            if (_active) { ErrorText.Text = $"Test failed to start: {exception.Message}"; StartButton.IsEnabled = true; ModeComboBox.IsEnabled = true; }
         }
     }
+
+    private FrontendClawSensorProbeMode SelectedMode() => ModeComboBox.SelectedIndex switch
+    {
+        1 => FrontendClawSensorProbeMode.AxisCharacterization,
+        2 => FrontendClawSensorProbeMode.StationaryBias,
+        _ => FrontendClawSensorProbeMode.LiveSanity
+    };
 
     private async void NextPhaseButton_Click(object sender, RoutedEventArgs e)
     {
@@ -260,6 +269,8 @@ public sealed partial class ClawSensorProbePage : UserControl
     {
         _latest = null;
         StartButton.IsEnabled = true;
+        ModeComboBox.IsEnabled = true;
+        ModeComboBox.SelectedIndex = 0;
         StopButton.IsEnabled = false;
         BackPhaseButton.IsEnabled = false;
         NextPhaseButton.IsEnabled = false;
@@ -304,25 +315,47 @@ public sealed partial class ClawSensorProbePage : UserControl
         if (snapshot.Discovery is { } discovery)
         {
             GyroDiscoveryText.Text = discovery.Gyroscope is { } gyro
-                ? $"Gyroscope: {gyro.FriendlyName} | ID: {gyro.SensorId} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage}"
+                ? $"Gyroscope: {gyro.Backend} | {gyro.FriendlyName} | ID: {gyro.SensorId} | Path: {gyro.DevicePath} | State: {gyro.State} | Unit: {gyro.UnitBasis} | Selection: {gyro.SelectionReason ?? "Unavailable"} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage}"
                 : "Gyroscope: Not discovered";
             AccelDiscoveryText.Text = discovery.Accelerometer is { } accel
-                ? $"Accelerometer: {accel.FriendlyName} | ID: {accel.SensorId} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage}"
+                ? $"Accelerometer: {accel.Backend} | {accel.FriendlyName} | ID: {accel.SensorId} | Path: {accel.DevicePath} | State: {accel.State} | Unit: {accel.UnitBasis} | Selection: {accel.SelectionReason ?? "Unavailable"} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage}"
                 : "Accelerometer: Not discovered";
         }
 
-        PhaseText.Text = snapshot.PhaseIndex >= 0
+        // Once the Runtime has accepted a mode, it is authoritative -- render it instead of the local
+        // selector state, and Previous/Next only ever apply to Axis Characterization (work order
+        // sections 6/19: no fake seven-phase traversal for Live Sanity / Stationary Bias).
+        var isAxis = snapshot.Mode is null or FrontendClawSensorProbeMode.AxisCharacterization;
+        PhaseText.Text = isAxis && snapshot.PhaseIndex >= 0
             ? $"Step: {snapshot.PhaseIndex + 1} of {snapshot.PhaseCount} - {PhaseLabel(snapshot.Phase)}"
-            : "Step: Not started";
-        InstructionText.Text = PhaseInstruction(snapshot.Phase);
+            : snapshot.Mode switch
+            {
+                FrontendClawSensorProbeMode.LiveSanity => "Live Sanity: continuous read-only capture.",
+                FrontendClawSensorProbeMode.StationaryBias => "Stationary Bias: continuous read-only capture.",
+                _ => "Step: Not started"
+            };
+        InstructionText.Text = snapshot.Mode switch
+        {
+            FrontendClawSensorProbeMode.LiveSanity => "Live Sanity: confirm the selected gyroscope and accelerometer are producing usable current data, then press Stop.",
+            FrontendClawSensorProbeMode.StationaryBias => "Place the device still on a stable surface. Leave it untouched during the capture, then press Stop.",
+            _ => PhaseInstruction(snapshot.Phase)
+        };
 
-        LiveText.Text = $"Status: {snapshot.State}{Environment.NewLine}Gyroscope raw: X={snapshot.Gyro.X:0.###}, Y={snapshot.Gyro.Y:0.###}, Z={snapshot.Gyro.Z:0.###} | {snapshot.Gyro.Hz:0.0} Hz | {snapshot.Gyro.Count} samples{Environment.NewLine}Accelerometer raw: X={snapshot.Accel.X:0.###}, Y={snapshot.Accel.Y:0.###}, Z={snapshot.Accel.Z:0.###} | {snapshot.Accel.Hz:0.0} Hz | {snapshot.Accel.Count} samples";
+        var gyroTiming = snapshot.GyroTiming;
+        var accelTiming = snapshot.AccelTiming;
+        LiveText.Text = $"Status: {snapshot.State} | Elapsed: {snapshot.ElapsedMs / 1000d:0.0}s{Environment.NewLine}" +
+            $"Gyroscope raw: X={snapshot.Gyro.X:0.###}, Y={snapshot.Gyro.Y:0.###}, Z={snapshot.Gyro.Z:0.###} | {snapshot.Gyro.Hz:0.0} Hz | {snapshot.Gyro.Count} samples | fresh age {snapshot.Gyro.FreshAgeMs:0} ms | last read {snapshot.Gyro.LastReadDurationMs:0.##} ms | {(snapshot.Gyro.IsFresh ? "fresh" : "stale")}" +
+            (gyroTiming is { } gt ? $" | dup {gt.DuplicateCount} | no-data {gt.NoDataCount} | fail {gt.ReadFailureCount} | max read {gt.MaxReadDurationMs:0.##} ms | max age {gt.MaxFreshAgeMs:0} ms" : string.Empty) + Environment.NewLine +
+            $"Accelerometer raw: X={snapshot.Accel.X:0.###}, Y={snapshot.Accel.Y:0.###}, Z={snapshot.Accel.Z:0.###} | {snapshot.Accel.Hz:0.0} Hz | {snapshot.Accel.Count} samples | fresh age {snapshot.Accel.FreshAgeMs:0} ms | last read {snapshot.Accel.LastReadDurationMs:0.##} ms | {(snapshot.Accel.IsFresh ? "fresh" : "stale")}" +
+            (snapshot.Accel.MagnitudeG is { } magnitude ? $" | |g|={magnitude:0.###}" : string.Empty) +
+            (accelTiming is { } at ? $" | dup {at.DuplicateCount} | no-data {at.NoDataCount} | fail {at.ReadFailureCount} | max read {at.MaxReadDurationMs:0.##} ms | max age {at.MaxFreshAgeMs:0} ms" : string.Empty);
 
         var recording = snapshot.State == FrontendClawSensorProbeState.RecordingPhase;
         StartButton.IsEnabled = snapshot.State == FrontendClawSensorProbeState.Ready;
+        ModeComboBox.IsEnabled = snapshot.State == FrontendClawSensorProbeState.Ready;
         StopButton.IsEnabled = snapshot.State is FrontendClawSensorProbeState.Starting or FrontendClawSensorProbeState.Countdown or FrontendClawSensorProbeState.RecordingPhase;
-        BackPhaseButton.IsEnabled = recording && snapshot.PhaseIndex > 0;
-        NextPhaseButton.IsEnabled = recording;
+        BackPhaseButton.IsEnabled = isAxis && recording && snapshot.PhaseIndex > 0;
+        NextPhaseButton.IsEnabled = isAxis && recording;
         NextPhaseButton.Content = snapshot.PhaseIndex == snapshot.PhaseCount - 1 ? "Finish Test" : "Next";
         DoneButton.IsEnabled = snapshot.State is FrontendClawSensorProbeState.Completed or FrontendClawSensorProbeState.Failed;
         OpenFolderButton.IsEnabled = snapshot.HasReport;
@@ -352,11 +385,30 @@ public sealed partial class ClawSensorProbePage : UserControl
     {
         var gyro = snapshot.GyroscopeSummary;
         var accel = snapshot.AccelerometerSummary;
-        SummaryText.Text = $"{result}{Environment.NewLine}Output directory: {snapshot.OutputDirectory ?? "Unavailable"}{Environment.NewLine}" +
-            $"Gyroscope samples: {gyro?.SampleCount ?? 0}, average rate: {gyro?.EffectiveHz ?? 0:0.0} Hz, interval: {gyro?.MinimumIntervalMs ?? 0:0.###}-{gyro?.MaximumIntervalMs ?? 0:0.###} ms, dropped: {snapshot.DroppedGyroscopeCount}{Environment.NewLine}" +
-            $"Accelerometer samples: {accel?.SampleCount ?? 0}, average rate: {accel?.EffectiveHz ?? 0:0.0} Hz, interval: {accel?.MinimumIntervalMs ?? 0:0.###}-{accel?.MaximumIntervalMs ?? 0:0.###} ms, dropped: {snapshot.DroppedAccelerometerCount}{Environment.NewLine}" +
-            $"Dropped samples total: {snapshot.DroppedSampleCount}";
+        // The JSON report is the authoritative detailed artifact -- this compact page summary shows
+        // only the evidence needed to confirm the run and locate the report (work order section 19).
+        var biasLine = snapshot.Mode == FrontendClawSensorProbeMode.StationaryBias && snapshot.BiasSummary is { } bias
+            ? FormatBiasSummaryLine(bias)
+            : string.Empty;
+        var gyroTiming = snapshot.GyroTiming;
+        var accelTiming = snapshot.AccelTiming;
+        SummaryText.Text = $"{result}{Environment.NewLine}Mode: {snapshot.Mode?.ToString() ?? "Unknown"}{Environment.NewLine}Output directory: {snapshot.OutputDirectory ?? "Unavailable"}{Environment.NewLine}" +
+            $"Gyroscope samples: {gyro?.SampleCount ?? 0}, average rate: {gyro?.EffectiveHz ?? 0:0.0} Hz, interval: {gyro?.MinimumIntervalMs ?? 0:0.###}-{gyro?.MaximumIntervalMs ?? 0:0.###} ms, dropped: {snapshot.DroppedGyroscopeCount}" +
+            (gyroTiming is { } gt ? $", duplicate: {gt.DuplicateCount}, no-data: {gt.NoDataCount}, read-failure: {gt.ReadFailureCount}, max read: {gt.MaxReadDurationMs:0.##} ms, max fresh age: {gt.MaxFreshAgeMs:0} ms" : string.Empty) + Environment.NewLine +
+            $"Accelerometer samples: {accel?.SampleCount ?? 0}, average rate: {accel?.EffectiveHz ?? 0:0.0} Hz, interval: {accel?.MinimumIntervalMs ?? 0:0.###}-{accel?.MaximumIntervalMs ?? 0:0.###} ms, dropped: {snapshot.DroppedAccelerometerCount}" +
+            (accelTiming is { } at ? $", duplicate: {at.DuplicateCount}, no-data: {at.NoDataCount}, read-failure: {at.ReadFailureCount}, max read: {at.MaxReadDurationMs:0.##} ms, max fresh age: {at.MaxFreshAgeMs:0} ms" : string.Empty) + Environment.NewLine +
+            $"Dropped samples total: {snapshot.DroppedSampleCount}" + biasLine;
     }
+
+    // Extracted so the required gyro mean/stddev/span + accel span fields (work order section 19)
+    // cannot silently disappear from the compact Bias completion summary again without a test failing
+    // (PR B review follow-up finding #1) -- mirrors ProfilePage's testable-static-helper pattern.
+    internal static string FormatBiasSummaryLine(FrontendClawSensorProbeBiasSummary bias) =>
+        $"{Environment.NewLine}Bias gyro mean: X={bias.GyroMeanX:0.###}, Y={bias.GyroMeanY:0.###}, Z={bias.GyroMeanZ:0.###}" +
+        $" | stddev: X={bias.GyroStandardDeviationX:0.###}, Y={bias.GyroStandardDeviationY:0.###}, Z={bias.GyroStandardDeviationZ:0.###}" +
+        $" | span: X={bias.GyroSpanX:0.###}, Y={bias.GyroSpanY:0.###}, Z={bias.GyroSpanZ:0.###}" +
+        $"{Environment.NewLine}Bias accel span: X={bias.AccelSpanX:0.###}, Y={bias.AccelSpanY:0.###}, Z={bias.AccelSpanZ:0.###}" +
+        (bias.AccelMagnitudeGMean is { } meanG ? $" | |g| mean={meanG:0.###}, span={bias.AccelMagnitudeGSpan:0.###}" : string.Empty);
 
     private static string PhaseLabel(FrontendClawSensorProbePhase phase) => phase switch
     {

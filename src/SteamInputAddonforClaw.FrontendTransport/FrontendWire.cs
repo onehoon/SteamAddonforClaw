@@ -76,7 +76,13 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // front is the honest outcome. Pre-release: no compatibility shim.
 // Version 26: Shared Frontend V2 adds CaptureDeviceQuickSettings and the typed
 // FrontendDeviceQuickSettingsSnapshot aggregate used by Main UI/QAM Device refresh.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 26; }
+// Version 27: SD6A PR B adds Claw Sensor Probe capture modes (Live Sanity / Axis Characterization /
+// Stationary Bias). StartClawSensorProbe changes from a no-payload RPC to one requiring
+// StartClawSensorProbeRequest (FrontendClawSensorProbeMode); the probe candidate/snapshot contracts
+// gain mode/backend/freshness/timing/bias-summary evidence. A v26 peer would connect and then send an
+// invalid (missing-mode) Start request or fail deserializing the extended snapshot -- failing the
+// handshake up front is the honest outcome. Pre-release: no compatibility shim.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 27; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -116,6 +122,7 @@ internal sealed record FrontendWireEnvelope(int ProtocolVersion, FrontendWireMes
 internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetFrontButtonMappingRequest(SteamInputAddonforClaw.Contracts.FrontButtons.FrontButtonMappingSettings Mapping);
 internal sealed record SetDeveloperTestModeRequest(bool Enabled);
+internal sealed record StartClawSensorProbeRequest(FrontendClawSensorProbeMode Mode);
 internal sealed record RunFanProbeRequest(FrontendFanProbeOperation Operation);
 internal sealed record SetDeviceCpuBoostAcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetDeviceCpuBoostDcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);

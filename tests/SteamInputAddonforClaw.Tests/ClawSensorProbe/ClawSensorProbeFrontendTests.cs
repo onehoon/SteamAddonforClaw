@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
@@ -98,7 +99,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
 
-        var snapshot = await control.StartClawSensorProbeAsync();
+        var snapshot = await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
 
         Assert.Equal(FrontendClawSensorProbeState.Failed, snapshot.State);
         Assert.NotNull(snapshot.ErrorMessage);
@@ -123,7 +124,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         // stable rather than looping or re-throwing.
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
-        var failed = await control.StartClawSensorProbeAsync();
+        var failed = await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
         Assert.Equal(FrontendClawSensorProbeState.Failed, failed.State);
 
         var polled = await control.CaptureClawSensorProbeAsync();
@@ -144,7 +145,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
 
-        var started = await control.StartClawSensorProbeAsync();
+        var started = await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
 
         Assert.Equal(FrontendClawSensorProbeState.Failed, started.State);
         Assert.NotNull(started.OutputDirectory);
@@ -171,7 +172,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
 
-        var startTask = control.StartClawSensorProbeAsync();
+        var startTask = control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
         control.BeginProcessShutdown();
         var exception = await Record.ExceptionAsync(() => startTask);
 
@@ -184,7 +185,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     {
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
-        await control.StartClawSensorProbeAsync();
+        await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
 
         var closed = await control.CloseClawSensorProbeAsync();
 
@@ -196,7 +197,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     {
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
         await control.OpenClawSensorProbeAsync();
-        var failed = await control.StartClawSensorProbeAsync();
+        var failed = await control.StartClawSensorProbeAsync(FrontendClawSensorProbeMode.AxisCharacterization);
         Assert.Equal(FrontendClawSensorProbeState.Failed, failed.State);
 
         var reopened = await control.OpenClawSensorProbeAsync();
@@ -279,6 +280,114 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             // escaping the race.
             Assert.True(exception is null, $"Iteration {i}: expected no exception, got {exception?.GetType()}: {exception?.Message}");
         }
+    }
+
+    [Theory]
+    [InlineData(FrontendClawSensorProbeMode.LiveSanity)]
+    [InlineData(FrontendClawSensorProbeMode.AxisCharacterization)]
+    [InlineData(FrontendClawSensorProbeMode.StationaryBias)]
+    public async Task Start_failure_reports_the_requested_mode_regardless_of_mode(FrontendClawSensorProbeMode mode)
+    {
+        // No real Windows Sensor API exists in this test environment, so discovery always fails before
+        // any mode-specific countdown/recording behavior runs -- but the Runtime must still have stored
+        // and projected the requested mode onto the session before that failure (work order section 6).
+        var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+        await control.OpenClawSensorProbeAsync();
+
+        var snapshot = await control.StartClawSensorProbeAsync(mode);
+
+        Assert.Equal(FrontendClawSensorProbeState.Failed, snapshot.State);
+        Assert.Equal(mode, snapshot.Mode);
+    }
+
+    [Fact]
+    public async Task Next_and_previous_phase_are_no_ops_before_a_session_has_started()
+    {
+        // Axis-only navigation (work order section 7): with no session started yet (Ready state), Next/
+        // Previous must not throw or otherwise misbehave -- they simply report the unchanged snapshot.
+        var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+        await control.OpenClawSensorProbeAsync();
+
+        var next = await control.NextClawSensorProbePhaseAsync();
+        var previous = await control.PreviousClawSensorProbePhaseAsync();
+
+        Assert.Equal(FrontendClawSensorProbeState.Ready, next.State);
+        Assert.Equal(FrontendClawSensorProbeState.Ready, previous.State);
+    }
+
+    [Fact]
+    public void MapClawSensorProbeCandidate_projects_backend_devicePath_unitBasis_and_selectionReason()
+    {
+        // The frontend candidate contract must carry the PR-A evidence the UI now needs (work order
+        // section 17), not just the pre-existing identity fields (PR B review finding #1).
+        var candidate = new ClawSensorProbeCandidate(
+            "Physical Gyrometer", "sensor-id", "type-guid", "category-guid",
+            Backend: ClawSensorProbeBackend.WinRtGyrometer,
+            State: "Ready",
+            DevicePath: @"\\?\HID#VID_1234",
+            UnitBasis: ClawSensorProbeUnitBasis.DegreesPerSecond,
+            SelectionReason: "Selected as the unique WinRT Gyrometer candidate.");
+
+        var mapped = InProcessAddonFrontendControl.MapClawSensorProbeCandidate(candidate);
+
+        Assert.Equal(FrontendClawSensorProbeBackend.WinRtGyrometer, mapped.Backend);
+        Assert.Equal("Ready", mapped.State);
+        Assert.Equal(@"\\?\HID#VID_1234", mapped.DevicePath);
+        Assert.Equal(FrontendClawSensorProbeUnitBasis.DegreesPerSecond, mapped.UnitBasis);
+        Assert.Equal("Selected as the unique WinRT Gyrometer candidate.", mapped.SelectionReason);
+    }
+
+    [Fact]
+    public void MapClawSensorProbeTiming_projects_duplicate_noData_readFailure_and_maxima()
+    {
+        // The compact timing DTO is what lets the completed-session UI show duplicate/no-data/read-
+        // failure counts and worst-case read duration/fresh age (PR B review finding #1) -- verify the
+        // projection actually carries every one of those fields, not just the happy-path ones already
+        // shown live.
+        var timing = new ClawSensorProbeTimingSnapshot(
+            FreshCount: 100, DuplicateCount: 5, NoDataCount: 3, ReadFailureCount: 1,
+            AverageFreshIntervalMs: 10, EffectiveFreshHz: 100,
+            LastReadDurationMs: 2.5, MaxReadDurationMs: 120,
+            FreshAgeMs: 8, MaxFreshAgeMs: 6000, LongReadCount: 2);
+
+        var mapped = InProcessAddonFrontendControl.MapClawSensorProbeTiming(timing);
+
+        Assert.NotNull(mapped);
+        Assert.Equal(100, mapped!.FreshCount);
+        Assert.Equal(5, mapped.DuplicateCount);
+        Assert.Equal(3, mapped.NoDataCount);
+        Assert.Equal(1, mapped.ReadFailureCount);
+        Assert.Equal(120, mapped.MaxReadDurationMs);
+        Assert.Equal(6000, mapped.MaxFreshAgeMs);
+        Assert.Equal(2, mapped.LongReadCount);
+    }
+
+    [Fact]
+    public void MapClawSensorProbeTiming_returns_null_for_null_snapshot()
+    {
+        Assert.Null(InProcessAddonFrontendControl.MapClawSensorProbeTiming(null));
+    }
+
+    [Fact]
+    public void MapClawSensorProbeBiasSummary_projects_gyro_and_accel_evidence_needed_for_completion_display()
+    {
+        var summary = new ClawSensorProbeBiasSummarySnapshot(
+            GyroSampleCount: 500, GyroEffectiveHz: 100,
+            GyroMeanX: 0.1, GyroMeanY: -0.2, GyroMeanZ: 0.05,
+            GyroStandardDeviationX: 0.01, GyroStandardDeviationY: 0.02, GyroStandardDeviationZ: 0.015,
+            GyroSpanX: 0.3, GyroSpanY: 0.4, GyroSpanZ: 0.2,
+            AccelSampleCount: 500, AccelEffectiveHz: 100,
+            AccelSpanX: 0.02, AccelSpanY: 0.03, AccelSpanZ: 0.01,
+            AccelMagnitudeGMean: 1.0, AccelMagnitudeGSpan: 0.02);
+
+        var mapped = InProcessAddonFrontendControl.MapClawSensorProbeBiasSummary(summary);
+
+        Assert.NotNull(mapped);
+        Assert.Equal(500, mapped!.GyroSampleCount);
+        Assert.Equal(0.1, mapped.GyroMeanX);
+        Assert.Equal(0.01, mapped.GyroStandardDeviationX);
+        Assert.Equal(1.0, mapped.AccelMagnitudeGMean);
+        Assert.Equal(0.02, mapped.AccelMagnitudeGSpan);
     }
 
     [Fact]

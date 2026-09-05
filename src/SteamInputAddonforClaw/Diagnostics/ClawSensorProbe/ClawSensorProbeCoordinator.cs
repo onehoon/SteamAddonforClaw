@@ -22,14 +22,24 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private ClawSensorProbeSessionClock? _clock;
     private readonly CancellationTokenSource _lifecycleCancellation = new();
     private ClawSensorCaptureContext _captureContext = new(ClawSensorCaptureMode.Transition, ClawSensorProbePhase.REST, 1);
+    private ClawSensorProbeMode _mode = ClawSensorProbeMode.AxisCharacterization;
+    private double? _recordingStartedElapsedMs;
+    private double? _recordingEndedElapsedMs;
     public CancellationToken LifecycleCancellation => _lifecycleCancellation.Token;
     public ClawSensorProbeState State => _workflow.State;
     public ClawSensorProbeWorkflow Workflow => _workflow;
+    public ClawSensorProbeMode Mode => _mode;
     public string? OutputDirectory => _writer?.DirectoryPath;
     public bool HasReport => _writer is not null && File.Exists(Path.Combine(_writer.DirectoryPath, "claw-sensor-report.json"));
     public ClawSensorProbeLiveSnapshot? LiveSnapshot => _readers?.Snapshot;
     public ClawSensorProbeStatistics? GyroscopeSummary => _writer?.GyroscopeSummary;
     public ClawSensorProbeStatistics? AccelerometerSummary => _writer?.AccelerometerSummary;
+    // Live while readers are active; falls back to the writer's frozen teardown-boundary snapshot once
+    // readers have gone away (Stop/Fail/Completed) -- see work order section 18. Narrow read-only
+    // accessors only: timing ownership stays with ClawSensorProbeReaders/the writer.
+    public ClawSensorProbeTimingSnapshot? GyroscopeTiming => _readers is { } r ? r.GyroscopeTiming.Snapshot() : _writer?.GyroscopeTimingSnapshot;
+    public ClawSensorProbeTimingSnapshot? AccelerometerTiming => _readers is { } r ? r.AccelerometerTiming.Snapshot() : _writer?.AccelerometerTimingSnapshot;
+    public ClawSensorProbeBiasSummarySnapshot? BiasSummary => _writer?.BiasSummary;
     public long DroppedSampleCount => _writer?.DroppedSampleCount ?? 0;
     public long DroppedGyroscopeCount => _writer?.DroppedGyroscopeCount ?? 0;
     public long DroppedAccelerometerCount => _writer?.DroppedAccelerometerCount ?? 0;
@@ -38,15 +48,19 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     public ClawSensorCaptureContext CaptureContext => Volatile.Read(ref _captureContext);
 
     public void Prepare() { _workflow.Discovering(); _workflow.Ready(); }
-    public void Start(string? root = null)
+    // Mode-less overload preserved for existing PR-A call sites/tests -- defaults to
+    // AxisCharacterization, exactly the only mode that existed before PR B.
+    public void Start(string? root = null) => Start(ClawSensorProbeMode.AxisCharacterization, root);
+    public void Start(ClawSensorProbeMode mode, string? root = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (_writer is not null) throw new InvalidOperationException("The probe session has already started.");
+        _mode = mode;
         root ??= Path.Combine(AppLog.DirectoryPath, "ClawSensorProbe");
         var sessionId = $"{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff", System.Globalization.CultureInfo.InvariantCulture)}-{Guid.NewGuid():N}";
-        _writer = new ClawSensorProbeSessionWriter(root, sessionId);
+        _writer = new ClawSensorProbeSessionWriter(root, sessionId, mode);
         _clock = new ClawSensorProbeSessionClock();
-        _workflow.Start();
+        _workflow.Start(mode);
     }
     public void SetDeviceIdentity(string manufacturer, string productName, string baseBoardProduct, string resolvedModel)
     {
@@ -65,8 +79,18 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             _writer.SetDiscovery(discovery);
             if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
-            var visit = Workflow.Visits.Last();
-            SetCaptureContext(ClawSensorCaptureMode.Transition, visit.Phase, visit.Pass);
+            if (_mode == ClawSensorProbeMode.AxisCharacterization)
+            {
+                var visit = Workflow.Visits.Last();
+                SetCaptureContext(ClawSensorCaptureMode.Transition, visit.Phase, visit.Pass);
+            }
+            else
+            {
+                // Live Sanity / Stationary Bias have no real axis phase -- REST/1 here is only an
+                // internal placeholder for the sample record's required Phase/Pass fields; the writer's
+                // CSV/report projection is mode-aware and never surfaces it as real phase evidence.
+                SetCaptureContext(ClawSensorCaptureMode.Transition, ClawSensorProbePhase.REST, 1);
+            }
             var clock = _clock ?? throw new InvalidOperationException("The probe session clock has not started.");
             _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, discovery, () => CaptureContext, clock));
             cancellationToken.ThrowIfCancellationRequested();
@@ -81,11 +105,47 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         }
         finally { _lifecycleGate.Release(); }
     }
-    public void BeginRecording() { ThrowIfReaderFaulted(); _workflow.BeginRecording(); var visit = Workflow.Visits.Last(); _writer?.BeginRecordingPhase(visit.Phase, visit.Pass, ElapsedMs); SetCaptureContext(ClawSensorCaptureMode.Recording, visit.Phase, visit.Pass); }
+    public void BeginRecording()
+    {
+        ThrowIfReaderFaulted();
+        _workflow.BeginRecording();
+        _recordingStartedElapsedMs ??= ElapsedMs;
+        if (_mode == ClawSensorProbeMode.AxisCharacterization)
+        {
+            var visit = Workflow.Visits.Last();
+            _writer?.BeginRecordingPhase(visit.Phase, visit.Pass, ElapsedMs);
+            SetCaptureContext(ClawSensorCaptureMode.Recording, visit.Phase, visit.Pass);
+        }
+        else
+        {
+            // Live/Bias: RecordingPhase begins immediately after discovery, with no
+            // BeginRecordingPhase() phase-log entry -- there is no real phase to log (section 8).
+            SetCaptureContext(ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1);
+        }
+    }
     public void Next() => _workflow.Next();
     public void Back() => _workflow.Back();
     public void Write(ClawSensorProbeSample sample) => _writer?.Write(sample);
     public double ElapsedMs => _clock?.ElapsedMs ?? 0;
+    // Recording-relative capture duration for the frontend's "elapsed capture time" evidence -- unlike
+    // ElapsedMs (the absolute session clock, used for CSV/report phase timestamps and still running
+    // pre-discovery and after Stop/Fail), this excludes pre-recording discovery/countdown time and
+    // freezes at teardown instead of continuing to grow while the completed-session UI keeps polling
+    // (PR B review follow-up finding #2).
+    public double RecordingElapsedMs
+    {
+        get
+        {
+            if (_recordingStartedElapsedMs is not { } start) return 0;
+            var end = _recordingEndedElapsedMs ?? ElapsedMs;
+            return Math.Max(0, end - start);
+        }
+    }
+    private void FreezeRecordingElapsed()
+    {
+        if (_recordingStartedElapsedMs is not null && _recordingEndedElapsedMs is null)
+            _recordingEndedElapsedMs = ElapsedMs;
+    }
     public void WriteTransition() => _writer?.WriteTransition(Workflow.Visits.LastOrDefault().Phase, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public void EndCurrentPhase() => _writer?.EndPhase((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public void BeginPhaseTransition() => WriteTransition();
@@ -153,6 +213,10 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         await _navigationGate.WaitAsync(cancellationToken);
         try
         {
+            // Next()/Back() remain Axis-only operations (work order section 7) -- a Live/Bias session
+            // must not be mutated by phase navigation, and AdvancePhase()/RevisitPreviousPhase() below
+            // assume Workflow.Visits.Last() exists, which is never true outside Axis mode.
+            if (_mode != ClawSensorProbeMode.AxisCharacterization) return;
             if (State != ClawSensorProbeState.RecordingPhase) return;
             AdvancePhase();
             updatePhaseUi();
@@ -169,6 +233,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         await _navigationGate.WaitAsync(cancellationToken);
         try
         {
+            if (_mode != ClawSensorProbeMode.AxisCharacterization) return;
             RevisitPreviousPhase();
             updatePhaseUi();
             if (State == ClawSensorProbeState.Countdown)
@@ -188,11 +253,19 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private async Task StopCoreAsync(CancellationToken cancellationToken)
     {
         _lifecycleCancellation.Cancel();
+        FreezeRecordingElapsed();
         if (_workflow.State == ClawSensorProbeState.RecordingPhase)
         {
-            var current = Workflow.Visits.Last();
-            SetCaptureContext(ClawSensorCaptureMode.Inactive, current.Phase, current.Pass);
-            EndCurrentPhase();
+            if (_mode == ClawSensorProbeMode.AxisCharacterization)
+            {
+                var current = Workflow.Visits.Last();
+                SetCaptureContext(ClawSensorCaptureMode.Inactive, current.Phase, current.Pass);
+                EndCurrentPhase();
+            }
+            else
+            {
+                SetCaptureContext(ClawSensorCaptureMode.Inactive, ClawSensorProbePhase.REST, 1);
+            }
         }
         _workflow.Stop();
         await ShutdownReadersAndApiAsync(cancellationToken);
@@ -207,11 +280,19 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private async Task FailCoreAsync(string error, CancellationToken cancellationToken)
     {
         _lifecycleCancellation.Cancel();
+        FreezeRecordingElapsed();
         if (_workflow.State == ClawSensorProbeState.RecordingPhase)
         {
-            var current = Workflow.Visits.Last();
-            SetCaptureContext(ClawSensorCaptureMode.Inactive, current.Phase, current.Pass);
-            EndCurrentPhase();
+            if (_mode == ClawSensorProbeMode.AxisCharacterization)
+            {
+                var current = Workflow.Visits.Last();
+                SetCaptureContext(ClawSensorCaptureMode.Inactive, current.Phase, current.Pass);
+                EndCurrentPhase();
+            }
+            else
+            {
+                SetCaptureContext(ClawSensorCaptureMode.Inactive, ClawSensorProbePhase.REST, 1);
+            }
         }
         _workflow.Fail();
         _writer?.AddError(error);
@@ -255,6 +336,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         try
         {
             _lifecycleCancellation.Cancel();
+            FreezeRecordingElapsed();
             await ShutdownReadersAndApiAsync(CancellationToken.None);
             if (_writer is not null) await _writer.FinalizeAsync();
         }

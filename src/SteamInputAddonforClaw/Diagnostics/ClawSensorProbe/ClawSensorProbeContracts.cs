@@ -10,6 +10,10 @@ namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 internal enum ClawSensorProbePhase { REST, ROLL_LEFT, ROLL_RIGHT, PITCH_UP, PITCH_DOWN, YAW_LEFT, YAW_RIGHT }
 internal enum ClawSensorProbeState { Idle, Discovering, Ready, Starting, Countdown, RecordingPhase, Stopping, Completed, Failed }
 internal enum ClawSensorCaptureMode { Inactive, Transition, Recording }
+// The diagnostic session's PURPOSE (chosen once at Start), distinct from ClawSensorCaptureMode above,
+// which is the per-sample recording STATE written into CSV (docs/gyro/SD6A_CLAW_SENSOR_PROBE_PR_B_
+// CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md section 4.2). Do not conflate the two.
+internal enum ClawSensorProbeMode { LiveSanity, AxisCharacterization, StationaryBias }
 internal enum ClawSensorProbeBackend { LegacySensorApi, WinRtGyrometer, WinRtAccelerometer }
 internal enum ClawSensorProbeUnitBasis { Unknown, DegreesPerSecond, G }
 internal enum ClawSensorReadOutcome { Fresh, Duplicate, NoData, Failure }
@@ -245,18 +249,39 @@ internal sealed class ClawSensorProbeTimingStatistics
     }
 }
 
+// Guarded the same way as ClawSensorProbeTimingStatistics above: WriteLoopAsync() (the single channel
+// consumer) calls Add() at sensor cadence while the frontend's ~200ms poll concurrently reads these
+// properties through MapClawSensorProbeStatistics. A running sum/min/max (not a List<double> scanned
+// on every read) backs Average/Minimum/MaximumIntervalMs so no shared collection is ever enumerated
+// concurrently with a mutation -- unguarded enumeration here previously risked "Collection was
+// modified" on a normal live probe, not just a theoretical race (PR B review).
 internal sealed class ClawSensorProbeStatistics
 {
-    private readonly List<double> _intervals = [];
-    public long SampleCount { get; private set; }
-    public long DroppedSampleCount { get; private set; }
-    public double DurationMs { get; private set; }
-    public double AverageIntervalMs => _intervals.Count == 0 ? 0 : _intervals.Average();
-    public double MinimumIntervalMs => _intervals.Count == 0 ? 0 : _intervals.Min();
-    public double MaximumIntervalMs => _intervals.Count == 0 ? 0 : _intervals.Max();
-    public double EffectiveHz => AverageIntervalMs <= 0 ? 0 : 1000 / AverageIntervalMs;
-    public void Add(double intervalMs) { SampleCount++; DurationMs += intervalMs; if (intervalMs > 0) _intervals.Add(intervalMs); }
-    public void AddDropped() => DroppedSampleCount++;
+    private readonly object _gate = new();
+    private long _sampleCount, _droppedSampleCount, _intervalCount;
+    private double _durationMs, _intervalTotalMs, _minimumIntervalMs = double.MaxValue, _maximumIntervalMs;
+    public long SampleCount { get { lock (_gate) return _sampleCount; } }
+    public long DroppedSampleCount { get { lock (_gate) return _droppedSampleCount; } }
+    public double DurationMs { get { lock (_gate) return _durationMs; } }
+    public double AverageIntervalMs { get { lock (_gate) return ComputeAverageIntervalMs(); } }
+    public double MinimumIntervalMs { get { lock (_gate) return _intervalCount == 0 ? 0 : _minimumIntervalMs; } }
+    public double MaximumIntervalMs { get { lock (_gate) return _maximumIntervalMs; } }
+    public double EffectiveHz { get { lock (_gate) { var average = ComputeAverageIntervalMs(); return average <= 0 ? 0 : 1000 / average; } } }
+    private double ComputeAverageIntervalMs() => _intervalCount == 0 ? 0 : _intervalTotalMs / _intervalCount;
+    public void Add(double intervalMs)
+    {
+        lock (_gate)
+        {
+            _sampleCount++;
+            _durationMs += intervalMs;
+            if (intervalMs <= 0) return;
+            _intervalTotalMs += intervalMs;
+            _intervalCount++;
+            if (intervalMs < _minimumIntervalMs) _minimumIntervalMs = intervalMs;
+            if (intervalMs > _maximumIntervalMs) _maximumIntervalMs = intervalMs;
+        }
+    }
+    public void AddDropped() { lock (_gate) _droppedSampleCount++; }
 }
 
 internal sealed class ClawSensorProbeLiveSnapshot
@@ -281,6 +306,79 @@ internal sealed class ClawSensorProbeLiveSnapshot
     }
 }
 
+// Pass-aware per-(Phase, Pass, Sensor) / stationary-bias vector aggregator (docs/gyro/SD6A_CLAW_
+// SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md section 9): mean/min/max/span plus an
+// optional known-g magnitude accumulation. All mutation happens from ClawSensorProbeSessionWriter's
+// single-consumer WriteLoopAsync, so -- like _restGyro/_restAccel before it -- no locking is needed.
+internal sealed class ClawSensorVectorAccumulator
+{
+    private double _sumX, _sumY, _sumZ, _sumSqX, _sumSqY, _sumSqZ;
+    private double _minX = double.MaxValue, _minY = double.MaxValue, _minZ = double.MaxValue;
+    private double _maxX = double.MinValue, _maxY = double.MinValue, _maxZ = double.MinValue;
+    private double _firstElapsedMs, _lastElapsedMs;
+    private double _sumMagnitudeG, _minMagnitudeG = double.MaxValue, _maxMagnitudeG = double.MinValue;
+    public long Count { get; private set; }
+    public bool HasMagnitude { get; private set; }
+
+    public void Add(double x, double y, double z, double elapsedMs)
+    {
+        if (Count == 0) _firstElapsedMs = elapsedMs;
+        _lastElapsedMs = elapsedMs;
+        Count++;
+        _sumX += x; _sumY += y; _sumZ += z;
+        _sumSqX += x * x; _sumSqY += y * y; _sumSqZ += z * z;
+        if (x < _minX) _minX = x; if (x > _maxX) _maxX = x;
+        if (y < _minY) _minY = y; if (y > _maxY) _maxY = y;
+        if (z < _minZ) _minZ = z; if (z > _maxZ) _maxZ = z;
+        // Magnitude is always accumulated from the raw triple -- it's just sqrt(x^2+y^2+z^2) and
+        // carries no unit assumption -- but the caller only ever SURFACES it when the selected
+        // source's UnitBasis is proven G (see AxisSummary's existing includeMagnitudeG pattern).
+        var magnitude = Math.Sqrt(x * x + y * y + z * z);
+        HasMagnitude = true;
+        _sumMagnitudeG += magnitude;
+        if (magnitude < _minMagnitudeG) _minMagnitudeG = magnitude;
+        if (magnitude > _maxMagnitudeG) _maxMagnitudeG = magnitude;
+    }
+
+    public double MeanX => Count == 0 ? 0 : _sumX / Count;
+    public double MeanY => Count == 0 ? 0 : _sumY / Count;
+    public double MeanZ => Count == 0 ? 0 : _sumZ / Count;
+    public double MinX => Count == 0 ? 0 : _minX;
+    public double MinY => Count == 0 ? 0 : _minY;
+    public double MinZ => Count == 0 ? 0 : _minZ;
+    public double MaxX => Count == 0 ? 0 : _maxX;
+    public double MaxY => Count == 0 ? 0 : _maxY;
+    public double MaxZ => Count == 0 ? 0 : _maxZ;
+    public double SpanX => Count == 0 ? 0 : _maxX - _minX;
+    public double SpanY => Count == 0 ? 0 : _maxY - _minY;
+    public double SpanZ => Count == 0 ? 0 : _maxZ - _minZ;
+    public double StandardDeviationX => Count == 0 ? 0 : Math.Sqrt(Math.Max(0, _sumSqX / Count - MeanX * MeanX));
+    public double StandardDeviationY => Count == 0 ? 0 : Math.Sqrt(Math.Max(0, _sumSqY / Count - MeanY * MeanY));
+    public double StandardDeviationZ => Count == 0 ? 0 : Math.Sqrt(Math.Max(0, _sumSqZ / Count - MeanZ * MeanZ));
+    public double StartElapsedMs => Count == 0 ? 0 : _firstElapsedMs;
+    public double EndElapsedMs => Count == 0 ? 0 : _lastElapsedMs;
+    public double DurationMs => Count <= 1 ? 0 : _lastElapsedMs - _firstElapsedMs;
+    public double EffectiveHz => Count <= 1 || DurationMs <= 0 ? 0 : (Count - 1) * 1000d / DurationMs;
+    public double MagnitudeGMean => Count == 0 ? 0 : _sumMagnitudeG / Count;
+    public double MagnitudeGMin => Count == 0 ? 0 : _minMagnitudeG;
+    public double MagnitudeGMax => Count == 0 ? 0 : _maxMagnitudeG;
+    public double MagnitudeGSpan => Count == 0 ? 0 : _maxMagnitudeG - _minMagnitudeG;
+}
+
+// Immutable Stationary Bias completion evidence, computed once in FinalizeAsync() after the writer
+// task has drained (no further accumulator mutation is possible past that point) so it is safe to
+// read concurrently from a polling RPC without any additional lock. Kept as a plain internal record
+// here (rather than a Contracts/Frontend type) to keep this file free of a Frontend-layer dependency;
+// InProcessAddonFrontendControl projects this into FrontendClawSensorProbeBiasSummary.
+internal sealed record ClawSensorProbeBiasSummarySnapshot(
+    long GyroSampleCount, double GyroEffectiveHz,
+    double GyroMeanX, double GyroMeanY, double GyroMeanZ,
+    double GyroStandardDeviationX, double GyroStandardDeviationY, double GyroStandardDeviationZ,
+    double GyroSpanX, double GyroSpanY, double GyroSpanZ,
+    long AccelSampleCount, double AccelEffectiveHz,
+    double AccelSpanX, double AccelSpanY, double AccelSpanZ,
+    double? AccelMagnitudeGMean, double? AccelMagnitudeGSpan);
+
 internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
 {
     private readonly StreamWriter _csv;
@@ -295,6 +393,17 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     private readonly Dictionary<string, int> _phaseRows = new(StringComparer.Ordinal);
     private readonly Dictionary<string, double> _pendingPhaseEnds = new(StringComparer.Ordinal);
     private readonly object _phaseGate = new();
+    private readonly ClawSensorProbeMode _mode;
+    // Axis per-(Phase, Pass, Sensor) accumulators, keyed by "{Phase}:{Pass}:{Sensor}"; Bias's two
+    // accumulators are simpler since a bias session has exactly one implicit "visit". Mutated only
+    // from WriteLoopAsync (the single channel consumer), same as the pre-existing
+    // _restGyro/_restAccel/_phases fields above. A sensor that produced zero accepted Fresh samples
+    // during a visit (quiet/duplicate/no-data for the whole window) simply has no entry here --
+    // BuildPerPhaseSummaries() must still emit an explicit SampleCount=0 summary for it rather than
+    // silently dropping that source from the visit (PR B review finding #2).
+    private readonly Dictionary<string, ClawSensorVectorAccumulator> _phaseAccumulators = new(StringComparer.Ordinal);
+    private readonly ClawSensorVectorAccumulator _biasGyro = new();
+    private readonly ClawSensorVectorAccumulator _biasAccel = new();
     private ClawSensorDiscovery? _discovery;
     private ClawSensorProbeTimingSnapshot? _gyroTiming;
     private ClawSensorProbeTimingSnapshot? _accelTiming;
@@ -316,6 +425,15 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     public string DirectoryPath { get; }
     public ClawSensorProbeStatistics GyroscopeSummary => _gyro;
     public ClawSensorProbeStatistics AccelerometerSummary => _accel;
+    // Frozen teardown-boundary timing evidence (set via SetTiming, same as PR A), exposed read-only so
+    // the frontend's compact UI projection can read final values after readers have gone away (work
+    // order section 18) without keeping the disposed reader object alive.
+    public ClawSensorProbeTimingSnapshot? GyroscopeTimingSnapshot => _gyroTiming;
+    public ClawSensorProbeTimingSnapshot? AccelerometerTimingSnapshot => _accelTiming;
+    // Only non-null after FinalizeAsync() has run for a StationaryBias session -- computed once past
+    // the point where the single-consumer writer task can still mutate the underlying accumulators,
+    // so it is safe to read concurrently from a polling RPC with no additional lock.
+    public ClawSensorProbeBiasSummarySnapshot? BiasSummary { get; private set; }
     public void SetDiscovery(ClawSensorDiscovery discovery) => _discovery = discovery;
     public void SetTiming(ClawSensorProbeTimingSnapshot? gyroscope, ClawSensorProbeTimingSnapshot? accelerometer) { _gyroTiming = gyroscope; _accelTiming = accelerometer; }
     public void SetSourceConfiguration(ClawSensorProbeSourceConfiguration? gyroscope, ClawSensorProbeSourceConfiguration? accelerometer) { _gyroConfiguration = gyroscope; _accelConfiguration = accelerometer; }
@@ -324,13 +442,17 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     public void AddError(string error) { lock (_errors) _errors.Add(error); }
     public void AddWarning(string warning) { lock (_warnings) _warnings.Add(warning); }
     public void MarkShutdownTimedOut() => _shutdownTimedOut = true;
-    public ClawSensorProbeSessionWriter(string root, string sessionId)
+    // Mode defaults to AxisCharacterization so the many existing PR-A tests that construct a writer
+    // without a mode keep exercising exactly the original seven-phase behavior.
+    public ClawSensorProbeSessionWriter(string root, string sessionId) : this(root, sessionId, ClawSensorProbeMode.AxisCharacterization) { }
+    public ClawSensorProbeSessionWriter(string root, string sessionId, ClawSensorProbeMode mode)
     {
+        _mode = mode;
         DirectoryPath = Path.Combine(root, sessionId);
         Directory.CreateDirectory(DirectoryPath);
         _reportPath = Path.Combine(DirectoryPath, "claw-sensor-report.json");
         _csv = new StreamWriter(Path.Combine(DirectoryPath, "claw-sensor-live.csv"), false, new UTF8Encoding(false)) { AutoFlush = false };
-        _csv.WriteLine("sequence,utc_timestamp,elapsed_ms,capture_mode,phase,phase_pass,sensor,x,y,z,sample_interval_ms,sensor_timestamp,backend,read_duration_ms,sensor_age_ms");
+        _csv.WriteLine("sequence,utc_timestamp,elapsed_ms,probe_mode,capture_mode,phase,phase_pass,sensor,x,y,z,sample_interval_ms,sensor_timestamp,backend,read_duration_ms,sensor_age_ms");
         _writerTask = WriteLoopAsync();
     }
     public void Write(ClawSensorProbeSample sample)
@@ -375,29 +497,49 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
             else _pendingPhaseEnds[key] = elapsedMs;
         }
     }
+    private bool IsAxis => _mode == ClawSensorProbeMode.AxisCharacterization;
     private async Task WriteLoopAsync()
     {
         await foreach (var sample in _channel.Reader.ReadAllAsync())
         {
-            _csv.WriteLine(string.Join(',', sample.Sequence.ToString(CultureInfo.InvariantCulture), sample.UtcTimestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), sample.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture), sample.CaptureMode.ToString().ToUpperInvariant(), sample.Phase, sample.PhasePass, sample.Sensor, sample.X.ToString("R", CultureInfo.InvariantCulture), sample.Y.ToString("R", CultureInfo.InvariantCulture), sample.Z.ToString("R", CultureInfo.InvariantCulture), sample.SampleIntervalMs.ToString("0.###", CultureInfo.InvariantCulture), sample.SensorTimestamp?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty, sample.Backend, sample.ReadDurationMs.ToString("0.###", CultureInfo.InvariantCulture), sample.SensorAgeMs?.ToString("0.###", CultureInfo.InvariantCulture) ?? string.Empty));
+            // Live Sanity / Stationary Bias have no real axis phase -- the sample still carries the
+            // reader context's REST/1 placeholder (see ClawSensorProbeCoordinator), but the CSV/report
+            // projection must not claim that as real phase evidence for those modes (work order
+            // section 14): blank phase/phase_pass in the CSV row and skip all phase-log bookkeeping.
+            _csv.WriteLine(string.Join(',', sample.Sequence.ToString(CultureInfo.InvariantCulture), sample.UtcTimestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), sample.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture), _mode.ToString(), sample.CaptureMode.ToString().ToUpperInvariant(), IsAxis ? sample.Phase.ToString() : string.Empty, IsAxis ? sample.PhasePass.ToString(CultureInfo.InvariantCulture) : string.Empty, sample.Sensor, sample.X.ToString("R", CultureInfo.InvariantCulture), sample.Y.ToString("R", CultureInfo.InvariantCulture), sample.Z.ToString("R", CultureInfo.InvariantCulture), sample.SampleIntervalMs.ToString("0.###", CultureInfo.InvariantCulture), sample.SensorTimestamp?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty, sample.Backend, sample.ReadDurationMs.ToString("0.###", CultureInfo.InvariantCulture), sample.SensorAgeMs?.ToString("0.###", CultureInfo.InvariantCulture) ?? string.Empty));
             var isRecordingSensorSample = sample.CaptureMode == ClawSensorCaptureMode.Recording && sample.Sensor is "GYRO" or "ACCEL";
             if (isRecordingSensorSample) (sample.Sensor == "GYRO" ? _gyro : _accel).Add(sample.SampleIntervalMs);
-            if (isRecordingSensorSample && sample.Phase == ClawSensorProbePhase.REST && sample.Sensor == "GYRO") _restGyro.Add((sample.X, sample.Y, sample.Z));
-            if (isRecordingSensorSample && sample.Phase == ClawSensorProbePhase.REST && sample.Sensor == "ACCEL") _restAccel.Add((sample.X, sample.Y, sample.Z));
-            var key = $"{sample.Phase}:{sample.PhasePass}";
-            lock (_phaseGate)
+            if (isRecordingSensorSample && IsAxis && sample.Phase == ClawSensorProbePhase.REST && sample.Sensor == "GYRO") _restGyro.Add((sample.X, sample.Y, sample.Z));
+            if (isRecordingSensorSample && IsAxis && sample.Phase == ClawSensorProbePhase.REST && sample.Sensor == "ACCEL") _restAccel.Add((sample.X, sample.Y, sample.Z));
+            if (isRecordingSensorSample && _mode == ClawSensorProbeMode.StationaryBias)
+                (sample.Sensor == "GYRO" ? _biasGyro : _biasAccel).Add(sample.X, sample.Y, sample.Z, sample.ElapsedMs);
+            if (isRecordingSensorSample && IsAxis)
             {
-                if (!_phaseRows.ContainsKey(key))
+                var accumulatorKey = $"{sample.Phase}:{sample.PhasePass}:{sample.Sensor}";
+                if (!_phaseAccumulators.TryGetValue(accumulatorKey, out var accumulator))
                 {
-                    _phaseRows[key] = _phases.Count;
-                    var end = _pendingPhaseEnds.TryGetValue(key, out var pendingEnd) ? pendingEnd : sample.ElapsedMs;
-                    _phases.Add(new(sample.Phase.ToString(), sample.PhasePass, sample.ElapsedMs, sample.CaptureMode == ClawSensorCaptureMode.Recording ? sample.ElapsedMs : 0, end, 0, "TransitionOnly"));
+                    accumulator = new ClawSensorVectorAccumulator();
+                    _phaseAccumulators[accumulatorKey] = accumulator;
                 }
-                if (isRecordingSensorSample)
+                accumulator.Add(sample.X, sample.Y, sample.Z, sample.ElapsedMs);
+            }
+            if (IsAxis)
+            {
+                var key = $"{sample.Phase}:{sample.PhasePass}";
+                lock (_phaseGate)
                 {
-                    var phaseIndex = _phaseRows[key];
-                    var phaseLog = _phases[phaseIndex];
-                    _phases[phaseIndex] = phaseLog with { sample_count = phaseLog.sample_count + 1, capture_status = "Captured" };
+                    if (!_phaseRows.ContainsKey(key))
+                    {
+                        _phaseRows[key] = _phases.Count;
+                        var end = _pendingPhaseEnds.TryGetValue(key, out var pendingEnd) ? pendingEnd : sample.ElapsedMs;
+                        _phases.Add(new(sample.Phase.ToString(), sample.PhasePass, sample.ElapsedMs, sample.CaptureMode == ClawSensorCaptureMode.Recording ? sample.ElapsedMs : 0, end, 0, "TransitionOnly"));
+                    }
+                    if (isRecordingSensorSample)
+                    {
+                        var phaseIndex = _phaseRows[key];
+                        var phaseLog = _phases[phaseIndex];
+                        _phases[phaseIndex] = phaseLog with { sample_count = phaseLog.sample_count + 1, capture_status = "Captured" };
+                    }
                 }
             }
         }
@@ -416,8 +558,128 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
             .Concat(DroppedSampleCount > 0 ? new[] { "The diagnostic writer queue was full and samples were dropped." } : Array.Empty<string>())
             .Concat(_shutdownTimedOut ? new[] { "Sensor reader shutdown exceeded the bounded wait." } : Array.Empty<string>())
             .ToArray();
-        var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, Discovery = new { LegacyCategoryAll = _discovery?.LegacyCategoryAll, LegacyDirectTypeQueries = _discovery?.LegacyDirectTypeQueries, WinRtGyrometer = _discovery?.WinRtGyrometer, WinRtAccelerometer = _discovery?.WinRtAccelerometer }, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, SourceConfiguration = new { Gyroscope = _gyroConfiguration, Accelerometer = _accelConfiguration }, LegacyCustomDataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false, _discovery?.Accelerometer?.UnitBasis == ClawSensorProbeUnitBasis.G) }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
+        var isAccelG = _discovery?.Accelerometer?.UnitBasis == ClawSensorProbeUnitBasis.G;
+        if (_mode == ClawSensorProbeMode.StationaryBias)
+            BiasSummary = new ClawSensorProbeBiasSummarySnapshot(
+                _biasGyro.Count, _biasGyro.EffectiveHz,
+                _biasGyro.MeanX, _biasGyro.MeanY, _biasGyro.MeanZ,
+                _biasGyro.StandardDeviationX, _biasGyro.StandardDeviationY, _biasGyro.StandardDeviationZ,
+                _biasGyro.SpanX, _biasGyro.SpanY, _biasGyro.SpanZ,
+                _biasAccel.Count, _biasAccel.EffectiveHz,
+                _biasAccel.SpanX, _biasAccel.SpanY, _biasAccel.SpanZ,
+                isAccelG ? _biasAccel.MagnitudeGMean : null, isAccelG ? _biasAccel.MagnitudeGSpan : null);
+        var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, CaptureMode = _mode, Discovery = new { LegacyCategoryAll = _discovery?.LegacyCategoryAll, LegacyDirectTypeQueries = _discovery?.LegacyDirectTypeQueries, WinRtGyrometer = _discovery?.WinRtGyrometer, WinRtAccelerometer = _discovery?.WinRtAccelerometer }, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, SourceConfiguration = new { Gyroscope = _gyroConfiguration, Accelerometer = _accelConfiguration }, LegacyCustomDataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, PerPhaseSummaries = BuildPerPhaseSummaries(isAccelG), RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false, isAccelG) }, StationaryBiasSummary = BuildStationaryBiasSummary(isAccelG), GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
         await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, ReportSerializerOptions), Encoding.UTF8, cancellationToken);
+    }
+
+    // Axis-only: one entry per (Phase, Pass, Sensor) for every visit that actually reached Recording,
+    // in visit order (docs/gyro/SD6A_CLAW_SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md
+    // section 10). The phase log (_phases), not _phaseAccumulators, is the visit authority: a source
+    // that was quiet/duplicate/no-data for an entire visit has no accumulator entry, but the visit
+    // still happened, so it still gets an explicit SampleCount=0 summary rather than being silently
+    // dropped (PR B review finding #2). Live Sanity / Stationary Bias never populate _phases for
+    // recording (IsAxis gate in WriteLoopAsync), so this is an empty array for those modes.
+    private object[] BuildPerPhaseSummaries(bool includeAccelMagnitudeG)
+    {
+        // A visit "actually reached Recording" when either the coordinator explicitly started
+        // recording for it (recording_start_elapsed_ms > 0 in the normal production flow) or at least
+        // one Recording sample from either sensor was accepted for it (capture_status == "Captured",
+        // covering a phase whose first Recording sample happens to land at elapsed=0). Either
+        // condition alone can miss a real visit; matching either is the visit authority.
+        List<ClawSensorProbePhaseLog> phases;
+        lock (_phaseGate) phases = _phases.Where(p => p.recording_start_elapsed_ms > 0 || p.capture_status == "Captured").ToList();
+        var result = new List<object>(phases.Count * 2);
+        foreach (var phaseLog in phases)
+        {
+            if (!Enum.TryParse<ClawSensorProbePhase>(phaseLog.name, out var phase)) continue;
+            foreach (var sensor in new[] { "GYRO", "ACCEL" })
+            {
+                _phaseAccumulators.TryGetValue($"{phase}:{phaseLog.pass}:{sensor}", out var accumulator);
+                // A source that produced zero accepted Fresh samples for this visit (quiet/duplicate/
+                // no-data the whole window) has no accumulator entry -- fall back to the phase log's
+                // own start/end so the summary still reports an explicit SampleCount=0 rather than
+                // being silently dropped (PR B review finding #2), while a populated accumulator keeps
+                // reporting its own actual first/last sample timing as before.
+                var hasData = accumulator is not null;
+                accumulator ??= new ClawSensorVectorAccumulator();
+                var startElapsedMs = hasData ? accumulator.StartElapsedMs : phaseLog.recording_start_elapsed_ms;
+                var endElapsedMs = hasData ? accumulator.EndElapsedMs : phaseLog.end_elapsed_ms;
+                var includeMagnitude = includeAccelMagnitudeG && sensor == "ACCEL";
+                var entry = new Dictionary<string, object?>
+                {
+                    ["Phase"] = phase,
+                    ["Pass"] = phaseLog.pass,
+                    ["Sensor"] = sensor,
+                    ["Backend"] = sensor == "GYRO" ? _discovery?.Gyroscope?.Backend : _discovery?.Accelerometer?.Backend,
+                    ["SampleCount"] = accumulator.Count,
+                    ["MeanX"] = accumulator.MeanX, ["MeanY"] = accumulator.MeanY, ["MeanZ"] = accumulator.MeanZ,
+                    ["MinX"] = accumulator.MinX, ["MinY"] = accumulator.MinY, ["MinZ"] = accumulator.MinZ,
+                    ["MaxX"] = accumulator.MaxX, ["MaxY"] = accumulator.MaxY, ["MaxZ"] = accumulator.MaxZ,
+                    ["SpanX"] = accumulator.SpanX, ["SpanY"] = accumulator.SpanY, ["SpanZ"] = accumulator.SpanZ,
+                    ["StartElapsedMs"] = startElapsedMs,
+                    ["EndElapsedMs"] = endElapsedMs,
+                    ["DurationMs"] = hasData ? accumulator.DurationMs : Math.Max(0, endElapsedMs - startElapsedMs),
+                    ["EffectiveHz"] = accumulator.EffectiveHz,
+                };
+                // MagnitudeG* keys are omitted entirely (not merely null) when the source's unit basis is
+                // not proven G, matching the existing AxisSummary/RestSummary convention (docs section 10).
+                if (includeMagnitude)
+                {
+                    entry["MagnitudeGMean"] = accumulator.MagnitudeGMean;
+                    entry["MagnitudeGMin"] = accumulator.MagnitudeGMin;
+                    entry["MagnitudeGMax"] = accumulator.MagnitudeGMax;
+                    entry["MagnitudeGSpan"] = accumulator.MagnitudeGSpan;
+                }
+                result.Add(entry);
+            }
+        }
+        return [.. result];
+    }
+
+    // StationaryBias-only (docs section 11): a gyro zero-rate bias CANDIDATE and accelerometer
+    // stability check -- never applied anywhere, purely reported for later human/offline analysis.
+    private object? BuildStationaryBiasSummary(bool includeAccelMagnitudeG)
+    {
+        if (_mode != ClawSensorProbeMode.StationaryBias) return null;
+        return new
+        {
+            Gyroscope = new
+            {
+                SampleCount = _biasGyro.Count,
+                DurationMs = _biasGyro.DurationMs,
+                EffectiveHz = _biasGyro.EffectiveHz,
+                MeanX = _biasGyro.MeanX, MeanY = _biasGyro.MeanY, MeanZ = _biasGyro.MeanZ,
+                StandardDeviationX = _biasGyro.StandardDeviationX, StandardDeviationY = _biasGyro.StandardDeviationY, StandardDeviationZ = _biasGyro.StandardDeviationZ,
+                MinX = _biasGyro.MinX, MinY = _biasGyro.MinY, MinZ = _biasGyro.MinZ,
+                MaxX = _biasGyro.MaxX, MaxY = _biasGyro.MaxY, MaxZ = _biasGyro.MaxZ,
+                SpanX = _biasGyro.SpanX, SpanY = _biasGyro.SpanY, SpanZ = _biasGyro.SpanZ,
+            },
+            Accelerometer = BuildBiasAccelerometerSummary(includeAccelMagnitudeG)
+        };
+    }
+
+    private object BuildBiasAccelerometerSummary(bool includeAccelMagnitudeG)
+    {
+        var result = new Dictionary<string, object?>
+        {
+            ["SampleCount"] = _biasAccel.Count,
+            ["DurationMs"] = _biasAccel.DurationMs,
+            ["EffectiveHz"] = _biasAccel.EffectiveHz,
+            ["MeanX"] = _biasAccel.MeanX, ["MeanY"] = _biasAccel.MeanY, ["MeanZ"] = _biasAccel.MeanZ,
+            ["MinX"] = _biasAccel.MinX, ["MinY"] = _biasAccel.MinY, ["MinZ"] = _biasAccel.MinZ,
+            ["MaxX"] = _biasAccel.MaxX, ["MaxY"] = _biasAccel.MaxY, ["MaxZ"] = _biasAccel.MaxZ,
+            ["SpanX"] = _biasAccel.SpanX, ["SpanY"] = _biasAccel.SpanY, ["SpanZ"] = _biasAccel.SpanZ,
+        };
+        // MagnitudeG* keys are omitted entirely (not merely null) unless the accelerometer's unit
+        // basis is proven G, matching the existing AxisSummary/RestSummary/PerPhaseSummaries convention.
+        if (includeAccelMagnitudeG)
+        {
+            result["MagnitudeGMean"] = _biasAccel.MagnitudeGMean;
+            result["MagnitudeGMin"] = _biasAccel.MagnitudeGMin;
+            result["MagnitudeGMax"] = _biasAccel.MagnitudeGMax;
+            result["MagnitudeGSpan"] = _biasAccel.MagnitudeGSpan;
+        }
+        return result;
     }
 
     // Enums (Backend, UnitBasis, ...) must serialize as their named diagnostic values -- e.g. "WinRtGyrometer",

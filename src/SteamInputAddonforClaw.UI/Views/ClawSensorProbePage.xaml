@@ -9,6 +9,14 @@
     <TextBlock x:Name="BoardText" TextWrapping="Wrap" />
     <TextBlock x:Name="GyroDiscoveryText" TextWrapping="Wrap" />
     <TextBlock x:Name="AccelDiscoveryText" TextWrapping="Wrap" />
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <TextBlock Text="Capture mode:" VerticalAlignment="Center" />
+      <ComboBox x:Name="ModeComboBox" SelectedIndex="0" MinWidth="180">
+        <ComboBoxItem Content="Live Sanity" />
+        <ComboBoxItem Content="Axis Characterization" />
+        <ComboBoxItem Content="Stationary Bias" />
+      </ComboBox>
+    </StackPanel>
     <TextBlock x:Name="PhaseText" FontWeight="SemiBold" TextWrapping="Wrap" />
     <TextBlock x:Name="InstructionText" TextWrapping="Wrap" />
     <TextBlock x:Name="LiveText" TextWrapping="Wrap" FontFamily="Consolas" />

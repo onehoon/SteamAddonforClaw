@@ -565,14 +565,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return MapClawSensorProbeSnapshot(session);
     }
 
-    public async Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(CancellationToken cancellationToken = default)
+    public async Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(FrontendClawSensorProbeMode mode, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
         var session = CurrentClawSensorProbeSession();
         if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
         try
         {
-            session.Coordinator.Start();
+            var coordinatorMode = MapClawSensorProbeMode(mode);
+            session.Coordinator.Start(coordinatorMode);
             session.Coordinator.SetDeviceIdentity(session.Manufacturer, session.Model, session.BaseBoard, session.ResolvedModel);
             session.Coordinator.SetHardwareCompatibility(session.HardwareStatus, session.HardwareFamily, session.HardwareModel, session.HardwareReason);
 
@@ -582,8 +583,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             // (review finding #2 on PR #290).
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.Coordinator.LifecycleCancellation);
             await session.Coordinator.StartCaptureAsync(linked.Token).ConfigureAwait(false);
-            await session.Coordinator.CountdownAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, linked.Token).ConfigureAwait(false);
+            if (coordinatorMode == ClawSensorProbeMode.AxisCharacterization)
+                await session.Coordinator.CountdownAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, linked.Token).ConfigureAwait(false);
             linked.Token.ThrowIfCancellationRequested();
+            // Live Sanity / Stationary Bias have no countdown/phase wizard (work order sections 5-8):
+            // recording begins immediately once discovery/readers succeed.
             session.Coordinator.BeginRecording();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -713,6 +717,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var phase = workflow.CurrentIndex >= 0 ? workflow.Visits[^1].Phase : ClawSensorProbePhase.REST;
         var gyro = coordinator.LiveSnapshot?.Gyro;
         var accel = coordinator.LiveSnapshot?.Accel;
+        var gyroTiming = coordinator.GyroscopeTiming;
+        var accelTiming = coordinator.AccelerometerTiming;
+        var accelIsG = coordinator.Discovery?.Accelerometer?.UnitBasis == ClawSensorProbeUnitBasis.G;
+        var modeKnown = coordinator.State is not (ClawSensorProbeState.Idle or ClawSensorProbeState.Discovering or ClawSensorProbeState.Ready);
         return new FrontendClawSensorProbeSnapshot(
             Available: true,
             State: MapClawSensorProbeState(coordinator.State),
@@ -720,8 +728,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             PhaseIndex: workflow.CurrentIndex,
             PhaseCount: ClawSensorProbeWorkflow.Phases.Count,
             Discovery: MapClawSensorProbeDiscovery(coordinator.Discovery),
-            Gyro: gyro is { } g ? new(g.X, g.Y, g.Z, g.Hz, g.Count) : FrontendClawSensorProbeAxisSnapshot.Empty,
-            Accel: accel is { } a ? new(a.X, a.Y, a.Z, a.Hz, a.Count) : FrontendClawSensorProbeAxisSnapshot.Empty,
+            Gyro: gyro is { } g ? new(g.X, g.Y, g.Z, g.Hz, g.Count, gyroTiming?.FreshAgeMs ?? 0, gyroTiming?.LastReadDurationMs ?? 0, IsFresh(gyroTiming)) : FrontendClawSensorProbeAxisSnapshot.Empty,
+            Accel: accel is { } a ? new(a.X, a.Y, a.Z, a.Hz, a.Count, accelTiming?.FreshAgeMs ?? 0, accelTiming?.LastReadDurationMs ?? 0, IsFresh(accelTiming), accelIsG ? Math.Sqrt(a.X * a.X + a.Y * a.Y + a.Z * a.Z) : null) : FrontendClawSensorProbeAxisSnapshot.Empty,
             GyroscopeSummary: MapClawSensorProbeStatistics(coordinator.GyroscopeSummary),
             AccelerometerSummary: MapClawSensorProbeStatistics(coordinator.AccelerometerSummary),
             DroppedSampleCount: coordinator.DroppedSampleCount,
@@ -734,8 +742,19 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             Manufacturer: session.Manufacturer,
             Model: session.Model,
             BaseBoard: session.BaseBoard,
-            ResolvedModel: session.ResolvedModel);
+            ResolvedModel: session.ResolvedModel,
+            Mode: modeKnown ? MapClawSensorProbeMode(coordinator.Mode) : null,
+            ElapsedMs: coordinator.RecordingElapsedMs,
+            GyroTiming: MapClawSensorProbeTiming(gyroTiming),
+            AccelTiming: MapClawSensorProbeTiming(accelTiming),
+            BiasSummary: MapClawSensorProbeBiasSummary(coordinator.BiasSummary));
     }
+
+    // Diagnostic presentation only (not a production freshness authority) -- mirrors the existing PR-A
+    // stale-warning threshold/evidence rather than introducing a second persisted threshold (work order
+    // section 17).
+    private static bool IsFresh(ClawSensorProbeTimingSnapshot? timing) =>
+        timing is { FreshCount: > 0 } t && t.FreshAgeMs < ClawSensorProbeReaders.StaleWarningThreshold.TotalMilliseconds;
 
     private static FrontendClawSensorProbeState MapClawSensorProbeState(ClawSensorProbeState state) => state switch
     {
@@ -761,7 +780,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _ => FrontendClawSensorProbePhase.YawRight
     };
 
-    private static FrontendClawSensorProbeDiscovery? MapClawSensorProbeDiscovery(ClawSensorDiscovery? discovery)
+    internal static FrontendClawSensorProbeDiscovery? MapClawSensorProbeDiscovery(ClawSensorDiscovery? discovery)
     {
         if (discovery is null) return null;
         return new FrontendClawSensorProbeDiscovery(
@@ -772,11 +791,54 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             discovery.IsValid);
     }
 
-    private static FrontendClawSensorProbeCandidate MapClawSensorProbeCandidate(ClawSensorProbeCandidate candidate) => new(
+    internal static FrontendClawSensorProbeCandidate MapClawSensorProbeCandidate(ClawSensorProbeCandidate candidate) => new(
         candidate.FriendlyName, candidate.SensorId, candidate.TypeGuid, candidate.CategoryGuid,
-        candidate.Manufacturer, candidate.Model, candidate.PersistentUniqueId, candidate.MinimumReportInterval, candidate.CustomUsage);
+        candidate.Manufacturer, candidate.Model, candidate.PersistentUniqueId, candidate.MinimumReportInterval, candidate.CustomUsage,
+        MapClawSensorProbeBackend(candidate.Backend), candidate.State, candidate.DevicePath, MapClawSensorProbeUnitBasis(candidate.UnitBasis), candidate.SelectionReason);
 
-    private static FrontendClawSensorProbeStatistics? MapClawSensorProbeStatistics(ClawSensorProbeStatistics? statistics) => statistics is null
+    private static FrontendClawSensorProbeBackend MapClawSensorProbeBackend(ClawSensorProbeBackend backend) => backend switch
+    {
+        ClawSensorProbeBackend.WinRtGyrometer => FrontendClawSensorProbeBackend.WinRtGyrometer,
+        ClawSensorProbeBackend.WinRtAccelerometer => FrontendClawSensorProbeBackend.WinRtAccelerometer,
+        _ => FrontendClawSensorProbeBackend.LegacySensorApi
+    };
+
+    private static FrontendClawSensorProbeUnitBasis MapClawSensorProbeUnitBasis(ClawSensorProbeUnitBasis unitBasis) => unitBasis switch
+    {
+        ClawSensorProbeUnitBasis.DegreesPerSecond => FrontendClawSensorProbeUnitBasis.DegreesPerSecond,
+        ClawSensorProbeUnitBasis.G => FrontendClawSensorProbeUnitBasis.G,
+        _ => FrontendClawSensorProbeUnitBasis.Unknown
+    };
+
+    private static ClawSensorProbeMode MapClawSensorProbeMode(FrontendClawSensorProbeMode mode) => mode switch
+    {
+        FrontendClawSensorProbeMode.LiveSanity => ClawSensorProbeMode.LiveSanity,
+        FrontendClawSensorProbeMode.StationaryBias => ClawSensorProbeMode.StationaryBias,
+        _ => ClawSensorProbeMode.AxisCharacterization
+    };
+
+    private static FrontendClawSensorProbeMode MapClawSensorProbeMode(ClawSensorProbeMode mode) => mode switch
+    {
+        ClawSensorProbeMode.LiveSanity => FrontendClawSensorProbeMode.LiveSanity,
+        ClawSensorProbeMode.StationaryBias => FrontendClawSensorProbeMode.StationaryBias,
+        _ => FrontendClawSensorProbeMode.AxisCharacterization
+    };
+
+    internal static FrontendClawSensorProbeTiming? MapClawSensorProbeTiming(ClawSensorProbeTimingSnapshot? timing) => timing is null
+        ? null
+        : new(timing.FreshCount, timing.DuplicateCount, timing.NoDataCount, timing.ReadFailureCount, timing.EffectiveFreshHz, timing.LastReadDurationMs, timing.MaxReadDurationMs, timing.FreshAgeMs, timing.MaxFreshAgeMs, timing.LongReadCount);
+
+    internal static FrontendClawSensorProbeBiasSummary? MapClawSensorProbeBiasSummary(ClawSensorProbeBiasSummarySnapshot? summary) => summary is null
+        ? null
+        : new(summary.GyroSampleCount, summary.GyroEffectiveHz,
+            summary.GyroMeanX, summary.GyroMeanY, summary.GyroMeanZ,
+            summary.GyroStandardDeviationX, summary.GyroStandardDeviationY, summary.GyroStandardDeviationZ,
+            summary.GyroSpanX, summary.GyroSpanY, summary.GyroSpanZ,
+            summary.AccelSampleCount, summary.AccelEffectiveHz,
+            summary.AccelSpanX, summary.AccelSpanY, summary.AccelSpanZ,
+            summary.AccelMagnitudeGMean, summary.AccelMagnitudeGSpan);
+
+    internal static FrontendClawSensorProbeStatistics? MapClawSensorProbeStatistics(ClawSensorProbeStatistics? statistics) => statistics is null
         ? null
         : new(statistics.SampleCount, statistics.DroppedSampleCount, statistics.DurationMs, statistics.AverageIntervalMs, statistics.MinimumIntervalMs, statistics.MaximumIntervalMs, statistics.EffectiveHz);
 

@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using System.Text.Json;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests.ClawSensorProbe;
@@ -812,6 +813,48 @@ public sealed class ClawSensorProbeTests
         await mutator;
     }
 
+    [Fact] public async Task ClawSensorProbeStatistics_ConcurrentAddAndReadDoNotThrow()
+    {
+        // WriteLoopAsync() calls Add() at sensor cadence while the frontend's ~200ms poll concurrently
+        // reads AverageIntervalMs/MinimumIntervalMs/MaximumIntervalMs -- previously backed by a raw
+        // List<double> enumerated on every read, so a normal live probe could intermittently throw
+        // "Collection was modified" (PR B review finding #3). This is real producer/poller
+        // concurrency, not a theoretical race.
+        var statistics = new ClawSensorProbeStatistics();
+        using var stop = new CancellationTokenSource();
+        var mutator = Task.Run(() =>
+        {
+            var i = 0;
+            while (!stop.IsCancellationRequested) statistics.Add(++i % 20 + 1);
+        });
+
+        for (var i = 0; i < 2000; i++)
+        {
+            _ = statistics.SampleCount;
+            _ = statistics.AverageIntervalMs;
+            _ = statistics.MinimumIntervalMs;
+            _ = statistics.MaximumIntervalMs;
+            _ = statistics.EffectiveHz;
+        }
+
+        stop.Cancel();
+        await mutator;
+    }
+
+    [Fact] public void ClawSensorProbeStatistics_MinimumAndMaximumIntervalMsReflectAllAddedIntervals()
+    {
+        var statistics = new ClawSensorProbeStatistics();
+        statistics.Add(5);
+        statistics.Add(1);
+        statistics.Add(9);
+        statistics.Add(0); // non-positive intervals do not count toward min/max/average
+
+        Assert.Equal(4, statistics.SampleCount);
+        Assert.Equal(1, statistics.MinimumIntervalMs);
+        Assert.Equal(9, statistics.MaximumIntervalMs);
+        Assert.Equal(5, statistics.AverageIntervalMs);
+    }
+
     [Fact] public async Task Writer_CsvHeaderAndRowsIncludeBackendReadDurationAndSensorAge()
     {
         var root = Path.Combine(Path.GetTempPath(), "claw-probe-backend-columns-" + Guid.NewGuid().ToString("N"));
@@ -928,6 +971,427 @@ public sealed class ClawSensorProbeTests
         }
         finally
         {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    // ---- SD6A PR B: capture modes and characterization summaries ----
+
+    [Fact] public void Workflow_AxisStartStillVisitsFirstPhaseAndCountdown()
+    {
+        var workflow = new ClawSensorProbeWorkflow();
+        workflow.Ready();
+        workflow.Start(ClawSensorProbeMode.AxisCharacterization);
+        Assert.Single(workflow.Visits);
+        Assert.Equal(ClawSensorProbePhase.REST, workflow.Visits[0].Phase);
+        Assert.Equal(ClawSensorProbeState.Countdown, workflow.State);
+        Assert.Equal(0, workflow.CurrentIndex);
+    }
+
+    [Fact] public void Workflow_LiveStartDoesNotCreatePhaseVisitOrCountdown()
+    {
+        var workflow = new ClawSensorProbeWorkflow();
+        workflow.Ready();
+        workflow.Start(ClawSensorProbeMode.LiveSanity);
+        Assert.Empty(workflow.Visits);
+        Assert.Equal(-1, workflow.CurrentIndex);
+        Assert.Equal(ClawSensorProbeState.Starting, workflow.State);
+        workflow.BeginRecording();
+        Assert.Equal(ClawSensorProbeState.RecordingPhase, workflow.State);
+    }
+
+    [Fact] public void Workflow_BiasStartDoesNotCreatePhaseVisitOrCountdown()
+    {
+        var workflow = new ClawSensorProbeWorkflow();
+        workflow.Ready();
+        workflow.Start(ClawSensorProbeMode.StationaryBias);
+        Assert.Empty(workflow.Visits);
+        Assert.Equal(-1, workflow.CurrentIndex);
+        Assert.Equal(ClawSensorProbeState.Starting, workflow.State);
+        workflow.BeginRecording();
+        Assert.Equal(ClawSensorProbeState.RecordingPhase, workflow.State);
+    }
+
+    [Fact] public void Workflow_NextThrowsOutsideAxisMode()
+    {
+        var workflow = new ClawSensorProbeWorkflow();
+        workflow.Ready(); workflow.Start(ClawSensorProbeMode.LiveSanity); workflow.BeginRecording();
+        Assert.Throws<InvalidOperationException>(() => workflow.Next());
+    }
+
+    [Fact] public void Workflow_BackDoesNotMutateOutsideAxisMode()
+    {
+        var workflow = new ClawSensorProbeWorkflow();
+        workflow.Ready(); workflow.Start(ClawSensorProbeMode.StationaryBias); workflow.BeginRecording();
+        workflow.Back();
+        Assert.Equal(ClawSensorProbeState.RecordingPhase, workflow.State);
+        Assert.Equal(-1, workflow.CurrentIndex);
+    }
+
+    [Fact] public async Task Coordinator_LiveModeBeginsRecordingImmediatelyWithoutPhaseVisit()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-live-mode-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(ClawSensorProbeMode.LiveSanity, root);
+            coordinator.BeginRecording();
+            Assert.Equal(ClawSensorProbeState.RecordingPhase, coordinator.State);
+            Assert.Equal(-1, coordinator.Workflow.CurrentIndex);
+            Assert.Empty(coordinator.Workflow.Visits);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Coordinator_BiasModeStopDoesNotAssumeAPhaseVisitExists()
+    {
+        // Reproduces the fix: StopCoreAsync used to unconditionally call Workflow.Visits.Last(), which
+        // throws on an empty list for Live/Bias sessions that never create a phase visit.
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-bias-stop-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(ClawSensorProbeMode.StationaryBias, root);
+            coordinator.BeginRecording();
+            coordinator.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1));
+            await coordinator.StopAsync();
+
+            Assert.Equal(ClawSensorProbeState.Completed, coordinator.State);
+            var report = await File.ReadAllTextAsync(Directory.GetFiles(root, "claw-sensor-report.json", SearchOption.AllDirectories).Single());
+            Assert.Contains("\"CaptureMode\": \"StationaryBias\"", report);
+            Assert.Contains("\"Phases\": []", report);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Coordinator_LiveModePhaseNavigationDoesNotMutateSession()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-live-nav-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(ClawSensorProbeMode.LiveSanity, root);
+            coordinator.BeginRecording();
+
+            await coordinator.AdvancePhaseAsync(_ => Task.CompletedTask, _ => "n/a", () => { }, CancellationToken.None);
+            Assert.Equal(ClawSensorProbeState.RecordingPhase, coordinator.State);
+            Assert.Equal(-1, coordinator.Workflow.CurrentIndex);
+
+            await coordinator.RevisitPreviousPhaseAsync(_ => Task.CompletedTask, _ => "n/a", () => { }, CancellationToken.None);
+            Assert.Equal(ClawSensorProbeState.RecordingPhase, coordinator.State);
+            Assert.Equal(-1, coordinator.Workflow.CurrentIndex);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_LiveModeReportShapeIsEmptyPhasesAndNullBiasSummary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-live-report-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session", ClawSensorProbeMode.LiveSanity))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1));
+                writer.Write(new(2, DateTimeOffset.UtcNow, 2, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 4, 5, 6, 1));
+            }
+
+            using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
+            var root2 = report.RootElement;
+            Assert.Equal(2, root2.GetProperty("SchemaVersion").GetInt32());
+            Assert.Equal("LiveSanity", root2.GetProperty("CaptureMode").GetString());
+            Assert.Equal(0, root2.GetProperty("Phases").GetArrayLength());
+            Assert.Equal(0, root2.GetProperty("PerPhaseSummaries").GetArrayLength());
+            Assert.Equal(JsonValueKind.Null, root2.GetProperty("StationaryBiasSummary").ValueKind);
+            // Live Sanity's REST placeholder phase must not leak into RestSummary either.
+            Assert.Equal(0, root2.GetProperty("RestSummary").GetProperty("Gyroscope").GetProperty("SampleCount").GetInt32());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_AxisModePerPhaseSummaryComputesMeanMinMaxSpanDurationAndRate()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-axis-summary-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session", ClawSensorProbeMode.AxisCharacterization))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 10, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.ROLL_LEFT, 1, "GYRO", 1, 2, 3, 0));
+                writer.Write(new(2, DateTimeOffset.UtcNow, 20, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.ROLL_LEFT, 1, "GYRO", 3, 4, 1, 10));
+            }
+
+            using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
+            var summary = report.RootElement.GetProperty("PerPhaseSummaries").EnumerateArray()
+                .Single(e => e.GetProperty("Phase").GetString() == "ROLL_LEFT" && e.GetProperty("Pass").GetInt32() == 1 && e.GetProperty("Sensor").GetString() == "GYRO");
+
+            Assert.Equal(2, summary.GetProperty("SampleCount").GetInt64());
+            Assert.Equal(2, summary.GetProperty("MeanX").GetDouble());
+            Assert.Equal(3, summary.GetProperty("MeanY").GetDouble());
+            Assert.Equal(2, summary.GetProperty("MeanZ").GetDouble());
+            Assert.Equal(1, summary.GetProperty("MinX").GetDouble());
+            Assert.Equal(3, summary.GetProperty("MaxX").GetDouble());
+            Assert.Equal(2, summary.GetProperty("SpanX").GetDouble());
+            Assert.Equal(10, summary.GetProperty("DurationMs").GetDouble());
+            Assert.Equal(100, summary.GetProperty("EffectiveHz").GetDouble());
+            Assert.Equal(10, summary.GetProperty("StartElapsedMs").GetDouble());
+            Assert.Equal(20, summary.GetProperty("EndElapsedMs").GetDouble());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_AxisModeRevisitedPhasePassesRemainDistinctInPerPhaseSummaries()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-axis-passes-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session", ClawSensorProbeMode.AxisCharacterization))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.ROLL_LEFT, 1, "GYRO", 1, 1, 1, 0));
+                writer.Write(new(2, DateTimeOffset.UtcNow, 2, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.ROLL_LEFT, 2, "GYRO", 9, 9, 9, 0));
+            }
+
+            using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
+            var summaries = report.RootElement.GetProperty("PerPhaseSummaries").EnumerateArray()
+                .Where(e => e.GetProperty("Phase").GetString() == "ROLL_LEFT" && e.GetProperty("Sensor").GetString() == "GYRO")
+                .ToArray();
+
+            Assert.Equal(2, summaries.Length);
+            Assert.Contains(summaries, e => e.GetProperty("Pass").GetInt32() == 1 && e.GetProperty("MeanX").GetDouble() == 1);
+            Assert.Contains(summaries, e => e.GetProperty("Pass").GetInt32() == 2 && e.GetProperty("MeanX").GetDouble() == 9);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_AxisModePerPhaseSummaryIncludesZeroSampleSensorRatherThanDroppingIt()
+    {
+        // A source can be quiet/duplicate/no-data for an entire visit while the other source still
+        // produces Fresh samples -- a realistic sensor behavior this diagnostic exists to characterize
+        // (PR B review finding #2). The visit's GYRO summary must still appear with an explicit
+        // SampleCount=0 rather than being silently absent from PerPhaseSummaries.
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-zero-sensor-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session", ClawSensorProbeMode.AxisCharacterization))
+            {
+                writer.BeginRecordingPhase(ClawSensorProbePhase.REST, 1, 10);
+                writer.Write(new(1, DateTimeOffset.UtcNow, 20, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 0, 0, 1, 10));
+                writer.EndPhase(ClawSensorProbePhase.REST, 1, 30);
+            }
+
+            using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
+            var summaries = report.RootElement.GetProperty("PerPhaseSummaries").EnumerateArray()
+                .Where(e => e.GetProperty("Phase").GetString() == "REST" && e.GetProperty("Pass").GetInt32() == 1)
+                .ToArray();
+
+            Assert.Equal(2, summaries.Length);
+            var gyro = Assert.Single(summaries, e => e.GetProperty("Sensor").GetString() == "GYRO");
+            Assert.Equal(0, gyro.GetProperty("SampleCount").GetInt64());
+            var accel = Assert.Single(summaries, e => e.GetProperty("Sensor").GetString() == "ACCEL");
+            Assert.Equal(1, accel.GetProperty("SampleCount").GetInt64());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_BiasModeComputesGyroMeanStdDevMinMaxSpanAndAccelStability()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-bias-summary-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session", ClawSensorProbeMode.StationaryBias))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 0, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "GYRO", 1, 1, 1, 0));
+                writer.Write(new(2, DateTimeOffset.UtcNow, 100, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "GYRO", 3, 3, 3, 100));
+                writer.Write(new(3, DateTimeOffset.UtcNow, 0, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 0, 0, 10, 0));
+                writer.Write(new(4, DateTimeOffset.UtcNow, 100, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 0, 0, 12, 100));
+            }
+
+            using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
+            var bias = report.RootElement.GetProperty("StationaryBiasSummary");
+            var gyro = bias.GetProperty("Gyroscope");
+            Assert.Equal(2, gyro.GetProperty("SampleCount").GetInt64());
+            Assert.Equal(2, gyro.GetProperty("MeanX").GetDouble());
+            Assert.Equal(1, gyro.GetProperty("StandardDeviationX").GetDouble());
+            Assert.Equal(1, gyro.GetProperty("MinX").GetDouble());
+            Assert.Equal(3, gyro.GetProperty("MaxX").GetDouble());
+            Assert.Equal(2, gyro.GetProperty("SpanX").GetDouble());
+
+            var accel = bias.GetProperty("Accelerometer");
+            Assert.Equal(2, accel.GetProperty("SampleCount").GetInt64());
+            Assert.Equal(10, accel.GetProperty("MinZ").GetDouble());
+            Assert.Equal(12, accel.GetProperty("MaxZ").GetDouble());
+            Assert.Equal(2, accel.GetProperty("SpanZ").GetDouble());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_BiasModeIncludesAccelMagnitudeOnlyWhenUnitBasisIsG()
+    {
+        var rootKnownG = Path.Combine(Path.GetTempPath(), "claw-probe-bias-mag-g-" + Guid.NewGuid().ToString("N"));
+        var rootUnknown = Path.Combine(Path.GetTempPath(), "claw-probe-bias-mag-unknown-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var winRtAccel = new ClawSensorProbeCandidate("WinRT Accelerometer", "winrt-accel", "Unavailable", "Unavailable", Backend: ClawSensorProbeBackend.WinRtAccelerometer, UnitBasis: ClawSensorProbeUnitBasis.G);
+            var discoveryG = ClawSensorDiscovery.Select([
+                new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+                winRtAccel]);
+            var writerG = new ClawSensorProbeSessionWriter(rootKnownG, "session", ClawSensorProbeMode.StationaryBias);
+            writerG.SetDiscovery(discoveryG);
+            writerG.Write(new(1, DateTimeOffset.UtcNow, 0, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 0, 0, 1, 0));
+            await writerG.DisposeAsync();
+            var reportG = await File.ReadAllTextAsync(Path.Combine(rootKnownG, "session", "claw-sensor-report.json"));
+            using var reportGDocument = JsonDocument.Parse(reportG);
+            Assert.True(reportGDocument.RootElement.GetProperty("StationaryBiasSummary").GetProperty("Accelerometer").TryGetProperty("MagnitudeGMean", out _));
+
+            var discoveryUnknown = ClawSensorDiscovery.Select([
+                new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+                new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+            var writerUnknown = new ClawSensorProbeSessionWriter(rootUnknown, "session", ClawSensorProbeMode.StationaryBias);
+            writerUnknown.SetDiscovery(discoveryUnknown);
+            writerUnknown.Write(new(1, DateTimeOffset.UtcNow, 0, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 0, 0, 1, 0));
+            await writerUnknown.DisposeAsync();
+            var reportUnknown = await File.ReadAllTextAsync(Path.Combine(rootUnknown, "session", "claw-sensor-report.json"));
+            using var reportUnknownDocument = JsonDocument.Parse(reportUnknown);
+            Assert.False(reportUnknownDocument.RootElement.GetProperty("StationaryBiasSummary").GetProperty("Accelerometer").TryGetProperty("MagnitudeGMean", out _));
+        }
+        finally
+        {
+            if (Directory.Exists(rootKnownG)) Directory.Delete(rootKnownG, true);
+            if (Directory.Exists(rootUnknown)) Directory.Delete(rootUnknown, true);
+        }
+    }
+
+    [Fact] public async Task Writer_CsvHasProbeModeColumnDistinctFromCaptureMode()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-probe-mode-column-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session", ClawSensorProbeMode.AxisCharacterization))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1));
+            }
+
+            var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
+            var header = csv.Split('\n')[0];
+            Assert.Contains("probe_mode", header);
+            Assert.Contains("capture_mode", header);
+            Assert.True(header.IndexOf("probe_mode", StringComparison.Ordinal) < header.IndexOf("capture_mode", StringComparison.Ordinal));
+            Assert.Contains("AxisCharacterization,RECORDING,REST,1,GYRO", csv);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_LiveAndBiasModeCsvBlanksPhaseAndPhasePass()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-live-csv-blank-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session", ClawSensorProbeMode.LiveSanity))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1));
+            }
+
+            var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
+            Assert.Contains("LiveSanity,RECORDING,,,GYRO", csv);
+            Assert.DoesNotContain("REST", csv);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Coordinator_RecordingElapsedMsIsZeroBeforeRecordingBegins()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-recording-elapsed-zero-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(ClawSensorProbeMode.LiveSanity, root);
+            Assert.Equal(0, coordinator.RecordingElapsedMs);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Coordinator_RecordingElapsedMsFreezesAtStopInsteadOfContinuingToGrow()
+    {
+        // The frontend labels this "elapsed capture time" -- it must exclude pre-recording discovery
+        // time and stop advancing once the session has completed, rather than growing on every
+        // subsequent ~200ms poll while the state is already Completed (PR B review follow-up finding #2).
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-recording-elapsed-freeze-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(ClawSensorProbeMode.LiveSanity, root);
+            coordinator.BeginRecording();
+            await Task.Delay(20);
+            await coordinator.StopAsync();
+
+            var frozen = coordinator.RecordingElapsedMs;
+            Assert.True(frozen >= 0);
+            await Task.Delay(50);
+            Assert.Equal(frozen, coordinator.RecordingElapsedMs);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Coordinator_StartOverloadWithoutModeDefaultsToAxisCharacterization()
+    {
+        // Existing PR-A call sites that omit the mode argument must keep exercising exactly the
+        // original seven-phase Axis behavior.
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-default-mode-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(root);
+            Assert.Equal(ClawSensorProbeMode.AxisCharacterization, coordinator.Mode);
+            Assert.Equal(ClawSensorProbeState.Countdown, coordinator.State);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }

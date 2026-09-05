@@ -13,8 +13,8 @@ public sealed class FrontButtonTransportContractTests
     [Fact]
     public void Protocol_is_current()
         // PR-C bumped 24 -> 25; Shared Frontend V2 SF-V2-01 subsequently bumped 25 -> 26
-        // (CaptureDeviceQuickSettings aggregate).
-        => Assert.Equal(26, FrontendTransportProtocol.CurrentVersion);
+        // (CaptureDeviceQuickSettings aggregate); SD6A PR B bumped 26 -> 27 (Claw Sensor Probe capture modes).
+        => Assert.Equal(27, FrontendTransportProtocol.CurrentVersion);
 
     [Fact]
     public void The_split_oem1_wing_rpcs_and_snapshot_members_are_gone()

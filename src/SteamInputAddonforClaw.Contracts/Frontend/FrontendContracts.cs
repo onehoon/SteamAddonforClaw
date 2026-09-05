@@ -206,10 +206,26 @@ public sealed record FrontendSteamSnapshot(bool Active, uint AppId, FrontendStea
 public sealed record FrontendPrerequisiteSnapshot(FrontendPrerequisiteStatus HidHideStatus, string HidHideReason, FrontendPrerequisiteStatus UsbIpStatus, string UsbIpReason, FrontendPrerequisiteStatus ViiperStatus, string ViiperReason);
 public enum FrontendClawSensorProbeState { Idle, Discovering, Ready, Starting, Countdown, RecordingPhase, Stopping, Completed, Failed }
 public enum FrontendClawSensorProbePhase { Rest, RollLeft, RollRight, PitchUp, PitchDown, YawLeft, YawRight }
+/// <summary>The diagnostic session's purpose, chosen once at Start and immutable for the life of the
+/// session (docs/gyro/SD6A_CLAW_SENSOR_PROBE_PR_B_CAPTURE_MODES_AND_SUMMARIES_WORK_ORDER.md).</summary>
+public enum FrontendClawSensorProbeMode { LiveSanity, AxisCharacterization, StationaryBias }
+public enum FrontendClawSensorProbeBackend { LegacySensorApi, WinRtGyrometer, WinRtAccelerometer }
+public enum FrontendClawSensorProbeUnitBasis { Unknown, DegreesPerSecond, G }
 
-public sealed record FrontendClawSensorProbeCandidate(string FriendlyName, string SensorId, string TypeGuid, string CategoryGuid, string Manufacturer, string Model, string PersistentUniqueId, string MinimumReportInterval, string CustomUsage);
+public sealed record FrontendClawSensorProbeCandidate(
+    string FriendlyName, string SensorId, string TypeGuid, string CategoryGuid, string Manufacturer, string Model, string PersistentUniqueId, string MinimumReportInterval, string CustomUsage,
+    FrontendClawSensorProbeBackend Backend = FrontendClawSensorProbeBackend.LegacySensorApi,
+    string State = "Unavailable",
+    string DevicePath = "Unavailable",
+    FrontendClawSensorProbeUnitBasis UnitBasis = FrontendClawSensorProbeUnitBasis.Unknown,
+    string? SelectionReason = null);
 public sealed record FrontendClawSensorProbeDiscovery(IReadOnlyList<FrontendClawSensorProbeCandidate> Sensors, FrontendClawSensorProbeCandidate? Gyroscope, FrontendClawSensorProbeCandidate? Accelerometer, IReadOnlyList<string> Errors, bool IsValid);
-public sealed record FrontendClawSensorProbeAxisSnapshot(double X, double Y, double Z, double Hz, long Count)
+public sealed record FrontendClawSensorProbeAxisSnapshot(
+    double X, double Y, double Z, double Hz, long Count,
+    double FreshAgeMs = 0,
+    double LastReadDurationMs = 0,
+    bool IsFresh = false,
+    double? MagnitudeG = null)
 {
     public static readonly FrontendClawSensorProbeAxisSnapshot Empty = new(0, 0, 0, 0, 0);
 }
@@ -217,6 +233,25 @@ public sealed record FrontendClawSensorProbeStatistics(long SampleCount, long Dr
 {
     public static readonly FrontendClawSensorProbeStatistics Empty = new(0, 0, 0, 0, 0, 0, 0);
 }
+/// <summary>Compact per-source timing/freshness evidence for UI display -- a narrower projection of
+/// the Runtime's <c>ClawSensorProbeTimingSnapshot</c>. Raw per-attempt history never crosses the pipe.</summary>
+public sealed record FrontendClawSensorProbeTiming(
+    long FreshCount, long DuplicateCount, long NoDataCount, long ReadFailureCount,
+    double EffectiveFreshHz, double LastReadDurationMs, double MaxReadDurationMs,
+    double FreshAgeMs, double MaxFreshAgeMs, long LongReadCount)
+{
+    public static readonly FrontendClawSensorProbeTiming Empty = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+}
+/// <summary>Compact Stationary Bias completion summary sufficient for the UI (detailed per-phase
+/// summaries stay JSON-report-only). Null until a StationaryBias session has recorded data.</summary>
+public sealed record FrontendClawSensorProbeBiasSummary(
+    long GyroSampleCount, double GyroEffectiveHz,
+    double GyroMeanX, double GyroMeanY, double GyroMeanZ,
+    double GyroStandardDeviationX, double GyroStandardDeviationY, double GyroStandardDeviationZ,
+    double GyroSpanX, double GyroSpanY, double GyroSpanZ,
+    long AccelSampleCount, double AccelEffectiveHz,
+    double AccelSpanX, double AccelSpanY, double AccelSpanZ,
+    double? AccelMagnitudeGMean, double? AccelMagnitudeGSpan);
 
 /// <remarks>A read-only diagnostic session snapshot for the developer-only Claw Sensor Probe
 /// (gyro/accelerometer discovery and phase-by-phase motion capture). <see cref="Available"/> is
@@ -245,7 +280,12 @@ public sealed record FrontendClawSensorProbeSnapshot(
     string Manufacturer,
     string Model,
     string BaseBoard,
-    string ResolvedModel)
+    string ResolvedModel,
+    FrontendClawSensorProbeMode? Mode = null,
+    double ElapsedMs = 0,
+    FrontendClawSensorProbeTiming? GyroTiming = null,
+    FrontendClawSensorProbeTiming? AccelTiming = null,
+    FrontendClawSensorProbeBiasSummary? BiasSummary = null)
 {
     public static readonly FrontendClawSensorProbeSnapshot Unavailable = new(
         false, FrontendClawSensorProbeState.Idle, FrontendClawSensorProbePhase.Rest, -1, 0,
@@ -360,14 +400,18 @@ public interface IAddonFrontendControl
     /// device identity/hardware compatibility. Idempotent while a session is already open/running.</summary>
     Task<FrontendClawSensorProbeSnapshot> OpenClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
-    /// <summary>Starts sensor discovery and capture for the currently open session.</summary>
-    Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
+    /// <summary>Starts sensor discovery and capture for the currently open session using the
+    /// requested diagnostic mode (Live Sanity / Axis Characterization / Stationary Bias). The mode is
+    /// immutable for the life of the session once accepted.</summary>
+    Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(FrontendClawSensorProbeMode mode, CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
     /// <summary>Returns the current snapshot without mutating anything -- used for UI polling.</summary>
     Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+    /// <summary>Axis Characterization only -- a no-op (unchanged snapshot) outside that mode.</summary>
     Task<FrontendClawSensorProbeSnapshot> NextClawSensorProbePhaseAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+    /// <summary>Axis Characterization only -- a no-op (unchanged snapshot) outside that mode.</summary>
     Task<FrontendClawSensorProbeSnapshot> PreviousClawSensorProbePhaseAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
     /// <summary>Stops capture, keeping the session open so the final Completed/Failed report stays
