@@ -18,6 +18,10 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     }
     internal static readonly Guid SensorCategoryAll = new("C317C286-C468-4288-9975-D4C4587C442C");
     internal static readonly Guid SensorDataTypeCustomGuid = new("B14C764F-07CF-41E8-9D82-EBE3D0776A6F");
+    // A2VM reference custom accelerometer type (WSGM/A2VM diagnostic evidence only, not a CG3EM production contract).
+    // See docs/gyro/GYRO_IMU_RESEARCH_AND_SD6_DESIGN_2026-09-05.md.
+    internal static readonly Guid A2VmReferenceAccelerometerType = new("E83AF229-8640-4D18-A213-E22675EBB2C3");
+    private const string A2VmReferenceAccelerometerLabel = "A2VM reference custom accelerometer type";
     private const int HResultFromWin32ErrorNoData = unchecked((int)0x800700E8);
     private static readonly Guid SensorManagerClass = new("77A1C827-FCD2-4689-8915-9D613CC5FA3E");
     private ISensorManager? _manager;
@@ -28,14 +32,6 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     }
     public void Dispose() { if (_manager is not null) { Marshal.FinalReleaseComObject(_manager); _manager = null; } GC.SuppressFinalize(this); }
     ~ClawSensorProbeSensorApi() => Dispose();
-    internal IntPtr GetAllSensors()
-    {
-        var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));
-        var category = SensorCategoryAll;
-        var hr = manager.GetSensorsByCategory(ref category, out var collection);
-        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
-        return collection;
-    }
     internal IntPtr GetSensorById(Guid sensorId)
     {
         var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));
@@ -51,29 +47,32 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
         return count;
     }
+    // Backend-aware discovery (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 5): broad legacy
+    // enumeration remains evidence, a direct GetSensorsByType lookup validates the A2VM reference accelerometer type
+    // independently of it, and WinRT Gyrometer/Accelerometer are probed as separate candidate backends. Selection
+    // between them is left entirely to ClawSensorDiscovery.Select; this method only collects evidence.
     internal ClawSensorDiscovery Discover()
     {
-        var sensors = new List<ClawSensorProbeCandidate>();
-        using var ownedCollection = new OwnedComPointer(GetAllSensors());
-        var collection = ownedCollection.Pointer;
-        for (var i = 0; i < GetCollectionCount(collection); i++)
-        {
-            var sensor = GetCollectionItem(collection, i);
-            try { sensors.Add(ReadCandidate(sensor)); }
-            finally
-            {
-                if (sensor != IntPtr.Zero)
-                {
-                    using var ownedSensor = new OwnedComPointer(sensor);
-                }
-            }
-        }
-        return ClawSensorDiscovery.Select(sensors);
+        var candidates = new List<ClawSensorProbeCandidate>();
+        candidates.AddRange(EnumerateByCategory(SensorCategoryAll).Candidates.Select(ToProbeCandidate));
+        candidates.AddRange(EnumerateByType(A2VmReferenceAccelerometerType, A2VmReferenceAccelerometerLabel).Candidates
+            .Where(x => x.SupportsCustomX == "True" && x.SupportsCustomY == "True" && x.SupportsCustomZ == "True")
+            .Select(x => ToProbeCandidate(x) with { IsDirectTypeMatch = true, SelectionReason = "Matched a direct GetSensorsByType lookup with required X/Y/Z field support." }));
+        var gyrometer = ClawSensorProbeWinRtDiscovery.TryDiscoverGyrometer();
+        if (gyrometer is not null) candidates.Add(gyrometer);
+        var accelerometer = ClawSensorProbeWinRtDiscovery.TryDiscoverAccelerometer();
+        if (accelerometer is not null) candidates.Add(accelerometer);
+        return ClawSensorDiscovery.Select(candidates);
     }
 
-    // Diagnostics-only one-shot queries for Environment Discovery. These preserve the raw HRESULT
-    // and every returned candidate as report evidence instead of throwing, unlike Discover() above,
-    // which remains the interactive probe's existing selection behavior and is left unchanged.
+    private static ClawSensorProbeCandidate ToProbeCandidate(LegacySensorCandidateInfo info) => new(
+        info.FriendlyName, info.SensorId, info.TypeGuid, info.CategoryGuid,
+        Manufacturer: info.Manufacturer, Model: info.Model, PersistentUniqueId: info.PersistentUniqueId,
+        MinimumReportInterval: info.MinimumReportInterval, CustomUsage: info.HidUsage,
+        Backend: ClawSensorProbeBackend.LegacySensorApi, State: info.State, DevicePath: info.DevicePath);
+
+    // Diagnostics-only one-shot queries shared by Environment Discovery and the Discover() method above.
+    // These preserve the raw HRESULT and every returned candidate as evidence instead of throwing.
     internal LegacySensorQueryInfo EnumerateByCategory(Guid category, string? label = null)
     {
         var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));

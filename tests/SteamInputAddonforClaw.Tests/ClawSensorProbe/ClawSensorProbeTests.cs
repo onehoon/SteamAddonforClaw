@@ -414,9 +414,133 @@ public sealed class ClawSensorProbeTests
         Assert.Equal([t1, t2], accepted.Select(x => x.SensorTimestamp).ToArray());
     }
 
-    [Fact] public void Reader_UsesBoundedFreshReportTimeout()
+    [Fact] public void Reader_UsesBoundedStaleWarningThreshold()
     {
-        Assert.Equal(TimeSpan.FromSeconds(5), ClawSensorProbeReaders.FreshReportTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(5), ClawSensorProbeReaders.StaleWarningThreshold);
+    }
+
+    [Fact] public void TimingStatistics_ClassifiesFreshDuplicateNoDataAndFailureIndependently()
+    {
+        var timing = new ClawSensorProbeTimingStatistics();
+        timing.Observe(ClawSensorReadOutcome.Fresh, 2, 0, 10);
+        timing.Observe(ClawSensorReadOutcome.Fresh, 3, 0, 10);
+        timing.Observe(ClawSensorReadOutcome.Duplicate, 1, 5);
+        timing.Observe(ClawSensorReadOutcome.NoData, 1, 6);
+        timing.Observe(ClawSensorReadOutcome.Failure, 0);
+
+        Assert.Equal(2, timing.FreshCount);
+        Assert.Equal(1, timing.DuplicateCount);
+        Assert.Equal(1, timing.NoDataCount);
+        Assert.Equal(1, timing.ReadFailureCount);
+        Assert.Equal(10, timing.AverageFreshIntervalMs);
+        Assert.Equal(100, timing.EffectiveFreshHz);
+    }
+
+    [Fact] public void TimingStatistics_QuietOrDuplicateReportsAccumulatePastFiveSecondsWithoutThrowing()
+    {
+        var timing = new ClawSensorProbeTimingStatistics();
+        for (var i = 0; i < 6000; i++) timing.Observe(ClawSensorReadOutcome.NoData, 1, i);
+
+        Assert.Equal(6000, timing.NoDataCount);
+        Assert.True(timing.MaxFreshAgeMs >= (double)ClawSensorProbeReaders.StaleWarningThreshold.TotalMilliseconds);
+    }
+
+    [Fact] public void TimingStatistics_TracksMaxReadDurationAndLongReadCount()
+    {
+        var timing = new ClawSensorProbeTimingStatistics();
+        timing.Observe(ClawSensorReadOutcome.Fresh, 5, 0, 10);
+        timing.Observe(ClawSensorReadOutcome.Fresh, 150, 0, 10);
+
+        Assert.Equal(150, timing.MaxReadDurationMs);
+        Assert.Equal(150, timing.LastReadDurationMs);
+        Assert.Equal(1, timing.LongReadCount);
+    }
+
+    [Fact] public void Discovery_PrefersUniqueWinRtGyroscopeOverAmbiguousLegacyCandidates()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "g1", "t", "c"),
+            new("Physical Gyrometer", "g2", "t", "c"),
+            new("WinRT Gyrometer", "winrt-gyro", "Unavailable", "Unavailable", Backend: ClawSensorProbeBackend.WinRtGyrometer),
+            new("Physical Accelerometer", "a", "t", "c")]);
+
+        Assert.Equal(ClawSensorProbeBackend.WinRtGyrometer, result.Gyroscope?.Backend);
+        Assert.True(result.IsValid);
+    }
+
+    [Fact] public void Discovery_PrefersDirectTypeValidatedAccelerometerOverBroadEnumerationMatch()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "g", "t", "c"),
+            new("Physical Accelerometer", "a1", "t", "c"),
+            new("Physical Accelerometer", "a2", "t2", "c2", IsDirectTypeMatch: true)]);
+
+        Assert.Equal("a2", result.Accelerometer?.SensorId);
+        Assert.True(result.Accelerometer?.IsDirectTypeMatch);
+    }
+
+    [Fact] public void Discovery_AllowsDifferentBackendsForGyroscopeAndAccelerometer()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("WinRT Gyrometer", "winrt-gyro", "Unavailable", "Unavailable", Backend: ClawSensorProbeBackend.WinRtGyrometer),
+            new("Physical Accelerometer", "a", "t", "c")]);
+
+        Assert.Equal(ClawSensorProbeBackend.WinRtGyrometer, result.Gyroscope?.Backend);
+        Assert.Equal(ClawSensorProbeBackend.LegacySensorApi, result.Accelerometer?.Backend);
+        Assert.True(result.IsValid);
+    }
+
+    [Fact] public void Discovery_ReportsPartialDiscoveryWhenOnlyOneRoleIsResolvable()
+    {
+        var result = ClawSensorDiscovery.Select([new("WinRT Gyrometer", "winrt-gyro", "Unavailable", "Unavailable", Backend: ClawSensorProbeBackend.WinRtGyrometer)]);
+
+        Assert.False(result.IsValid);
+        Assert.NotNull(result.Gyroscope);
+        Assert.Null(result.Accelerometer);
+        Assert.Contains(result.Errors, x => x.Contains("Accelerometer", StringComparison.Ordinal));
+    }
+
+    [Fact] public async Task Writer_EmitsSchemaVersionTwoWithTimingSummaryAndNoMisleadingBackendField()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-schema-v2-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var writer = new ClawSensorProbeSessionWriter(root, "session");
+            var timing = new ClawSensorProbeTimingStatistics();
+            timing.Observe(ClawSensorReadOutcome.Fresh, 2, 0, 10);
+            writer.SetTiming(timing, new ClawSensorProbeTimingStatistics());
+            await writer.DisposeAsync();
+
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.Contains("\"SchemaVersion\": 2", report);
+            Assert.Contains("\"TimingSummary\"", report);
+            Assert.Contains("\"FreshCount\": 1", report);
+            Assert.DoesNotContain("Windows Sensor API / ISensorManager", report);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_CsvHeaderAndRowsIncludeBackendReadDurationAndSensorAge()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-backend-columns-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1, null, "WinRtGyrometer", 4.5, 12.5));
+            }
+
+            var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
+            Assert.Contains("backend,read_duration_ms,sensor_age_ms", csv.Split('\n')[0]);
+            Assert.Contains("WinRtGyrometer,4.5,12.5", csv);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
     }
 
     [Fact] public async Task AdvancePhase_ClearsRecordingContextBeforeMovingToNextPhase()

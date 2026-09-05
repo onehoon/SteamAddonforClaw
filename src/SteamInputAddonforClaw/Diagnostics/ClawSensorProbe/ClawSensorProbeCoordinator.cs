@@ -230,6 +230,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         _readers = null;
         if (readers is not null)
         {
+            _writer?.SetTiming(readers.GyroscopeTiming, readers.AccelerometerTiming);
             await readers.DisposeAsync();
             foreach (var error in readers.Errors) { lock (_readerErrors) _readerErrors.Add(error); _writer?.AddError(error); }
             if (readers.ShutdownTimedOut)
