@@ -106,7 +106,7 @@ internal sealed record ClawSensorDiscovery(
         if (winRt.Length > 1) { errors.Add("Multiple WinRT Gyrometer candidates were found."); return null; }
 
         var legacy = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && string.Equals(x.FriendlyName, "Physical Gyrometer", StringComparison.OrdinalIgnoreCase) && IsUsableLegacyCandidate(x)).ToArray();
-        if (legacy.Length == 1) return legacy[0];
+        if (legacy.Length == 1) return legacy[0] with { SelectionReason = "Selected as the unique usable legacy Physical Gyrometer fallback." };
         errors.Add(legacy.Length == 0 ? "No usable Physical Gyrometer was found." : "Multiple Physical Gyrometer candidates were found.");
         return null;
     }
@@ -122,7 +122,7 @@ internal sealed record ClawSensorDiscovery(
         if (direct.Length > 1) { errors.Add("Multiple direct-type accelerometer candidates were found."); return null; }
 
         var legacy = sensors.Where(x => x.Backend == ClawSensorProbeBackend.LegacySensorApi && string.Equals(x.FriendlyName, "Physical Accelerometer", StringComparison.OrdinalIgnoreCase) && IsUsableLegacyCandidate(x)).ToArray();
-        if (legacy.Length == 1) return legacy[0];
+        if (legacy.Length == 1) return legacy[0] with { SelectionReason = "Selected as the unique usable broad-enumeration Physical Accelerometer fallback." };
         errors.Add(legacy.Length == 0 ? "No usable Physical Accelerometer was found." : "Multiple Physical Accelerometer candidates were found.");
         return null;
     }
@@ -416,7 +416,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
             .Concat(DroppedSampleCount > 0 ? new[] { "The diagnostic writer queue was full and samples were dropped." } : Array.Empty<string>())
             .Concat(_shutdownTimedOut ? new[] { "Sensor reader shutdown exceeded the bounded wait." } : Array.Empty<string>())
             .ToArray();
-        var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, Discovery = new { LegacyCategoryAll = _discovery?.LegacyCategoryAll, LegacyDirectTypeQueries = _discovery?.LegacyDirectTypeQueries, WinRtGyrometer = _discovery?.WinRtGyrometer, WinRtAccelerometer = _discovery?.WinRtAccelerometer }, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, SourceConfiguration = new { Gyroscope = _gyroConfiguration, Accelerometer = _accelConfiguration }, LegacyCustomDataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false) }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
+        var report = new { SchemaVersion = 2, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, ResolvedHardware = _compatibility, Discovery = new { LegacyCategoryAll = _discovery?.LegacyCategoryAll, LegacyDirectTypeQueries = _discovery?.LegacyDirectTypeQueries, WinRtGyrometer = _discovery?.WinRtGyrometer, WinRtAccelerometer = _discovery?.WinRtAccelerometer }, SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, SourceConfiguration = new { Gyroscope = _gyroConfiguration, Accelerometer = _accelConfiguration }, LegacyCustomDataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = AxisSummary(_restGyro, true), Accelerometer = AxisSummary(_restAccel, false, _discovery?.Accelerometer?.UnitBasis == ClawSensorProbeUnitBasis.G) }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, TimingSummary = new { Gyroscope = TimingSummaryOf(_gyroTiming), Accelerometer = TimingSummaryOf(_accelTiming) }, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, ShutdownTimedOut = _shutdownTimedOut, Errors = errors, Warnings = warnings };
         await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, ReportSerializerOptions), Encoding.UTF8, cancellationToken);
     }
 
@@ -444,11 +444,16 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
         timing.MaxFreshAgeMs,
         timing.LongReadCount
     };
-    private static object AxisSummary(IReadOnlyList<(double X, double Y, double Z)> values, bool includeStandardDeviation)
+    // MagnitudeGMean is only meaningful -- and only computed -- when the selected source's unit basis is
+    // proven to be g (docs/gyro/SD6A_CLAW_SENSOR_PROBE_CHARACTERIZATION_WORK_ORDER.md section 9): the normal
+    // legacy fallback path leaves UnitBasis Unknown, and a magnitude computed from an unproven unit would be
+    // presented as if it meant something before CG3EM characterization confirms it.
+    private static object AxisSummary(IReadOnlyList<(double X, double Y, double Z)> values, bool includeStandardDeviation, bool includeMagnitudeG = false)
     {
         if (values.Count == 0) return new { SampleCount = 0 };
         var mean = new { X = values.Average(x => x.X), Y = values.Average(x => x.Y), Z = values.Average(x => x.Z) };
-        var result = new Dictionary<string, object?> { ["SampleCount"] = values.Count, ["Mean"] = mean, ["MagnitudeMean"] = values.Average(x => Math.Sqrt(x.X * x.X + x.Y * x.Y + x.Z * x.Z)) };
+        var result = new Dictionary<string, object?> { ["SampleCount"] = values.Count, ["Mean"] = mean };
+        if (includeMagnitudeG) result["MagnitudeGMean"] = values.Average(x => Math.Sqrt(x.X * x.X + x.Y * x.Y + x.Z * x.Z));
         if (includeStandardDeviation) result["StandardDeviation"] = new { X = Std(values.Select(x => x.X)), Y = Std(values.Select(x => x.Y)), Z = Std(values.Select(x => x.Z)) };
         return result;
     }

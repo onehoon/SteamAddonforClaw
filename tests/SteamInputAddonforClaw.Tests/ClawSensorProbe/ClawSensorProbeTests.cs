@@ -658,6 +658,71 @@ public sealed class ClawSensorProbeTests
         }
     }
 
+    [Fact] public void Discovery_SetsSelectionReasonOnLegacyGyroscopeFallback()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+        Assert.False(string.IsNullOrEmpty(result.Gyroscope?.SelectionReason));
+    }
+
+    [Fact] public void Discovery_SetsSelectionReasonOnLegacyAccelerometerBroadFallback()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+            new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+        Assert.False(string.IsNullOrEmpty(result.Accelerometer?.SelectionReason));
+    }
+
+    [Fact] public async Task Writer_OmitsAccelerometerMagnitudeWhenSelectedUnitBasisIsUnknown()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-magnitude-unknown-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var discovery = ClawSensorDiscovery.Select([
+                new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+                new("Physical Accelerometer", "a", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true)]);
+
+            var writer = new ClawSensorProbeSessionWriter(root, "session");
+            writer.SetDiscovery(discovery);
+            writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 0, 0, 1, 1));
+            await writer.DisposeAsync();
+
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.DoesNotContain("MagnitudeGMean", report);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public async Task Writer_IncludesAccelerometerMagnitudeWhenSelectedUnitBasisIsG()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-magnitude-g-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var winRtAccel = new ClawSensorProbeCandidate("WinRT Accelerometer", "winrt-accel", "Unavailable", "Unavailable", Backend: ClawSensorProbeBackend.WinRtAccelerometer, UnitBasis: ClawSensorProbeUnitBasis.G);
+            var discovery = ClawSensorDiscovery.Select([
+                new("Physical Gyrometer", "g", "t", "c", SupportsX: true, SupportsY: true, SupportsZ: true),
+                winRtAccel]);
+
+            var writer = new ClawSensorProbeSessionWriter(root, "session");
+            writer.SetDiscovery(discovery);
+            writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "ACCEL", 0, 0, 1, 1));
+            await writer.DisposeAsync();
+
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.Contains("MagnitudeGMean", report);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     [Fact] public async Task Writer_ScopesCustomDataKeysToLegacyBackendInsteadOfGlobalField()
     {
         var root = Path.Combine(Path.GetTempPath(), "claw-probe-legacy-keys-" + Guid.NewGuid().ToString("N"));
