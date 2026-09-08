@@ -2,7 +2,7 @@ namespace SteamInputAddonforClaw.Prerequisites;
 
 internal enum PrerequisiteKind { HidHide, UsbIpWin2, Viiper }
 
-internal enum ComponentInstallationStatus { Missing, Installed, ExistingUnverified, Incompatible, Indeterminate }
+internal enum ComponentInstallationStatus { Missing, Installed, ExistingUnverified, Incompatible, Indeterminate, UpdateRequired }
 
 internal sealed record ComponentInstallationAssessment(
     PrerequisiteKind Kind,

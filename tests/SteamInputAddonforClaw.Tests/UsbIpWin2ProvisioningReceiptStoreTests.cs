@@ -1,4 +1,6 @@
 using SteamInputAddonforClaw.Prerequisites;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -55,6 +57,74 @@ public sealed class UsbIpWin2ProvisioningReceiptStoreTests
 
         Assert.Equal(expected, fixture.Store.Load().Receipt);
         Assert.Empty(fixture.TemporaryFiles);
+    }
+
+    [Fact]
+    public void Load_LegacyV1FirstInstallReceiptWithoutUpgradeFields_RemainsValid()
+    {
+        using var fixture = new ReceiptStoreFixture();
+        var expected = CreateReceipt();
+        var json = JsonNode.Parse(JsonSerializer.Serialize(expected))!.AsObject();
+        json.Remove(nameof(UsbIpWin2ProvisioningReceipt.PreInstallationStatus));
+        json.Remove(nameof(UsbIpWin2ProvisioningReceipt.PreviousInstalledVersion));
+        File.WriteAllText(fixture.Path, json.ToJsonString());
+
+        Assert.Equal(expected, fixture.Store.Load().Receipt);
+        Assert.False(fixture.Store.Load().IsCorrupt);
+    }
+
+    [Fact]
+    public void Save_UpgradeReceiptWithOlderOrigin_LoadsAsValid()
+    {
+        using var fixture = new ReceiptStoreFixture();
+        var expected = CreateReceipt() with
+        {
+            PreProvisioningStatus = PrerequisiteStatus.Incompatible,
+            PreInstallationStatus = ComponentInstallationStatus.UpdateRequired,
+            PreviousInstalledVersion = "0.9.7.6"
+        };
+
+        fixture.Store.Save(expected);
+
+        Assert.Equal(expected, fixture.Store.Load().Receipt);
+    }
+
+    [Theory]
+    [InlineData("0.9.7.7")]
+    [InlineData("0.9.7.8")]
+    [InlineData("unknown")]
+    public void Load_InvalidUpgradeOrigin_IsCorrupt(string previousInstalledVersion)
+    {
+        using var fixture = new ReceiptStoreFixture();
+        var receipt = CreateReceipt() with
+        {
+            PreProvisioningStatus = PrerequisiteStatus.Incompatible,
+            PreInstallationStatus = ComponentInstallationStatus.UpdateRequired,
+            PreviousInstalledVersion = previousInstalledVersion
+        };
+        File.WriteAllText(fixture.Path, JsonSerializer.Serialize(receipt));
+
+        var loaded = fixture.Store.Load();
+
+        Assert.Null(loaded.Receipt);
+        Assert.True(loaded.IsCorrupt);
+    }
+
+    [Theory]
+    [InlineData((int)ComponentInstallationStatus.Installed)]
+    [InlineData((int)ComponentInstallationStatus.ExistingUnverified)]
+    [InlineData((int)ComponentInstallationStatus.Incompatible)]
+    [InlineData((int)ComponentInstallationStatus.Indeterminate)]
+    public void Load_NonInstallableReceiptOrigin_IsCorrupt(int statusValue)
+    {
+        using var fixture = new ReceiptStoreFixture();
+        var receipt = CreateReceipt() with { PreInstallationStatus = (ComponentInstallationStatus)statusValue };
+        File.WriteAllText(fixture.Path, JsonSerializer.Serialize(receipt));
+
+        var loaded = fixture.Store.Load();
+
+        Assert.Null(loaded.Receipt);
+        Assert.True(loaded.IsCorrupt);
     }
 
     private static UsbIpWin2ProvisioningReceipt CreateReceipt() => new(

@@ -118,18 +118,29 @@ internal static class ElevatedPrerequisiteSetup
             ReconcileUsbIpReceipt(usbStore, usbIp, usbPrerequisite);
             var usbInstallation = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbIp, usbPrerequisite, UsbIpWin2PackageMetadata.BundledVersion.ToString());
             AppLog.Info("PrerequisiteSetup", "usbip-win2 installation assessment completed.", ("InstallationStatus", usbInstallation.Status), ("InstallationReason", usbInstallation.Reason), ("PackageVersion", usbInstallation.Version), ("RuntimeStatus", usbPrerequisite.Status));
-            if (usbInstallation.Status is not (ComponentInstallationStatus.Installed or ComponentInstallationStatus.Missing))
+            if (usbInstallation.Status != ComponentInstallationStatus.Installed && !ShouldInstallUsbIp(usbInstallation.Status))
             {
                 AppLog.Warn("PrerequisiteSetup", "usbip-win2 setup was blocked by an existing or incompatible installation.", null, ("InstallationStatus", usbInstallation.Status), ("Reason", usbInstallation.Reason));
                 return 3;
             }
             var usbReceipt = usbStore.Load().Receipt;
             if (usbReceipt?.State == UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot) restartRequired = true;
-            if (usbInstallation.Status == ComponentInstallationStatus.Missing)
+            if (ShouldInstallUsbIp(usbInstallation.Status))
             {
-                var receipt = new UsbIpWin2ProvisioningReceipt(1, UsbIpWin2ProvisioningReceiptState.InstallStarted, Guid.NewGuid(), UsbIpWin2PackageMetadata.BundledVersion.ToString(), UsbIpWin2PackageMetadata.InstallerSha256, PrerequisiteStatus.Missing, DateTimeOffset.UtcNow, null, null);
+                var receipt = new UsbIpWin2ProvisioningReceipt(
+                    1,
+                    UsbIpWin2ProvisioningReceiptState.InstallStarted,
+                    Guid.NewGuid(),
+                    UsbIpWin2PackageMetadata.BundledVersion.ToString(),
+                    UsbIpWin2PackageMetadata.InstallerSha256,
+                    usbPrerequisite.Status,
+                    DateTimeOffset.UtcNow,
+                    null,
+                    null,
+                    PreInstallationStatus: usbInstallation.Status,
+                    PreviousInstalledVersion: usbInstallation.Status == ComponentInstallationStatus.UpdateRequired ? usbIp.Version : null);
                 usbStore.Save(receipt);
-                AppLog.Info("PrerequisiteSetup", "usbip-win2 installation receipt persisted.", ("AttemptId", receipt.AttemptId), ("State", receipt.State), ("Version", receipt.InstallerVersion));
+                AppLog.Info("PrerequisiteSetup", "usbip-win2 installation receipt persisted.", ("AttemptId", receipt.AttemptId), ("State", receipt.State), ("Version", receipt.InstallerVersion), ("PreInstallationStatus", receipt.PreInstallationStatus), ("PreviousInstalledVersion", receipt.PreviousInstalledVersion));
                 if (!LogAndAllowSafetyGate("BeforeUsbIpInstall"))
                 {
                     usbStore.Save(receipt with { State = UsbIpWin2ProvisioningReceiptState.AttemptCancelled, CompletedAtUtc = DateTimeOffset.UtcNow, FailureReason = "SafetyGateBlockedBeforeUsbIpInstall" });
@@ -142,7 +153,7 @@ internal static class ElevatedPrerequisiteSetup
                 var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
                 var state = outcome.IsProvisioned ? UsbIpWin2ProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot : UsbIpWin2ProvisioningReceiptState.AttemptFailed;
                 usbStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
-                AppLog.Info("PrerequisiteSetup", "usbip-win2 installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status));
+                AppLog.Info("PrerequisiteSetup", "usbip-win2 installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status), ("PreInstallationStatus", receipt.PreInstallationStatus), ("PreviousInstalledVersion", receipt.PreviousInstalledVersion));
                 if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
                 restartRequired |= code == 3010;
             }
@@ -215,6 +226,8 @@ internal static class ElevatedPrerequisiteSetup
             packageProbe).Inspect();
         return (package, prerequisite);
     }
+
+    internal static bool ShouldInstallUsbIp(ComponentInstallationStatus status) => status is ComponentInstallationStatus.Missing or ComponentInstallationStatus.UpdateRequired;
 
     internal static (UsbIpWin2PackageState Package, PrerequisiteAssessment Prerequisite) WaitForUsbIpPostInstallEvidence(
         Func<UsbIpWin2PackageState> packageProbe,

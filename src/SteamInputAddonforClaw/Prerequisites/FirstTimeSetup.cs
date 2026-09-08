@@ -31,7 +31,7 @@ internal static class FirstTimeSetupPolicy
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
         if (input.Provisioning.HidHide == ComponentProvisioningState.AttemptFailed && input.HidHideInstallation.Status is not (ComponentInstallationStatus.Missing or ComponentInstallationStatus.Installed))
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
-        if (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.AttemptFailed && input.UsbIpWin2Installation.Status is not (ComponentInstallationStatus.Missing or ComponentInstallationStatus.Installed))
+        if (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.AttemptFailed && input.UsbIpWin2Installation.Status is not (ComponentInstallationStatus.Missing or ComponentInstallationStatus.Installed or ComponentInstallationStatus.UpdateRequired))
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
         if (!input.RecoverySafe) return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.RecoveryUnsafe, false);
         if (input.Provisioning.HidHide == ComponentProvisioningState.Legacy && input.HidHide.Status == PrerequisiteStatus.Missing)

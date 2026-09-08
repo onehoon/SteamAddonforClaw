@@ -110,6 +110,22 @@ public sealed class RuntimePrerequisiteInspectorTests
         Assert.Equal(version, assessment.Version);
     }
 
+    [Fact]
+    public void OlderUsbIpPackage_IsRuntimeIncompatibleButInstallationUpgradeable()
+    {
+        var package = new UsbIpWin2PackageState(true, "0.9.7.6", true, true);
+        var runtime = new UsbIpWin2PrerequisiteInspector(
+            new FakeUsbIpProbe(true, true, true, true),
+            new FakeUsbIpPackageProbe(package)).Inspect();
+
+        var installation = ComponentInstallationAssessmentPolicy.AssessUsbIp(package, runtime, "0.9.7.7");
+
+        Assert.Equal(PrerequisiteStatus.Incompatible, runtime.Status);
+        Assert.Equal("UsbIpWin2VersionUnsupported", runtime.Reason);
+        Assert.Equal(ComponentInstallationStatus.UpdateRequired, installation.Status);
+        Assert.Equal("OlderPackageVersion", installation.Reason);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
