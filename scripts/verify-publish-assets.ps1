@@ -16,7 +16,7 @@ $requiredAssets = @(
     'SteamInputAddonforClaw.exe',
     'SteamInputAddonforClaw.TdpHelper.exe',
     'Dependencies\HidHide\HidHide_1.5.230_x64.exe',
-    'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe',
+    'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe',
     'Dependencies\Viiper\libVIIPER.dll',
     'Dependencies\Viiper\PROVENANCE.md',
     'Dependencies\Viiper\libVIIPER.h',
@@ -51,15 +51,15 @@ if ((Get-FileHash -LiteralPath $hidHideInstaller -Algorithm SHA256).Hash -ne $ex
     throw 'Published HidHide installer SHA-256 does not match the bundled metadata.'
 }
 
-$usbIpInstaller = Join-Path $PublishDirectory 'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe'
-$expectedUsbIpSha256 = '51620FA5F9F8BE5932BC9D786DEEE557CE06D5407A99CAB490DCFAC71F185FEA'
+$usbIpInstaller = Join-Path $PublishDirectory 'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe'
+$expectedUsbIpSha256 = '81F426741F7EE2ED991FEBE24A22DACA8400B6AE2F171054E3FB404897E15D39'
 if ((Get-FileHash -LiteralPath $usbIpInstaller -Algorithm SHA256).Hash -ne $expectedUsbIpSha256) {
     throw 'Published USB/IP installer SHA-256 does not match the bundled metadata.'
 }
 
 $viiperPayload = Join-Path $PublishDirectory 'Dependencies\Viiper\libVIIPER.dll'
 # Must match the vendored VIIPER DLL recorded in viiper.lock.json and PROVENANCE.md.
-$expectedViiperSha256 = 'D07D2E5A622983AED6B9CC676B59B5B3A31A2B343015C4492FA5BDAE74DD0CB6'
+$expectedViiperSha256 = '0ECE53486DE369167B92482957FF0B41BB2CE760A2D534D066DC68BE33768F75'
 if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expectedViiperSha256) {
     throw 'Published VIIPER payload SHA-256 does not match its recorded provenance.'
 }

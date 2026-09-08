@@ -90,8 +90,8 @@ public sealed class UsbIpWin2ProvisioningReceiptStoreTests
     }
 
     [Theory]
-    [InlineData("0.9.7.7")]
-    [InlineData("0.9.7.8")]
+    [InlineData("0.9.8.0")]
+    [InlineData("0.9.8.1")]
     [InlineData("unknown")]
     public void Load_InvalidUpgradeOrigin_IsCorrupt(string previousInstalledVersion)
     {

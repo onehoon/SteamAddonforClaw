@@ -6,9 +6,9 @@ namespace SteamInputAddonforClaw.Prerequisites;
 
 internal static class UsbIpWin2PackageMetadata
 {
-    public static readonly Version BundledVersion = new(0, 9, 7, 7);
-    public const string InstallerFileName = "USBip-0.9.7.7-x64.exe";
-    public const string InstallerSha256 = "51620FA5F9F8BE5932BC9D786DEEE557CE06D5407A99CAB490DCFAC71F185FEA";
+    public static readonly Version BundledVersion = new(0, 9, 8, 0);
+    public const string InstallerFileName = "USBip-0.9.8.0-x64.exe";
+    public const string InstallerSha256 = "81F426741F7EE2ED991FEBE24A22DACA8400B6AE2F171054E3FB404897E15D39";
     public static string InstallerPath => Path.Combine(AppContext.BaseDirectory, "Dependencies", "UsbIpWin2", InstallerFileName);
     public static bool VerifyInstaller() => File.Exists(InstallerPath) && string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(InstallerPath))), InstallerSha256, StringComparison.OrdinalIgnoreCase);
 }

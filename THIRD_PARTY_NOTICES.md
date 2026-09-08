@@ -46,8 +46,8 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 ### VIIPER
 
 - Project: VIIPER
-- Canonical source: https://github.com/onehoon/VIIPER/tree/77a8af547de2253862ede648a212c01d4dd950c1
-- Source baseline: pinned commit `77a8af547de2253862ede648a212c01d4dd950c1`
+- Canonical source: https://github.com/onehoon/VIIPER/tree/e00fbf01277a2c354a32b0e54418a9bd917a05ae
+- Source baseline: pinned commit `e00fbf01277a2c354a32b0e54418a9bd917a05ae`
 - Lineage: https://github.com/Valkirie/VIIPER -> https://github.com/Alia5/VIIPER
 - Copyright: Peter Repukat (as identified by the upstream project)
 - License: GPL-3.0
@@ -85,7 +85,7 @@ ClawTweaks is a compatibility and technical reference only. It is not a runtime 
 
 ## usbip-win2
 
-- Version: 0.9.7.7
+- Version: 0.9.8.0
 - License: BSD-2-Clause
 - Upstream: https://github.com/vadimgrn/usbip-win2
 - Distribution: official unmodified x64 GitHub release installer

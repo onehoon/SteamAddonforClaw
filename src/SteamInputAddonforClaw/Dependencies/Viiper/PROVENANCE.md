@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     77a8af547de2253862ede648a212c01d4dd950c1
+Commit:     e00fbf01277a2c354a32b0e54418a9bd917a05ae
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: 202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718
-DLL SHA-256:              d07d2e5a622983aed6b9cc676b59b5b3a31a2b343015c4492fa5bdae74dd0cb6
+DLL SHA-256:              0ece53486de369167b92482957ff0b41bb2ce760a2d534d066dc68be33768f75
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,51 +42,34 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-Reviewed VIIPER `49e5796b9f31f8ddb7009fde6f910c66837e2315` ->
-`77a8af547de2253862ede648a212c01d4dd950c1`. The target is exactly one
-canonical main commit, `Reduce Windows USBIP loopback attach latency (#44)`.
-
-The generated canonical `libVIIPER.h` is byte-identical to the previously
-reviewed Addon header. The Addon base and dependency-PR head vendored headers
-have the same Git blob identity,
-`2ab164e4d37c7cfde6e9a0771c3c5489183b0a03`, and the generated-header
-SHA-256 remains
+Reviewed VIIPER `77a8af547de2253862ede648a212c01d4dd950c1` ->
+`e00fbf01277a2c354a32b0e54418a9bd917a05ae`. The generated canonical
+`libVIIPER.h` is byte-identical to the previously reviewed Addon header;
+the header SHA-256 remains
 `202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718`.
-There are no added or removed exports, signature changes, enum changes, struct
-layout/packing changes, callback ABI changes, or Steam Deck/Xbox360 typed-state
-layout changes. `SteamDeckDeviceState` remains 76 bytes with `LPadForce`,
-`RPadForce`, `LStickForce`, and `RStickForce` at offsets 68/70/72/74. The
-current Addon managed P/Invoke surface, 19-entry `RequiredExports`, classified
-attach/detach bindings, callback rooting, Xbox360 typed bindings, and ABI tests
-require no adaptation.
+There are no added or removed exports, C signature changes, enum changes,
+Steam Deck or Xbox360 typed-state layout changes, or managed P/Invoke changes.
+The existing typed-handle ownership, callback lifetime, classified attachment
+and teardown contracts remain unchanged.
 
-PR #44 changes only the Windows localhost endpoint used by USB/IP attach from
-the hostname `localhost` to the numeric IPv4 loopback address `127.0.0.1`.
-The change is applied consistently to the tracked native IOCTL path, the shared
-command argument contract, and the legacy command fallback. The Addon already
-creates its canonical VIIPER server on `127.0.0.1:3242`, so the new attach
-endpoint matches the actual listener address and does not require any Addon
-configuration or runtime change.
+The compatibility change is internal to the Windows usbip-win2 attach path.
+VIIPER now targets usbip-win2 `0.9.8.0`, commit
+`83bd1f781d57ed6efdf15530c55710cf5d4482bc`, and its `plugin_hardware`
+request includes the required `Serial[16]` field at offset 1097 and
+`WskEvents` at offset 1113, for a complete request size of 1116 bytes.
+The request sets `WskEvents=true`; the command fallback likewise selects
+`--receive-mode=low-latency`. This PR bundles and validates the matching
+official usbip-win2 `0.9.8.0` x64 installer, so the native ABI and provisioned
+package move together atomically. Older or later usbip-win2 versions are not
+claimed compatible, and no compatibility bridge or automatic downgrade is
+introduced.
 
-No attachment classification, native backend selection/fallback policy,
-verified positive import-port token ownership, detach behavior, rollback,
-server/bus ownership, lifecycle serialization, retryable/unknown result
-handling, `close-failed` behavior, teardown ordering, callback contract, or PnP
-readiness policy changes are included. `AttachUSBDeviceEx` continues to expose
-the same classified result and the Addon continues to treat VIIPER attachment
-state as native ownership evidence only, with separate exact Windows PnP
-stabilization.
-
-The upstream regression coverage verifies both command argument construction
-and the native IOCTL host field use `127.0.0.1`. The canonical artifact comes
-from the exact successful push/main run recorded above. This is a latency-path
-implementation correction only; no hardware timing improvement is inferred
-from automated validation, and existing hardware-validation claims remain
-unchanged.
-
-No Addon mapper, publisher, native binding, callback lifetime, feedback,
-routing, Game Bar/Xbox360 presentation, PnP, HidHide, recovery, lifecycle, or
-teardown code change is required for this dependency update.
+The Addon managed ABI remains unchanged because the generated public header
+did not change. The focused VIIPER native ABI tests verify the 0.9.8.0
+request size, field offsets, WSK policy, and low-latency command arguments;
+the Addon prerequisite tests verify the `0.9.7.7` -> `0.9.8.0`
+`UpdateRequired` path and preserve exact-version runtime fail-close behavior.
+No additional hardware validation is claimed by this dependency update.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
