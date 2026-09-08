@@ -203,6 +203,62 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.Equal(ComponentInstallationStatus.Installed, assessment.Status);
     }
 
+    [Theory]
+    [InlineData("0.9.7.7", "Installed", "ExpectedPackagePresent")]
+    [InlineData("0.9.7.6", "UpdateRequired", "OlderPackageVersion")]
+    [InlineData("0.9.7.8", "Incompatible", "UnexpectedPackageVersion")]
+    [InlineData("unknown", "Incompatible", "UnexpectedPackageVersion")]
+    public void UsbIpInstallationAssessment_OrdersVersionsWithoutChangingBundledMetadata(string installedVersion, string expectedStatus, string expectedReason)
+    {
+        var assessment = ComponentInstallationAssessmentPolicy.AssessUsbIp(
+            new UsbIpWin2PackageState(true, installedVersion, true, true),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Incompatible, "UsbIpWin2VersionUnsupported", installedVersion),
+            "0.9.7.7");
+
+        Assert.Equal(Enum.Parse<ComponentInstallationStatus>(expectedStatus), assessment.Status);
+        Assert.Equal(expectedReason, assessment.Reason);
+        Assert.Equal("0.9.7.7", UsbIpWin2PackageMetadata.BundledVersion.ToString());
+        Assert.Equal("USBip-0.9.7.7-x64.exe", UsbIpWin2PackageMetadata.InstallerFileName);
+    }
+
+    [Theory]
+    [InlineData(true, "Missing", "PackageAndRuntimeMissing")]
+    [InlineData(false, "ExistingUnverified", "RuntimeEvidenceWithoutPackage")]
+    public void UsbIpInstallationAssessment_HandlesMissingPackageAndRuntimeEvidence(bool runtimeMissing, string expectedStatus, string expectedReason)
+    {
+        var assessment = ComponentInstallationAssessmentPolicy.AssessUsbIp(
+            new UsbIpWin2PackageState(false, null, true, false),
+            new(PrerequisiteKind.UsbIpWin2, runtimeMissing ? PrerequisiteStatus.Missing : PrerequisiteStatus.Unusable, "test"),
+            "0.9.7.7");
+
+        Assert.Equal(Enum.Parse<ComponentInstallationStatus>(expectedStatus), assessment.Status);
+        Assert.Equal(expectedReason, assessment.Reason);
+    }
+
+    [Fact]
+    public void UsbIpInstallationAssessment_InspectionFailureIsIndeterminate()
+    {
+        var assessment = ComponentInstallationAssessmentPolicy.AssessUsbIp(
+            new UsbIpWin2PackageState(false, null, false, false),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2PackageInspectionFailed"),
+            "0.9.7.7");
+
+        Assert.Equal(ComponentInstallationStatus.Indeterminate, assessment.Status);
+        Assert.Equal("PackageInspectionFailed", assessment.Reason);
+    }
+
+    [Fact]
+    public void UsbIpInstallationAssessment_MalformedBundledVersionFailsClosed()
+    {
+        var assessment = ComponentInstallationAssessmentPolicy.AssessUsbIp(
+            new UsbIpWin2PackageState(true, "0.9.7.6", true, true),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Incompatible, "UsbIpWin2VersionUnsupported", "0.9.7.6"),
+            "not-a-version");
+
+        Assert.Equal(ComponentInstallationStatus.Incompatible, assessment.Status);
+        Assert.Equal("UnexpectedPackageVersion", assessment.Reason);
+    }
+
     [Fact]
     public void UsbIpPostInstallEvidence_WaitsForExpectedPackage()
     {
@@ -231,6 +287,96 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
         Assert.True(setup.CanInstallRequiredComponents);
     }
+
+    [Fact]
+    public void FailedUsbIpUpgradeWithOlderPackage_IsRetryable()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.7.6"),
+            Provisioning = new(ComponentProvisioningState.None, ComponentProvisioningState.AttemptFailed)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.True(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void UnresolvedUsbIpUpgradeInstallStarted_RemainsBlocked()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.7.6"),
+            Provisioning = new(ComponentProvisioningState.None, ComponentProvisioningState.InstallStarted)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void SafeUsbIpUpgrade_IsOfferedThroughExistingSetupPath()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.7.6")
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.True(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void SteamActiveUsbIpUpgrade_IsNotInstallable()
+    {
+        var input = Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            Steam = SteamSessionState.FromRunningAppId(1234),
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.7.6")
+        };
+
+        var setup = FirstTimeSetupPolicy.Evaluate(input);
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.SteamActive, setup.Reason);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void RecoveryUnsafeUsbIpUpgrade_IsBlocked()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            RecoverySafe = false,
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.7.6")
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void NewerUsbIpPackage_RemainsBlockedAndCannotBeInstalled()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.Incompatible, "UnexpectedPackageVersion", "0.9.7.8")
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.False(setup.CanInstallRequiredComponents);
+        Assert.False(ElevatedPrerequisiteSetup.ShouldInstallUsbIp(ComponentInstallationStatus.Incompatible));
+    }
+
+    [Theory]
+    [InlineData((int)ComponentInstallationStatus.Missing, true)]
+    [InlineData((int)ComponentInstallationStatus.UpdateRequired, true)]
+    [InlineData((int)ComponentInstallationStatus.Installed, false)]
+    [InlineData((int)ComponentInstallationStatus.Incompatible, false)]
+    [InlineData((int)ComponentInstallationStatus.ExistingUnverified, false)]
+    [InlineData((int)ComponentInstallationStatus.Indeterminate, false)]
+    public void ExistingUsbIpInstallerPath_IsSelectedOnlyForMissingOrUpdateRequired(int statusValue, bool expected)
+        => Assert.Equal(expected, ElevatedPrerequisiteSetup.ShouldInstallUsbIp((ComponentInstallationStatus)statusValue));
 
     [Fact]
     public void InstallStartedWithExactPackage_DoesNotBlockMissingComponentSetup()

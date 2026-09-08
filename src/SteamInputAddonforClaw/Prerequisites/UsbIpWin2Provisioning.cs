@@ -31,10 +31,32 @@ internal sealed class WindowsUsbIpWin2PackageProbe : IUsbIpWin2PackageProbe
 }
 
 internal enum UsbIpWin2ProvisioningReceiptState { InstallStarted, Provisioned, InstalledPendingReboot, AttemptFailed, AttemptCancelled }
-internal sealed record UsbIpWin2ProvisioningReceipt(int SchemaVersion, UsbIpWin2ProvisioningReceiptState State, Guid AttemptId, string InstallerVersion, string InstallerSha256, PrerequisiteStatus PreProvisioningStatus, DateTimeOffset StartedAtUtc, DateTimeOffset? CompletedAtUtc, string? ObservedInstalledVersion, string? FailureReason = null, int? InstallerExitCode = null)
+internal sealed record UsbIpWin2ProvisioningReceipt(
+    int SchemaVersion,
+    UsbIpWin2ProvisioningReceiptState State,
+    Guid AttemptId,
+    string InstallerVersion,
+    string InstallerSha256,
+    PrerequisiteStatus PreProvisioningStatus,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset? CompletedAtUtc,
+    string? ObservedInstalledVersion,
+    string? FailureReason = null,
+    int? InstallerExitCode = null,
+    ComponentInstallationStatus PreInstallationStatus = ComponentInstallationStatus.Missing,
+    string? PreviousInstalledVersion = null)
 {
     public const int CurrentSchemaVersion = 1;
-    public bool IsValid => SchemaVersion == CurrentSchemaVersion && AttemptId != Guid.Empty && PreProvisioningStatus == PrerequisiteStatus.Missing && Version.TryParse(InstallerVersion, out _) && InstallerSha256.Length == 64 && InstallerSha256.All(Uri.IsHexDigit);
+    public bool IsValid => SchemaVersion == CurrentSchemaVersion
+        && AttemptId != Guid.Empty
+        && Version.TryParse(InstallerVersion, out var targetVersion)
+        && InstallerSha256 is { Length: 64 } && InstallerSha256.All(Uri.IsHexDigit)
+        && PreInstallationStatus switch
+        {
+            ComponentInstallationStatus.Missing => PreProvisioningStatus == PrerequisiteStatus.Missing && PreviousInstalledVersion is null,
+            ComponentInstallationStatus.UpdateRequired => Version.TryParse(PreviousInstalledVersion, out var previousVersion) && previousVersion.CompareTo(targetVersion) < 0,
+            _ => false
+        };
 }
 internal sealed class UsbIpWin2ProvisioningReceiptStore
 {
