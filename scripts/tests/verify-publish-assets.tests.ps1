@@ -21,7 +21,7 @@ function New-Fixture {
         'SteamInputAddonforClaw.exe' = 'runtime'
         'SteamInputAddonforClaw.TdpHelper.exe' = 'tdp helper'
         'Dependencies\HidHide\HidHide_1.5.230_x64.exe' = (Join-Path $dependencyRoot 'HidHide\HidHide_1.5.230_x64.exe')
-        'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe' = (Join-Path $dependencyRoot 'UsbIpWin2\USBip-0.9.7.7-x64.exe')
+        'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe' = (Join-Path $dependencyRoot 'UsbIpWin2\USBip-0.9.8.0-x64.exe')
         'Dependencies\Viiper\libVIIPER.dll' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.dll')
         'Dependencies\Viiper\PROVENANCE.md' = (Join-Path $dependencyRoot 'Viiper\PROVENANCE.md')
         'Dependencies\Viiper\libVIIPER.h' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.h')

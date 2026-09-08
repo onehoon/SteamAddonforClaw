@@ -16,7 +16,7 @@ $requiredAssets = @(
     'SteamInputAddonforClaw.exe',
     'SteamInputAddonforClaw.TdpHelper.exe',
     'Dependencies\HidHide\HidHide_1.5.230_x64.exe',
-    'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe',
+    'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe',
     'Dependencies\Viiper\libVIIPER.dll',
     'Dependencies\Viiper\PROVENANCE.md',
     'Dependencies\Viiper\libVIIPER.h',
@@ -51,8 +51,8 @@ if ((Get-FileHash -LiteralPath $hidHideInstaller -Algorithm SHA256).Hash -ne $ex
     throw 'Published HidHide installer SHA-256 does not match the bundled metadata.'
 }
 
-$usbIpInstaller = Join-Path $PublishDirectory 'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe'
-$expectedUsbIpSha256 = '51620FA5F9F8BE5932BC9D786DEEE557CE06D5407A99CAB490DCFAC71F185FEA'
+$usbIpInstaller = Join-Path $PublishDirectory 'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe'
+$expectedUsbIpSha256 = '81F426741F7EE2ED991FEBE24A22DACA8400B6AE2F171054E3FB404897E15D39'
 if ((Get-FileHash -LiteralPath $usbIpInstaller -Algorithm SHA256).Hash -ne $expectedUsbIpSha256) {
     throw 'Published USB/IP installer SHA-256 does not match the bundled metadata.'
 }

@@ -85,7 +85,7 @@ ClawTweaks is a compatibility and technical reference only. It is not a runtime 
 
 ## usbip-win2
 
-- Version: 0.9.7.7
+- Version: 0.9.8.0
 - License: BSD-2-Clause
 - Upstream: https://github.com/vadimgrn/usbip-win2
 - Distribution: official unmodified x64 GitHub release installer

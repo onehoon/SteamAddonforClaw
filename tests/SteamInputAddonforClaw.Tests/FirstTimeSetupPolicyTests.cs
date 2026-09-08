@@ -204,21 +204,21 @@ public sealed class FirstTimeSetupPolicyTests
     }
 
     [Theory]
-    [InlineData("0.9.7.7", "Installed", "ExpectedPackagePresent")]
-    [InlineData("0.9.7.6", "UpdateRequired", "OlderPackageVersion")]
-    [InlineData("0.9.7.8", "Incompatible", "UnexpectedPackageVersion")]
+    [InlineData("0.9.8.0", "Installed", "ExpectedPackagePresent")]
+    [InlineData("0.9.7.7", "UpdateRequired", "OlderPackageVersion")]
+    [InlineData("0.9.8.1", "Incompatible", "UnexpectedPackageVersion")]
     [InlineData("unknown", "Incompatible", "UnexpectedPackageVersion")]
     public void UsbIpInstallationAssessment_OrdersVersionsWithoutChangingBundledMetadata(string installedVersion, string expectedStatus, string expectedReason)
     {
         var assessment = ComponentInstallationAssessmentPolicy.AssessUsbIp(
             new UsbIpWin2PackageState(true, installedVersion, true, true),
             new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Incompatible, "UsbIpWin2VersionUnsupported", installedVersion),
-            "0.9.7.7");
+            "0.9.8.0");
 
         Assert.Equal(Enum.Parse<ComponentInstallationStatus>(expectedStatus), assessment.Status);
         Assert.Equal(expectedReason, assessment.Reason);
-        Assert.Equal("0.9.7.7", UsbIpWin2PackageMetadata.BundledVersion.ToString());
-        Assert.Equal("USBip-0.9.7.7-x64.exe", UsbIpWin2PackageMetadata.InstallerFileName);
+        Assert.Equal("0.9.8.0", UsbIpWin2PackageMetadata.BundledVersion.ToString());
+        Assert.Equal("USBip-0.9.8.0-x64.exe", UsbIpWin2PackageMetadata.InstallerFileName);
     }
 
     [Theory]
@@ -229,7 +229,7 @@ public sealed class FirstTimeSetupPolicyTests
         var assessment = ComponentInstallationAssessmentPolicy.AssessUsbIp(
             new UsbIpWin2PackageState(false, null, true, false),
             new(PrerequisiteKind.UsbIpWin2, runtimeMissing ? PrerequisiteStatus.Missing : PrerequisiteStatus.Unusable, "test"),
-            "0.9.7.7");
+            "0.9.8.0");
 
         Assert.Equal(Enum.Parse<ComponentInstallationStatus>(expectedStatus), assessment.Status);
         Assert.Equal(expectedReason, assessment.Reason);
@@ -241,7 +241,7 @@ public sealed class FirstTimeSetupPolicyTests
         var assessment = ComponentInstallationAssessmentPolicy.AssessUsbIp(
             new UsbIpWin2PackageState(false, null, false, false),
             new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2PackageInspectionFailed"),
-            "0.9.7.7");
+            "0.9.8.0");
 
         Assert.Equal(ComponentInstallationStatus.Indeterminate, assessment.Status);
         Assert.Equal("PackageInspectionFailed", assessment.Reason);
@@ -265,14 +265,14 @@ public sealed class FirstTimeSetupPolicyTests
         var elapsed = 100000L;
         var polls = 0;
         var result = ElevatedPrerequisiteSetup.WaitForUsbIpPostInstallEvidence(
-            () => polls++ == 0 ? new UsbIpWin2PackageState(false, null, true, false) : new UsbIpWin2PackageState(true, "0.9.7.7", true, true),
+            () => polls++ == 0 ? new UsbIpWin2PackageState(false, null, true, false) : new UsbIpWin2PackageState(true, "0.9.8.0", true, true),
             () => new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable"),
             () => elapsed,
             milliseconds => elapsed += milliseconds,
-            "0.9.7.7",
+            "0.9.8.0",
             0);
 
-        Assert.Equal(ComponentInstallationStatus.Installed, ComponentInstallationAssessmentPolicy.AssessUsbIp(result.Package, result.Prerequisite, "0.9.7.7").Status);
+        Assert.Equal(ComponentInstallationStatus.Installed, ComponentInstallationAssessmentPolicy.AssessUsbIp(result.Package, result.Prerequisite, "0.9.8.0").Status);
         Assert.Equal(2, polls);
     }
 
