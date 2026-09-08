@@ -42,12 +42,43 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
+Reviewed VIIPER `e00fbf01277a2c354a32b0e54418a9bd917a05ae` ->
+`61b6fc236bf71ff4f723223373eabd39c8676ca2`. The generated canonical
+`libVIIPER.h` is byte-identical to the previously embedded Addon header; its
+SHA-256 remains
+`202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718`.
+There are no added or removed exports, C signature changes, enum changes,
+typed Steam Deck/Xbox360 state-layout changes, callback-lifetime changes, or
+managed P/Invoke / `RequiredExports` changes required by this update.
+
+The runtime delta is internal to VIIPER's Windows usbip-win2 `0.9.8.0`
+`PLUGIN_HARDWARE` request. The previous binding incorrectly flattened the C++
+multiple-inheritance layout and omitted the three-byte tail padding of the
+`imported_device_location` base subobject. The corrected Microsoft x64 ABI is:
+
+```text
+Size offset       = 0
+PortOutput offset = 4
+BusID offset      = 8
+Service offset    = 40
+Host offset       = 72
+base tail padding = 1097..1099
+Serial offset     = 1100
+WskEvents offset  = 1116
+struct size       = 1120
+output prefix     = 8
+```
+
+`WskEvents=true` remains the fixed low-latency policy. Native attach ownership,
+exact positive imported-port retention, exact-port detach, known-failure
+fallback, and unknown-outcome fail-close behavior are unchanged. The
+additional `DeviceIoControl` error log is diagnostic-only and does not alter
+classification or lifecycle behavior.
+
+SteamAddonforClaw continues to pin usbip-win2 `0.9.8.0`; no Addon managed ABI
+change is required because the generated public VIIPER header did not change.
+This dependency update does not claim new hardware validation; MSI Claw
+runtime validation is still required after adoption.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
