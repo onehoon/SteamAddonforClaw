@@ -61,7 +61,7 @@ jobs:
           private-key: ${{ secrets.VIIPER_ADDON_BOT_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: |
-            SteamInputAddonforClaw
+            SteamAddonforClaw
             VIIPER
           permission-actions: read
           permission-contents: write
