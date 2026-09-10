@@ -13,12 +13,24 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
 
     internal static WindowsPowerMode DecodePowerMode(JsonElement payload) =>
         payload.GetProperty("mode").Deserialize<WindowsPowerMode>();
-    private readonly NamedPipeAddonFrontendClient _client = new(FrontendPipeEndpoint.CreateQamForCurrentUser());
+    private readonly NamedPipeAddonFrontendClient _client;
     internal NamedPipeAddonFrontendClient Client => _client;
     internal event EventHandler? StateInvalidated;
     private int _stopping;
 
-    internal QamFrontendBridge() => _client.StateInvalidated += OnStateInvalidated;
+    internal QamFrontendBridge() : this(FrontendPipeEndpoint.CreateQamForCurrentUser()) { }
+
+    // Test seam only: an isolated random pipe. Production behaviour is identical to the parameterless
+    // constructor.
+    internal QamFrontendBridge(string pipeName)
+    {
+        _client = new NamedPipeAddonFrontendClient(pipeName);
+        _client.StateInvalidated += OnStateInvalidated;
+    }
+
+    // SF-V2-04: bridge-local generic Quick Settings capture request. Kept private rather than making
+    // the frontend-transport DTO public.
+    private sealed record QuickSettingsPageBridgeRequest(QuickSettingsPageId PageId, uint? AppId);
 
     internal async Task ConnectAsync(CancellationToken cancellationToken)
     {
@@ -42,6 +54,10 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
             {
                 "captureStatus" => await _client.CaptureStatusAsync(token),
                 "captureDeviceQuickSettings" => await _client.CaptureDeviceQuickSettingsAsync(token),
+                // SF-V2-04 generic seam; qam.js starts consuming these in SF-V2-05. The feature-specific
+                // Device operations below remain until then because current qam.js still calls them.
+                "captureQuickSettingsPage" => await CaptureQuickSettingsPageAsync(root, token),
+                "mutateQuickSetting" => await MutateQuickSettingAsync(root, token),
                 "captureActiveGameProfile" => await _client.CaptureActiveGameProfileAsync(token),
                 "setActiveGameProfileEnabled" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileEnabledAsync(id, p.GetProperty("enabled").GetBoolean(), p.TryGetProperty("displayName", out var name) ? name.GetString() : null, t)),
                 "setActiveGameCpuBoostEnabled" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileCpuBoostEnabledAsync(id, p.GetProperty("enabled").GetBoolean(), t)),
@@ -72,10 +88,40 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     }
     private async Task<object> MutateAsync(JsonElement root, CancellationToken token, Func<NamedPipeAddonFrontendClient, JsonElement, CancellationToken, Task<object>> mutation)
     {
+        await EnsureDeviceMutationAdmittedAsync(token).ConfigureAwait(false);
+        return await mutation(_client, root.GetProperty("payload"), token).ConfigureAwait(false);
+    }
+
+    // The one Device QAM mutation admission rule, shared by the legacy feature-specific path and the
+    // SF-V2-04 generic path. Surface-owned policy only -- it is deliberately NOT moved into the
+    // SF-V2-03 mutation adapter / presentation / feature Runtimes.
+    private async Task EnsureDeviceMutationAdmittedAsync(CancellationToken token)
+    {
         var status = await _client.CaptureStatusAsync(token).ConfigureAwait(false);
         if (!status.Steam.Active || status.Steam.AppId != 0 || status.Steam.Source != FrontendSteamSource.BigPicture)
             throw new InvalidOperationException("Device QAM mutation is available only in Big Picture with no running game.");
-        return await mutation(_client, root.GetProperty("payload"), token).ConfigureAwait(false);
+    }
+
+    private async Task<object> CaptureQuickSettingsPageAsync(JsonElement root, CancellationToken token)
+    {
+        var request = root.GetProperty("payload").Deserialize<QuickSettingsPageBridgeRequest>(BridgeJson)
+            ?? throw new JsonException("Invalid Quick Settings page request.");
+        if (!Enum.IsDefined(request.PageId))
+            throw new JsonException("Invalid Quick Settings page id.");
+        return await _client.CaptureQuickSettingsPageAsync(request.PageId, request.AppId, token).ConfigureAwait(false);
+    }
+
+    private async Task<object> MutateQuickSettingAsync(JsonElement root, CancellationToken token)
+    {
+        var intent = root.GetProperty("payload").Deserialize<QuickSettingsMutationIntent>(BridgeJson)
+            ?? throw new JsonException("Invalid Quick Settings mutation intent.");
+        // Surface scope for SF-V2-04/05: only Device mutation is exposed through the generic QAM path.
+        // Profile generic admission is a later focused milestone. Row/value/AppId/TDP-group validation
+        // stays in the SF-V2-03 QuickSettingsMutationAdapter.
+        if (intent.PageId != QuickSettingsPageId.Device)
+            throw new InvalidOperationException("Only Device Quick Settings mutation is available through the QAM generic seam.");
+        await EnsureDeviceMutationAdmittedAsync(token).ConfigureAwait(false);
+        return await _client.MutateQuickSettingAsync(intent, token).ConfigureAwait(false);
     }
     private async Task<object> ActiveMutationAsync(JsonElement root, CancellationToken token, Func<NamedPipeAddonFrontendClient, uint, JsonElement, CancellationToken, Task<object>> mutation)
     {

@@ -28,8 +28,9 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     {
         Assert.Equal(6, OverlayTransportProtocol.CurrentVersion);
         // SF-V2-02 owns only .Overlay v5 -> v6. The desktop/QAM frontend protocol is whatever current
-        // main already carries (27, from the since-merged SD6A PR B #497) -- this PR must not bump it.
-        Assert.Equal(27, FrontendTransportProtocol.CurrentVersion);
+        // main already carries (28, after the since-merged SF-V2-04 generic Quick Settings RPC seam) --
+        // the .Overlay transport is independent of it and its own version stays at v6.
+        Assert.Equal(28, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]

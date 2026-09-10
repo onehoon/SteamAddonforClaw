@@ -176,7 +176,19 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                 try { await _inner.CloseClawSensorProbeAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
             operationGate.Dispose(); }
     }
-    private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.SetGameProfileFavorite
+    // SF-V2-04: dispatch the two generic Quick Settings RPCs onto the existing IAddonFrontendControl
+    // seam only. Product validation (page/row/value shape, TDP group, enum values) stays in the
+    // SF-V2-03 QuickSettingsMutationAdapter behind MutateQuickSettingAsync -- no feature switch here.
+    private async Task<System.Text.Json.JsonElement> InvokeQuickSettingsCaptureAsync(System.Text.Json.JsonElement? p, CancellationToken t)
+    {
+        var request = FrontendWireCodec.Decode<CaptureQuickSettingsPageRequest>(p);
+        return FrontendWireCodec.Payload(await _inner.CaptureQuickSettingsPageAsync(request.PageId, request.AppId, t).ConfigureAwait(false));
+    }
+    private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.CaptureQuickSettingsPage
+        ? await InvokeQuickSettingsCaptureAsync(p, t).ConfigureAwait(false)
+        : m == FrontendRpcMethod.MutateQuickSetting
+        ? FrontendWireCodec.Payload(await _inner.MutateQuickSettingAsync(FrontendWireCodec.Decode<QuickSettingsMutationIntent>(p), t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileFavorite
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileFavoriteAsync(FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).Favorite, FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).DisplayName, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileResolution
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileResolutionAsync(FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
