@@ -83,6 +83,42 @@ public sealed class QamFrontendBridgeTests
     }
 
     [Fact]
+    public async Task Generic_mutation_missing_required_identity_fields_is_rejected_before_runtime_call()
+    {
+        var (bridge, fake, server) = await StartAsync(new(true, 0, FrontendSteamSource.BigPicture));
+        await using var _ = server;
+        await using var __ = bridge;
+
+        // PageId / EditedRowId / nested RowId / Value.Kind all omitted -- must not default to enum
+        // member 0 (Device / DeviceTdpEnabled / Boolean) and reach the Runtime.
+        const string json = """
+            { "id": 1, "method": "mutateQuickSetting", "payload": { "appId": null, "values": [ { "value": { "booleanValue": true } } ] } }
+            """;
+
+        var response = await bridge.HandleRequestAsync(json, CancellationToken.None);
+
+        Assert.False(response.Ok);
+        Assert.Equal(0, fake.MutateCount);
+    }
+
+    [Fact]
+    public async Task Generic_capture_missing_page_identity_is_rejected_before_runtime_call()
+    {
+        var (bridge, fake, server) = await StartAsync(new(true, 0, FrontendSteamSource.BigPicture));
+        await using var _ = server;
+        await using var __ = bridge;
+
+        const string json = """
+            { "id": 1, "method": "captureQuickSettingsPage", "payload": { "appId": null } }
+            """;
+
+        var response = await bridge.HandleRequestAsync(json, CancellationToken.None);
+
+        Assert.False(response.Ok);
+        Assert.Equal(0, fake.CaptureCount);
+    }
+
+    [Fact]
     public async Task Generic_page_capture_round_trips_through_the_bridge_and_does_not_require_admission()
     {
         var (bridge, fake, server) = await StartAsync(new(true, 480, FrontendSteamSource.Actual));

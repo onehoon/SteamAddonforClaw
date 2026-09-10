@@ -11,6 +11,13 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     internal sealed record Response(long Id, bool Ok, object? Payload = null, string? Error = null);
     internal static readonly JsonSerializerOptions BridgeJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
+    // SF-V2-04: the generic Quick Settings records must fail closed on omitted identities. BridgeJson
+    // deliberately does not enforce required constructor parameters (legacy compatibility surface), so
+    // a missing enum-valued field would silently default to enum member 0 (Device / DeviceTdpEnabled /
+    // Boolean) and reserialize into a valid strict v28 wire payload. Decode the two new payloads with a
+    // stricter clone so a malformed dynamic JS request is rejected before any Runtime call.
+    private static readonly JsonSerializerOptions QuickSettingsBridgeJson = new(BridgeJson) { RespectRequiredConstructorParameters = true };
+
     internal static WindowsPowerMode DecodePowerMode(JsonElement payload) =>
         payload.GetProperty("mode").Deserialize<WindowsPowerMode>();
     private readonly NamedPipeAddonFrontendClient _client;
@@ -30,7 +37,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
 
     // SF-V2-04: bridge-local generic Quick Settings capture request. Kept private rather than making
     // the frontend-transport DTO public.
-    private sealed record QuickSettingsPageBridgeRequest(QuickSettingsPageId PageId, uint? AppId);
+    private sealed record QuickSettingsPageBridgeRequest(QuickSettingsPageId PageId, uint? AppId = null);
 
     internal async Task ConnectAsync(CancellationToken cancellationToken)
     {
@@ -104,7 +111,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
 
     private async Task<object> CaptureQuickSettingsPageAsync(JsonElement root, CancellationToken token)
     {
-        var request = root.GetProperty("payload").Deserialize<QuickSettingsPageBridgeRequest>(BridgeJson)
+        var request = root.GetProperty("payload").Deserialize<QuickSettingsPageBridgeRequest>(QuickSettingsBridgeJson)
             ?? throw new JsonException("Invalid Quick Settings page request.");
         if (!Enum.IsDefined(request.PageId))
             throw new JsonException("Invalid Quick Settings page id.");
@@ -113,7 +120,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
 
     private async Task<object> MutateQuickSettingAsync(JsonElement root, CancellationToken token)
     {
-        var intent = root.GetProperty("payload").Deserialize<QuickSettingsMutationIntent>(BridgeJson)
+        var intent = root.GetProperty("payload").Deserialize<QuickSettingsMutationIntent>(QuickSettingsBridgeJson)
             ?? throw new JsonException("Invalid Quick Settings mutation intent.");
         // Surface scope for SF-V2-04/05: only Device mutation is exposed through the generic QAM path.
         // Profile generic admission is a later focused milestone. Row/value/AppId/TDP-group validation
