@@ -529,6 +529,10 @@
       const [status, setStatus] = React.useState(null);
       const [devicePage, setDevicePage] = React.useState(null);
       const devicePageRef = React.useRef(null);
+      // The generic Device pending draft lives in state.qamSliderCommits (outside React). Bump this
+      // to force one renderer-local pass so an immediate slider preview / linked paired correction
+      // is visible before the trailing commit settles.
+      const [, bumpDeviceDraftRender] = React.useState(0);
       const [profile, setProfile] = React.useState(null);
       const [fpsDraft, setFpsDraft] = React.useState({ ac: 60, dc: 60 });
       const [profileTdpDraft, setProfileTdpDraft] = React.useState(null);
@@ -714,6 +718,9 @@
             applyDeviceQuickSettingsResult(result);
           },
           delayMs);
+        // The pending Map is outside React -- force one render so deviceRowEffectiveValue() and any
+        // linked paired value show immediately.
+        bumpDeviceDraftRender(value => value + 1);
       };
 
       const renderDeviceQuickSettingsRow = (page, section, row) => {

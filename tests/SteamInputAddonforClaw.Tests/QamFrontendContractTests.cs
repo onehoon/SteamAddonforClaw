@@ -399,6 +399,10 @@ public sealed class QamFrontendContractTests
         // Delay comes from the row's commit policy, never a JS constant.
         Assert.Contains("const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING ? Number(row.commitPolicy.delayMilliseconds) : 0;", schedule);
         Assert.Contains("\"mutateQuickSetting\"", schedule);
+        // The pending Map is outside React -- scheduling a draft forces one renderer-local pass so
+        // the immediate preview / linked paired correction is visible before the trailing commit.
+        Assert.Contains("const [, bumpDeviceDraftRender] = React.useState(0);", source);
+        Assert.Contains("bumpDeviceDraftRender(value => value + 1);", schedule);
 
         // Seeding reads only the shared section rows and their values, in order.
         var seed = source[source.IndexOf("function seedDeviceQuickSettingsSectionDraft", StringComparison.Ordinal)..source.IndexOf("function applyDeviceQuickSettingsLinkedConstraints", StringComparison.Ordinal)];
