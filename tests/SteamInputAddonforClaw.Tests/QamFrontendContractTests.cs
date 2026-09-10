@@ -87,31 +87,37 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_bridge_has_one_device_read_path_through_the_shared_aggregate()
+    public void Qam_bridge_device_path_is_only_the_generic_quick_settings_seam()
     {
         var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
 
-        Assert.Contains("\"captureDeviceQuickSettings\" => await _client.CaptureDeviceQuickSettingsAsync(token),", bridge);
-        Assert.DoesNotContain("\"captureCpuBoost\"", bridge);
-        Assert.DoesNotContain("\"captureTdp\"", bridge);
-        Assert.DoesNotContain("\"capturePowerMode\"", bridge);
-    }
-
-    [Fact]
-    public void Qam_bridge_exposes_the_generic_quick_settings_seam_alongside_the_transition_device_methods()
-    {
-        var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
-
-        // SF-V2-04: exactly the two approved generic bridge names.
+        // SF-V2-05: exactly the two approved generic bridge names, and the one Device admission rule.
         Assert.Contains("\"captureQuickSettingsPage\" => await CaptureQuickSettingsPageAsync(root, token),", bridge);
         Assert.Contains("\"mutateQuickSetting\" => await MutateQuickSettingAsync(root, token),", bridge);
-        // The generic Device mutation goes through the same one admission rule.
         Assert.Contains("await EnsureDeviceMutationAdmittedAsync(token)", bridge);
         // Product validation stays in SF-V2-03; the bridge only scopes the surface to Device.
         Assert.Contains("intent.PageId != QuickSettingsPageId.Device", bridge);
-        // The feature-specific Device methods remain until SF-V2-05 migrates qam.js.
-        Assert.Contains("\"setDeviceCpuBoostEnabled\" =>", bridge);
-        Assert.Contains("\"setDeviceTdp\" =>", bridge);
+
+        // The transitional feature-specific Device bridge operations are gone now that qam.js
+        // renders/mutates Device only through the shared page.
+        Assert.DoesNotContain("\"captureDeviceQuickSettings\"", bridge);
+        Assert.DoesNotContain("\"captureCpuBoost\"", bridge);
+        Assert.DoesNotContain("\"captureTdp\"", bridge);
+        Assert.DoesNotContain("\"capturePowerMode\"", bridge);
+        Assert.DoesNotContain("\"setDeviceCpuBoostEnabled\"", bridge);
+        Assert.DoesNotContain("\"setDeviceCpuBoostAc\"", bridge);
+        Assert.DoesNotContain("\"setDeviceCpuBoostDc\"", bridge);
+        Assert.DoesNotContain("\"setDeviceTdpEnabled\"", bridge);
+        Assert.DoesNotContain("\"setDeviceTdp\"", bridge);
+        Assert.DoesNotContain("\"setDevicePowerModeEnabled\"", bridge);
+        Assert.DoesNotContain("\"setDevicePowerModeAc\"", bridge);
+        Assert.DoesNotContain("\"setDevicePowerModeDc\"", bridge);
+        Assert.DoesNotContain("DecodeTdpConfiguration", bridge);
+
+        // Legacy Profile bridge operations remain untouched.
+        Assert.Contains("\"setActiveGameCpuBoostAc\"", bridge);
+        Assert.Contains("\"setActiveGameTdp\"", bridge);
+        Assert.Contains("DecodePowerMode", bridge);
     }
 
     [Fact]
@@ -127,17 +133,20 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_enabled_mutation_is_retired_with_the_installed_panel_and_clears_mode_previews()
+    public void Qam_device_immediate_toggle_retires_same_section_pending_work_generically()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var enabledIndex = source.IndexOf("const setEnabled = async value =>", StringComparison.Ordinal);
-        Assert.True(enabledIndex >= 0);
-        var enabledPath = source[enabledIndex..];
+        var index = source.IndexOf("const commitDeviceImmediate = async (page, section, row, nextValue) =>", StringComparison.Ordinal);
+        Assert.True(index >= 0);
+        var path = source[index..source.IndexOf("const scheduleDeviceQuickSettingsCommit", index, StringComparison.Ordinal)];
 
-        Assert.Contains("cancelQamSliderCommits(key => key.startsWith(\"device-cpu-\"));", enabledPath);
-        Assert.Contains("setPreviewAc(null); setPreviewDc(null);", enabledPath);
-        Assert.Contains("if (!state.installed) return;", enabledPath);
-        Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", enabledPath);
+        // Same-section cancellation is derived from the shared section identity, not device-* strings.
+        Assert.Contains("cancelQamSliderCommits((key, pending) => pending?.deviceSectionId === section.sectionId);", path);
+        Assert.DoesNotContain("device-cpu-", path);
+        Assert.Contains("if (!state.installed || !canMutateDeviceRow(row)) return;", path);
+        Assert.Contains("request(\"mutateQuickSetting\"", path);
+        Assert.Contains("editedRowId: row.rowId", path);
+        Assert.DoesNotContain("setDeviceCpuBoostEnabled", source);
     }
 
     [Fact]
@@ -252,7 +261,7 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_cpu_boost_panel_uses_the_existing_seven_mode_contract_and_bridge_allowlist()
+    public void Qam_preserves_steam_native_component_discovery_and_the_addon_tab_descriptor()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
@@ -281,37 +290,17 @@ public sealed class QamFrontendContractTests
         Assert.Contains("style: { display: \"flex\", width: \"100%\", justifyContent: \"space-between\" }", source);
         Assert.DoesNotContain("marginTop: \"-4px\"", source);
         Assert.Contains("fill: \"currentColor\"", source);
-        Assert.Contains("[0, \"Disabled\"]", source);
-        Assert.Contains("[1, \"Enabled\"]", source);
-        Assert.Contains("[2, \"Aggressive\"]", source);
-        Assert.Contains("[3, \"Efficient Enabled\"]", source);
-        Assert.Contains("[4, \"Efficient Aggressive\"]", source);
-        Assert.Contains("[5, \"Aggressive At Guaranteed\"]", source);
-        Assert.Contains("[6, \"Efficient Aggressive At Guaranteed\"]", source);
-        Assert.Contains("Plugged in", source);
-        Assert.Contains("On battery", source);
         Assert.DoesNotContain("AC Mode", source);
         Assert.DoesNotContain("DC Mode", source);
         Assert.Contains("request(\"captureStatus\")", source);
-        Assert.Contains("request(\"captureDeviceQuickSettings\")", source);
-        Assert.DoesNotContain("request(\"captureCpuBoost\")", source);
-        Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", source);
-        Assert.Contains("scheduleQamSliderCommit(`device-cpu-${key}`", source);
-        var cpuModeMutation = source[source.IndexOf("const scheduleMode", StringComparison.Ordinal)..source.IndexOf("const setEnabled", StringComparison.Ordinal)];
-        Assert.DoesNotContain("setBusy(true)", cpuModeMutation);
-        Assert.DoesNotContain("setBusy(false)", cpuModeMutation);
-        Assert.Contains("scheduleQamSliderCommit", cpuModeMutation);
-        Assert.Contains("setPreviewAc", cpuModeMutation);
-        Assert.Contains("setPreviewDc", cpuModeMutation);
-        Assert.Contains("const QAM_SLIDER_COMMIT_DELAY_MS = 2000", source);
         Assert.Contains("function scheduleQamSliderCommit", source);
         Assert.Contains("setTimeout(async () =>", source);
         Assert.Contains("state.onStateInvalidated", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("request(\"captureTdp\")", source);
         Assert.DoesNotContain("request(\"capturePowerMode\")", source);
+        Assert.DoesNotContain("request(\"captureCpuBoost\")", source);
         Assert.Contains("cancelQamSliderCommits", source);
-        Assert.Contains("setPreviewAc(null); setPreviewDc(null);", source);
         Assert.Contains("state.onStateInvalidated === handler", source);
         Assert.Contains("function findNativeQamComponents(webpackRequire)", source);
         Assert.Contains("const module = webpackRequire(id)", source);
@@ -331,8 +320,6 @@ public sealed class QamFrontendContractTests
         Assert.Contains("candidate?.toString?.()", source);
         Assert.Contains("source?.includes('ToggleField\",')", source);
         Assert.Contains("source?.includes('SliderField\",')", source);
-        Assert.DoesNotContain("ToggleField\\\\\\\",", source);
-        Assert.DoesNotContain("SliderField\\\\\\\",", source);
         Assert.DoesNotContain("findNativeComponent", source);
         Assert.DoesNotContain("findUniqueNativeComponent", source);
         Assert.DoesNotContain("requiredProps", source);
@@ -342,71 +329,114 @@ public sealed class QamFrontendContractTests
         Assert.Contains("state.installFailureKind = \"native-components\"", source);
         Assert.Contains("native.ToggleField", source);
         Assert.Contains("native.SliderField", source);
-        Assert.Contains("notchCount: modes.length", source);
         Assert.Contains("notchTicksVisible: true", source);
         Assert.DoesNotContain("numericNotches", source);
         Assert.DoesNotContain("notchLabels", source);
-        var cpuSliderStart = source.LastIndexOf("const slider =", StringComparison.Ordinal);
-        var cpuSlider = source[cpuSliderStart..source.IndexOf("const controls =", cpuSliderStart, StringComparison.Ordinal)];
-        Assert.DoesNotContain("showValue: true", cpuSlider);
-        Assert.DoesNotContain("description: labelFor(value)", source);
-        Assert.DoesNotContain("description: `${value} W`", source);
         Assert.Contains("mutationDepthRef", source);
         Assert.Contains("deferredInvalidationRef", source);
         Assert.Contains("beginMutation", source);
         Assert.Contains("endMutation", source);
-        Assert.Contains("key: \"cpu-plugged-in\"", source);
-        Assert.Contains("key: \"cpu-on-battery\"", source);
-        Assert.Contains("key: \"tdp-ac-pl1\"", source);
-        Assert.Contains("key: \"tdp-dc-pl2\"", source);
-        Assert.DoesNotContain("cpu-row-${index}", source);
-        Assert.DoesNotContain("tdp-row-${index}", source);
-        Assert.Contains("bottomSeparator: cpu?.enabled ? \"none\" : \"standard\"", source);
-        Assert.Contains("bottomSeparator,", source);
-        Assert.Contains("\"standard\")", source);
-        Assert.Contains("if (cpu?.enabled)", source);
         Assert.DoesNotContain("type: \"checkbox\"", source);
         Assert.DoesNotContain("type: \"range\"", source);
-        Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("fontFamily: \"sans-serif\"", source);
-        Assert.Contains("const mutationAvailable", source);
-        Assert.Contains("const modeWritable = mutationAvailable && cpu.enabled", source);
-        Assert.Contains("disabled: !modeWritable", source);
-        Assert.DoesNotContain("value: value == null ? 0 : value", source);
         Assert.Contains("const failClosed", source);
-        Assert.Contains("setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null", source);
-        Assert.Contains("cpu.lastFailure", source);
-        Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
         Assert.Contains("QAM required native controls/layout unavailable", source);
-        Assert.Contains("const powerWritable", source);
-        Assert.Contains("const powerInitialized = powerMode?.ac?.desired != null && powerMode?.dc?.desired != null;", source);
-        Assert.Contains("powerInitialized && !status?.steam?.appId", source);
-        Assert.Contains("const runPowerMutation", source);
-        Assert.Contains("Power Mode update failed", source);
-        Assert.Contains("Best power efficiency", source);
-        Assert.Contains("Best performance", source);
     }
 
     [Fact]
-    public void Qam_tdp_panel_projects_existing_device_contract_without_new_policy_or_polling()
+    public void Qam_device_page_renders_generically_from_shared_quick_settings_metadata()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var index = source.IndexOf("const renderDeviceQuickSettingsRow = (page, section, row) =>", StringComparison.Ordinal);
+        Assert.True(index >= 0);
+        var renderer = source[index..source.IndexOf("if (activeProfile) {", index, StringComparison.Ordinal)];
 
-        Assert.Contains("label: \"TDP Control\"", source);
-        Assert.Contains("scheduleQamSliderCommit(\"device-tdp\"", source);
-        Assert.Contains("request(\"setDeviceTdpEnabled\", { enabled })", source);
-        Assert.Contains("const tdpLimits = tdp?.limits", source);
-        Assert.Contains("max: label === \"PL1\" ? limit.pl2MaximumWatts : limit.pl2MaximumWatts", source);
-        Assert.Contains("step: 1", source);
-        Assert.Contains("const adjustTdpPair", source);
-        Assert.Contains("scheduleQamSliderCommit(\"device-tdp\"", source);
-        Assert.Contains("scheduleQamSliderCommit(\"profile-tdp\"", source);
-        Assert.Contains("QAM_SLIDER_COMMIT_DELAY_MS", source);
-        Assert.Contains("if (tdpDraft?.enabled && tdpLimits)", source);
-        Assert.DoesNotContain("setTdpAcPl1", source);
-        Assert.DoesNotContain("setTdpAcPl2", source);
-        Assert.DoesNotContain("setTdpDcPl1", source);
-        Assert.DoesNotContain("setTdpDcPl2", source);
+        // Control kind, labels, ranges, options, and value shape all come from the row payload.
+        Assert.Contains("row.controlKind === QS_CONTROL_TOGGLE", renderer);
+        Assert.Contains("row.controlKind !== QS_CONTROL_SLIDER", renderer);
+        Assert.Contains("label: row.label", renderer);
+        Assert.Contains("row.sliderSpec.kind === QS_SLIDER_NUMERIC", renderer);
+        Assert.Contains("min: row.sliderSpec.minimum, max: row.sliderSpec.maximum, step: row.sliderSpec.step", renderer);
+        Assert.Contains("row.sliderSpec.suffix", renderer);
+        Assert.Contains("const options = row.sliderSpec.options ?? [];", renderer);
+        Assert.Contains("options.findIndex(option => Number(option.value) === Number(effective.integerValue))", renderer);
+        Assert.Contains("if (optionIndex < 0) return null;", renderer);
+        Assert.Contains("options[optionIndex].label", renderer);
+        Assert.Contains("scheduleDeviceQuickSettingsCommit(page, section, row, option.value)", renderer);
+        Assert.Contains("native.ToggleField", renderer);
+        Assert.Contains("native.SliderField", renderer);
+
+        // Sections/rows are iterated in payload order with identity-derived keys.
+        Assert.Contains("(devicePage?.sections ?? []).map(section =>", source);
+        Assert.Contains("key: `qs-section-${section.sectionId}`, title: section.label || undefined", source);
+        Assert.Contains("key: `qs-row-${row.rowId}`", source);
+
+        // The Device path no longer owns product labels/options/ranges/policy.
+        Assert.DoesNotContain("const QAM_SLIDER_COMMIT_DELAY_MS", source);
+        Assert.DoesNotContain("sideValue", source);
+        Assert.DoesNotContain("const mutationAvailable", source);
+        Assert.DoesNotContain("cpu.lastFailure", source);
+    }
+
+    [Fact]
+    public void Qam_device_tdp_group_uses_shared_commit_group_and_a_whole_section_draft()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var scheduleIndex = source.IndexOf("const scheduleDeviceQuickSettingsCommit = (page, section, row, nextProductValue) =>", StringComparison.Ordinal);
+        Assert.True(scheduleIndex >= 0);
+        var schedule = source[scheduleIndex..source.IndexOf("const renderDeviceQuickSettingsRow", scheduleIndex, StringComparison.Ordinal)];
+
+        // Pending identity: independent row -> RowId key; grouped row -> CommitGroupId key.
+        var pendingKey = source[source.IndexOf("function deviceQuickSettingsPendingKey", StringComparison.Ordinal)..source.IndexOf("function deviceQuickSettingsPendingValue", StringComparison.Ordinal)];
+        Assert.Contains("row.commitGroupId == null", pendingKey);
+        Assert.Contains("`device-row:${row.rowId}`", pendingKey);
+        Assert.Contains("`device-group:${row.commitGroupId}`", pendingKey);
+        // A grouped edit seeds the WHOLE containing section (Enabled + four PL sliders) in payload
+        // order -- with no hard-coded Device TDP RowId knowledge in JS.
+        Assert.Contains(": seedDeviceQuickSettingsSectionDraft(section);", schedule);
+        Assert.Contains("if (row.commitGroupId != null) applyDeviceQuickSettingsLinkedConstraints(devicePageRef.current, draft.values, row.rowId);", schedule);
+        Assert.Contains("draft.order.map(rowId => ({ rowId, value: draft.values[rowId] }))", schedule);
+        // Delay comes from the row's commit policy, never a JS constant.
+        Assert.Contains("const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING ? Number(row.commitPolicy.delayMilliseconds) : 0;", schedule);
+        Assert.Contains("\"mutateQuickSetting\"", schedule);
+        // The pending Map is outside React -- scheduling a draft forces one renderer-local pass so
+        // the immediate preview / linked paired correction is visible before the trailing commit.
+        Assert.Contains("const [, bumpDeviceDraftRender] = React.useState(0);", source);
+        Assert.Contains("bumpDeviceDraftRender(value => value + 1);", schedule);
+
+        // Only the in-flight delayed RPC runs inside the component's existing mutation/invalidation
+        // gate (beginMutation/endMutation via onRequestStart/onRequestEnd); the 2s debounce is not
+        // gated, and the settlement consumes the mutation's own deferred invalidation.
+        Assert.Contains("deferredInvalidationRef.current = false;", schedule);
+        var lines = schedule.Split('\n');
+        Assert.Contains(lines, l => l.Trim() == "beginMutation,");
+        Assert.Contains(lines, l => l.Trim() == "endMutation);");
+        var scheduler = source[source.IndexOf("function scheduleQamSliderCommit", StringComparison.Ordinal)..source.IndexOf("// --- Shared Quick Settings Device helpers", StringComparison.Ordinal)];
+        Assert.Contains("onRequestStart = null, onRequestEnd = null", scheduler);
+        Assert.Contains("requestStarted = true;", scheduler);
+        Assert.Contains("onRequestStart?.();", scheduler);
+        Assert.Contains("if (requestStarted) onRequestEnd?.();", scheduler);
+
+        // Seeding reads only the shared section rows and their values, in order.
+        var seed = source[source.IndexOf("function seedDeviceQuickSettingsSectionDraft", StringComparison.Ordinal)..source.IndexOf("function applyDeviceQuickSettingsLinkedConstraints", StringComparison.Ordinal)];
+        Assert.Contains("for (const row of section?.rows ?? [])", seed);
+        Assert.Contains("if (row.value == null) return null;", seed);
+
+        // Linked correction is metadata-driven: identities + gap + row slider bounds from the page,
+        // never known Claw limit tuples or PL1/PL2 label parsing in the Device path.
+        var constraints = source[source.IndexOf("function applyDeviceQuickSettingsLinkedConstraints", StringComparison.Ordinal)..source.IndexOf("function request(method, payload)", StringComparison.Ordinal)];
+        Assert.Contains("page?.linkedSliderConstraints ?? []", constraints);
+        Assert.Contains("constraint.lowerRowId", constraints);
+        Assert.Contains("constraint.upperRowId", constraints);
+        Assert.Contains("Number(constraint.minimumGap)", constraints);
+        Assert.Contains("upperRow.sliderSpec.maximum", constraints);
+        Assert.DoesNotContain("pl1MaximumWatts === 30", constraints);
+        Assert.DoesNotContain("PL1", constraints);
+
+        // The legacy tuple/label policy survives only in a Profile-scoped helper.
+        Assert.Contains("const legacyProfileAdjustTdpPair", source);
+        Assert.DoesNotContain("scheduleQamSliderCommit(\"device-tdp\"", source);
+        Assert.DoesNotContain("request(\"setDeviceTdpEnabled\"", source);
         Assert.DoesNotContain("Success", source[source.IndexOf("function buildAddonTab", StringComparison.Ordinal)..]);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("keydown", source);
@@ -422,16 +452,17 @@ public sealed class QamFrontendContractTests
         Assert.True(refreshStart >= 0);
         var refresh = source[refreshStart..source.IndexOf("const beginMutation", refreshStart, StringComparison.Ordinal)];
 
-        Assert.Contains("const nextDevice = activeGame ? null : await request(\"captureDeviceQuickSettings\");", refresh);
-        Assert.Contains("const nextCpu = nextDevice?.cpuBoost ?? null;", refresh);
-        Assert.Contains("const nextPowerMode = nextDevice?.powerMode ?? null;", refresh);
-        Assert.Contains("const nextTdp = nextDevice?.tdp ?? null;", refresh);
+        Assert.Contains("const nextDevicePage = activeGame ? null : await request(\"captureQuickSettingsPage\", { pageId: QS_PAGE_DEVICE, appId: null });", refresh);
+        Assert.Contains("setDevicePage(nextDevicePage); devicePageRef.current = nextDevicePage;", refresh);
+        Assert.DoesNotContain("captureDeviceQuickSettings", refresh);
         Assert.DoesNotContain("captureCpuBoost", refresh);
         Assert.DoesNotContain("capturePowerMode", refresh);
         Assert.DoesNotContain("\"captureTdp\"", refresh);
-        // Status/active Profile stay their own separate reads (work order section 11.3).
+        // Status/active Profile stay their own separate reads (surface admission / page selection).
         Assert.Contains("await request(\"captureStatus\")", refresh);
         Assert.Contains("await request(\"captureActiveGameProfile\")", refresh);
+        // Device delayed commits are retired when the Device surface context/admission is lost.
+        Assert.Contains("if (activeGame || !deviceMutationAdmitted) cancelQamSliderCommits(key => key.startsWith(\"device-\"));", refresh);
     }
 
     [Fact]
@@ -544,23 +575,31 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        Assert.Contains("const QAM_SLIDER_COMMIT_DELAY_MS = 2000", source);
+        // The one shared scheduler mechanism is reused; no JS Device delay constant remains.
+        Assert.DoesNotContain("QAM_SLIDER_COMMIT_DELAY_MS", source);
+        Assert.Contains("const PROFILE_SLIDER_COMMIT_DELAY_MS = 2000", source);
         Assert.Contains("state.qamSliderCommits", source);
         Assert.Contains("clearTimeout(pending.timer)", source);
         Assert.Contains("cancelQamSliderCommits();", source);
         Assert.Contains("scheduleQamSliderCommit(`profile-fps-${side}`", source);
-        Assert.Contains("\"device-power-ac\"", source);
+
+        // Device slider delay comes from row.commitPolicy; Device toggles commit immediately.
+        Assert.Contains("const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING ? Number(row.commitPolicy.delayMilliseconds) : 0;", source);
+        var deviceImmediate = source[source.IndexOf("const commitDeviceImmediate", StringComparison.Ordinal)..source.IndexOf("const scheduleDeviceQuickSettingsCommit", StringComparison.Ordinal)];
+        Assert.DoesNotContain("scheduleQamSliderCommit", deviceImmediate);
+        Assert.Contains("request(\"mutateQuickSetting\"", deviceImmediate);
+
+        // Legacy Profile power scheduler mechanics unchanged.
         var powerSchedule = source[source.IndexOf("const schedulePowerMode", StringComparison.Ordinal)..source.IndexOf("const powerSlider", StringComparison.Ordinal)];
         Assert.Contains("setPowerPreview(current => ({ ...current, [key]: value }))", powerSchedule);
         Assert.True(powerSchedule.IndexOf("setPowerPreview", StringComparison.Ordinal)
             < powerSchedule.IndexOf("scheduleQamSliderCommit", StringComparison.Ordinal));
-        var powerSlider = source[source.IndexOf("const powerSlider", StringComparison.Ordinal)..source.IndexOf("const powerControls", StringComparison.Ordinal)];
-        Assert.Contains("schedulePowerMode", powerSlider);
-        Assert.Contains("powerPreview[key] ?? pendingValue ?? value", powerSlider);
-        Assert.DoesNotContain("runPowerMutation", powerSlider);
         Assert.True(powerSchedule.IndexOf("await refresh();", StringComparison.Ordinal)
             < powerSchedule.IndexOf("delete next[key]", StringComparison.Ordinal));
-        Assert.Contains("setDevicePowerModeEnabled", source);
+        var powerSlider = source[source.IndexOf("const powerSlider", StringComparison.Ordinal)..source.IndexOf("// --- Generic Device Quick Settings renderer", StringComparison.Ordinal)];
+        Assert.Contains("schedulePowerMode", powerSlider);
+        Assert.Contains("powerPreview[key] ?? pendingValue ?? value", powerSlider);
+        Assert.DoesNotContain("runPowerMutation", source);
         Assert.Contains("setActiveGameFpsLimitEnabled", source);
         Assert.DoesNotContain("250", source);
         Assert.DoesNotContain("275", source);
@@ -572,12 +611,17 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        Assert.Contains("const effectiveDeviceDraft = state.qamSliderCommits?.get(\"device-tdp\")?.draft ?? nextDraft", source);
+        // Device: refresh() does NOT touch state.qamSliderCommits, so a pending draft survives a
+        // same-page StateInvalidated; the rendered value checks the pending draft before row.value.
+        var refresh = source[source.IndexOf("const refresh = React.useCallback(async () => {", StringComparison.Ordinal)..source.IndexOf("const beginMutation", StringComparison.Ordinal)];
+        Assert.DoesNotContain("qamSliderCommits.delete", refresh);
+        Assert.DoesNotContain("qamSliderCommits.set", refresh);
+        Assert.Contains("const deviceRowEffectiveValue = row => deviceQuickSettingsPendingValue(row.rowId) ?? row.value;", source);
+        // Legacy Profile pending draft restore is unchanged.
         Assert.Contains("const effectiveProfileDraft = state.qamSliderCommits?.get(\"profile-tdp\")?.draft ?? authoritativeProfileDraft", source);
-        Assert.Contains("tdpDraftRef.current = effectiveDeviceDraft", source);
         Assert.Contains("profileTdpDraftRef.current = effectiveProfileDraft", source);
 
-        var scheduler = source[source.IndexOf("function scheduleQamSliderCommit", StringComparison.Ordinal)..source.IndexOf("function receiveBridgeResponse", StringComparison.Ordinal)];
+        var scheduler = source[source.IndexOf("function scheduleQamSliderCommit", StringComparison.Ordinal)..source.IndexOf("// --- Shared Quick Settings Device helpers", StringComparison.Ordinal)];
         Assert.Contains("if (state.qamSliderCommits.get(key)?.token !== token) return;", scheduler);
         Assert.Contains("state.qamSliderCommits.delete(key);", scheduler);
         Assert.True(scheduler.IndexOf("const result = await request(method, payload)", StringComparison.Ordinal)
@@ -591,27 +635,30 @@ public sealed class QamFrontendContractTests
 
         var handlerStart = source.IndexOf("const handler = () =>", StringComparison.Ordinal);
         var handler = source[handlerStart..source.IndexOf("state.onStateInvalidated = handler", handlerStart, StringComparison.Ordinal)];
+        // The invalidation handler only re-refreshes -- it never erases pending previews/drafts.
         Assert.DoesNotContain("setPreviewAc(null)", handler);
         Assert.DoesNotContain("setPreviewDc(null)", handler);
-        Assert.Contains("const cpuScope = activeGame ? \"profile\" : \"device\"", source);
-        Assert.Contains("`${cpuScope}-cpu-ac`", source);
-        Assert.Contains("`${cpuScope}-cpu-dc`", source);
+        Assert.DoesNotContain("setDevicePage(null)", handler);
+        Assert.DoesNotContain("cancelQamSliderCommits", handler);
+        Assert.Contains("void refresh();", handler);
     }
 
     [Fact]
-    public void Qam_power_mutation_refresh_preserves_explicit_failure()
+    public void Qam_device_mutation_result_page_is_authoritative_on_success_and_failure()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        var mutationStart = source.IndexOf("const runPowerMutation", StringComparison.Ordinal);
-        var mutation = source[mutationStart..source.IndexOf("React.useEffect", mutationStart, StringComparison.Ordinal)];
+        var apply = source[source.IndexOf("const applyDeviceQuickSettingsResult = result =>", StringComparison.Ordinal)..source.IndexOf("const commitDeviceImmediate", StringComparison.Ordinal)];
+        // result.page always wins -- no optimistic rollback to the previous page on a typed failure.
+        Assert.Contains("if (result?.page) { setDevicePage(result.page); devicePageRef.current = result.page; }", apply);
+        Assert.Contains("setError(!result?.succeeded ? (result?.failureMessage || \"Device update failed\") : null);", apply);
+        Assert.DoesNotContain("rollback", source);
 
-        Assert.Contains("const failure = !result?.succeeded", mutation);
-        Assert.Contains("await refresh();", mutation);
-        Assert.Contains("deferredInvalidationRef.current = false;", mutation);
-        Assert.Contains("if (failure) setError(failure);", mutation);
-        Assert.True(mutation.IndexOf("await refresh();", StringComparison.Ordinal)
-            < mutation.IndexOf("if (failure) setError(failure);", StringComparison.Ordinal));
+        // The immediate path swallows its own self-triggered invalidation like the legacy path did.
+        var immediate = source[source.IndexOf("const commitDeviceImmediate", StringComparison.Ordinal)..source.IndexOf("const scheduleDeviceQuickSettingsCommit", StringComparison.Ordinal)];
+        Assert.Contains("applyDeviceQuickSettingsResult(result);", immediate);
+        Assert.Contains("deferredInvalidationRef.current = false;", immediate);
+        Assert.Contains("finally { endMutation(); setBusy(false); }", immediate);
     }
 
     [Fact]
@@ -621,9 +668,9 @@ public sealed class QamFrontendContractTests
 
         Assert.Contains("if (state.addonTabDescriptor) return state.addonTabDescriptor;", source);
         Assert.Contains("state.addonTabDescriptor = {", source);
-        Assert.Contains("const modeWritableRef = React.useRef(false);", source);
-        Assert.Contains("modeWritableRef.current = modeWritable;", source);
-        Assert.Contains("if (!state.installed || !modeWritableRef.current) return;", source);
+        // Device row mutation is gated by shared writability + QAM surface admission, checked live.
+        Assert.Contains("const canMutateDeviceRow = row => !unavailable && !!row.available && !!row.writable && !busy;", source);
+        Assert.Contains("if (!state.installed || !canMutateDeviceRow(row)) return;", source);
         Assert.Contains("cancelQamSliderCommits();", source);
         Assert.Contains("retireBridgeConsumers", source);
     }

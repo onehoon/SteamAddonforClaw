@@ -132,17 +132,6 @@ public sealed class QamFrontendBridgeTests
         Assert.Equal(QuickSettingsPageId.Device, fake.LastPageId);
     }
 
-    [Fact]
-    public void Tdp_configuration_round_trips_through_bridge_camel_case_json()
-    {
-        var expected = new FrontendTdpConfiguration(true, new(21, 31), new(11, 19));
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(new { configuration = expected }, QamFrontendBridge.BridgeJson));
-
-        var actual = QamFrontendBridge.DecodeTdpConfiguration(document.RootElement);
-
-        Assert.Equal(expected, actual);
-    }
-
     [Theory]
     [InlineData(0, WindowsPowerMode.BestPowerEfficiency)]
     [InlineData(1, WindowsPowerMode.Balanced)]

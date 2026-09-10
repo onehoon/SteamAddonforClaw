@@ -60,9 +60,10 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
             object result = method switch
             {
                 "captureStatus" => await _client.CaptureStatusAsync(token),
-                "captureDeviceQuickSettings" => await _client.CaptureDeviceQuickSettingsAsync(token),
-                // SF-V2-04 generic seam; qam.js starts consuming these in SF-V2-05. The feature-specific
-                // Device operations below remain until then because current qam.js still calls them.
+                // SF-V2-05: the QAM Device renderer now reads/mutates only through the shared Quick
+                // Settings seam. The feature-specific Device bridge operations were removed once qam.js
+                // stopped calling them; the focused NamedPipeAddonFrontendClient typed Device APIs stay
+                // for Main UI / other code.
                 "captureQuickSettingsPage" => await CaptureQuickSettingsPageAsync(root, token),
                 "mutateQuickSetting" => await MutateQuickSettingAsync(root, token),
                 "captureActiveGameProfile" => await _client.CaptureActiveGameProfileAsync(token),
@@ -78,14 +79,6 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
                 "setActiveGameFpsLimitEnabled" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileFpsLimitEnabledAsync(id, p.GetProperty("enabled").GetBoolean(), t)),
                 "setActiveGameFpsLimitAc" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileFpsLimitAcAsync(id, p.GetProperty("fps").GetInt32(), t)),
                 "setActiveGameFpsLimitDc" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileFpsLimitDcAsync(id, p.GetProperty("fps").GetInt32(), t)),
-                "setDeviceCpuBoostEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
-                "setDeviceCpuBoostAc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostAcAsync(p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
-                "setDeviceCpuBoostDc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostDcAsync(p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
-                "setDeviceTdp" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceTdpAsync(DecodeTdpConfiguration(p), t)),
-                "setDeviceTdpEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceTdpEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
-                "setDevicePowerModeEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDevicePowerModeEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
-                "setDevicePowerModeAc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDevicePowerModeAcAsync(DecodePowerMode(p), t)),
-                "setDevicePowerModeDc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDevicePowerModeDcAsync(DecodePowerMode(p), t)),
                 _ => throw new InvalidOperationException("Unsupported QAM method.")
             };
             return new Response(id, true, result);
@@ -93,15 +86,8 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException or FrontendTransportException)
         { return Error(id, "Invalid or unavailable QAM bridge request."); }
     }
-    private async Task<object> MutateAsync(JsonElement root, CancellationToken token, Func<NamedPipeAddonFrontendClient, JsonElement, CancellationToken, Task<object>> mutation)
-    {
-        await EnsureDeviceMutationAdmittedAsync(token).ConfigureAwait(false);
-        return await mutation(_client, root.GetProperty("payload"), token).ConfigureAwait(false);
-    }
-
-    // The one Device QAM mutation admission rule, shared by the legacy feature-specific path and the
-    // SF-V2-04 generic path. Surface-owned policy only -- it is deliberately NOT moved into the
-    // SF-V2-03 mutation adapter / presentation / feature Runtimes.
+    // The one Device QAM mutation admission rule. Surface-owned policy only -- it is deliberately NOT
+    // moved into the SF-V2-03 mutation adapter / presentation / feature Runtimes.
     private async Task EnsureDeviceMutationAdmittedAsync(CancellationToken token)
     {
         var status = await _client.CaptureStatusAsync(token).ConfigureAwait(false);
@@ -136,9 +122,6 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
         if (active.AppId == 0 || !active.Exists && active.Enabled) throw new InvalidOperationException("No active game.");
         return await mutation(_client, active.AppId, root.GetProperty("payload"), token).ConfigureAwait(false);
     }
-    internal static FrontendTdpConfiguration DecodeTdpConfiguration(JsonElement payload) =>
-        payload.GetProperty("configuration").Deserialize<FrontendTdpConfiguration>(BridgeJson)
-        ?? throw new JsonException("Invalid TDP configuration.");
     private static Response Error(long id, string message) => new(id, false, Error: message);
     internal void StopAccepting() => Interlocked.Exchange(ref _stopping, 1);
     public async ValueTask DisposeAsync()

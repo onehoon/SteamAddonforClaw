@@ -25,8 +25,23 @@
   const TAB_MARKER = "steamInputAddonQam";
   const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
-  const QAM_SLIDER_COMMIT_DELAY_MS = 2000;
+  // Legacy Profile-only slider debounce. The Device path is migrated to the shared Quick Settings
+  // model (SF-V2-05) and reads its delay from row.commitPolicy.delayMilliseconds instead. Profile
+  // duplication is removed in its own later migration PR.
+  const PROFILE_SLIDER_COMMIT_DELAY_MS = 2000;
   const SHOW_INTEL_FPS_LIMIT = false;
+
+  // Shared Quick Settings transport/ABI vocabulary (SF-V2-05). These mirror the closed C# enums the
+  // bridge serializes numerically -- they are NOT a duplicated copy of Device product presentation
+  // policy (labels/order/options/ranges/policy all come from the page payload).
+  const QS_PAGE_DEVICE = 0;
+  const QS_CONTROL_TOGGLE = 0;
+  const QS_CONTROL_SLIDER = 1;
+  const QS_SLIDER_NUMERIC = 0;
+  const QS_SLIDER_DISCRETE = 1;
+  const QS_COMMIT_TRAILING = 1;
+  const QS_VALUE_BOOLEAN = 0;
+  const QS_VALUE_INTEGER = 1;
 
   function log(message) {
     console.log("[SteamInputAddon:QAM] " + message);
@@ -512,15 +527,17 @@
 
     function CpuBoostPanel() {
       const [status, setStatus] = React.useState(null);
-      const [cpu, setCpu] = React.useState(null);
-      const [powerMode, setPowerMode] = React.useState(null);
-      const [tdp, setTdp] = React.useState(null);
+      const [devicePage, setDevicePage] = React.useState(null);
+      const devicePageRef = React.useRef(null);
+      // The generic Device pending draft lives in state.qamSliderCommits (outside React). Bump this
+      // to force one renderer-local pass so an immediate slider preview / linked paired correction
+      // is visible before the trailing commit settles.
+      const [, bumpDeviceDraftRender] = React.useState(0);
       const [profile, setProfile] = React.useState(null);
       const [fpsDraft, setFpsDraft] = React.useState({ ac: 60, dc: 60 });
       const [profileTdpDraft, setProfileTdpDraft] = React.useState(null);
       const profileTdpDraftRef = React.useRef(null);
       const activeProfileAppIdRef = React.useRef(0);
-      const [tdpDraft, setTdpDraft] = React.useState(null);
       const [previewAc, setPreviewAc] = React.useState(null);
       const [previewDc, setPreviewDc] = React.useState(null);
       const [powerPreview, setPowerPreview] = React.useState({});
@@ -528,9 +545,6 @@
       const [error, setError] = React.useState(null);
       const refreshInFlight = React.useRef(false);
       const refreshDirty = React.useRef(false);
-      const tdpDraftRef = React.useRef(null);
-      const tdpWritableRef = React.useRef(false);
-      const modeWritableRef = React.useRef(false);
       const mutationDepthRef = React.useRef(0);
       const deferredInvalidationRef = React.useRef(false);
       const powerModeLabels = ["Best power efficiency", "Balanced", "Best performance"];
@@ -541,7 +555,7 @@
       const failClosed = React.useCallback(message => {
         cancelQamSliderCommits();
         activeProfileAppIdRef.current = 0;
-          setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setPowerPreview({}); setError(message);
+          setStatus(null); setDevicePage(null); devicePageRef.current = null; setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setPreviewAc(null); setPreviewDc(null); setPowerPreview({}); setError(message);
           setFpsDraft({ ac: 60, dc: 60 });
       }, []);
 
@@ -560,16 +574,16 @@
           }
           activeProfileAppIdRef.current = nextAppId;
           const activeGame = nextAppId > 0;
-          const nextDevice = activeGame ? null : await request("captureDeviceQuickSettings");
-          const nextCpu = nextDevice?.cpuBoost ?? null;
-          const nextPowerMode = nextDevice?.powerMode ?? null;
-          const nextTdp = nextDevice?.tdp ?? null;
-          const nextDraft = nextTdp?.configuration ? {
-            enabled: nextTdp.configuration.enabled,
-            ac: { ...nextTdp.configuration.ac },
-            dc: { ...nextTdp.configuration.dc },
-          } : null;
-          setStatus(nextStatus); setCpu(nextCpu); setPowerMode(nextPowerMode); setTdp(nextTdp); setProfile(nextProfile);
+          // Device surface admission stays QAM-owned: Big Picture active + no running game.
+          const deviceMutationAdmitted = !!nextStatus && nextStatus.steam?.active === true && nextStatus.steam?.appId === 0 && nextStatus.steam?.source === 1;
+          // The one Device product-definition input is now the shared Quick Settings page.
+          const nextDevicePage = activeGame ? null : await request("captureQuickSettingsPage", { pageId: QS_PAGE_DEVICE, appId: null });
+          // A Device delayed commit is no longer admissible once a game is running / Big Picture
+          // admission is lost -- retire it rather than let a stale timer fire into the bridge and
+          // be rejected (e.g. a 2s slider edit right before a game launch).
+          if (activeGame || !deviceMutationAdmitted) cancelQamSliderCommits(key => key.startsWith("device-"));
+          setStatus(nextStatus); setProfile(nextProfile);
+          setDevicePage(nextDevicePage); devicePageRef.current = nextDevicePage;
           setFpsDraft({ ac: state.qamSliderCommits?.get("profile-fps-ac")?.value ?? nextProfile?.fpsLimit?.acFps ?? 60, dc: state.qamSliderCommits?.get("profile-fps-dc")?.value ?? nextProfile?.fpsLimit?.dcFps ?? 60 });
           if (nextProfile?.tdp) {
             const authoritativeProfileDraft = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
@@ -577,11 +591,8 @@
             profileTdpDraftRef.current = effectiveProfileDraft;
             setProfileTdpDraft(effectiveProfileDraft);
           }
-          const effectiveDeviceDraft = state.qamSliderCommits?.get("device-tdp")?.draft ?? nextDraft;
-          setTdpDraft(effectiveDeviceDraft); tdpDraftRef.current = effectiveDeviceDraft;
-          const cpuScope = activeGame ? "profile" : "device";
-          setPreviewAc(state.qamSliderCommits?.get(`${cpuScope}-cpu-ac`)?.value ?? null);
-          setPreviewDc(state.qamSliderCommits?.get(`${cpuScope}-cpu-dc`)?.value ?? null);
+          setPreviewAc(state.qamSliderCommits?.get("profile-cpu-ac")?.value ?? null);
+          setPreviewDc(state.qamSliderCommits?.get("profile-cpu-dc")?.value ?? null);
           setError(null);
         } catch (_) { failClosed("QAM bridge unavailable"); }
         finally {
@@ -598,29 +609,6 @@
           void refresh();
         }
       }, [refresh]);
-      const runPowerMutation = React.useCallback(async (method, payload) => {
-        if (!state.installed) return;
-        if (method.endsWith("PowerModeEnabled") && payload?.enabled === false) {
-          cancelQamSliderCommits(key => key.includes("power-"));
-          setPowerPreview(current => Object.fromEntries(Object.entries(current).filter(([key]) => !key.includes("power-"))));
-        }
-        try {
-          beginMutation();
-          setError(null);
-          const result = await request(method, payload);
-          const failure = !result?.succeeded
-            ? (result?.failureMessage || "Power Mode update failed")
-            : null;
-          await refresh();
-          // The explicit refresh consumed the mutation's invalidation. Preserve
-          // the operation failure after refreshing Runtime authority.
-          deferredInvalidationRef.current = false;
-          if (failure) setError(failure);
-        }
-        catch (_) { failClosed("Power Mode update failed"); }
-        finally { endMutation(); }
-      }, [beginMutation, endMutation, failClosed, refresh]);
-
       React.useEffect(() => { void refresh(); }, [refresh]);
 
       React.useEffect(() => {
@@ -640,45 +628,13 @@
 
       const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
       const activeProfile = Number(profile?.appId || 0) > 0;
-      const mutationAvailable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
-      const modeWritable = mutationAvailable && cpu.enabled;
-      const tdpMutationAvailable = !!tdp && tdp.available && tdp.persistenceWritable && !unavailable && !busy;
-      tdpWritableRef.current = tdpMutationAvailable;
-      modeWritableRef.current = modeWritable;
-      const snapshotMessage = !cpu ? null : !cpu.persistenceWritable
-        ? "CPU Boost settings could not be loaded, so changes are disabled."
-        : cpu.lastFailure ? `The last CPU Boost change could not be applied to Windows: ${cpu.lastFailure}` : null;
-      const displayError = error || snapshotMessage;
-      const sideValue = (side, preview) => preview ?? side?.desired ?? (side?.currentStatus === 0 ? side.current : null);
+      const displayError = error || devicePage?.message || null;
       const labelFor = value => modes.find(item => item[0] === value)?.[1] || "Unknown / unset";
       const labelRow = (label, value) => React.createElement("div", { className: native.FieldLabelRowClass, style: { display: "flex", width: "100%", justifyContent: "space-between" } }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, value));
-      const scheduleMode = (side, value) => {
-        if (!state.installed || !modeWritableRef.current) return;
-        const key = side === "ac" ? "ac" : "dc";
-        side === "ac" ? setPreviewAc(value) : setPreviewDc(value);
-        scheduleQamSliderCommit(`device-cpu-${key}`, { value }, side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value }, async (result, failure) => {
-          if (failure) { failClosed("CPU Boost update failed"); return; }
-          if (result?.snapshot) setCpu(result.snapshot);
-          side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
-          if (!result?.succeeded) setError(result?.failureMessage || "CPU Boost update failed");
-          await refresh();
-        });
-      };
-      const setEnabled = async value => {
-        cancelQamSliderCommits(key => key.startsWith("device-cpu-"));
-        setPreviewAc(null); setPreviewDc(null);
-        if (!state.installed) return;
-        if (!mutationAvailable) return;
-        setBusy(true); setError(null);
-        try {
-          beginMutation();
-          const result = await request("setDeviceCpuBoostEnabled", { enabled: value });
-          setCpu(result.snapshot); if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
-        } catch (_) { failClosed("CPU Boost update failed"); }
-        finally { endMutation(); setBusy(false); }
-      };
-      const tdpLimits = tdp?.limits;
-      const adjustTdpPair = (pl1WasEdited, pl1, pl2, limits = tdpLimits) => {
+
+      // Legacy Profile-only PL1/PL2 gap correction. The Device path is metadata-driven
+      // (applyDeviceQuickSettingsLinkedConstraints) and never inspects known Claw limit tuples.
+      const legacyProfileAdjustTdpPair = (pl1WasEdited, pl1, pl2, limits) => {
         if (!limits) return { pl1Watts: pl1, pl2Watts: pl2 };
         const gap = limits.pl1MinimumWatts === 8 && limits.pl1MaximumWatts === 30 && limits.pl2MinimumWatts === 8 && limits.pl2MaximumWatts === 37
           ? 1
@@ -688,75 +644,7 @@
         if (!pl1WasEdited && pl1 > pl2 - gap) return pl2 - gap >= limits.pl1MinimumWatts ? { pl1Watts: pl2 - gap, pl2Watts: pl2 } : { pl1Watts: limits.pl1MinimumWatts, pl2Watts: limits.pl1MinimumWatts + gap };
         return { pl1Watts: pl1, pl2Watts: pl2 };
       };
-      const scheduleTdp = (nextDraft) => {
-        if (!tdpWritableRef.current) return;
-        tdpDraftRef.current = nextDraft; setTdpDraft(nextDraft);
-        scheduleQamSliderCommit("device-tdp", { draft: nextDraft }, "setDeviceTdp", { configuration: nextDraft }, async (result, failure) => {
-          if (failure) { failClosed("TDP update failed"); return; }
-          const authoritative = result?.snapshot?.configuration;
-          if (authoritative) { setTdp(result.snapshot); setTdpDraft(authoritative); tdpDraftRef.current = authoritative; }
-          if (!result?.succeeded) setError(result?.failureMessage || "TDP update failed");
-          await refresh();
-        });
-      };
-      const setTdpEnabled = async enabled => {
-        if (!state.installed || !tdpMutationAvailable) return;
-        cancelQamSliderCommits(key => key === "device-tdp"); setBusy(true); setError(null);
-        try {
-          beginMutation();
-          const result = await request("setDeviceTdpEnabled", { enabled });
-          setTdp(result.snapshot); setTdpDraft(result.snapshot.configuration); tdpDraftRef.current = result.snapshot.configuration;
-          if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
-        } catch (_) { failClosed("TDP update failed"); }
-        finally { endMutation(); setBusy(false); }
-      };
-      const tdpSlider = (label, source, limit, value, separator) => value == null || !limit ? null : React.createElement(native.SliderField, {
-        label: `${source === "ac" ? "Plugged in" : "On battery"} · ${label}`,
-        min: label === "PL1" ? limit.pl1MinimumWatts : limit.pl2MinimumWatts,
-        max: label === "PL1" ? limit.pl2MaximumWatts : limit.pl2MaximumWatts,
-        step: 1,
-        value,
-        disabled: !tdpMutationAvailable || !tdpDraft?.enabled,
-        showValue: true,
-        bottomSeparator: separator,
-        onChange: next => {
-          const draft = tdpDraftRef.current;
-          if (!draft) return;
-          const pair = { ...draft[source] };
-          let numeric = Number(next);
-          if (label === "PL1") numeric = Math.min(numeric, limit.pl1MaximumWatts);
-          if (label === "PL1") pair.pl1Watts = numeric; else pair.pl2Watts = numeric;
-          const adjusted = adjustTdpPair(label === "PL1", pair.pl1Watts, pair.pl2Watts);
-          scheduleTdp({ ...draft, [source]: { pl1Watts: adjusted.pl1Watts, pl2Watts: adjusted.pl2Watts } });
-        },
-      });
-      const slider = (title, side, value, bottomSeparator) => value == null ? null : React.createElement(native.SliderField, {
-        label: labelRow(title, labelFor(value)),
-        min: 0,
-        max: 6,
-        step: 1,
-        value,
-        notchCount: modes.length,
-        disabled: !modeWritable,
-        notchTicksVisible: true,
-        bottomSeparator,
-        onChange: next => scheduleMode(side, Number(next)),
-      });
 
-      const controls = [{ key: "cpu-toggle", node: React.createElement(native.ToggleField, {
-          label: "CPU Boost",
-          checked: !!cpu?.enabled,
-          disabled: !mutationAvailable,
-          bottomSeparator: cpu?.enabled ? "none" : "standard",
-          onChange: value => void setEnabled(!!value),
-        }) }];
-      if (cpu?.enabled) {
-        controls.push({ key: "cpu-plugged-in", node: slider("Plugged in", "ac", sideValue(cpu.ac, previewAc), "none") });
-        controls.push({ key: "cpu-on-battery", node: slider("On battery", "dc", sideValue(cpu.dc, previewDc), "standard") });
-      }
-
-      const powerInitialized = powerMode?.ac?.desired != null && powerMode?.dc?.desired != null;
-      const powerWritable = !!powerMode?.persistenceWritable && powerInitialized && !status?.steam?.appId && !busy;
       const schedulePowerMode = (key, method, value, appId = 0) => {
         setPowerPreview(current => ({ ...current, [key]: value }));
         scheduleQamSliderCommit(key, { value, appId }, method, { mode: powerModeValue(value) }, async (result, failure) => {
@@ -772,21 +660,107 @@
         const currentValue = powerPreview[key] ?? pendingValue ?? value;
         return React.createElement(native.SliderField, { label: labelRow(label, powerModeLabels[powerModeIndex(currentValue)] ?? "Unknown"), min: 0, max: 2, step: 1, value: powerModeIndex(currentValue), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => schedulePowerMode(key, method, Number(next), activeProfile ? Number(profile?.appId || 0) : 0) });
       };
-      const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !powerWritable, onChange: value => void runPowerMutation("setDevicePowerModeEnabled", { enabled: !!value }) }) }];
-      if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, "device-power-ac", "setDevicePowerModeAc", !powerWritable) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, "device-power-dc", "setDevicePowerModeDc", !powerWritable) }); }
 
-      const tdpControls = [{ key: "tdp-toggle", node: React.createElement(native.ToggleField, {
-        label: "TDP Control",
-        checked: !!tdpDraft?.enabled,
-        disabled: !tdpMutationAvailable,
-        onChange: value => void setTdpEnabled(!!value),
-      }) }];
-      if (tdpDraft?.enabled && tdpLimits) {
-        tdpControls.push({ key: "tdp-ac-pl1", node: tdpSlider("PL1", "ac", tdpLimits, tdpDraft.ac?.pl1Watts, "none") });
-        tdpControls.push({ key: "tdp-ac-pl2", node: tdpSlider("PL2", "ac", tdpLimits, tdpDraft.ac?.pl2Watts, "none") });
-        tdpControls.push({ key: "tdp-dc-pl1", node: tdpSlider("PL1", "dc", tdpLimits, tdpDraft.dc?.pl1Watts, "none") });
-        tdpControls.push({ key: "tdp-dc-pl2", node: tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard") });
-      }
+      // --- Generic Device Quick Settings renderer (SF-V2-05) ------------------------------------
+      // Steam native ToggleField / SliderField driven entirely by the shared page payload:
+      // section/row order, labels, control kind, options, ranges, commit policy, grouping, and
+      // linked constraints all come from the page -- no Device product table lives here.
+      const deviceRowEffectiveValue = row => deviceQuickSettingsPendingValue(row.rowId) ?? row.value;
+      const canMutateDeviceRow = row => !unavailable && !!row.available && !!row.writable && !busy;
+
+      const applyDeviceQuickSettingsResult = result => {
+        // The adapter always returns a fresh authoritative page -- it wins on success AND on a
+        // typed feature failure (a failed Windows apply may still have persisted the desired value).
+        if (result?.page) { setDevicePage(result.page); devicePageRef.current = result.page; }
+        setError(!result?.succeeded ? (result?.failureMessage || "Device update failed") : null);
+      };
+
+      const commitDeviceImmediate = async (page, section, row, nextValue) => {
+        if (!state.installed || !canMutateDeviceRow(row)) return;
+        const value = makeQuickSettingsValue(row, nextValue);
+        if (!value) return;
+        // An immediate parent toggle retires any still-pending delayed edit in the same section
+        // (CPU Boost OFF -> pending AC/DC slider; TDP OFF -> pending group commit; etc.).
+        cancelQamSliderCommits((key, pending) => pending?.deviceSectionId === section.sectionId);
+        setBusy(true); setError(null);
+        try {
+          beginMutation();
+          const result = await request("mutateQuickSetting", { pageId: page.pageId, appId: null, editedRowId: row.rowId, values: [{ rowId: row.rowId, value }] });
+          applyDeviceQuickSettingsResult(result);
+          deferredInvalidationRef.current = false;
+        } catch (_) { failClosed("Device update failed"); }
+        finally { endMutation(); setBusy(false); }
+      };
+
+      const scheduleDeviceQuickSettingsCommit = (page, section, row, nextProductValue) => {
+        if (!state.installed || !canMutateDeviceRow(row)) return;
+        const key = deviceQuickSettingsPendingKey(row);
+        const existing = state.qamSliderCommits?.get(key);
+        let draft = existing?.deviceValues
+          ? { values: { ...existing.deviceValues }, order: existing.deviceOrder }
+          : row.commitGroupId == null
+            ? (() => { const seeded = makeQuickSettingsValue(row, nextProductValue); return seeded ? { values: { [row.rowId]: seeded }, order: [row.rowId] } : null; })()
+            : seedDeviceQuickSettingsSectionDraft(section);
+        if (!draft) return;
+        const edited = makeQuickSettingsValue(row, nextProductValue);
+        if (!edited) return;
+        draft.values[row.rowId] = edited;
+        if (row.commitGroupId != null) applyDeviceQuickSettingsLinkedConstraints(devicePageRef.current, draft.values, row.rowId);
+        const values = draft.order.map(rowId => ({ rowId, value: draft.values[rowId] }));
+        const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING ? Number(row.commitPolicy.delayMilliseconds) : 0;
+        scheduleQamSliderCommit(
+          key,
+          { deviceValues: draft.values, deviceOrder: draft.order, deviceSectionId: section.sectionId },
+          "mutateQuickSetting",
+          { pageId: page.pageId, appId: null, editedRowId: row.rowId, values },
+          async (result, failure) => {
+            // Consume the mutation's own deferred invalidation before endMutation() can launch a
+            // refresh that would overwrite this settlement (and its failureMessage).
+            deferredInvalidationRef.current = false;
+            if (failure) { failClosed("Device update failed"); return; }
+            applyDeviceQuickSettingsResult(result);
+          },
+          delayMs,
+          beginMutation,
+          endMutation);
+        // The pending Map is outside React -- force one render so deviceRowEffectiveValue() and any
+        // linked paired value show immediately.
+        bumpDeviceDraftRender(value => value + 1);
+      };
+
+      const renderDeviceQuickSettingsRow = (page, section, row) => {
+        if (row.controlKind === QS_CONTROL_TOGGLE) {
+          return React.createElement(native.ToggleField, {
+            label: row.label,
+            checked: deviceRowEffectiveValue(row)?.booleanValue === true,
+            disabled: !canMutateDeviceRow(row),
+            onChange: value => void commitDeviceImmediate(page, section, row, !!value),
+          });
+        }
+        if (row.controlKind !== QS_CONTROL_SLIDER || !row.sliderSpec) return null;
+        const effective = deviceRowEffectiveValue(row);
+        if (effective == null) return null;
+        if (row.sliderSpec.kind === QS_SLIDER_NUMERIC) {
+          const numeric = Number(effective.integerValue);
+          return React.createElement(native.SliderField, {
+            label: labelRow(row.label, `${numeric}${row.sliderSpec.suffix ?? ""}`),
+            min: row.sliderSpec.minimum, max: row.sliderSpec.maximum, step: row.sliderSpec.step || 1,
+            value: numeric,
+            disabled: !canMutateDeviceRow(row),
+            onChange: next => scheduleDeviceQuickSettingsCommit(page, section, row, Number(next)),
+          });
+        }
+        const options = row.sliderSpec.options ?? [];
+        const optionIndex = options.findIndex(option => Number(option.value) === Number(effective.integerValue));
+        if (optionIndex < 0) return null;
+        return React.createElement(native.SliderField, {
+          label: labelRow(row.label, options[optionIndex].label),
+          min: 0, max: Math.max(0, options.length - 1), step: 1, value: optionIndex,
+          notchCount: options.length, notchTicksVisible: true,
+          disabled: !canMutateDeviceRow(row),
+          onChange: next => { const option = options[Math.round(Number(next))]; if (option) scheduleDeviceQuickSettingsCommit(page, section, row, option.value); },
+        });
+      };
 
       if (activeProfile) {
         const writable = profile.persistenceWritable && !busy;
@@ -867,7 +841,7 @@
             const pair = { ...draft[side] }; let numeric = Number(next);
             if (label.includes("PL1")) numeric = Math.min(numeric, profile.limits.pl1MaximumWatts);
             pair[label.includes("PL1") ? "pl1Watts" : "pl2Watts"] = numeric;
-            const adjusted = adjustTdpPair(label.includes("PL1"), pair.pl1Watts, pair.pl2Watts, profile.limits);
+            const adjusted = legacyProfileAdjustTdpPair(label.includes("PL1"), pair.pl1Watts, pair.pl2Watts, profile.limits);
             scheduleProfileTdp({ ...draft, [side]: adjusted });
           },
         });
@@ -935,16 +909,19 @@
           profilePowerControls.some(x => x.node) ? React.createElement(native.PanelSection, { key: "profile-power-section" }, ...profilePowerControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))) : null);
       }
 
+      const deviceSections = (devicePage?.sections ?? []).map(section => {
+        const rows = (section.rows ?? [])
+          .map(row => ({ key: `qs-row-${row.rowId}`, node: renderDeviceQuickSettingsRow(devicePage, section, row) }))
+          .filter(entry => entry.node);
+        return React.createElement(native.PanelSection, { key: `qs-section-${section.sectionId}`, title: section.label || undefined },
+          ...rows.map(entry => React.createElement(native.PanelSectionRow, { key: entry.key }, entry.node)));
+      });
+
       return React.createElement(React.Fragment, null,
         React.createElement("div", { className: native.QamTitleClass }, "Steam Addon for Claw"),
-        unavailable ? React.createElement("p", { key: "unavailable" }, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
+        unavailable ? React.createElement("p", { key: "unavailable" }, status?.steam?.appId ? "Unavailable while a game is running" : "Device settings unavailable") : null,
         displayError ? React.createElement("p", { key: "error" }, displayError) : null,
-        React.createElement(native.PanelSection, { key: "tdp-section" },
-          ...tdpControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
-        React.createElement(native.PanelSection, { key: "cpu-section" },
-          ...controls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
-        React.createElement(native.PanelSection, { key: "power-section", title: "Windows Power Mode" },
-          ...powerControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))));
+        ...deviceSections);
     }
 
     state.addonTabDescriptor = {
@@ -971,7 +948,10 @@
     }
   }
 
-  function scheduleQamSliderCommit(key, pending, method, payload, onSettled) {
+  // onRequestStart / onRequestEnd wrap ONLY the actual delayed RPC execution (never the debounce
+  // window), so the Device path can put just the in-flight mutation inside the component's existing
+  // beginMutation()/endMutation() invalidation gate while the pending draft stays refreshable.
+  function scheduleQamSliderCommit(key, pending, method, payload, onSettled, delayMs = PROFILE_SLIDER_COMMIT_DELAY_MS, onRequestStart = null, onRequestEnd = null) {
     state.qamSliderCommits ??= new Map();
     const previous = state.qamSliderCommits.get(key);
     if (previous) clearTimeout(previous.timer);
@@ -982,6 +962,7 @@
         if (state.qamSliderCommits.get(key)?.token !== token) return;
         entry.timer = null;
         if (!state.installed) return;
+        let requestStarted = false;
         try {
           if (entry.appId) {
             const activeProfile = await request("captureActiveGameProfile");
@@ -994,6 +975,8 @@
             }
           }
           if (state.qamSliderCommits.get(key)?.token !== token) return;
+          requestStarted = true;
+          onRequestStart?.();
           const result = await request(method, payload);
           if (state.qamSliderCommits.get(key)?.token !== token) return;
           state.qamSliderCommits.delete(key);
@@ -1002,9 +985,80 @@
           if (state.qamSliderCommits.get(key)?.token !== token) return;
           state.qamSliderCommits.delete(key);
           await onSettled(null, error, entry);
+        } finally {
+          if (requestStarted) onRequestEnd?.();
         }
-    }, QAM_SLIDER_COMMIT_DELAY_MS);
+    }, Number.isFinite(delayMs) && delayMs > 0 ? delayMs : PROFILE_SLIDER_COMMIT_DELAY_MS);
     state.qamSliderCommits.set(key, entry);
+  }
+
+  // --- Shared Quick Settings Device helpers (SF-V2-05) ------------------------------------------
+  // Pure functions over the shared page payload. The renderer treats rowId / sectionId /
+  // commitGroupId as opaque stable identities; it never reconstructs Device labels/order/options.
+
+  function deviceQuickSettingsPendingKey(row) {
+    return row.commitGroupId == null
+      ? `device-row:${row.rowId}`
+      : `device-group:${row.commitGroupId}`;
+  }
+
+  function deviceQuickSettingsPendingValue(rowId) {
+    for (const entry of state.qamSliderCommits?.values?.() ?? []) {
+      if (!entry?.deviceValues) continue;
+      if (Object.prototype.hasOwnProperty.call(entry.deviceValues, rowId)) return entry.deviceValues[rowId];
+    }
+    return null;
+  }
+
+  function findDeviceQuickSettingsRow(page, rowId) {
+    for (const section of page?.sections ?? []) {
+      for (const row of section?.rows ?? []) {
+        if (row.rowId === rowId) return row;
+      }
+    }
+    return null;
+  }
+
+  function makeQuickSettingsValue(row, next) {
+    const kind = row?.value?.kind;
+    if (kind === QS_VALUE_BOOLEAN) return { kind, booleanValue: !!next, integerValue: null };
+    if (kind === QS_VALUE_INTEGER) return { kind, booleanValue: null, integerValue: Number(next) };
+    return null;
+  }
+
+  // Seeds the whole-section mutation draft in section/row payload order. For the current closed
+  // Device model the only grouped section is TDP, whose section carries exactly the five values
+  // (Enabled + four PL sliders) that QuickSettingsMutationAdapter requires -- with no JS knowledge
+  // of the individual TDP RowIds.
+  function seedDeviceQuickSettingsSectionDraft(section) {
+    const values = {};
+    const order = [];
+    for (const row of section?.rows ?? []) {
+      if (row.value == null) return null;
+      values[row.rowId] = { ...row.value };
+      order.push(row.rowId);
+    }
+    return { values, order };
+  }
+
+  function applyDeviceQuickSettingsLinkedConstraints(page, values, editedRowId) {
+    for (const constraint of page?.linkedSliderConstraints ?? []) {
+      if (constraint.lowerRowId !== editedRowId && constraint.upperRowId !== editedRowId) continue;
+      const lowerRow = findDeviceQuickSettingsRow(page, constraint.lowerRowId);
+      const upperRow = findDeviceQuickSettingsRow(page, constraint.upperRowId);
+      if (!lowerRow?.sliderSpec || !upperRow?.sliderSpec) continue;
+      const lower = values[constraint.lowerRowId]?.integerValue;
+      const upper = values[constraint.upperRowId]?.integerValue;
+      const gap = Number(constraint.minimumGap);
+      if (!Number.isFinite(lower) || !Number.isFinite(upper) || !(gap > 0)) continue;
+      if (constraint.lowerRowId === editedRowId && upper < lower + gap) {
+        if (lower + gap <= upperRow.sliderSpec.maximum) values[constraint.upperRowId] = { ...values[constraint.upperRowId], integerValue: lower + gap };
+        else values[constraint.lowerRowId] = { ...values[constraint.lowerRowId], integerValue: upperRow.sliderSpec.maximum - gap };
+      } else if (constraint.upperRowId === editedRowId && lower > upper - gap) {
+        if (upper - gap >= lowerRow.sliderSpec.minimum) values[constraint.lowerRowId] = { ...values[constraint.lowerRowId], integerValue: upper - gap };
+        else values[constraint.upperRowId] = { ...values[constraint.upperRowId], integerValue: lowerRow.sliderSpec.minimum + gap };
+      }
+    }
   }
 
   function request(method, payload) {
