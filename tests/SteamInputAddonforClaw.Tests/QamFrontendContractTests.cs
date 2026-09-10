@@ -404,6 +404,19 @@ public sealed class QamFrontendContractTests
         Assert.Contains("const [, bumpDeviceDraftRender] = React.useState(0);", source);
         Assert.Contains("bumpDeviceDraftRender(value => value + 1);", schedule);
 
+        // Only the in-flight delayed RPC runs inside the component's existing mutation/invalidation
+        // gate (beginMutation/endMutation via onRequestStart/onRequestEnd); the 2s debounce is not
+        // gated, and the settlement consumes the mutation's own deferred invalidation.
+        Assert.Contains("deferredInvalidationRef.current = false;", schedule);
+        var lines = schedule.Split('\n');
+        Assert.Contains(lines, l => l.Trim() == "beginMutation,");
+        Assert.Contains(lines, l => l.Trim() == "endMutation);");
+        var scheduler = source[source.IndexOf("function scheduleQamSliderCommit", StringComparison.Ordinal)..source.IndexOf("// --- Shared Quick Settings Device helpers", StringComparison.Ordinal)];
+        Assert.Contains("onRequestStart = null, onRequestEnd = null", scheduler);
+        Assert.Contains("requestStarted = true;", scheduler);
+        Assert.Contains("onRequestStart?.();", scheduler);
+        Assert.Contains("if (requestStarted) onRequestEnd?.();", scheduler);
+
         // Seeding reads only the shared section rows and their values, in order.
         var seed = source[source.IndexOf("function seedDeviceQuickSettingsSectionDraft", StringComparison.Ordinal)..source.IndexOf("function applyDeviceQuickSettingsLinkedConstraints", StringComparison.Ordinal)];
         Assert.Contains("for (const row of section?.rows ?? [])", seed);

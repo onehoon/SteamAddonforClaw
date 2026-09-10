@@ -714,10 +714,15 @@
           "mutateQuickSetting",
           { pageId: page.pageId, appId: null, editedRowId: row.rowId, values },
           async (result, failure) => {
+            // Consume the mutation's own deferred invalidation before endMutation() can launch a
+            // refresh that would overwrite this settlement (and its failureMessage).
+            deferredInvalidationRef.current = false;
             if (failure) { failClosed("Device update failed"); return; }
             applyDeviceQuickSettingsResult(result);
           },
-          delayMs);
+          delayMs,
+          beginMutation,
+          endMutation);
         // The pending Map is outside React -- force one render so deviceRowEffectiveValue() and any
         // linked paired value show immediately.
         bumpDeviceDraftRender(value => value + 1);
@@ -943,7 +948,10 @@
     }
   }
 
-  function scheduleQamSliderCommit(key, pending, method, payload, onSettled, delayMs = PROFILE_SLIDER_COMMIT_DELAY_MS) {
+  // onRequestStart / onRequestEnd wrap ONLY the actual delayed RPC execution (never the debounce
+  // window), so the Device path can put just the in-flight mutation inside the component's existing
+  // beginMutation()/endMutation() invalidation gate while the pending draft stays refreshable.
+  function scheduleQamSliderCommit(key, pending, method, payload, onSettled, delayMs = PROFILE_SLIDER_COMMIT_DELAY_MS, onRequestStart = null, onRequestEnd = null) {
     state.qamSliderCommits ??= new Map();
     const previous = state.qamSliderCommits.get(key);
     if (previous) clearTimeout(previous.timer);
@@ -954,6 +962,7 @@
         if (state.qamSliderCommits.get(key)?.token !== token) return;
         entry.timer = null;
         if (!state.installed) return;
+        let requestStarted = false;
         try {
           if (entry.appId) {
             const activeProfile = await request("captureActiveGameProfile");
@@ -966,6 +975,8 @@
             }
           }
           if (state.qamSliderCommits.get(key)?.token !== token) return;
+          requestStarted = true;
+          onRequestStart?.();
           const result = await request(method, payload);
           if (state.qamSliderCommits.get(key)?.token !== token) return;
           state.qamSliderCommits.delete(key);
@@ -974,6 +985,8 @@
           if (state.qamSliderCommits.get(key)?.token !== token) return;
           state.qamSliderCommits.delete(key);
           await onSettled(null, error, entry);
+        } finally {
+          if (requestStarted) onRequestEnd?.();
         }
     }, Number.isFinite(delayMs) && delayMs > 0 ? delayMs : PROFILE_SLIDER_COMMIT_DELAY_MS);
     state.qamSliderCommits.set(key, entry);
