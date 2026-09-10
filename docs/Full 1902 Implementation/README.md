@@ -16,6 +16,12 @@ For controller ownership work, use the following precedence when statements conf
 3. `FULL_1902_IMPLEMENTATION_ARCHITECTURE.md` for the overall Full1902 controller architecture except where item 1 explicitly revises its older foreign-HidHide policy.
 4. Historical `docs/work-order/*` files describe the implementation contract at the time each PR was prepared. Later policy revisions and the active work order/addendum take precedence for new implementation work.
 
+## Related independent Device-feature architecture
+
+`EX_FIRST_FAN_CONTROL_ARCHITECTURE_2026-09-10.md` defines the EX-first Device/Cooling fan-control architecture, including MSI/CTW/RE evidence, target-temperature control, presets, calibration, lifecycle, fail-safe behavior, profile integration, and UI direction.
+
+It does **not** modify the controller-ownership authority order above and must not introduce a new controller authority.
+
 ## Important 2026-09-01 correction
 
 Older Full1902 documents used a conservative admission rule:
