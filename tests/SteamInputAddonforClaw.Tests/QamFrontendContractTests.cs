@@ -98,6 +98,23 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_bridge_exposes_the_generic_quick_settings_seam_alongside_the_transition_device_methods()
+    {
+        var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
+
+        // SF-V2-04: exactly the two approved generic bridge names.
+        Assert.Contains("\"captureQuickSettingsPage\" => await CaptureQuickSettingsPageAsync(root, token),", bridge);
+        Assert.Contains("\"mutateQuickSetting\" => await MutateQuickSettingAsync(root, token),", bridge);
+        // The generic Device mutation goes through the same one admission rule.
+        Assert.Contains("await EnsureDeviceMutationAdmittedAsync(token)", bridge);
+        // Product validation stays in SF-V2-03; the bridge only scopes the surface to Device.
+        Assert.Contains("intent.PageId != QuickSettingsPageId.Device", bridge);
+        // The feature-specific Device methods remain until SF-V2-05 migrates qam.js.
+        Assert.Contains("\"setDeviceCpuBoostEnabled\" =>", bridge);
+        Assert.Contains("\"setDeviceTdp\" =>", bridge);
+    }
+
+    [Fact]
     public void Qam_uninstall_retires_pending_bridge_consumers_without_resetting_ids()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");

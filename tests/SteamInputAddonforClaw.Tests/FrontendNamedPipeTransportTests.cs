@@ -129,6 +129,109 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Generic_quick_settings_page_round_trips_the_whole_closed_contract()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var page = await client.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device);
+
+        Assert.Equivalent(fake.QuickSettingsPage, page, strict: true);
+        Assert.Equal(QuickSettingsPageId.Device, fake.LastQuickSettingsPageId);
+        Assert.Null(fake.LastQuickSettingsAppId);
+        Assert.Equal(1, fake.CaptureQuickSettingsPageCount);
+    }
+
+    [Fact]
+    public async Task Generic_quick_settings_capture_carries_page_context_across_the_transport()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var page = await client.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 480u);
+
+        Assert.Equal(QuickSettingsPageId.Profile, fake.LastQuickSettingsPageId);
+        Assert.Equal(480u, fake.LastQuickSettingsAppId);
+        Assert.False(page.Available);
+        Assert.Equal(480u, page.AppId);
+    }
+
+    [Fact]
+    public async Task Generic_quick_settings_mutation_intent_and_result_round_trip_through_the_named_pipe()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var independent = new QuickSettingsMutationIntent(QuickSettingsPageId.Device, null, QuickSettingsRowId.DeviceCpuBoostEnabled,
+            [new(QuickSettingsRowId.DeviceCpuBoostEnabled, QuickSettingsValue.Boolean(true))]);
+        var grouped = new QuickSettingsMutationIntent(QuickSettingsPageId.Device, null, QuickSettingsRowId.DeviceTdpAcPl1,
+        [
+            new(QuickSettingsRowId.DeviceTdpEnabled, QuickSettingsValue.Boolean(true)),
+            new(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsValue.Integer(20)),
+            new(QuickSettingsRowId.DeviceTdpAcPl2, QuickSettingsValue.Integer(25)),
+            new(QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsValue.Integer(15)),
+            new(QuickSettingsRowId.DeviceTdpDcPl2, QuickSettingsValue.Integer(20)),
+        ]);
+
+        var independentResult = await client.MutateQuickSettingAsync(independent);
+        Assert.Equivalent(independent, fake.LastQuickSettingsIntent, strict: true);
+        Assert.True(independentResult.Succeeded);
+        Assert.Equivalent(fake.QuickSettingsPage, independentResult.Page, strict: true);
+
+        var groupedResult = await client.MutateQuickSettingAsync(grouped);
+        Assert.Equivalent(grouped, fake.LastQuickSettingsIntent, strict: true);
+        Assert.Equivalent(fake.QuickSettingsPage, groupedResult.Page, strict: true);
+        Assert.Equal(2, fake.MutateQuickSettingCount);
+    }
+
+    [Theory]
+    [InlineData("CaptureQuickSettingsPage", null)]
+    [InlineData("CaptureQuickSettingsPage", "{}")]
+    [InlineData("CaptureQuickSettingsPage", "{\"PageId\":\"NotAPage\",\"AppId\":null}")]
+    [InlineData("MutateQuickSetting", null)]
+    [InlineData("MutateQuickSetting", "{\"PageId\":\"Device\",\"AppId\":null,\"EditedRowId\":\"DeviceCpuBoostEnabled\"}")]
+    [InlineData("MutateQuickSetting", "{\"PageId\":\"Device\",\"AppId\":null,\"EditedRowId\":\"NotARow\",\"Values\":[]}")]
+    public async Task Malformed_generic_quick_settings_wire_requests_fail_boundedly_without_invoking_frontend(string method, string? payload)
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        var frame = payload is null
+            ? $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\"}}"
+            : $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{payload}}}";
+        await WriteRawFrameAsync(pipe, frame);
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.CaptureQuickSettingsPageCount);
+        Assert.Equal(0, fake.MutateQuickSettingCount);
+    }
+
+    [Fact]
+    public async Task A_v27_frontend_peer_is_rejected_by_the_v28_server()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
+
+        await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
+    }
+
+    [Fact]
     public async Task Game_profile_operations_round_trip_through_the_named_pipe()
     {
         var fake = new RecordingFrontendControl();
@@ -1015,9 +1118,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":27,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":27,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":27,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":28,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":28,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":28,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1388,6 +1491,37 @@ public sealed class FrontendNamedPipeTransportTests
             new(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null));
         public int CaptureDeviceQuickSettingsCount { get; private set; }
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) { TotalCalls++; CaptureDeviceQuickSettingsCount++; return Task.FromResult(DeviceQuickSettingsSnapshot); }
+
+        // SF-V2-04: generic shared Quick Settings seam. The page carries every closed contract shape
+        // (Toggle/Numeric/Discrete rows, TrailingDebounce policy, TDP commit group, linked constraint)
+        // so the transport round-trip test proves the whole contract survives the real codec.
+        public QuickSettingsPageSnapshot QuickSettingsPage { get; } = new(
+            QuickSettingsPageId.Device, null, true, null,
+            [
+                new(QuickSettingsSectionId.DeviceTdp, "TDP", [
+                    new(QuickSettingsRowId.DeviceTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle, true, true, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate),
+                    new(QuickSettingsRowId.DeviceTdpAcPl1, "Plugged in · PL1", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(20), new(QuickSettingsSliderKind.Numeric, 8, 30, 1, "W"), QuickSettingsCommitPolicy.TrailingDebounce2000, QuickSettingsCommitGroupId.DeviceTdpConfiguration),
+                ]),
+                new(QuickSettingsSectionId.DeviceCpuBoost, "CPU Boost", [
+                    new(QuickSettingsRowId.DeviceCpuBoostAc, "Plugged in", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(1), new(QuickSettingsSliderKind.Discrete, Options: [new(0, "Disabled"), new(1, "Enabled")]), QuickSettingsCommitPolicy.TrailingDebounce2000),
+                ]),
+            ],
+            [new(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, 1)]);
+        public QuickSettingsPageId? LastQuickSettingsPageId { get; private set; }
+        public uint? LastQuickSettingsAppId { get; private set; }
+        public int CaptureQuickSettingsPageCount { get; private set; }
+        public QuickSettingsMutationIntent? LastQuickSettingsIntent { get; private set; }
+        public int MutateQuickSettingCount { get; private set; }
+        public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken t = default)
+        {
+            TotalCalls++; CaptureQuickSettingsPageCount++; LastQuickSettingsPageId = pageId; LastQuickSettingsAppId = appId;
+            return Task.FromResult(pageId == QuickSettingsPageId.Device && appId is null ? QuickSettingsPage : QuickSettingsPageSnapshot.Unavailable(pageId, appId));
+        }
+        public Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken t = default)
+        {
+            TotalCalls++; MutateQuickSettingCount++; LastQuickSettingsIntent = intent;
+            return Task.FromResult(new QuickSettingsMutationResult(true, null, QuickSettingsPage));
+        }
     }
 
     private sealed class PartialReadStream : MemoryStream

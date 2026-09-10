@@ -82,7 +82,12 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // gain mode/backend/freshness/timing/bias-summary evidence. A v26 peer would connect and then send an
 // invalid (missing-mode) Start request or fail deserializing the extended snapshot -- failing the
 // handshake up front is the honest outcome. Pre-release: no compatibility shim.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 27; }
+// Version 28: Shared Frontend V2 SF-V2-04 exposes the closed shared Quick Settings product seam
+// through .Frontend/.Qam via CaptureQuickSettingsPage and MutateQuickSetting. The new RPC methods
+// carry QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult. A v27
+// peer does not implement this wire contract, so fail the handshake up front. Pre-release: no
+// compatibility shim.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 28; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -114,7 +119,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, SetFrontButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, CaptureDeviceQuickSettings }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, SetFrontButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, MutateQuickSetting }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -133,6 +138,9 @@ internal sealed record SetDevicePowerModeEnabledRequest(bool Enabled);
 internal sealed record SetDeviceTdpRequest(FrontendTdpConfiguration Configuration);
 internal sealed record SetDeviceTdpEnabledRequest(bool Enabled);
 internal sealed record RequestCenterMAuthorityTransitionRequest(bool CenterMEnabled);
+// SF-V2-04: the generic Quick Settings capture request. MutateQuickSetting sends the shared
+// QuickSettingsMutationIntent contract directly as its payload -- no transport wrapper record.
+internal sealed record CaptureQuickSettingsPageRequest(QuickSettingsPageId PageId, uint? AppId);
 internal sealed record CaptureGameProfileRequest(uint AppId);
 internal sealed record SetGameProfileEnabledRequest(uint AppId, bool Enabled, string? DisplayName);
 internal sealed record SetGameProfileCpuBoostEnabledRequest(uint AppId, bool Enabled);
