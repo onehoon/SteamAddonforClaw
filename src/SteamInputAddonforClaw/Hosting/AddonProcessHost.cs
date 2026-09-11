@@ -975,8 +975,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (OperationCanceledException) { throw; }
         catch (Exception exception)
         {
+            // Let this propagate: the v7 wire contract distinguishes a valid Runtime settlement
+            // (Result != null) from a thrown operation/transport-side failure (Result == null +
+            // narrow Error). Synthesizing a normal QuickSettingsMutationResult here would let an
+            // unexpected Runtime exception masquerade as an authoritative product settlement instead
+            // of the bounded Error NamedPipeOverlayServer.HandleQuickSettingsMutationRequestAsync
+            // already produces for exactly this case.
             AppLog.Warn("OverlayDevice", "Overlay Quick Settings mutation failed.", exception, ("PageId", intent.PageId), ("EditedRowId", intent.EditedRowId));
-            return new QuickSettingsMutationResult(false, "Overlay Device mutation failed.", QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.AppId));
+            throw;
         }
         finally { Interlocked.Decrement(ref _overlayQuickSettingsMutationInFlight); }
     }
