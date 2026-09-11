@@ -449,16 +449,16 @@ public sealed class OverlayTransportTests
         {
             await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
                 StartTestProcess, _ => new NamedPipeOverlayServer(pipeName));
-            controller.BindDeviceQuickSettingsAuthority(
-                capture: async _ =>
+            controller.BindQuickSettingsAuthority(
+                captureDevicePage: async _ =>
                 {
                     captureEntered.TrySetResult();
                     await releaseCapture.Task;
-                    return FrontendDeviceQuickSettingsSnapshot.Unavailable;
+                    return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device);
                 },
-                mutate: (request, _) => Task.FromResult(OverlayWireValidation.NotAdmitted(request, "unused")));
+                mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")));
 
-            var deviceFrames = new List<FrontendDeviceQuickSettingsSnapshot>();
+            var deviceFrames = new List<QuickSettingsPageSnapshot>();
             await using var client = new NamedPipeOverlayClient(pipeName);
             var run = client.RunAsync(_ => Task.CompletedTask, null, null,
                 snapshot => { lock (deviceFrames) deviceFrames.Add(snapshot); return Task.CompletedTask; });

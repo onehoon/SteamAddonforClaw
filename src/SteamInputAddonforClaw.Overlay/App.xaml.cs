@@ -64,7 +64,7 @@ public partial class App : Application
         {
             _client = new NamedPipeOverlayClient(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
             OverlayLog.Info("Transport", "Overlay command loop starting.");
-            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleDeviceQuickSettingsAsync).ConfigureAwait(false);
+            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleQuickSettingsPageAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -105,14 +105,14 @@ public partial class App : Application
         return completion.Task;
     }
 
-    // SF-V2-02 section 19: receives the shared typed Device Quick Settings aggregate. For this
-    // transport-foundation PR this is transport-verification-only -- no persistence, no direct
-    // hardware access, and no binding to the current preview Toggle/Slider fixtures (that starts in
-    // SF-V2-03/04).
-    private Task HandleDeviceQuickSettingsAsync(FrontendDeviceQuickSettingsSnapshot snapshot)
+    // SF-V2-06 section 25: receives the shared QuickSettingsPageSnapshot(Device) directly -- the same
+    // product contract QAM renders (SF-V2-05). This transport-migration PR is verification-only: no
+    // persistence, no direct hardware access, and no binding to the current preview Toggle/Slider
+    // fixtures. Real generic Device rendering/binding starts in SF-V2-07.
+    private Task HandleQuickSettingsPageAsync(QuickSettingsPageSnapshot page)
     {
-        OverlayLog.Debug("Device", "Device Quick Settings snapshot received.",
-            ("CpuBoostEnabled", snapshot.CpuBoost.Enabled), ("TdpAvailable", snapshot.Tdp.Available), ("PowerModeEnabled", snapshot.PowerMode.Enabled));
+        OverlayLog.Debug("Device", "Quick Settings page received.",
+            ("PageId", page.PageId), ("Available", page.Available), ("SectionCount", page.Sections.Count));
         return Task.CompletedTask;
     }
 
