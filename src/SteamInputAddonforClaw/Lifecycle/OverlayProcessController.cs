@@ -24,11 +24,12 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     // start. FrontendTransport never sees the coordinator -- only these two narrow operations.
     private Func<IReadOnlyList<OverlayTabId>>? _getTabOrder;
     private Func<IReadOnlyList<OverlayTabId>, bool>? _tryChangeTabOrder;
-    // SF-V2-02 section 14: bound once by AddonProcessHost onto the ONE _frontendControl. `_mutateDevice`
-    // is handed to each new NamedPipeOverlayServer so a request arriving on its read loop can reach
-    // Runtime; `_captureDeviceQuickSettings` is used here for the Runtime-initiated publish path.
-    private Func<CancellationToken, Task<FrontendDeviceQuickSettingsSnapshot>>? _captureDeviceQuickSettings;
-    private Func<OverlayDeviceMutationRequest, CancellationToken, Task<OverlayDeviceMutationResponse>>? _mutateDevice;
+    // SF-V2-02/06 section 14: bound once by AddonProcessHost onto the ONE _frontendControl.
+    // `_mutateQuickSettings` is handed to each new NamedPipeOverlayServer so a request arriving on its
+    // read loop can reach Runtime; `_captureQuickSettingsPage` is used here for the
+    // Runtime-initiated publish path. Only the Device page is captured/published in SF-V2-06.
+    private Func<CancellationToken, Task<QuickSettingsPageSnapshot>>? _captureQuickSettingsPage;
+    private Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? _mutateQuickSettings;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
@@ -51,7 +52,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _startProcess = startProcess ?? Process.Start;
         // The default factory reads the bound authority at connection time (StartCoreAsync), which
         // always runs after AddonProcessHost has called BindTabOrderAuthority.
-        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _getTabOrder, _tryChangeTabOrder, _mutateDevice));
+        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _getTabOrder, _tryChangeTabOrder, _mutateQuickSettings));
     }
 
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
@@ -64,16 +65,16 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _tryChangeTabOrder = tryChangeTabOrder ?? throw new ArgumentNullException(nameof(tryChangeTabOrder));
     }
 
-    // SF-V2-02 section 14: wire the Overlay Device transport to the ONE _frontendControl. Must be
-    // called before the first warm start, same as BindTabOrderAuthority; a later call replaces the
-    // delegates for the next connection only (an already-connected Overlay keeps its bound mutate
-    // delegate for its lifetime).
-    internal void BindDeviceQuickSettingsAuthority(
-        Func<CancellationToken, Task<FrontendDeviceQuickSettingsSnapshot>> capture,
-        Func<OverlayDeviceMutationRequest, CancellationToken, Task<OverlayDeviceMutationResponse>> mutate)
+    // SF-V2-02/06 section 14: wire the Overlay shared Quick Settings transport to the ONE
+    // _frontendControl. Must be called before the first warm start, same as BindTabOrderAuthority; a
+    // later call replaces the delegates for the next connection only (an already-connected Overlay
+    // keeps its bound mutate delegate for its lifetime).
+    internal void BindQuickSettingsAuthority(
+        Func<CancellationToken, Task<QuickSettingsPageSnapshot>> captureDevicePage,
+        Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>> mutate)
     {
-        _captureDeviceQuickSettings = capture ?? throw new ArgumentNullException(nameof(capture));
-        _mutateDevice = mutate ?? throw new ArgumentNullException(nameof(mutate));
+        _captureQuickSettingsPage = captureDevicePage ?? throw new ArgumentNullException(nameof(captureDevicePage));
+        _mutateQuickSettings = mutate ?? throw new ArgumentNullException(nameof(mutate));
     }
 
     internal string ExecutablePath => _executablePath;
@@ -136,37 +137,37 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         }
     }
 
-    // SF-V2-02 sections 16/17: best-effort Runtime -> Overlay Device state publish. Called after OQ4
-    // capture commits on Show, and from a StateInvalidated handler while a captured session stays
-    // visible. Never awaited by a caller that must not be delayed -- feature snapshot work is always
-    // less important than OQ4 capture/lifecycle timing (section 4.6).
+    // SF-V2-02/06 sections 16/17/20: best-effort Runtime -> Overlay shared Device page publish. Called
+    // after OQ4 capture commits on Show, and from a StateInvalidated handler while a captured session
+    // stays visible. Never awaited by a caller that must not be delayed -- feature snapshot work is
+    // always less important than OQ4 capture/lifecycle timing (section 4.6/21).
     internal async Task RefreshDeviceQuickSettingsAsync()
     {
         NamedPipeOverlayServer? server;
         lock (_sync) server = _server;
-        var capture = _captureDeviceQuickSettings;
+        var capture = _captureQuickSettingsPage;
         if (server is null || capture is null) return;
-        // A cheap pre-check avoids most no-op captures; SendDeviceQuickSettingsStateAsync still
-        // re-checks Ready/Visible at write time (section 17.2), which is the actual authority.
+        // A cheap pre-check avoids most no-op captures; SendQuickSettingsPageStateAsync still
+        // re-checks Ready/Visible at write time (section 17.2/20.3), which is the actual authority.
         if (!server.IsReady || server.State != OverlayState.Visible) return;
 
         await _deviceRefreshGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            FrontendDeviceQuickSettingsSnapshot snapshot;
-            try { snapshot = await capture(CancellationToken.None).ConfigureAwait(false); }
+            QuickSettingsPageSnapshot page;
+            try { page = await capture(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception exception)
             {
-                // Section 16.3: a whole aggregate capture failure is feature-local -- deliver
-                // Unavailable rather than silently skipping the refresh, unless delivery itself is
-                // impossible (checked by the send call below via its own live Ready/Visible check).
-                AppLog.Warn("Overlay", "Overlay Device Quick Settings capture failed.", exception);
-                snapshot = FrontendDeviceQuickSettingsSnapshot.Unavailable;
+                // Section 20.2: a whole page capture failure is feature-local -- deliver Unavailable
+                // rather than silently skipping the refresh, unless delivery itself is impossible
+                // (checked by the send call below via its own live Ready/Visible check).
+                AppLog.Warn("Overlay", "Overlay Quick Settings page capture failed.", exception);
+                page = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device);
             }
-            try { await server.SendDeviceQuickSettingsStateAsync(snapshot).ConfigureAwait(false); }
+            try { await server.SendQuickSettingsPageStateAsync(page).ConfigureAwait(false); }
             catch (Exception exception)
             {
-                AppLog.Warn("Overlay", "Overlay Device Quick Settings publish failed.", exception);
+                AppLog.Warn("Overlay", "Overlay Quick Settings page publish failed.", exception);
             }
         }
         finally { _deviceRefreshGate.Release(); }

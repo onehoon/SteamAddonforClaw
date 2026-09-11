@@ -65,6 +65,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // Not another controller authority. Never persisted, never restored across process restart.
     private bool _overlayCaptureActive;
     private OverlayControllerInputRouter? _overlayInputRouter;
+    // SF-V2-06 section 23: the admitted Overlay Quick Settings mutation raises its own StateInvalidated
+    // before returning (e.g. SetDeviceTdpAsync). Skip the redundant Overlay page refresh while this is
+    // non-zero so that self-triggered refresh cannot race/overwrite the mutation's own authoritative
+    // result page. Never held across the debounce window -- only around the actual Runtime call.
+    private int _overlayQuickSettingsMutationInFlight;
     private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
 
     // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
@@ -448,11 +453,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     return false;
                 }
             });
-        // SF-V2-02 section 14.2: bind the Overlay Device transport onto the SAME _frontendControl at
-        // the same stage as BindTabOrderAuthority, before the first warm Overlay connection.
-        _overlayController.BindDeviceQuickSettingsAuthority(
-            capture: token => _frontendControl!.CaptureDeviceQuickSettingsAsync(token),
-            mutate: (request, token) => HandleOverlayDeviceMutationAsync(request, token));
+        // SF-V2-02/06 section 14/14.2: bind the Overlay shared Quick Settings transport onto the SAME
+        // _frontendControl at the same stage as BindTabOrderAuthority, before the first warm Overlay
+        // connection. Only the Device page is captured/exposed to the Overlay in SF-V2-06.
+        _overlayController.BindQuickSettingsAuthority(
+            captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, appId: null, token),
+            mutate: (intent, token) => HandleOverlayQuickSettingsMutationAsync(intent, token));
         // SF-V2-02 section 17: refresh a currently visible/captured Overlay on ordinary Runtime
         // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
         // scheduled once shutdown admission closes.
@@ -936,32 +942,49 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
         if (!_overlayCaptureActive) return;
         if (!_overlayController.IsVisible) return;
+        // Section 23: an admitted Overlay mutation already returns a fresh authoritative page; a
+        // redundant refresh here could otherwise race/overwrite that result (including erasing a
+        // typed Succeeded=false + FailureMessage) with an older/less-complete page.
+        if (Volatile.Read(ref _overlayQuickSettingsMutationInFlight) != 0) return;
         _ = _overlayController.RefreshDeviceQuickSettingsAsync();
     }
 
-    // SF-V2-02 section 15: the admission Runtime-side fact this class owns (_overlayCaptureActive +
-    // process shutdown). NamedPipeOverlayServer separately checks its own Ready/Visible fact before
-    // ever calling this delegate. Explicit switch onto the SAME _frontendControl methods Main UI/QAM
-    // already use -- no direct ProfileStore/hardware/registry access from the Overlay transport.
-    private async Task<OverlayDeviceMutationResponse> HandleOverlayDeviceMutationAsync(OverlayDeviceMutationRequest request, CancellationToken token)
+    // SF-V2-02/06 section 15/16: the admission Runtime-side fact this class owns (_overlayCaptureActive
+    // + process shutdown + Device-only page scope). NamedPipeOverlayServer separately checks its own
+    // Ready/Visible fact before ever calling this delegate. Dispatches onto the SAME shared
+    // MutateQuickSettingAsync seam Main UI/QAM already use through IAddonFrontendControl -- no direct
+    // ProfileStore/hardware/registry access, and no second Device row/group dispatch authority.
+    private async Task<QuickSettingsMutationResult> HandleOverlayQuickSettingsMutationAsync(QuickSettingsMutationIntent intent, CancellationToken token)
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive)
-            return OverlayWireValidation.NotAdmitted(request, "The Overlay is not the active captured surface.");
+            return OverlayQuickSettingsWireValidation.NotAdmitted(intent, "The Overlay is not the active captured surface.");
+
+        // Section 12: Profile is not exposed/admitted to the Overlay in SF-V2-06.
+        if (intent.PageId != QuickSettingsPageId.Device)
+            return OverlayQuickSettingsWireValidation.NotAdmitted(intent, "Only the Device page is available through the Overlay Quick Settings seam.");
 
         var control = _frontendControl;
         if (control is null)
-            return OverlayWireValidation.NotAdmitted(request, "The Overlay is not the active captured surface.");
+            return OverlayQuickSettingsWireValidation.NotAdmitted(intent, "The Overlay is not the active captured surface.");
 
+        Interlocked.Increment(ref _overlayQuickSettingsMutationInFlight);
         try
         {
-            return await OverlayDeviceMutationDispatch.DispatchAsync(control, request, token).ConfigureAwait(false);
+            return await control.MutateQuickSettingAsync(intent, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception)
         {
-            AppLog.Warn("OverlayDevice", "Overlay Device mutation failed.", exception, ("Kind", request.Kind));
-            return new OverlayDeviceMutationResponse(request.RequestId, request.Kind, Error: "Overlay Device mutation failed.");
+            // Let this propagate: the v7 wire contract distinguishes a valid Runtime settlement
+            // (Result != null) from a thrown operation/transport-side failure (Result == null +
+            // narrow Error). Synthesizing a normal QuickSettingsMutationResult here would let an
+            // unexpected Runtime exception masquerade as an authoritative product settlement instead
+            // of the bounded Error NamedPipeOverlayServer.HandleQuickSettingsMutationRequestAsync
+            // already produces for exactly this case.
+            AppLog.Warn("OverlayDevice", "Overlay Quick Settings mutation failed.", exception, ("PageId", intent.PageId), ("EditedRowId", intent.EditedRowId));
+            throw;
         }
+        finally { Interlocked.Decrement(ref _overlayQuickSettingsMutationInFlight); }
     }
 
     private async Task HandleOverlayCloseReasonAsync(string reason, bool surfaceAlreadyGone)
