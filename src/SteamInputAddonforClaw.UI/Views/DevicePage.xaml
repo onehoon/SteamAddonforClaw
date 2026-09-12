@@ -34,6 +34,23 @@
                 </StackPanel>
             </ctcontrols:SettingsCard>
 
+            <InfoBar x:Name="BatteryChargeLimitInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+            <ctcontrols:SettingsCard x:Name="BatteryChargeLimitCard" Header="Battery charge limit"
+                Description="Set the maximum charge level for this MSI Claw device.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE86B;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <StackPanel Spacing="8" MinWidth="520">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <ToggleSwitch x:Name="BatteryChargeLimitEnabledToggleSwitch" OffContent="" OnContent="" Toggled="BatteryChargeLimitEnabledToggleSwitch_Toggled" />
+                        <Slider x:Name="BatteryChargeLimitSlider" Grid.Column="1" Minimum="60" Maximum="100" StepFrequency="5" ValueChanged="BatteryChargeLimitSlider_ValueChanged" PointerCaptureLost="BatteryChargeLimitSlider_PointerCaptureLost" KeyUp="BatteryChargeLimitSlider_KeyUp" />
+                        <TextBlock x:Name="BatteryChargeLimitValueText" Grid.Column="2" MinWidth="64" Text="—%" TextAlignment="Right" VerticalAlignment="Center" />
+                    </Grid>
+                    <TextBlock x:Name="BatteryChargeLimitStatusText" Opacity="0.7" TextWrapping="Wrap" />
+                </StackPanel>
+            </ctcontrols:SettingsCard>
+
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control"
                 Description="Configure processor power limits for plugged-in and battery operation.">

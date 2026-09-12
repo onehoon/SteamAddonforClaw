@@ -165,6 +165,39 @@ public sealed record FrontendBatteryChargeLimitTestMutationResult(
     public bool Succeeded => Outcome == FrontendBatteryChargeLimitTestMutationOutcome.Succeeded;
 }
 
+public enum FrontendBatteryChargeLimitMutationOutcome
+{
+    Succeeded,
+    InvalidTarget,
+    PersistenceFailed,
+    ApplyFailed,
+    Unavailable
+}
+
+/// <summary>Production Device-page projection. Current hardware state and persisted desired state
+/// are intentionally separate; an observed value is not owned or normalized merely because it can
+/// be displayed.</summary>
+public sealed record FrontendBatteryChargeLimitSnapshot(
+    bool Available,
+    bool PersistenceWritable,
+    bool Initialized,
+    bool? CurrentEnabled,
+    int? CurrentLimitPercent,
+    bool? DesiredEnabled,
+    int? DesiredLimitPercent,
+    string? LastFailure)
+{
+    public static readonly FrontendBatteryChargeLimitSnapshot Unavailable = new(false, false, false, null, null, null, null, null);
+}
+
+public sealed record FrontendBatteryChargeLimitMutationResult(
+    FrontendBatteryChargeLimitMutationOutcome Outcome,
+    string? FailureMessage,
+    FrontendBatteryChargeLimitSnapshot Snapshot)
+{
+    public bool Succeeded => Outcome == FrontendBatteryChargeLimitMutationOutcome.Succeeded;
+}
+
 /// <remarks><see cref="FrontButtonMapping"/> is the settings-layer projection of the one persisted
 /// front-button mapping. The frontend deliberately carries the SAME
 /// <see cref="FrontButtonMappingSettings"/> the runtime persists and the dispatcher validates
@@ -428,6 +461,14 @@ public interface IAddonFrontendControl
     Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestPercentAsync(int percent, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendBatteryChargeLimitTestMutationResult(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
             "MSI battery charge-limit test is unavailable.", FrontendBatteryChargeLimitTestSnapshot.Unavailable));
+    Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendBatteryChargeLimitSnapshot.Unavailable);
+    Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendBatteryChargeLimitMutationResult(FrontendBatteryChargeLimitMutationOutcome.Unavailable,
+            "MSI battery charge-limit control is unavailable.", FrontendBatteryChargeLimitSnapshot.Unavailable));
+    Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendBatteryChargeLimitMutationResult(FrontendBatteryChargeLimitMutationOutcome.Unavailable,
+            "MSI battery charge-limit control is unavailable.", FrontendBatteryChargeLimitSnapshot.Unavailable));
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
     Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));

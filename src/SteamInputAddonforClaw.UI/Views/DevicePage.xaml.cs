@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -30,6 +31,11 @@ public sealed partial class DevicePage : UserControl
     private bool _tdpDraftDirty;
     private FrontendCenterMStartupSnapshot _centerMStartupSnapshot = FrontendCenterMStartupSnapshot.Unavailable;
     private bool _centerMStartupBusy;
+    private FrontendBatteryChargeLimitSnapshot _batteryChargeLimitSnapshot = FrontendBatteryChargeLimitSnapshot.Unavailable;
+    private bool _suppressBatteryChargeLimitEvents;
+    private bool _batteryChargeLimitDraftDirty;
+    private bool _batteryChargeLimitMutationBusy;
+    private int _batteryChargeLimitDraftPercent = 60;
 
     private static readonly CpuBoostModeItem[] Modes =
     [
@@ -94,11 +100,149 @@ public sealed partial class DevicePage : UserControl
             Render(FrontendCpuBoostSnapshot.Unavailable);
             RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: false);
             RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);
+            RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot.Unavailable, preserveDirtyDraft: false);
             return;
         }
         Render(snapshot.CpuBoost);
         RenderTdp(snapshot.Tdp);
         RenderPowerMode(snapshot.PowerMode);
+        FrontendBatteryChargeLimitSnapshot battery;
+        try { battery = await _frontend.CaptureBatteryChargeLimitAsync(); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "Battery charge-limit snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
+            battery = FrontendBatteryChargeLimitSnapshot.Unavailable;
+        }
+        RenderBatteryChargeLimit(battery);
+    }
+
+    private void RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot snapshot, bool preserveDirtyDraft = true)
+    {
+        _batteryChargeLimitSnapshot = snapshot;
+        if (!preserveDirtyDraft || !_batteryChargeLimitDraftDirty)
+        {
+            _batteryChargeLimitDraftPercent = snapshot.DesiredLimitPercent
+                ?? (snapshot.CurrentLimitPercent is >= 60 and <= 100 && (snapshot.CurrentLimitPercent.Value - 60) % 5 == 0
+                    ? snapshot.CurrentLimitPercent.Value : 60);
+        }
+
+        _suppressBatteryChargeLimitEvents = true;
+        try
+        {
+            BatteryChargeLimitEnabledToggleSwitch.IsOn = snapshot.DesiredEnabled ?? snapshot.CurrentEnabled ?? false;
+            BatteryChargeLimitSlider.Value = _batteryChargeLimitDraftPercent;
+            BatteryChargeLimitValueText.Text = $"{_batteryChargeLimitDraftPercent}%";
+        }
+        finally { _suppressBatteryChargeLimitEvents = false; }
+
+        var editable = snapshot.Available && snapshot.PersistenceWritable && !_batteryChargeLimitMutationBusy;
+        BatteryChargeLimitEnabledToggleSwitch.IsEnabled = editable && snapshot.Initialized;
+        BatteryChargeLimitSlider.IsEnabled = editable;
+        var current = snapshot.CurrentLimitPercent is { } currentPercent
+            ? $"Current hardware: {currentPercent}%"
+            : "Current hardware: unavailable";
+        var desired = snapshot.Initialized
+            ? $"Desired: {snapshot.DesiredLimitPercent}% ({(snapshot.DesiredEnabled == true ? "enabled" : "disabled")})"
+            : "Desired: not initialized; choose a supported 60–100% value to take ownership.";
+        BatteryChargeLimitStatusText.Text = $"{current} · {desired}";
+
+        BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Warning;
+        if (!snapshot.Available)
+        {
+            BatteryChargeLimitInfoBar.Message = "Battery charge-limit control is unavailable on this device.";
+            BatteryChargeLimitInfoBar.IsOpen = true;
+        }
+        else if (!snapshot.PersistenceWritable)
+        {
+            BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Error;
+            BatteryChargeLimitInfoBar.Message = "Battery settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.";
+            BatteryChargeLimitInfoBar.IsOpen = true;
+        }
+        else if (snapshot.LastFailure is { } failure)
+        {
+            BatteryChargeLimitInfoBar.Message = failure;
+            BatteryChargeLimitInfoBar.IsOpen = true;
+        }
+        else if (snapshot.Initialized && (snapshot.CurrentEnabled != snapshot.DesiredEnabled || snapshot.CurrentLimitPercent != snapshot.DesiredLimitPercent))
+        {
+            BatteryChargeLimitInfoBar.Message = "Current hardware does not match the saved desired battery charge limit; it will be reconciled on the next lifecycle event.";
+            BatteryChargeLimitInfoBar.IsOpen = true;
+        }
+        else BatteryChargeLimitInfoBar.IsOpen = false;
+    }
+
+    private void BatteryChargeLimitSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs args)
+    {
+        if (_suppressBatteryChargeLimitEvents) return;
+        _batteryChargeLimitDraftPercent = Math.Clamp((int)Math.Round(args.NewValue / 5) * 5, 60, 100);
+        _batteryChargeLimitDraftDirty = true;
+        BatteryChargeLimitValueText.Text = $"{_batteryChargeLimitDraftPercent}%";
+    }
+
+    private async void BatteryChargeLimitSlider_PointerCaptureLost(object sender, PointerRoutedEventArgs e) => await CommitBatteryChargeLimitPercentAsync();
+    private async void BatteryChargeLimitSlider_KeyUp(object sender, KeyRoutedEventArgs e) => await CommitBatteryChargeLimitPercentAsync();
+
+    private async Task CommitBatteryChargeLimitPercentAsync()
+    {
+        if (_suppressBatteryChargeLimitEvents || !_batteryChargeLimitDraftDirty || _frontend is null || _batteryChargeLimitMutationBusy) return;
+        _batteryChargeLimitDraftDirty = false;
+        _batteryChargeLimitMutationBusy = true;
+        RenderBatteryChargeLimit(_batteryChargeLimitSnapshot, preserveDirtyDraft: false);
+        try
+        {
+            var result = await _frontend.SetDeviceBatteryChargeLimitPercentAsync(_batteryChargeLimitDraftPercent);
+            RenderBatteryChargeLimit(result.Snapshot, preserveDirtyDraft: false);
+            if (!result.Succeeded)
+            {
+                BatteryChargeLimitInfoBar.Severity = result.Outcome == FrontendBatteryChargeLimitMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning;
+                BatteryChargeLimitInfoBar.Message = result.FailureMessage ?? "Battery charge limit could not be updated.";
+                BatteryChargeLimitInfoBar.IsOpen = true;
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "Battery charge-limit mutation failed.", exception, ("Reason", exception.GetType().Name));
+            BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Error;
+            BatteryChargeLimitInfoBar.Message = "Battery charge limit could not be updated because the Runtime connection was interrupted.";
+            BatteryChargeLimitInfoBar.IsOpen = true;
+            await RefreshAsync();
+        }
+        finally
+        {
+            _batteryChargeLimitMutationBusy = false;
+            RenderBatteryChargeLimit(_batteryChargeLimitSnapshot);
+        }
+    }
+
+    private async void BatteryChargeLimitEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressBatteryChargeLimitEvents || _frontend is null || _batteryChargeLimitMutationBusy) return;
+        _batteryChargeLimitMutationBusy = true;
+        RenderBatteryChargeLimit(_batteryChargeLimitSnapshot);
+        try
+        {
+            var result = await _frontend.SetDeviceBatteryChargeLimitEnabledAsync(BatteryChargeLimitEnabledToggleSwitch.IsOn);
+            RenderBatteryChargeLimit(result.Snapshot, preserveDirtyDraft: false);
+            if (!result.Succeeded)
+            {
+                BatteryChargeLimitInfoBar.Severity = result.Outcome == FrontendBatteryChargeLimitMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning;
+                BatteryChargeLimitInfoBar.Message = result.FailureMessage ?? "Battery charge limit could not be updated.";
+                BatteryChargeLimitInfoBar.IsOpen = true;
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "Battery charge-limit enable mutation failed.", exception, ("Reason", exception.GetType().Name));
+            BatteryChargeLimitInfoBar.Severity = InfoBarSeverity.Error;
+            BatteryChargeLimitInfoBar.Message = "Battery charge limit could not be updated because the Runtime connection was interrupted.";
+            BatteryChargeLimitInfoBar.IsOpen = true;
+            await RefreshAsync();
+        }
+        finally
+        {
+            _batteryChargeLimitMutationBusy = false;
+            RenderBatteryChargeLimit(_batteryChargeLimitSnapshot);
+        }
     }
 
     private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];

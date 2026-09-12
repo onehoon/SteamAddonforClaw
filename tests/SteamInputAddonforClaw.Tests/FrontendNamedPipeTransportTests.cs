@@ -71,12 +71,15 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(29, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(30, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestPercentAsync(85));
         Assert.Equal(85, fake.LastBatteryPercent);
+        Assert.Equal(fake.ProductionBatterySnapshot, await client.CaptureBatteryChargeLimitAsync());
+        Assert.Equal(fake.ProductionBatteryMutationResult, await client.SetDeviceBatteryChargeLimitEnabledAsync(false));
+        Assert.Equal(fake.ProductionBatteryMutationResult, await client.SetDeviceBatteryChargeLimitPercentAsync(90));
     }
 
     [Fact]
@@ -1130,13 +1133,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 29 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 30 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":29,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":29,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":29,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":30,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":30,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":30,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1546,6 +1549,11 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendBatteryChargeLimitTestSnapshot> CaptureBatteryChargeLimitTestAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(BatterySnapshot); }
         public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastBatteryEnabled = enabled; return Task.FromResult(BatteryMutationResult); }
         public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestPercentAsync(int percent, CancellationToken t = default) { TotalCalls++; LastBatteryPercent = percent; return Task.FromResult(BatteryMutationResult); }
+        public FrontendBatteryChargeLimitSnapshot ProductionBatterySnapshot { get; } = new(true, true, true, true, 80, true, 85, null);
+        public FrontendBatteryChargeLimitMutationResult ProductionBatteryMutationResult { get; } = new(FrontendBatteryChargeLimitMutationOutcome.Succeeded, null, new(true, true, true, false, 90, false, 90, null));
+        public Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatterySnapshot); }
+        public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
+        public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
     }
 
     private sealed class PartialReadStream : MemoryStream

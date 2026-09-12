@@ -88,9 +88,9 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // peer does not implement this wire contract, so fail the handshake up front. Pre-release: no
 // compatibility shim.
 // Version 29: the Developer-only battery charge-limit test adds typed capture and mutation RPCs.
-// A v28 peer does not implement this wire contract, so fail the handshake up front. Pre-release:
-// no compatibility shim.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 29; }
+// Version 30: the production Device-page battery charge-limit snapshot and mutation RPCs are
+// separate from the developer test surface. A v29 peer must fail the handshake up front.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 30; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -122,7 +122,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, SetFrontButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, SetFrontButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled, SetDeviceBatteryChargeLimitPercent }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -134,6 +134,8 @@ internal sealed record StartClawSensorProbeRequest(FrontendClawSensorProbeMode M
 internal sealed record RunFanProbeRequest(FrontendFanProbeOperation Operation);
 internal sealed record SetBatteryChargeLimitTestEnabledRequest(bool Enabled);
 internal sealed record SetBatteryChargeLimitTestPercentRequest(int Percent);
+internal sealed record SetDeviceBatteryChargeLimitEnabledRequest(bool Enabled);
+internal sealed record SetDeviceBatteryChargeLimitPercentRequest(int Percent);
 internal sealed record SetDeviceCpuBoostAcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetDeviceCpuBoostDcRequest(SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetDeviceCpuBoostEnabledRequest(bool Enabled);

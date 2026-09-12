@@ -36,6 +36,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly object _fanProbeGate = new();
     private FanProbeSession? _fanProbe;
     private readonly MsiClawBatteryChargeLimitHardware? _batteryChargeLimitHardware;
+    private readonly MsiClawBatteryChargeLimitRuntime? _batteryChargeLimitRuntime;
 
     /// <summary>Wraps the Runtime-owned <see cref="ClawSensorProbeCoordinator"/> for one active
     /// diagnostic session, plus the device identity captured at Open time (so a stale-but-still-open
@@ -83,7 +84,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _centerMStartup = centerMStartup;
@@ -97,7 +98,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _scanProfileGames = scanProfileGames ?? (token => new ProfileGameCatalogScanner().ScanAsync(token));
         _displayResolutionRuntime = displayResolutionRuntime;
         _fanProbeTransport = fanProbeTransport;
-        _batteryChargeLimitHardware = fanProbeTransport is null ? null : new MsiClawBatteryChargeLimitHardware(fanProbeTransport);
+        _batteryChargeLimitRuntime = batteryChargeLimitRuntime;
+        _batteryChargeLimitHardware = batteryChargeLimitHardware ?? (fanProbeTransport is null ? null : new MsiClawBatteryChargeLimitHardware(fanProbeTransport));
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -990,6 +992,54 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private static FrontendPowerModeMutationOutcome MapPowerModeOutcome(PowerModeMutationOutcome outcome) => outcome switch { PowerModeMutationOutcome.Succeeded => FrontendPowerModeMutationOutcome.Succeeded, PowerModeMutationOutcome.ApplyFailed => FrontendPowerModeMutationOutcome.ApplyFailed, _ => FrontendPowerModeMutationOutcome.PersistenceFailed };
     private static FrontendPowerModeSnapshot MapPowerModeSnapshot(PowerModeRuntimeSnapshot s) => new(MapPowerModeSide(s.AcCurrent, s.AcDesired), MapPowerModeSide(s.DcCurrent, s.DcDesired), s.Enabled, s.PersistenceWritable, s.LastFailure);
     private static FrontendPowerModeSideSnapshot MapPowerModeSide(PowerModeSideReading r, WindowsPowerMode? desired) => new(r.Status switch { PowerModeReadStatus.Known => FrontendPowerModeReadStatus.Known, PowerModeReadStatus.Unknown => FrontendPowerModeReadStatus.Unknown, _ => FrontendPowerModeReadStatus.Unavailable }, r.Mode, desired);
+
+    // ---- Production Device battery charge limit (PR2) ----
+    public Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_batteryChargeLimitRuntime is null
+            ? FrontendBatteryChargeLimitSnapshot.Unavailable
+            : MapBatteryChargeLimitSnapshot(_batteryChargeLimitRuntime.CaptureSnapshot()));
+    }
+
+    public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_batteryChargeLimitRuntime is null)
+            return Task.FromResult(new FrontendBatteryChargeLimitMutationResult(FrontendBatteryChargeLimitMutationOutcome.Unavailable,
+                "MSI battery charge-limit control is unavailable.", FrontendBatteryChargeLimitSnapshot.Unavailable));
+        var result = _batteryChargeLimitRuntime.SetEnabled(enabled);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(MapBatteryChargeLimitMutation(result));
+    }
+
+    public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_batteryChargeLimitRuntime is null)
+            return Task.FromResult(new FrontendBatteryChargeLimitMutationResult(FrontendBatteryChargeLimitMutationOutcome.Unavailable,
+                "MSI battery charge-limit control is unavailable.", FrontendBatteryChargeLimitSnapshot.Unavailable));
+        var result = _batteryChargeLimitRuntime.SetPercent(percent);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(MapBatteryChargeLimitMutation(result));
+    }
+
+    private static FrontendBatteryChargeLimitMutationResult MapBatteryChargeLimitMutation(BatteryChargeLimitMutationResult result) =>
+        new(result.Outcome switch
+        {
+            BatteryChargeLimitMutationOutcome.Succeeded => FrontendBatteryChargeLimitMutationOutcome.Succeeded,
+            BatteryChargeLimitMutationOutcome.InvalidTarget => FrontendBatteryChargeLimitMutationOutcome.InvalidTarget,
+            BatteryChargeLimitMutationOutcome.PersistenceFailed => FrontendBatteryChargeLimitMutationOutcome.PersistenceFailed,
+            BatteryChargeLimitMutationOutcome.ApplyFailed => FrontendBatteryChargeLimitMutationOutcome.ApplyFailed,
+            _ => FrontendBatteryChargeLimitMutationOutcome.Unavailable
+        }, result.FailureMessage, MapBatteryChargeLimitSnapshot(result.Snapshot));
+
+    private static FrontendBatteryChargeLimitSnapshot MapBatteryChargeLimitSnapshot(BatteryChargeLimitRuntimeSnapshot snapshot) =>
+        new(snapshot.Available, snapshot.PersistenceWritable, snapshot.Initialized, snapshot.CurrentEnabled,
+            snapshot.CurrentLimitPercent, snapshot.DesiredEnabled, snapshot.DesiredLimitPercent, snapshot.LastFailure);
 
     private FrontendCpuBoostMutationResult MutateCpuBoost(bool ac, CpuBoostMode mode)
     {

@@ -15,10 +15,31 @@ public sealed record DeviceSettings
 {
     public DevicePerformanceSettings Performance { get; init; } = new();
     public DeviceDisplaySettings Display { get; init; } = new();
+    // Additive Device/Profile storage for the production battery charge-limit owner. The
+    // initializer intentionally distinguishes an absent legacy property from explicit JSON null;
+    // ProfileStore rejects the latter without rejecting older documents.
+    public DeviceBatterySettings Battery { get; init; } = new();
 
     /// <summary>Preserves unrecognized properties directly under <c>device</c> (as opposed to
     /// inside <see cref="Performance"/>/<see cref="Display"/>) across a load/save round trip --
     /// see the identical rationale on those two types and on <see cref="ProfileDocument.ExtensionData"/>.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed record DeviceBatterySettings
+{
+    public DeviceBatteryChargeLimitSettings? ChargeLimit { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed record DeviceBatteryChargeLimitSettings
+{
+    public bool Enabled { get; init; }
+    public int LimitPercent { get; init; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }

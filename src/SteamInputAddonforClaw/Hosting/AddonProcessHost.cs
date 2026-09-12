@@ -86,6 +86,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private WindowsIntelFpsPowerNotificationSource? _intelFpsPowerSource;
     private TdpRuntime? _tdpRuntime;
     private HelperMsiClawTdpTransport? _tdpTransport;
+    private MsiClawBatteryChargeLimitHardware? _batteryChargeLimitHardware;
+    private MsiClawBatteryChargeLimitRuntime? _batteryChargeLimitRuntime;
     private TdpPowerLifecycleWatcher? _tdpPowerLifecycleWatcher;
     private TdpCenterMRegistryWatcher? _tdpCenterMRegistryWatcher;
 
@@ -301,8 +303,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             _gameProfileMutations.SetModelId(tdpModel);
             _tdpTransport = new();
-            _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
-                new MsiClawTdpHardware(_tdpTransport));
+            var tdpHardware = new MsiClawTdpHardware(_tdpTransport);
+            _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel, tdpHardware);
+            _batteryChargeLimitHardware = new MsiClawBatteryChargeLimitHardware(_tdpTransport);
+            _batteryChargeLimitRuntime = new(_profileStore, _profileMutationGate, tdpModel, _batteryChargeLimitHardware);
             _tdpRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
@@ -388,6 +392,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
             intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
+            batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
+            batteryChargeLimitHardware: _batteryChargeLimitHardware,
             // MSI Center M startup Enable/Disable (work order PR1). The one shared reader -- also
             // consulted by the mandatory Runtime termination / launch-at-startup policy (PR2.5).
             centerMStartup: _centerMStartupControl,
@@ -1209,6 +1215,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         try
         {
+            _batteryChargeLimitRuntime?.StartupReconcile();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Battery", "Battery charge-limit startup reconcile failed.", exception);
+        }
+
+        try
+        {
             if (_tdpRuntime is not null && _tdpPowerLifecycleWatcher is not null)
             {
                 _tdpPowerLifecycleWatcher.Start();
@@ -1412,6 +1427,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             await _tdpRuntime.DisposeAsync().ConfigureAwait(false);
             _tdpRuntime = null;
         }
+        _batteryChargeLimitRuntime?.BeginShutdown();
+        _batteryChargeLimitRuntime = null;
+        _batteryChargeLimitHardware = null;
         if (_tdpTransport is not null)
         {
             await _tdpTransport.DisposeAsync().ConfigureAwait(false);
@@ -1624,7 +1642,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken),
             () => _runtimeHost?.ActualRunningAppId ?? 0,
             appId => _cpuBoostRuntime.Reconcile(appId),
-            appId => _powerModeRuntime.Reconcile(appId));
+            appId => _powerModeRuntime.Reconcile(appId),
+            () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"));
     }
 
     internal static async Task ReconcilePerformanceAfterResumeAsync(
@@ -1632,7 +1651,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Func<TimeSpan, CancellationToken, Task> delay,
         Func<uint> actualAppIdSource,
         Action<uint> reconcileCpuBoost,
-        Action<uint> reconcilePowerMode)
+        Action<uint> reconcilePowerMode,
+        Action? reconcileBattery = null)
     {
         try
         {
@@ -1660,6 +1680,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("Profiles.PowerMode", "Power Mode resume reconcile failed.", exception);
+        }
+
+        try
+        {
+            reconcileBattery?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Battery", "Battery charge-limit resume reconcile failed.", exception);
         }
     }
 

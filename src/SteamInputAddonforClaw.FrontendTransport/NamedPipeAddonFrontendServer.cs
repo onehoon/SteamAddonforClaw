@@ -154,7 +154,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureBatteryChargeLimitTest)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
@@ -230,6 +230,12 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.RunFanProbeAsync(FrontendWireCodec.Decode<RunFanProbeRequest>(p).Operation, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureBatteryChargeLimitTest
         ? FrontendWireCodec.Payload(await _inner.CaptureBatteryChargeLimitTestAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureBatteryChargeLimit
+        ? FrontendWireCodec.Payload(await _inner.CaptureBatteryChargeLimitAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetDeviceBatteryChargeLimitEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetDeviceBatteryChargeLimitEnabledAsync(FrontendWireCodec.Decode<SetDeviceBatteryChargeLimitEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetDeviceBatteryChargeLimitPercent
+        ? FrontendWireCodec.Payload(await _inner.SetDeviceBatteryChargeLimitPercentAsync(FrontendWireCodec.Decode<SetDeviceBatteryChargeLimitPercentRequest>(p).Percent, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetBatteryChargeLimitTestEnabled
         ? FrontendWireCodec.Payload(await _inner.SetBatteryChargeLimitTestEnabledAsync(FrontendWireCodec.Decode<SetBatteryChargeLimitTestEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetBatteryChargeLimitTestPercent

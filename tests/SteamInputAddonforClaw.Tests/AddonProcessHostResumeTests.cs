@@ -88,6 +88,22 @@ public sealed class AddonProcessHostResumeTests
     }
 
     [Fact]
+    public async Task Resume_reconcile_runs_battery_after_the_existing_profile_runtimes()
+    {
+        var calls = new List<string>();
+
+        await AddonProcessHost.ReconcilePerformanceAfterResumeAsync(
+            CancellationToken.None,
+            static (_, _) => Task.CompletedTask,
+            static () => 123u,
+            _ => calls.Add("CPU"),
+            _ => calls.Add("Power"),
+            () => calls.Add("Battery"));
+
+        Assert.Equal(new[] { "CPU", "Power", "Battery" }, calls);
+    }
+
+    [Fact]
     public async Task Resume_reconcile_keeps_power_mode_independent_when_cpu_boost_fails()
     {
         var calls = new List<string>();
