@@ -10,19 +10,27 @@ internal static class QuickSettingsRowRendering
 {
     internal static bool IsWellFormed(QuickSettingsRow row) => row.ControlKind switch
     {
-        QuickSettingsControlKind.Toggle => row.Value is null || row.Value.Kind == QuickSettingsValueKind.Boolean,
+        QuickSettingsControlKind.Toggle =>
+            row.Value is null || (row.Value.Kind == QuickSettingsValueKind.Boolean && row.Value.IsStructurallyValid),
         QuickSettingsControlKind.Slider => IsWellFormedSlider(row),
         _ => false,
     };
 
+    // Section 48: a missing or unknown discrete product value must fail the row closed rather than
+    // render an arbitrary option (index 0) -- this is a normal supported Runtime read-failure shape
+    // (e.g. CPU Boost/Power Mode enabled with neither a desired nor a known current side), not a
+    // theoretical case. Requiring the value up front, before the Numeric/Discrete split, keeps both
+    // kinds equally fail-closed instead of letting Numeric silently fall back to its Minimum.
     private static bool IsWellFormedSlider(QuickSettingsRow row)
     {
         if (row.SliderSpec is not { } spec) return false;
-        if (row.Value is not null && row.Value.Kind != QuickSettingsValueKind.Integer) return false;
+        if (row.Value is not { Kind: QuickSettingsValueKind.Integer, IntegerValue: { } current } value || !value.IsStructurallyValid)
+            return false;
+
         return spec.Kind switch
         {
             QuickSettingsSliderKind.Numeric => spec.Minimum <= spec.Maximum && spec.Step > 0,
-            QuickSettingsSliderKind.Discrete => spec.Options is { Count: > 0 },
+            QuickSettingsSliderKind.Discrete => spec.Options is { Count: > 0 } options && FindDiscreteIndex(options, current) >= 0,
             _ => false,
         };
     }

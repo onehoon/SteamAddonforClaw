@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using SteamInputAddonforClaw.FrontendTransport;
@@ -55,5 +57,48 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.NotEqual(typeof(NamedPipeOverlayClient), mutateParameter.ParameterType);
         Assert.True(mutateParameter.ParameterType.IsGenericType);
         Assert.Equal(typeof(Func<,>), mutateParameter.ParameterType.GetGenericTypeDefinition());
+    }
+
+    // OverlayWindow itself cannot be constructed/exercised here (WinUI needs a XAML host), so this
+    // is a source/composition regression -- mirroring QamFrontendContractTests' qam.js text
+    // assertions -- proving RenderDevicePage() actually consumes and clears the binder's local
+    // failure fact in BOTH the fast (value-only) path and the structural-rebuild path, per the PR
+    // #508 review that flagged a mutation failure being retained in the binder but never surfaced.
+    [Fact]
+    public void RenderDevicePage_surfaces_and_clears_the_binder_local_failure_message_on_both_paths()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+
+        Assert.Contains("private void ApplyDeviceLocalFailure()", source);
+        Assert.Contains("_deviceBinding.LastLocalFailureMessage", source);
+        // Cleared, not just shown: no message collapses the banner again.
+        Assert.Contains("Visibility.Collapsed", source);
+
+        var renderDevicePage = source[source.IndexOf("private void RenderDevicePage()", StringComparison.Ordinal)..
+            source.IndexOf("private static DeviceRowShape DeviceRowShapeOf", StringComparison.Ordinal)];
+        var fastPathCallCount = CountOccurrences(renderDevicePage, "ApplyDeviceLocalFailure();");
+        Assert.Equal(2, fastPathCallCount); // once after the fast-path update, once after a rebuild
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+        return count;
+    }
+
+    private static string ReadSource(params string[] parts)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "README.md")))
+            directory = directory.Parent;
+
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine([directory!.FullName, .. parts]));
     }
 }

@@ -63,6 +63,7 @@ public sealed partial class OverlayWindow : Window
     // controls in place instead of tearing down/rebuilding the page on every edit/settlement.
     private OverlayQuickSettingsPageBinding? _deviceBinding;
     private StackPanel? _devicePageContent;
+    private TextBlock? _deviceFailureText;
     private readonly Dictionary<QuickSettingsRowId, OverlayToggleRow> _deviceToggleRows = new();
     private readonly Dictionary<QuickSettingsRowId, OverlaySliderRow> _deviceSliderRows = new();
     private DeviceRowShape[]? _deviceRowShape;
@@ -261,10 +262,16 @@ public sealed partial class OverlayWindow : Window
         if (id != OverlayTabId.Device)
             return CreatePlaceholderPage(id);
 
-        // Populated by RenderDevicePage() once ConfigureQuickSettings/ApplyQuickSettingsPage runs;
-        // `rows` (== _pageRows[Device]) starts empty and is replaced wholesale on first render.
+        // Root holds the SF-V2-30/32 local failure banner above the actual row content;
+        // RenderDevicePage() populates/updates both once ConfigureQuickSettings/ApplyQuickSettingsPage
+        // runs. `rows` (== _pageRows[Device]) starts empty and is replaced wholesale on first render.
+        var root = new StackPanel { Spacing = 4 };
+        _deviceFailureText = CreateDeviceMessageText(string.Empty, "CaptionTextBlockStyle");
+        _deviceFailureText.Visibility = Visibility.Collapsed;
+        root.Children.Add(_deviceFailureText);
         _devicePageContent = new StackPanel { Spacing = 4 };
-        return _devicePageContent;
+        root.Children.Add(_devicePageContent);
+        return root;
     }
 
     // SF-V2-07 section 12/28: render the binder's current effective page (authoritative rows with
@@ -282,11 +289,25 @@ public sealed partial class OverlayWindow : Window
             if (_deviceRowShape is not null && _deviceRowShape.SequenceEqual(shape))
             {
                 UpdateDeviceRowValues(page);
+                ApplyDeviceLocalFailure();
                 return;
             }
         }
 
         RebuildDeviceContent(page);
+        ApplyDeviceLocalFailure();
+    }
+
+    // Sections 30/32: a typed failure's FailureMessage or an operation/transport failure's narrow
+    // local message must be visible -- silently snapping back to authoritative state with no
+    // indication is not acceptable. Page-local only: no notification framework, cleared the moment
+    // the binder's own failure fact clears (a later success settlement/refresh).
+    private void ApplyDeviceLocalFailure()
+    {
+        if (_deviceFailureText is null || _deviceBinding is null) return;
+        var message = _deviceBinding.LastLocalFailureMessage;
+        _deviceFailureText.Text = message ?? string.Empty;
+        _deviceFailureText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private static DeviceRowShape DeviceRowShapeOf(QuickSettingsRow row) => new(

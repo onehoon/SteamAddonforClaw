@@ -414,6 +414,40 @@ public sealed class OverlayQuickSettingsPageBindingTests
         Assert.True(QuickSettingsRowRendering.IsWellFormed(Discrete(QuickSettingsRowId.DeviceCpuBoostAc, 20)));
     }
 
+    // A row with Available=true but no known/desired side (e.g. CPU Boost/Power Mode enabled with
+    // neither a desired nor a known current value) is a normal supported Runtime read-failure shape,
+    // not a theoretical case -- it must fail closed rather than render an arbitrary option.
+
+    [Fact]
+    public void Numeric_slider_with_a_null_value_fails_closed()
+    {
+        var row = Numeric(QuickSettingsRowId.DeviceTdpAcPl1, 20, 8, 30) with { Value = null };
+        Assert.False(QuickSettingsRowRendering.IsWellFormed(row));
+    }
+
+    [Fact]
+    public void Discrete_slider_with_a_null_value_fails_closed()
+    {
+        var row = Discrete(QuickSettingsRowId.DeviceCpuBoostAc, 20) with { Value = null };
+        Assert.False(QuickSettingsRowRendering.IsWellFormed(row));
+    }
+
+    [Fact]
+    public void Discrete_slider_with_an_unknown_product_value_fails_closed()
+    {
+        // 99 is not one of NonContiguousOptions' 10/20/40 -- must not silently select index 0.
+        var row = Discrete(QuickSettingsRowId.DeviceCpuBoostAc, 99);
+        Assert.False(QuickSettingsRowRendering.IsWellFormed(row));
+    }
+
+    [Fact]
+    public void Toggle_with_a_null_value_is_well_formed_but_a_non_boolean_value_is_not()
+    {
+        Assert.True(QuickSettingsRowRendering.IsWellFormed(Toggle(QuickSettingsRowId.DeviceTdpEnabled, true) with { Value = null }));
+        var malformed = Numeric(QuickSettingsRowId.DeviceTdpEnabled, 5, 0, 10) with { ControlKind = QuickSettingsControlKind.Toggle };
+        Assert.False(QuickSettingsRowRendering.IsWellFormed(malformed));
+    }
+
     // --- Effective value / authoritative refresh (section 49) -----------------------------------
 
     [Fact]
