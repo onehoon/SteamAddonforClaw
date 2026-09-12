@@ -177,6 +177,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("tabs.splice(0, tabs.length, ...nextTabs);", insertion);
         Assert.Contains("const desired = [descriptors[ADDON_DEVICE_TAB_KEY], descriptors[ADDON_PROFILE_TAB_KEY]];", insertion);
         Assert.Contains("LegacyRemoved=${legacyRemoved} DuplicatesRemoved=${duplicatesRemoved}", insertion);
+        Assert.Contains("selectInitialAddonTab(resolveQamSessionOwner(owner), owner, descriptors);", insertion);
     }
 
     [Fact]
@@ -189,9 +190,17 @@ public sealed class QamFrontendContractTests
         var selection = source[selectionStart..selectionEnd];
 
         Assert.Contains("function resolveNativeTabSelection(owner)", selection);
-        Assert.Contains("if (candidates.length !== 1) return null;", selection);
-        Assert.Contains("function selectInitialAddonTab(owner, tabs, descriptors)", selection);
+        Assert.Contains("typeof props.selectedTabKey !== \"string\"", selection);
+        Assert.Contains("typeof props.onTabSelected !== \"function\"", selection);
+        Assert.Contains("if (key !== ADDON_DEVICE_TAB_KEY && key !== ADDON_PROFILE_TAB_KEY) return;", selection);
+        Assert.DoesNotContain("const candidates =", selection);
+        Assert.DoesNotContain("activeTab", selection);
+        Assert.Contains("function resolveQamSessionOwner(owner)", selection);
+        Assert.Contains("const sessionOwner = owner?._owner;", selection);
+        Assert.Contains("function selectInitialAddonTab(sessionOwner, owner, descriptors)", selection);
+        Assert.Contains("if (!sessionOwner)", selection);
         Assert.Contains("state.initialTabSelectionOwners ??= new WeakSet();", selection);
+        Assert.Contains("state.initialTabSelectionOwners.has(sessionOwner)", selection);
         Assert.Contains("void request(\"captureStatus\").then", selection);
         Assert.Contains("QAM initial Addon tab selection unavailable; tabs remain usable.", selection);
         Assert.DoesNotContain("document.querySelector", selection);

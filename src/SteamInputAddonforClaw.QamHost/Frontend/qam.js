@@ -332,38 +332,34 @@
 
   function resolveNativeTabSelection(owner) {
     const props = owner?.props;
-    if (!props) return null;
-
-    // The supported Steam tab owner exposes one selected-tab value and one matching callback.
-    // Keep the allow-list explicit: an ambiguous or unknown prop shape must remain fail-open.
-    const candidates = [
-      ["selectedTab", "onTabSelected"],
-      ["selectedTabKey", "onTabSelected"],
-      ["activeTab", "onTabSelected"],
-      ["activeTabKey", "onTabSelected"],
-      ["selectedTab", "onTabChange"],
-      ["selectedTabKey", "onTabChange"],
-      ["activeTab", "onTabChange"],
-      ["activeTabKey", "onTabChange"],
-    ].filter(([valueKey, setterKey]) =>
-      Object.prototype.hasOwnProperty.call(props, valueKey) && typeof props[setterKey] === "function");
-
-    if (candidates.length !== 1) return null;
-    const [valueKey, setterKey] = candidates[0];
+    // This is the only supported current-Steam selection contract. Every other value/callback
+    // shape fails open so a future Steam build cannot receive a guessed selected-tab value.
+    if (!props || typeof props.selectedTabKey !== "string" || typeof props.onTabSelected !== "function") return null;
     return {
-      current: props[valueKey],
-      set: (key, descriptor) => {
-        const current = props[valueKey];
-        const next = current && typeof current === "object" ? descriptor : key;
-        props[setterKey](next);
+      set: key => {
+        if (key !== ADDON_DEVICE_TAB_KEY && key !== ADDON_PROFILE_TAB_KEY) return;
+        props.onTabSelected(key);
       },
     };
   }
 
-  function selectInitialAddonTab(owner, tabs, descriptors) {
+  function resolveQamSessionOwner(owner) {
+    // React's element owner fiber is stable for the mounted QAM surface and is replaced when
+    // that surface unmounts. Do not fall back to render output or its tabs collection.
+    const sessionOwner = owner?._owner;
+    return sessionOwner && (typeof sessionOwner === "object" || typeof sessionOwner === "function")
+      ? sessionOwner
+      : null;
+  }
+
+  function selectInitialAddonTab(sessionOwner, owner, descriptors) {
+    if (!sessionOwner) {
+      logOnce("initialTabSessionUnavailable", "QAM initial Addon tab selection unavailable; tabs remain usable.");
+      return;
+    }
     state.initialTabSelectionOwners ??= new WeakSet();
-    if (state.initialTabSelectionOwners.has(tabs)) return;
-    state.initialTabSelectionOwners.add(tabs);
+    if (state.initialTabSelectionOwners.has(sessionOwner)) return;
+    state.initialTabSelectionOwners.add(sessionOwner);
 
     const authority = resolveNativeTabSelection(owner);
     if (!authority) {
@@ -418,7 +414,7 @@
       "stableTabs",
       `QAM stable Addon tabs ensured. Device=${!!descriptors[ADDON_DEVICE_TAB_KEY]} Profile=${!!descriptors[ADDON_PROFILE_TAB_KEY]} LegacyRemoved=${legacyRemoved} DuplicatesRemoved=${duplicatesRemoved}`
     );
-    selectInitialAddonTab(owner, tabs, descriptors);
+    selectInitialAddonTab(resolveQamSessionOwner(owner), owner, descriptors);
     return tabs;
   }
 
