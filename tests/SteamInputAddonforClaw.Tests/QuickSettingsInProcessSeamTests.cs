@@ -56,6 +56,20 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Capture_profile_page_without_context_uses_the_shared_no_game_message()
+    {
+        var control = CreateControl(cpuBoostRuntime: null);
+
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: null);
+
+        Assert.False(page.Available);
+        Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
+        Assert.Null(page.AppId);
+        Assert.Equal("No active game.", page.Message);
+        Assert.Empty(page.Sections);
+    }
+
+    [Fact]
     public async Task Capture_profile_page_with_a_stale_app_id_is_unavailable_for_the_requested_context()
     {
         var profilesPath = Path.Combine(_testDirectory, "profiles.json");
