@@ -9,11 +9,8 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class QamFrontendBridgeTests
 {
-    // SF-V2-04/08: the generic Quick Settings QAM seam must reach the same shared Runtime mutation
-    // for Device only through the exact current Device admission rule (Big Picture + no running
-    // game); Profile generic mutation reaches the Runtime directly -- the SF-V2-08
-    // QuickSettingsMutationAdapter is the AppId/current-target/row validation authority, not a
-    // second QAM-side check.
+    // SF-V2-04/08: the generic Quick Settings QAM seam admits Device and Profile by page identity;
+    // shared Runtime validation remains the authority for target and row correctness.
 
     private static FrontendStatusSnapshot StatusWith(FrontendSteamSnapshot steam) => new(
         new("MSI", "Claw", "Board", ["GPU"]),
@@ -40,10 +37,14 @@ public sealed class QamFrontendBridgeTests
         return (bridge, fake, server);
     }
 
-    [Fact]
-    public async Task Generic_device_mutation_is_admitted_in_big_picture_with_no_running_game()
+    [Theory]
+    [InlineData(true, 0u, FrontendSteamSource.BigPicture)]
+    [InlineData(true, 480u, FrontendSteamSource.Actual)]
+    [InlineData(true, 480u, FrontendSteamSource.BigPicture)]
+    [InlineData(false, 0u, FrontendSteamSource.Actual)]
+    public async Task Generic_device_mutation_has_no_qam_specific_steam_admission(bool active, uint appId, FrontendSteamSource source)
     {
-        var (bridge, fake, server) = await StartAsync(new(true, 0, FrontendSteamSource.BigPicture));
+        var (bridge, fake, server) = await StartAsync(new(active, appId, source));
         await using var _ = server;
         await using var __ = bridge;
 
@@ -52,22 +53,6 @@ public sealed class QamFrontendBridgeTests
         Assert.True(response.Ok);
         Assert.Equal(1, fake.MutateCount);
         Assert.Equal(QuickSettingsRowId.DeviceCpuBoostEnabled, fake.LastIntent?.EditedRowId);
-    }
-
-    [Theory]
-    [InlineData(true, 480u, FrontendSteamSource.BigPicture)]
-    [InlineData(true, 0u, FrontendSteamSource.Actual)]
-    [InlineData(false, 0u, FrontendSteamSource.BigPicture)]
-    public async Task Generic_device_mutation_is_rejected_outside_big_picture_or_with_a_running_game(bool active, uint appId, FrontendSteamSource source)
-    {
-        var (bridge, fake, server) = await StartAsync(new(active, appId, source));
-        await using var _ = server;
-        await using var __ = bridge;
-
-        var response = await bridge.HandleRequestAsync(Request("mutateQuickSetting", CpuBoostToggleIntent()), CancellationToken.None);
-
-        Assert.False(response.Ok);
-        Assert.Equal(0, fake.MutateCount);
     }
 
     [Fact]

@@ -77,28 +77,17 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_bridge_requires_active_big_picture_without_a_running_game()
-    {
-        var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
-
-        Assert.Contains("!status.Steam.Active", bridge);
-        Assert.Contains("status.Steam.AppId != 0", bridge);
-        Assert.Contains("status.Steam.Source != FrontendSteamSource.BigPicture", bridge);
-    }
-
-    [Fact]
     public void Qam_bridge_path_is_only_the_generic_quick_settings_seam_for_device_and_profile()
     {
         var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
 
-        // SF-V2-05/08: exactly the two approved generic bridge names, and the one Device admission
-        // rule; Profile has no separate bridge-level admission (the SF-V2-08 mutation adapter is the
-        // AppId/current-target/row validation authority).
+        // SF-V2-05/08: exactly the two approved generic bridge names and the Device/Profile page
+        // allow-list; shared Runtime validation remains the target/row authority.
         Assert.Contains("\"captureQuickSettingsPage\" => await CaptureQuickSettingsPageAsync(root, token),", bridge);
         Assert.Contains("\"mutateQuickSetting\" => await MutateQuickSettingAsync(root, token),", bridge);
-        Assert.Contains("await EnsureDeviceMutationAdmittedAsync(token)", bridge);
         Assert.Contains("case QuickSettingsPageId.Device:", bridge);
         Assert.Contains("case QuickSettingsPageId.Profile:", bridge);
+        Assert.DoesNotContain("EnsureDeviceMutationAdmittedAsync", bridge);
 
         // The transitional feature-specific Device/Profile bridge operations are gone now that
         // qam.js renders/mutates both pages only through the shared page.
@@ -157,7 +146,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("cancelQamSliderCommits((key, pending) => pending?.pageId === page.pageId && (pending?.appId ?? null) === (page.appId ?? null) && pending?.sectionId === section.sectionId);", path);
         Assert.DoesNotContain("device-cpu-", path);
         Assert.DoesNotContain("profile-cpu-", path);
-        Assert.Contains("if (!state.installed || !canMutateQuickSettingsRow(row)) return;", path);
+        Assert.Contains("if (!state.installed || !requireQuickSettingsRowMutation(row)) return;", path);
         Assert.Contains("request(\"mutateQuickSetting\"", path);
         Assert.Contains("editedRowId: row.rowId", path);
         Assert.DoesNotContain("setDeviceCpuBoostEnabled", source);
@@ -282,27 +271,17 @@ public sealed class QamFrontendContractTests
 
         Assert.DoesNotContain("QAM integration test", source);
         Assert.Contains("title: null", source);
-        Assert.Contains("className: native.QamTitleClass", source);
-        Assert.Contains("style: { paddingTop: \"16px\" }", source);
-        Assert.Contains("function findPanelComponents(modules)", source);
-        Assert.Contains("let defaultCandidate = null", source);
-        Assert.Contains("try { defaultCandidate = module?.default ?? null; } catch (_) { }", source);
-        Assert.Contains("candidate === window", source);
-        Assert.Contains("let panelSection = null", source);
-        Assert.Contains("candidate[exportName]", source);
-        Assert.Contains("source?.includes(\".PanelSection\")", source);
-        Assert.Contains("return { PanelSection: panelSection, PanelSectionRow: panelSectionRow }", source);
-        Assert.DoesNotContain("Object.values(candidate).find(value => value?.toString", source);
-        Assert.Contains("try { value = candidate[exportName]; } catch (_) { continue; }", source);
+        Assert.DoesNotContain("QamTitleClass", source);
+        Assert.DoesNotContain("paddingTop: \"16px\"", source);
+        Assert.DoesNotContain("function findPanelComponents(modules)", source);
+        Assert.DoesNotContain("function findNativeClassStyles(modules)", source);
+        Assert.DoesNotContain("FieldLabelRowClass", source);
+        Assert.DoesNotContain("FieldLabelClass", source);
+        Assert.DoesNotContain("FieldLabelValueClass", source);
+        Assert.DoesNotContain("function labelRow", source);
+        Assert.DoesNotContain("justifyContent: \"space-between\"", source);
         Assert.Contains("PanelSection", source);
         Assert.Contains("PanelSectionRow", source);
-        Assert.Contains("function isSteamClassModule(candidate)", source);
-        Assert.Contains("candidate.Title && candidate.QuickAccessMenu && candidate.BatteryDetailsLabels", source);
-        Assert.Contains("candidate.FieldLabelRow && candidate.FieldLabel && candidate.FieldLabelValue", source);
-        Assert.Contains("FieldLabelRowClass", source);
-        Assert.Contains("FieldLabelClass", source);
-        Assert.Contains("FieldLabelValueClass", source);
-        Assert.Contains("style: { display: \"flex\", width: \"100%\", justifyContent: \"space-between\" }", source);
         Assert.DoesNotContain("marginTop: \"-4px\"", source);
         Assert.Contains("fill: \"currentColor\"", source);
         Assert.DoesNotContain("AC Mode", source);
@@ -318,35 +297,43 @@ public sealed class QamFrontendContractTests
         Assert.Contains("cancelQamSliderCommits", source);
         Assert.Contains("state.onStateInvalidated === handler", source);
         Assert.Contains("function findNativeQamComponents(webpackRequire)", source);
-        Assert.Contains("const module = webpackRequire(id)", source);
-        Assert.Contains("for (const module of modules)", source);
-        Assert.Contains("if (module?.default && isCommonUiModule(module.default))", source);
-        Assert.Contains("if (isCommonUiModule(module))", source);
-        Assert.Contains("Source=default", source);
-        Assert.Contains("Source=root", source);
+        Assert.Contains("function findUniqueFactory(webpackRequire, requiredTokens)", source);
+        Assert.Contains("function findUniqueFunction(exports, requiredTokens)", source);
+        Assert.Contains("function findUniqueObject(exports, predicate)", source);
+        Assert.Contains("DialogSlider_Container", source);
+        Assert.Contains("DropDownField", source);
+        Assert.Contains("SliderField", source);
+        Assert.Contains("PanelSectionTitle", source);
+        Assert.Contains("spinner", source);
+        Assert.Contains("onChangeComplete", source);
+        Assert.Contains("valueSuffix", source);
+        Assert.Contains("explainerTitle", source);
+        Assert.Contains("OnToggleChange", source);
+        Assert.Contains("this.Toggle()", source);
         Assert.DoesNotContain("webpackRequire.c", source);
-        Assert.Contains("function findCommonUiModule(modules)", source);
-        Assert.Contains("Object.keys(candidate).length > 60", source);
-        Assert.Contains("candidate[prop]?.contextType?._currentValue", source);
-        Assert.Contains("function findToggleField(commonUiModule)", source);
-        Assert.Contains("function findSliderField(commonUiModule)", source);
-        Assert.Contains("Object.values(commonUiModule)", source);
-        Assert.Contains("candidate?.render?.toString?.()", source);
-        Assert.Contains("candidate?.toString?.()", source);
-        Assert.Contains("source?.includes('ToggleField\",')", source);
-        Assert.Contains("source?.includes('SliderField\",')", source);
         Assert.DoesNotContain("findNativeComponent", source);
         Assert.DoesNotContain("findUniqueNativeComponent", source);
         Assert.DoesNotContain("requiredProps", source);
-        Assert.Contains("Steam CommonUIModule unavailable.", source);
-        Assert.Contains("native ToggleField unavailable", source);
-        Assert.Contains("native SliderField unavailable", source);
+        Assert.Contains("QAM native fields factory discovery failed", source);
+        Assert.Contains("QAM native layout factory discovery failed", source);
+        Assert.Contains("QAM native SliderField discovery failed", source);
+        Assert.Contains("QAM native ToggleField discovery failed", source);
+        Assert.Contains("QAM native PanelSection discovery failed", source);
+        Assert.Contains("QAM native PanelSectionRow discovery failed", source);
         Assert.Contains("state.installFailureKind = \"native-components\"", source);
         Assert.Contains("native.ToggleField", source);
         Assert.Contains("native.SliderField", source);
         Assert.Contains("notchTicksVisible: true", source);
-        Assert.DoesNotContain("numericNotches", source);
-        Assert.DoesNotContain("notchLabels", source);
+        Assert.Contains("notchLabels", source);
+        Assert.Contains("controlled: true", source);
+        Assert.Contains("showValue: true", source);
+        Assert.Contains("showBookendLabels: true", source);
+        Assert.Contains("function logStateChange(key, signature, message)", source);
+        Assert.Contains("state.runtimeDiagnostics", source);
+        Assert.Contains("QAM page state: Page=", source);
+        Assert.Contains("QAM mutation request: Page=", source);
+        Assert.Contains("QAM mutation result: Page=", source);
+        Assert.Contains("function quickSettingsRowMutationBlockReason(row, busy)", source);
         Assert.Contains("mutationDepthRef", source);
         Assert.Contains("deferredInvalidationRef", source);
         Assert.Contains("beginMutation", source);
@@ -355,7 +342,7 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("type: \"range\"", source);
         Assert.DoesNotContain("fontFamily: \"sans-serif\"", source);
         Assert.Contains("const failClosed", source);
-        Assert.Contains("QAM required native controls/layout unavailable", source);
+        Assert.Contains("QAM native semantic controls resolved", source);
     }
 
     [Fact]
@@ -376,7 +363,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("const options = row.sliderSpec.options ?? [];", renderer);
         Assert.Contains("options.findIndex(option => Number(option.value) === Number(effective.integerValue))", renderer);
         Assert.Contains("if (optionIndex < 0) return null;", renderer);
-        Assert.Contains("options[optionIndex].label", renderer);
+        Assert.Contains("label: option.label", renderer);
         Assert.Contains("scheduleQuickSettingsCommit(page, section, row, option.value)", renderer);
         Assert.Contains("native.ToggleField", renderer);
         Assert.Contains("native.SliderField", renderer);
@@ -483,11 +470,9 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("\"captureTdp\"", refresh);
         Assert.DoesNotContain("captureActiveGameProfile", refresh);
         Assert.Contains("await request(\"captureStatus\")", refresh);
-        // A context change retires the previous context's pending work; Device admission loss
-        // without a context change is handled separately (section 10.2).
+        // A context change retires the previous context's pending work.
         Assert.Contains("cancelQuickSettingsPendingForContext(previousContext);", refresh);
-        Assert.Contains("if (nextContext.pageId === QS_PAGE_DEVICE && !nextDeviceMutationAdmitted) {", refresh);
-        Assert.Contains("cancelQuickSettingsPendingForContext(nextContext);", refresh);
+        Assert.DoesNotContain("nextDeviceMutationAdmitted", refresh);
         // Late-result guard on the fetch itself (section 16).
         Assert.Contains("if (sameQuickSettingsContext(quickSettingsContextRef.current, nextContext)) {", refresh);
     }
@@ -705,10 +690,11 @@ public sealed class QamFrontendContractTests
 
         Assert.Contains("if (state.addonTabDescriptor) return state.addonTabDescriptor;", source);
         Assert.Contains("state.addonTabDescriptor = {", source);
-        // Row mutation is gated by shared writability + (for Device only) QAM surface admission,
-        // checked live -- Profile has no separate JS-side admission concept.
-        Assert.Contains("const canMutateQuickSettingsRow = row => !!row.available && !!row.writable && !busy && (quickSettingsPage?.pageId !== QS_PAGE_DEVICE || deviceMutationAdmitted);", source);
-        Assert.Contains("if (!state.installed || !canMutateQuickSettingsRow(row)) return;", source);
+        // Row mutation is gated only by shared writability and local busy state.
+        Assert.Contains("const canMutateQuickSettingsRow = row => quickSettingsRowMutationBlockReason(row, busy) == null;", source);
+        Assert.Contains("const requireQuickSettingsRowMutation = row =>", source);
+        Assert.Contains("QAM mutation blocked: Row=", source);
+        Assert.Contains("if (!state.installed || !requireQuickSettingsRowMutation(row)) return;", source);
         Assert.Contains("cancelQamSliderCommits();", source);
         Assert.Contains("retireBridgeConsumers", source);
     }
