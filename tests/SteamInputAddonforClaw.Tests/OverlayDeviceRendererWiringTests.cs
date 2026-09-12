@@ -52,6 +52,33 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void WindowInterop_preserves_topmost_and_no_activate_contract_across_warm_show_hide()
+    {
+        var source = ReadWindowInteropSource();
+
+        Assert.Contains("presenter.IsAlwaysOnTop = true;", source);
+        Assert.Contains("private const long WsExTopmost = 0x00000008L;", source);
+        Assert.Contains("Overlay topmost state verified.", source);
+        Assert.Contains("Overlay topmost style is missing after a successful Show.", source);
+        Assert.DoesNotContain("Activate()", source);
+        Assert.DoesNotContain("SetForegroundWindow", source);
+
+        var show = source[source.IndexOf("internal static void ShowWithoutActivation", StringComparison.Ordinal)..
+            source.IndexOf("internal static void Hide", StringComparison.Ordinal)];
+        Assert.Contains("HwndTopmost", show);
+        Assert.Contains("SwpNoActivate", show);
+        Assert.Contains("SwpShowWindow", show);
+        Assert.DoesNotContain("SwpNoZOrder", show);
+
+        var hide = source[source.IndexOf("internal static void Hide", StringComparison.Ordinal)..
+            source.IndexOf("private static void LogTopmostStateAfterShow", StringComparison.Ordinal)];
+        Assert.Contains("SwpNoZOrder", hide);
+        Assert.Contains("SwpNoSize", hide);
+        Assert.Contains("SwpNoMove", hide);
+        Assert.Contains("SwpHideWindow", hide);
+    }
+
+    [Fact]
     public void OverlayQuickSettingsPageBinding_takes_a_narrow_mutation_delegate_not_the_client()
     {
         var constructor = typeof(OverlayQuickSettingsPageBinding).GetConstructors(AnyInstance).Single();
@@ -163,6 +190,8 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     private static string ReadOverlayWindowSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+
+    private static string ReadWindowInteropSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "WindowInterop.cs");
 
     private static int CountOccurrences(string haystack, string needle)
     {
