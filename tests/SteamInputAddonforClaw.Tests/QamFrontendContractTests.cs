@@ -129,17 +129,24 @@ public sealed class QamFrontendContractTests
         Assert.Contains("function retireBridgeConsumers()", source);
         Assert.Contains("pending.reject(new Error(\"QAM bridge stopped\"))", source);
         Assert.Contains("state.bridgePending?.clear()", source);
-        Assert.Contains("state.onStateInvalidated = null", source);
+        Assert.Contains("state.stateInvalidationSubscribers?.clear()", source);
         Assert.DoesNotContain("state.bridgeNextId = 0", source);
     }
 
     [Fact]
-    public void Qam_tab_descriptor_is_not_reused_across_install_generations()
+    public void Qam_stable_tab_descriptors_are_generation_scoped_and_cleaned_up()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js").ReplaceLineEndings("\n");
 
+        Assert.Contains("const ADDON_DEVICE_TAB_KEY = \"steam-input-addon-device\";", source);
+        Assert.Contains("const ADDON_PROFILE_TAB_KEY = \"steam-input-addon-profile\";", source);
+        Assert.Contains("state.addonTabDescriptors", source);
+        Assert.Contains("buildAddonTab(React, native, QS_PAGE_DEVICE)", source);
+        Assert.Contains("buildAddonTab(React, native, QS_PAGE_PROFILE)", source);
+        Assert.Contains("[TAB_MARKER]: key", source);
+        Assert.Contains("panel: React.createElement(QuickSettingsPanel, { pageId })", source);
         var installStart = source.IndexOf("function install()", StringComparison.Ordinal);
-        var installReset = source.IndexOf("state.addonTabDescriptor = null;", installStart, StringComparison.Ordinal);
+        var installReset = source.IndexOf("state.addonTabDescriptors = null;", installStart, StringComparison.Ordinal);
         Assert.True(installStart >= 0);
         Assert.True(installReset > installStart);
         Assert.True(installReset < source.IndexOf("state.diagnostics = {};", installReset, StringComparison.Ordinal));
@@ -147,11 +154,65 @@ public sealed class QamFrontendContractTests
         var teardownStart = source.IndexOf("Object.assign(state, {\n      patches: null,", StringComparison.Ordinal);
         Assert.True(teardownStart >= 0);
         var teardown = source[teardownStart..source.IndexOf("    });", teardownStart, StringComparison.Ordinal)];
-        Assert.Contains("addonTabDescriptor: null,", teardown);
+        Assert.Contains("addonTabDescriptors: null,", teardown);
+        Assert.Contains("initialTabSelectionOwners: null,", teardown);
 
         var uninstallStart = source.IndexOf("function uninstall()", StringComparison.Ordinal);
         var uninstall = source[uninstallStart..source.IndexOf("    state.installed = false;", uninstallStart, StringComparison.Ordinal)];
         Assert.Contains("state.addonTabDescriptor = null;", uninstall);
+        Assert.Contains("state.addonTabDescriptors = null;", uninstall);
+    }
+
+    [Fact]
+    public void Qam_stable_tab_insertion_preserves_steam_tabs_and_removes_legacy_or_duplicate_addon_tabs()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var insertion = source[source.IndexOf("function ensureAddonTabs", StringComparison.Ordinal)..source.IndexOf("function preservePatchedFunctionShape", StringComparison.Ordinal)];
+
+        Assert.Contains("function addonTabKey(tab)", source);
+        Assert.Contains("if (marker === true) return \"legacy\";", source);
+        Assert.Contains("if (!key) {", insertion);
+        Assert.Contains("steamTabs.push(tab);", insertion);
+        Assert.Contains("else if (seen.has(key)) duplicatesRemoved++;", insertion);
+        Assert.Contains("tabs.splice(0, tabs.length, ...nextTabs);", insertion);
+        Assert.Contains("const desired = [descriptors[ADDON_DEVICE_TAB_KEY], descriptors[ADDON_PROFILE_TAB_KEY]];", insertion);
+        Assert.Contains("LegacyRemoved=${legacyRemoved} DuplicatesRemoved=${duplicatesRemoved}", insertion);
+    }
+
+    [Fact]
+    public void Qam_initial_tab_selection_uses_only_native_authority_and_fails_open_when_unavailable()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var selectionStart = source.IndexOf("function resolveNativeTabSelection", StringComparison.Ordinal);
+        var selectionEnd = source.IndexOf("function preservePatchedFunctionShape", selectionStart, StringComparison.Ordinal);
+        Assert.True(selectionStart >= 0 && selectionEnd > selectionStart);
+        var selection = source[selectionStart..selectionEnd];
+
+        Assert.Contains("function resolveNativeTabSelection(owner)", selection);
+        Assert.Contains("if (candidates.length !== 1) return null;", selection);
+        Assert.Contains("function selectInitialAddonTab(owner, tabs, descriptors)", selection);
+        Assert.Contains("state.initialTabSelectionOwners ??= new WeakSet();", selection);
+        Assert.Contains("void request(\"captureStatus\").then", selection);
+        Assert.Contains("QAM initial Addon tab selection unavailable; tabs remain usable.", selection);
+        Assert.DoesNotContain("document.querySelector", selection);
+        Assert.DoesNotContain(".click(", selection);
+        Assert.DoesNotContain("focus()", selection);
+        Assert.DoesNotContain("setInterval", selection);
+        Assert.DoesNotContain("MutationObserver", selection);
+    }
+
+    [Fact]
+    public void Qam_invalidation_subscribers_are_shared_but_each_panel_owns_its_refresh_and_pending_context()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        Assert.Contains("state.stateInvalidationSubscribers ??= new Set();", source);
+        Assert.Contains("for (const callback of [...(state.stateInvalidationSubscribers ?? [])])", source);
+        Assert.Contains("return () => state.stateInvalidationSubscribers?.delete(callback);", source);
+        Assert.Contains("if (pageId === QS_PAGE_PROFILE && previousContext && !sameQuickSettingsContext(previousContext, nextContext))", source);
+        Assert.Contains("cancelQuickSettingsPendingForContext(previousContext);", source);
+        Assert.Contains("state.stateInvalidationSubscribers?.clear();", source);
+        Assert.Contains("if (pageId === QS_PAGE_DEVICE)", source);
+        Assert.Contains("nextContext = { pageId: QS_PAGE_DEVICE, appId: null };", source);
     }
 
     [Fact]
@@ -262,7 +323,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("record.node = node;", source);
         Assert.Contains("if (record.node?.type === record.patchedType)", source);
         Assert.Contains("record.node.type = record.originalType;", source);
-        Assert.Contains("record.tabs = owner.props.tabs;", source);
+        Assert.Contains("record.tabs = ensureAddonTabs(owner, React, native);", source);
         Assert.Contains("record.node = null;", source);
         Assert.Contains("record.tabs = null;", source);
         Assert.DoesNotContain("record.nodes", source);
@@ -291,7 +352,7 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         Assert.DoesNotContain("QAM integration test", source);
-        Assert.Contains("title: null", source);
+        Assert.Contains("title: key === ADDON_DEVICE_TAB_KEY ? \"Device\" : \"Profile\"", source);
         Assert.DoesNotContain("QamTitleClass", source);
         Assert.DoesNotContain("paddingTop: \"16px\"", source);
         Assert.DoesNotContain("function findPanelComponents(modules)", source);
@@ -310,13 +371,13 @@ public sealed class QamFrontendContractTests
         Assert.Contains("request(\"captureStatus\")", source);
         Assert.Contains("function scheduleQamSliderCommit", source);
         Assert.Contains("setTimeout(async () =>", source);
-        Assert.Contains("state.onStateInvalidated", source);
+        Assert.Contains("state.stateInvalidationSubscribers", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("request(\"captureTdp\")", source);
         Assert.DoesNotContain("request(\"capturePowerMode\")", source);
         Assert.DoesNotContain("request(\"captureCpuBoost\")", source);
         Assert.Contains("cancelQamSliderCommits", source);
-        Assert.Contains("state.onStateInvalidated === handler", source);
+        Assert.Contains("return subscribeStateInvalidation(handler);", source);
         Assert.Contains("function findNativeQamComponents(webpackRequire)", source);
         Assert.Contains("function findUniqueFactory(webpackRequire, requiredTokens)", source);
         Assert.Contains("function findUniqueFunction(exports, requiredTokens)", source);
@@ -473,29 +534,27 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_refresh_selects_device_or_profile_page_from_status_and_uses_the_generic_capture()
+    public void Qam_device_and_profile_panels_use_fixed_page_identity_and_profile_tracks_active_app()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        var refreshStart = source.IndexOf("const refresh = React.useCallback(async () => {", StringComparison.Ordinal);
-        Assert.True(refreshStart >= 0);
-        var refresh = source[refreshStart..source.IndexOf("const beginMutation", refreshStart, StringComparison.Ordinal)];
-
-        // Page selection: no active game -> Device; active game -> that game's Profile (section 10).
-        Assert.Contains("const nextContext = activeGame ? { pageId: QS_PAGE_PROFILE, appId: nextAppId } : { pageId: QS_PAGE_DEVICE, appId: null };", refresh);
-        Assert.Contains("const nextPage = await request(\"captureQuickSettingsPage\", { pageId: nextContext.pageId, appId: nextContext.appId });", refresh);
-        Assert.Contains("setQuickSettingsPage(nextPage); quickSettingsPageRef.current = nextPage;", refresh);
-        Assert.DoesNotContain("captureDeviceQuickSettings", refresh);
-        Assert.DoesNotContain("captureCpuBoost", refresh);
-        Assert.DoesNotContain("capturePowerMode", refresh);
-        Assert.DoesNotContain("\"captureTdp\"", refresh);
-        Assert.DoesNotContain("captureActiveGameProfile", refresh);
-        Assert.Contains("await request(\"captureStatus\")", refresh);
-        // A context change retires the previous context's pending work.
-        Assert.Contains("cancelQuickSettingsPendingForContext(previousContext);", refresh);
-        Assert.DoesNotContain("nextDeviceMutationAdmitted", refresh);
-        // Late-result guard on the fetch itself (section 16).
-        Assert.Contains("if (sameQuickSettingsContext(quickSettingsContextRef.current, nextContext)) {", refresh);
+        var panelStart = source.IndexOf("function QuickSettingsPanel({ pageId })", StringComparison.Ordinal);
+        Assert.True(panelStart >= 0);
+        var panel = source[panelStart..source.IndexOf("state.addonTabDescriptors[key] =", panelStart, StringComparison.Ordinal)];
+        Assert.Contains("if (pageId === QS_PAGE_DEVICE)", panel);
+        var deviceBranch = panel[panel.IndexOf("if (pageId === QS_PAGE_DEVICE)", StringComparison.Ordinal)..panel.IndexOf("} else {", panel.IndexOf("if (pageId === QS_PAGE_DEVICE)", StringComparison.Ordinal), StringComparison.Ordinal)];
+        Assert.Contains("nextContext = { pageId: QS_PAGE_DEVICE, appId: null };", deviceBranch);
+        Assert.DoesNotContain("captureStatus", deviceBranch);
+        Assert.Contains("const nextStatus = await request(\"captureStatus\")", panel);
+        Assert.Contains("nextContext = { pageId: QS_PAGE_PROFILE, appId: nextAppId > 0 ? nextAppId : null };", panel);
+        Assert.Contains("request(\"captureQuickSettingsPage\", { pageId: nextContext.pageId, appId: nextContext.appId })", panel);
+        Assert.Contains("if (pageId === QS_PAGE_PROFILE && previousContext", panel);
+        Assert.Contains("if (sameQuickSettingsContext(quickSettingsContextRef.current, nextContext)) {", panel);
+        Assert.DoesNotContain("const nextContext = activeGame ?", source);
+        Assert.DoesNotContain("const activeGame = nextAppId > 0", source);
+        Assert.Contains("state.stateInvalidationSubscribers", source);
+        Assert.Contains("function subscribeStateInvalidation(callback)", source);
+        Assert.Contains("return subscribeStateInvalidation(handler);", panel);
     }
 
     [Fact]
@@ -528,7 +587,7 @@ public sealed class QamFrontendContractTests
 
         // The generic page-selection/context plumbing is what now drives Profile.
         Assert.Contains("const nextAppId = Number(nextStatus?.steam?.appId || 0)", source);
-        Assert.Contains("const activeGame = nextAppId > 0;", source);
+        Assert.Contains("nextContext = { pageId: QS_PAGE_PROFILE, appId: nextAppId > 0 ? nextAppId : null };", source);
         Assert.Contains("request(\"captureQuickSettingsPage\", { pageId: nextContext.pageId, appId: nextContext.appId })", source);
 
         // No hard-coded visible Profile product policy/labels/keys survive.
@@ -579,7 +638,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("pending?.pageId === context.pageId && (pending?.appId ?? null) === (context.appId ?? null)", source);
         // Context transition retires the OLD context's pending work on change.
         var refresh = source[source.IndexOf("const refresh = React.useCallback(async () => {", StringComparison.Ordinal)..source.IndexOf("const beginMutation", StringComparison.Ordinal)];
-        Assert.Contains("if (previousContext && !sameQuickSettingsContext(previousContext, nextContext)) {", refresh);
+        Assert.Contains("if (pageId === QS_PAGE_PROFILE && previousContext && !sameQuickSettingsContext(previousContext, nextContext)) {", refresh);
         // Late-result guard: a stale settlement is dropped instead of overwriting the current page.
         var apply = source[source.IndexOf("const applyQuickSettingsResult = result =>", StringComparison.Ordinal)..source.IndexOf("const commitQuickSettingsImmediate", StringComparison.Ordinal)];
         Assert.Contains("if (!sameQuickSettingsContext(quickSettingsContextOf(result?.page), quickSettingsContextRef.current)) return;", apply);
@@ -679,7 +738,9 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         var handlerStart = source.IndexOf("const handler = () =>", StringComparison.Ordinal);
-        var handler = source[handlerStart..source.IndexOf("state.onStateInvalidated = handler", handlerStart, StringComparison.Ordinal)];
+        var handlerEnd = source.IndexOf("return subscribeStateInvalidation(handler);", handlerStart, StringComparison.Ordinal);
+        Assert.True(handlerStart >= 0 && handlerEnd > handlerStart);
+        var handler = source[handlerStart..handlerEnd];
         // The invalidation handler only re-refreshes -- it never erases pending drafts/the page.
         Assert.DoesNotContain("setQuickSettingsPage(null)", handler);
         Assert.DoesNotContain("cancelQamSliderCommits", handler);
@@ -709,8 +770,11 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        Assert.Contains("if (state.addonTabDescriptor) return state.addonTabDescriptor;", source);
-        Assert.Contains("state.addonTabDescriptor = {", source);
+        Assert.Contains("state.addonTabDescriptors[key]", source);
+        Assert.Contains("[TAB_MARKER]: key", source);
+        Assert.Contains("function ensureAddonTabs", source);
+        Assert.Contains("addonTabKey(tab)", source);
+        Assert.Contains("const desired = [descriptors[ADDON_DEVICE_TAB_KEY], descriptors[ADDON_PROFILE_TAB_KEY]];", source);
         // Row mutation is gated only by shared writability and local busy state.
         Assert.Contains("const canMutateQuickSettingsRow = row => quickSettingsRowMutationBlockReason(row, busy) == null;", source);
         Assert.Contains("const requireQuickSettingsRowMutation = row =>", source);
@@ -727,6 +791,6 @@ public sealed class QamFrontendContractTests
             directory = directory.Parent;
 
         Assert.NotNull(directory);
-        return File.ReadAllText(Path.Combine([directory!.FullName, .. parts]));
+        return File.ReadAllText(Path.Combine([directory!.FullName, .. parts])).ReplaceLineEndings("\n");
     }
 }

@@ -1168,6 +1168,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         {
             (QuickSettingsPageId.Device, null) => CaptureDeviceQuickSettingsPageAsync(cancellationToken),
             (QuickSettingsPageId.Profile, > 0) => CaptureProfileQuickSettingsPageAsync(appId.Value, cancellationToken),
+            (QuickSettingsPageId.Profile, null or 0) => Task.FromResult(
+                QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "No active game.")),
             _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, appId)),
         };
     }
