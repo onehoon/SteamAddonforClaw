@@ -63,6 +63,9 @@ public partial class App : Application
         try
         {
             _client = new NamedPipeOverlayClient(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
+            // SF-V2-07 section 10.2: App owns the transport client; the Window/binder receives only
+            // this narrow mutation delegate, never the client itself.
+            _window?.ConfigureQuickSettings(intent => _client.SendQuickSettingsMutationAsync(intent));
             OverlayLog.Info("Transport", "Overlay command loop starting.");
             await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleQuickSettingsPageAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
@@ -105,15 +108,31 @@ public partial class App : Application
         return completion.Task;
     }
 
-    // SF-V2-06 section 25: receives the shared QuickSettingsPageSnapshot(Device) directly -- the same
-    // product contract QAM renders (SF-V2-05). This transport-migration PR is verification-only: no
-    // persistence, no direct hardware access, and no binding to the current preview Toggle/Slider
-    // fixtures. Real generic Device rendering/binding starts in SF-V2-07.
+    // SF-V2-07 section 10.1: marshal the shared QuickSettingsPageSnapshot(Device) -- the same
+    // product contract QAM renders (SF-V2-05) -- to the UI thread and complete only after the
+    // Window/binder has applied it. No WinUI row creation ever runs on the pipe read thread.
     private Task HandleQuickSettingsPageAsync(QuickSettingsPageSnapshot page)
     {
         OverlayLog.Debug("Device", "Quick Settings page received.",
             ("PageId", page.PageId), ("Available", page.Available), ("SectionCount", page.Sections.Count));
-        return Task.CompletedTask;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                _window?.ApplyQuickSettingsPage(page);
+                completion.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                OverlayLog.Error("Device", "Applying the Quick Settings page failed.", exception);
+                completion.TrySetException(exception);
+            }
+        }))
+        {
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Quick Settings page application."));
+        }
+        return completion.Task;
     }
 
     // OQ5-UI-10: the Setting-page editor proposed a one-position tab move. Forward it through the
