@@ -132,6 +132,39 @@ public sealed class BatteryChargeLimitValidationRunnerTests : IDisposable
         Assert.Empty(frontend.Calls);
     }
 
+    [Fact]
+    public async Task Stops_and_skips_restore_when_report_write_fails_after_a_successful_mutation()
+    {
+        var frontend = new FakeFrontend(enabled: true, limit: 80);
+        var result = await new BatteryChargeLimitValidationRunner(
+            frontend.CaptureAsync,
+            frontend.SetEnabledAsync,
+            frontend.SetPercentAsync,
+            _directory,
+            reportWriterFactory: _ => new FailingFlushStreamWriter()).RunAsync();
+
+        Assert.False(result.Passed);
+        Assert.Contains("report", result.PrimaryFailure!.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(BatteryChargeLimitValidationRestoreOutcome.Skipped, result.Restore.Outcome);
+        Assert.Equal(["Enabled:False"], frontend.Calls);
+    }
+
+    [Fact]
+    public async Task Final_report_write_failure_never_returns_pass()
+    {
+        var frontend = new FakeFrontend(enabled: true, limit: 80);
+        var result = await new BatteryChargeLimitValidationRunner(
+            frontend.CaptureAsync,
+            frontend.SetEnabledAsync,
+            frontend.SetPercentAsync,
+            _directory,
+            reportWriterFactory: _ => new FailingFlushStreamWriter(failOnFlush: 25)).RunAsync();
+
+        Assert.False(result.Passed);
+        Assert.Equal(BatteryChargeLimitValidationRestoreOutcome.Succeeded, result.Restore.Outcome);
+        Assert.Contains("finalization", result.PrimaryFailure!.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private BatteryChargeLimitValidationRunner CreateRunner(FakeFrontend frontend) => new(
         frontend.CaptureAsync,
         frontend.SetEnabledAsync,
@@ -141,6 +174,26 @@ public sealed class BatteryChargeLimitValidationRunnerTests : IDisposable
     public void Dispose()
     {
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
+    }
+
+    private sealed class FailingFlushStreamWriter : StreamWriter
+    {
+        private readonly int _failOnFlush;
+        private int _flushCount;
+        private bool _failed;
+
+        internal FailingFlushStreamWriter(int failOnFlush = 1) : base(new MemoryStream()) => _failOnFlush = failOnFlush;
+
+        public override void Flush()
+        {
+            if (!_failed && ++_flushCount == _failOnFlush)
+            {
+                _failed = true;
+                throw new IOException("simulated report flush failure");
+            }
+
+            base.Flush();
+        }
     }
 
     private sealed class FakeFrontend

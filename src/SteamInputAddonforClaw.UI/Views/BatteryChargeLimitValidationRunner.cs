@@ -47,6 +47,7 @@ internal sealed class BatteryChargeLimitValidationRunner
     private readonly Action<int, int, string>? _progress;
     private readonly Action<string>? _reportCreated;
     private readonly Action<FrontendBatteryChargeLimitTestSnapshot>? _stateUpdated;
+    private readonly Func<string, StreamWriter> _reportWriterFactory;
 
     internal BatteryChargeLimitValidationRunner(
         Func<Task<FrontendBatteryChargeLimitTestSnapshot>> capture,
@@ -55,7 +56,8 @@ internal sealed class BatteryChargeLimitValidationRunner
         string logDirectory,
         Action<int, int, string>? progress = null,
         Action<string>? reportCreated = null,
-        Action<FrontendBatteryChargeLimitTestSnapshot>? stateUpdated = null)
+        Action<FrontendBatteryChargeLimitTestSnapshot>? stateUpdated = null,
+        Func<string, StreamWriter>? reportWriterFactory = null)
     {
         _capture = capture ?? throw new ArgumentNullException(nameof(capture));
         _setEnabled = setEnabled ?? throw new ArgumentNullException(nameof(setEnabled));
@@ -64,6 +66,7 @@ internal sealed class BatteryChargeLimitValidationRunner
         _progress = progress;
         _reportCreated = reportCreated;
         _stateUpdated = stateUpdated;
+        _reportWriterFactory = reportWriterFactory ?? CreateReportWriter;
     }
 
     internal async Task<BatteryChargeLimitValidationRunResult> RunAsync()
@@ -75,33 +78,64 @@ internal sealed class BatteryChargeLimitValidationRunner
         var restore = BatteryChargeLimitValidationRestoreResult.NotAttempted;
         var completedSteps = 0;
         var mutationStarted = false;
+        var reportWriteFailed = false;
+
+        void MarkReportFailure(BatteryChargeLimitValidationFailure failure)
+        {
+            reportWriteFailed = true;
+            primaryFailure ??= failure;
+        }
+
+        BatteryChargeLimitValidationFailure? TryWriteReport(string step, Action write)
+        {
+            if (reportWriteFailed)
+                return primaryFailure;
+
+            try
+            {
+                write();
+                return null;
+            }
+            catch (Exception exception)
+            {
+                var failure = new BatteryChargeLimitValidationFailure(
+                    step, null, $"Validation report write failed: {exception.Message}");
+                MarkReportFailure(failure);
+                return failure;
+            }
+        }
 
         try
         {
             var candidateReportPath = BuildReportPath();
-            writer = CreateReportWriter(candidateReportPath);
+            writer = _reportWriterFactory(candidateReportPath);
             reportPath = candidateReportPath;
             _reportCreated?.Invoke(reportPath);
-            WriteHeader(writer);
+            TryWriteReport("Report header", () => WriteHeader(writer!));
             AppLog.Info("BatteryValidation", "Automated validation started.", ("ReportPath", reportPath));
 
             try
             {
                 initial = await _capture();
                 _stateUpdated?.Invoke(initial);
-                WriteInitial(writer, initial);
             }
             catch (Exception exception)
             {
-                primaryFailure = new("Initial capture", null, exception.Message);
-                TryWrite(writer, $"INITIAL FAILURE\nMessage={exception.Message}\n");
+                primaryFailure ??= new("Initial capture", null, exception.Message);
+                TryWriteReport("Initial capture", () => writer!.Write($"INITIAL FAILURE\nMessage={exception.Message}\n"));
+            }
+
+            if (primaryFailure is null && initial is not null)
+            {
+                TryWriteReport("Initial capture", () => WriteInitial(writer!, initial));
             }
 
             if (primaryFailure is null && initial is not null && !CanBegin(initial))
             {
-                primaryFailure = new("Initial capture", null,
+                var failure = new BatteryChargeLimitValidationFailure("Initial capture", null,
                     initial.FailureMessage ?? "Initial battery state is unavailable or incomplete.");
-                WriteFailure(writer, primaryFailure);
+                primaryFailure = failure;
+                TryWriteReport("Initial capture", () => WriteFailure(writer!, failure));
             }
 
             if (primaryFailure is null && initial is not null)
@@ -109,7 +143,7 @@ internal sealed class BatteryChargeLimitValidationRunner
                 mutationStarted = true;
                 var disabled = await RunMutationStepAsync(
                     "Disable", expectedEnabled: false, expectedPercent: null, requireProductValue: false,
-                    () => _setEnabled(false), writer, ++completedSteps);
+                    () => _setEnabled(false), writer!, ++completedSteps, tryWriteReport: TryWriteReport);
                 _progress?.Invoke(completedSteps, TotalSteps, "Disable");
                 if (disabled.Failure is not null)
                 {
@@ -121,7 +155,7 @@ internal sealed class BatteryChargeLimitValidationRunner
                     {
                         var step = await RunMutationStepAsync(
                             $"Set {limit}% while Disabled", expectedEnabled: false, expectedPercent: limit, requireProductValue: true,
-                            () => _setPercent(limit), writer, ++completedSteps);
+                            () => _setPercent(limit), writer!, ++completedSteps, tryWriteReport: TryWriteReport);
                         _progress?.Invoke(completedSteps, TotalSteps, $"Set {limit}% while Disabled");
                         if (step.Failure is not null)
                         {
@@ -136,7 +170,7 @@ internal sealed class BatteryChargeLimitValidationRunner
                     mutationStarted = true;
                     var enabled = await RunMutationStepAsync(
                         "Enable", expectedEnabled: true, expectedPercent: null, requireProductValue: true,
-                        () => _setEnabled(true), writer, ++completedSteps);
+                        () => _setEnabled(true), writer!, ++completedSteps, tryWriteReport: TryWriteReport);
                     _progress?.Invoke(completedSteps, TotalSteps, "Enable");
                     if (enabled.Failure is not null)
                     {
@@ -149,7 +183,7 @@ internal sealed class BatteryChargeLimitValidationRunner
                         {
                             var step = await RunMutationStepAsync(
                                 $"Set {limit}% while Enabled", expectedEnabled: true, expectedPercent: limit, requireProductValue: true,
-                                () => _setPercent(limit), writer, ++completedSteps);
+                                () => _setPercent(limit), writer!, ++completedSteps, tryWriteReport: TryWriteReport);
                             _progress?.Invoke(completedSteps, TotalSteps, $"Set {limit}% while Enabled");
                             if (limit == 100) enabled100 = step;
                             if (step.Failure is not null)
@@ -163,7 +197,10 @@ internal sealed class BatteryChargeLimitValidationRunner
                         {
                             var enabled100Failure = Validate100EnabledObservation(enabled100.Result);
                             completedSteps++;
-                            WriteObservationStep(writer, completedSteps, "Verify 100% Enabled", enabled100.Result, enabled100Failure);
+                            enabled100Failure = TryWriteReport(
+                                "Verify 100% Enabled",
+                                () => WriteObservationStep(writer!, completedSteps, "Verify 100% Enabled", enabled100.Result, enabled100Failure))
+                                ?? enabled100Failure;
                             _progress?.Invoke(completedSteps, TotalSteps, "Verify 100% Enabled");
                             if (enabled100Failure is not null)
                             {
@@ -174,8 +211,9 @@ internal sealed class BatteryChargeLimitValidationRunner
                                 mutationStarted = true;
                                 var disabled100 = await RunMutationStepAsync(
                                     "Verify 100% Disabled", expectedEnabled: false, expectedPercent: 100, requireProductValue: true,
-                                    () => _setEnabled(false), writer, ++completedSteps,
-                                    result => Validate100Identity(enabled100.Result, result));
+                                    () => _setEnabled(false), writer!, ++completedSteps,
+                                    result => Validate100Identity(enabled100.Result, result),
+                                    TryWriteReport);
                                 _progress?.Invoke(completedSteps, TotalSteps, "Verify 100% Disabled");
                                 if (disabled100.Failure is not null && primaryFailure is null)
                                     primaryFailure = disabled100.Failure;
@@ -188,35 +226,66 @@ internal sealed class BatteryChargeLimitValidationRunner
         catch (Exception exception)
         {
             primaryFailure ??= new("Validation runner", null, exception.Message);
-            TryWrite(writer, $"RUNNER FAILURE\nMessage={exception.Message}\n");
+            TryWriteReport("Validation runner", () => writer?.Write($"RUNNER FAILURE\nMessage={exception.Message}\n"));
         }
         finally
         {
-            if (initial is not null && mutationStarted)
+            if (initial is not null && mutationStarted && !reportWriteFailed)
             {
                 try
                 {
-                    restore = await RestoreInitialStateAsync(initial, writer);
+                    restore = await RestoreInitialStateAsync(initial, writer!, TryWriteReport);
                 }
                 catch (Exception exception)
                 {
                     restore = new(BatteryChargeLimitValidationRestoreOutcome.Failed, exception.Message);
                     primaryFailure ??= new("Restore", null, exception.Message);
-                    TryWrite(writer, $"Restore=FAIL\nFailureMessage={exception.Message}\n");
+                    TryWriteReport("Restore", () => writer?.Write($"Restore=FAIL\nFailureMessage={exception.Message}\n"));
                 }
             }
-
-            var passed = primaryFailure is null && restore.Outcome != BatteryChargeLimitValidationRestoreOutcome.Failed;
-            if (primaryFailure is not null)
+            else if (initial is not null && mutationStarted && reportWriteFailed)
             {
-                TryWrite(writer, $"PrimaryFailureStep={primaryFailure.Step}\n");
-                TryWrite(writer, $"PrimaryFailureOutcome={primaryFailure.Outcome?.ToString() ?? "Exception"}\n");
-                TryWrite(writer, $"PrimaryFailureMessage={primaryFailure.Message}\n");
+                restore = new(BatteryChargeLimitValidationRestoreOutcome.Skipped,
+                    "Restore skipped because the validation report is no longer writable.");
             }
-            TryWrite(writer, primaryFailure is null ? "Sequence completed.\n" : "Sequence stopped after first failure.\n");
-            TryWrite(writer, $"FINAL RESULT: {(passed ? "PASS" : "FAIL")}\n");
-            TryWrite(writer, $"Completed: {DateTimeOffset.Now:O}\n");
-            writer?.Dispose();
+
+            var passed = primaryFailure is null &&
+                         restore.Outcome != BatteryChargeLimitValidationRestoreOutcome.Failed &&
+                         !reportWriteFailed;
+            if (!reportWriteFailed)
+            {
+                try
+                {
+                    if (primaryFailure is not null)
+                    {
+                        writer?.Write($"PrimaryFailureStep={primaryFailure.Step}\n");
+                        writer?.Write($"PrimaryFailureOutcome={primaryFailure.Outcome?.ToString() ?? "Exception"}\n");
+                        writer?.Write($"PrimaryFailureMessage={primaryFailure.Message}\n");
+                    }
+                    writer?.Write(primaryFailure is null ? "Sequence completed.\n" : "Sequence stopped after first failure.\n");
+                    writer?.Write($"FINAL RESULT: {(passed ? "PASS" : "FAIL")}\n");
+                    writer?.Write($"Completed: {DateTimeOffset.Now:O}\n");
+                    writer?.Flush();
+                }
+                catch (Exception exception)
+                {
+                    MarkReportFailure(new(
+                        "Report finalization", null,
+                        $"Validation report finalization failed: {exception.Message}"));
+                    passed = false;
+                }
+            }
+            try
+            {
+                writer?.Dispose();
+            }
+            catch (Exception exception)
+            {
+                MarkReportFailure(new(
+                    "Report finalization", null,
+                    $"Validation report finalization failed: {exception.Message}"));
+                passed = false;
+            }
 
             if (passed)
                 AppLog.Info("BatteryValidation", "Automated validation completed.", ("ReportPath", reportPath ?? "Unavailable"));
@@ -235,7 +304,8 @@ internal sealed class BatteryChargeLimitValidationRunner
         Func<Task<FrontendBatteryChargeLimitTestMutationResult>> operation,
         StreamWriter writer,
         int stepNumber,
-        Func<FrontendBatteryChargeLimitTestMutationResult?, BatteryChargeLimitValidationFailure?>? additionalValidation = null)
+        Func<FrontendBatteryChargeLimitTestMutationResult?, BatteryChargeLimitValidationFailure?>? additionalValidation = null,
+        Func<string, Action, BatteryChargeLimitValidationFailure?>? tryWriteReport = null)
     {
         FrontendBatteryChargeLimitTestMutationResult? result = null;
         BatteryChargeLimitValidationFailure? failure = null;
@@ -261,50 +331,83 @@ internal sealed class BatteryChargeLimitValidationRunner
             failure = new(label, null, exception.Message);
         }
 
-        WriteMutationStep(writer, stepNumber, label, result, failure);
+        if (tryWriteReport is not null)
+            failure = tryWriteReport(label, () => WriteMutationStep(writer, stepNumber, label, result, failure)) ?? failure;
+        else
+            WriteMutationStep(writer, stepNumber, label, result, failure);
         return new(result, failure);
     }
 
     private async Task<BatteryChargeLimitValidationRestoreResult> RestoreInitialStateAsync(
         FrontendBatteryChargeLimitTestSnapshot initial,
-        StreamWriter? writer)
+        StreamWriter writer,
+        Func<string, Action, BatteryChargeLimitValidationFailure?> tryWriteReport)
     {
-        WriteLine(writer, "RESTORE");
-        WriteLine(writer, $"Initial ProductValueValid={initial.ProductValueValid}");
+        if (tryWriteReport("Restore", () =>
+        {
+            WriteLine(writer, "RESTORE");
+            WriteLine(writer, $"Initial ProductValueValid={initial.ProductValueValid}");
+        }) is not null)
+        {
+            return ReportWriteFailureRestoreResult();
+        }
+
         if (!CanRestore(initial))
         {
-            WriteLine(writer, "Restore=SKIPPED");
-            WriteLine(writer, "Reason=Initial remembered limit is outside Addon supported product values.");
+            if (tryWriteReport("Restore", () =>
+            {
+                WriteLine(writer, "Restore=SKIPPED");
+                WriteLine(writer, "Reason=Initial remembered limit is outside Addon supported product values.");
+            }) is not null)
+            {
+                return ReportWriteFailureRestoreResult();
+            }
+
             return new(BatteryChargeLimitValidationRestoreOutcome.Skipped,
                 "Initial remembered limit is outside Addon supported product values.");
         }
 
         var percent = await _setPercent(initial.LimitPercent!.Value);
         _stateUpdated?.Invoke(percent.Snapshot);
-        WriteRestoreMutation(writer, $"SetPercent({initial.LimitPercent.Value})", percent);
+        if (tryWriteReport("Restore", () => WriteRestoreMutation(writer, $"SetPercent({initial.LimitPercent.Value})", percent)) is not null)
+            return ReportWriteFailureRestoreResult();
         if (!percent.Succeeded)
         {
-            WriteLine(writer, "Restore=FAIL");
+            if (tryWriteReport("Restore", () => WriteLine(writer, "Restore=FAIL")) is not null)
+                return ReportWriteFailureRestoreResult();
             return new(BatteryChargeLimitValidationRestoreOutcome.Failed,
                 percent.FailureMessage ?? "Initial percentage restore failed.");
         }
 
         var enabled = await _setEnabled(initial.Enabled!.Value);
         _stateUpdated?.Invoke(enabled.Snapshot);
-        WriteRestoreMutation(writer, $"SetEnabled({initial.Enabled.Value})", enabled);
+        if (tryWriteReport("Restore", () => WriteRestoreMutation(writer, $"SetEnabled({initial.Enabled.Value})", enabled)) is not null)
+            return ReportWriteFailureRestoreResult();
         if (!enabled.Succeeded)
         {
-            WriteLine(writer, "Restore=FAIL");
+            if (tryWriteReport("Restore", () => WriteLine(writer, "Restore=FAIL")) is not null)
+                return ReportWriteFailureRestoreResult();
             return new(BatteryChargeLimitValidationRestoreOutcome.Failed,
                 enabled.FailureMessage ?? "Initial enabled-state restore failed.");
         }
 
-        WriteLine(writer, $"Final Enabled={Format(enabled.Snapshot.Enabled)}");
-        WriteLine(writer, $"Final Limit={Format(enabled.Snapshot.LimitPercent)}");
-        WriteLine(writer, $"Final Raw={Format(enabled.Snapshot.RawValue)}");
-        WriteLine(writer, "Restore=PASS");
+        if (tryWriteReport("Restore", () =>
+        {
+            WriteLine(writer, $"Final Enabled={Format(enabled.Snapshot.Enabled)}");
+            WriteLine(writer, $"Final Limit={Format(enabled.Snapshot.LimitPercent)}");
+            WriteLine(writer, $"Final Raw={Format(enabled.Snapshot.RawValue)}");
+            WriteLine(writer, "Restore=PASS");
+        }) is not null)
+        {
+            return ReportWriteFailureRestoreResult();
+        }
+
         return new(BatteryChargeLimitValidationRestoreOutcome.Succeeded, null);
     }
+
+    private static BatteryChargeLimitValidationRestoreResult ReportWriteFailureRestoreResult() =>
+        new(BatteryChargeLimitValidationRestoreOutcome.Skipped,
+            "Restore skipped because the validation report is no longer writable.");
 
     private static bool CanBegin(FrontendBatteryChargeLimitTestSnapshot snapshot) =>
         snapshot.Available && snapshot.FailureMessage is null && snapshot.RawValue is not null &&
@@ -441,12 +544,6 @@ internal sealed class BatteryChargeLimitValidationRunner
     }
 
     private static void WriteLine(StreamWriter? writer, string text = "") => writer?.WriteLine(text);
-
-    private static void TryWrite(StreamWriter? writer, string text)
-    {
-        try { writer?.Write(text); }
-        catch { }
-    }
 
     private static string Format(bool? value) => value?.ToString() ?? "Unknown";
     private static string Format(int? value) => value?.ToString() ?? "Unknown";
