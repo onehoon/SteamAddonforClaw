@@ -63,8 +63,8 @@ public partial class App : Application
         try
         {
             _client = new NamedPipeOverlayClient(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
-            // SF-V2-07 section 10.2: App owns the transport client; the Window/binder receives only
-            // this narrow mutation delegate, never the client itself.
+            // SF-V2-07/09 section 10.2/12.1: App owns the transport client; the Window's Device and
+            // Profile bindings receive only this narrow mutation delegate, never the client itself.
             _window?.ConfigureQuickSettings(intent => _client.SendQuickSettingsMutationAsync(intent));
             OverlayLog.Info("Transport", "Overlay command loop starting.");
             await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleQuickSettingsPageAsync).ConfigureAwait(false);
@@ -108,12 +108,12 @@ public partial class App : Application
         return completion.Task;
     }
 
-    // SF-V2-07 section 10.1: marshal the shared QuickSettingsPageSnapshot(Device) -- the same
-    // product contract QAM renders (SF-V2-05) -- to the UI thread and complete only after the
-    // Window/binder has applied it. No WinUI row creation ever runs on the pipe read thread.
+    // SF-V2-07/09 section 10.1/12.2: marshal a shared QuickSettingsPageSnapshot (Device or Profile --
+    // the same product contract QAM renders, SF-V2-05/08) to the UI thread and complete only after
+    // the Window/binder has applied it. No WinUI row creation ever runs on the pipe read thread.
     private Task HandleQuickSettingsPageAsync(QuickSettingsPageSnapshot page)
     {
-        OverlayLog.Debug("Device", "Quick Settings page received.",
+        OverlayLog.Debug("QuickSettings", "Quick Settings page received.",
             ("PageId", page.PageId), ("Available", page.Available), ("SectionCount", page.Sections.Count));
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>

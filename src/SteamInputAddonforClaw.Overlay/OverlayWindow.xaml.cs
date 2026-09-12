@@ -22,11 +22,36 @@ public sealed partial class OverlayWindow : Window
     // an ordinary authoritative page rebuild instead of by numeric index.
     private sealed record OverlayRow(Border Container, OverlayRowCapabilities Capabilities, QuickSettingsRowId? QuickSettingsRowId = null);
 
-    // SF-V2-07 section 44: the flattened (RowId, ControlKind, SliderKind, WellFormed) shape of the
-    // last-rendered Device page. Equal shape on a new page means only row VALUES changed (the
-    // common case while a slider is being edited/settled) -- update the existing WinUI controls in
-    // place. A different shape means a row appeared/disappeared/changed kind -- rebuild.
-    private readonly record struct DeviceRowShape(QuickSettingsRowId RowId, QuickSettingsControlKind ControlKind, QuickSettingsSliderKind? SliderKind, bool WellFormed);
+    // SF-V2-07/09 section 44: the flattened (RowId, ControlKind, SliderKind, WellFormed) shape of a
+    // last-rendered Quick Settings page (Device or Profile). Equal shape on a new page means only
+    // row VALUES changed (the common case while a slider is being edited/settled) -- update the
+    // existing WinUI controls in place. A different shape means a row appeared/disappeared/changed
+    // kind -- rebuild.
+    private readonly record struct QuickSettingsRowShape(QuickSettingsRowId RowId, QuickSettingsControlKind ControlKind, QuickSettingsSliderKind? SliderKind, bool WellFormed);
+
+    // SF-V2-09 section 13.1: the small page-local surface state a generic Device/Profile Quick
+    // Settings renderer needs -- grouping what used to be five parallel Device-only fields. Window-
+    // local, behavior-free data only; Binding is the one piece assigned after construction (by
+    // ConfigureQuickSettings, once App has a transport client) rather than at BuildShell time.
+    private sealed class QuickSettingsSurface
+    {
+        internal required QuickSettingsPageId PageId { get; init; }
+        internal required OverlayTabId TabId { get; init; }
+        internal required StackPanel Content { get; init; }
+        internal required TextBlock FailureText { get; init; }
+        internal OverlayQuickSettingsPageBinding? Binding { get; set; }
+        internal Dictionary<QuickSettingsRowId, OverlayToggleRow> ToggleRows { get; } = new();
+        internal Dictionary<QuickSettingsRowId, OverlaySliderRow> SliderRows { get; } = new();
+        internal QuickSettingsRowShape[]? RowShape { get; set; }
+        // PR #510 review: the row shape alone (RowId/ControlKind/SliderKind/WellFormed) does not
+        // capture the Profile game identity, which renders from section Label/Message text, not row
+        // identity. Two different games with the same enabled Profile features have an identical
+        // RowShape, so the fast path must also fail closed to a rebuild when AppId or section
+        // text changes -- otherwise a Profile(A)->Profile(B) context switch can leave A's game
+        // heading on screen over B's authoritative rows.
+        internal uint? RenderedAppId { get; set; }
+        internal (QuickSettingsSectionId Id, string? Label, string? Message)[]? RenderedSections { get; set; }
+    }
 
     private const double ContentSlideDistanceDip = 32.0;
     private const double HiddenOpacity = 0.90;
@@ -57,16 +82,12 @@ public sealed partial class OverlayWindow : Window
     private readonly OverlayShortcutSelection _shortcutSelection = new();
     private readonly Dictionary<OverlayShortcutSlotId, Border> _shortcutTiles = new();
 
-    // SF-V2-07: the Device page's generic Quick Settings renderer state. _deviceBinding is
-    // configured once App has a transport client (ConfigureQuickSettings); the row-control
-    // dictionaries and _deviceRowShape let ordinary value-only refreshes update existing WinUI
-    // controls in place instead of tearing down/rebuilding the page on every edit/settlement.
-    private OverlayQuickSettingsPageBinding? _deviceBinding;
-    private StackPanel? _devicePageContent;
-    private TextBlock? _deviceFailureText;
-    private readonly Dictionary<QuickSettingsRowId, OverlayToggleRow> _deviceToggleRows = new();
-    private readonly Dictionary<QuickSettingsRowId, OverlaySliderRow> _deviceSliderRows = new();
-    private DeviceRowShape[]? _deviceRowShape;
+    // SF-V2-07/09: the Device and Profile pages' generic Quick Settings renderer state, one surface
+    // per PageId. Each surface's Binding is configured once App has a transport client
+    // (ConfigureQuickSettings); its row-control dictionaries and RowShape let ordinary value-only
+    // refreshes update existing WinUI controls in place instead of tearing down/rebuilding the page
+    // on every edit/settlement.
+    private readonly Dictionary<QuickSettingsPageId, QuickSettingsSurface> _quickSettingsSurfaces = new();
 
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
 
@@ -91,34 +112,46 @@ public sealed partial class OverlayWindow : Window
                 ? onAccentBrush
                 : new SolidColorBrush(Colors.White);
         BuildShell();
-        Closed += (_, _) => _deviceBinding?.Dispose();
+        Closed += (_, _) =>
+        {
+            foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.Dispose();
+        };
     }
 
-    // SF-V2-07 section 10.2/44: App owns the NamedPipeOverlayClient; this is the narrow mutation
-    // delegate the Window/binder receives instead. Called once, right after App creates the
-    // client and before the transport loop starts reading Device pages.
+    // SF-V2-07/09 section 10.2/44/12.1: App owns the NamedPipeOverlayClient; this is the narrow
+    // mutation delegate the Window/binders receive instead. Called once, right after App creates the
+    // client and before the transport loop starts reading Quick Settings pages. One Device binding
+    // and one Profile binding are created from the SAME delegate -- neither ever sees the client.
     internal void ConfigureQuickSettings(Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> mutate)
     {
-        _deviceBinding?.Dispose();
-        var binding = new OverlayQuickSettingsPageBinding(
-            QuickSettingsPageId.Device, mutate, action => DispatcherQueue.TryEnqueue(() => action()));
-        binding.SettledAsynchronously += RenderDevicePage;
-        _deviceBinding = binding;
-        RenderDevicePage();
+        ConfigureQuickSettingsSurface(QuickSettingsPageId.Device, mutate);
+        ConfigureQuickSettingsSurface(QuickSettingsPageId.Profile, mutate);
     }
 
-    // SF-V2-07 section 10.1: called (already marshalled to the UI thread by App) whenever the
-    // Runtime republishes the Device Quick Settings page.
+    private void ConfigureQuickSettingsSurface(QuickSettingsPageId pageId, Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> mutate)
+    {
+        if (!_quickSettingsSurfaces.TryGetValue(pageId, out var surface)) return;
+        surface.Binding?.Dispose();
+        var binding = new OverlayQuickSettingsPageBinding(
+            pageId, mutate, action => DispatcherQueue.TryEnqueue(() => action()));
+        binding.SettledAsynchronously += () => RenderQuickSettingsPage(surface);
+        surface.Binding = binding;
+        RenderQuickSettingsPage(surface);
+    }
+
+    // SF-V2-07/09 section 10.1/12.2: called (already marshalled to the UI thread by App) whenever the
+    // Runtime republishes a Device or Profile Quick Settings page. An unconfigured PageId cannot
+    // happen in production (ConfigureQuickSettings always creates both surfaces before the transport
+    // loop starts reading pages) but is ignored/logged rather than throwing.
     internal void ApplyQuickSettingsPage(QuickSettingsPageSnapshot page)
     {
-        if (page.PageId != QuickSettingsPageId.Device)
+        if (!_quickSettingsSurfaces.TryGetValue(page.PageId, out var surface))
         {
-            // Section 11: Profile publication is not rendered until SF-V2-09.
-            OverlayLog.Warn("Device", "Ignoring a non-Device Quick Settings page.", exception: null, ("PageId", page.PageId));
+            OverlayLog.Warn("QuickSettings", "Ignoring a Quick Settings page for an unconfigured surface.", exception: null, ("PageId", page.PageId));
             return;
         }
-        _deviceBinding?.ApplyAuthoritativePage(page);
-        RenderDevicePage();
+        surface.Binding?.ApplyAuthoritativePage(page);
+        RenderQuickSettingsPage(surface);
     }
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
@@ -172,10 +205,10 @@ public sealed partial class OverlayWindow : Window
 
     internal async Task HideForPocAsync()
     {
-        // SF-V2-07 section 39: hide never waits for the trailing debounce window -- drop any
-        // unsubmitted Device draft so a hidden Overlay cannot fire an obsolete mutation later.
-        // Already-submitted work settles on its own and stays subject to the generation check.
-        _deviceBinding?.CancelUnsubmittedDrafts();
+        // SF-V2-07/09 section 23/39: hide never waits for the trailing debounce window -- drop any
+        // unsubmitted Device/Profile draft so a hidden Overlay cannot fire an obsolete mutation
+        // later. Already-submitted work settles on its own and stays subject to the generation check.
+        foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.CancelUnsubmittedDrafts();
         WindowInterop.DisarmOutsideClickDismissal();
         if (AnimationsEnabled())
         {
@@ -250,93 +283,116 @@ public sealed partial class OverlayWindow : Window
         ApplySelectedTabVisualState();
     }
 
-    // Device gets the SF-V2-07 generic Quick Settings renderer; Setting gets the OQ5-UI-10
-    // tab-order editor; Shortcut gets the OQ5-UI-11 2x2 slot shell; every other tab keeps its
-    // OQ5-UI-01 placeholder with zero selectable rows.
-    private FrameworkElement BuildPage(OverlayTabId id, List<OverlayRow> rows)
+    // Device and Profile both get the SF-V2-07/09 generic Quick Settings renderer; Setting gets the
+    // OQ5-UI-10 tab-order editor; Shortcut gets the OQ5-UI-11 2x2 slot shell; every other tab keeps
+    // its OQ5-UI-01 placeholder with zero selectable rows.
+    private FrameworkElement BuildPage(OverlayTabId id, List<OverlayRow> rows) => id switch
     {
-        if (id == OverlayTabId.Setting)
-            return BuildTabOrderEditorPage(rows);
-        if (id == OverlayTabId.Shortcut)
-            return BuildShortcutPage();
-        if (id != OverlayTabId.Device)
-            return CreatePlaceholderPage(id);
+        OverlayTabId.Setting => BuildTabOrderEditorPage(rows),
+        OverlayTabId.Shortcut => BuildShortcutPage(),
+        OverlayTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
+        OverlayTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile),
+        _ => CreatePlaceholderPage(id),
+    };
 
-        // Root holds the SF-V2-30/32 local failure banner above the actual row content;
-        // RenderDevicePage() populates/updates both once ConfigureQuickSettings/ApplyQuickSettingsPage
-        // runs. `rows` (== _pageRows[Device]) starts empty and is replaced wholesale on first render.
+    // Root holds the SF-V2-30/32 local failure banner above the actual row content;
+    // RenderQuickSettingsPage() populates/updates both once ConfigureQuickSettings/
+    // ApplyQuickSettingsPage runs. The caller's `rows` (== _pageRows[tabId]) starts empty and is
+    // replaced wholesale on first render.
+    private FrameworkElement BuildQuickSettingsPage(OverlayTabId tabId, QuickSettingsPageId pageId)
+    {
+        var failureText = CreateQuickSettingsMessageText(string.Empty, "CaptionTextBlockStyle");
+        failureText.Visibility = Visibility.Collapsed;
+        var content = new StackPanel { Spacing = 4 };
         var root = new StackPanel { Spacing = 4 };
-        _deviceFailureText = CreateDeviceMessageText(string.Empty, "CaptionTextBlockStyle");
-        _deviceFailureText.Visibility = Visibility.Collapsed;
-        root.Children.Add(_deviceFailureText);
-        _devicePageContent = new StackPanel { Spacing = 4 };
-        root.Children.Add(_devicePageContent);
+        root.Children.Add(failureText);
+        root.Children.Add(content);
+        _quickSettingsSurfaces[pageId] = new QuickSettingsSurface
+        {
+            PageId = pageId,
+            TabId = tabId,
+            Content = content,
+            FailureText = failureText,
+        };
         return root;
     }
 
-    // SF-V2-07 section 12/28: render the binder's current effective page (authoritative rows with
+    // SF-V2-07/09 section 12/28: render the binder's current effective page (authoritative rows with
     // any pending draft overlaid). A same-shape page (section 44) only needs its rows' values
     // refreshed in place -- important so editing/settling one slider never disrupts an in-progress
-    // drag on another WinUI Slider by tearing down and recreating the control tree.
-    private void RenderDevicePage()
+    // drag on another WinUI Slider by tearing down and recreating the control tree. PR #510 review:
+    // "same shape" must also mean the same AppId and section text, not just the same rows -- two
+    // different Profile games with identical enabled features share a RowShape, so the fast path
+    // alone could leave the previous game's heading on screen after a Profile(A)->Profile(B) switch.
+    private void RenderQuickSettingsPage(QuickSettingsSurface surface)
     {
-        if (_devicePageContent is null || _deviceBinding is null) return;
-        var page = _deviceBinding.BuildEffectivePage();
+        if (surface.Binding is null) return;
+        var page = surface.Binding.BuildEffectivePage();
 
         if (page.Available)
         {
-            var shape = page.Sections.SelectMany(s => s.Rows).Select(DeviceRowShapeOf).ToArray();
-            if (_deviceRowShape is not null && _deviceRowShape.SequenceEqual(shape))
+            var rowShape = page.Sections.SelectMany(s => s.Rows).Select(QuickSettingsRowShapeOf).ToArray();
+            var sectionShape = QuickSettingsSectionShapeOf(page);
+            if (surface.RowShape is not null && surface.RowShape.SequenceEqual(rowShape) &&
+                surface.RenderedAppId == page.AppId &&
+                surface.RenderedSections is not null && surface.RenderedSections.SequenceEqual(sectionShape))
             {
-                UpdateDeviceRowValues(page);
-                ApplyDeviceLocalFailure();
+                UpdateQuickSettingsRowValues(surface, page);
+                ApplyQuickSettingsLocalFailure(surface);
                 return;
             }
         }
 
-        RebuildDeviceContent(page);
-        ApplyDeviceLocalFailure();
+        RebuildQuickSettingsContent(surface, page);
+        ApplyQuickSettingsLocalFailure(surface);
     }
 
     // Sections 30/32: a typed failure's FailureMessage or an operation/transport failure's narrow
     // local message must be visible -- silently snapping back to authoritative state with no
     // indication is not acceptable. Page-local only: no notification framework, cleared the moment
-    // the binder's own failure fact clears (a later success settlement/refresh).
-    private void ApplyDeviceLocalFailure()
+    // the binder's own failure fact clears (a later success settlement/refresh). Device and Profile
+    // failure banners are independent because each surface owns its own FailureText/Binding.
+    private static void ApplyQuickSettingsLocalFailure(QuickSettingsSurface surface)
     {
-        if (_deviceFailureText is null || _deviceBinding is null) return;
-        var message = _deviceBinding.LastLocalFailureMessage;
-        _deviceFailureText.Text = message ?? string.Empty;
-        _deviceFailureText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
+        if (surface.Binding is null) return;
+        var message = surface.Binding.LastLocalFailureMessage;
+        surface.FailureText.Text = message ?? string.Empty;
+        surface.FailureText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private static DeviceRowShape DeviceRowShapeOf(QuickSettingsRow row) => new(
+    private static QuickSettingsRowShape QuickSettingsRowShapeOf(QuickSettingsRow row) => new(
         row.RowId,
         row.ControlKind,
         row.ControlKind == QuickSettingsControlKind.Slider ? row.SliderSpec?.Kind : null,
         QuickSettingsRowRendering.IsWellFormed(row));
 
+    // PR #510 review: the Profile game identity (section heading/message -- e.g. the enriched
+    // display name BuildProfile renders into ProfileGeneral's Label) lives outside RowShape, so it
+    // must be its own fast-path invariant.
+    private static (QuickSettingsSectionId Id, string? Label, string? Message)[] QuickSettingsSectionShapeOf(QuickSettingsPageSnapshot page) =>
+        page.Sections.Select(s => (s.SectionId, s.Label, s.Message)).ToArray();
+
     // Fast path: the rendered row set/kinds are unchanged from the last render -- push new values
     // into the existing controls without touching the WinUI tree, selection, or scroll.
-    private void UpdateDeviceRowValues(QuickSettingsPageSnapshot page)
+    private static void UpdateQuickSettingsRowValues(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
     {
         foreach (var row in page.Sections.SelectMany(s => s.Rows))
         {
-            if (_deviceToggleRows.TryGetValue(row.RowId, out var toggle))
-                ApplyDeviceToggleState(toggle, row);
-            else if (_deviceSliderRows.TryGetValue(row.RowId, out var slider))
-                ApplyDeviceSliderState(slider, row);
+            if (surface.ToggleRows.TryGetValue(row.RowId, out var toggle))
+                ApplyQuickSettingsToggleState(toggle, row);
+            else if (surface.SliderRows.TryGetValue(row.RowId, out var slider))
+                ApplyQuickSettingsSliderState(slider, row);
         }
     }
 
-    private static void ApplyDeviceToggleState(OverlayToggleRow toggle, QuickSettingsRow row)
+    private static void ApplyQuickSettingsToggleState(OverlayToggleRow toggle, QuickSettingsRow row)
     {
         var isOn = row.Value is { Kind: QuickSettingsValueKind.Boolean, BooleanValue: true };
         var isAvailable = row.Available && row.Writable && row.Value is { Kind: QuickSettingsValueKind.Boolean };
         toggle.ApplyState(isAvailable, isOn);
     }
 
-    private static void ApplyDeviceSliderState(OverlaySliderRow slider, QuickSettingsRow row)
+    private static void ApplyQuickSettingsSliderState(OverlaySliderRow slider, QuickSettingsRow row)
     {
         if (row.SliderSpec is not { } spec) return;
         if (spec.Kind == QuickSettingsSliderKind.Numeric)
@@ -358,64 +414,69 @@ public sealed partial class OverlayWindow : Window
     }
 
     // Section 34/35/36/44: structural rebuild -- row set/kind changed, or the whole page became
-    // (un)available. Preserves the selected Device RowId (only while Device is the visible tab) and
-    // never resets body scroll; that stays reserved for an actual tab change.
-    private void RebuildDeviceContent(QuickSettingsPageSnapshot page)
+    // (un)available. Preserves the selected RowId (only while this surface's tab is the visible one)
+    // and never resets body scroll; that stays reserved for an actual tab change.
+    private void RebuildQuickSettingsContent(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
     {
         QuickSettingsRowId? preferredRowId = null;
-        if (_tabState.SelectedTab == OverlayTabId.Device &&
-            _pageRows.TryGetValue(OverlayTabId.Device, out var oldRows) &&
+        if (_tabState.SelectedTab == surface.TabId &&
+            _pageRows.TryGetValue(surface.TabId, out var oldRows) &&
             _rowSelection.SelectedIndex is { } selectedIndex && selectedIndex >= 0 && selectedIndex < oldRows.Count)
         {
             preferredRowId = oldRows[selectedIndex].QuickSettingsRowId;
         }
 
-        _deviceToggleRows.Clear();
-        _deviceSliderRows.Clear();
-        _devicePageContent!.Children.Clear();
+        surface.ToggleRows.Clear();
+        surface.SliderRows.Clear();
+        surface.Content.Children.Clear();
         var rows = new List<OverlayRow>();
 
         if (!page.Available)
         {
-            _devicePageContent.Children.Add(CreateDeviceMessageText(page.Message ?? "Quick Settings are unavailable.", "BodyTextBlockStyle"));
-            _deviceRowShape = [];
+            surface.Content.Children.Add(CreateQuickSettingsMessageText(page.Message ?? "Quick Settings are unavailable.", "BodyTextBlockStyle"));
+            surface.RowShape = [];
         }
         else
         {
             foreach (var section in page.Sections)
             {
                 if (!string.IsNullOrEmpty(section.Label))
-                    _devicePageContent.Children.Add(CreateDeviceMessageText(section.Label, "BodyStrongTextBlockStyle"));
+                    surface.Content.Children.Add(CreateQuickSettingsMessageText(section.Label, "BodyStrongTextBlockStyle"));
                 if (!string.IsNullOrEmpty(section.Message))
-                    _devicePageContent.Children.Add(CreateDeviceMessageText(section.Message, "CaptionTextBlockStyle"));
+                    surface.Content.Children.Add(CreateQuickSettingsMessageText(section.Message, "CaptionTextBlockStyle"));
 
                 foreach (var row in section.Rows)
                 {
-                    if (!TryCreateDeviceRow(row, out var overlayRow)) continue;
+                    if (!TryCreateQuickSettingsRow(surface, row, out var overlayRow)) continue;
                     rows.Add(overlayRow);
-                    _devicePageContent.Children.Add(overlayRow.Container);
+                    surface.Content.Children.Add(overlayRow.Container);
                 }
             }
 
-            _deviceRowShape = page.Sections.SelectMany(s => s.Rows).Select(DeviceRowShapeOf).ToArray();
+            surface.RowShape = page.Sections.SelectMany(s => s.Rows).Select(QuickSettingsRowShapeOf).ToArray();
         }
 
-        _pageRows[OverlayTabId.Device] = rows;
+        // PR #510 review: recorded alongside RowShape so the NEXT render's fast-path check can
+        // detect a Profile AppId/section-text change even when RowShape alone stayed identical.
+        surface.RenderedAppId = page.AppId;
+        surface.RenderedSections = QuickSettingsSectionShapeOf(page);
 
-        if (_tabState.SelectedTab == OverlayTabId.Device)
+        _pageRows[surface.TabId] = rows;
+
+        if (_tabState.SelectedTab == surface.TabId)
         {
             int? preferredIndex = null;
             if (preferredRowId is { } rid)
                 for (var i = 0; i < rows.Count; i++)
                     if (rows[i].QuickSettingsRowId == rid) { preferredIndex = i; break; }
 
-            _rowSelection.SetRows(CapabilitiesFor(OverlayTabId.Device), preferredIndex);
+            _rowSelection.SetRows(CapabilitiesFor(surface.TabId), preferredIndex);
             ApplyRowSelectionVisual();
             BringSelectedRowIntoView();
         }
     }
 
-    private static TextBlock CreateDeviceMessageText(string text, string styleKey)
+    private static TextBlock CreateQuickSettingsMessageText(string text, string styleKey)
     {
         var block = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap };
         if (Application.Current.Resources.TryGetValue(styleKey, out var style) && style is Style textStyle)
@@ -427,38 +488,39 @@ public sealed partial class OverlayWindow : Window
     // SliderSpec, invalid numeric range/step, empty discrete options, or an unsupported
     // ControlKind) is skipped entirely -- it is never registered for selection and can never emit
     // a mutation.
-    private bool TryCreateDeviceRow(QuickSettingsRow row, out OverlayRow overlayRow)
+    private bool TryCreateQuickSettingsRow(QuickSettingsSurface surface, QuickSettingsRow row, out OverlayRow overlayRow)
     {
         if (!QuickSettingsRowRendering.IsWellFormed(row))
         {
-            OverlayLog.Warn("Device", "Skipped a malformed/unsupported Quick Settings row.", exception: null, ("RowId", row.RowId), ("ControlKind", row.ControlKind));
+            OverlayLog.Warn("QuickSettings", "Skipped a malformed/unsupported Quick Settings row.", exception: null,
+                ("PageId", surface.PageId), ("RowId", row.RowId), ("ControlKind", row.ControlKind));
             overlayRow = default!;
             return false;
         }
 
         overlayRow = row.ControlKind == QuickSettingsControlKind.Toggle
-            ? CreateDeviceToggleRow(row)
-            : CreateDeviceSliderRow(row);
+            ? CreateQuickSettingsToggleRow(surface, row)
+            : CreateQuickSettingsSliderRow(surface, row);
         return true;
     }
 
-    private OverlayRow CreateDeviceToggleRow(QuickSettingsRow row)
+    private OverlayRow CreateQuickSettingsToggleRow(QuickSettingsSurface surface, QuickSettingsRow row)
     {
         var rowId = row.RowId;
-        var toggleRow = new OverlayToggleRow(row.Label, desired => _ = SubmitDeviceToggleAsync(rowId, desired));
-        ApplyDeviceToggleState(toggleRow, row);
-        _deviceToggleRows[rowId] = toggleRow;
+        var toggleRow = new OverlayToggleRow(row.Label, desired => _ = SubmitQuickSettingsToggleAsync(surface, rowId, desired));
+        ApplyQuickSettingsToggleState(toggleRow, row);
+        surface.ToggleRows[rowId] = toggleRow;
         return new OverlayRow(toggleRow.Container, toggleRow.Capabilities, rowId);
     }
 
-    private async Task SubmitDeviceToggleAsync(QuickSettingsRowId rowId, bool desired)
+    private async Task SubmitQuickSettingsToggleAsync(QuickSettingsSurface surface, QuickSettingsRowId rowId, bool desired)
     {
-        if (_deviceBinding is null) return;
-        await _deviceBinding.SubmitImmediateToggleAsync(rowId, desired);
-        RenderDevicePage();
+        if (surface.Binding is null) return;
+        await surface.Binding.SubmitImmediateToggleAsync(rowId, desired);
+        RenderQuickSettingsPage(surface);
     }
 
-    private OverlayRow CreateDeviceSliderRow(QuickSettingsRow row)
+    private OverlayRow CreateQuickSettingsSliderRow(QuickSettingsSurface surface, QuickSettingsRow row)
     {
         var rowId = row.RowId;
         var spec = row.SliderSpec!;
@@ -468,7 +530,7 @@ public sealed partial class OverlayWindow : Window
             var suffix = spec.Suffix ?? string.Empty;
             sliderRow = new OverlaySliderRow(row.Label,
                 value => OverlaySliderRow.FormatInteger(value) + suffix,
-                desired => ScheduleDeviceSlider(rowId, QuickSettingsValue.Integer((int)Math.Round(desired))));
+                desired => ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer((int)Math.Round(desired))));
         }
         else
         {
@@ -479,20 +541,20 @@ public sealed partial class OverlayWindow : Window
                 {
                     var i = (int)Math.Round(desired);
                     if (i < 0 || i >= options.Count) return;
-                    ScheduleDeviceSlider(rowId, QuickSettingsValue.Integer(options[i].Value));
+                    ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer(options[i].Value));
                 });
         }
 
-        ApplyDeviceSliderState(sliderRow, row);
-        _deviceSliderRows[rowId] = sliderRow;
+        ApplyQuickSettingsSliderState(sliderRow, row);
+        surface.SliderRows[rowId] = sliderRow;
         return new OverlayRow(sliderRow.Container, sliderRow.Capabilities, rowId);
     }
 
-    private void ScheduleDeviceSlider(QuickSettingsRowId rowId, QuickSettingsValue desired)
+    private void ScheduleQuickSettingsSlider(QuickSettingsSurface surface, QuickSettingsRowId rowId, QuickSettingsValue desired)
     {
-        if (_deviceBinding is null) return;
-        _deviceBinding.ScheduleSlider(rowId, desired);
-        RenderDevicePage();
+        if (surface.Binding is null) return;
+        surface.Binding.ScheduleSlider(rowId, desired);
+        RenderQuickSettingsPage(surface);
     }
 
     private static string FormatDiscreteLabel(IReadOnlyList<QuickSettingsDiscreteOption> options, double index)

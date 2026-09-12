@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Overlay.Diagnostics;
 
 namespace SteamInputAddonforClaw.Overlay;
 
@@ -71,12 +72,18 @@ internal readonly struct QuickSettingsPendingKey : IEquatable<QuickSettingsPendi
     public override int GetHashCode() => HashCode.Combine(_isGroup, _rowId, _groupId);
 }
 
-// SF-V2-07 section 9/23: the smallest page-local Device Quick Settings binder. It owns only
-// surface-local facts -- the latest authoritative page, rendered rows' pending drafts, and one
-// narrow immediate-mutation-busy fact -- never hardware state, persistence, Runtime feature state,
-// or controller/capture authority. Zero WinUI dependency: OverlayWindow supplies a UI-thread
-// marshal for the one asynchronous callback (a delayed commit's settlement) and otherwise calls
-// this synchronously from the UI thread.
+// SF-V2-07/09 section 9/23: the smallest page-local Quick Settings binder -- one instance per
+// PageId (Device or Profile). It owns only surface-local facts -- the latest authoritative page,
+// rendered rows' pending drafts, and one narrow immediate-mutation-busy fact -- never hardware
+// state, persistence, Runtime feature state, or controller/capture authority. Zero WinUI
+// dependency: OverlayWindow supplies a UI-thread marshal for the one asynchronous callback (a
+// delayed commit's settlement) and otherwise calls this synchronously from the UI thread.
+//
+// SF-V2-09 section 17: Device has a static (Device, null) context for its whole lifetime; Profile's
+// AppId context changes as the active Steam game changes. `_expectedPageId` is the narrow page
+// identity invariant (a binding built for one PageId must never accept the other); the AppId half
+// of the (PageId, AppId) context is read off `_authoritativePage.AppId` -- there is no separate
+// epoch/state machine.
 internal sealed class OverlayQuickSettingsPageBinding : IDisposable
 {
     private sealed class PendingEntry
@@ -87,6 +94,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         internal required OverlayDelayedSliderCommit Commit { get; init; }
     }
 
+    private readonly QuickSettingsPageId _expectedPageId;
     private readonly Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> _mutate;
     private readonly Action<Action> _uiThreadMarshal;
     private readonly Func<TimeSpan, CancellationToken, Task>? _delayAsync;
@@ -102,6 +110,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         Action<Action> uiThreadMarshal,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
+        _expectedPageId = pageId;
         _mutate = mutate;
         _uiThreadMarshal = uiThreadMarshal;
         _delayAsync = delayAsync;
@@ -147,9 +156,34 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
     internal QuickSettingsSection? FindSectionForRow(QuickSettingsRowId rowId) =>
         _authoritativePage.Sections.FirstOrDefault(s => s.Rows.Any(r => r.RowId == rowId));
 
-    // Section 29: a fresh authoritative page never clears pending drafts by itself -- the caller
-    // re-renders via BuildEffectivePage(), which keeps overlaying them over the new authority.
-    internal void ApplyAuthoritativePage(QuickSettingsPageSnapshot page) => _authoritativePage = page;
+    // Section 29: a fresh authoritative page never clears an individual pending draft just because
+    // it exists -- the caller re-renders via BuildEffectivePage(), which keeps overlaying valid
+    // drafts over the new authority. SF-V2-09 section 17.1/17.2/18/19 add three narrow safety facts
+    // on top of that: an unexpected PageId is ignored/fail-closed rather than corrupting this page's
+    // state; an AppId context change retires ALL local pending work for the old context (an
+    // already-submitted Runtime request is not magically cancelled, but its local settlement is
+    // suppressed -- section 17.2); and a same-context refresh prunes any pending draft whose edited
+    // row the fresh page no longer allows (section 18), generically from row metadata, with no
+    // per-feature special-casing. A page pushed through this method is always an "independent"
+    // Runtime refresh (never a mutation's own result -- see OnSettled/SubmitImmediateToggleAsync),
+    // so it also clears a stale local failure banner (section 19).
+    internal void ApplyAuthoritativePage(QuickSettingsPageSnapshot page)
+    {
+        if (page.PageId != _expectedPageId)
+        {
+            OverlayLog.Warn("QuickSettings", "Ignoring a Quick Settings page whose PageId does not match this binding.",
+                exception: null, ("Expected", _expectedPageId), ("Actual", page.PageId));
+            return;
+        }
+
+        if (page.AppId != _authoritativePage.AppId)
+            RetireAllPending();
+        else
+            PruneAgainstPage(page);
+
+        LastLocalFailureMessage = null;
+        _authoritativePage = page;
+    }
 
     internal static bool CanMutate(QuickSettingsRow row) => row.Available && row.Writable;
 
@@ -166,22 +200,34 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         if (FindSectionForRow(rowId) is { } section)
             CancelUnsubmittedInSection(section.SectionId);
 
+        var submittedPageId = _authoritativePage.PageId;
+        var submittedAppId = _authoritativePage.AppId;
         var intent = new QuickSettingsMutationIntent(
-            _authoritativePage.PageId, _authoritativePage.AppId, rowId,
+            submittedPageId, submittedAppId, rowId,
             [new QuickSettingsRowValue(rowId, QuickSettingsValue.Boolean(desired))]);
 
         _mutationBusy = true;
         try
         {
             var result = await _mutate(intent);
+            // Section 17.3: the active game may have changed while this immediate toggle was in
+            // flight -- a fresh Profile(B) authoritative page can already be installed by the time
+            // this A-targeted result returns. A mutation was still genuinely submitted (the caller's
+            // re-render is a harmless no-op), but the stale A result must never overwrite B.
+            if (IsStaleForCurrentContext(result.Page)) return true;
             _authoritativePage = result.Page;
             LastLocalFailureMessage = result.Succeeded ? null : result.FailureMessage;
+            PruneAgainstPage(_authoritativePage);
             return true;
         }
         catch (Exception exception)
         {
-            // Operation/transport failure (section 32): never synthesize a fake authoritative page.
-            LastLocalFailureMessage = exception.Message;
+            // PR #510 review: an operation/transport failure is a supported lifecycle condition too
+            // (never a typed Page to compare, unlike the success path above), so it needs its own
+            // staleness check -- otherwise a context change that raced this outstanding await would
+            // leave A's exception message painted over B's already-installed authoritative page.
+            if (_authoritativePage.PageId == submittedPageId && _authoritativePage.AppId == submittedAppId)
+                LastLocalFailureMessage = exception.Message;
             return false;
         }
         finally { _mutationBusy = false; }
@@ -325,9 +371,12 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         }
     }
 
-    // Sections 30-32: the CURRENT generation's settlement is authoritative. A valid Runtime
+    // Sections 30-32/17.4: the CURRENT generation's settlement is authoritative. A valid Runtime
     // settlement (including a normal typed failure) always carries a fresh Page and replaces the
-    // cached authoritative page; a thrown operation/transport failure never does.
+    // cached authoritative page UNLESS the active context has already moved on (a context change
+    // already retired this entry's key in the common case -- section 17.2 -- but the explicit
+    // IsStaleForCurrentContext check is the same defense-in-depth guarantee SubmitImmediateToggleAsync
+    // uses); a thrown operation/transport failure never carries a Page at all.
     private void OnSettled(QuickSettingsPendingKey key, int generation, QuickSettingsCommitSettlement settlement)
     {
         if (_disposed) return;
@@ -338,8 +387,12 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
 
         if (settlement.Result is { } result)
         {
-            _authoritativePage = result.Page;
-            LastLocalFailureMessage = result.Succeeded ? null : result.FailureMessage;
+            if (!IsStaleForCurrentContext(result.Page))
+            {
+                _authoritativePage = result.Page;
+                LastLocalFailureMessage = result.Succeeded ? null : result.FailureMessage;
+                PruneAgainstPage(_authoritativePage);
+            }
         }
         else
         {
@@ -349,13 +402,52 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         SettledAsynchronously?.Invoke();
     }
 
+    // Section 17.3/17.4: a mutation result is stale once the binder's live context has moved past
+    // the (PageId, AppId) it was computed for -- e.g. the active game changed while the request was
+    // in flight. PageId is fixed per binding instance so only AppId can actually drift in practice;
+    // both are checked for clarity/defense-in-depth rather than trusting the Runtime to only ever
+    // echo this binding's own PageId back.
+    private bool IsStaleForCurrentContext(QuickSettingsPageSnapshot resultPage) =>
+        resultPage.PageId != _expectedPageId || resultPage.AppId != _authoritativePage.AppId;
+
+    // Section 17.2: an AppId context change retires ALL local pending work for the old context, not
+    // just unsubmitted drafts -- an already-submitted Runtime request cannot be cancelled, but its
+    // eventual settlement must be suppressed (Dispose() makes IsCurrentGeneration false, and removal
+    // from _pending independently makes OnSettled's own lookup fail).
+    private void RetireAllPending()
+    {
+        foreach (var entry in _pending.Values) entry.Commit.Dispose();
+        _pending.Clear();
+    }
+
+    // Section 18/18.1: generic same-context prune -- inspect each pending entry's OWN edited row
+    // (not every row it happens to carry) against the fresh page. Absent or no longer
+    // Available+Writable retires that whole entry; nothing here knows about ProfileEnabled, TDP, CPU
+    // Boost, or Power Mode by name. CancelUnsubmitted()/HasPendingDraft is the same idiom
+    // CancelUnsubmittedInSection/CancelUnsubmittedDrafts already use to leave an already-submitted
+    // (in-flight) entry alone -- it will settle on its own, subject to the central
+    // QuickSettingsMutationAdapter's own writability backstop.
+    private void PruneAgainstPage(QuickSettingsPageSnapshot page)
+    {
+        foreach (var (key, entry) in _pending.ToArray())
+        {
+            if (!entry.Commit.TryGetPendingIntent(out var intent)) continue;
+            var row = page.Sections.SelectMany(s => s.Rows).FirstOrDefault(r => r.RowId == intent.EditedRowId);
+            if (row is { Available: true, Writable: true }) continue;
+
+            entry.Commit.CancelUnsubmitted();
+            if (entry.Commit.HasPendingDraft) continue; // already in flight -- leave it to settle
+            _pending.Remove(key);
+            entry.Commit.Dispose();
+        }
+    }
+
     // Section 40: window/process teardown suppresses obsolete local settlement callbacks and
     // prevents new scheduling. Runtime/feature teardown owns already-submitted operations.
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        foreach (var entry in _pending.Values) entry.Commit.Dispose();
-        _pending.Clear();
+        RetireAllPending();
     }
 }

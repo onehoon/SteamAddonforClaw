@@ -453,11 +453,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     return false;
                 }
             });
-        // SF-V2-02/06 section 14/14.2: bind the Overlay shared Quick Settings transport onto the SAME
-        // _frontendControl at the same stage as BindTabOrderAuthority, before the first warm Overlay
-        // connection. Only the Device page is captured/exposed to the Overlay in SF-V2-06.
+        // SF-V2-02/06/09 section 14/14.2/7.2/7.3: bind the Overlay shared Quick Settings transport
+        // onto the SAME _frontendControl at the same stage as BindTabOrderAuthority, before the first
+        // warm Overlay connection. Both Device and Profile are captured/exposed to the Overlay as of
+        // SF-V2-09. Profile capture reuses the existing generic CaptureQuickSettingsPageAsync seam
+        // (its own current-target revalidation/display-name enrichment stays authoritative) against
+        // the current Runtime active-game AppId -- never ProfileStore/hardware directly, and no local
+        // FrontendGameProfileSnapshot construction here.
         _overlayController.BindQuickSettingsAuthority(
             captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, appId: null, token),
+            captureProfilePage: token => CaptureOverlayProfileQuickSettingsPageAsync(token),
             mutate: (intent, token) => HandleOverlayQuickSettingsMutationAsync(intent, token));
         // SF-V2-02 section 17: refresh a currently visible/captured Overlay on ordinary Runtime
         // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
@@ -467,6 +472,20 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         // Full1902 Policy B: _startupComposition is retained (nulled at dispose) so the deferred
         // Disabled-mode controller startup can reuse it off the message-loop thread.
+    }
+
+    // SF-V2-09 section 7.3/7.4: Profile capture for the Overlay uses the current Runtime active-game
+    // authority, exactly like QAM's Profile page selection. AppId 0 (no active Steam game) is
+    // resolved locally to an explicit Unavailable page without ever calling into the frontend
+    // control -- the Profile tab stays visible with a deliberate "No active game." message rather
+    // than a fake AppId-0 profile or a hidden tab.
+    private Task<QuickSettingsPageSnapshot> CaptureOverlayProfileQuickSettingsPageAsync(CancellationToken token)
+    {
+        var appId = _runtimeHost?.ActualRunningAppId ?? 0;
+        if (appId == 0)
+            return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId: null, message: "No active game."));
+
+        return _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId, token);
     }
 
     /// <summary>PR5/PR6: the whole Disabled-mode controller startup sequence. Runs only for an exact
@@ -922,10 +941,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _overlayInputRouter = router;
             _overlayCaptureActive = true;
             AppLog.Info("OverlayCapture", "Capture committed.", ("Event", "OverlayCaptureCommitted"));
-            // SF-V2-02 section 16.2: Device state publish happens strictly AFTER capture is
-            // committed, and is fire-and-forget -- a slow/failed snapshot must never extend how long
-            // this method (and the _visibleSurfaceTransition it holds) delays a concurrent Hide.
-            _ = _overlayController.RefreshDeviceQuickSettingsAsync();
+            // SF-V2-02/09 section 16.2/8: Device+Profile state publish happens strictly AFTER capture
+            // is committed, and is fire-and-forget -- a slow/failed snapshot must never extend how
+            // long this method (and the _visibleSurfaceTransition it holds) delays a concurrent Hide.
+            _ = _overlayController.RefreshQuickSettingsAsync();
         }
         catch (Exception exception)
         {
@@ -944,29 +963,36 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (!_overlayController.IsVisible) return;
         // Section 23: an admitted Overlay mutation already returns a fresh authoritative page; a
         // redundant refresh here could otherwise race/overwrite that result (including erasing a
-        // typed Succeeded=false + FailureMessage) with an older/less-complete page.
+        // typed Succeeded=false + FailureMessage) with an older/less-complete page. Section 10's
+        // finally-block backstop in HandleOverlayQuickSettingsMutationAsync covers the one case this
+        // suppression could otherwise lose: the active game changing while a mutation is in flight.
         if (Volatile.Read(ref _overlayQuickSettingsMutationInFlight) != 0) return;
-        _ = _overlayController.RefreshDeviceQuickSettingsAsync();
+        _ = _overlayController.RefreshQuickSettingsAsync();
     }
 
-    // SF-V2-02/06 section 15/16: the admission Runtime-side fact this class owns (_overlayCaptureActive
-    // + process shutdown + Device-only page scope). NamedPipeOverlayServer separately checks its own
+    // SF-V2-02/06/09 section 15/16/11: the admission Runtime-side fact this class owns
+    // (_overlayCaptureActive + process shutdown). NamedPipeOverlayServer separately checks its own
     // Ready/Visible fact before ever calling this delegate. Dispatches onto the SAME shared
     // MutateQuickSettingAsync seam Main UI/QAM already use through IAddonFrontendControl -- no direct
-    // ProfileStore/hardware/registry access, and no second Device row/group dispatch authority.
+    // ProfileStore/hardware/registry access, and no second Device/Profile row/group dispatch
+    // authority. SF-V2-09 removes the historical Device-only restriction (section 11): Profile
+    // AppId/target/writability validation and dispatch are already fully owned by the shared
+    // QuickSettingsMutationAdapter, so nothing Profile-specific is duplicated here.
     private async Task<QuickSettingsMutationResult> HandleOverlayQuickSettingsMutationAsync(QuickSettingsMutationIntent intent, CancellationToken token)
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive)
             return OverlayQuickSettingsWireValidation.NotAdmitted(intent, "The Overlay is not the active captured surface.");
 
-        // Section 12: Profile is not exposed/admitted to the Overlay in SF-V2-06.
-        if (intent.PageId != QuickSettingsPageId.Device)
-            return OverlayQuickSettingsWireValidation.NotAdmitted(intent, "Only the Device page is available through the Overlay Quick Settings seam.");
-
         var control = _frontendControl;
         if (control is null)
             return OverlayQuickSettingsWireValidation.NotAdmitted(intent, "The Overlay is not the active captured surface.");
 
+        // Section 10: capture the active AppId before the mutation, so that if it changes while this
+        // mutation is in flight (a game starts/exits/switches), the finally block below can request
+        // one backstop refresh even though OnFrontendStateInvalidatedForOverlay intentionally
+        // suppressed every StateInvalidated it saw during that window. No epoch/state machine --
+        // just the narrowest before/after comparison that satisfies this lifecycle.
+        var activeAppIdBefore = _runtimeHost?.ActualRunningAppId ?? 0;
         Interlocked.Increment(ref _overlayQuickSettingsMutationInFlight);
         try
         {
@@ -981,10 +1007,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // unexpected Runtime exception masquerade as an authoritative product settlement instead
             // of the bounded Error NamedPipeOverlayServer.HandleQuickSettingsMutationRequestAsync
             // already produces for exactly this case.
-            AppLog.Warn("OverlayDevice", "Overlay Quick Settings mutation failed.", exception, ("PageId", intent.PageId), ("EditedRowId", intent.EditedRowId));
+            AppLog.Warn("OverlayQuickSettings", "Overlay Quick Settings mutation failed.", exception, ("PageId", intent.PageId), ("EditedRowId", intent.EditedRowId));
             throw;
         }
-        finally { Interlocked.Decrement(ref _overlayQuickSettingsMutationInFlight); }
+        finally
+        {
+            Interlocked.Decrement(ref _overlayQuickSettingsMutationInFlight);
+
+            var activeAppIdAfter = _runtimeHost?.ActualRunningAppId ?? 0;
+            if (activeAppIdAfter != activeAppIdBefore &&
+                Volatile.Read(ref _processShutdownStarted) == 0 &&
+                _overlayCaptureActive &&
+                _overlayController.IsVisible)
+            {
+                _ = _overlayController.RefreshQuickSettingsAsync();
+            }
+        }
     }
 
     private async Task HandleOverlayCloseReasonAsync(string reason, bool surfaceAlreadyGone)

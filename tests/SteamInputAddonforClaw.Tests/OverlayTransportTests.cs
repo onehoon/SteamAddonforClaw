@@ -424,10 +424,10 @@ public sealed class OverlayTransportTests
         }
     }
 
-    // SF-V2-02 section 17.2: a refresh started while visible must not intentionally publish to a
+    // SF-V2-02/09 section 17.2: a refresh started while visible must not intentionally publish to a
     // session that became hidden before the (possibly slow) capture completed.
     [Fact]
-    public async Task RefreshDeviceQuickSettingsAsync_does_not_publish_after_the_session_is_hidden_mid_capture()
+    public async Task RefreshQuickSettingsAsync_does_not_publish_after_the_session_is_hidden_mid_capture()
     {
         var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
         var overlayDirectory = Path.Combine(root, "overlay");
@@ -456,6 +456,7 @@ public sealed class OverlayTransportTests
                     await releaseCapture.Task;
                     return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device);
                 },
+                captureProfilePage: _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile)),
                 mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")));
 
             var deviceFrames = new List<QuickSettingsPageSnapshot>();
@@ -466,7 +467,7 @@ public sealed class OverlayTransportTests
             Assert.True(await controller.ShowAsync());
             Assert.True(controller.IsVisible);
 
-            var refreshTask = controller.RefreshDeviceQuickSettingsAsync();
+            var refreshTask = controller.RefreshQuickSettingsAsync();
             await captureEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.True(await controller.EnsureHiddenAsync());
@@ -475,6 +476,157 @@ public sealed class OverlayTransportTests
             await refreshTask.WaitAsync(TimeSpan.FromSeconds(5));
             await Task.Delay(200);
             lock (deviceFrames) Assert.Empty(deviceFrames);
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static Process? StartLongRunningTestProcess(ProcessStartInfo _) => Process.Start(new ProcessStartInfo
+    {
+        FileName = "cmd.exe", Arguments = "/c timeout /t 30 /nobreak >nul",
+        UseShellExecute = false, CreateNoWindow = true
+    });
+
+    // SF-V2-09 section 7.7/29.1: a stable Device-then-Profile publish order (no product meaning
+    // attached; just deterministic tests/logs).
+    [Fact]
+    public async Task RefreshQuickSettingsAsync_publishes_device_then_profile_in_a_stable_order()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartLongRunningTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.BindQuickSettingsAuthority(
+                captureDevicePage: _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device, message: "device-page")),
+                captureProfilePage: _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, message: "profile-page")),
+                mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")));
+
+            var frames = new List<QuickSettingsPageSnapshot>();
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null,
+                snapshot => { lock (frames) frames.Add(snapshot); return Task.CompletedTask; });
+
+            Assert.True(await controller.ShowAsync());
+            await controller.RefreshQuickSettingsAsync();
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTime.UtcNow < deadline) { lock (frames) { if (frames.Count >= 2) break; } await Task.Delay(20); }
+
+            lock (frames)
+            {
+                Assert.Equal(2, frames.Count);
+                Assert.Equal(QuickSettingsPageId.Device, frames[0].PageId);
+                Assert.Equal("device-page", frames[0].Message);
+                Assert.Equal(QuickSettingsPageId.Profile, frames[1].PageId);
+                Assert.Equal("profile-page", frames[1].Message);
+            }
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // SF-V2-09 section 7.6/29.3: one page's capture failure must never suppress the other page's
+    // publish -- the failing page is delivered as an explicit Unavailable page instead.
+    [Fact]
+    public async Task RefreshQuickSettingsAsync_profile_capture_failure_still_publishes_device_and_an_unavailable_profile_page()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartLongRunningTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.BindQuickSettingsAuthority(
+                captureDevicePage: _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Device, message: "device-ok")),
+                captureProfilePage: _ => throw new InvalidOperationException("profile capture boom"),
+                mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")));
+
+            var frames = new List<QuickSettingsPageSnapshot>();
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null,
+                snapshot => { lock (frames) frames.Add(snapshot); return Task.CompletedTask; });
+
+            Assert.True(await controller.ShowAsync());
+            await controller.RefreshQuickSettingsAsync();
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTime.UtcNow < deadline) { lock (frames) { if (frames.Count >= 2) break; } await Task.Delay(20); }
+
+            lock (frames)
+            {
+                Assert.Equal(2, frames.Count);
+                Assert.Equal(QuickSettingsPageId.Device, frames[0].PageId);
+                Assert.Equal("device-ok", frames[0].Message);
+                Assert.Equal(QuickSettingsPageId.Profile, frames[1].PageId);
+                Assert.False(frames[1].Available); // caught capture failure -> explicit Unavailable
+            }
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RefreshQuickSettingsAsync_device_capture_failure_still_publishes_profile_and_an_unavailable_device_page()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartLongRunningTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.BindQuickSettingsAuthority(
+                captureDevicePage: _ => throw new InvalidOperationException("device capture boom"),
+                captureProfilePage: _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, message: "profile-ok")),
+                mutate: (intent, _) => Task.FromResult(OverlayQuickSettingsWireValidation.NotAdmitted(intent, "unused")));
+
+            var frames = new List<QuickSettingsPageSnapshot>();
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null,
+                snapshot => { lock (frames) frames.Add(snapshot); return Task.CompletedTask; });
+
+            Assert.True(await controller.ShowAsync());
+            await controller.RefreshQuickSettingsAsync();
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTime.UtcNow < deadline) { lock (frames) { if (frames.Count >= 2) break; } await Task.Delay(20); }
+
+            lock (frames)
+            {
+                Assert.Equal(2, frames.Count);
+                Assert.Equal(QuickSettingsPageId.Device, frames[0].PageId);
+                Assert.False(frames[0].Available); // caught capture failure -> explicit Unavailable
+                Assert.Equal(QuickSettingsPageId.Profile, frames[1].PageId);
+                Assert.Equal("profile-ok", frames[1].Message);
+            }
 
             await controller.DisposeAsync();
             try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
