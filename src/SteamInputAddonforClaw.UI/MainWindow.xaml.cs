@@ -187,9 +187,20 @@ public sealed partial class MainWindow : Window
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        if (IsBatteryValidationBlockingNavigation())
+        {
+            if (!args.IsSettingsSelected)
+                sender.SelectedItem = sender.SettingsItem;
+            return;
+        }
+
         var selectedTag = (args.SelectedItem as NavigationViewItem)?.Tag as string;
         ShowPage(_navigationState.SelectNavigationItem(args.IsSettingsSelected, selectedTag));
     }
+
+    private bool IsBatteryValidationBlockingNavigation() =>
+        BatteryChargeLimitTestContent.Visibility == Visibility.Visible &&
+        BatteryChargeLimitTestContent.IsValidationRunning;
 
     private void ShowPage(MainNavigationPage page)
     {
@@ -372,6 +383,13 @@ public sealed partial class MainWindow : Window
 
     private async void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
     {
+        if (IsBatteryValidationBlockingNavigation())
+        {
+            if (args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed)
+                args.Handled = true;
+            return;
+        }
+
         if (!args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed ||
             _navigationState.GetMouseBackDestination() is not { } destination)
         {
