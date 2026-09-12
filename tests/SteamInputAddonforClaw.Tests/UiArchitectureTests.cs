@@ -180,6 +180,23 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Battery_slider_value_changed_ignores_xaml_initialization_before_frontend_connects()
+    {
+        var root = FindRepositoryRoot();
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var handlerStart = codeBehind.IndexOf("private void BatteryChargeLimitSlider_ValueChanged", StringComparison.Ordinal);
+        var handlerEnd = codeBehind.IndexOf("private async void BatteryChargeLimitSlider_PointerCaptureLost", handlerStart, StringComparison.Ordinal);
+        Assert.True(handlerStart >= 0);
+        Assert.True(handlerEnd > handlerStart);
+
+        var handler = codeBehind[handlerStart..handlerEnd];
+        var guard = "if (_suppressBatteryChargeLimitEvents || _frontend is null) return;";
+        Assert.Contains(guard, handler, StringComparison.Ordinal);
+        Assert.True(handler.IndexOf(guard, StringComparison.Ordinal)
+            < handler.IndexOf("_batteryChargeLimitDraftPercent =", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Battery_slider_draft_policy_commits_the_changed_value_once_after_interaction()
     {
         var dirty = true;

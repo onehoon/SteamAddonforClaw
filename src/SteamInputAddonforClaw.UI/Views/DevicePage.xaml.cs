@@ -173,7 +173,7 @@ public sealed partial class DevicePage : UserControl
 
     private void BatteryChargeLimitSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs args)
     {
-        if (_suppressBatteryChargeLimitEvents) return;
+        if (_suppressBatteryChargeLimitEvents || _frontend is null) return;
         _batteryChargeLimitDraftPercent = Math.Clamp((int)Math.Round(args.NewValue / 5) * 5, 60, 100);
         _batteryChargeLimitDraftDirty = true;
         BatteryChargeLimitValueText.Text = $"{_batteryChargeLimitDraftPercent}%";
