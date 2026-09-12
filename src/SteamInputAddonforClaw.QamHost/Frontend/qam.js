@@ -577,6 +577,7 @@
           // Late-result guard (section 16): only install this fetch if the visible context has not
           // already moved on again while the request was in flight.
           if (sameQuickSettingsContext(quickSettingsContextRef.current, nextContext)) {
+            pruneQuickSettingsPendingAgainstPage(nextPage);
             setQuickSettingsPage(nextPage); quickSettingsPageRef.current = nextPage;
           }
           setStatus(nextStatus);
@@ -631,6 +632,7 @@
         if (!sameQuickSettingsContext(quickSettingsContextOf(result?.page), quickSettingsContextRef.current)) return;
         // The adapter always returns a fresh authoritative page -- it wins on success AND on a
         // typed feature failure (a failed Windows apply may still have persisted the desired value).
+        pruneQuickSettingsPendingAgainstPage(result.page);
         setQuickSettingsPage(result.page); quickSettingsPageRef.current = result.page;
         setError(!result?.succeeded ? (result?.failureMessage || "Quick Settings update failed") : null);
       };
@@ -779,6 +781,25 @@
 
   function sameQuickSettingsContext(a, b) {
     return !!a && !!b && a.pageId === b.pageId && (a.appId ?? null) === (b.appId ?? null);
+  }
+
+  // SF-V2-08 sections 13.1/14/25: a fresh authoritative same-context page retires a same-context
+  // pending entry once its own edited row is no longer valid against THAT page (absent or
+  // non-writable) -- this is the generic way real parent-state transitions (e.g. ProfileEnabled OFF
+  // making ProfileTdp/ProfileCpuBoost/ProfilePowerMode rows non-writable) retire a stale child draft
+  // without any cross-section policy or per-feature special-casing. A still-writable pending row is
+  // left untouched, so it survives ordinary same-context invalidation. The central mutation adapter
+  // remains the final backstop if a timer still reaches Runtime after this.
+  function pruneQuickSettingsPendingAgainstPage(page) {
+    if (!page) return;
+    for (const [key, pending] of state.qamSliderCommits ?? []) {
+      if (pending?.pageId !== page.pageId || (pending?.appId ?? null) !== (page.appId ?? null)) continue;
+      const editedRowId = pending?.payload?.editedRowId;
+      const row = findQuickSettingsRow(page, editedRowId);
+      if (row?.available === true && row?.writable === true) continue;
+      clearTimeout(pending.timer);
+      state.qamSliderCommits.delete(key);
+    }
   }
 
   // onRequestStart / onRequestEnd wrap ONLY the actual delayed RPC execution (never the debounce

@@ -580,6 +580,44 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_generic_prune_retires_a_pending_row_the_fresh_page_no_longer_allows()
+    {
+        // Review fix (PR #509): a pending child draft (e.g. a Profile TDP/CPU/Power slider) must be
+        // retired the moment a fresh same-context authoritative page makes its edited row absent or
+        // non-writable -- generically, driven only by page/row metadata, never a per-feature or
+        // per-section special case (SF-V2-08 sections 13.1/14/25).
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var pruneStart = source.IndexOf("function pruneQuickSettingsPendingAgainstPage(page)", StringComparison.Ordinal);
+        Assert.True(pruneStart >= 0);
+        var prune = source[pruneStart..source.IndexOf("// onRequestStart / onRequestEnd wrap", pruneStart, StringComparison.Ordinal)];
+
+        Assert.Contains("pending?.pageId !== page.pageId || (pending?.appId ?? null) !== (page.appId ?? null)", prune);
+        Assert.Contains("const editedRowId = pending?.payload?.editedRowId;", prune);
+        Assert.Contains("const row = findQuickSettingsRow(page, editedRowId);", prune);
+        Assert.Contains("if (row?.available === true && row?.writable === true) continue;", prune);
+        Assert.Contains("clearTimeout(pending.timer);", prune);
+        Assert.Contains("state.qamSliderCommits.delete(key);", prune);
+        // Purely page/row-metadata driven -- never special-cases a specific row/section identity.
+        Assert.DoesNotContain("ProfileEnabled", prune);
+        Assert.DoesNotContain("ProfileTdp", prune);
+        Assert.DoesNotContain("ProfileCpuBoost", prune);
+        Assert.DoesNotContain("ProfilePowerMode", prune);
+        Assert.DoesNotContain("sectionId", prune);
+
+        // Called for every fresh same-context authoritative page: an ordinary refresh...
+        var refresh = source[source.IndexOf("const refresh = React.useCallback(async () => {", StringComparison.Ordinal)..source.IndexOf("const beginMutation", StringComparison.Ordinal)];
+        Assert.Contains("pruneQuickSettingsPendingAgainstPage(nextPage);", refresh);
+        Assert.True(refresh.IndexOf("pruneQuickSettingsPendingAgainstPage(nextPage);", StringComparison.Ordinal)
+            < refresh.IndexOf("setQuickSettingsPage(nextPage);", StringComparison.Ordinal));
+        // ...and a mutation settlement (both success and typed failure, since both carry a page).
+        var apply = source[source.IndexOf("const applyQuickSettingsResult = result =>", StringComparison.Ordinal)..source.IndexOf("const commitQuickSettingsImmediate", StringComparison.Ordinal)];
+        Assert.Contains("pruneQuickSettingsPendingAgainstPage(result.page);", apply);
+        Assert.True(apply.IndexOf("pruneQuickSettingsPendingAgainstPage(result.page);", StringComparison.Ordinal)
+            < apply.IndexOf("setQuickSettingsPage(result.page);", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Qam_all_sliders_use_the_shared_trailing_commit_path_while_toggles_stay_immediate()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
@@ -608,9 +646,10 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        // refresh() does NOT touch state.qamSliderCommits directly (only the two explicit context/
-        // admission-scoped cancellations), so a same-context pending draft survives an ordinary
-        // StateInvalidated; the rendered value checks the pending draft before row.value.
+        // refresh() has no unscoped state.qamSliderCommits deletion inline (only the explicit
+        // context/admission-scoped cancellation and the generic row-validity prune, both of which
+        // leave a still-writable same-context pending entry untouched), so that entry survives an
+        // ordinary StateInvalidated; the rendered value checks the pending draft before row.value.
         var refresh = source[source.IndexOf("const refresh = React.useCallback(async () => {", StringComparison.Ordinal)..source.IndexOf("const beginMutation", StringComparison.Ordinal)];
         Assert.DoesNotContain("qamSliderCommits.delete", refresh);
         Assert.DoesNotContain("qamSliderCommits.set", refresh);
