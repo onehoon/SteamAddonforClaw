@@ -191,9 +191,14 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
     // draft. The first edit of a group seeds the whole section in row order; later edits reuse the
     // same whole draft and restart the trailing delay from the newest edit. Malformed/unsupported
     // commit policy fails the row closed (section 22) rather than falling back to a literal delay.
+    // Rejects while an immediate Toggle mutation is outstanding (reuses the same narrow
+    // _mutationBusy fact SubmitImmediateToggleAsync sets): otherwise a grouped draft could seed
+    // itself from the pre-toggle authoritative section (e.g. DeviceTdpEnabled still true) and later
+    // re-enable a feature the user just turned off. The caller re-renders immediately after this
+    // returns, so a rejected controller/pointer edit just snaps back to the current effective value.
     internal bool ScheduleSlider(QuickSettingsRowId rowId, QuickSettingsValue desired)
     {
-        if (_disposed) return false;
+        if (_disposed || _mutationBusy) return false;
         if (FindRow(rowId) is not { ControlKind: QuickSettingsControlKind.Slider } row) return false;
         if (!CanMutate(row)) return false;
         if (row.CommitPolicy is not { Mode: QuickSettingsCommitMode.TrailingDebounce, DelayMilliseconds: > 0 } policy) return false;

@@ -635,6 +635,30 @@ public sealed class OverlayQuickSettingsPageBindingTests
     }
 
     [Fact]
+    public async Task Slider_edit_is_rejected_while_immediate_parent_toggle_is_in_flight()
+    {
+        // Otherwise a grouped draft could seed itself from the pre-toggle authoritative section
+        // (DeviceTdpEnabled still true) and, two seconds later, re-enable TDP right after the user
+        // turned it off -- a normal UI/RPC latency path, not a theoretical race.
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewBinding(TdpPage(), mutate.Func, delay.Func);
+
+        var toggleTask = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.DeviceTdpEnabled, false);
+        Assert.Single(mutate.Calls); // toggle submitted synchronously (Immediate policy, no debounce)
+
+        Assert.False(binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsValue.Integer(26)));
+        Assert.Empty(binding.PendingKeys);
+
+        mutate.CompleteNext(Success(TdpPage(tdpEnabled: false)));
+        Assert.True(await toggleTask);
+
+        delay.Elapse();
+        await Task.Delay(40);
+        Assert.Single(mutate.Calls); // no stale grouped TDP mutation can follow the OFF result
+    }
+
+    [Fact]
     public async Task Immediate_toggle_typed_failure_still_applies_the_result_page()
     {
         var mutate = new GatedMutate();
