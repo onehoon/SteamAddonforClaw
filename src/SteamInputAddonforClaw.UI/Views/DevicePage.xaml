@@ -35,19 +35,19 @@
             </ctcontrols:SettingsCard>
 
             <InfoBar x:Name="BatteryChargeLimitInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
-            <ctcontrols:SettingsCard x:Name="BatteryChargeLimitCard" Header="Battery charge limit"
-                Description="Set the maximum charge level for this MSI Claw device.">
+            <ctcontrols:SettingsCard x:Name="BatteryChargeLimitCard" Header="Battery charge limit">
+                <ctcontrols:SettingsCard.Description>
+                    <TextBlock x:Name="BatteryChargeLimitStatusText" Opacity="0.7" TextWrapping="Wrap" />
+                </ctcontrols:SettingsCard.Description>
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE86B;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <StackPanel Spacing="8" MinWidth="520">
-                    <Grid RowSpacing="4" ColumnSpacing="12">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <TextBlock x:Name="BatteryChargeLimitValueText" MinWidth="64" Text="—%" VerticalAlignment="Center" />
-                        <Slider x:Name="BatteryChargeLimitSlider" Grid.Column="1" Minimum="60" Maximum="100" StepFrequency="5" ValueChanged="BatteryChargeLimitSlider_ValueChanged" PointerCaptureLost="BatteryChargeLimitSlider_PointerCaptureLost" KeyUp="BatteryChargeLimitSlider_KeyUp" />
-                        <ToggleSwitch x:Name="BatteryChargeLimitEnabledToggleSwitch" Grid.Column="2" OffContent="" OnContent="" Toggled="BatteryChargeLimitEnabledToggleSwitch_Toggled" />
-                        <TextBlock x:Name="BatteryChargeLimitStatusText" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" TextAlignment="Center" Opacity="0.7" TextWrapping="Wrap" />
+                        <Slider x:Name="BatteryChargeLimitSlider" Grid.Column="1" VerticalAlignment="Center" Minimum="60" Maximum="100" StepFrequency="5" ValueChanged="BatteryChargeLimitSlider_ValueChanged" PointerCaptureLost="BatteryChargeLimitSlider_PointerCaptureLost" KeyUp="BatteryChargeLimitSlider_KeyUp" />
+                        <ToggleSwitch x:Name="BatteryChargeLimitEnabledToggleSwitch" Grid.Column="2" VerticalAlignment="Center" OffContent="" OnContent="" Toggled="BatteryChargeLimitEnabledToggleSwitch_Toggled" />
                     </Grid>
                 </StackPanel>
             </ctcontrols:SettingsCard>
