@@ -117,7 +117,7 @@ internal sealed class MsiClawBatteryChargeLimitHardware
         if (!TryRead(out var readback))
         {
             AppLog.Debug("MsiBatteryChargeLimit", "BatteryLimit readback failed");
-            return new(MsiBatteryChargeLimitMutationOutcome.VerificationFailed, current, "BatteryLimit readback failed.");
+            return new(MsiBatteryChargeLimitMutationOutcome.VerificationFailed, null, "BatteryLimit readback failed.");
         }
 
         if (readback.Enabled != expectedEnabled || readback.LimitPercent != expectedPercent)

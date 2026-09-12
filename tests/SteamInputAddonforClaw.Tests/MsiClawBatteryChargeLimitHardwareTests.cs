@@ -112,12 +112,13 @@ public sealed class MsiClawBatteryChargeLimitHardwareTests
     }
 
     [Fact]
-    public void Verification_read_failure_reports_verification_failure()
+    public void Verification_read_failure_does_not_report_pre_write_state_as_current()
     {
         var transport = new FakeTransport(0xD0) { FailSecondRead = true };
         var result = new MsiClawBatteryChargeLimitHardware(transport).SetPercent(85);
 
         Assert.Equal(MsiBatteryChargeLimitMutationOutcome.VerificationFailed, result.Outcome);
+        Assert.Null(result.State);
         Assert.Single(transport.Writes);
     }
 

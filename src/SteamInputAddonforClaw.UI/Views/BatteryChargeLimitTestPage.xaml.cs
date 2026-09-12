@@ -54,6 +54,7 @@ public sealed partial class BatteryChargeLimitTestPage : UserControl
         catch (Exception exception)
         {
             ErrorText.Text = exception.Message;
+            ResultText.Text = "Result: Failed";
         }
         finally
         {
@@ -74,6 +75,7 @@ public sealed partial class BatteryChargeLimitTestPage : UserControl
         catch (Exception exception)
         {
             ErrorText.Text = exception.Message;
+            ResultText.Text = "Result: Failed";
         }
         finally
         {
@@ -110,7 +112,9 @@ public sealed partial class BatteryChargeLimitTestPage : UserControl
         ProductValueText.Text = $"Product value: {(snapshot.RawValue is null ? "Unknown" : snapshot.ProductValueValid ? "Valid" : "Outside Addon range")}";
         LimitComboBox.SelectedIndex = snapshot.LimitPercent is int value && value is >= 60 and <= 100 && (value - 60) % 5 == 0 ? (value - 60) / 5 : -1;
         ErrorText.Text = snapshot.FailureMessage ?? string.Empty;
-        if (string.IsNullOrEmpty(snapshot.FailureMessage)) ResultText.Text = snapshot.Available ? "Result: State captured" : "Result: Unavailable";
+        ResultText.Text = snapshot.FailureMessage is not null
+            ? snapshot.Available ? "Result: Failed" : "Result: Unavailable"
+            : snapshot.Available ? "Result: State captured" : "Result: Unavailable";
     }
 
     private static string ValueOrUnknown(string value) => string.IsNullOrWhiteSpace(value) ? "Unknown" : value;
