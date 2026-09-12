@@ -78,8 +78,9 @@ internal sealed class BatteryChargeLimitValidationRunner
 
         try
         {
-            reportPath = BuildReportPath();
-            writer = CreateReportWriter(reportPath);
+            var candidateReportPath = BuildReportPath();
+            writer = CreateReportWriter(candidateReportPath);
+            reportPath = candidateReportPath;
             _reportCreated?.Invoke(reportPath);
             WriteHeader(writer);
             AppLog.Info("BatteryValidation", "Automated validation started.", ("ReportPath", reportPath));

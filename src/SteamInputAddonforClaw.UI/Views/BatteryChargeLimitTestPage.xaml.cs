@@ -12,6 +12,8 @@ public sealed partial class BatteryChargeLimitTestPage : UserControl
 
     public event EventHandler? BackRequested;
 
+    internal bool IsValidationRunning => _busy;
+
     public BatteryChargeLimitTestPage() => InitializeComponent();
 
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;

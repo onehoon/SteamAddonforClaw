@@ -413,6 +413,21 @@ public sealed class UiArchitectureTests
         Assert.Contains("StartValidationButton.IsEnabled = !busy", codeBehind, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Main_window_blocks_navigation_while_battery_validation_is_running()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/BatteryChargeLimitTestPage.xaml.cs"));
+        var window = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+
+        Assert.Contains("internal bool IsValidationRunning => _busy;", page, StringComparison.Ordinal);
+        Assert.Contains("private bool IsBatteryValidationBlockingNavigation()", window, StringComparison.Ordinal);
+        Assert.Contains("BatteryChargeLimitTestContent.IsValidationRunning", window, StringComparison.Ordinal);
+        Assert.Contains("if (IsBatteryValidationBlockingNavigation())", window, StringComparison.Ordinal);
+        Assert.Contains("sender.SelectedItem = sender.SettingsItem", window, StringComparison.Ordinal);
+        Assert.Contains("args.Handled = true", window, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false, Visibility.Collapsed)]
     [InlineData(true, Visibility.Visible)]

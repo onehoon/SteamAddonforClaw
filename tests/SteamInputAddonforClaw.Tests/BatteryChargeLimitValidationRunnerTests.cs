@@ -128,6 +128,7 @@ public sealed class BatteryChargeLimitValidationRunnerTests : IDisposable
 
         Assert.False(result.Passed);
         Assert.NotNull(result.PrimaryFailure);
+        Assert.Null(result.ReportPath);
         Assert.Empty(frontend.Calls);
     }
 
