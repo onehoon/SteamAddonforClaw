@@ -86,6 +86,20 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_ExplicitNullBatteryContainer_ReturnsMalformedAndPreservesFile()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var json = "{\"schemaVersion\":1,\"device\":{\"battery\":null},\"games\":{}}";
+        File.WriteAllText(ProfilesPath, json);
+
+        var result = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Equal(ProfileLoadStatus.Malformed, result.Status);
+        Assert.False(result.CanSafelyReplace);
+        Assert.Equal(json, File.ReadAllText(ProfilesPath));
+    }
+
+    [Fact]
     public void SaveAndLoad_PreservesUnknownTdpProperties()
     {
         Directory.CreateDirectory(_testDirectory);

@@ -160,6 +160,46 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Device_page_exposes_production_battery_control_as_an_inline_card()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+
+        Assert.Contains("x:Name=\"BatteryChargeLimitCard\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<FontIcon Glyph=\"&#xE86B;\" />", xaml, StringComparison.Ordinal);
+        Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Slider x:Name=\"BatteryChargeLimitSlider\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsExpander x:Name=\"BatteryChargeLimitCard\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("CaptureBatteryChargeLimitAsync", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("SetDeviceBatteryChargeLimitPercentAsync", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("PointerCaptureLost", xaml, StringComparison.Ordinal);
+        Assert.Contains("KeyUp", xaml, StringComparison.Ordinal);
+        Assert.Contains("_batteryChargeLimitDraftDirty", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("_suppressBatteryChargeLimitEvents", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Battery_slider_draft_policy_commits_the_changed_value_once_after_interaction()
+    {
+        var dirty = true;
+        var commitCount = 0;
+        var committedPercent = 0;
+        var draftPercent = 85;
+
+        if (DevicePage.BatteryChargeLimitDraftPolicy.ShouldCommit(80, draftPercent, dirty, busy: false))
+        {
+            dirty = false;
+            commitCount++;
+            committedPercent = draftPercent;
+        }
+
+        Assert.Equal(85, committedPercent);
+        Assert.Equal(1, commitCount);
+        Assert.False(DevicePage.BatteryChargeLimitDraftPolicy.ShouldCommit(80, draftPercent, dirty, busy: false));
+    }
+
+    [Fact]
     public void Device_page_owns_the_msi_center_m_startup_card_below_the_identity_summary_with_explicit_buttons()
     {
         var root = FindRepositoryRoot();
