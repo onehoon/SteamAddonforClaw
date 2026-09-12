@@ -22,8 +22,10 @@ public sealed partial class DeveloperPage : UserControl
     private void OpenVibrationTestButton_Click(object sender, RoutedEventArgs args) => VibrationTestRequested?.Invoke(this, EventArgs.Empty);
     public event EventHandler? SensorProbeRequested;
     public event EventHandler? FanHardwareProbeRequested;
+    public event EventHandler? BatteryChargeLimitTestRequested;
     private void OpenSensorProbeButton_Click(object sender, RoutedEventArgs args) => SensorProbeRequested?.Invoke(this, EventArgs.Empty);
     private void OpenFanHardwareProbeButton_Click(object sender, RoutedEventArgs args) => FanHardwareProbeRequested?.Invoke(this, EventArgs.Empty);
+    private void OpenBatteryChargeLimitTestButton_Click(object sender, RoutedEventArgs args) => BatteryChargeLimitTestRequested?.Invoke(this, EventArgs.Empty);
 
     public DeveloperPage()
     {

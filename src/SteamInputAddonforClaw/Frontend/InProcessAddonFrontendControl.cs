@@ -35,6 +35,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private ClawSensorProbeSession? _clawSensorProbe;
     private readonly object _fanProbeGate = new();
     private FanProbeSession? _fanProbe;
+    private readonly MsiClawBatteryChargeLimitHardware? _batteryChargeLimitHardware;
 
     /// <summary>Wraps the Runtime-owned <see cref="ClawSensorProbeCoordinator"/> for one active
     /// diagnostic session, plus the device identity captured at Open time (so a stale-but-still-open
@@ -96,6 +97,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _scanProfileGames = scanProfileGames ?? (token => new ProfileGameCatalogScanner().ScanAsync(token));
         _displayResolutionRuntime = displayResolutionRuntime;
         _fanProbeTransport = fanProbeTransport;
+        _batteryChargeLimitHardware = fanProbeTransport is null ? null : new MsiClawBatteryChargeLimitHardware(fanProbeTransport);
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -501,6 +503,75 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (session is null) return FrontendFanProbeSnapshot.Unavailable;
         return new(true, state, status, session.Manufacturer, session.Model, session.Board, FanProbeModelMap.Resolve(session.Board).ToString(), path, !string.IsNullOrWhiteSpace(path), state == FrontendFanProbeState.Failed ? status : null);
     }
+
+    // ---- MSI Battery Charge-Limit Test (developer-only, no persistence or lifecycle reconcile) ----
+    public async Task<FrontendBatteryChargeLimitTestSnapshot> CaptureBatteryChargeLimitTestAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var status = await CaptureStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (!IsSupportedBatteryHardware(status))
+            return UnavailableBatterySnapshot(status, "The authoritative hardware assessment is not a supported MSI Claw.");
+        if (_batteryChargeLimitHardware is null)
+            return UnavailableBatterySnapshot(status, "The shared MSI helper transport is unavailable.");
+
+        var result = await Task.Run(() => _batteryChargeLimitHardware.Read(), CancellationToken.None).ConfigureAwait(false);
+        return MapBatterySnapshot(status, result.State, result.FailureMessage, result.Succeeded);
+    }
+
+    public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        SetBatteryChargeLimitTestAsync(() => _batteryChargeLimitHardware!.SetEnabled(enabled), cancellationToken);
+
+    public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestPercentAsync(int percent, CancellationToken cancellationToken = default) =>
+        SetBatteryChargeLimitTestAsync(() => _batteryChargeLimitHardware!.SetPercent(percent), cancellationToken);
+
+    private async Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestAsync(
+        Func<MsiBatteryChargeLimitMutationResult> mutation,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var status = await CaptureStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (!IsSupportedBatteryHardware(status))
+            return new(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
+                "The authoritative hardware assessment is not a supported MSI Claw.",
+                UnavailableBatterySnapshot(status, "The authoritative hardware assessment is not a supported MSI Claw."));
+        if (_batteryChargeLimitHardware is null)
+            return new(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
+                "The shared MSI helper transport is unavailable.", UnavailableBatterySnapshot(status, "The shared MSI helper transport is unavailable."));
+
+        var result = await Task.Run(mutation, CancellationToken.None).ConfigureAwait(false);
+        // The transport/backend is available even when a mutation fails before a fresh state can be
+        // returned. Keep that distinction visible from the error text instead of presenting it as an
+        // unavailable hardware path.
+        var snapshot = MapBatterySnapshot(status, result.State, result.FailureMessage, true);
+        return new(MapBatteryMutationOutcome(result.Outcome), result.FailureMessage, snapshot);
+    }
+
+    private static bool IsSupportedBatteryHardware(FrontendStatusSnapshot status) =>
+        status.Hardware.Status == FrontendHardwareStatus.Supported &&
+        MsiClawDeviceModels.All.Any(model => string.Equals(model.HardwareModelId, status.Device.BaseBoard, StringComparison.OrdinalIgnoreCase));
+
+    private static FrontendBatteryChargeLimitTestSnapshot UnavailableBatterySnapshot(FrontendStatusSnapshot status, string message) =>
+        new(false, status.Device.Manufacturer, status.Device.Model, status.Device.BaseBoard, null, null, null, false, message);
+
+    private static FrontendBatteryChargeLimitTestSnapshot MapBatterySnapshot(
+        FrontendStatusSnapshot status,
+        MsiBatteryChargeLimitState? state,
+        string? failureMessage,
+        bool available) =>
+        new(available, status.Device.Manufacturer, status.Device.Model, status.Device.BaseBoard,
+            state?.Enabled, state?.LimitPercent, state?.RawValue, state?.IsProductValue == true, failureMessage);
+
+    private static FrontendBatteryChargeLimitTestMutationOutcome MapBatteryMutationOutcome(MsiBatteryChargeLimitMutationOutcome outcome) => outcome switch
+    {
+        MsiBatteryChargeLimitMutationOutcome.Succeeded => FrontendBatteryChargeLimitTestMutationOutcome.Succeeded,
+        MsiBatteryChargeLimitMutationOutcome.InvalidTarget => FrontendBatteryChargeLimitTestMutationOutcome.InvalidTarget,
+        MsiBatteryChargeLimitMutationOutcome.ReadFailed => FrontendBatteryChargeLimitTestMutationOutcome.ReadFailed,
+        MsiBatteryChargeLimitMutationOutcome.WriteFailed => FrontendBatteryChargeLimitTestMutationOutcome.WriteFailed,
+        MsiBatteryChargeLimitMutationOutcome.VerificationFailed => FrontendBatteryChargeLimitTestMutationOutcome.VerificationFailed,
+        _ => FrontendBatteryChargeLimitTestMutationOutcome.Unavailable
+    };
 
     // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
 

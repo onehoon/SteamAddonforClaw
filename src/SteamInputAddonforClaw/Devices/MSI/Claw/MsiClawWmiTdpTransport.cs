@@ -16,6 +16,9 @@ internal sealed class MsiClawWmiTdpTransport : IMsiClawTdpTransport
     public bool TrySetData(int block, byte value) =>
         TryInvoke("Set_Data", BuildPackage(block, value), "Block", block, false, out _);
 
+    public bool TryGetData(int block, out byte[] payload) =>
+        TryInvoke("Get_Data", BuildPackage(block, 0), "Block", block, true, out payload);
+
     internal static byte[] BuildPackage(int block, byte value)
     {
         if ((uint)block > byte.MaxValue) throw new ArgumentOutOfRangeException(nameof(block));

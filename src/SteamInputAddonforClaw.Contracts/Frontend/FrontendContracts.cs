@@ -132,6 +132,39 @@ public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeSt
     public static readonly FrontendFanProbeSnapshot Unavailable = new(false, FrontendFanProbeState.Unavailable, "Unavailable", "", "", "", "Unsupported", null, false, "MSI fan probe is unavailable.");
 }
 
+public sealed record FrontendBatteryChargeLimitTestSnapshot(
+    bool Available,
+    string Manufacturer,
+    string Model,
+    string BaseBoard,
+    bool? Enabled,
+    int? LimitPercent,
+    byte? RawValue,
+    bool ProductValueValid,
+    string? FailureMessage)
+{
+    public static readonly FrontendBatteryChargeLimitTestSnapshot Unavailable =
+        new(false, "", "", "", null, null, null, false, "MSI battery charge-limit test is unavailable.");
+}
+
+public enum FrontendBatteryChargeLimitTestMutationOutcome
+{
+    Succeeded,
+    InvalidTarget,
+    ReadFailed,
+    WriteFailed,
+    VerificationFailed,
+    Unavailable
+}
+
+public sealed record FrontendBatteryChargeLimitTestMutationResult(
+    FrontendBatteryChargeLimitTestMutationOutcome Outcome,
+    string? FailureMessage,
+    FrontendBatteryChargeLimitTestSnapshot Snapshot)
+{
+    public bool Succeeded => Outcome == FrontendBatteryChargeLimitTestMutationOutcome.Succeeded;
+}
+
 /// <remarks><see cref="FrontButtonMapping"/> is the settings-layer projection of the one persisted
 /// front-button mapping. The frontend deliberately carries the SAME
 /// <see cref="FrontButtonMappingSettings"/> the runtime persists and the dispatcher validates
@@ -387,6 +420,14 @@ public interface IAddonFrontendControl
         Task.FromResult(new QuickSettingsMutationResult(false, "Quick Settings are unavailable.", QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.AppId)));
     Task<FrontendFanProbeSnapshot> OpenFanProbeAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
     Task<FrontendFanProbeSnapshot> RunFanProbeAsync(FrontendFanProbeOperation operation, CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
+    Task<FrontendBatteryChargeLimitTestSnapshot> CaptureBatteryChargeLimitTestAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendBatteryChargeLimitTestSnapshot.Unavailable);
+    Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendBatteryChargeLimitTestMutationResult(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
+            "MSI battery charge-limit test is unavailable.", FrontendBatteryChargeLimitTestSnapshot.Unavailable));
+    Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestPercentAsync(int percent, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendBatteryChargeLimitTestMutationResult(FrontendBatteryChargeLimitTestMutationOutcome.Unavailable,
+            "MSI battery charge-limit test is unavailable.", FrontendBatteryChargeLimitTestSnapshot.Unavailable));
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
     Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));

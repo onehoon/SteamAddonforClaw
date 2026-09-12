@@ -37,8 +37,9 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     public void Protocol_is_v7_and_frontend_transport_is_unaffected()
     {
         Assert.Equal(7, OverlayTransportProtocol.CurrentVersion);
-        // SF-V2-06 owns only .Overlay v6 -> v7. The desktop/QAM frontend protocol is independent of it.
-        Assert.Equal(28, FrontendTransportProtocol.CurrentVersion);
+        // SF-V2-06 owns only .Overlay v6 -> v7. The desktop/QAM frontend protocol is independent of
+        // the Overlay protocol, even though its own version may advance for a separate RPC.
+        Assert.Equal(29, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]

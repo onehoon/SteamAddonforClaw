@@ -63,6 +63,11 @@
                 <Button Content="Open" Click="OpenFanHardwareProbeButton_Click" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard Header="Battery Charge Limit Test" Description="Developer-only MSI battery charge-limit read/write validation. Changes apply immediately and remain until changed.">
+                <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="AllApps" /></ctcontrols:SettingsCard.HeaderIcon>
+                <Button Content="Open" Click="OpenBatteryChargeLimitTestButton_Click" />
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsCard Header="Logging" Description="Off by default. Info enables runtime diagnostics; Debug is verbose and for developer use only.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="List" />
