@@ -43,6 +43,14 @@ public sealed partial class OverlayWindow : Window
         internal Dictionary<QuickSettingsRowId, OverlayToggleRow> ToggleRows { get; } = new();
         internal Dictionary<QuickSettingsRowId, OverlaySliderRow> SliderRows { get; } = new();
         internal QuickSettingsRowShape[]? RowShape { get; set; }
+        // PR #510 review: the row shape alone (RowId/ControlKind/SliderKind/WellFormed) does not
+        // capture the Profile game identity, which renders from section Label/Message text, not row
+        // identity. Two different games with the same enabled Profile features have an identical
+        // RowShape, so the fast path must also fail closed to a rebuild when AppId or section
+        // text changes -- otherwise a Profile(A)->Profile(B) context switch can leave A's game
+        // heading on screen over B's authoritative rows.
+        internal uint? RenderedAppId { get; set; }
+        internal (QuickSettingsSectionId Id, string? Label, string? Message)[]? RenderedSections { get; set; }
     }
 
     private const double ContentSlideDistanceDip = 32.0;
@@ -312,7 +320,10 @@ public sealed partial class OverlayWindow : Window
     // SF-V2-07/09 section 12/28: render the binder's current effective page (authoritative rows with
     // any pending draft overlaid). A same-shape page (section 44) only needs its rows' values
     // refreshed in place -- important so editing/settling one slider never disrupts an in-progress
-    // drag on another WinUI Slider by tearing down and recreating the control tree.
+    // drag on another WinUI Slider by tearing down and recreating the control tree. PR #510 review:
+    // "same shape" must also mean the same AppId and section text, not just the same rows -- two
+    // different Profile games with identical enabled features share a RowShape, so the fast path
+    // alone could leave the previous game's heading on screen after a Profile(A)->Profile(B) switch.
     private void RenderQuickSettingsPage(QuickSettingsSurface surface)
     {
         if (surface.Binding is null) return;
@@ -320,8 +331,11 @@ public sealed partial class OverlayWindow : Window
 
         if (page.Available)
         {
-            var shape = page.Sections.SelectMany(s => s.Rows).Select(QuickSettingsRowShapeOf).ToArray();
-            if (surface.RowShape is not null && surface.RowShape.SequenceEqual(shape))
+            var rowShape = page.Sections.SelectMany(s => s.Rows).Select(QuickSettingsRowShapeOf).ToArray();
+            var sectionShape = QuickSettingsSectionShapeOf(page);
+            if (surface.RowShape is not null && surface.RowShape.SequenceEqual(rowShape) &&
+                surface.RenderedAppId == page.AppId &&
+                surface.RenderedSections is not null && surface.RenderedSections.SequenceEqual(sectionShape))
             {
                 UpdateQuickSettingsRowValues(surface, page);
                 ApplyQuickSettingsLocalFailure(surface);
@@ -351,6 +365,12 @@ public sealed partial class OverlayWindow : Window
         row.ControlKind,
         row.ControlKind == QuickSettingsControlKind.Slider ? row.SliderSpec?.Kind : null,
         QuickSettingsRowRendering.IsWellFormed(row));
+
+    // PR #510 review: the Profile game identity (section heading/message -- e.g. the enriched
+    // display name BuildProfile renders into ProfileGeneral's Label) lives outside RowShape, so it
+    // must be its own fast-path invariant.
+    private static (QuickSettingsSectionId Id, string? Label, string? Message)[] QuickSettingsSectionShapeOf(QuickSettingsPageSnapshot page) =>
+        page.Sections.Select(s => (s.SectionId, s.Label, s.Message)).ToArray();
 
     // Fast path: the rendered row set/kinds are unchanged from the last render -- push new values
     // into the existing controls without touching the WinUI tree, selection, or scroll.
@@ -435,6 +455,11 @@ public sealed partial class OverlayWindow : Window
 
             surface.RowShape = page.Sections.SelectMany(s => s.Rows).Select(QuickSettingsRowShapeOf).ToArray();
         }
+
+        // PR #510 review: recorded alongside RowShape so the NEXT render's fast-path check can
+        // detect a Profile AppId/section-text change even when RowShape alone stayed identical.
+        surface.RenderedAppId = page.AppId;
+        surface.RenderedSections = QuickSettingsSectionShapeOf(page);
 
         _pageRows[surface.TabId] = rows;
 

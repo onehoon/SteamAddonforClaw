@@ -899,6 +899,44 @@ public sealed class OverlayQuickSettingsPageBindingTests
         Assert.Same(bPage, binding.AuthoritativePage); // B remains current; A's result is discarded
     }
 
+    // PR #510 review: an operation/transport exception has no Page to compare, so
+    // IsStaleForCurrentContext alone cannot guard it -- SubmitImmediateToggleAsync must independently
+    // remember which context it submitted for and only surface the exception if that context is
+    // still current when the catch runs.
+    [Fact]
+    public async Task Late_operation_failure_for_a_retired_profile_context_does_not_leak_into_the_new_context()
+    {
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func);
+
+        var task = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileEnabled, false); // targets A (480)
+        Assert.Single(mutate.Calls);
+
+        var bPage = ProfilePage(490); // active game switched to B before A's request fails
+        binding.ApplyAuthoritativePage(bPage);
+
+        mutate.FailNext(new InvalidOperationException("pipe broke for A"));
+        Assert.False(await task);
+
+        Assert.Same(bPage, binding.AuthoritativePage); // B remains current
+        Assert.Null(binding.LastLocalFailureMessage); // A's exception must not leak onto B
+    }
+
+    // The same-context counterpart: an operation failure that arrives while the context has NOT
+    // changed must still surface its message, exactly as before this fix.
+    [Fact]
+    public async Task Same_context_operation_failure_still_surfaces_its_message()
+    {
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func);
+
+        var task = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileEnabled, false);
+        mutate.FailNext(new InvalidOperationException("pipe broke"));
+        Assert.False(await task);
+
+        Assert.Equal("pipe broke", binding.LastLocalFailureMessage);
+    }
+
     [Fact]
     public void Same_context_valid_profile_pending_draft_survives_an_ordinary_refresh()
     {

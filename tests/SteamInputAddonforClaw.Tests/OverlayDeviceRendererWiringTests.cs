@@ -82,6 +82,29 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Equal(2, fastPathCallCount); // once after the fast-path update, once after a rebuild
     }
 
+    // PR #510 review: RowShape alone (RowId/ControlKind/SliderKind/WellFormed) cannot distinguish two
+    // different Profile games with the same enabled features -- the game identity renders from
+    // section Label/Message text (BuildProfile's enriched display name), not row identity. Without
+    // also gating the fast path on AppId and section text, a Profile(A)->Profile(B) switch with an
+    // identical RowShape would take the value-only fast path and leave A's heading on screen.
+    [Fact]
+    public void Quick_settings_fast_path_also_requires_the_same_app_id_and_section_text()
+    {
+        var source = ReadOverlayWindowSource();
+
+        var renderQuickSettingsPage = source[source.IndexOf("private void RenderQuickSettingsPage(QuickSettingsSurface surface)", StringComparison.Ordinal)..
+            source.IndexOf("private static void ApplyQuickSettingsLocalFailure", StringComparison.Ordinal)];
+
+        Assert.Contains("surface.RenderedAppId == page.AppId", renderQuickSettingsPage);
+        Assert.Contains("surface.RenderedSections is not null && surface.RenderedSections.SequenceEqual(sectionShape)", renderQuickSettingsPage);
+        Assert.Contains("surface.RowShape.SequenceEqual(rowShape)", renderQuickSettingsPage);
+
+        var rebuildContent = source[source.IndexOf("private void RebuildQuickSettingsContent(QuickSettingsSurface surface", StringComparison.Ordinal)..
+            source.IndexOf("private static TextBlock CreateQuickSettingsMessageText", StringComparison.Ordinal)];
+        Assert.Contains("surface.RenderedAppId = page.AppId;", rebuildContent);
+        Assert.Contains("surface.RenderedSections = QuickSettingsSectionShapeOf(page);", rebuildContent);
+    }
+
     // SF-V2-09 section 32: Device and Profile share one generic renderer/binder path -- BuildPage's
     // dispatch calls the SAME BuildQuickSettingsPage helper for both tab identities, and the historic
     // Profile placeholder is gone.

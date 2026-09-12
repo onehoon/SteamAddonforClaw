@@ -200,8 +200,10 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         if (FindSectionForRow(rowId) is { } section)
             CancelUnsubmittedInSection(section.SectionId);
 
+        var submittedPageId = _authoritativePage.PageId;
+        var submittedAppId = _authoritativePage.AppId;
         var intent = new QuickSettingsMutationIntent(
-            _authoritativePage.PageId, _authoritativePage.AppId, rowId,
+            submittedPageId, submittedAppId, rowId,
             [new QuickSettingsRowValue(rowId, QuickSettingsValue.Boolean(desired))]);
 
         _mutationBusy = true;
@@ -220,8 +222,12 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         }
         catch (Exception exception)
         {
-            // Operation/transport failure (section 32): never synthesize a fake authoritative page.
-            LastLocalFailureMessage = exception.Message;
+            // PR #510 review: an operation/transport failure is a supported lifecycle condition too
+            // (never a typed Page to compare, unlike the success path above), so it needs its own
+            // staleness check -- otherwise a context change that raced this outstanding await would
+            // leave A's exception message painted over B's already-installed authoritative page.
+            if (_authoritativePage.PageId == submittedPageId && _authoritativePage.AppId == submittedAppId)
+                LastLocalFailureMessage = exception.Message;
             return false;
         }
         finally { _mutationBusy = false; }
