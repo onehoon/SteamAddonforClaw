@@ -106,7 +106,11 @@ public sealed class SettingsStore
     private static FrontButtonMappingSettings ReadFrontButtonMapping(JsonElement root)
     {
         if (!root.TryGetProperty("FrontButtonMapping", out var property) || property.ValueKind != JsonValueKind.Object)
+        {
+            AppLog.Warn("Settings", "Front-button mapping is missing; using defaults.", null,
+                ("Reason", "MissingFrontButtonMapping"));
             return FrontButtonMappingSettings.Default;
+        }
 
         try
         {
@@ -117,7 +121,13 @@ public sealed class SettingsStore
                 AppLog.Warn("Settings", "Front-button mapping is invalid; using the frozen defaults for this feature only.", null, ("Reason", reason));
                 return FrontButtonMappingSettings.Default;
             }
-            return mapping!;
+            var effective = mapping!;
+            AppLog.Debug("Settings", "Front-button mapping loaded.",
+                ("NormalGamebar", effective.Normal.Gamebar.Action),
+                ("NormalCenterM", effective.Normal.CenterM.Action),
+                ("SteamGamebar", effective.Steam.Gamebar.Action),
+                ("SteamCenterM", effective.Steam.CenterM.Action));
+            return effective;
         }
         catch (JsonException exception)
         {

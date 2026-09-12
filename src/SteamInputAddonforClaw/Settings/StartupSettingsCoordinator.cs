@@ -68,6 +68,11 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
         var next = Settings with { FrontButtonMapping = mapping };
         _settingsStore.Save(next);
         Settings = next;
+        SteamInputAddonforClaw.Diagnostics.AppLog.Debug("Settings", "Front-button mapping saved.",
+            ("NormalGamebar", Settings.FrontButtonMapping.Normal.Gamebar.Action),
+            ("NormalCenterM", Settings.FrontButtonMapping.Normal.CenterM.Action),
+            ("SteamGamebar", Settings.FrontButtonMapping.Steam.Gamebar.Action),
+            ("SteamCenterM", Settings.FrontButtonMapping.Steam.CenterM.Action));
         FrontButtonMappingChanged?.Invoke(this, EventArgs.Empty);
         return true;
     }

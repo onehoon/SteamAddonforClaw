@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.FrontButtons;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using Xunit;
@@ -8,6 +9,7 @@ namespace SteamInputAddonforClaw.Tests;
 /// <summary>App UI PR-C section 22.4 / 22.5: the atomic front-button mapping persists through the one
 /// settings file; a malformed/obsolete value resolves only this feature to the frozen defaults and
 /// never resets unrelated settings; the settings coordinator validates before it writes.</summary>
+[Collection("AppLog")]
 public sealed class FrontButtonMappingPersistenceTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.FrontButtons.{Guid.NewGuid():N}");
@@ -39,6 +41,46 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
         Assert.True(coordinator.ChangeFrontButtonMapping(mapping));
         Assert.Equal(1, changes);
         Assert.Equal(mapping, new SettingsStore(PathName).Load().FrontButtonMapping);
+    }
+
+    [Fact]
+    public void Mapping_diagnostics_log_fallback_load_and_successful_save_with_all_four_slots()
+    {
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, "{}");
+        var store = new SettingsStore(PathName);
+        var initial = store.Load();
+        Assert.Equal(FrontButtonMappingSettings.Default, initial.FrontButtonMapping);
+
+        var mapping = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.KeyboardHotkey) with
+            {
+                Hotkey = new FrontButtonHotkeyBinding(FrontButtonHotkeyModifiers.Control, FrontButtonHotkeyKey.R)
+            });
+        var coordinator = new StartupSettingsCoordinator(initial, store, new NoOpStartupManager());
+
+        Assert.True(coordinator.ChangeFrontButtonMapping(mapping));
+        Assert.Equal(mapping, store.Load().FrontButtonMapping);
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllLines(AppLog.CurrentLogFilePath);
+        var fallback = Assert.Single(lines, line => line.Contains("Front-button mapping is missing; using defaults.", StringComparison.Ordinal));
+        Assert.Contains("Reason=MissingFrontButtonMapping", fallback, StringComparison.Ordinal);
+
+        var loaded = Assert.Single(lines, line => line.Contains("Front-button mapping loaded.", StringComparison.Ordinal));
+        Assert.Contains("NormalGamebar=KeyboardHotkey", loaded, StringComparison.Ordinal);
+        Assert.Contains("NormalCenterM=SteamBigPicture", loaded, StringComparison.Ordinal);
+        Assert.Contains("SteamGamebar=SteamButton", loaded, StringComparison.Ordinal);
+        Assert.Contains("SteamCenterM=SteamQuickAccess", loaded, StringComparison.Ordinal);
+
+        var saved = Assert.Single(lines, line => line.Contains("Front-button mapping saved.", StringComparison.Ordinal));
+        Assert.Contains("NormalGamebar=KeyboardHotkey", saved, StringComparison.Ordinal);
+        Assert.Contains("NormalCenterM=SteamBigPicture", saved, StringComparison.Ordinal);
+        Assert.Contains("SteamGamebar=SteamButton", saved, StringComparison.Ordinal);
+        Assert.Contains("SteamCenterM=SteamQuickAccess", saved, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,7 +194,13 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
         Assert.Contains("FrontButtonMapping", text);
     }
 
-    public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
+    public void Dispose()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+    }
 
     private sealed class NoOpStartupManager : IWindowsStartupManager
     {
