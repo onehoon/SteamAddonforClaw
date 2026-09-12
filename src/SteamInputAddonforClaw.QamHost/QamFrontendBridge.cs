@@ -70,15 +70,6 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException or FrontendTransportException)
         { return Error(id, "Invalid or unavailable QAM bridge request."); }
     }
-    // The one Device QAM mutation admission rule. Surface-owned policy only -- it is deliberately NOT
-    // moved into the SF-V2-03 mutation adapter / presentation / feature Runtimes.
-    private async Task EnsureDeviceMutationAdmittedAsync(CancellationToken token)
-    {
-        var status = await _client.CaptureStatusAsync(token).ConfigureAwait(false);
-        if (!status.Steam.Active || status.Steam.AppId != 0 || status.Steam.Source != FrontendSteamSource.BigPicture)
-            throw new InvalidOperationException("Device QAM mutation is available only in Big Picture with no running game.");
-    }
-
     private async Task<object> CaptureQuickSettingsPageAsync(JsonElement root, CancellationToken token)
     {
         var request = root.GetProperty("payload").Deserialize<QuickSettingsPageBridgeRequest>(QuickSettingsBridgeJson)
@@ -93,15 +84,11 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
         var intent = root.GetProperty("payload").Deserialize<QuickSettingsMutationIntent>(QuickSettingsBridgeJson)
             ?? throw new JsonException("Invalid Quick Settings mutation intent.");
         // Surface scope for SF-V2-04/05/08: Device and Profile are the only pages exposed through the
-        // generic QAM path. Device keeps its own surface admission rule (Big Picture + no running
-        // game); Profile has no separate bridge-level admission -- the SF-V2-03/08
-        // QuickSettingsMutationAdapter is the one AppId/current-target/row validation authority, so a
-        // second complex QAM-side validator is deliberately not duplicated here.
+        // generic QAM path. Shared Runtime validation remains the authority for row availability,
+        // target identity, persistence, and feature apply behavior.
         switch (intent.PageId)
         {
             case QuickSettingsPageId.Device:
-                await EnsureDeviceMutationAdmittedAsync(token).ConfigureAwait(false);
-                break;
             case QuickSettingsPageId.Profile:
                 break;
             default:

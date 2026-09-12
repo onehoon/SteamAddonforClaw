@@ -53,6 +53,52 @@
     log(message);
   }
 
+  function logStateChange(key, signature, message) {
+    state.runtimeDiagnostics ??= {};
+    if (state.runtimeDiagnostics[key] === signature) return;
+    state.runtimeDiagnostics[key] = signature;
+    log(message);
+  }
+
+  function quickSettingsPageName(pageId) {
+    if (pageId === QS_PAGE_DEVICE) return "Device";
+    if (pageId === QS_PAGE_PROFILE) return "Profile";
+    return String(pageId);
+  }
+
+  function quickSettingsAppId(appId) {
+    return appId == null ? "none" : String(appId);
+  }
+
+  function logQuickSettingsPageState(page) {
+    const rows = (page?.sections ?? []).flatMap(section => section?.rows ?? []);
+    const availableRows = rows.filter(row => row?.available === true).length;
+    const writableRows = rows.filter(row => row?.writable === true).length;
+    const pageName = quickSettingsPageName(page?.pageId);
+    const appId = quickSettingsAppId(page?.appId ?? null);
+    const signature = [pageName, appId, page?.available === true, rows.length, availableRows, writableRows].join("|");
+    logStateChange(
+      "quickSettingsPage",
+      signature,
+      `QAM page state: Page=${pageName} AppId=${appId} Available=${page?.available === true} Rows=${rows.length} AvailableRows=${availableRows} WritableRows=${writableRows}`);
+  }
+
+  function logQuickSettingsMutationRequest(pageId, appId, rowId) {
+    log(`QAM mutation request: Page=${quickSettingsPageName(pageId)} AppId=${quickSettingsAppId(appId)} Row=${rowId}`);
+  }
+
+  function logQuickSettingsMutationResult(pageId, appId, rowId, succeeded, message = null) {
+    const suffix = message ? ` Message=${message}` : "";
+    log(`QAM mutation result: Page=${quickSettingsPageName(pageId)} AppId=${quickSettingsAppId(appId)} Row=${rowId} Succeeded=${succeeded}${suffix}`);
+  }
+
+  function quickSettingsRowMutationBlockReason(row, busy) {
+    if (!row?.available) return "row-unavailable";
+    if (!row?.writable) return "row-readonly";
+    if (busy) return "busy";
+    return null;
+  }
+
   function findWebpackRequire() {
     const chunkGlobalNames = ["webpackChunksteamui", "webpackChunk_steamclient"];
     for (const name of chunkGlobalNames) {
@@ -135,143 +181,99 @@
     return null;
   }
 
-  function isCommonUiModule(candidate) {
-    if (!candidate || typeof candidate !== "object") return false;
-    for (const prop in candidate) {
-      if (candidate[prop]?.contextType?._currentValue && Object.keys(candidate).length > 60) return true;
-    }
-    return false;
-  }
-
-  function findCommonUiModule(modules) {
-    for (const module of modules) {
-      if (module?.default && isCommonUiModule(module.default)) {
-        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(module.default).length} Source=default`);
-        return module.default;
-      }
-      if (isCommonUiModule(module)) {
-        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(module).length} Source=root`);
-        return module;
-      }
-    }
-    logOnce("commonUi", "Steam CommonUIModule unavailable.");
-    return null;
-  }
-
-  function findToggleField(commonUiModule) {
-    if (!commonUiModule) return null;
-    for (const candidate of Object.values(commonUiModule)) {
-      const source = candidate?.render?.toString?.();
-      if (source?.includes("ToggleField,fallback") || source?.includes('ToggleField",')) {
-        logOnce("native-ToggleField", "QAM native ToggleField resolved.");
-        return candidate;
-      }
-    }
-    logOnce("native-ToggleField", "QAM native ToggleField unavailable.");
-    return null;
-  }
-
-  function findSliderField(commonUiModule) {
-    if (!commonUiModule) return null;
-    for (const candidate of Object.values(commonUiModule)) {
-      const source = candidate?.toString?.();
-      if (source?.includes("SliderField,fallback") || source?.includes('SliderField",')) {
-        logOnce("native-SliderField", "QAM native SliderField resolved.");
-        return candidate;
-      }
-    }
-    logOnce("native-SliderField", "QAM native SliderField unavailable.");
-    return null;
-  }
-
-  function findPanelComponents(modules) {
-    for (const module of modules) {
-      let defaultCandidate = null;
-      try { defaultCandidate = module?.default ?? null; } catch (_) { }
-      for (const candidate of [defaultCandidate, module]) {
-        if (!candidate || typeof candidate !== "object" || candidate === window) continue;
-        let panelSection = null;
-        for (const exportName of Object.keys(candidate)) {
-          let value;
-          try { value = candidate[exportName]; } catch (_) { continue; }
-          if (!value) continue;
-          let source;
-          try { source = value?.toString?.(); } catch (_) { continue; }
-          if (source?.includes(".PanelSection")) {
-            panelSection = value;
-            break;
-          }
-        }
-        if (!panelSection) continue;
-        let panelSectionRow = null;
-        for (const exportName of Object.keys(candidate)) {
-          let value;
-          try { value = candidate[exportName]; } catch (_) { continue; }
-          if (!value || value === panelSection) continue;
-          let source;
-          try { source = value?.toString?.(); } catch (_) { continue; }
-          if (!source?.includes(".PanelSection")) {
-            panelSectionRow = value;
-            break;
-          }
-        }
-        if (panelSectionRow) {
-          logOnce("native-panel", "QAM native PanelSection and PanelSectionRow resolved.");
-          return { PanelSection: panelSection, PanelSectionRow: panelSectionRow };
-        }
-      }
-    }
-    logOnce("native-panel", "QAM native PanelSection/PanelSectionRow unavailable.");
-    return null;
-  }
-
-  function isSteamClassModule(candidate) {
-    if (!candidate || typeof candidate !== "object" || candidate.__esModule) return false;
-    const keys = Object.keys(candidate);
-    return keys.length > 0 && keys.every(key => {
-      const descriptor = Object.getOwnPropertyDescriptor(candidate, key);
-      return !descriptor?.get && typeof candidate[key] === "string";
+  function findUniqueFactory(webpackRequire, requiredTokens) {
+    const matches = Object.entries(webpackRequire.m || {}).filter(([, factory]) => {
+      const source = String(factory);
+      return requiredTokens.every(token => source.includes(token));
     });
+    return matches.length === 1 ? matches[0] : null;
   }
 
-  function findNativeClassStyles(modules) {
-    const classModules = [];
-    for (const module of modules) {
-      for (const candidate of [module?.default, module]) {
-        if (isSteamClassModule(candidate)) classModules.push(candidate);
-      }
-    }
-    const qam = classModules.find(candidate => candidate.Title && candidate.QuickAccessMenu && candidate.BatteryDetailsLabels);
-    const field = classModules.find(candidate => candidate.FieldLabelRow && candidate.FieldLabel && candidate.FieldLabelValue);
-    if (!qam?.Title || !field) {
-      logOnce("native-styles", "QAM native title/slider class styles unavailable.");
-      return null;
-    }
-    logOnce("native-styles", "QAM native title/slider class styles resolved.");
-    return {
-      QamTitleClass: qam.Title,
-      FieldLabelRowClass: field.FieldLabelRow,
-      FieldLabelClass: field.FieldLabel,
-      FieldLabelValueClass: field.FieldLabelValue,
-    };
+  function findUniqueFunction(exports, requiredTokens) {
+    const matches = Object.values(exports || {}).filter(value => {
+      if (typeof value !== "function") return false;
+      const source = String(value);
+      return requiredTokens.every(token => source.includes(token));
+    });
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function findUniqueObject(exports, predicate) {
+    const matches = Object.values(exports || {}).filter(value =>
+      value && typeof value === "object" && predicate(value));
+    return matches.length === 1 ? matches[0] : null;
   }
 
   function findNativeQamComponents(webpackRequire) {
-    const modules = collectSearchableModules(webpackRequire);
-    const commonUiModule = findCommonUiModule(modules);
-    if (!commonUiModule) return null;
-    const components = {
-      ToggleField: findToggleField(commonUiModule),
-      SliderField: findSliderField(commonUiModule),
-      ...findPanelComponents(modules),
-      ...findNativeClassStyles(modules),
-    };
-    if (!components.ToggleField || !components.SliderField || !components.PanelSection || !components.PanelSectionRow || !components.QamTitleClass) {
-      logOnce("nativeControls", "QAM required native controls/layout unavailable; Addon tab is disabled.");
+    const fieldsFactory = findUniqueFactory(webpackRequire, [
+      "DialogSlider_Container",
+      "DropDownField",
+      "SliderField",
+    ]);
+    if (!fieldsFactory) {
+      logOnce("nativeFieldsFactory", "QAM native fields factory discovery failed (expected exactly one semantic match).");
       return null;
     }
-    logOnce("nativeControls", "QAM native ToggleField and SliderField resolved.");
-    return components;
+
+    const layoutFactory = findUniqueFactory(webpackRequire, [
+      "PanelSectionTitle",
+      "PanelSectionRow",
+      "spinner",
+    ]);
+    if (!layoutFactory) {
+      logOnce("nativeLayoutFactory", "QAM native layout factory discovery failed (expected exactly one semantic match).");
+      return null;
+    }
+
+    let fields;
+    let layout;
+    try {
+      fields = webpackRequire(fieldsFactory[0]);
+      layout = webpackRequire(layoutFactory[0]);
+    } catch (err) {
+      logOnce("nativeExports", `QAM native semantic module loading failed: ${String(err)}`);
+      return null;
+    }
+
+    const SliderField = findUniqueFunction(fields, [
+      "onChangeComplete",
+      "notchCount",
+      "valueSuffix",
+      "explainerTitle",
+    ]);
+    if (!SliderField) {
+      logOnce("nativeSliderField", "QAM native SliderField discovery failed (expected exactly one semantic match).");
+      return null;
+    }
+
+    const ToggleField = findUniqueFunction(fields, [
+      "OnToggleChange",
+      "this.Toggle()",
+    ]);
+    if (!ToggleField) {
+      logOnce("nativeToggleField", "QAM native ToggleField discovery failed (expected exactly one semantic match).");
+      return null;
+    }
+
+    const PanelSection = findUniqueFunction(layout, [
+      "PanelSectionTitle",
+      "spinner",
+    ]);
+    if (!PanelSection) {
+      logOnce("nativePanelSection", "QAM native PanelSection discovery failed (expected exactly one semantic match).");
+      return null;
+    }
+
+    const PanelSectionRow = findUniqueObject(
+      layout,
+      value => value.$$typeof && typeof value.render === "function");
+    if (!PanelSectionRow) {
+      logOnce("nativePanelSectionRow", "QAM native PanelSectionRow discovery failed (expected exactly one semantic match).");
+      return null;
+    }
+
+    logOnce("nativeControls", "QAM native semantic controls resolved.");
+    return { SliderField, ToggleField, PanelSection, PanelSectionRow };
   }
 
   // Purpose-built, bounded walker for the specific React node shapes Steam exposes for QAM: plain
@@ -518,8 +520,7 @@
       React.createElement("path", { d: "M5.1 7.1C3.2 7.7 2.2 9.7 1.6 12.1l-1 4.1c-.4 1.8.7 3.4 2.5 3.4 1 0 1.9-.5 2.4-1.3l1.4-2.1h9.9l1.4 2.1c.5.8 1.4 1.3 2.4 1.3 1.8 0 2.9-1.6 2.5-3.4l-1-4.1c-.6-2.4-1.6-4.4-3.5-5-1.1-.4-2.8-.5-4.2-.5h-2.7c-1.4 0-3.1.1-4.2.5Z" })
     );
 
-    function CpuBoostPanel() {
-      const [status, setStatus] = React.useState(null);
+    function QuickSettingsPanel() {
       // SF-V2-08: Device and Profile are now the SAME shared Quick Settings product model -- one
       // current generic page state serves both, replacing the previous separate devicePage /
       // legacy-Profile-object-plus-drafts state machines (work order section 10.1).
@@ -528,7 +529,6 @@
       // The current page/AppId context this panel is showing (section 10.2). Retiring pending work
       // on a context change, and ignoring a stale settlement, both key off this.
       const quickSettingsContextRef = React.useRef(null);
-      const [deviceMutationAdmitted, setDeviceMutationAdmitted] = React.useState(false);
       // The generic pending draft lives in state.qamSliderCommits (outside React). Bump this to
       // force one renderer-local pass so an immediate slider preview / linked paired correction is
       // visible before the trailing commit settles.
@@ -543,7 +543,7 @@
       const failClosed = React.useCallback(message => {
         cancelQamSliderCommits();
         quickSettingsContextRef.current = null;
-        setStatus(null); setQuickSettingsPage(null); quickSettingsPageRef.current = null; setDeviceMutationAdmitted(false); setError(message);
+        setQuickSettingsPage(null); quickSettingsPageRef.current = null; setError(message);
       }, []);
 
       const refresh = React.useCallback(async () => {
@@ -553,9 +553,6 @@
           const nextStatus = await request("captureStatus");
           const nextAppId = Number(nextStatus?.steam?.appId || 0);
           const activeGame = nextAppId > 0;
-          // Device surface admission stays QAM-owned: Big Picture active + no running game (section
-          // 9.2 -- unchanged from SF-V2-05).
-          const nextDeviceMutationAdmitted = !!nextStatus && nextStatus.steam?.active === true && nextStatus.steam?.appId === 0 && nextStatus.steam?.source === 1;
           // QAM still owns the surface choice: no active game -> Device; active game -> that game's
           // Profile (section 10). Context is (PageId, AppId) -- section 10.2.
           const nextContext = activeGame ? { pageId: QS_PAGE_PROFILE, appId: nextAppId } : { pageId: QS_PAGE_DEVICE, appId: null };
@@ -565,12 +562,6 @@
             // 10.2): Device -> Profile(A), Profile(A) -> Profile(B), Profile(A) -> Device.
             cancelQuickSettingsPendingForContext(previousContext);
           }
-          if (nextContext.pageId === QS_PAGE_DEVICE && !nextDeviceMutationAdmitted) {
-            // Device admission can be lost without a context change (e.g. leaving Big Picture with
-            // no game running) -- a stale delayed Device timer must not reach the bridge and be
-            // rejected (e.g. a 2s slider edit right before losing Big Picture focus).
-            cancelQuickSettingsPendingForContext(nextContext);
-          }
           quickSettingsContextRef.current = nextContext;
 
           const nextPage = await request("captureQuickSettingsPage", { pageId: nextContext.pageId, appId: nextContext.appId });
@@ -578,10 +569,9 @@
           // already moved on again while the request was in flight.
           if (sameQuickSettingsContext(quickSettingsContextRef.current, nextContext)) {
             pruneQuickSettingsPendingAgainstPage(nextPage);
+            logQuickSettingsPageState(nextPage);
             setQuickSettingsPage(nextPage); quickSettingsPageRef.current = nextPage;
           }
-          setStatus(nextStatus);
-          setDeviceMutationAdmitted(nextDeviceMutationAdmitted);
           setError(null);
         } catch (_) { failClosed("QAM bridge unavailable"); }
         finally {
@@ -616,14 +606,19 @@
       }, [refresh]);
 
       const displayError = error || quickSettingsPage?.message || null;
-      const labelRow = (label, value) => React.createElement("div", { className: native.FieldLabelRowClass, style: { display: "flex", width: "100%", justifyContent: "space-between" } }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, value));
 
       // --- Generic Device/Profile Quick Settings renderer (SF-V2-05/08) ------------------------
       // Steam native ToggleField / SliderField driven entirely by the shared page payload:
       // section/row order, labels, control kind, options, ranges, commit policy, grouping, and
       // linked constraints all come from the page -- no Device/Profile product table lives here.
       const quickSettingsRowEffectiveValue = row => quickSettingsPendingValue(quickSettingsPage, row.rowId) ?? row.value;
-      const canMutateQuickSettingsRow = row => !!row.available && !!row.writable && !busy && (quickSettingsPage?.pageId !== QS_PAGE_DEVICE || deviceMutationAdmitted);
+      const canMutateQuickSettingsRow = row => quickSettingsRowMutationBlockReason(row, busy) == null;
+      const requireQuickSettingsRowMutation = row => {
+        const reason = quickSettingsRowMutationBlockReason(row, busy);
+        if (!reason) return true;
+        log(`QAM mutation blocked: Row=${row?.rowId ?? "unknown"} Reason=${reason}`);
+        return false;
+      };
 
       const applyQuickSettingsResult = result => {
         // Section 16: ignore a settlement whose page context no longer matches what is currently
@@ -638,7 +633,7 @@
       };
 
       const commitQuickSettingsImmediate = async (page, section, row, nextValue) => {
-        if (!state.installed || !canMutateQuickSettingsRow(row)) return;
+        if (!state.installed || !requireQuickSettingsRowMutation(row)) return;
         const value = makeQuickSettingsValue(row, nextValue);
         if (!value) return;
         // An immediate parent toggle retires any still-pending delayed edit in the same section of
@@ -648,15 +643,20 @@
         setBusy(true); setError(null);
         try {
           beginMutation();
+          logQuickSettingsMutationRequest(page.pageId, page.appId ?? null, row.rowId);
           const result = await request("mutateQuickSetting", { pageId: page.pageId, appId: page.appId ?? null, editedRowId: row.rowId, values: [{ rowId: row.rowId, value }] });
+          logQuickSettingsMutationResult(page.pageId, page.appId ?? null, row.rowId, result?.succeeded === true, result?.failureMessage || null);
           applyQuickSettingsResult(result);
           deferredInvalidationRef.current = false;
-        } catch (_) { failClosed("Quick Settings update failed"); }
+        } catch (error) {
+          logQuickSettingsMutationResult(page.pageId, page.appId ?? null, row.rowId, false, error?.message || "bridge-error");
+          failClosed("Quick Settings update failed");
+        }
         finally { endMutation(); setBusy(false); }
       };
 
       const scheduleQuickSettingsCommit = (page, section, row, nextProductValue) => {
-        if (!state.installed || !canMutateQuickSettingsRow(row)) return;
+        if (!state.installed || !requireQuickSettingsRowMutation(row)) return;
         const key = quickSettingsPendingKey(page, row);
         const existing = state.qamSliderCommits?.get(key);
         let draft = existing?.quickSettingsValues
@@ -696,6 +696,7 @@
           return React.createElement(native.ToggleField, {
             label: row.label,
             checked: quickSettingsRowEffectiveValue(row)?.booleanValue === true,
+            controlled: true,
             disabled: !canMutateQuickSettingsRow(row),
             onChange: value => void commitQuickSettingsImmediate(page, section, row, !!value),
           });
@@ -706,9 +707,12 @@
         if (row.sliderSpec.kind === QS_SLIDER_NUMERIC) {
           const numeric = Number(effective.integerValue);
           return React.createElement(native.SliderField, {
-            label: labelRow(row.label, `${numeric}${row.sliderSpec.suffix ?? ""}`),
+            label: row.label,
             min: row.sliderSpec.minimum, max: row.sliderSpec.maximum, step: row.sliderSpec.step || 1,
             value: numeric,
+            valueSuffix: row.sliderSpec.suffix ?? "",
+            showValue: true,
+            showBookendLabels: true,
             disabled: !canMutateQuickSettingsRow(row),
             onChange: next => scheduleQuickSettingsCommit(page, section, row, Number(next)),
           });
@@ -716,10 +720,15 @@
         const options = row.sliderSpec.options ?? [];
         const optionIndex = options.findIndex(option => Number(option.value) === Number(effective.integerValue));
         if (optionIndex < 0) return null;
+        const notchLabels = options.map((option, notchIndex) => ({
+          notchIndex,
+          label: option.label,
+          value: option.value,
+        }));
         return React.createElement(native.SliderField, {
-          label: labelRow(row.label, options[optionIndex].label),
+          label: row.label,
           min: 0, max: Math.max(0, options.length - 1), step: 1, value: optionIndex,
-          notchCount: options.length, notchTicksVisible: true,
+          notchCount: options.length, notchLabels, notchTicksVisible: true,
           disabled: !canMutateQuickSettingsRow(row),
           onChange: next => { const option = options[Math.round(Number(next))]; if (option) scheduleQuickSettingsCommit(page, section, row, option.value); },
         });
@@ -733,12 +742,7 @@
           ...rows.map(entry => React.createElement(native.PanelSectionRow, { key: entry.key }, entry.node)));
       });
 
-      const isDevicePage = quickSettingsPage?.pageId === QS_PAGE_DEVICE;
       return React.createElement(React.Fragment, null,
-        // Device carries its own static header; Profile's own General section already renders the
-        // game title as its PanelSection heading (matching the pre-migration Profile presentation).
-        isDevicePage ? React.createElement("div", { className: native.QamTitleClass }, "Steam Addon for Claw") : null,
-        isDevicePage && !deviceMutationAdmitted ? React.createElement("p", { key: "unavailable" }, "Device settings unavailable") : null,
         displayError ? React.createElement("p", { key: "error" }, displayError) : null,
         ...sections);
     }
@@ -748,9 +752,7 @@
       key: "steam-input-addon",
       title: null,
       tab: icon,
-      panel: React.createElement(React.Fragment, null,
-        React.createElement("div", { style: { paddingTop: "16px" } },
-          React.createElement(CpuBoostPanel))),
+      panel: React.createElement(QuickSettingsPanel),
     };
     return state.addonTabDescriptor;
   }
@@ -767,9 +769,7 @@
     }
   }
 
-  // SF-V2-08 section 10.2: retires every pending entry belonging to one (PageId, AppId) context --
-  // used both on an outright context change (Device <-> Profile(A) <-> Profile(B)) and when Device
-  // admission is lost while the context itself has not changed.
+  // SF-V2-08 section 10.2: retires every pending entry belonging to one (PageId, AppId) context.
   function cancelQuickSettingsPendingForContext(context) {
     if (!context) return;
     cancelQamSliderCommits((key, pending) => pending?.pageId === context.pageId && (pending?.appId ?? null) === (context.appId ?? null));
@@ -835,13 +835,16 @@
           if (state.qamSliderCommits.get(key)?.token !== token) return;
           requestStarted = true;
           onRequestStart?.();
+          logQuickSettingsMutationRequest(entry.pageId, entry.appId, entry.payload?.editedRowId);
           const result = await request(method, payload);
+          logQuickSettingsMutationResult(entry.pageId, entry.appId, entry.payload?.editedRowId, result?.succeeded === true, result?.failureMessage || null);
           if (state.qamSliderCommits.get(key)?.token !== token) return;
           state.qamSliderCommits.delete(key);
           await onSettled(result, null, entry);
         } catch (error) {
           if (state.qamSliderCommits.get(key)?.token !== token) return;
           state.qamSliderCommits.delete(key);
+          logQuickSettingsMutationResult(entry.pageId, entry.appId, entry.payload?.editedRowId, false, error?.message || "bridge-error");
           await onSettled(null, error, entry);
         } finally {
           if (requestStarted) onRequestEnd?.();
@@ -963,6 +966,7 @@
     }
 
     state.diagnostics = {};
+    state.runtimeDiagnostics = {};
     state.installFailureKind = null;
 
     const webpackRequire = findWebpackRequire();
