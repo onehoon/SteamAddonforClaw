@@ -76,7 +76,7 @@ public sealed class ElevationConfigurationTests
         Assert.Contains("HelperPid", helper);
         Assert.Contains("GetMethodInventory", helper);
         Assert.Contains("GetThermal", protocol);
-        Assert.Contains("index is 152 or 210 or 212", protocol);
+        Assert.Contains("index is 152 or 210 or 212 or 215", protocol);
         Assert.Contains("GetWmiVersion\" => index == 1", protocol);
         Assert.Contains("BIOSVersion", frontend);
         Assert.Contains("EC: unavailable", frontend);
@@ -95,6 +95,12 @@ public sealed class ElevationConfigurationTests
     [InlineData("SetData", 80, true)]
     [InlineData("SetData", 81, true)]
     [InlineData("SetData", 210, true)]
+    [InlineData("SetData", 215, true)]
+    [InlineData("GetData", 215, true)]
+    [InlineData("GetData", 214, false)]
+    [InlineData("GetData", 216, false)]
+    [InlineData("SetData", 214, false)]
+    [InlineData("SetData", 216, false)]
     [InlineData("SetData", 1, false)]
     public void Tdp_helper_rejects_unsupported_privileged_blocks(string operation, int index, bool expected) =>
         Assert.Equal(expected, TdpHelperProtocol.IsSupported(operation, index));

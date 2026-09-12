@@ -1,0 +1,32 @@
+<UserControl x:Class="SteamInputAddonforClaw.Views.BatteryChargeLimitTestPage" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ScrollViewer Padding="32"><StackPanel Spacing="12">
+    <Button Content="Back to Developer Menu" Click="Back_Click" HorizontalAlignment="Left" />
+    <TextBlock Text="Battery Charge Limit Test" FontSize="24" FontWeight="SemiBold" />
+    <TextBlock Opacity="0.7" Text="Developer-only MSI battery charge-limit hardware validation. Changes are written immediately to MSI firmware state and are NOT restored when leaving this page." TextWrapping="Wrap" />
+
+    <TextBlock Text="Device" FontWeight="SemiBold" Margin="0,8,0,0" />
+    <TextBlock x:Name="ManufacturerText" /><TextBlock x:Name="ModelText" /><TextBlock x:Name="BoardText" />
+
+    <TextBlock Text="Live State" FontWeight="SemiBold" Margin="0,8,0,0" />
+    <TextBlock x:Name="EnabledText" /><TextBlock x:Name="LimitText" /><TextBlock x:Name="RawText" /><TextBlock x:Name="ProductValueText" />
+    <Button x:Name="RefreshButton" Content="Refresh" Click="Refresh_Click" HorizontalAlignment="Left" />
+
+    <TextBlock Text="Limit" FontWeight="SemiBold" Margin="0,8,0,0" />
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <ComboBox x:Name="LimitComboBox" Width="120" PlaceholderText="Select limit">
+        <ComboBoxItem Content="60%" /><ComboBoxItem Content="65%" /><ComboBoxItem Content="70%" />
+        <ComboBoxItem Content="75%" /><ComboBoxItem Content="80%" /><ComboBoxItem Content="85%" />
+        <ComboBoxItem Content="90%" /><ComboBoxItem Content="95%" /><ComboBoxItem Content="100%" />
+      </ComboBox>
+      <Button x:Name="ApplyLimitButton" Content="Apply Limit" Click="ApplyLimit_Click" />
+    </StackPanel>
+
+    <TextBlock Text="State" FontWeight="SemiBold" Margin="0,8,0,0" />
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <Button x:Name="EnableButton" Content="Enable" Click="Enable_Click" />
+      <Button x:Name="DisableButton" Content="Disable" Click="Disable_Click" />
+    </StackPanel>
+    <TextBlock x:Name="ResultText" TextWrapping="Wrap" />
+    <TextBlock x:Name="ErrorText" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" />
+  </StackPanel></ScrollViewer>
+</UserControl>

@@ -384,6 +384,17 @@ public sealed class UiArchitectureTests
         Assert.True(page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Logging\"", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Battery_charge_limit_test_page_reports_terminal_failure_results()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/BatteryChargeLimitTestPage.xaml.cs"));
+
+        Assert.Equal(2, page.Split("ResultText.Text = \"Result: Failed\";", StringSplitOptions.None).Length - 1);
+        Assert.Contains("snapshot.FailureMessage is not null", page, StringComparison.Ordinal);
+        Assert.Contains("snapshot.Available ? \"Result: Failed\" : \"Result: Unavailable\"", page, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false, Visibility.Collapsed)]
     [InlineData(true, Visibility.Visible)]

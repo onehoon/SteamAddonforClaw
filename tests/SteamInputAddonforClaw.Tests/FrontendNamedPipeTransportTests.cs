@@ -64,6 +64,22 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Battery_charge_limit_test_operations_round_trip_through_the_named_pipe()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        Assert.Equal(29, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
+        Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
+        Assert.True(fake.LastBatteryEnabled);
+        Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestPercentAsync(85));
+        Assert.Equal(85, fake.LastBatteryPercent);
+    }
+
+    [Fact]
     public async Task Resolution_rpc_round_trips_value_and_clear()
     {
         var fake = new RecordingFrontendControl();
@@ -1114,13 +1130,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep it in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 29 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":28,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":28,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":28,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":29,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":29,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":29,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1522,6 +1538,14 @@ public sealed class FrontendNamedPipeTransportTests
             TotalCalls++; MutateQuickSettingCount++; LastQuickSettingsIntent = intent;
             return Task.FromResult(new QuickSettingsMutationResult(true, null, QuickSettingsPage));
         }
+
+        public FrontendBatteryChargeLimitTestSnapshot BatterySnapshot { get; } = new(true, "MSI", "Claw", "MS-1T91", true, 80, 0xD0, true, null);
+        public FrontendBatteryChargeLimitTestMutationResult BatteryMutationResult { get; } = new(FrontendBatteryChargeLimitTestMutationOutcome.Succeeded, null, new(true, "MSI", "Claw", "MS-1T91", true, 85, 0xD5, true, null));
+        public bool? LastBatteryEnabled { get; private set; }
+        public int? LastBatteryPercent { get; private set; }
+        public Task<FrontendBatteryChargeLimitTestSnapshot> CaptureBatteryChargeLimitTestAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(BatterySnapshot); }
+        public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastBatteryEnabled = enabled; return Task.FromResult(BatteryMutationResult); }
+        public Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestPercentAsync(int percent, CancellationToken t = default) { TotalCalls++; LastBatteryPercent = percent; return Task.FromResult(BatteryMutationResult); }
     }
 
     private sealed class PartialReadStream : MemoryStream
