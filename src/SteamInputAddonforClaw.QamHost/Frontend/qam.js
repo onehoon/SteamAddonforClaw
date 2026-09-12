@@ -965,6 +965,9 @@
       return true;
     }
 
+    // A tab descriptor closes over the React/native components and panel implementation from the
+    // script generation that created it. Never reuse it across uninstall/reinstall or upgrades.
+    state.addonTabDescriptor = null;
     state.diagnostics = {};
     state.runtimeDiagnostics = {};
     state.installFailureKind = null;
@@ -1033,6 +1036,7 @@
 
   function uninstall() {
     retireBridgeConsumers();
+    state.addonTabDescriptor = null;
     if (!state.installed) {
       log("uninstall() called but not installed; no-op.");
       return true;
@@ -1053,6 +1057,7 @@
     Object.assign(state, {
       patches: null,
       nestedPatches: null,
+      addonTabDescriptor: null,
       install,
       uninstall,
     });

@@ -134,6 +134,27 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_tab_descriptor_is_not_reused_across_install_generations()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js").ReplaceLineEndings("\n");
+
+        var installStart = source.IndexOf("function install()", StringComparison.Ordinal);
+        var installReset = source.IndexOf("state.addonTabDescriptor = null;", installStart, StringComparison.Ordinal);
+        Assert.True(installStart >= 0);
+        Assert.True(installReset > installStart);
+        Assert.True(installReset < source.IndexOf("state.diagnostics = {};", installReset, StringComparison.Ordinal));
+
+        var teardownStart = source.IndexOf("Object.assign(state, {\n      patches: null,", StringComparison.Ordinal);
+        Assert.True(teardownStart >= 0);
+        var teardown = source[teardownStart..source.IndexOf("    });", teardownStart, StringComparison.Ordinal)];
+        Assert.Contains("addonTabDescriptor: null,", teardown);
+
+        var uninstallStart = source.IndexOf("function uninstall()", StringComparison.Ordinal);
+        var uninstall = source[uninstallStart..source.IndexOf("    state.installed = false;", uninstallStart, StringComparison.Ordinal)];
+        Assert.Contains("state.addonTabDescriptor = null;", uninstall);
+    }
+
+    [Fact]
     public void Qam_immediate_toggle_retires_same_section_same_context_pending_work_generically()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
