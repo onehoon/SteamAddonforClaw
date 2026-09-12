@@ -395,6 +395,24 @@ public sealed class UiArchitectureTests
         Assert.Contains("snapshot.Available ? \"Result: Failed\" : \"Result: Unavailable\"", page, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Battery_charge_limit_test_page_exposes_the_automated_validation_surface()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/BatteryChargeLimitTestPage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/BatteryChargeLimitTestPage.xaml.cs"));
+
+        Assert.Contains("Text=\"Automated Validation\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"StartValidationButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ValidationProgressText\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ValidationCurrentStepText\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ValidationReportPathText\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("new BatteryChargeLimitValidationRunner", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("UiLog.DirectoryPath", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("BackButton.IsEnabled = !busy", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("StartValidationButton.IsEnabled = !busy", codeBehind, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false, Visibility.Collapsed)]
     [InlineData(true, Visibility.Visible)]

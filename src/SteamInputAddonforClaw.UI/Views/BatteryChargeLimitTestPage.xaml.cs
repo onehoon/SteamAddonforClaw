@@ -43,6 +43,8 @@ public sealed partial class BatteryChargeLimitTestPage : UserControl
     private async void Disable_Click(object sender, RoutedEventArgs args) =>
         await RunAsync(() => _frontend!.SetBatteryChargeLimitTestEnabledAsync(false));
 
+    private async void StartValidation_Click(object sender, RoutedEventArgs args) => await RunValidationAsync();
+
     private async Task RefreshAsync()
     {
         if (_frontend is null || _busy) return;
@@ -85,6 +87,7 @@ public sealed partial class BatteryChargeLimitTestPage : UserControl
 
     private void Back_Click(object sender, RoutedEventArgs args)
     {
+        if (_busy) return;
         _active = false;
         BackRequested?.Invoke(this, EventArgs.Empty);
     }
@@ -97,7 +100,75 @@ public sealed partial class BatteryChargeLimitTestPage : UserControl
         LimitComboBox.IsEnabled = !busy;
         EnableButton.IsEnabled = !busy;
         DisableButton.IsEnabled = !busy;
+        StartValidationButton.IsEnabled = !busy;
+        BackButton.IsEnabled = !busy;
         if (busy) ResultText.Text = "Result: Running...";
+    }
+
+    private async Task RunValidationAsync()
+    {
+        if (_frontend is null || _busy) return;
+
+        SetBusy(true);
+        ValidationStatusText.Text = "Status: Running";
+        ValidationProgressText.Text = $"Progress: 0 / {BatteryChargeLimitValidationRunner.TotalSteps}";
+        ValidationCurrentStepText.Text = "Current step: Initial capture";
+        ValidationReportPathText.Text = "Result log: creating...";
+        ErrorText.Text = string.Empty;
+        try
+        {
+            var runner = new BatteryChargeLimitValidationRunner(
+                () => _frontend.CaptureBatteryChargeLimitTestAsync(),
+                enabled => _frontend.SetBatteryChargeLimitTestEnabledAsync(enabled),
+                percent => _frontend.SetBatteryChargeLimitTestPercentAsync(percent),
+                UiLog.DirectoryPath,
+                (completed, total, label) =>
+                {
+                    if (!_active) return;
+                    ValidationProgressText.Text = $"Progress: {completed} / {total}";
+                    ValidationCurrentStepText.Text = $"Current step: {label}";
+                },
+                path =>
+                {
+                    if (_active) ValidationReportPathText.Text = $"Result log: {path}";
+                },
+                snapshot => Render(snapshot));
+            var result = await runner.RunAsync();
+
+            if (result.ReportPath is not null) ValidationReportPathText.Text = $"Result log: {result.ReportPath}";
+            else ValidationReportPathText.Text = "Result log: unavailable";
+            ValidationProgressText.Text = $"Progress: {result.CompletedSteps} / {BatteryChargeLimitValidationRunner.TotalSteps}";
+            ValidationCurrentStepText.Text = result.PrimaryFailure is not null
+                ? $"Current step: {result.PrimaryFailure.Step}"
+                : result.Restore.Outcome == BatteryChargeLimitValidationRestoreOutcome.Failed
+                    ? "Current step: Restore"
+                    : "Current step: Completed";
+            if (result.Passed)
+            {
+                ValidationStatusText.Text = "Status: PASS";
+                ErrorText.Text = string.Empty;
+                ResultText.Text = "Result: Validation PASS";
+            }
+            else
+            {
+                var outcome = result.PrimaryFailure?.Outcome?.ToString() ??
+                    (result.Restore.Outcome == BatteryChargeLimitValidationRestoreOutcome.Failed ? "RestoreFailed" : "Failed");
+                ValidationStatusText.Text = $"Status: FAIL — {outcome}";
+                ErrorText.Text = result.PrimaryFailure?.Message ?? result.Restore.FailureMessage ?? "Battery validation failed.";
+                ResultText.Text = "Result: Validation FAIL";
+            }
+        }
+        catch (Exception exception)
+        {
+            ValidationStatusText.Text = "Status: FAIL — Exception";
+            ValidationCurrentStepText.Text = "Current step: Runner exception";
+            ErrorText.Text = exception.Message;
+            ResultText.Text = "Result: Validation FAIL";
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     private void Render(FrontendBatteryChargeLimitTestSnapshot snapshot)
