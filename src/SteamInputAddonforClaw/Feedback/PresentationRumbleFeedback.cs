@@ -9,12 +9,14 @@ namespace SteamInputAddonforClaw.Feedback;
 /// <see cref="TwoMotorRumble"/> and writes it to the one shared physical <see cref="IPhysicalRumbleSink"/>.
 ///
 /// These are deliberately NOT authority managers: they own only a disposable native-callback lifetime,
-/// a tiny write-drain lock, and (SteamDeck only) a bounded dead-man safety stop. Lifetime arm/disarm
+/// a tiny write-drain lock, and a bounded dead-man safety stop. Lifetime arm/disarm
 /// ordering belongs to <c>MsiClawAddonPresentation</c>'s existing gate. The managed delegate stays
 /// rooted by <see cref="CanonicalViiperNativeApi"/>'s own callback-root map for exactly as long as
 /// native may call it, so a failed native clear here does not create an unrooted callback.</summary>
 internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
 {
+    internal static readonly TimeSpan DefaultSafetyStop = TimeSpan.FromSeconds(5);
+
     private readonly IPhysicalRumbleSink _sink;
     private readonly Func<Xbox360RumbleCallback?, bool> _setNativeCallback;
     private readonly Xbox360RumbleCallback _callback;
@@ -23,13 +25,21 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
     // thread issues the lifecycle STOP -- without this drain the late non-zero write would land AFTER
     // the STOP and leave the motors latched across a switch / Overlay pause / teardown.
     private readonly object _callbackWriteGate = new();
+    private readonly TimeSpan _safetyStopDelay;
+    private readonly object _safetyGate = new();
+    private CancellationTokenSource? _safetyStop;
+    private long _feedbackSequence;
     private int _disposed;
 
-    private Xbox360RumbleFeedbackBridge(IPhysicalRumbleSink sink, Func<Xbox360RumbleCallback?, bool> setNativeCallback)
+    private Xbox360RumbleFeedbackBridge(
+        IPhysicalRumbleSink sink,
+        Func<Xbox360RumbleCallback?, bool> setNativeCallback,
+        TimeSpan safetyStopDelay)
     {
         _sink = sink;
         _setNativeCallback = setNativeCallback;
         _callback = OnRumble;
+        _safetyStopDelay = safetyStopDelay;
     }
 
     /// <summary>8-bit to 16-bit full-range expansion. Preserves exact 8-bit magnitude through the
@@ -39,9 +49,12 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
     /// <summary>Registers the native Xbox360 rumble callback. Returns <see langword="null"/> (rumble
     /// unavailable for this presentation) if registration is not confirmed -- the caller keeps the
     /// controller presentation healthy regardless.</summary>
-    internal static Xbox360RumbleFeedbackBridge? TryArm(IPhysicalRumbleSink sink, Func<Xbox360RumbleCallback?, bool> setNativeCallback)
+    internal static Xbox360RumbleFeedbackBridge? TryArm(
+        IPhysicalRumbleSink sink,
+        Func<Xbox360RumbleCallback?, bool> setNativeCallback,
+        TimeSpan? safetyStop = null)
     {
-        var bridge = new Xbox360RumbleFeedbackBridge(sink, setNativeCallback);
+        var bridge = new Xbox360RumbleFeedbackBridge(sink, setNativeCallback, safetyStop ?? DefaultSafetyStop);
         if (!setNativeCallback(bridge._callback))
         {
             AppLog.Warn("Rumble", "Production rumble callback registration failed.", null,
@@ -58,15 +71,21 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
         try
         {
             if (Volatile.Read(ref _disposed) != 0) return;
-            // XInput rumble is persistent host state (0,0 is the host's own stop), so no dead-man
-            // timer is needed here -- only the write drain.
+            var rumble = new TwoMotorRumble(Expand(leftMotor), Expand(rightMotor));
             lock (_callbackWriteGate)
             {
                 if (Volatile.Read(ref _disposed) != 0) return;
-                var result = _sink.SetRumble(new TwoMotorRumble(Expand(leftMotor), Expand(rightMotor)));
-                if (result.Status == PhysicalRumbleWriteStatus.Failed)
-                    AppLog.Debug("Rumble", "Production rumble write failed.",
-                        ("Event", "ProductionRumbleWriteFailed"), ("Presentation", "Xbox360"), ("Reason", result.Reason));
+                try
+                {
+                    var result = _sink.SetRumble(rumble);
+                    if (result.Status == PhysicalRumbleWriteStatus.Failed)
+                        AppLog.Debug("Rumble", "Production rumble write failed.",
+                            ("Event", "ProductionRumbleWriteFailed"), ("Presentation", "Xbox360"), ("Reason", result.Reason));
+                }
+                finally
+                {
+                    ScheduleSafetyStop(rumble);
+                }
             }
         }
         catch
@@ -75,9 +94,64 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
         }
     }
 
+    private void ScheduleSafetyStop(TwoMotorRumble rumble)
+    {
+        CancellationToken token;
+        long sequence;
+
+        lock (_safetyGate)
+        {
+            _safetyStop?.Cancel();
+            _safetyStop?.Dispose();
+            _safetyStop = null;
+            sequence = ++_feedbackSequence;
+
+            if (Volatile.Read(ref _disposed) != 0 || rumble.Equals(TwoMotorRumble.Stopped) || _safetyStopDelay <= TimeSpan.Zero)
+                return;
+
+            _safetyStop = new CancellationTokenSource();
+            token = _safetyStop.Token;
+        }
+
+        _ = StopAfterDelayAsync(sequence, token);
+    }
+
+    private async Task StopAfterDelayAsync(long sequence, CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(_safetyStopDelay, token).ConfigureAwait(false);
+            lock (_safetyGate)
+            {
+                if (token.IsCancellationRequested || sequence != _feedbackSequence || Volatile.Read(ref _disposed) != 0)
+                    return;
+            }
+            lock (_callbackWriteGate)
+            {
+                if (Volatile.Read(ref _disposed) != 0) return;
+                _sink.SetRumble(TwoMotorRumble.Stopped);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            AppLog.Debug("Rumble", "Production rumble safety stop was contained.",
+                ("Event", "ProductionRumbleStopFailed"), ("Presentation", "Xbox360"), ("Reason", exception.GetType().Name));
+        }
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        lock (_safetyGate)
+        {
+            _safetyStop?.Cancel();
+            _safetyStop?.Dispose();
+            _safetyStop = null;
+            _feedbackSequence++;
+        }
         RumbleCallbackCleanup.ClearNativeCallback(_setNativeCallback, "Xbox360");
         // Drain a callback that already passed the first _disposed check and may still be inside its
         // physical write, so the presentation's subsequent lifecycle STOP is the final write.
