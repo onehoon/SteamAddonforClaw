@@ -155,7 +155,7 @@ public sealed class QamFrontendContractTests
         Assert.True(teardownStart >= 0);
         var teardown = source[teardownStart..source.IndexOf("    });", teardownStart, StringComparison.Ordinal)];
         Assert.Contains("addonTabDescriptors: null,", teardown);
-        Assert.Contains("qamLifecyclePatch: null,", teardown);
+        Assert.Contains("qamSurfaceActive: false,", teardown);
 
         var uninstallStart = source.IndexOf("function uninstall()", StringComparison.Ordinal);
         var uninstall = source[uninstallStart..source.IndexOf("    state.installed = false;", uninstallStart, StringComparison.Ordinal)];
@@ -212,29 +212,30 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_open_lifecycle_wraps_the_native_callbacks_and_rearms_only_after_deactivation()
+    public void Qam_open_lifecycle_uses_the_verified_outer_visibility_transition()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var lifecycleStart = source.IndexOf("function patchQamLifecycle(node)", StringComparison.Ordinal);
+        var lifecycleStart = source.IndexOf("function updateQamSurfaceVisibility(visible)", StringComparison.Ordinal);
         var lifecycleEnd = source.IndexOf("function ensureAddonTabs", lifecycleStart, StringComparison.Ordinal);
         Assert.True(lifecycleStart >= 0 && lifecycleEnd > lifecycleStart);
         var lifecycle = source[lifecycleStart..lifecycleEnd];
 
-        Assert.Contains("typeof props.onFocusNavActivated !== \"function\"", lifecycle);
-        Assert.Contains("typeof props.onFocusNavDeactivated !== \"function\"", lifecycle);
-        Assert.Contains("const originalActivated = props.onFocusNavActivated;", lifecycle);
-        Assert.Contains("const originalDeactivated = props.onFocusNavDeactivated;", lifecycle);
-        Assert.Contains("const result = originalActivated.apply(this, args);", lifecycle);
-        Assert.Contains("const result = originalDeactivated.apply(this, args);", lifecycle);
+        Assert.Contains("function updateQamSurfaceVisibility(visible)", lifecycle);
+        Assert.Contains("if (visible === true)", lifecycle);
+        Assert.Contains("else if (visible === false)", lifecycle);
         Assert.Contains("activateQamSurface();", lifecycle);
         Assert.Contains("deactivateQamSurface();", lifecycle);
-        Assert.Contains("state.qamLifecyclePatch = { props, originalActivated, originalDeactivated, patchedActivated, patchedDeactivated };", lifecycle);
-        Assert.Contains("if (props.onFocusNavActivated === patch.patchedActivated) props.onFocusNavActivated = patch.originalActivated;", source);
-        Assert.Contains("if (props.onFocusNavDeactivated === patch.patchedDeactivated) props.onFocusNavDeactivated = patch.originalDeactivated;", source);
-        Assert.Contains("restoreQamLifecyclePatch();", source);
+
+        var patchedTypeStart = source.IndexOf("const patchedType = preservePatchedFunctionShape", StringComparison.Ordinal);
+        var patchedTypeEnd = source.IndexOf("patch.patchedType = patchedType;", patchedTypeStart, StringComparison.Ordinal);
+        Assert.True(patchedTypeStart >= 0 && patchedTypeEnd > patchedTypeStart);
+        var patchedType = source[patchedTypeStart..patchedTypeEnd];
+        Assert.Contains("updateQamSurfaceVisibility(args[0]?.visible);", patchedType);
+        Assert.DoesNotContain("onFocusNavActivated", patchedType);
+        Assert.DoesNotContain("onFocusNavDeactivated", patchedType);
 
         var transitionsStart = source.IndexOf("function activateQamSurface()", StringComparison.Ordinal);
-        var transitionsEnd = source.IndexOf("function patchQamLifecycle", transitionsStart, StringComparison.Ordinal);
+        var transitionsEnd = source.IndexOf("function ensureAddonTabs", transitionsStart, StringComparison.Ordinal);
         var transitions = source[transitionsStart..transitionsEnd];
         Assert.Contains("if (state.qamSurfaceActive) return;", transitions);
         Assert.Contains("state.qamSurfaceActive = true;", transitions);
@@ -252,7 +253,9 @@ public sealed class QamFrontendContractTests
         var insertionEnd = source.IndexOf("function preservePatchedFunctionShape", insertionStart, StringComparison.Ordinal);
         var insertion = source[insertionStart..insertionEnd];
         Assert.DoesNotContain("selectAddonTabForFreshOpen(owner", insertion);
-        Assert.DoesNotContain("trySelectAddonTabForFreshOpen", insertion);
+        var contextIndex = insertion.IndexOf("state.qamSelectionContext = { descriptors };", StringComparison.Ordinal);
+        var triggerIndex = insertion.IndexOf("trySelectAddonTabForFreshOpen();", StringComparison.Ordinal);
+        Assert.True(contextIndex >= 0 && triggerIndex > contextIndex);
 
         var notificationStart = source.IndexOf("function receiveBridgeNotification", StringComparison.Ordinal);
         var notificationEnd = source.IndexOf("function retireBridgeConsumers", notificationStart, StringComparison.Ordinal);
@@ -263,7 +266,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("if (state.qamSurfaceActive) return;", source);
         Assert.Contains("if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested", source);
         Assert.DoesNotContain("state.initialTabSelectionOwners", source);
-        Assert.DoesNotContain("setTimeout", source[source.IndexOf("function selectAddonTabForFreshOpen", StringComparison.Ordinal)..source.IndexOf("function patchQamLifecycle", StringComparison.Ordinal)]);
+        Assert.DoesNotContain("patchQamLifecycle", source);
+        Assert.DoesNotContain("setTimeout", source[source.IndexOf("function selectAddonTabForFreshOpen", StringComparison.Ordinal)..source.IndexOf("function updateQamSurfaceVisibility", StringComparison.Ordinal)]);
     }
 
     [Fact]
