@@ -170,6 +170,10 @@ public sealed class UiArchitectureTests
         Assert.Contains("<FontIcon Glyph=\"&#xE86B;\" />", xaml, StringComparison.Ordinal);
         Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Slider x:Name=\"BatteryChargeLimitSlider\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitValueText\" MinWidth=\"64\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\" Grid.Column=\"2\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitStatusText\" Grid.Row=\"1\" Grid.Column=\"1\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Stretch\" TextAlignment=\"Center\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsExpander x:Name=\"BatteryChargeLimitCard\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CaptureBatteryChargeLimitAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("SetDeviceBatteryChargeLimitPercentAsync", codeBehind, StringComparison.Ordinal);

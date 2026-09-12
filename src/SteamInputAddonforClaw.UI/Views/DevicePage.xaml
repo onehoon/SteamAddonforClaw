@@ -41,13 +41,14 @@
                     <FontIcon Glyph="&#xE86B;" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <StackPanel Spacing="8" MinWidth="520">
-                    <Grid ColumnSpacing="12">
+                    <Grid RowSpacing="4" ColumnSpacing="12">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <ToggleSwitch x:Name="BatteryChargeLimitEnabledToggleSwitch" OffContent="" OnContent="" Toggled="BatteryChargeLimitEnabledToggleSwitch_Toggled" />
+                        <TextBlock x:Name="BatteryChargeLimitValueText" MinWidth="64" Text="—%" VerticalAlignment="Center" />
                         <Slider x:Name="BatteryChargeLimitSlider" Grid.Column="1" Minimum="60" Maximum="100" StepFrequency="5" ValueChanged="BatteryChargeLimitSlider_ValueChanged" PointerCaptureLost="BatteryChargeLimitSlider_PointerCaptureLost" KeyUp="BatteryChargeLimitSlider_KeyUp" />
-                        <TextBlock x:Name="BatteryChargeLimitValueText" Grid.Column="2" MinWidth="64" Text="—%" TextAlignment="Right" VerticalAlignment="Center" />
+                        <ToggleSwitch x:Name="BatteryChargeLimitEnabledToggleSwitch" Grid.Column="2" OffContent="" OnContent="" Toggled="BatteryChargeLimitEnabledToggleSwitch_Toggled" />
+                        <TextBlock x:Name="BatteryChargeLimitStatusText" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" TextAlignment="Center" Opacity="0.7" TextWrapping="Wrap" />
                     </Grid>
-                    <TextBlock x:Name="BatteryChargeLimitStatusText" Opacity="0.7" TextWrapping="Wrap" />
                 </StackPanel>
             </ctcontrols:SettingsCard>
 
