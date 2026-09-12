@@ -185,12 +185,18 @@ public sealed partial class DevicePage : UserControl
     private async Task CommitBatteryChargeLimitPercentAsync()
     {
         if (_suppressBatteryChargeLimitEvents || !_batteryChargeLimitDraftDirty || _frontend is null || _batteryChargeLimitMutationBusy) return;
+        var percent = _batteryChargeLimitDraftPercent;
+        if (!BatteryChargeLimitDraftPolicy.ShouldCommit(_batteryChargeLimitSnapshot.DesiredLimitPercent, percent, _batteryChargeLimitDraftDirty, _batteryChargeLimitMutationBusy))
+        {
+            _batteryChargeLimitDraftDirty = false;
+            return;
+        }
         _batteryChargeLimitDraftDirty = false;
         _batteryChargeLimitMutationBusy = true;
-        RenderBatteryChargeLimit(_batteryChargeLimitSnapshot, preserveDirtyDraft: false);
+        UpdateBatteryChargeLimitControlEnabledState();
         try
         {
-            var result = await _frontend.SetDeviceBatteryChargeLimitPercentAsync(_batteryChargeLimitDraftPercent);
+            var result = await _frontend.SetDeviceBatteryChargeLimitPercentAsync(percent);
             RenderBatteryChargeLimit(result.Snapshot, preserveDirtyDraft: false);
             if (!result.Succeeded)
             {
@@ -210,7 +216,7 @@ public sealed partial class DevicePage : UserControl
         finally
         {
             _batteryChargeLimitMutationBusy = false;
-            RenderBatteryChargeLimit(_batteryChargeLimitSnapshot);
+            UpdateBatteryChargeLimitControlEnabledState();
         }
     }
 
@@ -218,7 +224,7 @@ public sealed partial class DevicePage : UserControl
     {
         if (_suppressBatteryChargeLimitEvents || _frontend is null || _batteryChargeLimitMutationBusy) return;
         _batteryChargeLimitMutationBusy = true;
-        RenderBatteryChargeLimit(_batteryChargeLimitSnapshot);
+        UpdateBatteryChargeLimitControlEnabledState();
         try
         {
             var result = await _frontend.SetDeviceBatteryChargeLimitEnabledAsync(BatteryChargeLimitEnabledToggleSwitch.IsOn);
@@ -241,8 +247,21 @@ public sealed partial class DevicePage : UserControl
         finally
         {
             _batteryChargeLimitMutationBusy = false;
-            RenderBatteryChargeLimit(_batteryChargeLimitSnapshot);
+            UpdateBatteryChargeLimitControlEnabledState();
         }
+    }
+
+    private void UpdateBatteryChargeLimitControlEnabledState()
+    {
+        var editable = _batteryChargeLimitSnapshot.Available && _batteryChargeLimitSnapshot.PersistenceWritable && !_batteryChargeLimitMutationBusy;
+        BatteryChargeLimitEnabledToggleSwitch.IsEnabled = editable && _batteryChargeLimitSnapshot.Initialized;
+        BatteryChargeLimitSlider.IsEnabled = editable;
+    }
+
+    internal static class BatteryChargeLimitDraftPolicy
+    {
+        internal static bool ShouldCommit(int? desiredPercent, int draftPercent, bool dirty, bool busy) =>
+            dirty && !busy && desiredPercent != draftPercent;
     }
 
     private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];

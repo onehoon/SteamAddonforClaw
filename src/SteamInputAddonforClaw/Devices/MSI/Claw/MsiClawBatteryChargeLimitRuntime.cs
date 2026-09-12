@@ -101,16 +101,44 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
             if (!_accepting || !_available)
                 return Result(BatteryChargeLimitMutationOutcome.Unavailable, "MSI battery charge-limit control is unavailable.");
 
-            var loaded = _profileStore.Load();
-            if (!loaded.CanSafelyReplace)
-                return Result(BatteryChargeLimitMutationOutcome.PersistenceFailed, "Profile state is not safe to replace.", loaded);
+            ProfileLoadResult? loadedForFailure = null;
+            BatteryChargeLimitMutationOutcome? failureOutcome = null;
+            string? failureMessage = null;
+            DeviceBatteryChargeLimitSettings? desired = null;
+            lock (_mutationGate.Sync)
+            {
+                var loaded = _profileStore.Load();
+                if (!loaded.CanSafelyReplace)
+                {
+                    loadedForFailure = loaded;
+                    failureOutcome = BatteryChargeLimitMutationOutcome.PersistenceFailed;
+                    failureMessage = "Profile state is not safe to replace.";
+                }
+                else if (!IsValidTarget(loaded.Document.Device.Battery?.ChargeLimit))
+                {
+                    loadedForFailure = loaded;
+                    failureOutcome = BatteryChargeLimitMutationOutcome.InvalidTarget;
+                    failureMessage = "A valid battery charge-limit target must be initialized before changing the enabled state.";
+                }
+                else
+                {
+                    var current = loaded.Document.Device.Battery!.ChargeLimit!;
+                    desired = current with { Enabled = enabled };
+                    try { _profileStore.Save(WithBatteryChargeLimit(loaded.Document, desired)); }
+                    catch (Exception exception)
+                    {
+                        loadedForFailure = loaded;
+                        failureOutcome = BatteryChargeLimitMutationOutcome.PersistenceFailed;
+                        failureMessage = exception.Message;
+                        AppLog.Error("Profiles.Battery", "Battery charge-limit persistence failed; hardware was not changed.", exception);
+                    }
+                }
+            }
 
-            var current = loaded.Document.Device.Battery?.ChargeLimit;
-            if (!IsValidTarget(current))
-                return Result(BatteryChargeLimitMutationOutcome.InvalidTarget,
-                    "A valid battery charge-limit target must be initialized before changing the enabled state.", loaded);
-
-            return Commit(loaded, current! with { Enabled = enabled });
+            if (failureOutcome is { } outcome)
+                return Result(outcome, failureMessage!, loadedForFailure);
+            var apply = Apply(desired!);
+            return new(apply.Outcome, apply.FailureMessage, _snapshot);
         }
     }
 
@@ -124,16 +152,85 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
                 return Result(BatteryChargeLimitMutationOutcome.InvalidTarget,
                     "The battery limit must be 60% to 100% in 5% steps.");
 
-            var loaded = _profileStore.Load();
-            if (!loaded.CanSafelyReplace)
-                return Result(BatteryChargeLimitMutationOutcome.PersistenceFailed, "Profile state is not safe to replace.", loaded);
+            ProfileLoadResult? loadedForFailure = null;
+            BatteryChargeLimitMutationOutcome? failureOutcome = null;
+            string? failureMessage = null;
+            DeviceBatteryChargeLimitSettings? desired = null;
+            bool? observedEnabled = null;
 
-            var saved = loaded.Document.Device.Battery?.ChargeLimit;
-            var enabled = IsValidTarget(saved) ? saved!.Enabled : ReadEnabledForInitialization();
-            if (enabled is null)
-                return Result(BatteryChargeLimitMutationOutcome.Unavailable, "BatteryLimit read failed.", loaded);
+            lock (_mutationGate.Sync)
+            {
+                var loaded = _profileStore.Load();
+                if (!loaded.CanSafelyReplace)
+                {
+                    loadedForFailure = loaded;
+                    failureOutcome = BatteryChargeLimitMutationOutcome.PersistenceFailed;
+                    failureMessage = "Profile state is not safe to replace.";
+                }
+                else if (IsValidTarget(loaded.Document.Device.Battery?.ChargeLimit))
+                {
+                    desired = new DeviceBatteryChargeLimitSettings
+                    {
+                        Enabled = loaded.Document.Device.Battery!.ChargeLimit!.Enabled,
+                        LimitPercent = percent
+                    };
+                    try { _profileStore.Save(WithBatteryChargeLimit(loaded.Document, desired)); }
+                    catch (Exception exception)
+                    {
+                        loadedForFailure = loaded;
+                        failureOutcome = BatteryChargeLimitMutationOutcome.PersistenceFailed;
+                        failureMessage = exception.Message;
+                        AppLog.Error("Profiles.Battery", "Battery charge-limit persistence failed; hardware was not changed.", exception);
+                    }
+                }
+            }
 
-            return Commit(loaded, new DeviceBatteryChargeLimitSettings { Enabled = enabled.Value, LimitPercent = percent });
+            if (failureOutcome is { } initialOutcome)
+                return Result(initialOutcome, failureMessage!, loadedForFailure);
+
+            // An uninitialized/invalid persisted target needs the current enable state to form a
+            // complete desired pair. The read is deliberately outside ProfileMutationGate.
+            if (desired is null)
+            {
+                observedEnabled = ReadEnabledForInitialization();
+                if (observedEnabled is null)
+                    return Result(BatteryChargeLimitMutationOutcome.Unavailable, "BatteryLimit read failed.");
+
+                lock (_mutationGate.Sync)
+                {
+                    var loaded = _profileStore.Load();
+                    if (!loaded.CanSafelyReplace)
+                    {
+                        loadedForFailure = loaded;
+                        failureOutcome = BatteryChargeLimitMutationOutcome.PersistenceFailed;
+                        failureMessage = "Profile state is not safe to replace.";
+                    }
+                    else
+                    {
+                        var saved = loaded.Document.Device.Battery?.ChargeLimit;
+                        desired = new DeviceBatteryChargeLimitSettings
+                        {
+                            // Prefer a concurrently committed valid target from this fresh load;
+                            // otherwise use the observation captured before entering the gate.
+                            Enabled = IsValidTarget(saved) ? saved!.Enabled : observedEnabled.Value,
+                            LimitPercent = percent
+                        };
+                        try { _profileStore.Save(WithBatteryChargeLimit(loaded.Document, desired)); }
+                        catch (Exception exception)
+                        {
+                            loadedForFailure = loaded;
+                            failureOutcome = BatteryChargeLimitMutationOutcome.PersistenceFailed;
+                            failureMessage = exception.Message;
+                            AppLog.Error("Profiles.Battery", "Battery charge-limit persistence failed; hardware was not changed.", exception);
+                        }
+                    }
+                }
+            }
+
+            if (failureOutcome is { } outcome)
+                return Result(outcome, failureMessage!, loadedForFailure);
+            var apply = Apply(desired!);
+            return new(apply.Outcome, apply.FailureMessage, _snapshot);
         }
     }
 
@@ -148,29 +245,13 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
         return current.Succeeded ? current.State!.Value.Enabled : null;
     }
 
-    private BatteryChargeLimitMutationResult Commit(ProfileLoadResult loaded, DeviceBatteryChargeLimitSettings desired)
+    private static ProfileDocument WithBatteryChargeLimit(ProfileDocument document, DeviceBatteryChargeLimitSettings desired) => document with
     {
-        var updated = loaded.Document with
+        Device = document.Device with
         {
-            Device = loaded.Document.Device with
-            {
-                Battery = (loaded.Document.Device.Battery ?? new DeviceBatterySettings()) with { ChargeLimit = desired }
-            }
-        };
-
-        try
-        {
-            lock (_mutationGate.Sync) _profileStore.Save(updated);
+            Battery = (document.Device.Battery ?? new DeviceBatterySettings()) with { ChargeLimit = desired }
         }
-        catch (Exception exception)
-        {
-            AppLog.Error("Profiles.Battery", "Battery charge-limit persistence failed; hardware was not changed.", exception);
-            return Result(BatteryChargeLimitMutationOutcome.PersistenceFailed, exception.Message, loaded);
-        }
-
-        var apply = Apply(desired);
-        return new(apply.Outcome, apply.FailureMessage, _snapshot);
-    }
+    };
 
     private void ReconcileLoadedProfile(string reason)
     {
@@ -200,15 +281,27 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
             desired = new DeviceBatteryChargeLimitSettings { Enabled = state.Enabled, LimitPercent = state.LimitPercent };
             try
             {
-                var updated = loaded.Document with
+                lock (_mutationGate.Sync)
                 {
-                    Device = loaded.Document.Device with
+                    // Reload after the observation. A concurrent Device/Profile mutation wins if
+                    // it initialized Battery while the hardware was being read.
+                    loaded = _profileStore.Load();
+                    if (!loaded.CanSafelyReplace)
                     {
-                        Battery = (loaded.Document.Device.Battery ?? new DeviceBatterySettings()) with { ChargeLimit = desired }
+                        _snapshot = BuildSnapshot(loaded, observed.State, "Profile state is not safe to replace.");
+                        return;
                     }
-                };
-                lock (_mutationGate.Sync) _profileStore.Save(updated);
-                loaded = new(updated, ProfileLoadStatus.Loaded);
+
+                    var freshDesired = loaded.Document.Device.Battery?.ChargeLimit;
+                    if (freshDesired is not null)
+                        desired = freshDesired;
+                    else
+                    {
+                        var updated = WithBatteryChargeLimit(loaded.Document, desired);
+                        _profileStore.Save(updated);
+                        loaded = new(updated, ProfileLoadStatus.Loaded);
+                    }
+                }
             }
             catch (Exception exception)
             {
@@ -216,6 +309,13 @@ internal sealed class MsiClawBatteryChargeLimitRuntime
                 _snapshot = BuildSnapshot(loaded, observed.State, exception.Message);
                 return;
             }
+        }
+
+        if (!IsValidTarget(desired) && desired is not null)
+        {
+            _snapshot = BuildSnapshot(loaded, observed.State,
+                "The persisted battery charge-limit target is outside the 60% to 100% 5% product range.");
+            return;
         }
 
         if (desired is null)

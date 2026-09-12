@@ -180,6 +180,26 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Battery_slider_draft_policy_commits_the_changed_value_once_after_interaction()
+    {
+        var dirty = true;
+        var commitCount = 0;
+        var committedPercent = 0;
+        var draftPercent = 85;
+
+        if (DevicePage.BatteryChargeLimitDraftPolicy.ShouldCommit(80, draftPercent, dirty, busy: false))
+        {
+            dirty = false;
+            commitCount++;
+            committedPercent = draftPercent;
+        }
+
+        Assert.Equal(85, committedPercent);
+        Assert.Equal(1, commitCount);
+        Assert.False(DevicePage.BatteryChargeLimitDraftPolicy.ShouldCommit(80, draftPercent, dirty, busy: false));
+    }
+
+    [Fact]
     public void Device_page_owns_the_msi_center_m_startup_card_below_the_identity_summary_with_explicit_buttons()
     {
         var root = FindRepositoryRoot();
