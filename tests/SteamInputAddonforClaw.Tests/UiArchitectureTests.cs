@@ -170,6 +170,13 @@ public sealed class UiArchitectureTests
         Assert.Contains("<FontIcon Glyph=\"&#xE86B;\" />", xaml, StringComparison.Ordinal);
         Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Slider x:Name=\"BatteryChargeLimitSlider\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitValueText\" MinWidth=\"64\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Set the maximum charge level for this MSI Claw device.", xaml, StringComparison.Ordinal);
+        Assert.Contains("<ctcontrols:SettingsCard.Description>", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextBlock x:Name=\"BatteryChargeLimitStatusText\" Opacity=\"0.7\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Slider x:Name=\"BatteryChargeLimitSlider\" Grid.Column=\"1\" VerticalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\" Grid.Column=\"2\" VerticalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Grid.Row=\"1\" Grid.Column=\"1\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsExpander x:Name=\"BatteryChargeLimitCard\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CaptureBatteryChargeLimitAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("SetDeviceBatteryChargeLimitPercentAsync", codeBehind, StringComparison.Ordinal);
