@@ -64,6 +64,57 @@ public sealed class OverlayQuickSettingsPageBindingTests
         ],
         linked ?? [new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, 1)]);
 
+    // SF-V2-09 section 31: a representative Profile page for a given AppId. `profileEnabled` mirrors
+    // the real BuildProfile coupling (writable = PersistenceWritable && Enabled) so a master-OFF
+    // result page makes every TDP/CPU Boost child row non-writable, exactly like production.
+    private static QuickSettingsPageSnapshot ProfilePage(
+        uint appId, bool profileEnabled = true,
+        int pl1Ac = 20, int pl2Ac = 25, int pl1Dc = 15, int pl2Dc = 20, int cpuAc = 20, int cpuDc = 10,
+        IReadOnlyList<QuickSettingsLinkedSliderConstraint>? linked = null) => new(
+        QuickSettingsPageId.Profile, appId, true, null,
+        [
+            new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, "Game " + appId,
+            [
+                Toggle(QuickSettingsRowId.ProfileEnabled, profileEnabled),
+            ]),
+            new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control",
+            [
+                Toggle(QuickSettingsRowId.ProfileTdpEnabled, profileEnabled, writable: profileEnabled),
+                Numeric(QuickSettingsRowId.ProfileTdpAcPl1, pl1Ac, 8, 30, QuickSettingsCommitGroupId.ProfileTdpConfiguration, writable: profileEnabled),
+                Numeric(QuickSettingsRowId.ProfileTdpAcPl2, pl2Ac, 8, 37, QuickSettingsCommitGroupId.ProfileTdpConfiguration, writable: profileEnabled),
+                Numeric(QuickSettingsRowId.ProfileTdpDcPl1, pl1Dc, 8, 30, QuickSettingsCommitGroupId.ProfileTdpConfiguration, writable: profileEnabled),
+                Numeric(QuickSettingsRowId.ProfileTdpDcPl2, pl2Dc, 8, 37, QuickSettingsCommitGroupId.ProfileTdpConfiguration, writable: profileEnabled),
+            ]),
+            new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, "CPU Boost",
+            [
+                Toggle(QuickSettingsRowId.ProfileCpuBoostEnabled, profileEnabled, writable: profileEnabled),
+                Discrete(QuickSettingsRowId.ProfileCpuBoostAc, cpuAc, writable: profileEnabled),
+                Discrete(QuickSettingsRowId.ProfileCpuBoostDc, cpuDc, writable: profileEnabled),
+            ]),
+        ],
+        linked ?? [new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, 1)]);
+
+    private static OverlayQuickSettingsPageBinding NewProfileBinding(
+        QuickSettingsPageSnapshot page,
+        Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> mutate,
+        UiThreadStub uiThread,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+    {
+        var binding = new OverlayQuickSettingsPageBinding(QuickSettingsPageId.Profile, mutate, uiThread.Marshal, delayAsync);
+        binding.ApplyAuthoritativePage(page);
+        return binding;
+    }
+
+    private static OverlayQuickSettingsPageBinding NewProfileBinding(
+        QuickSettingsPageSnapshot page,
+        Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> mutate,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+    {
+        var binding = new OverlayQuickSettingsPageBinding(QuickSettingsPageId.Profile, mutate, action => action(), delayAsync);
+        binding.ApplyAuthoritativePage(page);
+        return binding;
+    }
+
     // The binder is documented as single-UI-thread-affine: every settlement callback is expected to
     // be drained on the SAME thread that later reads binder state (App/OverlayWindow's DispatcherQueue
     // in production). A trivial `action => action()` marshal would instead run OnSettled on whatever
@@ -741,5 +792,233 @@ public sealed class OverlayQuickSettingsPageBindingTests
         uiThread.Pump();
 
         Assert.Same(originalPage, binding.AuthoritativePage); // stale settlement never applied post-teardown
+    }
+
+    // --- SF-V2-09 section 17: Profile (PageId, AppId) context safety --------------------------------
+
+    [Fact]
+    public async Task Profile_intent_carries_the_target_app_id()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, delay.Func);
+
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(40));
+        delay.Elapse();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "profile slider submitted");
+
+        var intent = mutate.Calls[0];
+        Assert.Equal(QuickSettingsPageId.Profile, intent.PageId);
+        Assert.Equal(480u, intent.AppId);
+        Assert.Equal(QuickSettingsRowId.ProfileCpuBoostAc, intent.EditedRowId);
+    }
+
+    [Fact]
+    public async Task Profile_tdp_group_emits_one_grouped_mutation_with_the_target_app_id()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, delay.Func);
+
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsValue.Integer(26));
+        delay.Elapse();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "profile TDP group submitted");
+
+        var intent = mutate.Calls[0];
+        Assert.Equal(QuickSettingsPageId.Profile, intent.PageId);
+        Assert.Equal(480u, intent.AppId);
+        Assert.Equal(5, intent.Values.Count);
+        Assert.Equal(
+        [
+            QuickSettingsRowId.ProfileTdpEnabled,
+            QuickSettingsRowId.ProfileTdpAcPl1,
+            QuickSettingsRowId.ProfileTdpAcPl2,
+            QuickSettingsRowId.ProfileTdpDcPl1,
+            QuickSettingsRowId.ProfileTdpDcPl2,
+        ], intent.Values.Select(v => v.RowId));
+    }
+
+    [Fact]
+    public async Task Context_change_retires_an_old_profile_pending_draft()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, delay.Func);
+
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(40));
+        Assert.Single(binding.PendingKeys);
+
+        binding.ApplyAuthoritativePage(ProfilePage(490)); // active game switched from 480 to 490
+
+        Assert.Empty(binding.PendingKeys);
+        Assert.Equal(490u, binding.AuthoritativePage.AppId);
+
+        delay.Elapse();
+        await Task.Delay(40);
+        Assert.Empty(mutate.Calls); // the retired draft's timer never fires
+    }
+
+    [Fact]
+    public async Task Late_delayed_result_for_a_retired_profile_context_cannot_replace_the_new_context()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var uiThread = new UiThreadStub();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, uiThread, delay.Func);
+
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(40));
+        delay.Elapse();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "A (480) submitted", uiThread);
+
+        var bPage = ProfilePage(490); // active game switched to B (490) while A's mutation is in flight
+        binding.ApplyAuthoritativePage(bPage);
+
+        mutate.CompleteNext(Success(ProfilePage(480, cpuAc: 40))); // A's late result arrives
+        await Task.Delay(60);
+        uiThread.Pump();
+
+        Assert.Same(bPage, binding.AuthoritativePage); // B remains current; A's result is discarded
+        Assert.Null(binding.LastLocalFailureMessage);
+    }
+
+    [Fact]
+    public async Task Late_immediate_toggle_result_for_a_retired_profile_context_cannot_replace_the_new_context()
+    {
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func);
+
+        var task = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileEnabled, false); // targets A (480)
+        Assert.Single(mutate.Calls);
+
+        var bPage = ProfilePage(490); // active game switched to B before A's result arrives
+        binding.ApplyAuthoritativePage(bPage);
+
+        mutate.CompleteNext(Success(ProfilePage(480, profileEnabled: false))); // A's late result
+        Assert.True(await task); // a mutation was genuinely submitted -- the caller's re-render is a no-op
+
+        Assert.Same(bPage, binding.AuthoritativePage); // B remains current; A's result is discarded
+    }
+
+    [Fact]
+    public void Same_context_valid_profile_pending_draft_survives_an_ordinary_refresh()
+    {
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480, cpuAc: 20), mutate.Func, new ManualDelay().Func);
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(40));
+
+        binding.ApplyAuthoritativePage(ProfilePage(480, cpuAc: 20)); // same (Profile, 480) context, unrelated refresh
+
+        var effective = binding.BuildEffectivePage();
+        var cpuAc = effective.Sections.SelectMany(s => s.Rows).Single(r => r.RowId == QuickSettingsRowId.ProfileCpuBoostAc);
+        Assert.Equal(40, cpuAc.Value!.IntegerValue); // pending draft still wins
+    }
+
+    [Fact]
+    public async Task Fresh_page_prunes_a_pending_row_that_became_absent()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, delay.Func);
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(40));
+        Assert.Single(binding.PendingKeys);
+
+        var withoutCpuBoostSection = ProfilePage(480) with
+        {
+            Sections = ProfilePage(480).Sections.Where(s => s.SectionId != QuickSettingsSectionId.ProfileCpuBoost).ToArray(),
+        };
+        binding.ApplyAuthoritativePage(withoutCpuBoostSection);
+
+        Assert.Empty(binding.PendingKeys);
+        delay.Elapse();
+        await Task.Delay(40);
+        Assert.Empty(mutate.Calls); // the pruned draft never fires
+    }
+
+    [Fact]
+    public async Task Fresh_page_prunes_a_pending_row_that_became_non_writable()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, delay.Func);
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(40));
+        Assert.Single(binding.PendingKeys);
+
+        binding.ApplyAuthoritativePage(ProfilePage(480, profileEnabled: false)); // same context; now non-writable
+
+        Assert.Empty(binding.PendingKeys);
+        delay.Elapse();
+        await Task.Delay(40);
+        Assert.Empty(mutate.Calls);
+    }
+
+    // The exact scenario the PR #509 QAM review flagged, now proven for the Overlay C# binder:
+    // ProfileEnabled lives in ProfileGeneral, a section with no sliders of its own, so same-section
+    // cancellation (CancelUnsubmittedInSection) cannot reach a pending TDP/CPU Boost/Power Mode child
+    // draft in a DIFFERENT section. The generic same-context prune (not a ProfileEnabled special
+    // case) is what retires them once the OFF result page makes them non-writable.
+    [Fact]
+    public async Task Profile_master_off_result_retires_every_pending_child_draft_without_feature_specific_logic()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var uiThread = new UiThreadStub();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, uiThread, delay.Func);
+
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(40)); // CPU Boost section
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsValue.Integer(26)); // TDP section
+        Assert.Equal(2, binding.PendingKeys.Count);
+
+        var task = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileEnabled, false); // ProfileGeneral section
+        mutate.CompleteNext(Success(ProfilePage(480, profileEnabled: false)));
+        await task;
+
+        Assert.Empty(binding.PendingKeys); // generic prune retired both cross-section drafts
+
+        delay.Elapse();
+        await Task.Delay(40);
+        uiThread.Pump();
+        Assert.Single(mutate.Calls); // only the master toggle -- neither child draft ever committed
+    }
+
+    [Fact]
+    public async Task Context_change_clears_a_stale_local_failure_message()
+    {
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func);
+        var task = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileEnabled, false);
+        mutate.CompleteNext(Failure("Profile toggle failed", ProfilePage(480)));
+        await task;
+        Assert.Equal("Profile toggle failed", binding.LastLocalFailureMessage);
+
+        binding.ApplyAuthoritativePage(ProfilePage(490));
+
+        Assert.Null(binding.LastLocalFailureMessage);
+    }
+
+    [Fact]
+    public async Task An_ordinary_same_context_refresh_clears_a_stale_local_failure_message()
+    {
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func);
+        var task = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileEnabled, false);
+        mutate.CompleteNext(Failure("Profile toggle failed", ProfilePage(480)));
+        await task;
+        Assert.Equal("Profile toggle failed", binding.LastLocalFailureMessage);
+
+        binding.ApplyAuthoritativePage(ProfilePage(480)); // same context, ordinary Runtime refresh
+
+        Assert.Null(binding.LastLocalFailureMessage);
+    }
+
+    [Fact]
+    public void Applying_a_page_with_the_wrong_page_id_is_ignored()
+    {
+        var mutate = new GatedMutate();
+        var originalPage = ProfilePage(480);
+        using var binding = NewProfileBinding(originalPage, mutate.Func);
+
+        binding.ApplyAuthoritativePage(TdpPage()); // a Device page reaching the Profile binding
+
+        Assert.Same(originalPage, binding.AuthoritativePage); // ignored -- fail closed, no corruption
     }
 }
