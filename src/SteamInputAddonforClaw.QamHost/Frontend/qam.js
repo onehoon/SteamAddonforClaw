@@ -330,57 +330,99 @@
     return null;
   }
 
-  function resolveNativeTabSelection(owner) {
-    const props = owner?.props;
-    // This is the only supported current-Steam selection contract. Every other value/callback
-    // shape fails open so a future Steam build cannot receive a guessed selected-tab value.
-    if (!props || typeof props.selectedTabKey !== "string" || typeof props.onTabSelected !== "function") return null;
+  function resolveNativeTabSelection() {
+    // Current Steam's QAM tab component calls MainWindowInstance.MenuStore.OpenQuickAccessMenu
+    // for native tab selection. Resolve that same store through the live SteamUIStore path;
+    // every other shape fails open rather than guessing a React prop or DOM interaction.
+    const menuStore = window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore?.MainWindowInstance?.MenuStore;
+    if (!menuStore || typeof menuStore.OpenQuickAccessMenu !== "function") return null;
     return {
       set: key => {
         if (key !== ADDON_DEVICE_TAB_KEY && key !== ADDON_PROFILE_TAB_KEY) return;
-        props.onTabSelected(key);
+        menuStore.OpenQuickAccessMenu(key, false);
       },
     };
   }
 
-  function resolveQamSessionOwner(owner) {
-    // React's element owner fiber is stable for the mounted QAM surface and is replaced when
-    // that surface unmounts. Do not fall back to render output or its tabs collection.
-    const sessionOwner = owner?._owner;
-    return sessionOwner && (typeof sessionOwner === "object" || typeof sessionOwner === "function")
-      ? sessionOwner
-      : null;
-  }
-
-  function selectInitialAddonTab(sessionOwner, owner, descriptors) {
-    if (!sessionOwner) {
-      logOnce("initialTabSessionUnavailable", "QAM initial Addon tab selection unavailable; tabs remain usable.");
-      return;
-    }
-    state.initialTabSelectionOwners ??= new WeakSet();
-    if (state.initialTabSelectionOwners.has(sessionOwner)) return;
-    state.initialTabSelectionOwners.add(sessionOwner);
-
-    const authority = resolveNativeTabSelection(owner);
+  function selectAddonTabForFreshOpen(descriptors) {
+    const authority = resolveNativeTabSelection();
     if (!authority) {
       logOnce("initialTabSelectionUnavailable", "QAM initial Addon tab selection unavailable; tabs remain usable.");
       return;
     }
 
     void request("captureStatus").then(status => {
+      if (!state.installed || !state.qamSurfaceActive) return;
       const appId = Number(status?.steam?.appId || 0);
       const key = appId > 0 ? ADDON_PROFILE_TAB_KEY : ADDON_DEVICE_TAB_KEY;
       const descriptor = descriptors[key];
       if (!descriptor) return;
       try {
-        authority.set(key, descriptor);
-        log(`QAM initial Addon tab selection: ${key === ADDON_DEVICE_TAB_KEY ? "Device Reason=NoActiveGame" : `Profile AppId=${appId}`}`);
+        authority.set(key);
+        log(`QAM open selection: ${key === ADDON_DEVICE_TAB_KEY ? "Device Reason=NoActiveGame" : `Profile AppId=${appId}`}`);
       } catch (error) {
         logOnce("initialTabSelectionFailure", `QAM initial Addon tab selection unavailable; tabs remain usable. Reason=${String(error)}`);
       }
     }).catch(() => {
       logOnce("initialTabSelectionBridgeFailure", "QAM initial Addon tab selection unavailable; tabs remain usable.");
     });
+  }
+
+  function trySelectAddonTabForFreshOpen() {
+    if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested || !state.qamSelectionContext) return;
+    state.qamInitialSelectionRequested = false;
+    const { descriptors } = state.qamSelectionContext;
+    selectAddonTabForFreshOpen(descriptors);
+  }
+
+  function activateQamSurface() {
+    if (state.qamSurfaceActive) return;
+    state.qamSurfaceActive = true;
+    state.qamInitialSelectionRequested = true;
+    log("QAM surface activated.");
+    trySelectAddonTabForFreshOpen();
+  }
+
+  function deactivateQamSurface() {
+    if (!state.qamSurfaceActive) return;
+    state.qamSurfaceActive = false;
+    state.qamInitialSelectionRequested = false;
+    log("QAM surface deactivated.");
+  }
+
+  function patchQamLifecycle(node) {
+    const props = node?.props;
+    if (!props) return false;
+    if (typeof props.onFocusNavActivated !== "function" || typeof props.onFocusNavDeactivated !== "function") {
+      logOnce("qamLifecycleUnavailable", "QAM surface lifecycle unavailable; open selection remains fail-open.");
+      return false;
+    }
+
+    if (state.qamLifecyclePatch?.props === props) return true;
+    restoreQamLifecyclePatch();
+
+    const originalActivated = props.onFocusNavActivated;
+    const originalDeactivated = props.onFocusNavDeactivated;
+    const patchedActivated = function (...args) {
+      const result = originalActivated.apply(this, args);
+      activateQamSurface();
+      return result;
+    };
+    const patchedDeactivated = function (...args) {
+      const result = originalDeactivated.apply(this, args);
+      deactivateQamSurface();
+      return result;
+    };
+    try {
+      props.onFocusNavActivated = patchedActivated;
+      props.onFocusNavDeactivated = patchedDeactivated;
+    } catch (error) {
+      logOnce("qamLifecyclePatchFailure", `QAM surface lifecycle unavailable; open selection remains fail-open. Reason=${String(error)}`);
+      return false;
+    }
+    state.qamLifecyclePatch = { props, originalActivated, originalDeactivated, patchedActivated, patchedDeactivated };
+    logOnce("qamLifecycleResolved", "QAM native active/inactive lifecycle resolved.");
+    return true;
   }
 
   function ensureAddonTabs(owner, React, native) {
@@ -414,7 +456,7 @@
       "stableTabs",
       `QAM stable Addon tabs ensured. Device=${!!descriptors[ADDON_DEVICE_TAB_KEY]} Profile=${!!descriptors[ADDON_PROFILE_TAB_KEY]} LegacyRemoved=${legacyRemoved} DuplicatesRemoved=${duplicatesRemoved}`
     );
-    selectInitialAddonTab(resolveQamSessionOwner(owner), owner, descriptors);
+    state.qamSelectionContext = { descriptors };
     return tabs;
   }
 
@@ -453,6 +495,8 @@
       logOnce("nestedProducerMissing", `Nested tabs producer not found. Visited=${producerSearch.visited} BudgetExhausted=${producerSearch.budgetExhausted}`);
       return false;
     }
+
+    patchQamLifecycle(node);
 
     const nodeType = node.type;
     const typeKind = typeof nodeType;
@@ -1068,6 +1112,15 @@
     state.stateInvalidationSubscribers?.clear();
   }
 
+  function restoreQamLifecyclePatch() {
+    const patch = state.qamLifecyclePatch;
+    if (!patch) return;
+    const { props } = patch;
+    if (props.onFocusNavActivated === patch.patchedActivated) props.onFocusNavActivated = patch.originalActivated;
+    if (props.onFocusNavDeactivated === patch.patchedDeactivated) props.onFocusNavDeactivated = patch.originalDeactivated;
+    state.qamLifecyclePatch = null;
+  }
+
   function install() {
     if (state.installed) {
       log("install() called but already installed; no-op.");
@@ -1078,7 +1131,10 @@
     // script generation that created it. Never reuse it across uninstall/reinstall or upgrades.
     state.addonTabDescriptor = null;
     state.addonTabDescriptors = null;
-    state.initialTabSelectionOwners = new WeakSet();
+    state.qamSurfaceActive = false;
+    state.qamInitialSelectionRequested = false;
+    state.qamSelectionContext = null;
+    state.qamLifecyclePatch = null;
     state.stateInvalidationSubscribers?.clear();
     state.diagnostics = {};
     state.runtimeDiagnostics = {};
@@ -1148,9 +1204,12 @@
 
   function uninstall() {
     retireBridgeConsumers();
+    restoreQamLifecyclePatch();
     state.addonTabDescriptor = null;
     state.addonTabDescriptors = null;
-    state.initialTabSelectionOwners = null;
+    state.qamSurfaceActive = false;
+    state.qamInitialSelectionRequested = false;
+    state.qamSelectionContext = null;
     if (!state.installed) {
       log("uninstall() called but not installed; no-op.");
       return true;
@@ -1173,7 +1232,10 @@
       nestedPatches: null,
       addonTabDescriptor: null,
       addonTabDescriptors: null,
-      initialTabSelectionOwners: null,
+      qamSurfaceActive: false,
+      qamInitialSelectionRequested: false,
+      qamSelectionContext: null,
+      qamLifecyclePatch: null,
       install,
       uninstall,
     });
