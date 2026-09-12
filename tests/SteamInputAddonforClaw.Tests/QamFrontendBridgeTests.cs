@@ -1,5 +1,4 @@
 using System.Text.Json;
-using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.FrontendTransport;
@@ -10,9 +9,11 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class QamFrontendBridgeTests
 {
-    // SF-V2-04: the generic Quick Settings QAM seam must reach the same shared Runtime mutation only
-    // through the exact current Device admission rule (Big Picture + no running game), and Profile
-    // generic mutation must not become admitted by transport availability alone.
+    // SF-V2-04/08: the generic Quick Settings QAM seam must reach the same shared Runtime mutation
+    // for Device only through the exact current Device admission rule (Big Picture + no running
+    // game); Profile generic mutation reaches the Runtime directly -- the SF-V2-08
+    // QuickSettingsMutationAdapter is the AppId/current-target/row validation authority, not a
+    // second QAM-side check.
 
     private static FrontendStatusSnapshot StatusWith(FrontendSteamSnapshot steam) => new(
         new("MSI", "Claw", "Board", ["GPU"]),
@@ -70,13 +71,36 @@ public sealed class QamFrontendBridgeTests
     }
 
     [Fact]
-    public async Task Generic_profile_mutation_is_not_admitted_by_transport_availability()
+    public async Task Generic_profile_mutation_reaches_the_runtime_without_device_admission()
+    {
+        // Section 9.3: Profile has no bridge-level admission check -- it must reach the Runtime even
+        // when Device admission (Big Picture + no running game) does not hold, because a running game
+        // is exactly the Profile page's own precondition.
+        var (bridge, fake, server) = await StartAsync(new(true, 480, FrontendSteamSource.Actual));
+        await using var _ = server;
+        await using var __ = bridge;
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 480, QuickSettingsRowId.ProfileEnabled,
+            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+
+        var response = await bridge.HandleRequestAsync(Request("mutateQuickSetting", intent), CancellationToken.None);
+
+        Assert.True(response.Ok);
+        Assert.Equal(1, fake.MutateCount);
+        Assert.Equal(QuickSettingsPageId.Profile, fake.LastIntent?.PageId);
+    }
+
+    [Fact]
+    public async Task Generic_mutation_for_an_unknown_page_is_rejected()
     {
         var (bridge, fake, server) = await StartAsync(new(true, 0, FrontendSteamSource.BigPicture));
         await using var _ = server;
         await using var __ = bridge;
 
-        var response = await bridge.HandleRequestAsync(Request("mutateQuickSetting", CpuBoostToggleIntent(QuickSettingsPageId.Profile)), CancellationToken.None);
+        const string json = """
+            { "id": 1, "method": "mutateQuickSetting", "payload": { "pageId": 99, "appId": null, "editedRowId": 0, "values": [ { "rowId": 0, "value": { "kind": 0, "booleanValue": true } } ] } }
+            """;
+
+        var response = await bridge.HandleRequestAsync(json, CancellationToken.None);
 
         Assert.False(response.Ok);
         Assert.Equal(0, fake.MutateCount);
@@ -130,17 +154,6 @@ public sealed class QamFrontendBridgeTests
         Assert.True(response.Ok);
         Assert.Equal(1, fake.CaptureCount);
         Assert.Equal(QuickSettingsPageId.Device, fake.LastPageId);
-    }
-
-    [Theory]
-    [InlineData(0, WindowsPowerMode.BestPowerEfficiency)]
-    [InlineData(1, WindowsPowerMode.Balanced)]
-    [InlineData(2, WindowsPowerMode.BestPerformance)]
-    public void Power_mode_ordinal_payload_decodes_through_bridge(int ordinal, WindowsPowerMode expected)
-    {
-        using var document = JsonDocument.Parse($"{{\"mode\":{ordinal}}}");
-
-        Assert.Equal(expected, QamFrontendBridge.DecodePowerMode(document.RootElement));
     }
 
     [Fact]

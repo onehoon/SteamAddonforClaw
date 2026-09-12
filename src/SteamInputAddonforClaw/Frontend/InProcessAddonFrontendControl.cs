@@ -1035,21 +1035,41 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode);
     }
 
-    /// <summary>Shared Quick Settings product seam (Shared Frontend V2, SF-V2-03 section 22/23):
-    /// Device is projected from <see cref="CaptureDeviceQuickSettingsAsync"/>; Profile is not
-    /// implemented yet and fails closed without any capture/scan side effect.</summary>
+    /// <summary>Shared Quick Settings product seam (Shared Frontend V2, SF-V2-03 section 22/23,
+    /// SF-V2-08 section 7): Device is projected from <see cref="CaptureDeviceQuickSettingsAsync"/>;
+    /// Profile is projected from the current active game's <see cref="FrontendGameProfileSnapshot"/>,
+    /// requiring the requested AppId to match the current active game so a stale/wrong-game request
+    /// can never leak a different game's Profile projection.</summary>
     public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        return pageId == QuickSettingsPageId.Device && appId is null
-            ? CaptureDeviceQuickSettingsPageAsync(cancellationToken)
-            : Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, appId));
+        return (pageId, appId) switch
+        {
+            (QuickSettingsPageId.Device, null) => CaptureDeviceQuickSettingsPageAsync(cancellationToken),
+            (QuickSettingsPageId.Profile, > 0) => CaptureProfileQuickSettingsPageAsync(appId.Value, cancellationToken),
+            _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, appId)),
+        };
     }
 
     private async Task<QuickSettingsPageSnapshot> CaptureDeviceQuickSettingsPageAsync(CancellationToken cancellationToken)
     {
         var snapshot = await CaptureDeviceQuickSettingsAsync(cancellationToken).ConfigureAwait(false);
         return QuickSettingsPresentation.BuildDevice(snapshot);
+    }
+
+    /// <summary>Section 7.1-7.3: a Profile page is only ever the current active game's own product --
+    /// reuses <see cref="CaptureActiveGameProfileAsync"/> (preserving its display-name catalog
+    /// enrichment, section 7.2) rather than adding a second scanner/cache, then re-validates its
+    /// AppId against the requested context before projecting.</summary>
+    private async Task<QuickSettingsPageSnapshot> CaptureProfileQuickSettingsPageAsync(uint appId, CancellationToken cancellationToken)
+    {
+        var snapshot = await CaptureActiveGameProfileAsync(cancellationToken).ConfigureAwait(false);
+        if (snapshot.AppId == 0)
+            return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, "No active game.");
+        if (snapshot.AppId != appId)
+            return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, "The requested game is not currently active.");
+
+        return QuickSettingsPresentation.BuildProfile(snapshot);
     }
 
     /// <summary>Shared Quick Settings mutation seam (section 22/24): validates and dispatches onto

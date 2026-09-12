@@ -12,12 +12,12 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>Shared Frontend V2, SF-V2-03 section 22/23: the <see
+/// <summary>Shared Frontend V2, SF-V2-03/SF-V2-08 section 7/22/23: the <see
 /// cref="IAddonFrontendControl.CaptureQuickSettingsPageAsync"/>/<see
 /// cref="IAddonFrontendControl.MutateQuickSettingAsync"/> seam on <see
-/// cref="InProcessAddonFrontendControl"/> must stay read-only for capture, fail closed (with zero
-/// side effects) for the not-yet-implemented Profile page, and preserve the existing shutdown/
-/// cancellation conventions.</summary>
+/// cref="InProcessAddonFrontendControl"/> must stay read-only for capture, project the Profile page
+/// only for the current active game (fail closed for a stale/wrong AppId or no active game, with zero
+/// side effects), and preserve the existing shutdown/cancellation conventions.</summary>
 [Collection("AppLog")]
 public sealed class QuickSettingsInProcessSeamTests : IDisposable
 {
@@ -43,7 +43,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
-    public async Task Capture_profile_page_is_explicitly_unavailable_with_zero_side_effects()
+    public async Task Capture_profile_page_with_no_active_game_is_unavailable_with_zero_side_effects()
     {
         var control = CreateControl(cpuBoostRuntime: null);
 
@@ -53,6 +53,51 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
         Assert.Equal(4000u, page.AppId);
         Assert.Empty(page.Sections);
+    }
+
+    [Fact]
+    public async Task Capture_profile_page_with_a_stale_app_id_is_unavailable_for_the_requested_context()
+    {
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
+        mutations.SetEnabled(555u, true, "Active Game");
+        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 555u);
+
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 999u);
+
+        Assert.False(page.Available);
+        Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
+        Assert.Equal(999u, page.AppId);
+    }
+
+    [Fact]
+    public async Task Capture_profile_page_projects_the_current_active_game_and_persists_nothing()
+    {
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
+        mutations.SetEnabled(555u, true, "Active Game");
+        var contentsBefore = File.ReadAllText(profilesPath);
+        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 555u);
+
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 555u);
+
+        Assert.True(page.Available);
+        Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
+        Assert.Equal(555u, page.AppId);
+        var enabledRow = page.Sections.SelectMany(s => s.Rows).Single(r => r.RowId == QuickSettingsRowId.ProfileEnabled);
+        Assert.True(enabledRow.Value!.BooleanValue);
+        Assert.Equal("Active Game", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+        Assert.Equal(contentsBefore, File.ReadAllText(profilesPath));
+    }
+
+    [Fact]
+    public async Task Capture_profile_page_requesting_app_id_zero_is_unavailable_without_any_capture_attempt()
+    {
+        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: null, actualRunningAppIdSource: () => throw new InvalidOperationException("Must not be consulted for AppId 0."));
+
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 0u);
+
+        Assert.False(page.Available);
     }
 
     [Fact]
@@ -107,7 +152,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         return runtime;
     }
 
-    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime? cpuBoostRuntime)
+    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime? cpuBoostRuntime, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -118,7 +163,9 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
             null,
             new DeveloperTestModeState(),
             cpuBoostRuntime: cpuBoostRuntime,
-            powerModeRuntime: null);
+            powerModeRuntime: null,
+            gameProfileMutations: gameProfileMutations,
+            actualRunningAppIdSource: actualRunningAppIdSource);
     }
 
     public void Dispose()

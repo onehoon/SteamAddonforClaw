@@ -47,8 +47,133 @@ internal static class QuickSettingsPresentation
             BuildPowerModeSection(snapshot.PowerMode),
         ];
 
-        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, AppId: null, Available: true, Message: null, sections, BuildTdpLinkedConstraints(snapshot.Tdp));
+        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, AppId: null, Available: true, Message: null, sections, BuildDeviceTdpLinkedConstraints(snapshot.Tdp));
     }
+
+    /// <summary>Shared Quick Settings Profile page projection (SF-V2-08 section 6): the exact current
+    /// visible QAM Profile product (General/TDP/CPU Boost/optional Power Mode), frozen from the
+    /// pre-migration qam.js policy. Called only for a valid active target -- an unavailable/stale
+    /// Profile context is represented separately via <see cref="QuickSettingsPageSnapshot.Unavailable"/>,
+    /// never fabricated here.</summary>
+    internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot)
+    {
+        var sections = new List<QuickSettingsSection> { BuildProfileGeneralSection(snapshot) };
+        if (snapshot.Limits is not null) sections.Add(BuildProfileTdpSection(snapshot));
+        sections.Add(BuildProfileCpuBoostSection(snapshot));
+        if (snapshot.PowerMode is not null) sections.Add(BuildProfilePowerModeSection(snapshot));
+
+        var linkedConstraints = snapshot.Limits is { } limits ? BuildProfileTdpLinkedConstraints(limits) : [];
+        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, snapshot.AppId, Available: true, Message: null, sections, linkedConstraints);
+    }
+
+    private static QuickSettingsSection BuildProfileGeneralSection(FrontendGameProfileSnapshot snapshot)
+    {
+        var label = string.IsNullOrWhiteSpace(snapshot.DisplayName) ? $"Game {snapshot.AppId}" : snapshot.DisplayName;
+        var row = new QuickSettingsRow(QuickSettingsRowId.ProfileEnabled, "Profile", QuickSettingsControlKind.Toggle,
+            Available: true,
+            Writable: snapshot.PersistenceWritable,
+            Value: QuickSettingsValue.Boolean(snapshot.Enabled),
+            SliderSpec: null,
+            CommitPolicy: QuickSettingsCommitPolicy.Immediate);
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, label, [row]);
+    }
+
+    private static QuickSettingsSection BuildProfileTdpSection(FrontendGameProfileSnapshot snapshot)
+    {
+        var limits = snapshot.Limits!;
+        var writable = snapshot.PersistenceWritable && snapshot.Enabled;
+        var rows = new List<QuickSettingsRow>
+        {
+            new(QuickSettingsRowId.ProfileTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle,
+                Available: true,
+                Writable: writable,
+                Value: QuickSettingsValue.Boolean(snapshot.Tdp.Enabled),
+                SliderSpec: null,
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+        };
+
+        if (snapshot.Tdp.Enabled)
+        {
+            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpAcPl1, "Plugged in · PL1", snapshot.Tdp.Ac.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, writable));
+            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpAcPl2, "Plugged in · PL2", snapshot.Tdp.Ac.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, writable));
+            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpDcPl1, "On battery · PL1", snapshot.Tdp.Dc.Pl1Watts, limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, writable));
+            rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpDcPl2, "On battery · PL2", snapshot.Tdp.Dc.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, writable));
+        }
+
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, null, rows);
+    }
+
+    // Section 6.3: unlike Device, the Profile slider keeps a null/empty suffix for parity with the
+    // pre-migration Steam native slider's plain-numeric-watts presentation.
+    private static QuickSettingsRow BuildProfileTdpSlider(QuickSettingsRowId rowId, string label, int currentWatts, int minimumWatts, int maximumWatts, bool writable) =>
+        new(rowId, label, QuickSettingsControlKind.Slider,
+            Available: true,
+            Writable: writable,
+            Value: QuickSettingsValue.Integer(currentWatts),
+            SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, minimumWatts, maximumWatts, Step: 1, Suffix: null),
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000,
+            CommitGroupId: QuickSettingsCommitGroupId.ProfileTdpConfiguration);
+
+    private static QuickSettingsSection BuildProfileCpuBoostSection(FrontendGameProfileSnapshot snapshot)
+    {
+        var writable = snapshot.PersistenceWritable && snapshot.Enabled;
+        var rows = new List<QuickSettingsRow>
+        {
+            new(QuickSettingsRowId.ProfileCpuBoostEnabled, "CPU Boost", QuickSettingsControlKind.Toggle,
+                Available: true,
+                Writable: writable,
+                Value: QuickSettingsValue.Boolean(snapshot.CpuBoost.Enabled),
+                SliderSpec: null,
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+        };
+
+        if (snapshot.CpuBoost.Enabled)
+        {
+            rows.Add(BuildProfileCpuBoostSlider(QuickSettingsRowId.ProfileCpuBoostAc, "Plugged in", snapshot.CpuBoost.Ac, writable));
+            rows.Add(BuildProfileCpuBoostSlider(QuickSettingsRowId.ProfileCpuBoostDc, "On battery", snapshot.CpuBoost.Dc, writable));
+        }
+
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, null, rows);
+    }
+
+    private static QuickSettingsRow BuildProfileCpuBoostSlider(QuickSettingsRowId rowId, string label, CpuBoostMode mode, bool writable) =>
+        new(rowId, label, QuickSettingsControlKind.Slider,
+            Available: true,
+            Writable: writable,
+            Value: QuickSettingsValue.Integer((int)mode),
+            SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: CpuBoostDiscreteOptions),
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
+
+    private static QuickSettingsSection BuildProfilePowerModeSection(FrontendGameProfileSnapshot snapshot)
+    {
+        var powerMode = snapshot.PowerMode!;
+        var writable = snapshot.PersistenceWritable && snapshot.Enabled;
+        var rows = new List<QuickSettingsRow>
+        {
+            new(QuickSettingsRowId.ProfilePowerModeEnabled, "Windows Power Mode", QuickSettingsControlKind.Toggle,
+                Available: true,
+                Writable: writable,
+                Value: QuickSettingsValue.Boolean(powerMode.Enabled),
+                SliderSpec: null,
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+        };
+
+        if (powerMode.Enabled)
+        {
+            rows.Add(BuildProfilePowerModeSlider(QuickSettingsRowId.ProfilePowerModeAc, "Plugged in", powerMode.Ac, writable));
+            rows.Add(BuildProfilePowerModeSlider(QuickSettingsRowId.ProfilePowerModeDc, "On battery", powerMode.Dc, writable));
+        }
+
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfilePowerMode, null, rows);
+    }
+
+    private static QuickSettingsRow BuildProfilePowerModeSlider(QuickSettingsRowId rowId, string label, WindowsPowerMode mode, bool writable) =>
+        new(rowId, label, QuickSettingsControlKind.Slider,
+            Available: true,
+            Writable: writable,
+            Value: QuickSettingsValue.Integer((int)mode),
+            SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: PowerModeDiscreteOptions),
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
 
     private static QuickSettingsSection BuildTdpSection(FrontendTdpSnapshot tdp)
     {
@@ -84,24 +209,39 @@ internal static class QuickSettingsPresentation
             CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000,
             CommitGroupId: QuickSettingsCommitGroupId.DeviceTdpConfiguration);
 
-    /// <summary>Known proven PL1/PL2 gap policy (work order section 13.1). Any other limit shape emits
-    /// no linked constraint -- the existing typed TDP Runtime remains the final validity authority.</summary>
-    private static IReadOnlyList<QuickSettingsLinkedSliderConstraint> BuildTdpLinkedConstraints(FrontendTdpSnapshot tdp)
+    /// <summary>Known proven PL1/PL2 gap policy (work order section 13.1/SF-V2-08 section 6.4). Any
+    /// other limit shape emits no linked constraint -- the existing typed TDP Runtime remains the
+    /// final validity authority. Shared between Device and Profile so the tuple switch is not
+    /// duplicated (SF-V2-08 section 6.4).</summary>
+    private static int GetKnownTdpGap(FrontendTdpLimits limits) => (limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts) switch
+    {
+        (8, 30, 8, 37) => 1,
+        (8, 35, 8, 45) => 2,
+        _ => 0,
+    };
+
+    private static IReadOnlyList<QuickSettingsLinkedSliderConstraint> BuildDeviceTdpLinkedConstraints(FrontendTdpSnapshot tdp)
     {
         if (tdp.Limits is not { } limits) return [];
-
-        var gap = (limits.Pl1MinimumWatts, limits.Pl1MaximumWatts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts) switch
-        {
-            (8, 30, 8, 37) => 1,
-            (8, 35, 8, 45) => 2,
-            _ => 0,
-        };
+        var gap = GetKnownTdpGap(limits);
         if (gap <= 0) return [];
 
         return
         [
             new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, gap),
             new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsRowId.DeviceTdpDcPl2, gap),
+        ];
+    }
+
+    private static IReadOnlyList<QuickSettingsLinkedSliderConstraint> BuildProfileTdpLinkedConstraints(FrontendTdpLimits limits)
+    {
+        var gap = GetKnownTdpGap(limits);
+        if (gap <= 0) return [];
+
+        return
+        [
+            new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, gap),
+            new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2, gap),
         ];
     }
 
