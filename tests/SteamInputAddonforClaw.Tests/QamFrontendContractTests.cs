@@ -136,7 +136,7 @@ public sealed class QamFrontendContractTests
     [Fact]
     public void Qam_tab_descriptor_is_not_reused_across_install_generations()
     {
-        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js").ReplaceLineEndings("\n");
 
         var installStart = source.IndexOf("function install()", StringComparison.Ordinal);
         var installReset = source.IndexOf("state.addonTabDescriptor = null;", installStart, StringComparison.Ordinal);
