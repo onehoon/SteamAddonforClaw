@@ -277,6 +277,194 @@ public sealed class QuickSettingsPresentationTests
         Assert.False(FindRow(page, QuickSettingsRowId.DevicePowerModeEnabled).Writable);
     }
 
+    // ---- SF-V2-08: QuickSettingsPresentation.BuildProfile -----------------------------------------
+
+    [Fact]
+    public void Exact_profile_section_and_row_order_when_all_enabled()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+
+        Assert.Collection(page.Sections,
+            s => Assert.Equal(QuickSettingsSectionId.ProfileGeneral, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId));
+
+        Assert.Equal([QuickSettingsRowId.ProfileEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2],
+            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc],
+            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileCpuBoost).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfilePowerModeEnabled, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc],
+            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode).Rows.Select(r => r.RowId).ToArray());
+
+        Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
+        Assert.Equal(4200u, page.AppId);
+        Assert.True(page.Available);
+    }
+
+    [Fact]
+    public void Profile_header_label_falls_back_to_game_app_id_when_display_name_is_blank()
+    {
+        var withName = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+        Assert.Equal("Claw Game", withName.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+
+        var blank = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { DisplayName = "  " });
+        Assert.Equal("Game 4200", blank.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+    }
+
+    [Fact]
+    public void Profile_disabled_parent_makes_subfeature_rows_non_writable_but_keeps_them_visible()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { Enabled = false });
+
+        Assert.True(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileTdpEnabled).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileCpuBoostEnabled).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfilePowerModeEnabled).Writable);
+        // Saved child feature toggles remain visible per their own saved enable state.
+        Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2],
+            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).ToArray());
+        foreach (var rowId in new[] { QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc})
+            Assert.False(FindRow(page, rowId).Writable);
+    }
+
+    [Fact]
+    public void Profile_feature_disabled_omits_its_child_rows()
+    {
+        var snapshot = EnabledProfileSnapshot() with
+        {
+            Tdp = EnabledProfileSnapshot().Tdp with { Enabled = false },
+            CpuBoost = EnabledProfileSnapshot().CpuBoost with { Enabled = false },
+            PowerMode = EnabledProfileSnapshot().PowerMode! with { Enabled = false },
+        };
+
+        var page = QuickSettingsPresentation.BuildProfile(snapshot);
+
+        Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfileCpuBoostEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileCpuBoost).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfilePowerModeEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode).Rows.Select(r => r.RowId).ToArray());
+    }
+
+    [Fact]
+    public void Profile_with_no_limits_omits_the_tdp_section_entirely()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { Limits = null });
+
+        Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfileTdp);
+        Assert.Empty(page.LinkedSliderConstraints);
+    }
+
+    [Fact]
+    public void Profile_with_no_power_mode_capability_omits_the_power_mode_section_entirely()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { PowerMode = null });
+
+        Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode);
+    }
+
+    [Fact]
+    public void Profile_tdp_uses_true_limits_and_no_visible_unit_suffix()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+
+        var pl1 = FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!;
+        var pl2 = FindRow(page, QuickSettingsRowId.ProfileTdpAcPl2).SliderSpec!;
+        Assert.Equal((GapOneLimits.Pl1MinimumWatts, GapOneLimits.Pl1MaximumWatts, 1), (pl1.Minimum, pl1.Maximum, pl1.Step));
+        Assert.Equal((GapOneLimits.Pl2MinimumWatts, GapOneLimits.Pl2MaximumWatts, 1), (pl2.Minimum, pl2.Maximum, pl2.Step));
+        Assert.Null(pl1.Suffix);
+    }
+
+    [Theory]
+    [MemberData(nameof(GapCases))]
+    public void Profile_known_tdp_gap_policies_are_emitted(FrontendTdpLimits limits, int expectedGap)
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { Limits = limits });
+
+        if (expectedGap <= 0)
+        {
+            Assert.Empty(page.LinkedSliderConstraints);
+            return;
+        }
+
+        Assert.Equal(2, page.LinkedSliderConstraints.Count);
+        Assert.Contains(page.LinkedSliderConstraints, c => c.LowerRowId == QuickSettingsRowId.ProfileTdpAcPl1 && c.UpperRowId == QuickSettingsRowId.ProfileTdpAcPl2 && c.MinimumGap == expectedGap);
+        Assert.Contains(page.LinkedSliderConstraints, c => c.LowerRowId == QuickSettingsRowId.ProfileTdpDcPl1 && c.UpperRowId == QuickSettingsRowId.ProfileTdpDcPl2 && c.MinimumGap == expectedGap);
+    }
+
+    [Fact]
+    public void Profile_cpu_boost_discrete_options_are_exact_and_ordered()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+        var acRow = FindRow(page, QuickSettingsRowId.ProfileCpuBoostAc);
+
+        var expected = new (int, string)[]
+        {
+            (0, "Disabled"), (1, "Enabled"), (2, "Aggressive"), (3, "Efficient Enabled"),
+            (4, "Efficient Aggressive"), (5, "Aggressive At Guaranteed"), (6, "Efficient Aggressive At Guaranteed"),
+        };
+        Assert.Equal(expected, acRow.SliderSpec!.Options!.Select(o => (o.Value, o.Label)).ToArray());
+        Assert.Equal((int)CpuBoostMode.Aggressive, acRow.Value!.IntegerValue);
+    }
+
+    [Fact]
+    public void Profile_power_mode_discrete_options_are_exact_and_ordered()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+        var acRow = FindRow(page, QuickSettingsRowId.ProfilePowerModeAc);
+
+        var expected = new (int, string)[] { (0, "Best power efficiency"), (1, "Balanced"), (2, "Best performance") };
+        Assert.Equal(expected, acRow.SliderSpec!.Options!.Select(o => (o.Value, o.Label)).ToArray());
+        Assert.Equal((int)WindowsPowerMode.BestPerformance, acRow.Value!.IntegerValue);
+    }
+
+    [Fact]
+    public void Profile_toggles_are_immediate_and_sliders_are_two_second_trailing_debounce()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+
+        foreach (var toggleId in new[] { QuickSettingsRowId.ProfileEnabled, QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsRowId.ProfilePowerModeEnabled })
+            Assert.Equal(QuickSettingsCommitPolicy.Immediate, FindRow(page, toggleId).CommitPolicy);
+
+        foreach (var sliderId in new[] { QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc })
+            Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce2000, FindRow(page, sliderId).CommitPolicy);
+    }
+
+    [Fact]
+    public void Profile_tdp_commit_group_covers_exactly_the_four_numeric_rows()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+
+        foreach (var rowId in new[] { QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2 })
+            Assert.Equal(QuickSettingsCommitGroupId.ProfileTdpConfiguration, FindRow(page, rowId).CommitGroupId);
+
+        Assert.Null(FindRow(page, QuickSettingsRowId.ProfileTdpEnabled).CommitGroupId);
+        foreach (var rowId in new[] { QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc })
+            Assert.Null(FindRow(page, rowId).CommitGroupId);
+    }
+
+    [Fact]
+    public void Profile_page_never_exposes_fps_or_resolution_rows()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+
+        var allLabels = page.Sections.SelectMany(s => s.Rows).Select(r => r.Label).ToArray();
+        Assert.DoesNotContain(allLabels, l => l.Contains("FPS", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(allLabels, l => l.Contains("Resolution", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static FrontendGameProfileSnapshot EnabledProfileSnapshot() => new(
+        AppId: 4200,
+        DisplayName: "Claw Game",
+        Exists: true,
+        Enabled: true,
+        CpuBoost: new FrontendGameCpuBoostConfiguration(true, CpuBoostMode.Aggressive, CpuBoostMode.Disabled),
+        Tdp: new FrontendGameTdpConfiguration(true, new FrontendTdpPowerPair(20, 25), new FrontendTdpPowerPair(18, 22)),
+        PersistenceWritable: true,
+        Limits: GapOneLimits,
+        Resolution: null,
+        PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.BestPerformance, WindowsPowerMode.Balanced));
+
     private static QuickSettingsRow FindRow(QuickSettingsPageSnapshot page, QuickSettingsRowId rowId) =>
         page.Sections.SelectMany(s => s.Rows).Single(r => r.RowId == rowId);
 
