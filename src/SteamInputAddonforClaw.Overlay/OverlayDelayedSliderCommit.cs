@@ -1,48 +1,44 @@
+using SteamInputAddonforClaw.Contracts.Frontend;
+
 namespace SteamInputAddonforClaw.Overlay;
 
-// OQ5-UI-07: the authoritative settlement a delayed slider commit produces. The delayed helper
-// never becomes feature authority -- a later feature binding turns a Runtime result/readback into
-// this and, on success, renders AuthoritativeValue back through OverlaySliderRow.ApplyState(...).
-internal sealed record OverlaySliderCommitSettlement(
-    bool Succeeded,
-    double? AuthoritativeValue,
-    string? FailureMessage);
+// SF-V2-07 section 32: a valid Runtime settlement (including a normal typed feature failure) is
+// Result != null; a thrown operation/transport-side failure is Result == null with a narrow
+// message. Never a synthesized QuickSettingsMutationResult standing in for the latter.
+internal sealed record QuickSettingsCommitSettlement(QuickSettingsMutationResult? Result, string? OperationFailureMessage);
 
-// OQ5-UI-07: QAM-equivalent trailing debounce for one logical slider setting. One instance owns at
-// most one current draft. It is NOT a global scheduler, a mutation-key dictionary, or a feature
-// authority -- a future feature binding creates one instance per slider it binds. The OQ5-UI-06
-// preview stays immediate; this only paces the request that follows the preview.
+// OQ5-UI-07 mechanics, refined for the real shared Quick Settings payload (SF-V2-07 section 21):
+// QAM-equivalent trailing debounce for one logical slider/group setting. One instance owns at most
+// one current draft and is NOT a global scheduler, a mutation-key dictionary, or a feature
+// authority -- OverlayQuickSettingsPageBinding creates one instance per pending row/group key. The
+// OQ5-UI-06 preview stays immediate; this only paces the request that follows the preview. The
+// delay is supplied by the caller per Schedule() call (from the row's shared CommitPolicy) rather
+// than being an Overlay-owned production constant.
 internal sealed class OverlayDelayedSliderCommit : IDisposable
 {
-    // Matches QAM_SLIDER_COMMIT_DELAY_MS in src/SteamInputAddonforClaw.QamHost/Frontend/qam.js.
-    internal static readonly TimeSpan ProductionDelay = TimeSpan.FromMilliseconds(2000);
-
-    private readonly Func<double, Task<OverlaySliderCommitSettlement>> _commitAsync;
+    private readonly Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> _commitAsync;
     // Raised with the generation that produced this settlement, after the background stale check
     // passes. The consumer marshals to its UI thread and MUST re-check IsCurrentGeneration there
     // before applying, because a newer Schedule() (or a newer edit already queued ahead of the
     // marshalled callback) can make the settlement stale between here and the actual apply.
-    private readonly Action<int, OverlaySliderCommitSettlement> _onCurrentSettlement;
-    private readonly TimeSpan _delay;
+    private readonly Action<int, QuickSettingsCommitSettlement> _onCurrentSettlement;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly object _sync = new();
 
     private int _generation;
-    private double _pendingValue;
+    private QuickSettingsMutationIntent? _pendingIntent;
     private bool _hasPendingDraft;
     private bool _commitInFlight;
     private bool _disposed;
     private CancellationTokenSource? _scheduleCts;
 
     internal OverlayDelayedSliderCommit(
-        Func<double, Task<OverlaySliderCommitSettlement>> commitAsync,
-        Action<int, OverlaySliderCommitSettlement> onCurrentSettlement,
-        TimeSpan delay,
+        Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> commitAsync,
+        Action<int, QuickSettingsCommitSettlement> onCurrentSettlement,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
         _commitAsync = commitAsync;
         _onCurrentSettlement = onCurrentSettlement;
-        _delay = delay;
         _delayAsync = delayAsync ?? Task.Delay;
     }
 
@@ -57,26 +53,27 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             return !_disposed && generation == _generation;
     }
 
-    // The latest desired value while a timer or current commit is still pending. This is the seam a
-    // future invalidation handler uses to keep the pending draft visible instead of snapping back.
-    internal bool TryGetPendingValue(out double value)
+    // The latest desired intent while a timer or current commit is still pending. This is the seam
+    // an invalidation handler uses to keep the pending draft visible instead of snapping back.
+    internal bool TryGetPendingIntent(out QuickSettingsMutationIntent intent)
     {
         lock (_sync)
         {
-            value = _hasPendingDraft ? _pendingValue : default;
+            intent = _hasPendingDraft ? _pendingIntent! : null!;
             return _hasPendingDraft;
         }
     }
 
-    // A new emitted desired value: replace any unsubmitted value, restart the trailing window.
-    internal void Schedule(double desiredValue)
+    // A new emitted desired intent: replace any unsubmitted intent, restart the trailing window
+    // using the caller-supplied delay (the row/group's current shared CommitPolicy).
+    internal void Schedule(QuickSettingsMutationIntent intent, TimeSpan delay)
     {
         CancellationToken token;
         int generation;
         lock (_sync)
         {
             if (_disposed) return;
-            _pendingValue = desiredValue;
+            _pendingIntent = intent;
             _hasPendingDraft = true;
             // A fresh draft: any commit still running belongs to an older generation and is now
             // stale, so this new draft is once again "not submitted".
@@ -88,7 +85,7 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             token = _scheduleCts.Token;
         }
 
-        _ = RunAsync(desiredValue, generation, token);
+        _ = RunAsync(intent, generation, delay, token);
     }
 
     // Cancel a draft that is still waiting out the trailing window (e.g. Overlay begins hiding).
@@ -104,6 +101,7 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
 
             _generation++;
             _hasPendingDraft = false;
+            _pendingIntent = null;
             _scheduleCts?.Cancel();
             _scheduleCts?.Dispose();
             _scheduleCts = null;
@@ -119,17 +117,18 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             _generation++;
             _hasPendingDraft = false;
             _commitInFlight = false;
+            _pendingIntent = null;
             _scheduleCts?.Cancel();
             _scheduleCts?.Dispose();
             _scheduleCts = null;
         }
     }
 
-    private async Task RunAsync(double value, int generation, CancellationToken token)
+    private async Task RunAsync(QuickSettingsMutationIntent intent, int generation, TimeSpan delay, CancellationToken token)
     {
         try
         {
-            await _delayAsync(_delay, token).ConfigureAwait(false);
+            await _delayAsync(delay, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -143,14 +142,16 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             _commitInFlight = true;
         }
 
-        OverlaySliderCommitSettlement settlement;
+        QuickSettingsCommitSettlement settlement;
         try
         {
-            settlement = await _commitAsync(value).ConfigureAwait(false);
+            var result = await _commitAsync(intent).ConfigureAwait(false);
+            settlement = new QuickSettingsCommitSettlement(result, null);
         }
         catch (Exception exception)
         {
-            settlement = new OverlaySliderCommitSettlement(false, null, exception.Message);
+            // Operation/transport failure (section 32): never a synthesized product Result.
+            settlement = new QuickSettingsCommitSettlement(null, exception.Message);
         }
 
         lock (_sync)
@@ -161,6 +162,7 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             if (_disposed || generation != _generation) return;
             _commitInFlight = false;
             _hasPendingDraft = false;
+            _pendingIntent = null;
         }
 
         // Not under _sync: the consumer marshals to its UI thread and re-checks IsCurrentGeneration
