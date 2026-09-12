@@ -34,6 +34,10 @@ internal static class WindowInterop
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoSendChanging = 0x0400;
     private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpShowWindow = 0x0040;
+    private const uint SwpHideWindow = 0x0080;
     private const uint SwpFrameChanged = 0x0020;
     private const uint WmNcCalcSize = 0x0083;
     private const uint WmMouseActivate = 0x0021;
@@ -49,6 +53,7 @@ internal static class WindowInterop
     private const nint MaNoActivate = 3;
     private const uint WsExNoActivate = 0x08000000;
     private const uint WsExToolWindow = 0x00000080;
+    private const long WsExTopmost = 0x00000008L;
     private static readonly SubclassProc OverlayWindowProc = HandleOverlayWindowMessage;
     private static readonly LowLevelMouseProc OutsideClickHook = HandleLowLevelMouseMessage;
     private static nint _subclassedHwnd;
@@ -174,6 +179,7 @@ internal static class WindowInterop
             presenter.IsResizable = false;
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
+            presenter.IsAlwaysOnTop = true;
         }
 
         if (!SetWindowPos(hwnd, HwndTopmost, rect.X, rect.Y, rect.Width, rect.Height, SwpNoActivate | SwpNoSendChanging | SwpFrameChanged))
@@ -197,23 +203,54 @@ internal static class WindowInterop
     internal static void ShowWithoutActivation(OverlayWindow window)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
-        if (!SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0, SwpNoActivate | SwpNoSendChanging | 0x0001 | 0x0002 | 0x0040))
+        if (!SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0,
+                SwpNoActivate | SwpNoSendChanging | SwpNoSize | SwpNoMove | SwpShowWindow))
         {
             var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not show the Overlay window.");
             OverlayLog.Error("Window", "Overlay show operation failed.", exception, ("Operation", "SetWindowPos.Show"), ("OverlayHwnd", hwnd));
             throw exception;
         }
+
+        LogTopmostStateAfterShow(hwnd);
     }
 
     internal static void Hide(OverlayWindow window)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
-        if (!SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SwpNoActivate | SwpNoSendChanging | 0x0001 | 0x0002 | 0x0080))
+        if (!SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
+                SwpNoActivate | SwpNoSendChanging | SwpNoZOrder | SwpNoSize | SwpNoMove | SwpHideWindow))
         {
             var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not hide the Overlay window.");
             OverlayLog.Error("Window", "Overlay hide operation failed.", exception, ("Operation", "SetWindowPos.Hide"), ("OverlayHwnd", hwnd));
             throw exception;
         }
+    }
+
+    private static void LogTopmostStateAfterShow(nint hwnd)
+    {
+        var topmostStyle = HasTopmostStyle(hwnd);
+        var foreground = GetForegroundWindow();
+        var fields = new (string Key, object? Value)[]
+        {
+            ("OverlayHwnd", hwnd),
+            ("TopmostStyle", topmostStyle),
+            ("ForegroundHwnd", foreground),
+            ("IsOverlayForeground", foreground == hwnd)
+        };
+
+        if (topmostStyle)
+        {
+            OverlayLog.Debug("Window", "Overlay topmost state verified.", fields);
+            return;
+        }
+
+        OverlayLog.Warn("Window", "Overlay topmost style is missing after a successful Show.", null, fields);
+    }
+
+    private static bool HasTopmostStyle(nint hwnd)
+    {
+        var exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
+        return (exStyle & WsExTopmost) != 0;
     }
 
     internal static void ArmOutsideClickDismissal(OverlayWindow window, Action<OverlayOutsideClick> callback)
