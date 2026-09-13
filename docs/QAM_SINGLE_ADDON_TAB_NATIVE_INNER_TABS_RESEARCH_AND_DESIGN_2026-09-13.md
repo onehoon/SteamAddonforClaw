@@ -1208,3 +1208,431 @@ Instead:
 6. delete the obsolete PR #522 visibility lifecycle state once the replacement seam is hardware-proven.
 
 This yields the smallest architecture consistent with the desired UX and the project's Full1902 / anti-overengineering policy.
+
+---
+
+## 24. Supplemental research — can Steam native QAM replace the Addon-owned Overlay on Windows Desktop?
+
+> **Status:** Promising external evidence, but **not yet hardware-proven for the required no-game / no-BPM Windows Desktop state**.  
+> **Relationship to sections 13/20/23:** This is an additional product/architecture question. It does not invalidate the existing conservative QAM-selection conclusions above.
+
+A broader question emerged while investigating direct QAM opening:
+
+> If Steam is running in normal Windows Desktop mode, with no Steam game and no Big Picture session, can the Addon directly surface Steam's native QAM and use it as the Quick Settings renderer?
+
+If the answer is yes, the separate Addon-owned WinUI Overlay may be unnecessary for the common Steam-running product path. The existing shared Device/Profile frontend authority could remain unchanged while Steam QAM becomes the single handheld Quick Settings presentation.
+
+This possibility should be tested before investing further in Overlay-specific presentation work, but it must not be treated as proven from API shape alone.
+
+### 24.1 New external evidence: generic QAM opening is not structurally tied to a running Steam game
+
+The current `toonymak1993/tools-for-steam` implementation contains two meaningfully different Steam paths.
+
+Its generic direct QAM opener, `TryOpenQuickAccessMenuAsync`, evaluates an `OpenQuickAccessMenu` / `ShowQuickAccessMenu` style operation across Steam CEF surfaces. Candidate targets include:
+
+```text
+SharedJSContext
+Big Picture / GamepadUI main target
+MainMenu / Menu
+QuickAccess
+```
+
+and candidate runtime objects include conceptually:
+
+```text
+window.GamepadUI
+window.GamepadUI.Router
+window.GamepadUI.NavigationManager
+window.SteamUIStore
+window.SteamUIStore.MenuStore
+window.SteamUIStore.SideMenuStore
+window.SteamClient.UI
+window.SteamClient.Overlay
+window.SteamClient.Input
+window.SteamClient.System
+window.SteamClient
+```
+
+Importantly, this generic direct opener does **not** first require a running Steam AppId.
+
+The same project has a separate in-game overlay path, `TryOpenInGameOverlayAsync`, which explicitly resolves:
+
+```text
+MainRunningAppID / running app
+-> overlay instance
+-> gameid
+-> SteamClient.Overlay.SetOverlayState(...)
+-> OnQuickAccessButtonPressed()
+   or overlayInstance.MenuStore.OpenQuickAccessMenu()
+```
+
+and fails when no running AppId / game id can be resolved.
+
+That separation is useful evidence:
+
+```text
+generic Steam QAM request
+!=
+in-game overlay-instance QAM request
+```
+
+Therefore the native QAM request operation itself is not obviously coupled to an active Steam game.
+
+This still does **not** prove that Windows Desktop idle Steam owns or will materialize a visible QAM surface. It only removes one earlier assumption: a running game is not necessarily required by the direct opener's API path.
+
+### 24.2 Stronger evidence: QAM can be surfaced without an injected in-game Steam overlay renderer
+
+`tools-for-steam` also has `ExternalGameQuickAccessService`.
+
+Its documented purpose is to open Steam's real Big Picture Quick Access surface in front of a foreground game whose process has **no injected Steam overlay renderer**.
+
+The flow is conceptually:
+
+```text
+foreground external game
+-> verify Steam overlay renderer is missing
+-> focus Steam window
+-> TryOpenQuickAccessMenuAsync()
+-> fallback to Ctrl+2 if needed
+-> observe QuickAccess visibility
+-> restore the original game window when QAM closes
+```
+
+This is stronger evidence than the direct method signature alone because it demonstrates an intended QAM path outside the normal injected in-game overlay renderer.
+
+However, it is still not the exact product case required here:
+
+```text
+required Addon question:
+Steam running
++ Windows Desktop foreground
++ no Steam game
++ no BPM
++ no existing in-game overlay
+-> can QAM appear by itself?
+```
+
+`ExternalGameQuickAccessService` still requires a foreground game target, and its own description calls the presented surface the "real Big Picture Quick Access surface". It therefore may depend on a GamepadUI/Big-Picture surface that already exists or can be activated as part of that flow.
+
+So the correct conclusion is:
+
+```text
+QAM outside injected in-game overlay = supported by external evidence
+pure idle Windows Desktop QAM       = still unproven
+```
+
+### 24.3 Current Addon code cannot answer the desktop-idle question yet because QamHost is intentionally stopped there
+
+The current project already has a product/lifetime gate before the Steam behavior can even be tested.
+
+`QamHostProcessController` currently computes desired QamHost lifetime as:
+
+```text
+Big Picture active
+OR
+actual Steam game active
+```
+
+Conceptually:
+
+```csharp
+desired = _bigPictureActive || _steamGameActive;
+```
+
+Therefore:
+
+```text
+Steam running normally on Windows Desktop
++ no game
++ no BPM
+-> QamHost not desired
+-> current Addon never attempts the direct desktop QAM path
+```
+
+The README is consistent with that current boundary: QAM support is documented for Big Picture sessions and Desktop Steam games that receive Steam's GamepadUI in-game overlay.
+
+This means a failed current-product desktop test would not by itself prove Steam cannot do it. The existing QamHost lifetime prevents the experiment.
+
+For the PoC, temporarily/manual-start QamHost or use a narrow diagnostic lifetime override. Do **not** broaden the production lifetime first and then infer success from the resulting behavior.
+
+### 24.4 Required desktop/no-game/no-BPM hardware PoC
+
+Run this independently from the existing game/BPM QAM acceptance tests.
+
+#### Case I — Steam Desktop idle, no game, no BPM
+
+Preconditions:
+
+```text
+Steam client running normally
+Big Picture not active
+no Steam game / Non-Steam shortcut running
+current controller presentation remains Xbox360
+QAM closed
+```
+
+Diagnostic steps:
+
+```text
+1. Record Steam CDP targets before the request.
+2. Start QamHost only for the diagnostic if the normal lifetime gate keeps it stopped.
+3. Resolve SharedJSContext and any existing GamepadUI/MenuStore candidates.
+4. Invoke the bounded direct Quick Access operation once.
+5. Record:
+   - return/result
+   - targets before/after
+   - whether a new QuickAccess/GamepadUI target appears
+   - foreground/focus result
+   - whether the full Big Picture main UI appears
+6. If QAM appears, verify Addon descriptor injection and current shared Device controls.
+7. Close and reopen QAM and verify native focus/toggle behavior.
+```
+
+The PoC must not temporarily switch the controller to SteamDeck merely to make the test pass. The first question is whether native QAM can be a presentation-only desktop surface while the supported Full1902 controller authority remains unchanged.
+
+#### PASS
+
+Treat desktop native QAM as viable only if all of the following are true:
+
+```text
+- QAM appears while Steam remains in normal Desktop mode;
+- full Big Picture main UI does not take over the desktop;
+- no Steam game is required;
+- Addon descriptor/content can be injected after the surface materializes;
+- current Xbox360 presentation can navigate/operate the QAM acceptably;
+- close/reopen/focus behavior is native and predictable;
+- no PID1901/PID1902 or virtual-presentation transition is required;
+- Steam desktop/client state is restored cleanly after QAM closes.
+```
+
+If these conditions hold, the Addon has a credible path to use Steam native QAM as its Windows Desktop Quick Settings renderer.
+
+#### PARTIAL — not enough to replace the Overlay
+
+Do **not** count the PoC as successful if QAM only becomes usable after any of these:
+
+```text
+- forcing Steam into full Big Picture / Gamepad UI mode;
+- showing the Big Picture main UI behind or before QAM;
+- switching Xbox360 -> SteamDeck solely to obtain a system-button pulse;
+- requiring a dummy/running Steam AppId;
+- relying on repeated focus tricks or retries.
+```
+
+In particular, a production design such as:
+
+```text
+SetUIMode(Gamepad)
+-> launch/show Big Picture
+-> hide its main window somehow
+-> expose only QAM
+```
+
+would replace a simple dedicated Overlay with a more fragile Steam lifecycle workaround. Do not choose that merely to avoid maintaining Overlay XAML.
+
+#### FAIL
+
+If the direct operation is accepted by the CEF context but no independent visible QAM can be materialized without a game/BPM surface, keep the current product split:
+
+```text
+Steam game / BPM
+-> Steam native QAM
+
+Windows Desktop / unsupported Steam surface
+-> Addon-owned Overlay
+```
+
+Do not create another speculative QAM lifecycle manager to force the unsupported state.
+
+### 24.5 Product dependency question: Steam running vs true standalone Quick Settings
+
+Even a full Case I PASS does not automatically mean the Overlay should be deleted.
+
+Steam native QAM has an unavoidable dependency:
+
+```text
+Steam client must be running and sufficiently healthy to provide GamepadUI/QAM.
+```
+
+The Addon-owned Overlay architecture was designed to work over:
+
+```text
+Game / Windows Desktop
+```
+
+without depending on Steam GamepadUI as its renderer.
+
+Therefore the product must explicitly choose one of these contracts:
+
+```text
+Contract A — Steam-running Quick Settings is sufficient
+-> native desktop QAM may replace the Addon Overlay
+
+Contract B — Quick Settings must still work when Steam is not running / unavailable
+-> Steam QAM cannot be the only renderer
+-> keep an Addon-owned fallback surface or accept that Quick Settings is unavailable
+```
+
+Because this application is Steam Addon for Claw, Contract A may be completely reasonable, but it should be an explicit product decision rather than an accidental consequence of removing the Overlay.
+
+Do not preserve two full-featured renderers indefinitely merely because both are technically possible. If Steam-running QAM becomes the product contract, prefer one primary renderer and delete redundant presentation code after acceptance.
+
+### 24.6 Architecture consequence if desktop native QAM is proven
+
+If Case I passes and the product accepts Steam-running Quick Settings, the preferred simplified architecture becomes:
+
+```text
+Windows Desktop + Steam running
+BPM
+Steam game
+        │
+        └-> QamHost / Steam native QAM
+              └-> one Addon top-level tab
+                    └-> native inner Device / Profile Tabs
+```
+
+The shared frontend/product authority remains unchanged.
+
+The main architectural change is QamHost lifetime, not controller ownership.
+
+A future implementation should consider the smallest lifetime rule, for example:
+
+```text
+on-demand QamHost start for an explicit QAM request
+```
+
+or, if justified by measured cost and simpler behavior:
+
+```text
+QamHost available while Steam is running
+```
+
+Do not decide between those until the PoC proves the desktop surface and actual startup/show latency is measured.
+
+Critically, desktop QAM must **not** become a reason to change the virtual presentation policy:
+
+```text
+no game / no BPM
+-> remain Xbox360 if that is the normal presentation policy
+```
+
+If an explicit OEM1/QAM request is needed while Xbox360 is active, prefer a narrow Runtime -> existing `.Qam` transport -> QamHost direct-open operation rather than temporarily changing to SteamDeck only to synthesize a Quick Access system-button pulse.
+
+### 24.7 Lifecycle/failure rules if QamHost lifetime is later broadened
+
+Any later production change must preserve the existing Full1902 boundary:
+
+```text
+QamHost crash/exit
+Steam exit
+Steam CEF reload
+QAM close
+Windows suspend/resume
+```
+
+must remain frontend failures only.
+
+They must not:
+
+- release PID1902 ownership;
+- tear down VIIPER because a frontend vanished;
+- alter HidHide authority;
+- switch Xbox360/SteamDeck presentation by themselves;
+- reset Device/Profile feature authority.
+
+If Steam exits while a desktop QAM is open:
+
+```text
+QAM disappears / QamHost retires
+-> Runtime continues
+-> controller authority continues
+-> main UI remains available independently
+```
+
+No additional controller state machine is justified for this presentation experiment.
+
+### 24.8 Recommended staging change
+
+Before spending additional implementation effort polishing the separate Addon Overlay as the long-term Windows Desktop Quick Settings surface, add one bounded hardware PoC:
+
+```text
+PoC C — Desktop native QAM viability
+
+Steam running
+no game
+no BPM
+Xbox360 presentation unchanged
+-> direct native QAM request
+-> can QAM appear alone and host the Addon tab?
+```
+
+Decision:
+
+```text
+PoC C PASS
++ Steam-running dependency accepted
+-> revisit whether SteamInputAddonforClaw.Overlay.exe should exist at all
+-> prefer QAM-only Quick Settings presentation if it materially simplifies the product
+
+PoC C PASS
++ Steam-off Quick Settings still required
+-> decide explicitly whether a small fallback renderer is worth keeping
+
+PoC C PARTIAL/FAIL
+-> keep the Addon Overlay for the desktop/non-QAM product domain
+```
+
+Do not delete the current Overlay implementation/design solely from external source evidence. The deletion decision should follow real MSI Claw hardware proof of Case I plus the product decision about Steam availability.
+
+### 24.9 Additional references reviewed for this supplement
+
+Project repository:
+
+- `src/SteamInputAddonforClaw/Lifecycle/QamHostProcessController.cs`
+- `README.md` — current QAM support boundary
+- `docs/overlayui/ADDON_QUICK_SETTINGS_OVERLAY_ARCHITECTURE.md`
+
+External reference repository:
+
+- `toonymak1993/tools-for-steam`
+  - `src/SteamLoader.App/Infrastructure/Steam/SteamDevToolsClient.cs`
+  - `src/SteamLoader.App/Services/ExternalGameQuickAccessService.cs`
+  - `src/SteamLoader.App/Hosting/SteamLoaderBackgroundHost.cs`
+
+The external implementation is reference evidence only. Do not add it as a runtime dependency.
+
+---
+
+## 25. Updated decision checkpoint
+
+The document's original recommendation remains valid for the current supported game/BPM QAM domain:
+
+```text
+one Addon top-level QAM tab
++ native inner Device/Profile Tabs
++ smallest proven direct/open-selection seam
+```
+
+The new desktop research adds one checkpoint **before finalizing the separate Overlay as a permanent renderer**:
+
+```text
+Can Steam native QAM exist as a clean no-game / no-BPM Desktop surface?
+```
+
+If hardware says yes, the simplest product may become:
+
+```text
+one Quick Settings renderer = Steam native QAM
+```
+
+rather than maintaining:
+
+```text
+Steam QAM renderer
++
+Addon WinUI Overlay renderer
+```
+
+If hardware says no, the existing split remains justified.
+
+This question should be answered by the bounded PoC C, not by expanding Steam lifecycle state, forcing Big Picture, or adding another abstraction layer.
