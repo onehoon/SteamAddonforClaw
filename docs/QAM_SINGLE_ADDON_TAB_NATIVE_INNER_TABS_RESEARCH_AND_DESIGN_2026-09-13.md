@@ -423,6 +423,20 @@ autoFocusContents
 
 That is good evidence that the generic native `Tabs` primitive remains a practical reuse target, although any implementation in this project must still fail closed if current Steam discovery no longer resolves uniquely.
 
+### 7.2 Friends/Chat is UX evidence, not an implementation dependency
+
+Steam's Friends/Chat QAM surface is useful evidence that a nested/secondary-tab UX is native and acceptable inside QAM. However, the current research did **not** directly prove from Valve's current minified implementation that the Friends panel literally uses the exact same exported `Tabs` component resolved above.
+
+Therefore the implementation rule is:
+
+```text
+use the generic Steam native Tabs primitive because its contract is independently resolved
+!=
+bind to Friends/Chat private component identity or stores
+```
+
+If later live inspection proves Friends uses the same primitive, that is additional confirmation only. The Addon design must not depend on that private implementation detail.
+
 ---
 
 ## 8. Recommended new topology
@@ -655,6 +669,62 @@ manual top-level tab navigation call
 
 without inventing an unrelated lifecycle state machine.
 
+### 12.1 Additional direct-call PoC before changing topology
+
+There is a smaller question that can be answered on the **current two-top-level-tab build** before the single-tab migration is implemented:
+
+> Can `OpenQuickAccessMenu("steam-input-addon-device", false)` itself open a closed QAM and select an injected string-key tab?
+
+PR #522 did not answer this because the call was never reached during the reproduced fresh opens.
+
+Test this directly from the already-connected QamHost/CDP context:
+
+```text
+Case E — cold first open
+Steam/BPM session active
+QAM has not been manually opened yet
+-> invoke OpenQuickAccessMenu("steam-input-addon-device", false)
+
+Case F — warm after descriptor insertion
+open QAM manually once so the injected descriptor is known to have existed in props.tabs
+close QAM
+-> invoke the same direct call
+
+Case G — QAM already open on a Steam-native tab
+-> invoke the same direct call
+-> verify whether it switches to Device without side effects
+
+Case H — QAM already open on Device
+-> invoke the same direct call again
+-> determine whether it closes, stays open, or only reselects Device
+```
+
+This explicitly separates two unresolved questions:
+
+```text
+1. Can MenuStore open/select an injected string key at all?
+2. Must that descriptor already exist in Steam's current tab array before the call?
+```
+
+The second question matters because an initial closed-QAM call may occur before the renderer has produced the tab array into which the Addon descriptor is inserted.
+
+Interpretation:
+
+```text
+Case E PASS + Case F PASS
+-> direct open/select is a real candidate
+
+Case E FAIL + Case F PASS
+-> likely descriptor-ordering/bootstrap constraint
+-> do not misclassify this as a bad string-key contract
+
+Case E FAIL + Case F FAIL
+-> direct open/select is not currently proven viable
+-> retain pulse/open authority and investigate the native selection seam
+```
+
+Also validate focus, Steam menu sound/haptic behavior, and the close/toggle result. A method that visually opens the correct tab but loses expected native input/focus behavior is not automatically a valid replacement for the system-button pulse.
+
 ---
 
 ## 13. Important OEM1 / Quick Access toggle constraint
@@ -700,6 +770,94 @@ This avoids changing the existing front-button controller presentation path just
 Only if the PoC proves the native open path cannot be distinguished should a Runtime -> QamHost explicit open/select command be considered.
 
 Do not add that IPC preemptively.
+
+### 13.1 Additional candidate if direct open/select is proven
+
+The recommendation above remains the conservative baseline because the existing SteamDeck Quick Access pulse already provides correct open/close behavior on hardware.
+
+However, there is a potentially simpler architecture that should remain explicitly on the table **if Case E/F/H proves the native method has the required semantics**:
+
+```text
+OEM1 SteamQuickAccess action
+-> one explicit QamHost request
+-> MenuStore.OpenQuickAccessMenu(ADDON_TAB_KEY, false)
+-> QAM opens directly on Addon
+```
+
+If this operation both:
+
+- opens a closed QAM on the injected Addon key; and
+- preserves the required repeat-press close/toggle/focus behavior,
+
+then the application may not need to detect a fresh QAM open at all. In that proven case the direct operation is simpler than:
+
+```text
+pulse QAM open
+-> observe/guess an open lifecycle
+-> later override selected key
+```
+
+This is intentionally an **additional candidate**, not a replacement conclusion yet. The existing section 13 preference remains authoritative until live PoC evidence proves the direct operation has equivalent user-visible semantics.
+
+### 13.2 If an explicit Runtime -> QamHost request is eventually chosen, reuse the existing `.Qam` transport
+
+Do not create a new IPC channel, broker, service, or generic command bus for this one action.
+
+The current architecture already has:
+
+```text
+Addon Runtime
+-> dedicated CreateQamForCurrentUser() named-pipe server
+-> QamFrontendBridge / NamedPipeAddonFrontendClient
+-> QamHost
+-> current Steam CDP session
+```
+
+The frontend transport also already supports Runtime-to-client notifications such as `StateInvalidated` and `CloseRequested`. Therefore, if a direct open/select request becomes the chosen design, the narrow shape should be conceptually equivalent to one QAM-specific notification/event, for example:
+
+```text
+OpenAddonQuickAccessRequested
+```
+
+rather than another transport subsystem.
+
+There is one lifecycle constraint to retain: `QamHostProcessController` currently desires QamHost only while Big Picture or an actual Steam game is active. That matches the current `SteamQuickAccess` product domain, where the SteamDeck presentation is active. If a future product requirement wants this direct QAM operation outside that domain, QamHost lifetime would need separate review; do not silently broaden it as part of this work.
+
+### 13.3 Explicit-request + existing pulse is a valid fallback if descriptor ordering blocks direct closed-QAM open
+
+If the direct call fails only because the custom descriptor does not yet exist before the first QAM render, do **not** return to `args[0].visible` or another guessed open prop.
+
+A smaller causality-based fallback is possible:
+
+```text
+OEM1 press is already known by Runtime
+-> send one narrow "next QAM open should select Addon" request to QamHost/JS
+-> issue the existing SteamDeck Quick Access pulse
+-> when the QAM tab array is produced and the Addon descriptor is present
+-> consume that one pending request
+-> OpenQuickAccessMenu(ADDON_TAB_KEY, false) exactly once
+```
+
+The important difference from PR #522 is:
+
+```text
+PR #522
+observed prop -> infer that a fresh open happened
+
+explicit-request fallback
+known OEM1 action -> intentionally arm one selection for the open that action is about to cause
+```
+
+This does not require:
+
+- visibility inference;
+- owner/session identity;
+- epochs;
+- timers;
+- polling;
+- repeated selection writes.
+
+If implemented, the pending fact must remain narrowly scoped and be retired after consumption or document/session replacement. Do not generalize it into a QAM lifecycle state machine.
 
 ---
 
@@ -911,16 +1069,45 @@ Goal:
 
 No speculative production state.
 
+### PoC B0 — Direct closed-QAM injected-key call
+
+This can be run before or alongside PoC A using the current Device key.
+
+Goal:
+
+```text
+closed QAM
+-> OpenQuickAccessMenu("steam-input-addon-device", false)
+-> determine whether Steam opens QAM directly on that injected key
+```
+
+Run both cold-first-open and warm-after-descriptor-insertion cases from section 12.1. This is the fastest way to determine whether the native operation can replace lifecycle detection entirely or whether descriptor ordering is the real constraint.
+
 ### Production PR — Verified fresh-open Addon selection + cleanup
 
-Only after PoC evidence:
+Only after PoC evidence, choose the smallest proven path:
 
-- implement the exact native fresh-open key override;
+```text
+Path 1 — direct native operation
+OEM1 explicit request -> QamHost -> OpenQuickAccessMenu(AddonKey)
+only if open/select/toggle/focus semantics are hardware-proven
+
+Path 2 — existing pulse + exact native fresh-open selection seam
+keep system-button pulse as open/close authority
+override only the verified open-time selected key
+
+Path 3 — explicit one-shot request + existing pulse
+use only if descriptor ordering prevents direct closed-QAM custom-key open
+consume selection once after the Addon descriptor exists
+```
+
+For every path:
+
 - remove PR #522 `visible`-based lifecycle code;
 - remove obsolete two-top-level-tab selection state;
-- keep the existing Quick Access pulse authority unless PoC evidence proves a better direct native path with equivalent toggle behavior.
+- do not add polling/retry/epoch machinery.
 
-If PoC A and B are both small and the live seam is obvious, they may be folded into one implementation branch, but the review should still treat topology proof and fresh-open proof as separate acceptance questions.
+If PoC A and B/B0 are all small and the live seam is obvious, they may be folded into one implementation branch, but review should still treat topology proof, direct-open proof, and fresh-open/toggle proof as separate acceptance questions.
 
 ---
 
@@ -937,6 +1124,8 @@ If PoC A and B are both small and the live seam is obvious, they may be folded i
 - `src/SteamInputAddonforClaw.QamHost/QamFrontendBridge.cs`
 - `src/SteamInputAddonforClaw/Lifecycle/QamHostProcessController.cs`
 - `src/SteamInputAddonforClaw/CenterM/FrontButtonActionExecutor.cs`
+- `src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendServer.cs`
+- `src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs`
 - relevant QAM/frontend/controller tests
 
 ### External reference repositories
@@ -954,7 +1143,45 @@ External sources are reference-only. Do not add WSGM, Decky Loader, or `decky-fr
 
 ---
 
-## 22. Final recommendation
+## 22. Supplemental decision notes — how to reconcile the alternatives
+
+The earlier sections intentionally prefer preserving the known-good SteamDeck Quick Access pulse until direct native behavior is proven. The additional findings do **not** invalidate that conservative recommendation; they make the next decision testable instead of leaving "fresh-open lifecycle" as the only design path.
+
+The decision order should be:
+
+```text
+1. Prove single Addon top-level + native inner Tabs.
+
+2. Directly test OpenQuickAccessMenu(customAddonKey, false)
+   on a closed QAM:
+   - cold before known descriptor insertion
+   - warm after known descriptor insertion
+   - repeated while already open
+
+3. If direct open/select/toggle/focus behavior is fully correct:
+   -> prefer the direct native operation.
+   -> no QAM-open lifecycle detection is needed.
+
+4. If direct open is not sufficient, but an exact native fresh-open selection seam is proven:
+   -> keep the SteamDeck Quick Access pulse as open/close authority.
+   -> override only that proven selected-key seam once.
+
+5. If descriptor ordering prevents direct closed-QAM open and no clean fresh-open seam exists:
+   -> use one explicit OEM1-caused pending selection + the existing pulse.
+   -> consume once when the Addon descriptor is present.
+
+6. In all cases:
+   -> do not return to args[0].visible lifecycle inference.
+   -> do not add timers, retries, epochs, owner identities, or generic managers.
+```
+
+This keeps the original document's caution while recognizing a potentially simpler result: because the Addon already owns the OEM1 action path, the best architecture may be to make the **operation that requests QAM** target the Addon key directly rather than infer afterward that a QAM open happened.
+
+The decisive evidence must come from the bounded hardware PoCs above, especially the cold-vs-warm descriptor-ordering test and repeat-press toggle/focus behavior.
+
+---
+
+## 23. Final recommendation
 
 Adopt the single-top-level Addon topology.
 
@@ -974,9 +1201,10 @@ Do not patch the failed lifecycle design with more owner/session state.
 Instead:
 
 1. prove the single Addon + native inner Tabs topology on hardware;
-2. observe the exact native QAM open/top-level selection call pattern;
-3. override only the verified fresh-open selected key to the Addon key;
-4. preserve the existing SteamDeck Quick Access system-button pulse as open/close authority unless live evidence proves a direct native replacement has equivalent toggle semantics;
-5. delete the obsolete PR #522 visibility lifecycle state once the exact native seam is proven.
+2. run the direct closed-QAM injected-key PoC, including cold-before-insertion and warm-after-insertion cases;
+3. observe the exact native QAM open/top-level selection and repeat-press toggle behavior;
+4. choose the smallest proven path: direct native open/select if fully equivalent, otherwise pulse + exact selection seam, otherwise explicit one-shot request + pulse if descriptor ordering requires it;
+5. reuse the existing `.Qam` transport if an explicit Runtime -> QamHost request is chosen rather than creating another IPC subsystem;
+6. delete the obsolete PR #522 visibility lifecycle state once the replacement seam is hardware-proven.
 
 This yields the smallest architecture consistent with the desired UX and the project's Full1902 / anti-overengineering policy.
