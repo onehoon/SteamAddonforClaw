@@ -23,7 +23,7 @@ internal sealed class RuntimeProcessApplication
     {
         AppLog.Info("Runtime", "True-headless Runtime shell entered.", ("LaunchMode", _shouldLaunchFrontend ? "Manual" : "Background"));
         _messageLoop = new NativeMessageLoop();
-        _processHost = new AddonProcessHost(_shouldLaunchFrontend ? null : ["--background"]);
+        _processHost = new AddonProcessHost();
         _singleInstanceGate.RegisterActivation(() => _processHost?.RequestFrontendOpen(FrontendOpenReason.RuntimeActivation));
         _singleInstanceGate.RegisterUninstallRequest(RequestExitForUninstall);
         if (_shouldLaunchFrontend)
@@ -32,8 +32,7 @@ internal sealed class RuntimeProcessApplication
         try
         {
             var outcome = _processHost.RunStartupAsync().GetAwaiter().GetResult();
-            if (outcome is AddonProcessStartupOutcome.UpdateRestartScheduled
-                or AddonProcessStartupOutcome.UnsupportedHardware
+            if (outcome is AddonProcessStartupOutcome.UnsupportedHardware
                 or AddonProcessStartupOutcome.IndeterminateHardware)
                 return;
             if (outcome != AddonProcessStartupOutcome.RuntimeReady)

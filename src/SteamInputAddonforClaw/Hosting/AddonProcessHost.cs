@@ -18,13 +18,13 @@ using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.GameBar;
 using SteamInputAddonforClaw.CenterMStartup;
+using SteamInputAddonforClaw.Updates;
 
 namespace SteamInputAddonforClaw.Hosting;
 
 internal enum AddonProcessStartupOutcome
 {
     RuntimeReady,
-    UpdateRestartScheduled,
     UnsupportedHardware,
     IndeterminateHardware,
     Canceled
@@ -32,7 +32,6 @@ internal enum AddonProcessStartupOutcome
 
 internal sealed class AddonProcessHost : IAsyncDisposable
 {
-    private readonly string[]? _updateRestartArguments;
     private readonly Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? _runtimeCompositionFactory;
     private readonly Func<string>? _frontendPipeNameFactory;
     private readonly CancellationTokenSource _startupCancellationTokenSource = new();
@@ -57,6 +56,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly QamHostProcessController _qamHostController;
     private readonly OverlayProcessController _overlayController;
+    private SilentUpdateService? _backgroundUpdateService;
     // OQ3-A: one narrow cross-surface ordering gate so a normal user request cannot run the two
     // opposite Main UI <-> Overlay visibility transitions at the same time. Not a surface manager.
     private readonly SemaphoreSlim _visibleSurfaceTransition = new(1, 1);
@@ -94,6 +94,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
     private Task? _deferredRuntimeStartup;
+    private Task? _backgroundUpdateTask;
+    private int _backgroundUpdateStarted;
     private Task? _overlayStartup;
     // Full1902 Policy B review [BLOCKER]: the Disabled-mode controller acquisition + Win+G arm now
     // runs deferred (off the message-loop thread, after the hook is installed and the loop is
@@ -130,13 +132,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // the strong MSI Claw identity itself. Disposed at BeginProcessShutdown before recovery drains.
     private Controllers.Detection.WindowsDeviceArrivalWatcher? _deviceArrivalWatcher;
 
-    internal AddonProcessHost(string[]? updateRestartArguments,
-        Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
+    internal AddonProcessHost(Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
         string? testOnlyDataRoot = null,
         Func<string>? testFrontendPipeNameFactory = null,
         Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null)
     {
-        _updateRestartArguments = updateRestartArguments;
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
         _frontendPipeNameFactory = testFrontendPipeNameFactory;
         var profilePath = testOnlyDataRoot is null
@@ -205,7 +205,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
 
         AppLog.Info("Startup coordination started.");
-        var startupComposition = AddonStartupCompositionFactory.Create(_updateRestartArguments);
+        var startupComposition = AddonStartupCompositionFactory.Create();
         _startupComposition = startupComposition;
 
         try
@@ -225,9 +225,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return _startupOutcome.Value;
             }
 
-            _startupOutcome = startupResult.ShouldStartRuntime
-                ? AddonProcessStartupOutcome.RuntimeReady
-                : AddonProcessStartupOutcome.UpdateRestartScheduled;
+            _startupOutcome = AddonProcessStartupOutcome.RuntimeReady;
 
             // QamHost itself remains GamepadUI-session scoped. Prepare only Steam's persistent CEF bootstrap
             // marker here so a normal future Steam/steamwebhelper launch exposes the loopback CDP
@@ -1174,7 +1172,45 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             StartPowerObservation();
             ReconcileDeviceProfileStartup();
+            StartBackgroundUpdate();
         }, cancellationToken);
+    }
+
+    private void StartBackgroundUpdate()
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0
+            || Interlocked.Exchange(ref _backgroundUpdateStarted, 1) != 0)
+            return;
+
+        var cancellationToken = _startupCancellationTokenSource.Token;
+        _backgroundUpdateService ??= new SilentUpdateService(new VelopackUpdateClient());
+        AppLog.Info("Update", "Update.BackgroundCheckStarted", ("Action", "CheckAndDownload"));
+        _backgroundUpdateTask = RunBackgroundUpdateAsync(cancellationToken);
+    }
+
+    private async Task RunBackgroundUpdateAsync(CancellationToken cancellationToken)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        using var timeoutCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCancellationTokenSource.CancelAfter(TimeSpan.FromMinutes(2));
+        try
+        {
+            await _backgroundUpdateService!.CheckAndDownloadAsync(timeoutCancellationTokenSource.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            AppLog.Debug("Update", "Background update operation canceled during Runtime shutdown.", ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+        }
+        catch (OperationCanceledException exception)
+        {
+            AppLog.Warn("Update", "Update.BackgroundCheckFailed", exception,
+                ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("ExceptionType", exception.GetType().Name), ("Action", "Continue"));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Update", "Update.BackgroundCheckFailed", exception,
+                ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("ExceptionType", exception.GetType().Name), ("Action", "Continue"));
+        }
     }
 
     /// <summary>

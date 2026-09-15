@@ -30,7 +30,7 @@ public sealed class VelopackUpdateClientTests
         };
         var client = new VelopackUpdateClient(operations);
         using var cancellation = new CancellationTokenSource();
-        var update = new SilentUpdateService(client).CheckDownloadAndScheduleAsync(cancellation.Token);
+        var update = new SilentUpdateService(client).CheckAndDownloadAsync(cancellation.Token);
         await operations.DownloadStarted.Task;
 
         cancellation.Cancel();
@@ -40,6 +40,44 @@ public sealed class VelopackUpdateClientTests
         Assert.Equal(1, operations.DownloadCount);
         Assert.Equal(0, operations.ApplyCount);
         Assert.Equal(cancellation.Token, operations.DownloadToken);
+    }
+
+    [Fact]
+    public void Pending_update_is_applied_only_when_the_primary_startup_boundary_calls_it()
+    {
+        var pending = UninitializedAsset();
+        var operations = new FakeOperations { PendingUpdate = pending };
+        var client = new VelopackUpdateClient(operations);
+
+        var scheduled = client.TrySchedulePendingUpdateApply(["--background", "--restart"]);
+
+        Assert.True(scheduled);
+        Assert.Same(pending, operations.AppliedUpdate);
+        Assert.NotNull(operations.RestartArguments);
+        Assert.Equal(["--background", "--restart"], operations.RestartArguments!);
+    }
+
+    [Fact]
+    public void No_pending_update_does_not_schedule_apply()
+    {
+        var operations = new FakeOperations();
+        var client = new VelopackUpdateClient(operations);
+
+        Assert.False(client.TrySchedulePendingUpdateApply(["--background"]));
+        Assert.Null(operations.AppliedUpdate);
+    }
+
+    [Fact]
+    public void Pending_apply_failure_is_fail_open_for_runtime_startup()
+    {
+        var operations = new FakeOperations
+        {
+            PendingUpdate = UninitializedAsset(),
+            ApplyFailure = new InvalidOperationException("simulated local update lock")
+        };
+        var client = new VelopackUpdateClient(operations);
+
+        Assert.False(client.TrySchedulePendingUpdateApply(["--background"]));
     }
 
     [Fact]
@@ -76,10 +114,15 @@ public sealed class VelopackUpdateClientTests
     }
 
     private static UpdateInfo UninitializedUpdateInfo() => (UpdateInfo)RuntimeHelpers.GetUninitializedObject(typeof(UpdateInfo));
+    private static VelopackAsset UninitializedAsset() => (VelopackAsset)RuntimeHelpers.GetUninitializedObject(typeof(VelopackAsset));
 
     private sealed class FakeOperations : IVelopackUpdateOperations
     {
         public bool IsInstalled => true;
+        public VelopackAsset? PendingUpdate { get; init; }
+        public VelopackAsset? AppliedUpdate { get; private set; }
+        public string[]? RestartArguments { get; private set; }
+        public Exception? ApplyFailure { get; init; }
         public Task<UpdateInfo?>? CheckTask { private get; init; }
         public UpdateInfo? CheckResult { private get; init; }
         public CancellationToken DownloadToken { get; private set; }
@@ -95,6 +138,12 @@ public sealed class VelopackUpdateClientTests
             DownloadStarted.TrySetResult();
             return DownloadCompletion?.Task ?? Task.CompletedTask;
         }
-        public void WaitExitThenApplyUpdates(UpdateInfo update, string[]? restartArguments) => ApplyCount++;
+        public void WaitExitThenApplyUpdates(VelopackAsset update, string[]? restartArguments)
+        {
+            if (ApplyFailure is not null) throw ApplyFailure;
+            AppliedUpdate = update;
+            RestartArguments = restartArguments;
+        }
+        public VelopackAsset? UpdatePendingRestart => PendingUpdate;
     }
 }

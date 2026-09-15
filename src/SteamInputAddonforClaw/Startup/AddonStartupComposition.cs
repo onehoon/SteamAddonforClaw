@@ -24,7 +24,7 @@ internal sealed record AddonStartupComposition(
 
 internal static class AddonStartupCompositionFactory
 {
-    internal static AddonStartupComposition Create(string[]? updateRestartArguments)
+    internal static AddonStartupComposition Create()
     {
         var deviceEnumerator = new WindowsControllerDeviceEnumerator();
         var msiClawAdapter = new MsiClawDeviceAdapter(deviceEnumerator);
@@ -58,7 +58,6 @@ internal static class AddonStartupCompositionFactory
                     MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
 
         var coordinator = new StartupCoordinator(
-            new SilentUpdateGate(updateRestartArguments),
             new ControllerTopologyWaiter(deviceEnumerator, classifier),
             stockCenterMBaseline: stockCenterMBaseline,
             disabledBootAdmission: disabledBootAdmission,

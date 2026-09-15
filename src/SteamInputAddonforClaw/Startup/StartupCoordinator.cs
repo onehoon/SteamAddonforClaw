@@ -8,7 +8,6 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 
 internal sealed class StartupCoordinator
 {
-    private readonly IUpdateGate _updateGate;
     private readonly IControllerTopologyWaiter _topologyWaiter;
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IDisabledBootControllerAdmission? _disabledBootAdmission;
@@ -20,7 +19,6 @@ internal sealed class StartupCoordinator
     private readonly Func<TimeSpan, CancellationToken, Task> _hardwareProbeDelay;
 
     public StartupCoordinator(
-        IUpdateGate updateGate,
         IControllerTopologyWaiter topologyWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
@@ -31,7 +29,6 @@ internal sealed class StartupCoordinator
         TimeSpan? hardwareProbeTimeout = null,
         Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null)
     {
-        _updateGate = updateGate;
         _topologyWaiter = topologyWaiter;
         _stockCenterMBaseline = stockCenterMBaseline;
         _disabledBootAdmission = disabledBootAdmission;
@@ -47,15 +44,6 @@ internal sealed class StartupCoordinator
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        AppLog.Info("Startup", "Startup update gate entered.");
-        var updateResult = await _updateGate.RunAsync(cancellationToken).ConfigureAwait(false);
-        AppLog.Info("Startup", "Update gate completed.", ("Result", updateResult), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
-        if (updateResult == UpdateGateResult.RestartScheduled)
-        {
-            AppLog.Info("Startup", "Runtime startup aborted because update restart was scheduled.", ("Action", "Exit"));
-            return new StartupResult(false, RecoverySafe: false);
-        }
-
         var hardware = await EvaluateHardwareCompatibilityWithStabilizationAsync(cancellationToken).ConfigureAwait(false);
         // The ONE decision of "is this a supported MSI Claw" for the whole process lifetime. It is
         // carried on StartupResult so every downstream consumer -- routing, and the OEM1 mapping

@@ -1,14 +1,16 @@
 using Velopack;
 using Velopack.Sources;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Updates;
 
 internal interface IVelopackUpdateOperations
 {
     bool IsInstalled { get; }
+    VelopackAsset? UpdatePendingRestart { get; }
     Task<UpdateInfo?> CheckForUpdatesAsync();
     Task DownloadUpdatesAsync(UpdateInfo update, CancellationToken cancellationToken);
-    void WaitExitThenApplyUpdates(UpdateInfo update, string[]? restartArguments);
+    void WaitExitThenApplyUpdates(VelopackAsset update, string[]? restartArguments);
 }
 
 internal sealed class VelopackUpdateClient : IUpdateClient
@@ -21,6 +23,30 @@ internal sealed class VelopackUpdateClient : IUpdateClient
     internal VelopackUpdateClient(IVelopackUpdateOperations operations) => _operations = operations ?? throw new ArgumentNullException(nameof(operations));
 
     public bool IsInstalled => _operations.IsInstalled;
+
+    internal bool TrySchedulePendingUpdateApply(string[]? restartArguments)
+    {
+        if (!_operations.IsInstalled)
+            return false;
+
+        try
+        {
+            var pending = _operations.UpdatePendingRestart;
+            if (pending is null)
+                return false;
+
+            AppLog.Info("Update", "Update.PendingApplyDetected", ("Action", "ApplyBeforeRuntimeStartup"));
+            _operations.WaitExitThenApplyUpdates(pending, restartArguments);
+            AppLog.Info("Update", "Update.PendingApplyScheduled", ("Action", "ExitAndRestart"));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Update", "Pending update apply could not be scheduled; continuing Runtime startup.", exception,
+                ("ExceptionType", exception.GetType().Name), ("Action", "Continue"));
+            return false;
+        }
+    }
 
     public async Task<bool> CheckForUpdatesAsync(CancellationToken cancellationToken)
     {
@@ -46,17 +72,15 @@ internal sealed class VelopackUpdateClient : IUpdateClient
         await _operations.DownloadUpdatesAsync(_availableUpdate ?? throw new InvalidOperationException("No update is available to download."), cancellationToken).ConfigureAwait(false);
     }
 
-    public void WaitExitThenApplyUpdates(string[]? restartArguments) =>
-        _operations.WaitExitThenApplyUpdates(_availableUpdate ?? throw new InvalidOperationException("No update is available to apply."), restartArguments);
-
     private static void ObserveLateCheckFailure(Task<UpdateInfo?> checkTask)
         => _ = checkTask.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
     private sealed class VelopackUpdateOperations(UpdateManager updateManager) : IVelopackUpdateOperations
     {
         public bool IsInstalled => updateManager.IsInstalled;
+        public VelopackAsset? UpdatePendingRestart => updateManager.UpdatePendingRestart;
         public Task<UpdateInfo?> CheckForUpdatesAsync() => updateManager.CheckForUpdatesAsync();
         public Task DownloadUpdatesAsync(UpdateInfo update, CancellationToken cancellationToken) => updateManager.DownloadUpdatesAsync(update, progress: null, cancelToken: cancellationToken);
-        public void WaitExitThenApplyUpdates(UpdateInfo update, string[]? restartArguments) => updateManager.WaitExitThenApplyUpdates(update.TargetFullRelease, silent: true, restart: true, restartArgs: restartArguments);
+        public void WaitExitThenApplyUpdates(VelopackAsset update, string[]? restartArguments) => updateManager.WaitExitThenApplyUpdates(update, silent: true, restart: true, restartArgs: restartArguments);
     }
 }
