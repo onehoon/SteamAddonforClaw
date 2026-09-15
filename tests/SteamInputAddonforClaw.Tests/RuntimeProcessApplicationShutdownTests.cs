@@ -47,8 +47,8 @@ public sealed class RuntimeProcessApplicationShutdownTests
         Assert.Contains("Environment.GetCommandLineArgs().Skip(1)", method, StringComparison.Ordinal);
         Assert.Contains("!string.Equals(argument, \"--restart\", StringComparison.OrdinalIgnoreCase)", method, StringComparison.Ordinal);
         // No update-checker/downloader API is invoked directly here -- Restart only re-enters the
-        // ordinary startup path, which already runs SilentUpdateGate.
-        foreach (var forbidden in new[] { "IUpdateClient", "IUpdateGate", "SilentUpdateGate", "WaitExitThenApplyUpdates" })
+        // ordinary startup path, whose primary-process boundary handles any pending local update.
+        foreach (var forbidden in new[] { "IUpdateClient", "IUpdateGate", "SilentUpdateGate", "TrySchedulePendingUpdateApply", "WaitExitThenApplyUpdates" })
             Assert.DoesNotContain(forbidden, method, StringComparison.Ordinal);
     }
 

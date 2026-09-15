@@ -258,10 +258,10 @@ Steam Addon for Claw checks for updates automatically when the application start
 
 When a new stable release is available:
 
-1. The update is downloaded automatically.
-2. Installation is scheduled silently without requiring user interaction.
-3. The current process exits and the update is applied.
-4. Steam Addon for Claw restarts automatically with the new version.
+1. The update is checked and downloaded automatically after controller startup.
+2. The current Runtime and controller session remain alive after the download.
+3. The downloaded update is applied silently at the next safe primary-process startup.
+4. Steam Addon for Claw restarts automatically with the new version and preserves its launch mode.
 
 There is no separate manual update step for normal releases.
 

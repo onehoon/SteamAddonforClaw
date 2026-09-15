@@ -7,6 +7,4 @@ internal interface IUpdateClient
     Task<bool> CheckForUpdatesAsync(CancellationToken cancellationToken);
 
     Task DownloadUpdatesAsync(CancellationToken cancellationToken);
-
-    void WaitExitThenApplyUpdates(string[]? restartArguments);
 }

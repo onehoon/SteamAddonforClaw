@@ -10,40 +10,40 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class StartupCoordinatorTests
 {
     [Fact]
-    public async Task VerifiedStockBaselineAfterUpdateAndStableTopology_IsRecoverySafe()
+    public async Task VerifiedStockBaselineAfterStableTopology_IsRecoverySafe()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), stockCenterMBaseline: new FakeBaseline(events));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.True(result.RecoverySafe);
-        Assert.Equal(["UpdateGate", "TopologyWaiter", "Baseline"], events);
+        Assert.Equal(["TopologyWaiter", "Baseline"], events);
     }
 
     [Fact]
     public async Task BaselineFailure_BlocksRoutingButStartsPassiveRuntime()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), stockCenterMBaseline: new FakeBaseline(events, false));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.False(result.RecoverySafe);
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
-        Assert.Equal(["UpdateGate", "TopologyWaiter", "Baseline"], events);
+        Assert.Equal(["TopologyWaiter", "Baseline"], events);
     }
 
     [Fact]
-    public async Task UpdateRestart_DoesNotRunBaselineOrTopologyWork()
+    public async Task SupportedStartup_DoesNotRunUpdateWorkBeforeHardwareEvaluation()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
-            new ThrowingTopologyWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), stockCenterMBaseline: new FakeBaseline(events));
+        var coordinator = new StartupCoordinator(
+            new ThrowingTopologyWaiter(), new FakeProbeFactory(), new FixedHardwareEvaluator(HardwareCompatibilityStatus.Unsupported), stockCenterMBaseline: new FakeBaseline(events),
+            hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
+        Assert.Empty(events);
         Assert.False(result.ShouldStartRuntime);
-        Assert.False(result.RecoverySafe);
-        Assert.Equal(["UpdateGate"], events);
     }
 
     [Fact]
@@ -51,21 +51,20 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         using var cancellation = new CancellationTokenSource();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new ThrowingBaseline(events, new OperationCanceledException(cancellation.Token)));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.RunAsync(cancellation.Token));
 
-        Assert.Equal(["UpdateGate", "TopologyWaiter", "Baseline"], events);
+        Assert.Equal(["TopologyWaiter", "Baseline"], events);
     }
 
     [Fact]
-    public async Task CanStartRuntimeAsync_WhenNoUpdateExists_WaitsForTopologyAfterUpdateGate()
+    public async Task CanStartRuntimeAsync_WaitsForTopologyWithoutAnUpdateGate()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(
-            new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -73,30 +72,20 @@ public sealed class StartupCoordinatorTests
         Assert.True(result.ShouldStartRuntime);
         Assert.Equal(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
         Assert.False(result.RecoverySafe);
-        Assert.Equal(["UpdateGate", "TopologyWaiter"], events);
+        Assert.Equal(["TopologyWaiter"], events);
     }
 
     [Fact]
-    public async Task CanStartRuntimeAsync_WhenUpdateIsScheduled_DoesNotInitializeTopology()
+    public async Task SupportedStartup_ContinuesWithoutAnUpdateRestart()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(
-            new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.False(result.ShouldStartRuntime);
-        Assert.Equal(["UpdateGate"], events);
-    }
-
-    private sealed class FakeUpdateGate(List<string> events, UpdateGateResult result) : IUpdateGate
-    {
-        public Task<UpdateGateResult> RunAsync(CancellationToken cancellationToken)
-        {
-            events.Add("UpdateGate");
-            return Task.FromResult(result);
-        }
+        Assert.True(result.ShouldStartRuntime);
+        Assert.DoesNotContain("UpdateGate", events);
     }
 
     [Theory]
@@ -108,7 +97,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         // Indeterminate is retried by the hardware probe stabilization; this fake never
         // resolves, so use a non-waiting fake delay and a short timeout to avoid a real 5s wait.
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingTopologyWaiter(),
+        var coordinator = new StartupCoordinator(new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), new FixedHardwareEvaluator(status), stockCenterMBaseline: new FakeBaseline(events),
             hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
 
@@ -122,7 +111,7 @@ public sealed class StartupCoordinatorTests
     public async Task StockReadinessIndeterminate_DoesNotEstablishStartupBoundary()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FixedTopologyWaiter(events, ControllerTopologyReadiness.Indeterminate), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+        var coordinator = new StartupCoordinator(new FixedTopologyWaiter(events, ControllerTopologyReadiness.Indeterminate), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -135,7 +124,7 @@ public sealed class StartupCoordinatorTests
     public async Task EnabledRoots_StableTopology_ReachesBaseline()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new FakeBaseline(events));
 
@@ -194,7 +183,7 @@ public sealed class StartupCoordinatorTests
             new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test")
         ]);
         var delay = new RecordingHardwareProbeDelay();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeTopologyWaiter(events),
+        var coordinator = new StartupCoordinator(new FakeTopologyWaiter(events),
             new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -213,7 +202,7 @@ public sealed class StartupCoordinatorTests
             new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test")
         ]);
         var delay = new RecordingHardwareProbeDelay();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeTopologyWaiter(events),
+        var coordinator = new StartupCoordinator(new FakeTopologyWaiter(events),
             new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -229,7 +218,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Unsupported, null, null, "MsiClawModelUnsupported")]);
         var delay = new RecordingHardwareProbeDelay();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingTopologyWaiter(),
+        var coordinator = new StartupCoordinator(new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -244,7 +233,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var delay = new RecordingHardwareProbeDelay();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeTopologyWaiter(events),
+        var coordinator = new StartupCoordinator(new FakeTopologyWaiter(events),
             new FakeProbeFactory(), new FakeHardwareEvaluator(), stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -258,7 +247,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Indeterminate, null, null, "test")], repeatLast: true);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingTopologyWaiter(),
+        var coordinator = new StartupCoordinator(new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events),
             hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
 
@@ -274,7 +263,7 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         using var cancellation = new CancellationTokenSource();
         var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Indeterminate, null, null, "test")], repeatLast: true);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingTopologyWaiter(),
+        var coordinator = new StartupCoordinator(new ThrowingTopologyWaiter(),
             new FakeProbeFactory(), evaluator, stockCenterMBaseline: new FakeBaseline(events),
             hardwareProbeDelay: (_, token) => { cancellation.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; });
 
@@ -294,7 +283,7 @@ public sealed class StartupCoordinatorTests
         // A stale journal is present: the Disabled path must not read, clean, or delete it.
         var waiter = new FakeTopologyWaiter(events);
         var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             waiter, new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new FakeBaseline(events),
             disabledBootAdmission: admission, captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
@@ -305,7 +294,7 @@ public sealed class StartupCoordinatorTests
         Assert.True(result.DisabledBootAdmission!.IsReady);
         Assert.Equal(FrontendCenterMStartupState.Disabled, result.CenterMStartupState);
         Assert.NotEqual(FrontendCenterMStartupState.Enabled, result.CenterMStartupState);
-        Assert.Equal(["UpdateGate", "TopologyWaiter", "Admission"], events);
+        Assert.Equal(["TopologyWaiter", "Admission"], events);
         Assert.DoesNotContain("Baseline", events);
         Assert.Equal(1, waiter.Calls);
     }
@@ -315,7 +304,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FixedTopologyWaiter(events, ControllerTopologyReadiness.Indeterminate),
             new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new FakeBaseline(events),
@@ -334,7 +323,7 @@ public sealed class StartupCoordinatorTests
     public async Task DisabledRoots_AdmissionBlocked_KeepsRuntimeAliveWithNoMutation()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new FakeBaseline(events),
             disabledBootAdmission: new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Blocked),
@@ -354,7 +343,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new FakeBaseline(events),
             disabledBootAdmission: admission, captureCenterMStartup: () => Roots(Enum.Parse<FrontendCenterMStartupState>(state)));
@@ -374,7 +363,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var admission = new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.Ready);
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new FakeBaseline(events),
             disabledBootAdmission: admission, captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Enabled));
@@ -392,7 +381,7 @@ public sealed class StartupCoordinatorTests
     public async Task NoCaptureDelegate_PreservesLegacyStockPath()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+        var coordinator = new StartupCoordinator(
             new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             stockCenterMBaseline: new FakeBaseline(events));
 

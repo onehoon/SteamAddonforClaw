@@ -25,7 +25,7 @@ public sealed class AddonProcessHostStartupTests
         var runtimeComposition = new AddonRuntimeComposition(
             runtimeHost, null!, null!);
         var testDataRoot = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw-HostTests", Guid.NewGuid().ToString("N"));
-        var host = new AddonProcessHost(null, (_, _) => runtimeComposition, testDataRoot,
+        var host = new AddonProcessHost((_, _) => runtimeComposition, testDataRoot,
             () => $"SteamInputAddonforClaw.Frontend.Test.{Guid.NewGuid():N}");
         host.TestOnly_SetStartupForInitialization(
             new AddonStartupComposition(null!, null!, null!, null!, new CenterMStartupControl(available: false)),

@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.Updates;
 
 namespace SteamInputAddonforClaw;
 
@@ -21,6 +22,7 @@ public static class Program
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
             VelopackApp.Build()
+                .SetAutoApplyOnStartup(false)
                 .OnBeforeUninstallFastCallback(_ => UninstallBootstrap.RunFastCallbackOnly())
                 .Run();
             AddonLogRetention.PruneDirectory(AppLog.DirectoryPath);
@@ -81,6 +83,9 @@ public static class Program
 
             using (singleInstanceGate)
             {
+                if (new VelopackUpdateClient().TrySchedulePendingUpdateApply(args))
+                    return;
+
                 runtimeLifetimeEntered = true;
                 try
                 {

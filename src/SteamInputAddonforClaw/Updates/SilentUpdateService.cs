@@ -9,7 +9,7 @@ internal sealed class SilentUpdateService
 {
     // At most two retries (three total attempts): immediately, then after 2s, then after 5s.
     // This adds at most ~7s of deliberate backoff, well inside the overall two-minute update
-    // gate timeout that SilentUpdateGate still enforces around the whole call.
+    // background update timeout is enforced by AddonProcessHost around this operation.
     private static readonly TimeSpan[] TransientRetryDelays = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)];
 
     private readonly IUpdateClient _updateClient;
@@ -21,25 +21,24 @@ internal sealed class SilentUpdateService
         _delay = delay ?? Task.Delay;
     }
 
-    public async Task<bool> CheckDownloadAndScheduleAsync(CancellationToken cancellationToken, string[]? restartArguments = null)
+    public async Task<bool> CheckAndDownloadAsync(CancellationToken cancellationToken)
     {
         if (!_updateClient.IsInstalled)
         {
-            AppLog.Info("Update check skipped because the application is not installed.");
+            AppLog.Info("Update", "Update.NoUpdate", ("Reason", "NotInstalled"));
             return false;
         }
 
         if (!await ExecuteWithTransientRetryAsync("check", () => _updateClient.CheckForUpdatesAsync(cancellationToken), cancellationToken).ConfigureAwait(false))
         {
-            AppLog.Info("No update is available.");
+            AppLog.Info("Update", "Update.NoUpdate", ("Reason", "NoUpdate"));
             return false;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         await ExecuteWithTransientRetryAsync("download", async () => { await _updateClient.DownloadUpdatesAsync(cancellationToken).ConfigureAwait(false); return true; }, cancellationToken).ConfigureAwait(false);
-        AppLog.Info("Update download completed; scheduling silent apply.");
         cancellationToken.ThrowIfCancellationRequested();
-        _updateClient.WaitExitThenApplyUpdates(restartArguments);
+        AppLog.Info("Update", "Update.DownloadCompleted", ("Action", "ApplyOnNextSafePrimaryStartup"));
         return true;
     }
 
@@ -66,7 +65,7 @@ internal sealed class SilentUpdateService
     // is deliberately excluded here -- both surface as OperationCanceledException on the token
     // this service was given, and neither should ever be converted into a retry. Everything else
     // (invalid application/update state, programming errors, local filesystem errors) is left to
-    // the existing fail-open behavior in SilentUpdateGate rather than broadened into a retry.
+    // the background runner rather than broadened into a retry.
     private static bool IsTransientNetworkFailure(Exception exception)
     {
         if (exception is OperationCanceledException) return false;
