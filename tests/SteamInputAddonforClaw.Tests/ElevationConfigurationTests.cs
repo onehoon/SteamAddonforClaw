@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using SteamInputAddonforClaw.Install;
 using Xunit;
 using SteamInputAddonforClaw.TdpHelper;
 
@@ -26,12 +27,14 @@ public sealed class ElevationConfigurationTests
     }
 
     [Fact]
-    public void Startup_task_uses_highest_run_level_and_background_argument()
+    public void Startup_task_uses_least_privilege_and_background_argument()
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Install", "StartupRegistration.cs"));
 
         Assert.Contains("taskDefinition.Principal.LogonType = WindowsTaskSchedulerStartupManager.TaskLogonInteractiveToken;", source);
         Assert.Contains("taskDefinition.Principal.RunLevel = 0;", source);
+        Assert.Contains("settings.Priority = WindowsTaskSchedulerStartupManager.StartupTaskPriority;", source);
+        Assert.Equal(2, WindowsTaskSchedulerStartupManager.StartupTaskPriority);
         Assert.Contains("action.Arguments = \"--background\";", source);
         // PR10 addendum section 15: an already-compliant task is proven read-only, with no rewrite.
         Assert.Contains("if (current is not null && IsCompliant(current, configuration))", source);
@@ -40,6 +43,15 @@ public sealed class ElevationConfigurationTests
         Assert.Contains("settings.DisallowStartIfOnBatteries = false;", source);
         Assert.Contains("settings.StopIfGoingOnBatteries = false;", source);
         Assert.Contains("settings.ExecutionTimeLimit = WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit;", source);
+    }
+
+    [Fact]
+    public void Startup_priority_is_task_scheduler_only_and_not_a_runtime_priority_mutation()
+    {
+        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Install", "StartupRegistration.cs"));
+
+        Assert.DoesNotContain("ProcessPriorityClass", source);
+        Assert.DoesNotContain("SetPriorityClass", source);
     }
 
     [Fact]

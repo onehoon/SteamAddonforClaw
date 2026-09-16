@@ -45,6 +45,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string LegacyRunValueName = "SteamInputAddonforClaw";
     internal const int TaskLogonInteractiveToken = 3;
+    internal const int StartupTaskPriority = 2;
 
     private readonly Func<string> _stableExecutablePathProvider;
     private readonly Func<string> _currentUserIdentityProvider;
@@ -362,6 +363,7 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
             // A persistent handheld Runtime must start and keep running on battery, with no scheduler
             // execution-time limit (review [P1]).
             dynamic settings = taskDefinition.Settings;
+            settings.Priority = WindowsTaskSchedulerStartupManager.StartupTaskPriority;
             settings.DisallowStartIfOnBatteries = false;
             settings.StopIfGoingOnBatteries = false;
             settings.ExecutionTimeLimit = WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit;
