@@ -154,8 +154,8 @@ internal static class WindowsControllerBackendDiscovery
                             info.ContainerId == Guid.Empty ? null : info.ContainerId,
                             FormatDeviceId(info.DeviceId),
                             FormatDeviceId(info.DeviceRootId),
-                            Marshal.PtrToStringUni(info.DisplayName),
-                            Marshal.PtrToStringUni(info.PnpPath));
+                            info.DisplayName == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(info.DisplayName),
+                            info.PnpPath == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(info.PnpPath));
                     }
                 }
             }
@@ -359,6 +359,8 @@ internal static class WindowsControllerBackendDiscovery
         [PreserveSig] int GetPreviousReading(IntPtr referenceReading, int inputKind, [MarshalAs(UnmanagedType.Interface)] IGameInputDevice? device, out IntPtr reading);
         [PreserveSig] int RegisterReadingCallback([MarshalAs(UnmanagedType.Interface)] IGameInputDevice? device, int inputKind, IntPtr context, IntPtr callbackFunc, out ulong callbackToken);
         [PreserveSig] int RegisterDeviceCallback([MarshalAs(UnmanagedType.Interface)] IGameInputDevice? device, int inputKind, int statusFilter, int enumerationKind, IntPtr context, [MarshalAs(UnmanagedType.FunctionPtr)] GameInputDeviceCallback callbackFunc, out ulong callbackToken);
+        [PreserveSig] int RegisterSystemButtonCallback([MarshalAs(UnmanagedType.Interface)] IGameInputDevice? device, int buttonFilter, IntPtr context, IntPtr callbackFunc, out ulong callbackToken);
+        [PreserveSig] int RegisterKeyboardLayoutCallback([MarshalAs(UnmanagedType.Interface)] IGameInputDevice? device, IntPtr context, IntPtr callbackFunc, out ulong callbackToken);
         [PreserveSig] void StopCallback(ulong callbackToken);
         [PreserveSig]
         [return: MarshalAs(UnmanagedType.I1)]
