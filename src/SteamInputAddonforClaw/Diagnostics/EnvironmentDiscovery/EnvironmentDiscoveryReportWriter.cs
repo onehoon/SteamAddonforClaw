@@ -1,13 +1,14 @@
 using System.Globalization;
 using System.Text;
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Prerequisites;
 
 namespace SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
 internal sealed class EnvironmentDiscoveryReportWriter
 {
-    internal const int SnapshotVersion = 2;
+    internal const int SnapshotVersion = 3;
 
     public string Write(EnvironmentDiscoverySnapshot snapshot)
     {
@@ -25,6 +26,7 @@ internal sealed class EnvironmentDiscoveryReportWriter
         WriteStartup(text, snapshot.StartupRegistrations);
         WriteTasks(text, snapshot.ScheduledTasks);
         WriteDevices(text, snapshot.Devices);
+        WriteControllerBackends(text, snapshot.ControllerBackends);
         WriteMotionSensors(text, snapshot);
         WritePrerequisites(text, snapshot.Prerequisites);
         WriteKeywordMatches(text, snapshot);
@@ -94,6 +96,64 @@ internal sealed class EnvironmentDiscoveryReportWriter
         if (Failure(text, section)) return;
         foreach (var item in section.Items.OrderBy(value => value.InstanceId, StringComparer.OrdinalIgnoreCase))
             text.AppendLine($"FriendlyName={Safe(item.FriendlyName)}; InstanceId={Safe(item.InstanceId)}; ContainerId={item.ContainerId}; Class={Safe(item.ClassName)}; ClassGuid={Safe(item.ClassGuid)}; Enumerator={Safe(item.EnumeratorName)}; Service={Safe(item.Service)}; VID={FormatHex(item.VendorId)}; PID={FormatHex(item.ProductId)}; HardwareIds={Safe(string.Join('|', item.HardwareIds))}; CompatibleIds={Safe(string.Join('|', item.CompatibleIds))}; Present={item.Present}");
+    }
+
+    private static void WriteControllerBackends(StringBuilder text, ControllerBackendDiscoverySnapshot backends)
+    {
+        Header(text, "WINDOWS CONTROLLER BACKEND DISCOVERY");
+        WriteDirectInput(text, backends.DirectInput);
+        text.AppendLine();
+        WriteRawInput(text, backends.RawInput);
+        text.AppendLine();
+        WriteGameInput(text, backends.GameInput);
+    }
+
+    private static void WriteDirectInput(StringBuilder text, DiscoverySection<DirectInputDeviceDescriptor> section)
+    {
+        text.AppendLine("DirectInput:");
+        if (Failure(text, section)) return;
+        text.AppendLine($"CandidateCount={section.Items.Count}");
+        foreach (var item in section.Items
+                     .OrderBy(value => value.VendorId)
+                     .ThenBy(value => value.ProductId)
+                     .ThenBy(value => value.ProductName, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(value => value.InstanceGuid))
+        {
+            text.AppendLine($"InstanceGuid={item.InstanceGuid}; ProductGuid={item.ProductGuid}; ProductName={Safe(item.ProductName)}; VID={FormatHex(item.VendorId)}; PID={FormatHex(item.ProductId)}; DevicePath={Safe(item.DevicePath)}; PnpInstanceId={Safe(item.PnpInstanceId)}; PhysicalIdentity={Safe(item.PhysicalIdentity)}; UsagePage={FormatHex(item.UsagePage)}; Usage={FormatHex(item.Usage)}; ButtonCount={FormatNumber(item.ButtonCount)}; AxisCount={FormatNumber(item.AxisCount)}; TopologyReason={Safe(item.TopologyReason)}");
+        }
+    }
+
+    private static void WriteRawInput(StringBuilder text, DiscoverySection<RawInputDeviceDiscoveryInfo> section)
+    {
+        text.AppendLine("RawInput:");
+        if (Failure(text, section)) return;
+        text.AppendLine($"CandidateCount={section.Items.Count}");
+        foreach (var item in section.Items
+                     .OrderBy(value => value.VendorId)
+                     .ThenBy(value => value.ProductId)
+                     .ThenBy(value => value.UsagePage)
+                     .ThenBy(value => value.Usage)
+                     .ThenBy(value => value.DevicePath, StringComparer.OrdinalIgnoreCase))
+        {
+            text.AppendLine($"DeviceType={Safe(item.DeviceType)}; DevicePath={Safe(item.DevicePath)}; PnpInstanceId={Safe(item.PnpInstanceId)}; VID={FormatHex(item.VendorId)}; PID={FormatHex(item.ProductId)}; VersionNumber={item.VersionNumber}; UsagePage={FormatHex(item.UsagePage)}; Usage={FormatHex(item.Usage)}");
+        }
+    }
+
+    private static void WriteGameInput(StringBuilder text, DiscoverySection<GameInputDeviceDiscoveryInfo> section)
+    {
+        text.AppendLine("GameInput:");
+        if (Failure(text, section)) return;
+        text.AppendLine($"CandidateCount={section.Items.Count}");
+        foreach (var item in section.Items
+                     .OrderBy(value => value.VendorId)
+                     .ThenBy(value => value.ProductId)
+                     .ThenBy(value => value.DeviceId, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(value => value.DeviceRootId, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(value => value.PnpPath, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(value => value.EnumerationOrdinal))
+        {
+            text.AppendLine($"EnumerationOrdinal={item.EnumerationOrdinal}; VID={FormatHex(item.VendorId)}; PID={FormatHex(item.ProductId)}; RevisionNumber={FormatNumber(item.RevisionNumber)}; UsagePage={FormatHex(item.UsagePage)}; Usage={FormatHex(item.Usage)}; DeviceFamily={Safe(item.DeviceFamily)}; SupportedInput={Safe(item.SupportedInput)}; DeviceStatus={Safe(item.DeviceStatus)}; ContainerId={FormatGuid(item.ContainerId)}; DeviceId={Safe(item.DeviceId)}; DeviceRootId={Safe(item.DeviceRootId)}; DisplayName={Safe(item.DisplayName)}; PnpPath={Safe(item.PnpPath)}; Failure={Safe(item.Failure)}");
+        }
     }
 
     private static void WriteMotionSensors(StringBuilder text, EnvironmentDiscoverySnapshot snapshot)
@@ -173,6 +233,9 @@ internal sealed class EnvironmentDiscoveryReportWriter
 
     private static string FormatHResult(int? value) => value is null ? "<Unavailable>" : $"0x{unchecked((uint)value.Value):X8}";
 
+    private static string FormatGuid(Guid? value) => value?.ToString() ?? "<Unavailable>";
+    private static string FormatNumber(int? value) => value?.ToString(CultureInfo.InvariantCulture) ?? "<Unavailable>";
+
     private static void WritePrerequisites(StringBuilder text, DiscoverySection<RuntimePrerequisiteAssessment> section)
     {
         Header(text, "ROUTING PREREQUISITES");
@@ -206,4 +269,5 @@ internal sealed class EnvironmentDiscoveryReportWriter
     private static void Field(StringBuilder text, string name, string value) => text.AppendLine($"{name}: {Safe(value)}");
     private static string Safe(string? value) => string.IsNullOrWhiteSpace(value) ? "<Unavailable>" : value.Replace('\r', ' ').Replace('\n', ' ');
     private static string FormatHex(ushort? value) => value is null ? "<Unavailable>" : value.Value.ToString("X4");
+    private static string FormatHex(ushort value) => value.ToString("X4");
 }

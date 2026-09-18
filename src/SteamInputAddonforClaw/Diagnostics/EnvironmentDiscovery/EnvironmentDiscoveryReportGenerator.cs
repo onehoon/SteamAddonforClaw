@@ -7,6 +7,7 @@ using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
@@ -68,6 +69,10 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
         var devices = new WindowsControllerDeviceEnumerator();
         var deviceProbe = new WindowsDeviceProbeContextFactory().Capture();
         var deviceInfo = new WindowsDeviceInformationProvider().Capture(deviceProbe.Context);
+        var controllerBackends = new ControllerBackendDiscoverySnapshot(
+            Section(CaptureDirectInput),
+            Section(WindowsControllerBackendDiscovery.CaptureRawInput),
+            Section(WindowsControllerBackendDiscovery.CaptureGameInput));
         return new EnvironmentDiscoverySnapshot(
             capturedAt,
             new SystemDiscoveryInfo(Environment.OSVersion.VersionString, Environment.OSVersion.Version.Build.ToString(), Environment.Is64BitOperatingSystem ? "x64" : "x86", deviceInfo.Manufacturer, deviceInfo.Model, deviceInfo.GpuModels, AppVersion()),
@@ -78,8 +83,15 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
             Section(CaptureStartupRegistrations),
             Section(CaptureScheduledTasks),
             Section(devices.EnumeratePresentDevices),
+            controllerBackends,
             Section(() => (IReadOnlyList<RuntimePrerequisiteAssessment>)[new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices), new WindowsUsbIpWin2PackageProbe()), new ViiperRuntimeInspector()).Inspect()]),
             CaptureMotionSensors());
+    }
+
+    private static IReadOnlyList<DirectInputDeviceDescriptor> CaptureDirectInput()
+    {
+        using var enumerator = new VorticeDirectInputDeviceEnumerator(IntPtr.Zero);
+        return enumerator.EnumerateGameControllers();
     }
 
     private static MotionSensorDiscoverySnapshot CaptureMotionSensors()
@@ -284,6 +296,7 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
     private static DiscoverySection<T> Section<T>(Func<IReadOnlyList<T>> capture)
     {
         try { return new DiscoverySection<T>(capture()); }
+        catch (EnvironmentDiscoveryBackendException exception) { return new DiscoverySection<T>([], exception.Message); }
         catch (Exception exception) { return new DiscoverySection<T>([], exception.GetType().Name); }
     }
 
