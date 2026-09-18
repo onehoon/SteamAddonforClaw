@@ -564,11 +564,14 @@ private static IReadOnlyList<AddonQuickSettingsTabId>
         parsed.Add(tab);
     }
 
-    return AddonQuickSettingsTabOrderContract.TryNormalize(
-        parsed,
-        out var normalized)
-        ? normalized
-        : normalized;
+    if (AddonQuickSettingsTabOrderContract.TryNormalize(
+            parsed,
+            out var normalized))
+    {
+        return normalized;
+    }
+
+    return normalized; // invalid shape already resolves to the frozen default
 }
 ```
 
