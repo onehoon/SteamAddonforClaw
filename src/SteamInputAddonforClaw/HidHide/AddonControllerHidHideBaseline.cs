@@ -118,62 +118,74 @@ internal sealed class AddonControllerHidHideBaseline
         return result;
     }
 
-    /// <summary>Read-only startup admission classification. Accepts the two persistent shapes a
-    /// Disabled boot may legitimately already be compliant in: the zero-target foundation, or a later
-    /// boot where exactly one hidden target the caller's validator confirms is an Addon-owned primary
-    /// PID1902 gamepad collection is persisted. A configuration that only needs normalization is
-    /// <see cref="AddonHidHideBaselineOutcome.Applicable"/>, exactly as
-    /// <see cref="InspectDisabledModeBaseline"/> reports it.</summary>
-    internal AddonHidHideBaselineResult InspectDisabledModeBaselineAllowingExistingOwnedTarget(Func<string, bool> ownedTargetValidator)
+    /// <summary>Persistently normalizes HidHide into the Disabled-mode Addon baseline on a Disabled
+    /// boot, preserving the exact owned target set selected from the currently persisted entries and
+    /// wiping every other hidden entry. The selector is MSI-specific and remains outside this generic
+    /// HidHide owner.</summary>
+    internal AddonHidHideBaselineResult InspectDisabledModeBaselineAllowingExistingOwnedTargets(
+        Func<IReadOnlyList<string>, IReadOnlyList<string>> selectOwnedTargets)
     {
-        ArgumentNullException.ThrowIfNull(ownedTargetValidator);
+        ArgumentNullException.ThrowIfNull(selectOwnedTargets);
         if (!TryInspect(out var inspection, out var unavailable))
             return unavailable;
 
         var hidden = Normalize(inspection.HiddenDeviceEntries?.ToArray() ?? []);
-        IReadOnlyCollection<string> owned = hidden.Count == 1 && ownedTargetValidator(hidden[0])
-            ? [hidden[0]]
-            : [];
-        return InspectDisabledModeBaseline(owned);
+        IReadOnlyList<string> selected;
+        try { selected = Normalize(selectOwnedTargets(hidden) ?? []); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHideBaseline", "Persisted owned HidHide target selection threw; using zero-target foundation.", exception);
+            selected = [];
+        }
+
+        return InspectDisabledModeBaseline(selected);
     }
 
     /// <summary>Persistently normalizes HidHide into the Disabled-mode Addon baseline on a Disabled
-    /// boot, keeping an existing single hidden target the caller's validator confirms is an Addon-owned
-    /// primary PID1902 gamepad collection (so a normal boot does not churn the owned target) and
-    /// wiping every other hidden entry. Verified by read-back (PR10 addendum sections 7-8).</summary>
-    internal AddonHidHideBaselineResult ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(Func<string, bool> ownedTargetValidator)
+    /// boot, preserving the exact owned target set selected from the currently persisted entries and
+    /// wiping every other hidden entry. The selector is MSI-specific and remains outside this generic
+    /// HidHide owner.</summary>
+    internal AddonHidHideBaselineResult ApplyDisabledModeBaselineNormalizingExistingOwnedTargets(
+        Func<IReadOnlyList<string>, IReadOnlyList<string>> selectOwnedTargets)
     {
-        ArgumentNullException.ThrowIfNull(ownedTargetValidator);
+        ArgumentNullException.ThrowIfNull(selectOwnedTargets);
         if (!TryInspect(out var inspection, out var unavailable))
             return unavailable;
 
-        // Retain the one validator-matching Addon-owned candidate even when unrelated non-owned
-        // hidden entries coexist (review [P1]); only fall back to the zero-target baseline when there
-        // is no unambiguous owned candidate. Every non-owned entry is still normalized away.
-        var ownedCandidates = Normalize(inspection.HiddenDeviceEntries?.ToArray() ?? [])
-            .Where(ownedTargetValidator)
-            .ToArray();
-        IReadOnlyCollection<string> keep = ownedCandidates.Length == 1 ? [ownedCandidates[0]] : [];
-        return ApplyDisabledModeBaseline(keep);
+        var hidden = Normalize(inspection.HiddenDeviceEntries?.ToArray() ?? []);
+        IReadOnlyList<string> selected;
+        try { selected = Normalize(selectOwnedTargets(hidden) ?? []); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHideBaseline", "Persisted owned HidHide target selection threw; using zero-target foundation.", exception);
+            selected = [];
+        }
+
+        return ApplyDisabledModeBaseline(selected);
     }
 
-    /// <summary>Read-only. Recovers the one exact Addon-owned primary PID1902 hidden target from the
-    /// persistent HidHide configuration when it is present and the whole baseline is proven compliant
-    /// for that single target. Returns <see langword="null"/> for zero, more than one, a
-    /// validator-rejected, or a non-compliant configuration.</summary>
-    internal string? TryGetSingleExistingOwnedTarget(Func<string, bool> ownedTargetValidator)
+    /// <summary>Read-only. Recovers an exact persisted Addon-owned target set only when the supplied
+    /// selector returns an unambiguous set and the complete Disabled-mode baseline is already proven
+    /// compliant for that set. The generic owner does not infer MSI topology.</summary>
+    internal IReadOnlyList<string> TryGetExistingOwnedTargets(
+        Func<IReadOnlyList<string>, IReadOnlyList<string>> selectOwnedTargets)
     {
-        ArgumentNullException.ThrowIfNull(ownedTargetValidator);
+        ArgumentNullException.ThrowIfNull(selectOwnedTargets);
         if (!TryInspect(out var inspection, out _))
-            return null;
+            return [];
 
         var hidden = Normalize(inspection.HiddenDeviceEntries?.ToArray() ?? []);
-        if (hidden.Count != 1 || !ownedTargetValidator(hidden[0]))
-            return null;
+        IReadOnlyList<string> selected;
+        try { selected = Normalize(selectOwnedTargets(hidden) ?? []); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHideBaseline", "Persisted owned HidHide target selection threw.", exception);
+            return [];
+        }
 
-        return InspectDisabledModeBaseline([hidden[0]]).Outcome == AddonHidHideBaselineOutcome.AlreadyCompliant
-            ? hidden[0]
-            : null;
+        return InspectDisabledModeBaseline(selected).Outcome == AddonHidHideBaselineOutcome.AlreadyCompliant
+            ? selected
+            : [];
     }
 
     /// <summary>Persistently normalizes HidHide into the Disabled-mode Addon baseline and verifies it

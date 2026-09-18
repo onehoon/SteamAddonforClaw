@@ -19,6 +19,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     private const string PhysKey = @"USB\VID_0DB0\SERIAL123";
     private const string OtherPhysKey = @"USB\VID_0DB0\SERIAL999";
     private const string PrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&abcdef&0&0000";
+    private const string ControlPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL02\7&abcdef&0&0001";
+    private const string ConsumerPnp = @"HID\VID_0DB0&PID_1902&MI_01&COL03\7&abcdef&0&0002";
     private const string OtherPrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_00&COL01\7&999999&0&0000";
     private const string NonPrimaryPnp = @"HID\VID_0DB0&PID_1902&MI_03\7&abcdef&0&0003";
 
@@ -33,8 +35,29 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.True(result.IsOwned);
         Assert.False(result.ModeWriteIssued);
         Assert.Equal(0, h.SwitchCalls);
-        Assert.Equal(PrimaryPnp, result.HiddenTarget);
+        Assert.Equal([PrimaryPnp], result.HiddenTargets);
         Assert.Equal(new[] { PrimaryPnp }, h.HidHideApplied);
+    }
+
+    [Fact]
+    public async Task Acquisition_applies_the_exact_current_primary_and_auxiliary_target_set()
+    {
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            PnpDevices =
+            [
+                PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+                PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+                PnpCollection(ConsumerPnp, PhysKey, 0x000C, 0x0001, "MI_01"),
+            ],
+        };
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.Equal([PrimaryPnp, ControlPnp, ConsumerPnp], result.HiddenTargets);
+        Assert.Equal([PrimaryPnp, ControlPnp, ConsumerPnp], h.HidHideApplied);
     }
 
     // ---- 25.2 PID1901 switches exactly once ----
@@ -351,7 +374,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var release = await owner.ReleaseForCenterMEnableAsync(default);
 
         Assert.True(release.Succeeded);
-        Assert.Equal(PrimaryPnp, release.HiddenTarget);
+        Assert.Equal([PrimaryPnp], release.HiddenTargets);
         Assert.True(h.InputSource.StopCalled);
         Assert.Equal(new[] { MsiClawNativeMode.XInput }, h.SwitchTargets); // PID1902 -> PID1901, once
         Assert.Null(owner.LiveInputSource);
@@ -371,7 +394,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         Assert.False(release.Succeeded);
         Assert.Contains("Pid1901RestoreFailed", release.Reason);
-        Assert.Equal(PrimaryPnp, release.HiddenTarget); // still surfaced so the caller does not lose it
+        Assert.Equal([PrimaryPnp], release.HiddenTargets); // still surfaced so the caller does not lose it
         Assert.True(h.InputSource.StopCalled);
     }
 
@@ -423,7 +446,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var release = await owner.ReleaseForCenterMEnableAsync(default);
 
         Assert.True(release.Succeeded);
-        Assert.Equal(PrimaryPnp, release.HiddenTarget); // held from the verified descriptor, not the failed apply
+        Assert.Equal([PrimaryPnp], release.HiddenTargets); // held from the verified descriptor, not the failed apply
     }
 
     [Fact]
@@ -437,7 +460,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var release = await owner.ReleaseForCenterMEnableAsync(default);
 
         Assert.True(release.Succeeded);
-        Assert.Equal(prior, release.HiddenTarget); // recovered from persistent HidHide
+        Assert.Equal([prior], release.HiddenTargets); // recovered from persistent HidHide
     }
 
     [Fact]
@@ -450,7 +473,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var release = await owner.ReleaseForCenterMEnableAsync(default);
 
         Assert.True(release.Succeeded);
-        Assert.Equal(prior, release.HiddenTarget);
+        Assert.Equal([prior], release.HiddenTargets);
         Assert.Equal(new[] { MsiClawNativeMode.XInput }, h.SwitchTargets); // PID1902 -> PID1901
     }
 
@@ -476,7 +499,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var release = await owner.ReleaseForCenterMEnableAsync(default);
 
         Assert.True(release.Succeeded);
-        Assert.Null(release.HiddenTarget);
+        Assert.Empty(release.HiddenTargets);
         Assert.Equal(0, h.SwitchCalls);
         Assert.False(h.InputSource.StopCalled);
     }
@@ -502,11 +525,40 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         Assert.True(recovery.IsOwned);
         Assert.Equal("OwnedPhysicalInputRecovered", recovery.Reason);
-        Assert.Equal(PrimaryPnp, recovery.HiddenTarget);
+        Assert.Equal([PrimaryPnp], recovery.HiddenTargets);
         Assert.Same(h.InputSource, owner.LiveInputSource);
         Assert.True(h.InputSource.IsRunning);
         Assert.Equal(2, h.InputSource.StartCallCount); // the SAME source, started again
         Assert.Equal(0, h.SwitchCalls);
+    }
+
+    [Fact]
+    public async Task Recovery_keeps_primary_identity_and_reconciles_a_refreshed_auxiliary_instance()
+    {
+        const string refreshedConsumer = @"HID\VID_0DB0&PID_1902&MI_01&COL03\8&REFRESHED&0&0002";
+        var hSnapshot = 0;
+        var h = new Harness
+        {
+            InitialMode = MsiClawNativeMode.DirectInput,
+            PnpDeviceSnapshot = () => hSnapshot++ == 0
+                ? [
+                    PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+                    PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+                    PnpCollection(ConsumerPnp, PhysKey, 0x000C, 0x0001, "MI_01"),
+                ]
+                : [
+                    PnpCollection(PrimaryPnp, PhysKey, 0x0001, 0x0005, "MI_00"),
+                    PnpCollection(ControlPnp, PhysKey, 0xFFF0, 0x0040, "MI_00"),
+                    PnpCollection(refreshedConsumer, PhysKey, 0x000C, 0x0001, "MI_01"),
+                ],
+        };
+        var (owner, _) = await AcquiredThenLost(h);
+
+        var recovery = await owner.RecoverLostInputAsync(default);
+
+        Assert.True(recovery.IsOwned);
+        Assert.Equal([PrimaryPnp, ControlPnp, refreshedConsumer], recovery.HiddenTargets);
+        Assert.Equal([PrimaryPnp, ControlPnp, ConsumerPnp, PrimaryPnp, ControlPnp, refreshedConsumer], h.HidHideApplied);
     }
 
     // ---- Full1902 production rumble physical identity/generation (work order section 6 / 19.5) ----
@@ -614,7 +666,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.True(recovery.IsOwned);
         Assert.Equal("OwnedPhysicalStateDriftReclaimed", recovery.Reason);
         Assert.True(recovery.ModeWriteIssued);
-        Assert.Equal(PrimaryPnp, recovery.HiddenTarget);
+        Assert.Equal([PrimaryPnp], recovery.HiddenTargets);
         Assert.Equal(1, h.RecoverySwitchCalls);
         Assert.Equal(MsiClawNativeMode.DirectInput, h.LastSwitchTarget);
         Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets); // never a reverse write
@@ -641,7 +693,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.True(recovery.ModeWriteIssued);
         Assert.Equal(1, h.RecoverySwitchCalls);
         Assert.DoesNotContain(MsiClawNativeMode.XInput, h.SwitchTargets);
-        Assert.Equal(PrimaryPnp, recovery.HiddenTarget); // exact owned target unchanged
+        Assert.Equal([PrimaryPnp], recovery.HiddenTargets); // exact owned target unchanged
     }
 
     [Fact] // review: a reclaim that succeeds then fails LATER in the tail must adopt the fresh PID1902
@@ -833,7 +885,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var release = await owner.ReleaseForCenterMEnableAsync(default);
 
         Assert.True(release.Succeeded);
-        Assert.Equal(PrimaryPnp, release.HiddenTarget); // owned target evidence retained through the failure
+        Assert.Equal([PrimaryPnp], release.HiddenTargets); // owned target evidence retained through the failure
     }
 
     // ---------- PR10: physical device loss / PnP return recovery (work order section 20) ----------
@@ -1019,7 +1071,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var release = await owner.ReleaseForCenterMEnableAsync(default);
 
         Assert.True(release.Succeeded);
-        Assert.Equal(PrimaryPnp, release.HiddenTarget); // owned target evidence retained through the failure
+        Assert.Equal([PrimaryPnp], release.HiddenTargets); // owned target evidence retained through the failure
     }
 
     [Fact] // section 10.8
@@ -1190,6 +1242,19 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             "the release seam must be assigned before the acquisition admission gate");
     }
 
+    private static ControllerDeviceInfo PnpCollection(string instanceId, string physKey, ushort usagePage, ushort usage, string interfaceId)
+    {
+        var serial = physKey[(physKey.LastIndexOf('\\') + 1)..];
+        return new ControllerDeviceInfo(
+            InstanceId: instanceId,
+            ContainerId: null,
+            ParentInstanceId: $@"USB\VID_0DB0&PID_1902&{interfaceId}\6&xyz&0&0000",
+            AncestorInstanceIds: [$@"USB\VID_0DB0&PID_1902\{serial}"],
+            EnumeratorName: "HID", HardwareIds: [], CompatibleIds: [], ClassName: "HIDClass", ClassGuid: null, Service: "HidUsb",
+            VendorId: 0x0DB0, ProductId: 0x1902, Present: true, FriendlyName: "MSI Claw",
+            UsagePage: usagePage, Usage: usage);
+    }
+
     // ---- harness ----
 
     private sealed class Harness
@@ -1207,6 +1272,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         public int DirectInputUnverifiedAttempts { get; set; }
         public bool DirectInputAmbiguous { get; set; }
         public string? ExistingOwnedTarget { get; set; }
+        public IReadOnlyList<ControllerDeviceInfo>? PnpDevices { get; set; }
+        public Func<IReadOnlyList<ControllerDeviceInfo>>? PnpDeviceSnapshot { get; set; }
         public string DirectInputPnp { get; set; } = PrimaryPnp;
         public string DirectInputPnpPhysKey { get; set; } = PhysKey;
         public AddonHidHideBaselineOutcome HidHideOutcome { get; set; } = AddonHidHideBaselineOutcome.Success;
@@ -1311,15 +1378,18 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                     ? RecoverySwitchCalls > 0 && RecoveryPnpPhysKeyAfterReclaim is not null ? RecoveryPnpPhysKeyAfterReclaim : RecoveryCurrentPhysKey
                     : DirectInputPnpPhysKey)
                 : null,
+            () => PnpDeviceSnapshot?.Invoke() ?? PnpDevices ?? [PnpDevice(EffectivePnp, Recovering
+                ? RecoverySwitchCalls > 0 && RecoveryPnpPhysKeyAfterReclaim is not null ? RecoveryPnpPhysKeyAfterReclaim : RecoveryCurrentPhysKey
+                : DirectInputPnpPhysKey)],
             InputSource,
-            target =>
+            targets =>
             {
-                HidHideApplied.Add(target);
+                HidHideApplied.AddRange(targets);
                 if (Recovering) Events.Add("HidHideApply");
                 var outcome = Recovering && RecoveryHidHideOutcome is { } recoveryOutcome ? recoveryOutcome : HidHideOutcome;
                 return new AddonHidHideBaselineResult(outcome, outcome.ToString(), AddonHidHideBaselineSnapshot.Unknown);
             },
-            () => ExistingOwnedTarget,
+            () => ExistingOwnedTarget is null ? [] : [ExistingOwnedTarget],
             delay: (_, _) => Task.CompletedTask,
             directInputSettleWindow: TimeSpan.FromMilliseconds(200),
             directInputSettleInterval: TimeSpan.FromMilliseconds(1));

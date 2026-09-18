@@ -201,12 +201,15 @@ Before the exact PID1902 target is known:
 HiddenDevices = []
 ```
 
-After the exact Addon-owned PID1902 primary gamepad collection is proven:
+After the exact Addon-owned PID1902 primary gamepad collection is proven, the current-world
+target set may additionally contain one uniquely resolved same-root control HID and one uniquely
+resolved same-root consumer-control HID:
 
 ```text
 HiddenDevices =
 {
-    exact Addon-owned PID1902 primary gamepad collection
+    exact Addon-owned PID1902 primary gamepad collection       (required)
+    exact same-root control/consumer collections when unique  (optional)
 }
 ```
 
@@ -217,6 +220,7 @@ Do not:
 - infer historical ownership;
 - preserve arbitrary previous hidden devices merely because another app may once have created them;
 - hide all PID1902 children;
+- hide an auxiliary collection when its exact instance, usage, and physical root are ambiguous;
 - hide PID1901;
 - hide VIIPER virtual targets;
 - invent VID/PID wildcards.
@@ -329,7 +333,7 @@ Active=true
 
 → verify
 → acquire/reconcile same supported physical MSI Claw to PID1902
-→ resolve exact primary PID1902 gamepad collection
+→ resolve exact primary PID1902 gamepad collection and optional same-root auxiliary collections
 → normalize final baseline
 
 Applications:
@@ -338,6 +342,7 @@ Applications:
   Addon
 Hidden:
   exact owned PID1902 primary collection
+  optional exact same-root control/consumer collections when uniquely resolved
 Inverse=false
 Active=true
 
@@ -370,7 +375,7 @@ If another application altered HidHide while the physical controller was absent,
 
 Do not confuse unrelated foreign hidden entries with the committed owned target identity.
 
-If a real PnP return resolves the same physical MSI Claw to a **different exact PID1902 primary collection** than the committed `_ownedHiddenTarget`:
+If a real PnP return resolves the same physical MSI Claw to a **different exact PID1902 primary collection** than the committed `_ownedPrimaryHiddenTarget`:
 
 ```text
 RecoveredTargetChanged
