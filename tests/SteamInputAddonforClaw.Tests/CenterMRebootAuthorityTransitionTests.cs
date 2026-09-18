@@ -289,7 +289,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             StartEnabled = false,
-            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", ownedTarget),
+            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", [ownedTarget]),
         };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Hidden.Add(ownedTarget);
@@ -311,7 +311,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             StartEnabled = false,
-            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "Pid1901RestoreUnverified", "target"),
+            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "Pid1901RestoreUnverified", ["target"]),
         };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Active = true;
@@ -330,7 +330,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             StartEnabled = false,
-            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", ownedTarget),
+            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", [ownedTarget]),
         };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Active = true;
@@ -350,7 +350,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             StartEnabled = false,
-            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", ownedTarget),
+            PhysicalRelease = new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", [ownedTarget]),
             OnPhysicalRelease = () => cts.Cancel(), // frontend pipe drops mid-release
         };
         h.Hid.Whitelist.Add(AddonExe);
@@ -447,7 +447,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     {
         var h = new Harness(this)
         {
-            PhysicalRelease = new(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+            PhysicalRelease = new(true, "Released", [@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"]),
         };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
@@ -464,10 +464,31 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.DoesNotContain(AddonExe, h.Hid.Whitelist);
     }
 
+    [Fact]
+    public async Task Prepare_for_uninstall_removes_the_complete_exact_owned_target_set()
+    {
+        const string primary = @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned";
+        const string control = @"HID\VID_0DB0&PID_1902&MI_00&COL02\owned";
+        const string consumer = @"HID\VID_0DB0&PID_1902&MI_01&COL03\owned";
+        var h = new Harness(this)
+        {
+            PhysicalRelease = new(true, "Released", [primary, control, consumer]),
+        };
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.AddRange([primary, control, consumer]);
+        h.Hid.Active = true;
+
+        var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(h.Hid.Hidden);
+        Assert.False(h.Hid.Active);
+    }
+
     [Fact] // 22.2 / 22.3 -- presentation/physical release failure stops everything downstream.
     public async Task Prepare_for_uninstall_stops_when_physical_release_fails()
     {
-        var h = new Harness(this) { PhysicalRelease = new(false, "VirtualPresentationReleaseFailed", null) };
+        var h = new Harness(this) { PhysicalRelease = new(false, "VirtualPresentationReleaseFailed", []) };
 
         var result = await h.Build().PrepareForUninstallAsync(CancellationToken.None);
 
@@ -545,7 +566,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     public async Task Prepare_for_uninstall_stops_when_hidhide_release_cannot_be_verified()
     {
         const string owned = @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned";
-        var h = new Harness(this) { PhysicalRelease = new(true, "Released", owned) };
+        var h = new Harness(this) { PhysicalRelease = new(true, "Released", [owned]) };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Hidden.Add(owned);
         h.Hid.Active = true;
@@ -576,7 +597,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     {
         var h = new Harness(this)
         {
-            PhysicalRelease = new(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+            PhysicalRelease = new(true, "Released", [@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"]),
             StartupTaskRemovalSucceeds = false,
         };
         h.Hid.Whitelist.Add(AddonExe);
@@ -599,7 +620,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var h = new Harness(this)
         {
             StartEnabled = true,
-            PhysicalRelease = new(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+            PhysicalRelease = new(true, "Released", [@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"]),
         };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
@@ -668,8 +689,8 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         {
             StartEnabled = false,
             PhysicalRelease = failAt == "physical"
-                ? new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "DirectInputStopFailed", null)
-                : new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+                ? new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "DirectInputStopFailed", [])
+                : new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(true, "Released", [@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"]),
             StockBaselineSucceeds = failAt != "stock",
             CenterMHelperCompletes = failAt != "centerm",
         };
@@ -706,7 +727,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     {
         var h = new Harness(this)
         {
-            PhysicalRelease = new(true, "Released", @"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"),
+            PhysicalRelease = new(true, "Released", [@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned"]),
         };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Hidden.Add(@"HID\VID_0DB0&PID_1902&MI_00&COL01\owned");
@@ -744,6 +765,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool StockBaselineModeWrite { get; init; }
         public string StockBaselineReason { get; init; } = "AlreadyXInput";
         public string? PersistedOwnedTarget { get; init; }
+        public IReadOnlyList<string>? PersistedOwnedTargets { get; init; }
         public bool StartupTaskRemovalSucceeds { get; init; } = true;
         public int StockBaselineCalls { get; private set; }
         public int StartupRemovalCalls { get; private set; }
@@ -808,7 +830,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                     return Task.FromResult(new SteamInputAddonforClaw.Startup.StockCenterMStartupBaselineResult(
                         StockBaselineSucceeds, StockBaselineModeWrite, StockBaselineReason));
                 },
-                () => PersistedOwnedTarget,
+                () => PersistedOwnedTargets ?? (PersistedOwnedTarget is null ? [] : [PersistedOwnedTarget]),
                 () =>
                 {
                     StartupRemovalCalls++;

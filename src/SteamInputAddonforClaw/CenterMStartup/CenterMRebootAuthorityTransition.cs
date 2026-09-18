@@ -116,9 +116,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     // PR12 section 6: independent current-world proof that the physical MSI Claw is PID1901/XInput --
     // NothingOwned from the process owner is NOT sufficient stock proof.
     private readonly Func<CancellationToken, Task<StockCenterMStartupBaselineResult>> _establishStockBaseline;
-    // PR12 section 8: the one exact Addon-owned PID1902 primary collection when no live owner returns
+    // PR12 section 8: the exact persisted Addon-owned PID1902 target set when no live owner returns
     // it -- read-only, never a broad VID/PID guess.
-    private readonly Func<string?> _captureExistingOwnedHiddenTarget;
+    private readonly Func<IReadOnlyList<string>> _captureExistingOwnedHiddenTargets;
     // PR12 section 11: remove the mandatory Addon startup task -- LAST, only after stock authority is
     // proven. Routed through the existing startup-registration owner.
     private readonly Func<StartupRegistrationResult> _removeStartupRegistration;
@@ -139,11 +139,11 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         Func<UserTerminationDecision> lowerLevelRuntimeSafety,
         Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> captureAdmission,
         // PR5 section 16: retire the process-owned DirectInput session and restore the same physical
-        // MSI Claw to PID1901 BEFORE HidHide is cleared. Returns the exact PR5-persisted target so the
+        // MSI Claw to PID1901 BEFORE HidHide is cleared. Returns the exact persisted target set so the
         // clear step operates on it rather than []. Null-owner boots return NothingOwned.
         Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> releasePhysicalOwnership,
         Func<CancellationToken, Task<StockCenterMStartupBaselineResult>> establishStockBaseline,
-        Func<string?> captureExistingOwnedHiddenTarget,
+        Func<IReadOnlyList<string>> captureExistingOwnedHiddenTargets,
         Func<StartupRegistrationResult> removeStartupRegistration,
         Action onStockAuthorityRestored,
         IWindowsRestartRequester restartRequester)
@@ -155,7 +155,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _captureAdmission = captureAdmission;
         _releasePhysicalOwnership = releasePhysicalOwnership;
         _establishStockBaseline = establishStockBaseline;
-        _captureExistingOwnedHiddenTarget = captureExistingOwnedHiddenTarget;
+        _captureExistingOwnedHiddenTargets = captureExistingOwnedHiddenTargets;
         _removeStartupRegistration = removeStartupRegistration;
         _onStockAuthorityRestored = onStockAuthorityRestored;
         _restartRequester = restartRequester;
@@ -286,7 +286,8 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         var release = await _releasePhysicalOwnership(CancellationToken.None).ConfigureAwait(false);
         AppLog.Info("CenterM.Authority", "Stock restoration physical release.",
             ("Event", "UninstallPhysicalRelease"), ("Reason", reason), ("Succeeded", release.Succeeded),
-            ("ReleaseReason", release.Reason), ("HiddenTarget", release.HiddenTarget ?? "None"));
+            ("ReleaseReason", release.Reason), ("HiddenTargetCount", release.HiddenTargets.Count),
+            ("HiddenTargets", string.Join(";", release.HiddenTargets)));
         if (!release.Succeeded)
             return StockRestorationResult.Fail("PhysicalRelease:" + release.Reason);
 
@@ -299,13 +300,16 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         if (!stock.Succeeded)
             return StockRestorationResult.Fail("StockBaseline:" + stock.Reason);
 
-        // 8. Exact Addon-owned HidHide target: prefer the live owner's, else the one safely provable
-        //    persisted primary PID1902 collection. Never a broad VID/PID match.
-        var target = release.HiddenTarget ?? _captureExistingOwnedHiddenTarget();
-        var clear = _hidHideBaseline.ApplyEnabledModeBaseline(target is null ? [] : [target]);
+        // 8. Exact Addon-owned HidHide target set: prefer the live owner's, else the safely provable
+        //    persisted exact PID1902 collection set. Never a broad VID/PID match.
+        var targets = release.HiddenTargets.Count != 0
+            ? release.HiddenTargets
+            : _captureExistingOwnedHiddenTargets();
+        var clear = _hidHideBaseline.ApplyEnabledModeBaseline(targets);
         AppLog.Info("CenterM.Authority", "Stock restoration HidHide release.",
             ("Event", "UninstallHidHideRelease"), ("Reason", reason), ("Outcome", clear.Outcome),
-            ("ClearReason", clear.Reason), ("HiddenTarget", target ?? "None"));
+            ("ClearReason", clear.Reason), ("HiddenTargetCount", targets.Count),
+            ("HiddenTargets", string.Join(";", targets)));
         if (!clear.IsCompliant)
             return StockRestorationResult.Fail("HidHideRelease:" + clear.Reason);
 

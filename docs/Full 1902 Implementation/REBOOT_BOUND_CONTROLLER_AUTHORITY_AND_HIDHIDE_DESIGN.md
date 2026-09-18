@@ -214,7 +214,8 @@ HidHide Installed     = yes
 Inverse mode          = off
 HidHide Active        = on
 Addon executable      = whitelisted
-Addon-owned PID1902 primary gamepad collection = hidden when known
+Addon-owned PID1902 primary gamepad collection = required hidden target when known
+Same-root PID1902 control/consumer collections = optional exact hidden targets when unique
 ```
 
 This configuration persists across:

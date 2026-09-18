@@ -100,8 +100,8 @@ public sealed class DisabledBootControllerAdmissionTests
             client, addonExe, () => [officialCli, officialClient]);
         var admission = new DisabledBootControllerAdmission(
             new StubInspector(Ready),
-            () => baseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(
-                SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
+            () => baseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTargets(
+                SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
 
         Assert.Equal(DisabledBootAdmissionOutcome.Ready, admission.Evaluate().Outcome);
         Assert.DoesNotContain(client.Whitelist, e => e.Contains("ClawTweaks", StringComparison.OrdinalIgnoreCase));
@@ -120,7 +120,7 @@ public sealed class DisabledBootControllerAdmissionTests
             client, addonExe, () => []); // official CLI path cannot be resolved -> Unavailable
         var admission = new DisabledBootControllerAdmission(
             new StubInspector(Ready),
-            () => baseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(_ => false));
+            () => baseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTargets(_ => []));
 
         Assert.Equal(DisabledBootAdmissionOutcome.Blocked, admission.Evaluate().Outcome);
     }

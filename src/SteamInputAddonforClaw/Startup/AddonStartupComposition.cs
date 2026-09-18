@@ -52,10 +52,9 @@ internal static class AddonStartupCompositionFactory
             : new DisabledBootControllerAdmission(
                 prerequisiteInspector,
                 // PR10 addendum section 7: normalize + verify the persistent HidHide baseline on every
-                // Disabled boot, keeping the one exact Addon-owned primary PID1902 gamepad collection
-                // if it is already persisted so a normal boot does not churn the owned target.
-                () => addonHidHideBaseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(
-                    MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
+                // Disabled boot, preserving the unambiguous exact Addon-owned PID1902 target set.
+                () => addonHidHideBaseline.ApplyDisabledModeBaselineNormalizingExistingOwnedTargets(
+                    MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
 
         var coordinator = new StartupCoordinator(
             new ControllerTopologyWaiter(deviceEnumerator, classifier),

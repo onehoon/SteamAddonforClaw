@@ -427,14 +427,16 @@ public sealed class AddonControllerHidHideBaselineTests
     {
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = [], Active = true, Inverse = false };
         Assert.Equal(AddonHidHideBaselineOutcome.AlreadyCompliant,
-            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary).Outcome);
+            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTargets(
+                SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets).Outcome);
     }
 
     [Fact]
     public void AllowingOwnedTarget_one_exact_previously_owned_primary_target_is_admitted()
     {
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = [PrimaryPid1902Collection], Active = true, Inverse = false };
-        var result = Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary);
+        var result = Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTargets(
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets);
         Assert.Equal(AddonHidHideBaselineOutcome.AlreadyCompliant, result.Outcome);
         Assert.Empty(client.MutationCalls);
     }
@@ -444,20 +446,22 @@ public sealed class AddonControllerHidHideBaselineTests
     {
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = [OtherHidden], Active = true };
         Assert.Equal(AddonHidHideBaselineOutcome.Applicable,
-            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTarget(IsPrimary).Outcome);
+            Baseline(client).InspectDisabledModeBaselineAllowingExistingOwnedTargets(
+                SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets).Outcome);
     }
 
     [Fact]
-    public void TryGetSingleExistingOwnedTarget_returns_the_one_compliant_owned_primary_target()
+    public void TryGetExistingOwnedTargets_returns_the_compliant_owned_target_set()
     {
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = [PrimaryPid1902Collection], Active = true, Inverse = false };
-        Assert.Equal(PrimaryPid1902Collection, Baseline(client).TryGetSingleExistingOwnedTarget(IsPrimary));
+        Assert.Equal([PrimaryPid1902Collection], Baseline(client).TryGetExistingOwnedTargets(
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
     }
 
     [Theory]
     [InlineData(0)]
     [InlineData(2)]
-    public void TryGetSingleExistingOwnedTarget_returns_null_unless_exactly_one(int count)
+    public void TryGetExistingOwnedTargets_returns_empty_unless_the_set_has_one_primary(int count)
     {
         var hidden = count switch
         {
@@ -466,23 +470,27 @@ public sealed class AddonControllerHidHideBaselineTests
             _ => [PrimaryPid1902Collection],
         };
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = hidden, Active = true };
-        Assert.Null(Baseline(client).TryGetSingleExistingOwnedTarget(IsPrimary));
+        Assert.Empty(Baseline(client).TryGetExistingOwnedTargets(
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
     }
 
     [Fact]
-    public void TryGetSingleExistingOwnedTarget_returns_null_for_a_foreign_or_non_primary_entry()
+    public void TryGetExistingOwnedTargets_returns_empty_for_a_foreign_or_non_primary_entry()
     {
         var foreign = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = [OtherHidden], Active = true };
-        Assert.Null(Baseline(foreign).TryGetSingleExistingOwnedTarget(IsPrimary));
+        Assert.Empty(Baseline(foreign).TryGetExistingOwnedTargets(
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
         var nonPrimary = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = [Pid1902Collection], Active = true };
-        Assert.Null(Baseline(nonPrimary).TryGetSingleExistingOwnedTarget(IsPrimary));
+        Assert.Empty(Baseline(nonPrimary).TryGetExistingOwnedTargets(
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
     }
 
     [Fact]
-    public void TryGetSingleExistingOwnedTarget_returns_null_when_the_baseline_is_not_compliant()
+    public void TryGetExistingOwnedTargets_returns_empty_when_the_baseline_is_not_compliant()
     {
         var client = new FakeHidHideClient { Whitelist = [CliByName, ClientByName, AddonExe], Hidden = [PrimaryPid1902Collection], Active = false };
-        Assert.Null(Baseline(client).TryGetSingleExistingOwnedTarget(IsPrimary));
+        Assert.Empty(Baseline(client).TryGetExistingOwnedTargets(
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
     }
 
     [Fact] // review [P1]: keep the one persisted owned target even when an unrelated hidden entry coexists
@@ -494,7 +502,8 @@ public sealed class AddonControllerHidHideBaselineTests
             Hidden = [PrimaryPid1902Collection, OtherHidden], // owned primary + unrelated foreign
             Active = true,
         };
-        var result = Baseline(client).ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(IsPrimary);
+        var result = Baseline(client).ApplyDisabledModeBaselineNormalizingExistingOwnedTargets(
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets);
 
         Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
         Assert.Equal([PrimaryPid1902Collection], client.Hidden);
@@ -509,7 +518,8 @@ public sealed class AddonControllerHidHideBaselineTests
             Hidden = [PrimaryPid1902Collection, OtherPrimaryPid1902Collection],
             Active = true,
         };
-        var result = Baseline(client).ApplyDisabledModeBaselineNormalizingExistingOwnedTarget(IsPrimary);
+        var result = Baseline(client).ApplyDisabledModeBaselineNormalizingExistingOwnedTargets(
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets);
 
         Assert.Equal(AddonHidHideBaselineOutcome.Success, result.Outcome);
         Assert.Empty(client.Hidden);

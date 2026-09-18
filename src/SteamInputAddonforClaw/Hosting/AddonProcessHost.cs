@@ -347,7 +347,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     _frontButtonRuntime = null;
                 }
                 if (_presentationOwnership is { } presentation && !await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false))
-                    return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", null);
+                    return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", []);
                 return _physicalOwnership is { } owner
                     ? await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
                     : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
@@ -359,8 +359,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ? stockBaseline.EstablishAsync
                 : _ => Task.FromResult(new SteamInputAddonforClaw.Startup.StockCenterMStartupBaselineResult(false, false, "StockBaselineUnavailable")),
             // PR12 section 8: the one safely provable persisted Addon-owned primary PID1902 target.
-            () => authorityHidHideBaseline.TryGetSingleExistingOwnedTarget(
-                SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId),
+            () => authorityHidHideBaseline.TryGetExistingOwnedTargets(
+                SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets),
             // PR12 section 11: startup-task removal routed through the existing registration owner.
             () => composition.StartupSettings.RemoveStartupRegistrationForUninstall(),
             // Full1902 Policy B section 8: native Win+G / Xbox Game Bar suppression belongs to Addon
@@ -538,7 +538,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             var acquired = await owner.AcquireAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
             AppLog.Info("ControllerOwnership", "Physical ownership acquisition completed.",
-                ("Result", acquired.Outcome), ("Reason", acquired.Reason), ("ModeWriteIssued", acquired.ModeWriteIssued), ("HiddenTarget", acquired.HiddenTarget ?? "None"));
+                ("Result", acquired.Outcome), ("Reason", acquired.Reason), ("ModeWriteIssued", acquired.ModeWriteIssued),
+                ("PrimaryHiddenTarget", acquired.PrimaryHiddenTarget ?? "None"), ("HiddenTargetCount", acquired.HiddenTargets.Count));
             if (!acquired.IsOwned)
             {
                 await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
@@ -657,10 +658,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             },
             instanceId => controllerDevices.EnumeratePresentDevices().FirstOrDefault(device =>
                 string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase)),
+            () => controllerDevices.EnumeratePresentDevices(),
             directInputInputSource,
-            target => hidHideBaseline.ApplyDisabledModeBaseline([target]),
-            () => hidHideBaseline.TryGetSingleExistingOwnedTarget(
-                Devices.MSI.Claw.MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId));
+            targets => hidHideBaseline.ApplyDisabledModeBaseline(targets),
+            () => hidHideBaseline.TryGetExistingOwnedTargets(
+                Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
     }
 
     /// <summary>PR8 section 7: decide whether an owned DirectInput session completion is an unexpected
@@ -773,7 +775,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             var result = await physical.RecoverLostInputAsync(cancellationToken).ConfigureAwait(false);
             AppLog.Info("ControllerOwnership", "Owned physical input recovery completed.",
-                ("Trigger", trigger), ("Result", result.Outcome), ("Reason", result.Reason), ("HiddenTarget", result.HiddenTarget ?? "None"));
+                ("Trigger", trigger), ("Result", result.Outcome), ("Reason", result.Reason),
+                ("PrimaryHiddenTarget", result.PrimaryHiddenTarget ?? "None"), ("HiddenTargetCount", result.HiddenTargets.Count));
             // 11: raw Steam/BPM state may have changed while input was down and PR7 correctly refused
             // forward mutation on a non-running source. Re-run the existing reconcile exactly once.
             if (result.IsOwned && result.Reason != "RecoveryNotNeeded")

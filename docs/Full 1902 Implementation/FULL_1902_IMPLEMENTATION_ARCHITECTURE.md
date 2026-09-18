@@ -401,7 +401,8 @@ HidHide readable/configurable
 Inverse whitelist = false
 Active = true
 Addon executable = whitelisted
-Exact Addon-owned PID1902 primary gamepad collection = hidden when known
+Exact Addon-owned PID1902 primary gamepad collection = required hidden target when known
+Exact same-root PID1902 control/consumer collections = optional hidden targets when uniquely resolved
 ```
 
 The baseline persists across:
@@ -415,7 +416,11 @@ It is removed on explicit authority release.
 
 ### Exact-target rule
 
-Hide the exact physical gamepad collection, not the entire PID1902 device tree.
+Hide the exact physical gamepad collection, plus only the exact same-root auxiliary HID
+collections that are uniquely resolved from the current PnP snapshot. The primary gamepad
+is required; auxiliary absence or ambiguity does not block ownership.
+
+Never hide the PID1902 root, keyboard, mouse, or an unverified auxiliary collection.
 
 Do not invent broad VID/PID wildcard hiding if the exact target is not yet known.
 
@@ -427,8 +432,8 @@ If the exact PID1902 target is not yet known:
 HidHide Active + Addon whitelist prepared
 VIIPER devices remain detached
 → acquire/reconcile PID1902
-→ resolve exact physical gamepad collection
-→ add/verify exact HidHide target
+→ resolve exact primary gamepad and optional same-root auxiliary collections
+→ add/verify the exact target set
 → only then attach virtual presentation
 ```
 
