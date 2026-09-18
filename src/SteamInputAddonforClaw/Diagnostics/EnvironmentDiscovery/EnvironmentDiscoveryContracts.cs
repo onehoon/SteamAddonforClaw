@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Prerequisites;
 
 namespace SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
@@ -21,8 +22,41 @@ internal sealed record EnvironmentDiscoverySnapshot(
     DiscoverySection<StartupRegistrationDiscoveryInfo> StartupRegistrations,
     DiscoverySection<ScheduledTaskDiscoveryInfo> ScheduledTasks,
     DiscoverySection<ControllerDeviceInfo> Devices,
+    ControllerBackendDiscoverySnapshot ControllerBackends,
     DiscoverySection<RuntimePrerequisiteAssessment> Prerequisites,
     MotionSensorDiscoverySnapshot MotionSensors);
+
+internal sealed record ControllerBackendDiscoverySnapshot(
+    DiscoverySection<DirectInputDeviceDescriptor> DirectInput,
+    DiscoverySection<RawInputDeviceDiscoveryInfo> RawInput,
+    DiscoverySection<GameInputDeviceDiscoveryInfo> GameInput);
+
+internal sealed record RawInputDeviceDiscoveryInfo(
+    string DeviceType,
+    string DevicePath,
+    string? PnpInstanceId,
+    ushort VendorId,
+    ushort ProductId,
+    uint VersionNumber,
+    ushort UsagePage,
+    ushort Usage);
+
+internal sealed record GameInputDeviceDiscoveryInfo(
+    int EnumerationOrdinal,
+    ushort? VendorId,
+    ushort? ProductId,
+    ushort? RevisionNumber,
+    ushort? UsagePage,
+    ushort? Usage,
+    string? DeviceFamily,
+    string? SupportedInput,
+    string? DeviceStatus,
+    Guid? ContainerId,
+    string? DeviceId,
+    string? DeviceRootId,
+    string? DisplayName,
+    string? PnpPath,
+    string? Failure = null);
 
 internal sealed record MotionSensorDiscoverySnapshot(
     WinRtSensorDiscoveryInfo WinRtGyrometer,

@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
+using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
@@ -19,11 +20,12 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
             processes: [new("zeta", 9, "C:\\z.exe", "", "", "", ""), new("Alpha", 3, "C:\\a.exe", "", "", "", "")],
             installed: [new("HKLM64", "b", "Zeta", "", "", ""), new("HKLM64", "a", "Alpha", "", "", "")]));
 
-        Assert.Contains("SnapshotVersion: 2", report);
+        Assert.Contains("SnapshotVersion: 3", report);
         Assert.True(report.IndexOf("=== SYSTEM ===", StringComparison.Ordinal) < report.IndexOf("=== RUNNING PROCESSES ===", StringComparison.Ordinal));
         Assert.True(report.IndexOf("Name=Alpha; PID=3", StringComparison.Ordinal) < report.IndexOf("Name=zeta; PID=9", StringComparison.Ordinal));
         Assert.True(report.IndexOf("DisplayName=Alpha", StringComparison.Ordinal) < report.IndexOf("DisplayName=Zeta", StringComparison.Ordinal));
-        Assert.True(report.IndexOf("=== CONTROLLER / PNP DEVICES ===", StringComparison.Ordinal) < report.IndexOf("=== WINDOWS MOTION / SENSOR DISCOVERY ===", StringComparison.Ordinal));
+        Assert.True(report.IndexOf("=== CONTROLLER / PNP DEVICES ===", StringComparison.Ordinal) < report.IndexOf("=== WINDOWS CONTROLLER BACKEND DISCOVERY ===", StringComparison.Ordinal));
+        Assert.True(report.IndexOf("=== WINDOWS CONTROLLER BACKEND DISCOVERY ===", StringComparison.Ordinal) < report.IndexOf("=== WINDOWS MOTION / SENSOR DISCOVERY ===", StringComparison.Ordinal));
         Assert.True(report.IndexOf("=== WINDOWS MOTION / SENSOR DISCOVERY ===", StringComparison.Ordinal) < report.IndexOf("=== ROUTING PREREQUISITES ===", StringComparison.Ordinal));
         Assert.DoesNotContain("CommandLine", report, StringComparison.OrdinalIgnoreCase);
     }
@@ -224,6 +226,73 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         Assert.True(File.Exists(second.ReportPath));
     }
 
+    [Fact]
+    public void Writer_PreservesDuplicateBackendProjections()
+    {
+        var snapshot = Snapshot(processes: []) with
+        {
+            ControllerBackends = new ControllerBackendDiscoverySnapshot(
+                new DiscoverySection<DirectInputDeviceDescriptor>([]),
+                new DiscoverySection<RawInputDeviceDiscoveryInfo>(
+                [
+                    new("HID", @"\\?\HID#VID_0DB0&PID_1902&MI_00&COL01#one#{guid}", "HID\\VID_0DB0&PID_1902&MI_00&COL01\\one", 0x0DB0, 0x1902, 1, 1, 5),
+                    new("HID", @"\\?\HID#VID_0DB0&PID_1902&MI_00&COL02#two#{guid}", "HID\\VID_0DB0&PID_1902&MI_00&COL02\\two", 0x0DB0, 0x1902, 1, 0xFFF0, 0x0040)
+                ]),
+                new DiscoverySection<GameInputDeviceDiscoveryInfo>([]))
+        };
+
+        var report = new EnvironmentDiscoveryReportWriter().Write(snapshot);
+
+        Assert.Contains("CandidateCount=2", report);
+        Assert.Contains("COL01#one", report);
+        Assert.Contains("COL02#two", report);
+    }
+
+    [Fact]
+    public void Writer_PreservesBackendPartialFailureAndOtherSections()
+    {
+        var descriptor = new DirectInputDeviceDescriptor(Guid.NewGuid(), Guid.NewGuid(), "MSI Claw", 0x0DB0, 0x1902, @"\\?\HID#PID1902", "HID\\PID1902", "USB\\PID1902", 1, 5, 17, 6, "VerifiedMsiPhysicalRoot");
+        var gameInput = new GameInputDeviceDiscoveryInfo(1, 0x0DB0, 0x1902, 1, 1, 5, "Hid", "Controller|Gamepad", "Connected", Guid.NewGuid(), "A1", "B1", "MSI Claw", "HID\\PID1902");
+        var snapshot = Snapshot(processes: []) with
+        {
+            ControllerBackends = new ControllerBackendDiscoverySnapshot(
+                new DiscoverySection<DirectInputDeviceDescriptor>([descriptor]),
+                new DiscoverySection<RawInputDeviceDiscoveryInfo>([], "RawInputUnavailable"),
+                new DiscoverySection<GameInputDeviceDiscoveryInfo>([gameInput]))
+        };
+
+        var report = new EnvironmentDiscoveryReportWriter().Write(snapshot);
+
+        Assert.Contains("RawInput:\r\n<InspectionFailed: RawInputUnavailable>", report);
+        Assert.Contains("ProductName=MSI Claw", report);
+        Assert.Contains("DeviceId=A1", report);
+        Assert.Contains("=== WINDOWS MOTION / SENSOR DISCOVERY ===", report);
+        Assert.Contains("=== ROUTING PREREQUISITES ===", report);
+    }
+
+    [Fact]
+    public void RawInputPathConversion_ConvertsHidDevicePathToPnpInstanceId()
+    {
+        var path = @"\\?\HID#VID_0DB0&PID_1902&MI_00&COL01#7&F02B9F1&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+
+        Assert.Equal(
+            "HID\\VID_0DB0&PID_1902&MI_00&COL01\\7&F02B9F1&0&0000",
+            WindowsControllerBackendDiscovery.TryConvertHidPathToPnpInstanceId(path));
+        Assert.Null(WindowsControllerBackendDiscovery.TryConvertHidPathToPnpInstanceId("not-a-device-path"));
+        Assert.Null(WindowsControllerBackendDiscovery.TryConvertHidPathToPnpInstanceId(null));
+    }
+
+    [Fact]
+    public void RawInputRelevanceFilterRetainsTrackedControllerProjectionsOnly()
+    {
+        Assert.True(WindowsControllerBackendDiscovery.IsRelevantRawInput(0x1234, 0x5678, 0x0001, 0x0004));
+        Assert.True(WindowsControllerBackendDiscovery.IsRelevantRawInput(0x1234, 0x5678, 0x0001, 0x0005));
+        Assert.True(WindowsControllerBackendDiscovery.IsRelevantRawInput(0x0DB0, 0x1902, 0xFFF0, 0x0040));
+        Assert.True(WindowsControllerBackendDiscovery.IsRelevantRawInput(0x045E, 0x028E, 0xFFFF, 0xFFFF));
+        Assert.True(WindowsControllerBackendDiscovery.IsRelevantRawInput(0x28DE, 0x1205, 0xFFFF, 0xFFFF));
+        Assert.False(WindowsControllerBackendDiscovery.IsRelevantRawInput(0x1234, 0x5678, 0xFFFF, 0x0040));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
@@ -239,6 +308,10 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         new DiscoverySection<StartupRegistrationDiscoveryInfo>([new("HKCU\\Run", "Startup", "C:\\Startup.exe")]),
         new DiscoverySection<ScheduledTaskDiscoveryInfo>([new("\\", "Task", "True", "Ready", "C:\\Task.exe")]),
         new DiscoverySection<ControllerDeviceInfo>(devices ?? []),
+        new ControllerBackendDiscoverySnapshot(
+            new DiscoverySection<DirectInputDeviceDescriptor>([]),
+            new DiscoverySection<RawInputDeviceDiscoveryInfo>([]),
+            new DiscoverySection<GameInputDeviceDiscoveryInfo>([])),
         new DiscoverySection<RuntimePrerequisiteAssessment>([new(new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "Missing"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Missing, "Missing"))]),
         DefaultMotionSensors());
 
