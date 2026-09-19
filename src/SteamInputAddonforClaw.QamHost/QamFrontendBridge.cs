@@ -59,6 +59,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
                 "captureStatus" => await _client.CaptureStatusAsync(token),
                 "captureQuickSettingsShell" => await _client.CaptureAddonQuickSettingsShellAsync(token),
                 "captureQuickSettingsTabOrder" => await _client.CaptureAddonQuickSettingsTabOrderAsync(token),
+                "captureQuickSettingsShortcut" => AddonQuickSettingsShortcutContract.Create(),
                 // SF-V2-05/SF-V2-08: the QAM Device+Profile renderer now reads/mutates only through
                 // the shared Quick Settings seam. The feature-specific Device/Profile bridge
                 // operations were removed once qam.js stopped calling them; the typed
