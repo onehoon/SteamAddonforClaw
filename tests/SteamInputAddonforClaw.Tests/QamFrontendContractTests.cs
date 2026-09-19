@@ -87,6 +87,12 @@ public sealed class QamFrontendContractTests
         Assert.Contains("select-addon-on-next-open", program);
         Assert.Contains("DeliverSelectAddonOnNextQuickAccessOpenAsync", program);
         Assert.Contains("admittedGeneration != Volatile.Read(ref documentGeneration)", program);
+        Assert.Contains("AcknowledgeQamSelectAddonOnNextOpenPreparedAsync", program);
+        var delivery = program[program.IndexOf("DeliverSelectAddonOnNextQuickAccessOpenAsync", StringComparison.Ordinal)..];
+        var evaluateIndex = delivery.IndexOf("EvaluateAsync", StringComparison.Ordinal);
+        var postEvaluationGenerationCheck = delivery.IndexOf("admittedGeneration != Volatile.Read(ref documentGeneration)", evaluateIndex + 1, StringComparison.Ordinal);
+        var acknowledgementIndex = delivery.IndexOf("AcknowledgeQamSelectAddonOnNextOpenPreparedAsync", StringComparison.Ordinal);
+        Assert.True(evaluateIndex >= 0 && postEvaluationGenerationCheck > evaluateIndex && postEvaluationGenerationCheck < acknowledgementIndex);
         Assert.DoesNotContain("state-invalidated')", program[program.IndexOf("DeliverSelectAddonOnNextQuickAccessOpenAsync", StringComparison.Ordinal)..]);
     }
 

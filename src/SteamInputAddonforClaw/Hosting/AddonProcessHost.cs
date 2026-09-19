@@ -850,7 +850,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             {
                 var delivered = false;
                 if (_qamFrontendServer is { } server)
-                    delivered = await server.RequestSelectAddonOnNextQuickAccessOpenAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+                    delivered = await server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromSeconds(1), _startupCancellationTokenSource.Token).ConfigureAwait(false);
 
                 AppLog.Debug("QAM", delivered
                     ? "QAM Addon first-tab intent delivered."

@@ -103,6 +103,7 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken t = default) => SendAsync<FrontendBatteryChargeLimitMutationResult>(FrontendRpcMethod.SetDeviceBatteryChargeLimitPercent, FrontendWireCodec.Payload(new SetDeviceBatteryChargeLimitPercentRequest(percent)), t);
     public Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken t = default) => SendAsync<FrontendPrerequisiteSetupResult>(FrontendRpcMethod.RunPrerequisiteSetup, null, t);
     public Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken t = default) => SendAsync<FrontendEnvironmentReportResult>(FrontendRpcMethod.GenerateEnvironmentReport, null, t);
+    public Task<bool> AcknowledgeQamSelectAddonOnNextOpenPreparedAsync(CancellationToken t = default) => SendAsync<bool>(FrontendRpcMethod.AcknowledgeQamSelectAddonOnNextOpenPrepared, null, t);
     private async Task<T> SendAsync<T>(FrontendRpcMethod method, JsonElement? payload, CancellationToken token)
     {
         token.ThrowIfCancellationRequested(); var pipe = _pipe ?? throw new FrontendTransportException("Client is not connected.", _disconnectReason); var id = Interlocked.Increment(ref _nextRequestId); var tcs = new TaskCompletionSource<FrontendWireEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously); if (!_pending.TryAdd(id, tcs)) throw new FrontendTransportException("Duplicate request id.");

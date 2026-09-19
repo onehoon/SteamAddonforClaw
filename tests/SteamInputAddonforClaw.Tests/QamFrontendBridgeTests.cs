@@ -64,7 +64,7 @@ public sealed class QamFrontendBridgeTests
         var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         bridge.SelectAddonOnNextQuickAccessOpenRequested += (_, _) => received.TrySetResult();
 
-        Assert.True(await server.RequestSelectAddonOnNextQuickAccessOpenAsync());
+        Assert.False(await server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromMilliseconds(50)));
         await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 

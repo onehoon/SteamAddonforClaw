@@ -96,7 +96,13 @@ try
             async Task DeliverSelectAddonOnNextQuickAccessOpenAsync(long admittedGeneration)
             {
                 if (admittedGeneration != Volatile.Read(ref documentGeneration)) return;
-                try { await sessionClient.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeNotification?.('select-addon-on-next-open')", lifetimeToken); }
+                try
+                {
+                    await sessionClient.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeNotification?.('select-addon-on-next-open')", lifetimeToken);
+                    if (admittedGeneration != Volatile.Read(ref documentGeneration)) return;
+                    var acknowledged = await frontendBridge.Client.AcknowledgeQamSelectAddonOnNextOpenPreparedAsync(lifetimeToken).ConfigureAwait(false);
+                    if (!acknowledged) log.Info("QAM Addon first-tab preparation acknowledgement was not accepted.");
+                }
                 catch (Exception exception) { log.Info($"QAM Addon first-tab request delivery skipped for retired CDP session. {exception.Message}"); }
             }
             void OnStateInvalidated(object? _, EventArgs __) => _ = Task.Run(DeliverInvalidationAsync, lifetimeToken);

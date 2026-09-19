@@ -221,6 +221,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
 
         Assert.Contains("RequestSelectAddonOnNextQuickAccessOpenAsync", host, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromSeconds(1)", host, StringComparison.Ordinal);
         Assert.Contains("_quickAccessRequestGate", host, StringComparison.Ordinal);
         var intentIndex = host.IndexOf("RequestSelectAddonOnNextQuickAccessOpenAsync", StringComparison.Ordinal);
         var pulseIndex = host.IndexOf("_presentationOwnership?.TryRequestQuickAccessPulse()", intentIndex, StringComparison.Ordinal);

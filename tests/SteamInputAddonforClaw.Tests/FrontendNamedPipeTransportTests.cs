@@ -671,8 +671,11 @@ public sealed class FrontendNamedPipeTransportTests
             if (Interlocked.Increment(ref count) == 1) notification.TrySetResult();
         };
 
-        Assert.True(await server.RequestSelectAddonOnNextQuickAccessOpenAsync());
+        var preparation = server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromSeconds(1));
         await notification.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var acknowledgement = client.AcknowledgeQamSelectAddonOnNextOpenPreparedAsync();
+        Assert.True(await preparation);
+        Assert.True(await acknowledgement);
         Assert.Equal(1, count);
         Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
     }
@@ -683,7 +686,41 @@ public sealed class FrontendNamedPipeTransportTests
         var (server, _) = await StartServerAsync(new RecordingFrontendControl());
         await using var serverLifetime = server;
 
-        Assert.False(await server.RequestSelectAddonOnNextQuickAccessOpenAsync());
+        Assert.False(await server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromMilliseconds(50)));
+    }
+
+    [Fact]
+    public async Task Select_addon_on_next_quick_access_open_waits_for_preparation_acknowledgement()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var notification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.SelectAddonOnNextQuickAccessOpenRequested += (_, _) => notification.TrySetResult();
+
+        var preparation = server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromSeconds(1));
+        await notification.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(preparation.IsCompleted);
+
+        Assert.True(await client.AcknowledgeQamSelectAddonOnNextOpenPreparedAsync());
+        Assert.True(await preparation);
+    }
+
+    [Fact]
+    public async Task Select_addon_on_next_quick_access_open_times_out_without_acknowledgement()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var notification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.SelectAddonOnNextQuickAccessOpenRequested += (_, _) => notification.TrySetResult();
+
+        var preparation = server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromMilliseconds(50));
+        await notification.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(await preparation);
     }
 
     [Fact]
