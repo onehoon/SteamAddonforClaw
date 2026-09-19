@@ -1,11 +1,11 @@
 # Addon Quick Settings Shared Surface Architecture
 
 > Date: 2026-09-18  
-> Status: Proposed architecture authority for the next QAM / Addon Overlay convergence phase  
-> Baseline reviewed: main at 1b5aa0d5a6ff930e5f85ee44f4c1ad392cdccd53  
+> Status: Implemented architecture authority after the shared-surface convergence sequence
+> Baseline reviewed: main at 8c333b1ee4af63e4e7a9f50dd3a4b73a8944c682 after PR #530; PR5 cleanup is recorded here
 > Product scope: Standalone Full PID1902  
 > CTW integration: not part of this design  
-> Estimated implementation: 5 focused PRs
+> Implementation sequence: PR #527, #528, #529, #530, and PR5 convergence cleanup
 
 ---
 
@@ -144,11 +144,11 @@ QAM renderer / Overlay renderer
 
 Do not replace this with a second abstraction.
 
-### 3.2 Overlay already has a five-tab identity contract
+### 3.2 The five-tab identity is now surface-neutral
 
 Current source:
 
-src/SteamInputAddonforClaw.Contracts/Overlay/OverlayTabId.cs
+src/SteamInputAddonforClaw.Contracts/Frontend/AddonQuickSettingsShellContracts.cs
 
 defines exactly:
 
@@ -160,17 +160,18 @@ Shortcut
 Setting
 ~~~
 
-and one exact-order validation contract.
+and one exact-order validation contract. Overlay and QAM both consume this shared identity/order
+contract; Overlay no longer owns an OverlayTabId product identity.
 
 The user may reorder the five known tabs but may not add, remove, hide, or rename them.
 
-That fixed five-tab product identity is useful beyond Overlay and should become surface-neutral.
+That fixed five-tab product identity is now surface-neutral.
 
-### 3.3 Overlay currently owns more shell/product composition than QAM
+### 3.3 Overlay owns renderer-specific composition only
 
 Current OverlayWindow builds:
 
-- five tab buttons;
+- five tab buttons rendered from the shared shell/order contracts;
 - local tab selection;
 - Device generic Quick Settings page;
 - Profile generic Quick Settings page;
@@ -184,7 +185,31 @@ The Device/Profile content is already generic.
 
 The remaining duplication risk is mainly shell and special-page composition.
 
-### 3.4 QAM currently owns only Device/Profile inner tabs
+### 3.5 Final ownership after the convergence sequence
+
+The implemented ownership is now:
+
+~~~text
+Runtime / Contracts
+  shell identity, order, labels
+  Device/Profile page metadata and mutation semantics
+  Setting tab-order state and mutation result
+  Shortcut Slot1-Slot4 read-only product meaning
+
+QAM
+  Steam-native React/CommonUI rendering and QAM lifecycle/admission
+
+Overlay
+  WinUI rendering, local navigation/geometry, and OQ4 lifecycle/admission
+
+Controller
+  shell identity plus renderer-local placeholder only
+~~~
+
+No surface owns a second product label/order table, local Device/Profile debounce policy, Shortcut
+action schema, or Controller page schema.
+
+### 3.4 QAM now renders the complete shared five-tab shell
 
 The current QAM design uses:
 
@@ -195,7 +220,7 @@ one Addon-owned top-level descriptor
         ↓
 Steam native inner Tabs
         ↓
-Device / Profile
+Device / Profile / Controller / Shortcut / Setting
 ~~~
 
 The QAM renderer intentionally uses Steam native controls such as:
@@ -254,8 +279,8 @@ The new target is:
           ┌───────────────────┴───────────────────┐
           │                                       │
           ▼                                       ▼
-Shared shell/composition                  Shared page contracts
-five tabs / order / labels                Device / Profile / later typed pages
+                  Shared shell/composition                  Shared page contracts
+                  five tabs / order / labels                Device / Profile / typed special pages
           │                                       │
           └───────────────────┬───────────────────┘
                               ▼
@@ -321,7 +346,7 @@ Shared:
 - commit/debounce policy;
 - linked constraints;
 - Setting tab-order state;
-- Shortcut slot product identity when that feature is implemented;
+- Shortcut slot product identity;
 - unavailable/placeholder product text where deliberately shared.
 
 Surface-specific:
@@ -497,7 +522,7 @@ Shortcut does not naturally fit the current Device/Profile Toggle/Slider schema.
 
 Do not distort QuickSettingsPageSnapshot by adding generic Action/Grid/Tile kinds merely to fit Shortcut.
 
-Preferred future contract is a small dedicated typed model only for the actual Shortcut product, conceptually:
+The implemented contract is a small dedicated typed model for the current Shortcut product:
 
 ~~~text
 AddonQuickSettingsShortcutSnapshot
@@ -507,9 +532,8 @@ AddonQuickSettingsShortcutSnapshot
 └─ Slot4
 ~~~
 
-with explicit known action identity once that product contract is frozen.
-
-Until real shortcut assignment/action semantics are implemented, both renderers may use a shared static placeholder/shell definition.
+The current contract intentionally contains only four read-only `Unassigned` slots. Assignment and
+execution semantics remain out of scope until a real product authority exists.
 
 ### 7.4 Setting remains a dedicated typed surface
 
@@ -1045,17 +1069,17 @@ Pixels are allowed to differ because one renderer is Steam native and one is Win
 
 ---
 
-## 18. PR count and sequencing rule
+## 18. Implementation sequence and status
 
-Expected implementation:
+Completed implementation:
 
 ~~~text
 5 PRs
 ~~~
 
-This is large enough that implementation should follow this architecture document rather than begin as an unstructured QAM/Overlay refactor.
+The implementation followed this architecture document as five independently reviewable PRs.
 
-Recommended order:
+Completed order:
 
 ~~~text
 PR1 shared identity/contract
@@ -1065,9 +1089,8 @@ PR1 shared identity/contract
 → PR5 cleanup + acceptance
 ~~~
 
-Do not parallelize PR2/PR3/PR4 against incompatible versions of the shell contract unless branch management clearly avoids duplicated migration work.
-
-PR1 should merge first.
+PR5 removed the remaining QAM debounce fallback, added final parity guardrails, and refreshed the
+living architecture documents. Historical work orders remain unchanged.
 
 ---
 

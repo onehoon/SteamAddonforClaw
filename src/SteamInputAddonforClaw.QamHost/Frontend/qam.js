@@ -26,11 +26,10 @@
   const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
   const ADDON_TAB_KEY = "steam-input-addon";
+  // Historical descriptor cleanup identities only. These markers recognize stale pre-shell tabs
+  // during QAM restart/reload/uninstall cleanup; they are not current product tab identities.
   const LEGACY_ADDON_DEVICE_TAB_KEY = "steam-input-addon-device";
   const LEGACY_ADDON_PROFILE_TAB_KEY = "steam-input-addon-profile";
-  // Defensive fallback only (SF-V2-05/08): every real product row supplies a valid
-  // row.commitPolicy.delayMilliseconds, so this is never expected to be hit in practice.
-  const QS_FALLBACK_COMMIT_DELAY_MS = 2000;
 
   // Shared Quick Settings transport/ABI vocabulary (SF-V2-05/08). These mirror the closed C# enums
   // the bridge serializes numerically -- they are NOT a duplicated copy of Device/Profile product
@@ -947,6 +946,18 @@
       const scheduleQuickSettingsCommit = (page, section, row, nextProductValue) => {
         if (!state.installed || !requireQuickSettingsRowMutation(row)) return;
         const key = quickSettingsPendingKey(page, row);
+        const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING
+          ? Number(row.commitPolicy.delayMilliseconds)
+          : NaN;
+        if (!Number.isFinite(delayMs) || delayMs <= 0) {
+          const pending = state.qamSliderCommits?.get(key);
+          if (pending) {
+            clearTimeout(pending.timer);
+            state.qamSliderCommits.delete(key);
+          }
+          setError("Quick Settings is unavailable.");
+          return;
+        }
         const existing = state.qamSliderCommits?.get(key);
         let draft = existing?.quickSettingsValues
           ? { values: { ...existing.quickSettingsValues }, order: existing.quickSettingsOrder }
@@ -959,7 +970,6 @@
         draft.values[row.rowId] = edited;
         if (row.commitGroupId != null) applyQuickSettingsLinkedConstraints(quickSettingsPageRef.current, draft.values, row.rowId);
         const values = draft.order.map(rowId => ({ rowId, value: draft.values[rowId] }));
-        const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING ? Number(row.commitPolicy.delayMilliseconds) : 0;
         scheduleQamSliderCommit(
           key,
           { pageId: page.pageId, appId: page.appId ?? null, quickSettingsValues: draft.values, quickSettingsOrder: draft.order, sectionId: section.sectionId },
@@ -1230,7 +1240,8 @@
   // onRequestStart / onRequestEnd wrap ONLY the actual delayed RPC execution (never the debounce
   // window), so the caller can put just the in-flight mutation inside the component's existing
   // beginMutation()/endMutation() invalidation gate while the pending draft stays refreshable.
-  function scheduleQamSliderCommit(key, pending, method, payload, onSettled, delayMs = QS_FALLBACK_COMMIT_DELAY_MS, onRequestStart = null, onRequestEnd = null) {
+  function scheduleQamSliderCommit(key, pending, method, payload, onSettled, delayMs, onRequestStart = null, onRequestEnd = null) {
+    if (!Number.isFinite(delayMs) || delayMs <= 0) return;
     state.qamSliderCommits ??= new Map();
     const previous = state.qamSliderCommits.get(key);
     if (previous) clearTimeout(previous.timer);
@@ -1274,7 +1285,7 @@
         } finally {
           if (requestStarted) onRequestEnd?.();
         }
-    }, Number.isFinite(delayMs) && delayMs > 0 ? delayMs : QS_FALLBACK_COMMIT_DELAY_MS);
+    }, delayMs);
     state.qamSliderCommits.set(key, entry);
   }
 

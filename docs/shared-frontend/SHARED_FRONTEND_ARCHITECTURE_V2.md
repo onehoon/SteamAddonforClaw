@@ -2,7 +2,7 @@
 
 > **Date:** 2026-09-05  
 > **Status:** Current design authority for shared Runtime/frontend projection and shared Quick Settings product semantics  
-> **Baseline reviewed:** `main` at `ed27976ff756ecb5bfc42569d642acb413b452a9` after PR #498  
+> **Baseline reviewed:** `main` at `8c333b1ee4af63e4e7a9f50dd3a4b73a8944c682` after PR #530; current-state sections refreshed by PR5
 > **Scope:** Addon Runtime, desktop Main UI, Steam QAM, Addon Quick Settings Overlay, shared typed feature state, shared Quick Settings page semantics, surface-specific transport/admission, and renderer boundaries
 
 ---
@@ -115,7 +115,7 @@ No shared Quick Settings component may acquire or restore PID1901/PID1902, touch
 
 ---
 
-## 4. Current production baseline after SF-V2-01 / 02
+## 4. Current production baseline after Shared Frontend V2 and shared-surface convergence
 
 ### 4.1 One Runtime/frontend projection already exists
 
@@ -186,22 +186,24 @@ This v6 Device transport is an important foundation, but it was deliberately cre
 
 ### 4.4 Current protocol versions
 
-At this baseline:
+Current production state:
 
 ```text
-FrontendTransportProtocol.CurrentVersion = 27
-OverlayTransportProtocol.CurrentVersion  = 6
+FrontendTransportProtocol.CurrentVersion = 32
+OverlayTransportProtocol.CurrentVersion  = 8
 ```
 
-Frontend v27 includes later unrelated Claw Sensor Probe work after SF-V2-01 claimed v26.
+Frontend v32 and Overlay v8 are the current wire authorities. The shared-surface shell, Setting,
+and Shortcut convergence does not add a wire version because its current QAM Shortcut path is
+bridge-local and the existing typed transport payloads remain unchanged.
 
-Do not use stale `25`/`26` planning numbers when preparing future work orders.
+### 4.5 Current duplication status
 
-### 4.5 Current duplication now matters
+The original duplication described below was the pre-convergence baseline. The shared-surface
+sequence has removed the product-policy copies while retaining renderer-specific layout, focus,
+admission, and lifecycle code.
 
-QAM and Overlay currently still encode Quick Settings interaction policy separately.
-
-QAM currently hard-codes, among other things:
+Historical pre-convergence QAM duplication included:
 
 ```text
 QAM_SLIDER_COMMIT_DELAY_MS = 2000
@@ -213,17 +215,32 @@ per-feature mutation method names
 pending-draft keys
 ```
 
-Overlay currently has a separate:
+Historical pre-convergence Overlay duplication included:
 
 ```text
 OverlayDelayedSliderCommit.ProductionDelay = 2000 ms
 ```
 
-and temporary preview rows rather than real Device controls.
+The current implementation instead uses shared shell/order/label contracts, shared
+QuickSettingsPageSnapshot metadata and commit policy, shared Setting mutation state, and the
+shared four-slot Shortcut contract. QAM's malformed/missing row delay policy fails closed; it does
+not invent a local 2000ms fallback.
 
-If real Overlay Device/Profile binding continues from here without another shared layer, every product change would need to be repeated in QAM JavaScript and Overlay C#.
+Current shared-surface topology is documented in
+`ADDON_QUICK_SETTINGS_SHARED_SURFACE_ARCHITECTURE_2026-09-18.md`.
 
-That is the duplication this revision removes.
+The current topology is:
+
+~~~text
+one Addon Quick Settings shell/order/label authority
+  + QuickSettingsPageSnapshot for Device/Profile
+  + typed Setting tab-order contract
+  + typed read-only Shortcut contract
+        ↓
+QAM native React renderer / Overlay WinUI renderer
+~~~
+
+Controller remains a shell identity with a renderer-local placeholder; it is not a generic page.
 
 ---
 
@@ -340,16 +357,17 @@ Exact record names may vary, but the semantics above are frozen.
 
 ### 7.1 Page identity
 
-Initial implemented page IDs should be only those already proven product surfaces:
+Device/Profile remain the only `QuickSettingsPageId` values:
 
 ```text
 Device
 Profile
 ```
 
-Do not pre-add Controller/Shortcut/Setting page IDs merely because the Overlay has those tabs.
+Controller, Shortcut, and Setting are shell-level typed surfaces, not generic
+`QuickSettingsPageSnapshot` page IDs.
 
-Add another shared page only when QAM + Overlay genuinely share its contents.
+Add another generic page only when QAM + Overlay genuinely share Toggle/Slider page contents.
 
 ### 7.2 Section identity
 
@@ -1042,7 +1060,7 @@ Do not add a per-row surface-visibility matrix just to support hypothetical dive
 
 The simplest model is:
 
-> **inside shared page = parity**  
+> **inside shared page = parity**
 > **outside shared page = surface-specific**
 
 Main UI remains separate regardless.

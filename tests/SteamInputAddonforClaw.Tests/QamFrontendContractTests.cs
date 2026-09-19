@@ -143,6 +143,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("const ADDON_TAB_KEY = \"steam-input-addon\";", source);
         Assert.Contains("const LEGACY_ADDON_DEVICE_TAB_KEY = \"steam-input-addon-device\";", source);
         Assert.Contains("const LEGACY_ADDON_PROFILE_TAB_KEY = \"steam-input-addon-profile\";", source);
+        Assert.Contains("Historical descriptor cleanup identities only.", source);
+        Assert.Contains("they are not current product tab identities.", source);
         Assert.Contains("state.addonTabDescriptor", source);
         Assert.Contains("function buildAddonTab(React, native)", source);
         Assert.Contains("[TAB_MARKER]: ADDON_TAB_KEY", source);
@@ -664,7 +666,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("if (row.commitGroupId != null) applyQuickSettingsLinkedConstraints(quickSettingsPageRef.current, draft.values, row.rowId);", schedule);
         Assert.Contains("draft.order.map(rowId => ({ rowId, value: draft.values[rowId] }))", schedule);
         // Delay comes from the row's commit policy, never a JS constant.
-        Assert.Contains("const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING ? Number(row.commitPolicy.delayMilliseconds) : 0;", schedule);
+        Assert.Contains("const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING", schedule);
+        Assert.Contains("Number(row.commitPolicy.delayMilliseconds)", schedule);
         Assert.Contains("\"mutateQuickSetting\"", schedule);
         // The pending Map is outside React -- scheduling a draft forces one renderer-local pass so
         // the immediate preview / linked paired correction is visible before the trailing commit.
@@ -867,16 +870,21 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         // The one shared scheduler mechanism is reused for both pages; no JS Device/Profile delay
-        // constant remains -- only a defensive fallback default that real rows never hit.
+        // constant or fallback remains.
         Assert.DoesNotContain("QAM_SLIDER_COMMIT_DELAY_MS", source);
         Assert.DoesNotContain("PROFILE_SLIDER_COMMIT_DELAY_MS", source);
-        Assert.Contains("const QS_FALLBACK_COMMIT_DELAY_MS = 2000;", source);
+        Assert.DoesNotContain("QS_FALLBACK_COMMIT_DELAY_MS", source);
         Assert.Contains("state.qamSliderCommits", source);
         Assert.Contains("clearTimeout(pending.timer)", source);
         Assert.Contains("cancelQamSliderCommits();", source);
 
-        // Slider delay comes from row.commitPolicy; toggles commit immediately via a separate path.
-        Assert.Contains("const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING ? Number(row.commitPolicy.delayMilliseconds) : 0;", source);
+        // Slider delay comes from row.commitPolicy; malformed policy fails closed without scheduling.
+        Assert.Contains("const delayMs = row.commitPolicy?.mode === QS_COMMIT_TRAILING", source);
+        Assert.Contains("Number(row.commitPolicy.delayMilliseconds)", source);
+        Assert.Contains("if (!Number.isFinite(delayMs) || delayMs <= 0)", source);
+        Assert.Contains("setError(\"Quick Settings is unavailable.\")", source);
+        Assert.Contains("}, delayMs);", source);
+        Assert.DoesNotContain("QS_FALLBACK_COMMIT_DELAY_MS", source);
         var immediate = source[source.IndexOf("const commitQuickSettingsImmediate", StringComparison.Ordinal)..source.IndexOf("const scheduleQuickSettingsCommit", StringComparison.Ordinal)];
         Assert.DoesNotContain("scheduleQamSliderCommit", immediate);
         Assert.Contains("request(\"mutateQuickSetting\"", immediate);
