@@ -154,7 +154,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
@@ -176,7 +176,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                 try { await _inner.CloseClawSensorProbeAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
             operationGate.Dispose(); }
     }
-    // SF-V2-04: dispatch the two generic Quick Settings RPCs onto the existing IAddonFrontendControl
+    // SF-V2-04/PR3: dispatch typed Quick Settings RPCs onto the existing IAddonFrontendControl
     // seam only. Product validation (page/row/value shape, TDP group, enum values) stays in the
     // SF-V2-03 QuickSettingsMutationAdapter behind MutateQuickSettingAsync -- no feature switch here.
     private async Task<System.Text.Json.JsonElement> InvokeQuickSettingsCaptureAsync(System.Text.Json.JsonElement? p, CancellationToken t)
@@ -186,6 +186,10 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
     }
     private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.CaptureAddonQuickSettingsShell
         ? FrontendWireCodec.Payload(await _inner.CaptureAddonQuickSettingsShellAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder
+        ? FrontendWireCodec.Payload(await _inner.CaptureAddonQuickSettingsTabOrderAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.MoveAddonQuickSettingsTab
+        ? FrontendWireCodec.Payload(await _inner.MoveAddonQuickSettingsTabAsync(FrontendWireCodec.Decode<AddonQuickSettingsTabOrderMoveIntent>(p), t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureQuickSettingsPage
         ? await InvokeQuickSettingsCaptureAsync(p, t).ConfigureAwait(false)
         : m == FrontendRpcMethod.MutateQuickSetting

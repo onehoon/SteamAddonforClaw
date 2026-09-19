@@ -5,7 +5,7 @@ using Xunit;
 namespace SteamInputAddonforClaw.Tests;
 
 // OQ5-UI-10: the Setting-page tab-order editor is WinUI, but its non-visual contract is the pure
-// composition of OverlayTabState (proposal + authoritative apply) and OverlayRowSelection
+// composition of the shared tab-order product (intent + authoritative apply) and OverlayRowSelection
 // (identity-preserving reselection). These cover that composition without a XAML host.
 public sealed class AddonQuickSettingsTabOrderEditorTests
 {
@@ -24,7 +24,14 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
         var selectedId = state.Order[selection.SelectedIndex!.Value];
         Assert.Equal(AddonQuickSettingsTabId.Controller, selectedId);
 
-        Assert.True(state.TryCreateMovedOrder(selectedId, -1, out var proposed));
+        IReadOnlyList<AddonQuickSettingsTabId> proposed =
+        [
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
+        ];
 
         // Runtime accepts and republishes; OverlayWindow.ApplyTabOrder re-points selection at the
         // same identity's new index.
@@ -38,22 +45,18 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
     }
 
     [Fact]
-    public void BoundaryMoveProducesNoProposalSoNoRequestIsSent()
-    {
-        var state = new OverlayTabState();
-
-        Assert.False(state.TryCreateMovedOrder(state.Order[0], -1, out _));
-        Assert.False(state.TryCreateMovedOrder(state.Order[^1], +1, out _));
-        Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
-    }
-
-    [Fact]
     public void NextShowStillSelectsTheNewFirstAuthoritativeTab()
     {
         var state = new OverlayTabState();
         state.Select(AddonQuickSettingsTabId.Setting);
-
-        Assert.True(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Profile, -1, out var proposed)); // Profile -> position 0
+        IReadOnlyList<AddonQuickSettingsTabId> proposed =
+        [
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
+        ];
         Assert.True(state.TryApplyOrder(proposed));
 
         Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab); // preserved during live reorder

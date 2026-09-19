@@ -520,17 +520,22 @@ public sealed class QamFrontendContractTests
         var panel = source[panelStart..panelEnd];
 
         Assert.Contains("request(\"captureQuickSettingsShell\")", panel);
+        Assert.Contains("request(\"captureQuickSettingsTabOrder\")", panel);
         Assert.Contains("validateQuickSettingsShell(shell)", panel);
-        Assert.Contains("setShellError(\"Addon Quick Settings shell is unavailable.\")", panel);
+        Assert.Contains("validateTabOrderState(order)", panel);
         Assert.Contains("const innerTabs = shellTabs.map(tab => ({", panel);
         Assert.Contains("id: String(tab.tabId)", panel);
         Assert.Contains("title: tab.label", panel);
-        Assert.Contains("content: buildInnerTabContent(React, native, tab, QuickSettingsPanel)", panel);
+        Assert.Contains("content: buildInnerTabContent(React, native, tab, QuickSettingsPanel,", panel);
         Assert.Contains("tabs: innerTabs", panel);
         Assert.Contains("activeTab,", panel);
         Assert.Contains("onShowTab: setActiveTab", panel);
         Assert.Contains("autoFocusContents: true", panel);
-        Assert.Contains("const preferred = appId > 0 ? AQS_TAB_PROFILE : AQS_TAB_DEVICE;", panel);
+        Assert.Contains("const preferred = Number(status?.steam?.appId || 0) > 0 ? AQS_TAB_PROFILE : AQS_TAB_DEVICE;", panel);
+        Assert.Contains("moveQuickSettingsTab", panel);
+        Assert.Contains("result?.state", panel);
+        Assert.Contains("SettingTabOrderPanel", source);
+        Assert.Contains("native.SliderField", source);
         Assert.DoesNotContain("[\"Device\", \"Profile\", \"Controller\", \"Shortcut\", \"Setting\"]", source);
         Assert.DoesNotContain("QuickSettingsPageId", source);
         Assert.Contains("This page is not available in QAM yet.", source);

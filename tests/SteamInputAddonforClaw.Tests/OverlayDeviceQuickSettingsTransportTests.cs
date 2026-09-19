@@ -8,7 +8,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-// SF-V2-06: .Overlay v7 replaces the v6 Device-specific state/mutation wire with the shared
+// SF-V2-06: .Overlay v8 carries the shared typed tab-order state/mutation wire alongside the
 // QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult contract
 // already consumed by .Frontend/.Qam (SF-V2-04/05), inside narrow transport correlation wrappers.
 // OQ4/lifecycle regression coverage lives in OverlayTransportTests/AddonQuickSettingsTabOrderTransportTests and
@@ -33,16 +33,16 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     // ---- Protocol / handshake -----------------------------------------------------------------
 
     [Fact]
-    public void Protocol_is_v7_and_frontend_transport_is_unaffected()
+    public void Protocol_is_v8_and_frontend_transport_is_current()
     {
-        Assert.Equal(7, OverlayTransportProtocol.CurrentVersion);
-        // SF-V2-06 owns only .Overlay v6 -> v7. The desktop/QAM frontend protocol is independent of
+        Assert.Equal(8, OverlayTransportProtocol.CurrentVersion);
+        // The desktop/QAM frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(31, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(32, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]
-    public async Task A_v6_peer_is_rejected_by_the_v7_server()
+    public async Task A_v7_peer_is_rejected_by_the_v8_server()
     {
         var pipeName = Pipe();
         await using var server = new NamedPipeOverlayServer(pipeName);
@@ -51,7 +51,7 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         await client.ConnectAsync(5000);
         using var writeGate = new SemaphoreSlim(1, 1);
 
-        await OverlayWireCodec.WriteAsync(client, new(6, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(client, new(7, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
         var response = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
 
         Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);
@@ -493,13 +493,21 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     {
         var pipeName = Pipe();
         IReadOnlyList<AddonQuickSettingsTabId> current = AddonQuickSettingsTabOrderContract.DefaultOrder;
-        await using var server = new NamedPipeOverlayServer(pipeName, () => current, requested => { current = requested; return true; });
+        await using var server = new NamedPipeOverlayServer(pipeName,
+            captureTabOrder: _ => Task.FromResult(AddonQuickSettingsTabOrderProduct.Create(current)),
+            moveTabOrder: (intent, _) =>
+            {
+                if (!AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(current, intent, out var next))
+                    return Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(false, "Rejected.", AddonQuickSettingsTabOrderProduct.Create(current)));
+                current = next;
+                return Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(true, null, AddonQuickSettingsTabOrderProduct.Create(current)));
+            });
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
 
         var pageFrames = new List<QuickSettingsPageSnapshot>();
         var navActions = new List<OverlayNavigationAction>();
-        var orders = new List<IReadOnlyList<AddonQuickSettingsTabId>>();
+        var orders = new List<AddonQuickSettingsTabOrderSnapshot>();
         var run = client.RunAsync(
             _ => Task.CompletedTask,
             action => { lock (navActions) navActions.Add(action); return Task.CompletedTask; },
@@ -513,10 +521,10 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         {
             var pageTask = server.SendQuickSettingsPageStateAsync(i % 2 == 0 ? SamplePage : PartialPage);
             var navTask = server.SendNavigationAsync(OverlayNavigationAction.NavigateDown);
-            var orderTask = client.SendSetTabOrderAsync(current);
+            var moveTask = client.SendTabOrderMoveAsync(new(AddonQuickSettingsTabId.Profile, i % 2 == 0 ? -1 : 1));
             Assert.True(await pageTask);
             await navTask;
-            Assert.True(await orderTask);
+            Assert.True((await moveTask).State.Available);
         }
 
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);

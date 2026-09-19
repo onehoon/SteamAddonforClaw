@@ -58,12 +58,14 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
             {
                 "captureStatus" => await _client.CaptureStatusAsync(token),
                 "captureQuickSettingsShell" => await _client.CaptureAddonQuickSettingsShellAsync(token),
+                "captureQuickSettingsTabOrder" => await _client.CaptureAddonQuickSettingsTabOrderAsync(token),
                 // SF-V2-05/SF-V2-08: the QAM Device+Profile renderer now reads/mutates only through
                 // the shared Quick Settings seam. The feature-specific Device/Profile bridge
                 // operations were removed once qam.js stopped calling them; the typed
                 // NamedPipeAddonFrontendClient APIs stay for Main UI / other code.
                 "captureQuickSettingsPage" => await CaptureQuickSettingsPageAsync(root, token),
                 "mutateQuickSetting" => await MutateQuickSettingAsync(root, token),
+                "moveQuickSettingsTab" => await MoveQuickSettingsTabAsync(root, token),
                 _ => throw new InvalidOperationException("Unsupported QAM method.")
             };
             return new Response(id, true, result);
@@ -96,6 +98,13 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
                 throw new InvalidOperationException("Only Device/Profile Quick Settings mutation is available through the QAM generic seam.");
         }
         return await _client.MutateQuickSettingAsync(intent, token).ConfigureAwait(false);
+    }
+
+    private async Task<object> MoveQuickSettingsTabAsync(JsonElement root, CancellationToken token)
+    {
+        var intent = root.GetProperty("payload").Deserialize<AddonQuickSettingsTabOrderMoveIntent>(QuickSettingsBridgeJson)
+            ?? throw new JsonException("Invalid tab-order move intent.");
+        return await _client.MoveAddonQuickSettingsTabAsync(intent, token).ConfigureAwait(false);
     }
     private static Response Error(long id, string message) => new(id, false, Error: message);
     internal void StopAccepting() => Interlocked.Exchange(ref _stopping, 1);

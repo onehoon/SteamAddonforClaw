@@ -90,9 +90,9 @@ public sealed partial class OverlayWindow : Window
 
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
 
-    // OQ5-UI-10: the Setting-page editor proposes a one-position tab move; App forwards it through the
-    // existing OQ5-UI-09 SendSetTabOrderAsync seam. OverlayWindow never owns the transport client.
-    internal event Action<IReadOnlyList<AddonQuickSettingsTabId>>? TabOrderChangeRequested;
+    // PR3: the Setting page emits only the shared one-position move intent. OverlayWindow never owns
+    // the transport client or constructs a replacement whole order.
+    internal event Action<AddonQuickSettingsTabOrderMoveIntent>? TabOrderMoveRequested;
 
     public OverlayWindow()
     {
@@ -591,14 +591,13 @@ public sealed partial class OverlayWindow : Window
         return section;
     }
 
-    // OQ5-UI-10: a proposal is only a request. The visible order changes only when the Runtime
-    // republishes TabOrderState -> ApplyTabOrder. A boundary move produces no proposal and no request.
+    // PR3: request only a single typed move. The visible order changes only when the Runtime returns
+    // or republishes authoritative typed state.
     private void RequestTabOrderMove(AddonQuickSettingsTabId tab, int delta)
     {
-        if (!_tabState.TryCreateMovedOrder(tab, delta, out var proposed))
-            return;
+        if (delta is not (-1 or 1)) return;
         OverlayLog.Info("TabOrder", "Tab order move requested.", ("Tab", tab), ("Delta", delta < 0 ? -1 : 1));
-        TabOrderChangeRequested?.Invoke(proposed);
+        TabOrderMoveRequested?.Invoke(new(tab, delta));
     }
 
     // OQ5-UI-11: the fixed four-slot Shortcut shell. A 2x2 Grid of four Unassigned tiles kept by
@@ -784,7 +783,7 @@ public sealed partial class OverlayWindow : Window
     // session. The five page/button/row instances are preserved; only the tab-strip column order and
     // the selected-header accent change. Selected page/row/scroll position stay exactly as they are
     // (s.11.1) -- the new first tab only takes effect on the next Show via ResetForShow().
-    internal void ApplyTabOrder(IReadOnlyList<AddonQuickSettingsTabId> order)
+    internal void ApplyTabOrderState(AddonQuickSettingsTabOrderSnapshot state)
     {
         // Capture the Setting-editor row identity selected right now (before the order changes) so a
         // live reorder preserves the selected tab rather than the old numeric row slot.
@@ -793,7 +792,21 @@ public sealed partial class OverlayWindow : Window
         if (settingVisible && _rowSelection.SelectedIndex is { } selected && selected >= 0 && selected < _tabState.Order.Count)
             selectedEditorTab = _tabState.Order[selected];
 
-        if (!_tabState.TryApplyOrder(order))
+        if (!state.Available || state.Rows.Count != 5)
+        {
+            OverlayLog.Warn("Shell", "Ignored an unavailable or malformed authoritative Overlay tab order.");
+            return;
+        }
+
+        var order = state.Rows.Select(row => row.TabId).ToArray();
+        if (!AddonQuickSettingsTabOrderContract.TryNormalize(order, out var normalized) ||
+            !state.Rows.SequenceEqual(AddonQuickSettingsTabOrderProduct.Create(normalized).Rows))
+        {
+            OverlayLog.Warn("Shell", "Ignored an invalid authoritative Overlay tab-order projection.");
+            return;
+        }
+
+        if (!_tabState.TryApplyOrder(normalized))
         {
             OverlayLog.Warn("Shell", "Ignored an invalid authoritative Overlay tab order.");
             return;
@@ -807,9 +820,12 @@ public sealed partial class OverlayWindow : Window
             if (_tabOrderRows.TryGetValue(applied[position], out var editorRow))
             {
                 Grid.SetRow(editorRow.Container, position);
-                editorRow.SetPosition(position, applied.Count);
             }
         }
+
+        foreach (var rowState in state.Rows)
+            if (_tabOrderRows.TryGetValue(rowState.TabId, out var editorRow))
+                editorRow.ApplyState(rowState);
 
         // Rebuild the Setting page's ordered row list so CapabilitiesFor(Setting) / the selection
         // model see the authoritative order. The AddonQuickSettingsTabOrderRow instances are reused.

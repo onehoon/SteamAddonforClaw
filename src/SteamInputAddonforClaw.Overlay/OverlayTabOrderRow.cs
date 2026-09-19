@@ -15,8 +15,11 @@ namespace SteamInputAddonforClaw.Overlay;
 internal sealed class AddonQuickSettingsTabOrderRow
 {
     private readonly Action<int> _requestMove;
+    private readonly TextBlock _label;
     private readonly Button _moveEarlier;
     private readonly Button _moveLater;
+    private bool _canMoveEarlier;
+    private bool _canMoveLater;
 
     internal AddonQuickSettingsTabId Tab { get; }
     internal Border Container { get; }
@@ -27,15 +30,15 @@ internal sealed class AddonQuickSettingsTabOrderRow
         Tab = tab;
         _requestMove = requestMove;
 
-        var text = new TextBlock
+        _label = new TextBlock
         {
             Text = label,
             VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
         };
         if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
-            text.Style = bodyStyle;
-        Grid.SetColumn(text, 0);
+            _label.Style = bodyStyle;
+        Grid.SetColumn(_label, 0);
 
         _moveEarlier = CreateMoveButton("◂", "Move earlier", -1);
         _moveLater = CreateMoveButton("▸", "Move later", +1);
@@ -57,7 +60,7 @@ internal sealed class AddonQuickSettingsTabOrderRow
                 new ColumnDefinition { Width = GridLength.Auto },
             },
         };
-        grid.Children.Add(text);
+        grid.Children.Add(_label);
         grid.Children.Add(buttons);
 
         Container = new Border
@@ -73,16 +76,30 @@ internal sealed class AddonQuickSettingsTabOrderRow
         Capabilities = new OverlayRowCapabilities(
             IsSelectable: () => true,
             Activate: null,
-            Adjust: delta => _requestMove(delta < 0 ? -1 : 1));
+            Adjust: delta =>
+            {
+                if (delta < 0 && _canMoveEarlier) _requestMove(-1);
+                else if (delta > 0 && _canMoveLater) _requestMove(1);
+            });
     }
 
     // Reflect this row's position within the current authoritative order so the boundary buttons
-    // disable. A boundary controller move is separately rejected by OverlayTabState.TryCreateMovedOrder,
-    // so it never sends a request either.
+    // disable. Runtime remains the final boundary guard, but the disabled state is still the primary UX guard.
     internal void SetPosition(int index, int count)
     {
-        _moveEarlier.IsEnabled = index > 0;
-        _moveLater.IsEnabled = index < count - 1;
+        _canMoveEarlier = index > 0;
+        _canMoveLater = index < count - 1;
+        _moveEarlier.IsEnabled = _canMoveEarlier;
+        _moveLater.IsEnabled = _canMoveLater;
+    }
+
+    internal void ApplyState(SteamInputAddonforClaw.Contracts.Frontend.AddonQuickSettingsTabOrderRow state)
+    {
+        _label.Text = state.Label;
+        _canMoveEarlier = state.CanMoveEarlier;
+        _canMoveLater = state.CanMoveLater;
+        _moveEarlier.IsEnabled = state.CanMoveEarlier;
+        _moveLater.IsEnabled = state.CanMoveLater;
     }
 
     private Button CreateMoveButton(string glyph, string accessibleName, int delta)

@@ -19,10 +19,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private readonly Func<string, NamedPipeOverlayServer> _serverFactory;
-    // OQ5-UI-09: bound once by AddonProcessHost onto the ONE StartupSettingsCoordinator before warm
-    // start. FrontendTransport never sees the coordinator -- only these two narrow operations.
-    private Func<IReadOnlyList<AddonQuickSettingsTabId>>? _getTabOrder;
-    private Func<IReadOnlyList<AddonQuickSettingsTabId>, bool>? _tryChangeTabOrder;
+    // PR3: bound once by AddonProcessHost onto the ONE IAddonFrontendControl. FrontendTransport
+    // never sees StartupSettingsCoordinator -- only these typed shared Setting operations.
+    private Func<CancellationToken, Task<AddonQuickSettingsTabOrderSnapshot>>? _captureTabOrder;
+    private Func<AddonQuickSettingsTabOrderMoveIntent, CancellationToken, Task<AddonQuickSettingsTabOrderMutationResult>>? _moveTabOrder;
     // SF-V2-02/06/09 section 14/7.2: bound once by AddonProcessHost onto the ONE _frontendControl.
     // `_mutateQuickSettings` is handed to each new NamedPipeOverlayServer so a request arriving on its
     // read loop can reach Runtime; the two capture delegates are used here for the Runtime-initiated
@@ -53,17 +53,17 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _startProcess = startProcess ?? Process.Start;
         // The default factory reads the bound authority at connection time (StartCoreAsync), which
         // always runs after AddonProcessHost has called BindTabOrderAuthority.
-        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _getTabOrder, _tryChangeTabOrder, _mutateQuickSettings));
+        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _captureTabOrder, _moveTabOrder, _mutateQuickSettings));
     }
 
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
     // called before the first warm start; a later call replaces the delegates for the next connection.
     internal void BindTabOrderAuthority(
-        Func<IReadOnlyList<AddonQuickSettingsTabId>> getTabOrder,
-        Func<IReadOnlyList<AddonQuickSettingsTabId>, bool> tryChangeTabOrder)
+        Func<CancellationToken, Task<AddonQuickSettingsTabOrderSnapshot>> capture,
+        Func<AddonQuickSettingsTabOrderMoveIntent, CancellationToken, Task<AddonQuickSettingsTabOrderMutationResult>> move)
     {
-        _getTabOrder = getTabOrder ?? throw new ArgumentNullException(nameof(getTabOrder));
-        _tryChangeTabOrder = tryChangeTabOrder ?? throw new ArgumentNullException(nameof(tryChangeTabOrder));
+        _captureTabOrder = capture ?? throw new ArgumentNullException(nameof(capture));
+        _moveTabOrder = move ?? throw new ArgumentNullException(nameof(move));
     }
 
     // SF-V2-02/06/09 section 14/7.2: wire the Overlay shared Quick Settings transport to the ONE
@@ -164,6 +164,24 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             await PublishQuickSettingsPageAsync(server, QuickSettingsPageId.Profile, captureProfile).ConfigureAwait(false);
         }
         finally { _quickSettingsRefreshGate.Release(); }
+    }
+
+    internal async Task RefreshTabOrderAsync()
+    {
+        NamedPipeOverlayServer? server;
+        var capture = _captureTabOrder;
+        lock (_sync) server = _server;
+        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+
+        AddonQuickSettingsTabOrderSnapshot state;
+        try { state = await capture(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Overlay tab-order capture failed.", exception);
+            state = AddonQuickSettingsTabOrderSnapshot.Unavailable();
+        }
+        try { await server.SendTabOrderStateAsync(state).ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("Overlay", "Overlay tab-order publish failed.", exception); }
     }
 
     private static async Task PublishQuickSettingsPageAsync(

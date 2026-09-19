@@ -159,6 +159,54 @@ public sealed class QamFrontendBridgeTests
     }
 
     [Fact]
+    public async Task Shared_tab_order_capture_round_trips_once_without_qam_admission()
+    {
+        var (bridge, fake, server) = await StartAsync(new(true, 480, FrontendSteamSource.Actual));
+        await using var _ = server;
+        await using var __ = bridge;
+
+        var response = await bridge.HandleRequestAsync(Request("captureQuickSettingsTabOrder", new { }), CancellationToken.None);
+
+        Assert.True(response.Ok);
+        Assert.Equal(1, fake.CaptureTabOrderCount);
+        var state = Assert.IsType<AddonQuickSettingsTabOrderSnapshot>(response.Payload);
+        Assert.Equal(fake.TabOrderSnapshot.Rows.Select(row => row.TabId), state.Rows.Select(row => row.TabId));
+    }
+
+    [Fact]
+    public async Task Shared_tab_order_move_round_trips_typed_intent_and_result()
+    {
+        var (bridge, fake, server) = await StartAsync(new(true, 0, FrontendSteamSource.BigPicture));
+        await using var _ = server;
+        await using var __ = bridge;
+        var intent = new AddonQuickSettingsTabOrderMoveIntent(AddonQuickSettingsTabId.Profile, -1);
+
+        var response = await bridge.HandleRequestAsync(Request("moveQuickSettingsTab", intent), CancellationToken.None);
+
+        Assert.True(response.Ok);
+        Assert.Equal(intent, fake.LastTabOrderIntent);
+        var result = Assert.IsType<AddonQuickSettingsTabOrderMutationResult>(response.Payload);
+        Assert.True(result.Succeeded);
+        Assert.Equal(fake.TabOrderMutationResult.State.Rows.Select(row => row.TabId), result.State.Rows.Select(row => row.TabId));
+    }
+
+    [Fact]
+    public async Task Shared_tab_order_move_rejects_malformed_payload_with_bounded_error()
+    {
+        var (bridge, fake, server) = await StartAsync(new(true, 0, FrontendSteamSource.BigPicture));
+        await using var _ = server;
+        await using var __ = bridge;
+
+        var response = await bridge.HandleRequestAsync(
+            "{ \"id\": 1, \"method\": \"moveQuickSettingsTab\", \"payload\": { \"tabId\": \"Profile\", \"delta\": \"left\" } }",
+            CancellationToken.None);
+
+        Assert.False(response.Ok);
+        Assert.NotNull(response.Error);
+        Assert.Null(fake.LastTabOrderIntent);
+    }
+
+    [Fact]
     public async Task Malformed_bridge_payload_returns_bounded_error()
     {
         await using var bridge = new QamFrontendBridge();
@@ -179,6 +227,10 @@ public sealed class QamFrontendBridgeTests
         public int MutateCount { get; private set; }
         public int CaptureShellCount { get; private set; }
         public AddonQuickSettingsShellSnapshot ShellSnapshot { get; } = AddonQuickSettingsShellContract.Create(AddonQuickSettingsTabOrderContract.DefaultOrder);
+        public int CaptureTabOrderCount { get; private set; }
+        public AddonQuickSettingsTabOrderSnapshot TabOrderSnapshot { get; } = AddonQuickSettingsTabOrderProduct.Create([AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut]);
+        public AddonQuickSettingsTabOrderMutationResult TabOrderMutationResult { get; } = new(true, null, AddonQuickSettingsTabOrderProduct.Create([AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut]));
+        public AddonQuickSettingsTabOrderMoveIntent? LastTabOrderIntent { get; private set; }
         public QuickSettingsPageId? LastPageId { get; private set; }
         public QuickSettingsMutationIntent? LastIntent { get; private set; }
 
@@ -198,6 +250,12 @@ public sealed class QamFrontendBridgeTests
 
         public Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken t = default)
         { CaptureShellCount++; return Task.FromResult(ShellSnapshot); }
+
+        public Task<AddonQuickSettingsTabOrderSnapshot> CaptureAddonQuickSettingsTabOrderAsync(CancellationToken t = default)
+        { CaptureTabOrderCount++; return Task.FromResult(TabOrderSnapshot); }
+
+        public Task<AddonQuickSettingsTabOrderMutationResult> MoveAddonQuickSettingsTabAsync(AddonQuickSettingsTabOrderMoveIntent intent, CancellationToken t = default)
+        { LastTabOrderIntent = intent; return Task.FromResult(TabOrderMutationResult); }
 
         public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) => throw new NotSupportedException();
         public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) => throw new NotSupportedException();
