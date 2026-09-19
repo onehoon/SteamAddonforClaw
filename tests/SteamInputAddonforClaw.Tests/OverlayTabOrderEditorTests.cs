@@ -1,4 +1,4 @@
-using SteamInputAddonforClaw.Contracts.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay;
 using Xunit;
 
@@ -7,7 +7,7 @@ namespace SteamInputAddonforClaw.Tests;
 // OQ5-UI-10: the Setting-page tab-order editor is WinUI, but its non-visual contract is the pure
 // composition of OverlayTabState (proposal + authoritative apply) and OverlayRowSelection
 // (identity-preserving reselection). These cover that composition without a XAML host.
-public sealed class OverlayTabOrderEditorTests
+public sealed class AddonQuickSettingsTabOrderEditorTests
 {
     private static OverlayRowCapabilities Selectable() => new(() => true);
 
@@ -22,7 +22,7 @@ public sealed class OverlayTabOrderEditorTests
         selection.MoveNext();
         selection.MoveNext();
         var selectedId = state.Order[selection.SelectedIndex!.Value];
-        Assert.Equal(OverlayTabId.Controller, selectedId);
+        Assert.Equal(AddonQuickSettingsTabId.Controller, selectedId);
 
         Assert.True(state.TryCreateMovedOrder(selectedId, -1, out var proposed));
 
@@ -34,7 +34,7 @@ public sealed class OverlayTabOrderEditorTests
 
         Assert.Equal(1, newIndex);
         Assert.Equal(1, selection.SelectedIndex);
-        Assert.Equal(OverlayTabId.Controller, state.Order[selection.SelectedIndex!.Value]); // still Controller, not Profile
+        Assert.Equal(AddonQuickSettingsTabId.Controller, state.Order[selection.SelectedIndex!.Value]); // still Controller, not Profile
     }
 
     [Fact]
@@ -51,17 +51,17 @@ public sealed class OverlayTabOrderEditorTests
     public void NextShowStillSelectsTheNewFirstAuthoritativeTab()
     {
         var state = new OverlayTabState();
-        state.Select(OverlayTabId.Setting);
+        state.Select(AddonQuickSettingsTabId.Setting);
 
-        Assert.True(state.TryCreateMovedOrder(OverlayTabId.Profile, -1, out var proposed)); // Profile -> position 0
+        Assert.True(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Profile, -1, out var proposed)); // Profile -> position 0
         Assert.True(state.TryApplyOrder(proposed));
 
-        Assert.Equal(OverlayTabId.Setting, state.SelectedTab); // preserved during live reorder
+        Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab); // preserved during live reorder
         state.ResetForShow();
-        Assert.Equal(OverlayTabId.Profile, state.SelectedTab); // new first tab on the next Show
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab); // new first tab on the next Show
     }
 
-    private static int IndexOf(IReadOnlyList<OverlayTabId> order, OverlayTabId tab)
+    private static int IndexOf(IReadOnlyList<AddonQuickSettingsTabId> order, AddonQuickSettingsTabId tab)
     {
         for (var i = 0; i < order.Count; i++)
             if (order[i] == tab) return i;

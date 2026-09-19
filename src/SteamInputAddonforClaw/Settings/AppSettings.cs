@@ -1,5 +1,5 @@
 using SteamInputAddonforClaw.Contracts.FrontButtons;
-using SteamInputAddonforClaw.Contracts.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Settings;
 
@@ -25,5 +25,5 @@ public sealed record AppSettings(
     /// FrontButtonMapping above. Always a complete normalized order (all five tabs, each once); the
     /// first entry is the tab selected on every Overlay Show. Transported to Overlay.exe by OQ5-UI-09.
     /// </summary>
-    public IReadOnlyList<OverlayTabId> OverlayTabOrder { get; init; } = OverlayTabOrderContract.DefaultOrder;
+    public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder { get; init; } = AddonQuickSettingsTabOrderContract.DefaultOrder;
 }

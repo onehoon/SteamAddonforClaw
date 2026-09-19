@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using System.Linq;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
 using Xunit;
@@ -191,7 +190,7 @@ public sealed class OverlayTransportTests
         Assert.Equal(OverlayWireMessageKind.Handshake, hello.Kind);
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None);
         // OQ5-UI-09: the client applies the initial authoritative order before it reports Ready.
-        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState, TabOrder: OverlayTabOrderContract.DefaultOrder), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState, TabOrder: AddonQuickSettingsTabOrderContract.DefaultOrder), writeGate, CancellationToken.None);
 
         var ready = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
         Assert.Equal(OverlayState.Ready, ready.State);

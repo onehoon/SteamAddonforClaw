@@ -446,6 +446,10 @@ public interface IAddonFrontendControl
     /// fails closed for any implementation (test double or otherwise) that does not opt in.</summary>
     Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken cancellationToken = default) =>
         Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, appId));
+    /// <summary>Captures the shared Addon Quick Settings shell identity/order/labels. Read-only and
+    /// fail-closed for implementations that do not opt into the PR1 foundation seam.</summary>
+    Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(AddonQuickSettingsShellSnapshot.Unavailable());
     /// <summary>Validates and dispatches a shared Quick Settings mutation intent onto the existing
     /// typed Device mutation methods, then returns a freshly re-projected page (work order section
     /// 21/28). The default fails closed without fabricating a successful mutation.</summary>

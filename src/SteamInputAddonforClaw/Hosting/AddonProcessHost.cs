@@ -441,15 +441,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         // OQ5-UI-09: give the Overlay transport a read + validated-mutation seam onto the ONE
         // StartupSettingsCoordinator before warm startup, so every Overlay connection applies the
-        // authoritative OverlayTabOrder before it reports Ready. A settings write failure is
+        // authoritative AddonQuickSettingsTabOrder before it reports Ready. A settings write failure is
         // feature-local -- it never touches controller Runtime ownership.
         _overlayController.BindTabOrderAuthority(
-            () => composition.StartupSettings.OverlayTabOrder,
+            () => composition.StartupSettings.AddonQuickSettingsTabOrder,
             requested =>
             {
                 try
                 {
-                    return composition.StartupSettings.TryChangeOverlayTabOrder(requested);
+                    return composition.StartupSettings.TryChangeAddonQuickSettingsTabOrder(requested);
                 }
                 catch (Exception exception)
                 {

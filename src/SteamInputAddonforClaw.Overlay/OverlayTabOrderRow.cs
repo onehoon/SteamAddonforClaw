@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using SteamInputAddonforClaw.Contracts.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Overlay;
 
@@ -12,17 +12,17 @@ namespace SteamInputAddonforClaw.Overlay;
 // row model) and the compact Move Earlier / Move Later buttons all raise the same one-position move
 // request. The row never commits an order -- OverlayWindow only applies the authoritative order the
 // Runtime republishes.
-internal sealed class OverlayTabOrderRow
+internal sealed class AddonQuickSettingsTabOrderRow
 {
     private readonly Action<int> _requestMove;
     private readonly Button _moveEarlier;
     private readonly Button _moveLater;
 
-    internal OverlayTabId Tab { get; }
+    internal AddonQuickSettingsTabId Tab { get; }
     internal Border Container { get; }
     internal OverlayRowCapabilities Capabilities { get; }
 
-    internal OverlayTabOrderRow(OverlayTabId tab, string label, Action<int> requestMove)
+    internal AddonQuickSettingsTabOrderRow(AddonQuickSettingsTabId tab, string label, Action<int> requestMove)
     {
         Tab = tab;
         _requestMove = requestMove;

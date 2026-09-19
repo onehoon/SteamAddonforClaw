@@ -1203,6 +1203,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return QuickSettingsMutationAdapter.MutateAsync(this, intent, cancellationToken);
     }
 
+    public Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(AddonQuickSettingsShellContract.Create(_settings.AddonQuickSettingsTabOrder));
+    }
+
     public Task<FrontendCenterMStartupSnapshot> CaptureCenterMStartupAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();

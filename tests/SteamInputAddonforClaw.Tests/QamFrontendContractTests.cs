@@ -81,8 +81,9 @@ public sealed class QamFrontendContractTests
     {
         var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
 
-        // SF-V2-05/08: exactly the two approved generic bridge names and the Device/Profile page
-        // allow-list; shared Runtime validation remains the target/row authority.
+        // SF-V2-05/08 plus shared-surface PR1: the bridge exposes only the closed shell read seam
+        // and the Device/Profile generic page/mutation allow-list.
+        Assert.Contains("\"captureQuickSettingsShell\" => await _client.CaptureAddonQuickSettingsShellAsync(token),", bridge);
         Assert.Contains("\"captureQuickSettingsPage\" => await CaptureQuickSettingsPageAsync(root, token),", bridge);
         Assert.Contains("\"mutateQuickSetting\" => await MutateQuickSettingAsync(root, token),", bridge);
         Assert.Contains("case QuickSettingsPageId.Device:", bridge);

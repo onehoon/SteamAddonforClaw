@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -85,7 +84,7 @@ public partial class App : Application
     // OQ5-UI-09: authoritative tab order from the Runtime. Used for the mandatory initial snapshot
     // (the returned Task must complete before the client reports Ready) and any later republish.
     // Marshalled through the existing DispatcherQueue; completes only after the shell has applied it.
-    private Task HandleTabOrderAsync(IReadOnlyList<OverlayTabId> order)
+    private Task HandleTabOrderAsync(IReadOnlyList<AddonQuickSettingsTabId> order)
     {
         OverlayLog.Info("TabOrder", "Authoritative tab order received.", ("Count", order.Count));
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -138,9 +137,9 @@ public partial class App : Application
     // OQ5-UI-10: the Setting-page editor proposed a one-position tab move. Forward it through the
     // existing OQ5-UI-09 request seam; the visible order only changes when the Runtime republishes
     // TabOrderState. A write failure is preference-local -- the Overlay stays on its current order.
-    private void OnTabOrderChangeRequested(IReadOnlyList<OverlayTabId> proposed) => _ = SendTabOrderAsync(proposed);
+    private void OnTabOrderChangeRequested(IReadOnlyList<AddonQuickSettingsTabId> proposed) => _ = SendTabOrderAsync(proposed);
 
-    private async Task SendTabOrderAsync(IReadOnlyList<OverlayTabId> proposed)
+    private async Task SendTabOrderAsync(IReadOnlyList<AddonQuickSettingsTabId> proposed)
     {
         try
         {

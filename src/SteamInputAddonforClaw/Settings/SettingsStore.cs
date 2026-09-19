@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
-using SteamInputAddonforClaw.Contracts.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Settings;
@@ -45,7 +45,7 @@ public sealed class SettingsStore
             {
                 DeveloperMenuEnabled = developerMenuEnabled,
                 FrontButtonMapping = ReadFrontButtonMapping(root),
-                OverlayTabOrder = ReadOverlayTabOrder(root)
+                AddonQuickSettingsTabOrder = ReadAddonQuickSettingsTabOrder(root)
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LogLevel", settings.LogLevel));
             return settings;
@@ -69,26 +69,26 @@ public sealed class SettingsStore
     /// tab-order value can never throw into <see cref="Load"/>'s catch and reset every unrelated
     /// setting to defaults.
     /// </summary>
-    private static IReadOnlyList<OverlayTabId> ReadOverlayTabOrder(JsonElement root)
+    private static IReadOnlyList<AddonQuickSettingsTabId> ReadAddonQuickSettingsTabOrder(JsonElement root)
     {
         if (!root.TryGetProperty("OverlayTabOrder", out var property) || property.ValueKind != JsonValueKind.Array)
-            return OverlayTabOrderContract.DefaultOrder;
+            return AddonQuickSettingsTabOrderContract.DefaultOrder;
 
-        var parsed = new List<OverlayTabId>(property.GetArrayLength());
+        var parsed = new List<AddonQuickSettingsTabId>(property.GetArrayLength());
         foreach (var element in property.EnumerateArray())
         {
             var name = element.ValueKind == JsonValueKind.String ? element.GetString() : null;
             // Enum.TryParse would also accept "3" or an out-of-range "99"; require an actual name.
             if (string.IsNullOrEmpty(name) || !char.IsLetter(name[0])
-                || !Enum.TryParse<OverlayTabId>(name, ignoreCase: false, out var tab))
+                || !Enum.TryParse<AddonQuickSettingsTabId>(name, ignoreCase: false, out var tab))
             {
                 AppLog.Warn("Settings", "Overlay tab order contains an invalid entry; using the default order.", null, ("Action", "Default"));
-                return OverlayTabOrderContract.DefaultOrder;
+                return AddonQuickSettingsTabOrderContract.DefaultOrder;
             }
             parsed.Add(tab);
         }
 
-        if (OverlayTabOrderContract.TryNormalize(parsed, out var normalized))
+        if (AddonQuickSettingsTabOrderContract.TryNormalize(parsed, out var normalized))
             return normalized;
 
         AppLog.Warn("Settings", "Overlay tab order is not a complete set of the five tabs; using the default order.", null, ("Action", "Default"));
@@ -144,7 +144,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.FrontButtonMapping, OverlayTabOrder = OverlayTabOrderContract.NormalizeOrDefault(settings.OverlayTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.FrontButtonMapping, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

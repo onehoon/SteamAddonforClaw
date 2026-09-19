@@ -2,7 +2,6 @@ using System.IO.Pipes;
 using System.Text;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using Xunit;
@@ -12,7 +11,7 @@ namespace SteamInputAddonforClaw.Tests;
 // SF-V2-06: .Overlay v7 replaces the v6 Device-specific state/mutation wire with the shared
 // QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult contract
 // already consumed by .Frontend/.Qam (SF-V2-04/05), inside narrow transport correlation wrappers.
-// OQ4/lifecycle regression coverage lives in OverlayTransportTests/OverlayTabOrderTransportTests and
+// OQ4/lifecycle regression coverage lives in OverlayTransportTests/AddonQuickSettingsTabOrderTransportTests and
 // is unaffected by this migration (verified green alongside this file).
 public sealed class OverlayDeviceQuickSettingsTransportTests
 {
@@ -39,7 +38,7 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         Assert.Equal(7, OverlayTransportProtocol.CurrentVersion);
         // SF-V2-06 owns only .Overlay v6 -> v7. The desktop/QAM frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(30, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(31, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]
@@ -493,14 +492,14 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     public async Task Page_state_and_navigation_and_tab_order_share_one_write_gate_and_never_interleave()
     {
         var pipeName = Pipe();
-        IReadOnlyList<OverlayTabId> current = OverlayTabOrderContract.DefaultOrder;
+        IReadOnlyList<AddonQuickSettingsTabId> current = AddonQuickSettingsTabOrderContract.DefaultOrder;
         await using var server = new NamedPipeOverlayServer(pipeName, () => current, requested => { current = requested; return true; });
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
 
         var pageFrames = new List<QuickSettingsPageSnapshot>();
         var navActions = new List<OverlayNavigationAction>();
-        var orders = new List<IReadOnlyList<OverlayTabId>>();
+        var orders = new List<IReadOnlyList<AddonQuickSettingsTabId>>();
         var run = client.RunAsync(
             _ => Task.CompletedTask,
             action => { lock (navActions) navActions.Add(action); return Task.CompletedTask; },
