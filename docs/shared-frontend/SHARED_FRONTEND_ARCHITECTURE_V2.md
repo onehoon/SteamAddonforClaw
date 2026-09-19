@@ -193,9 +193,15 @@ FrontendTransportProtocol.CurrentVersion = 32
 OverlayTransportProtocol.CurrentVersion  = 8
 ```
 
-Frontend v32 and Overlay v8 are the current wire authorities. The shared-surface shell, Setting,
-and Shortcut convergence does not add a wire version because its current QAM Shortcut path is
-bridge-local and the existing typed transport payloads remain unchanged.
+Frontend v32 and Overlay v8 are the current wire authorities.
+
+The shared-surface sequence did include intentional wire revisions:
+
+- PR1 added `CaptureAddonQuickSettingsShell` and moved Frontend v30 → v31.
+- PR3 added shared Setting tab-order capture/move and moved Frontend v31 → v32.
+- PR3 also replaced the Overlay Setting whole-order wire with the typed move contract and moved Overlay v7 → v8.
+- PR4 Shortcut required no additional protocol revision because its current QAM delivery path is bridge-local.
+- PR5 is renderer/tests/docs cleanup only and therefore keeps Frontend v32 / Overlay v8.
 
 ### 4.5 Current duplication status
 

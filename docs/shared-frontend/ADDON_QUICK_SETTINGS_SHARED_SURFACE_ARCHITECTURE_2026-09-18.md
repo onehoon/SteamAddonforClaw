@@ -181,33 +181,8 @@ Current OverlayWindow builds:
 - local logical row selection and scrolling;
 - Overlay-only window and animation behavior.
 
-The Device/Profile content is already generic.
-
-The remaining duplication risk is mainly shell and special-page composition.
-
-### 3.5 Final ownership after the convergence sequence
-
-The implemented ownership is now:
-
-~~~text
-Runtime / Contracts
-  shell identity, order, labels
-  Device/Profile page metadata and mutation semantics
-  Setting tab-order state and mutation result
-  Shortcut Slot1-Slot4 read-only product meaning
-
-QAM
-  Steam-native React/CommonUI rendering and QAM lifecycle/admission
-
-Overlay
-  WinUI rendering, local navigation/geometry, and OQ4 lifecycle/admission
-
-Controller
-  shell identity plus renderer-local placeholder only
-~~~
-
-No surface owns a second product label/order table, local Device/Profile debounce policy, Shortcut
-action schema, or Controller page schema.
+The Device/Profile content is generic, while Setting and Shortcut consume their dedicated shared
+contracts. Overlay now owns only renderer-specific layout, navigation, and lifecycle.
 
 ### 3.4 QAM now renders the complete shared five-tab shell
 
@@ -233,7 +208,31 @@ The QAM renderer intentionally uses Steam native controls such as:
 
 That is a product advantage and must be preserved.
 
-### 3.5 The two renderers are intentionally different technologies
+### 3.5 Final ownership after the convergence sequence
+
+The implemented ownership is now:
+
+~~~text
+Runtime / Contracts
+  shell identity, order, labels
+  Device/Profile page metadata and mutation semantics
+  Setting tab-order state and mutation result
+  Shortcut Slot1-Slot4 read-only product meaning
+
+QAM
+  Steam-native React/CommonUI rendering and QAM lifecycle/admission
+
+Overlay
+  WinUI rendering, local navigation/geometry, and OQ4 lifecycle/admission
+
+Controller
+  shell identity plus renderer-local placeholder only
+~~~
+
+No surface owns a second product label/order table, local Device/Profile debounce policy, Shortcut
+action schema, or Controller page schema.
+
+### 3.6 The two renderers are intentionally different technologies
 
 QAM:
 
