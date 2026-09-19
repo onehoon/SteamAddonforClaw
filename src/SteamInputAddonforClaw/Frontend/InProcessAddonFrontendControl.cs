@@ -16,6 +16,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.Updates;
 using System.Diagnostics;
 using Microsoft.Win32;
 
@@ -74,6 +75,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // The reboot-bound MSI Center M controller-authority transition owner (work order PR3). Null is a
     // valid passive state -- the request just reports unavailable, like every other null fallback here.
     private readonly ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
+    private readonly FrontendUpdateCoordinator? _updateCoordinator;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -84,11 +86,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _centerMStartup = centerMStartup;
         _centerMAuthorityTransition = centerMAuthorityTransition;
+        _updateCoordinator = updateCoordinator;
         _cpuBoostRuntime = cpuBoostRuntime;
         _powerModeRuntime = powerModeRuntime;
         _intelFpsRuntime = intelFpsRuntime;
@@ -107,6 +110,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _developer = developer;
         _setupExecutor = setupExecutor ?? new FrontendPrerequisiteSetupExecutor();
         _processPath = processPath ?? (() => Environment.ProcessPath);
+        if (_updateCoordinator is not null)
+            _updateCoordinator.StateInvalidated += (_, _) => StateInvalidated?.Invoke(this, EventArgs.Empty);
         if (_runtime is not null)
         {
             _runtime.ActualRunningAppIdChanged += _ => StateInvalidated?.Invoke(this, EventArgs.Empty);
@@ -319,6 +324,26 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private FrontendGameProfileMutationResult UnavailableMutation(uint appId, string message) => new(FrontendGameProfileMutationOutcome.Unavailable, message, CaptureGameProfile(appId));
 
     public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), new(_developer.IsEnabled), AppLog.DirectoryPath, _frontButtonMappingAvailable));
+
+    public Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_updateCoordinator?.Capture() ?? FrontendUpdateSnapshot.Unavailable);
+    }
+
+    public Task<FrontendUpdateSnapshot> CheckAndDownloadAppUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return _updateCoordinator?.CheckAndDownloadAsync(cancellationToken)
+            ?? Task.FromResult(FrontendUpdateSnapshot.Unavailable);
+    }
+
+    public Task<FrontendUpdateInstallResult> InstallAppUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return _updateCoordinator?.InstallAsync(cancellationToken)
+            ?? Task.FromResult(new FrontendUpdateInstallResult(FrontendUpdateInstallOutcome.Unavailable, FrontendUpdateSnapshot.Unavailable, "Updates are unavailable in this installation."));
+    }
 
     public async Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default)
     {

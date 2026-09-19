@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 
 public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
 {
-    private readonly string _pipeName; private readonly IAddonFrontendControl _inner; private readonly Func<NamedPipeServerStream> _pipeFactory; private readonly CancellationTokenSource _lifetime = new(); private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously); private NamedPipeServerStream? _activePipe; private Task? _acceptLoop; private int _started; private int _disposed; private volatile ServedConnection? _servedConnection;
+    private readonly string _pipeName; private readonly IAddonFrontendControl _inner; private readonly Func<NamedPipeServerStream> _pipeFactory; private Func<Task>? _afterResponse; private readonly CancellationTokenSource _lifetime = new(); private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously); private NamedPipeServerStream? _activePipe; private Task? _acceptLoop; private int _started; private int _disposed; private volatile ServedConnection? _servedConnection;
 
     // OQ3-A: a handle to the currently served frontend connection so the Runtime can ask the Main UI
     // to run its normal close path and then positively observe THIS connection disconnecting. The
@@ -18,6 +18,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
     }
     public NamedPipeAddonFrontendServer(string pipeName, IAddonFrontendControl inner) : this(pipeName, inner, () => new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly)) { }
     internal NamedPipeAddonFrontendServer(string pipeName, IAddonFrontendControl inner, Func<NamedPipeServerStream> pipeFactory) { _pipeName = pipeName; _inner = inner; _pipeFactory = pipeFactory; }
+    public void SetAfterResponse(Func<Task> afterResponse) => _afterResponse = afterResponse ?? throw new ArgumentNullException(nameof(afterResponse));
     public Task StartAsync() { ObjectDisposedException.ThrowIf(_disposed != 0, this); if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("Server already started."); _acceptLoop = AcceptLoopAsync(); return _ready.Task; }
 
     /// <summary>OQ3-A: ask the connected Main UI to run its normal close path, then wait for THIS
@@ -84,6 +85,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     if (message.Method.Value == FrontendRpcMethod.OpenClawSensorProbe) probeSessionMayBeOpen = true;
                     else if (message.Method.Value == FrontendRpcMethod.CloseClawSensorProbe) probeSessionMayBeOpen = false;
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, message.Method, Payload: payload)).ConfigureAwait(false);
+                    if (_afterResponse is not null)
+                        await _afterResponse().ConfigureAwait(false);
                 }
                 finally { operationGate.Release(); }
             }
@@ -154,7 +157,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
@@ -184,7 +187,13 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         var request = FrontendWireCodec.Decode<CaptureQuickSettingsPageRequest>(p);
         return FrontendWireCodec.Payload(await _inner.CaptureQuickSettingsPageAsync(request.PageId, request.AppId, t).ConfigureAwait(false));
     }
-    private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.CaptureAddonQuickSettingsShell
+    private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.CaptureAppUpdate
+        ? FrontendWireCodec.Payload(await _inner.CaptureAppUpdateAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CheckAndDownloadAppUpdate
+        ? FrontendWireCodec.Payload(await _inner.CheckAndDownloadAppUpdateAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.InstallAppUpdate
+        ? FrontendWireCodec.Payload(await _inner.InstallAppUpdateAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureAddonQuickSettingsShell
         ? FrontendWireCodec.Payload(await _inner.CaptureAddonQuickSettingsShellAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder
         ? FrontendWireCodec.Payload(await _inner.CaptureAddonQuickSettingsTabOrderAsync(t).ConfigureAwait(false))
