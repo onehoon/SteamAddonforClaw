@@ -485,7 +485,7 @@
       case AQS_TAB_SHORTCUT:
         return React.createElement(QuickSettingsShortcutPanel, { React, native, title: tab.label });
       case AQS_TAB_SETTING:
-        return React.createElement(SettingTabOrderPanel, settingProps);
+        return React.createElement(SettingTabOrderPanel, { React, native, ...settingProps });
       default:
         return null;
     }
@@ -548,7 +548,7 @@
         React.createElement("p", null, slot.statusLabel))));
   }
 
-  function SettingTabOrderPanel({ tabOrderState, busy, error, onMove }) {
+  function SettingTabOrderPanel({ React, native, tabOrderState, busy, error, onMove }) {
     if (!tabOrderState?.available) {
       return React.createElement(
         native.PanelSection,

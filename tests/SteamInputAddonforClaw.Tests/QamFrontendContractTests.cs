@@ -539,6 +539,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("result?.state", panel);
         Assert.Contains("SettingTabOrderPanel", source);
         Assert.Contains("native.SliderField", source);
+        Assert.Contains("React.createElement(SettingTabOrderPanel, { React, native, ...settingProps })", source);
         Assert.DoesNotContain("[\"Device\", \"Profile\", \"Controller\", \"Shortcut\", \"Setting\"]", source);
         Assert.DoesNotContain("QuickSettingsPageId", source);
         Assert.Contains("This page is not available in QAM yet.", source);
@@ -553,6 +554,8 @@ public sealed class QamFrontendContractTests
 
         Assert.Contains("case AQS_TAB_SHORTCUT:", inner);
         Assert.Contains("QuickSettingsShortcutPanel", inner);
+        Assert.Contains("React.createElement(QuickSettingsShortcutPanel, { React, native, title: tab.label });", inner);
+        Assert.Contains("function QuickSettingsShortcutPanel({ React, native, title })", shortcut);
         Assert.Contains("request(\"captureQuickSettingsShortcut\")", shortcut);
         Assert.Contains("validateQuickSettingsShortcut(snapshot)", shortcut);
         Assert.Contains("snapshot.slots.length !== 4", shortcut);
@@ -569,6 +572,20 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("captureQuickSettingsShortcut", source[source.IndexOf("function AddonQuickSettingsPanel", StringComparison.Ordinal)..]);
         Assert.Contains("case AQS_TAB_CONTROLLER:", inner);
         Assert.Contains("This page is not available in QAM yet.", inner);
+    }
+
+    [Fact]
+    public void Qam_setting_renderer_receives_generation_scoped_react_and_native_dependencies()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var start = source.IndexOf("function SettingTabOrderPanel", StringComparison.Ordinal);
+        var end = source.IndexOf("function validateQuickSettingsShell", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+
+        var setting = source[start..end];
+        Assert.Contains("function SettingTabOrderPanel({ React, native, tabOrderState, busy, error, onMove })", setting);
+        Assert.DoesNotContain("function SettingTabOrderPanel({ tabOrderState, busy, error, onMove })", setting);
+        Assert.Contains("React.createElement(SettingTabOrderPanel, { React, native, ...settingProps })", source);
     }
 
     [Fact]
