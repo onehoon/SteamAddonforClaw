@@ -93,9 +93,27 @@ try
                 try { await sessionClient.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeNotification?.('state-invalidated')", lifetimeToken); }
                 catch (Exception exception) { log.Info($"QAM invalidation delivery skipped for retired CDP session. {exception.Message}"); }
             }
+            async Task DeliverSelectAddonOnNextQuickAccessOpenAsync(long admittedGeneration)
+            {
+                if (admittedGeneration != Volatile.Read(ref documentGeneration)) return;
+                try
+                {
+                    await sessionClient.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeNotification?.('select-addon-on-next-open')", lifetimeToken);
+                    if (admittedGeneration != Volatile.Read(ref documentGeneration)) return;
+                    var acknowledged = await frontendBridge.Client.AcknowledgeQamSelectAddonOnNextOpenPreparedAsync(lifetimeToken).ConfigureAwait(false);
+                    if (!acknowledged) log.Info("QAM Addon first-tab preparation acknowledgement was not accepted.");
+                }
+                catch (Exception exception) { log.Info($"QAM Addon first-tab request delivery skipped for retired CDP session. {exception.Message}"); }
+            }
             void OnStateInvalidated(object? _, EventArgs __) => _ = Task.Run(DeliverInvalidationAsync, lifetimeToken);
+            void OnSelectAddonOnNextQuickAccessOpen(object? _, EventArgs __)
+            {
+                var admittedGeneration = Volatile.Read(ref documentGeneration);
+                _ = Task.Run(() => DeliverSelectAddonOnNextQuickAccessOpenAsync(admittedGeneration), lifetimeToken);
+            }
             sessionClient.BindingCalled += OnBindingCalled;
             frontendBridge.StateInvalidated += OnStateInvalidated;
+            frontendBridge.SelectAddonOnNextQuickAccessOpenRequested += OnSelectAddonOnNextQuickAccessOpen;
         var reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnDocumentLoaded() { Interlocked.Increment(ref documentGeneration); reload.TrySetResult(); }
         currentClient.DocumentLoaded += OnDocumentLoaded;
@@ -168,6 +186,7 @@ try
         finally
         {
             frontendBridge.StateInvalidated -= OnStateInvalidated;
+            frontendBridge.SelectAddonOnNextQuickAccessOpenRequested -= OnSelectAddonOnNextQuickAccessOpen;
             sessionClient.BindingCalled -= OnBindingCalled;
             if (installMayExist) await TeardownAsync(sessionClient);
             await sessionClient.DisposeAsync();

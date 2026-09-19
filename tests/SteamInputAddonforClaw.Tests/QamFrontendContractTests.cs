@@ -77,6 +77,26 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_first_tab_intent_uses_a_dedicated_current_document_notification()
+    {
+        var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
+        var program = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Program.cs");
+
+        Assert.Contains("SelectAddonOnNextQuickAccessOpenRequested", bridge);
+        Assert.Contains("SelectAddonOnNextQuickAccessOpenRequested", program);
+        Assert.Contains("select-addon-on-next-open", program);
+        Assert.Contains("DeliverSelectAddonOnNextQuickAccessOpenAsync", program);
+        Assert.Contains("admittedGeneration != Volatile.Read(ref documentGeneration)", program);
+        Assert.Contains("AcknowledgeQamSelectAddonOnNextOpenPreparedAsync", program);
+        var delivery = program[program.IndexOf("DeliverSelectAddonOnNextQuickAccessOpenAsync", StringComparison.Ordinal)..];
+        var evaluateIndex = delivery.IndexOf("EvaluateAsync", StringComparison.Ordinal);
+        var postEvaluationGenerationCheck = delivery.IndexOf("admittedGeneration != Volatile.Read(ref documentGeneration)", evaluateIndex + 1, StringComparison.Ordinal);
+        var acknowledgementIndex = delivery.IndexOf("AcknowledgeQamSelectAddonOnNextOpenPreparedAsync", StringComparison.Ordinal);
+        Assert.True(evaluateIndex >= 0 && postEvaluationGenerationCheck > evaluateIndex && postEvaluationGenerationCheck < acknowledgementIndex);
+        Assert.DoesNotContain("state-invalidated')", program[program.IndexOf("DeliverSelectAddonOnNextQuickAccessOpenAsync", StringComparison.Ordinal)..]);
+    }
+
+    [Fact]
     public void Qam_bridge_path_is_only_the_generic_quick_settings_seam_for_device_and_profile()
     {
         var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
@@ -160,7 +180,7 @@ public sealed class QamFrontendContractTests
         Assert.True(teardownStart >= 0);
         var teardown = source[teardownStart..source.IndexOf("    });", teardownStart, StringComparison.Ordinal)];
         Assert.Contains("addonTabDescriptor: null,", teardown);
-        Assert.Contains("qamSurfaceActive: false,", teardown);
+        Assert.Contains("selectAddonOnNextOpenRequested: false,", teardown);
 
         var uninstallStart = source.IndexOf("function uninstall()", StringComparison.Ordinal);
         var uninstall = source[uninstallStart..source.IndexOf("    state.installed = false;", uninstallStart, StringComparison.Ordinal)];
@@ -187,25 +207,27 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_initial_tab_selection_uses_only_native_authority_and_fails_open_when_unavailable()
+    public void Qam_initial_tab_selection_uses_native_menu_authority_and_fails_open_when_unavailable()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var selectionStart = source.IndexOf("function resolveNativeTabSelection", StringComparison.Ordinal);
+        var selectionStart = source.IndexOf("function resolveNativeQamMenuAuthority", StringComparison.Ordinal);
         var selectionEnd = source.IndexOf("function preservePatchedFunctionShape", selectionStart, StringComparison.Ordinal);
         Assert.True(selectionStart >= 0 && selectionEnd > selectionStart);
         var selection = source[selectionStart..selectionEnd];
 
-        Assert.Contains("function resolveNativeTabSelection()", selection);
+        Assert.Contains("function resolveNativeQamMenuAuthority()", selection);
         Assert.Contains("window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore?.MainWindowInstance?.MenuStore", selection);
         Assert.Contains("typeof menuStore.OpenQuickAccessMenu !== \"function\"", selection);
-        Assert.Contains("menuStore.OpenQuickAccessMenu(key, false);", selection);
-        Assert.Contains("if (key !== ADDON_TAB_KEY) return;", selection);
+        Assert.Contains("!Object.prototype.hasOwnProperty.call(menuStore, \"m_eOpenSideMenu\")", selection);
+        Assert.Contains("const QUICK_ACCESS_SIDE_MENU_ID = 2;", source);
+        Assert.Contains("isQuickAccessOpen: () => menuStore.m_eOpenSideMenu === QUICK_ACCESS_SIDE_MENU_ID", selection);
+        Assert.Contains("menuStore.OpenQuickAccessMenu(ADDON_TAB_KEY, false);", selection);
         Assert.DoesNotContain("const candidates =", selection);
         Assert.DoesNotContain("activeTab", selection);
-        Assert.Contains("function selectAddonTabForFreshOpen()", selection);
-        Assert.Contains("function trySelectAddonTabForFreshOpen()", selection);
-        Assert.Contains("if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested || !state.addonTabDescriptor) return;", selection);
-        Assert.Contains("authority.set(ADDON_TAB_KEY);", selection);
+        Assert.Contains("function requestAddonSelectionOnNextQuickAccessOpen()", selection);
+        Assert.Contains("function tryConsumeAddonSelectionRequest()", selection);
+        Assert.Contains("if (!state.selectAddonOnNextOpenRequested || !state.addonTabDescriptor) return;", selection);
+        Assert.Contains("authority.selectAddon();", selection);
         Assert.DoesNotContain("captureStatus", selection);
         Assert.DoesNotContain("if (!state.installed || !state.qamSurfaceActive) return;", selection);
         Assert.Contains("QAM initial Addon tab selection unavailable; tabs remain usable.", selection);
@@ -219,48 +241,30 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_open_lifecycle_uses_the_verified_outer_visibility_transition()
+    public void Qam_open_selection_does_not_use_renderer_visibility()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var lifecycleStart = source.IndexOf("function updateQamSurfaceVisibility(visible)", StringComparison.Ordinal);
-        var lifecycleEnd = source.IndexOf("function ensureAddonTabs", lifecycleStart, StringComparison.Ordinal);
-        Assert.True(lifecycleStart >= 0 && lifecycleEnd > lifecycleStart);
-        var lifecycle = source[lifecycleStart..lifecycleEnd];
-
-        Assert.Contains("function updateQamSurfaceVisibility(visible)", lifecycle);
-        Assert.Contains("if (visible === true)", lifecycle);
-        Assert.Contains("else if (visible === false)", lifecycle);
-        Assert.Contains("activateQamSurface();", lifecycle);
-        Assert.Contains("deactivateQamSurface();", lifecycle);
+        Assert.DoesNotContain("qamSurfaceActive", source);
+        Assert.DoesNotContain("qamInitialSelectionRequested", source);
+        Assert.DoesNotContain("updateQamSurfaceVisibility", source);
 
         var patchedTypeStart = source.IndexOf("const patchedType = preservePatchedFunctionShape", StringComparison.Ordinal);
         var patchedTypeEnd = source.IndexOf("patch.patchedType = patchedType;", patchedTypeStart, StringComparison.Ordinal);
         Assert.True(patchedTypeStart >= 0 && patchedTypeEnd > patchedTypeStart);
         var patchedType = source[patchedTypeStart..patchedTypeEnd];
-        Assert.Contains("updateQamSurfaceVisibility(args[0]?.visible);", patchedType);
+        Assert.DoesNotContain("args[0]?.visible", patchedType);
         Assert.DoesNotContain("onFocusNavActivated", patchedType);
         Assert.DoesNotContain("onFocusNavDeactivated", patchedType);
-
-        var transitionsStart = source.IndexOf("function activateQamSurface()", StringComparison.Ordinal);
-        var transitionsEnd = source.IndexOf("function ensureAddonTabs", transitionsStart, StringComparison.Ordinal);
-        var transitions = source[transitionsStart..transitionsEnd];
-        Assert.Contains("if (state.qamSurfaceActive) return;", transitions);
-        Assert.Contains("state.qamSurfaceActive = true;", transitions);
-        Assert.Contains("state.qamInitialSelectionRequested = true;", transitions);
-        Assert.Contains("if (!state.qamSurfaceActive) return;", transitions);
-        Assert.Contains("state.qamSurfaceActive = false;", transitions);
-        Assert.Contains("state.qamInitialSelectionRequested = false;", transitions);
     }
 
     [Fact]
-    public void Qam_open_selection_is_lifecycle_driven_and_not_render_or_invalidation_driven()
+    public void Qam_open_selection_is_intent_driven_and_consumed_after_descriptor_insertion()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var insertionStart = source.IndexOf("function ensureAddonTabs", StringComparison.Ordinal);
         var insertionEnd = source.IndexOf("function preservePatchedFunctionShape", insertionStart, StringComparison.Ordinal);
         var insertion = source[insertionStart..insertionEnd];
-        Assert.DoesNotContain("selectAddonTabForFreshOpen(owner", insertion);
-        var triggerIndex = insertion.IndexOf("trySelectAddonTabForFreshOpen();", StringComparison.Ordinal);
+        var triggerIndex = insertion.IndexOf("tryConsumeAddonSelectionRequest();", StringComparison.Ordinal);
         Assert.True(triggerIndex >= 0);
         Assert.DoesNotContain("state.qamSelectionContext", insertion);
         var descriptorIndex = insertion.IndexOf("const descriptor = buildAddonTab(React, native);", StringComparison.Ordinal);
@@ -269,14 +273,12 @@ public sealed class QamFrontendContractTests
         var notificationStart = source.IndexOf("function receiveBridgeNotification", StringComparison.Ordinal);
         var notificationEnd = source.IndexOf("function retireBridgeConsumers", notificationStart, StringComparison.Ordinal);
         var notification = source[notificationStart..notificationEnd];
-        Assert.DoesNotContain("selectAddonTabForFreshOpen", notification);
-        Assert.DoesNotContain("trySelectAddonTabForFreshOpen", notification);
-
-        Assert.Contains("if (state.qamSurfaceActive) return;", source);
-        Assert.Contains("if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested", source);
+        Assert.Contains("select-addon-on-next-open", notification);
+        Assert.Contains("requestAddonSelectionOnNextQuickAccessOpen", notification);
+        Assert.Contains("if (!state.selectAddonOnNextOpenRequested || !state.addonTabDescriptor)", source);
         Assert.DoesNotContain("state.initialTabSelectionOwners", source);
         Assert.DoesNotContain("patchQamLifecycle", source);
-        Assert.DoesNotContain("setTimeout", source[source.IndexOf("function selectAddonTabForFreshOpen", StringComparison.Ordinal)..source.IndexOf("function updateQamSurfaceVisibility", StringComparison.Ordinal)]);
+        Assert.DoesNotContain("setTimeout", source[source.IndexOf("function requestAddonSelectionOnNextQuickAccessOpen", StringComparison.Ordinal)..source.IndexOf("function ensureAddonTabs", StringComparison.Ordinal)]);
     }
 
     [Fact]

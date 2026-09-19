@@ -14,7 +14,9 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
     private sealed class ServedConnection
     {
         internal required Func<Task> SendCloseRequestedAsync { get; init; }
+        internal required Func<Task> SendSelectAddonOnNextQuickAccessOpenRequestedAsync { get; init; }
         internal required Task Completion { get; init; }
+        internal TaskCompletionSource<bool>? SelectAddonPreparedAcknowledgement;
     }
     public NamedPipeAddonFrontendServer(string pipeName, IAddonFrontendControl inner) : this(pipeName, inner, () => new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly)) { }
     internal NamedPipeAddonFrontendServer(string pipeName, IAddonFrontendControl inner, Func<NamedPipeServerStream> pipeFactory) { _pipeName = pipeName; _inner = inner; _pipeFactory = pipeFactory; }
@@ -50,6 +52,39 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         catch (OperationCanceledException)
         {
             return served.Completion.IsCompleted;
+        }
+    }
+
+    /// <summary>Send one causal Addon-first selection intent to the connected QamHost and wait for
+    /// its current-document JavaScript handler to prepare the next-open intent. This is bounded and
+    /// best-effort; the caller must preserve the native Quick Access pulse when preparation fails.</summary>
+    public async Task<bool> RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var served = _servedConnection;
+        if (served is null) return false;
+        var acknowledgement = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (Interlocked.CompareExchange(ref served.SelectAddonPreparedAcknowledgement, acknowledgement, null) is not null)
+            return false;
+        try
+        {
+            await served.SendSelectAddonOnNextQuickAccessOpenRequestedAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(timeout);
+            return await acknowledgement.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (Interlocked.CompareExchange(ref served.SelectAddonPreparedAcknowledgement, null, acknowledgement) is not null)
+                acknowledgement.TrySetResult(false);
         }
     }
     private async Task AcceptLoopAsync()
@@ -113,12 +148,15 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                 requestCts.Dispose();
             }
         }
+        ServedConnection? served = null;
         try { var hello = await FrontendWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false); if (hello.Kind != FrontendWireMessageKind.Handshake || hello.ProtocolVersion != FrontendTransportProtocol.CurrentVersion) { await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.ProtocolError, Error: new(FrontendRemoteErrorCode.ProtocolMismatch, "Protocol version mismatch."))).ConfigureAwait(false); return; } await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.HandshakeAccepted)).ConfigureAwait(false); _inner.StateInvalidated += Invalidated;
-            _servedConnection = new ServedConnection
+            served = new ServedConnection
             {
                 SendCloseRequestedAsync = () => Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Notification, Notification: FrontendNotificationKind.CloseRequested)),
+                SendSelectAddonOnNextQuickAccessOpenRequestedAsync = () => Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Notification, Notification: FrontendNotificationKind.SelectAddonOnNextQuickAccessOpenRequested)),
                 Completion = connectionClosed.Task
             };
+            _servedConnection = served;
             while (!connection.IsCancellationRequested)
             {
                 FrontendWireEnvelope message;
@@ -157,10 +195,17 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit or FrontendRpcMethod.AcknowledgeQamSelectAddonOnNextOpenPrepared)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
+                    continue;
+                }
+                if (message.Method.Value == FrontendRpcMethod.AcknowledgeQamSelectAddonOnNextOpenPrepared)
+                {
+                    var acknowledged = served.SelectAddonPreparedAcknowledgement?.TrySetResult(true) == true;
+                    await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, message.Method, Payload: FrontendWireCodec.Payload(acknowledged))).ConfigureAwait(false);
+                    requests.TryRemove(id, out var acknowledgementCts); acknowledgementCts?.Dispose();
                     continue;
                 }
                 var startSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -168,7 +213,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                 activeRequests.TryAdd(id, requestTask);
                 startSignal.TrySetResult();
             } }
-        finally { _servedConnection = null; connectionClosed.TrySetResult(); _inner.StateInvalidated -= Invalidated; connection.Cancel(); foreach (var item in requests.Values) item.Cancel(); try { await Task.WhenAll(activeRequests.Values).ConfigureAwait(false); } catch { } Task? pendingNotification; lock (notificationGate) pendingNotification = notificationTask; if (pendingNotification is not null) try { await pendingNotification.ConfigureAwait(false); } catch { }
+        finally { _servedConnection = null; served?.SelectAddonPreparedAcknowledgement?.TrySetResult(false); connectionClosed.TrySetResult(); _inner.StateInvalidated -= Invalidated; connection.Cancel(); foreach (var item in requests.Values) item.Cancel(); try { await Task.WhenAll(activeRequests.Values).ConfigureAwait(false); } catch { } Task? pendingNotification; lock (notificationGate) pendingNotification = notificationTask; if (pendingNotification is not null) try { await pendingNotification.ConfigureAwait(false); } catch { }
             // Frontend disconnect (crash/kill, or the pipe otherwise dropping without an orderly
             // Close call) must still retire a Runtime-owned Claw Sensor Probe session: unlike the
             // old in-process page, this diagnostic keeps actively reading sensors in the headless
