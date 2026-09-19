@@ -1,16 +1,16 @@
 # Steam Addon for Claw — Shared Frontend V2 Implementation PR Plan
 
 > **Date:** 2026-09-05  
-> **Status:** Current implementation roadmap  
-> **Production code baseline reviewed:** `main` at `ed27976ff756ecb5bfc42569d642acb413b452a9` after PR #498  
-> **Architecture authority:** `docs/shared-frontend/SHARED_FRONTEND_ARCHITECTURE_V2.md` as revised after PR #498  
+> **Status:** Completed implementation record; later shared-surface convergence is complete
+> **Production code baseline reviewed:** `main` at `8c333b1ee4af63e4e7a9f50dd3a4b73a8944c682` after PR #530; PR5 refreshed current-state notes
+> **Architecture authority:** `docs/shared-frontend/SHARED_FRONTEND_ARCHITECTURE_V2.md` and `ADDON_QUICK_SETTINGS_SHARED_SURFACE_ARCHITECTURE_2026-09-18.md`
 > **Core product decision:** QAM and Addon Overlay share one Quick Settings product definition; only their renderer/admission/lifecycle remain surface-specific.
 
 ---
 
-## 1. Goal
+## 1. Completed goal
 
-Finish Shared Frontend V2 so the Steam QAM and Addon Overlay do **not** become two separately maintained implementations of the same Device/Profile Quick Settings product.
+Shared Frontend V2 was completed so the Steam QAM and Addon Overlay do **not** become two separately maintained implementations of the same Device/Profile Quick Settings product.
 
 The intended maintenance outcome is:
 
@@ -81,20 +81,20 @@ with:
 
 ### Current protocol versions
 
-At the production baseline:
+Current production state:
 
 ```text
-FrontendTransportProtocol = 27
-OverlayTransportProtocol  = 6
+FrontendTransportProtocol = 32
+OverlayTransportProtocol  = 8
 ```
 
-Frontend v27 comes from the later Claw Sensor Probe work merged after SF-V2-01.
+These are the current wire authorities after the original SF-V2 roadmap and the later shared-surface
+shell/Setting/Shortcut convergence. Future work orders must still re-check current versions before
+coding.
 
-Every future work order must re-check current versions immediately before coding. If an unrelated PR has already consumed the expected next version, increment from then-current source rather than forcing the numbers below.
+### Historical duplication addressed by the completed roadmap
 
-### Current duplication to remove
-
-QAM still hard-codes Device/Profile product semantics in `qam.js`, including:
+The original roadmap identified QAM Device/Profile duplication, including:
 
 ```text
 labels/order
@@ -113,9 +113,9 @@ Overlay has separate primitives and:
 OverlayDelayedSliderCommit.ProductionDelay = 2000 ms
 ```
 
-but no real Device binding yet.
-
-This is the correct point to introduce the shared product layer before duplicated real Overlay feature UI is created.
+The original SF-V2 Device/Profile migration is complete. The later shared-surface sequence (#527–#530
+plus PR5) added the shell, Setting, and Shortcut parity contracts and removed the remaining QAM local
+debounce fallback. See the 2026-09-18 shared-surface architecture for the current topology.
 
 ---
 
@@ -1222,14 +1222,16 @@ If that is not true, the architecture has not achieved its primary maintenance g
 
 ---
 
-## 27. Next action
+## 27. Completion status and later convergence record
 
-Prepare the focused work order for:
+The original SF-V2 roadmap is complete. Its focused work orders remain an implementation record.
+
+The later shared-surface sequence is recorded in:
 
 ```text
-SF-V2-03 — Shared Quick Settings product contract + Device projection/dispatch
+docs/shared-frontend/ADDON_QUICK_SETTINGS_SHARED_SURFACE_ARCHITECTURE_2026-09-18.md
 ```
 
-against the latest `main` immediately before implementation.
-
-Do not begin the old planned `SF-V2-03 — Overlay CPU Boost + Power Mode binding`; that plan is superseded by this shared QAM/Overlay product-model architecture.
+It records PR #527 shared shell foundation, #528 QAM five-tab native shell, #529 Setting parity,
+#530 Shortcut parity, and PR5 convergence cleanup/final acceptance. Do not restart the old planned
+SF-V2-03 Overlay binding sequence or mass-edit the historical work orders.
