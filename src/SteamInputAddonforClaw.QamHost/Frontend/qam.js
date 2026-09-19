@@ -307,10 +307,14 @@
       return null;
     }
 
-    const Tabs = findUniqueFunction(tabsModule, [
-      ".TabRowTabs",
-      "activeTab:",
-    ]);
+    // Steam exposes this component through a wrapper export. The module fingerprint above only
+    // locates the module; resolve the wrapper shape separately and fail closed if it is absent or
+    // ambiguous rather than treating the locator export itself as the component.
+    const Tabs = findUniqueObject(
+      tabsModule,
+      value =>
+        typeof value?.type === "function" &&
+        String(value.type).includes("(function()"));
     if (!Tabs) {
       logOnce("nativeTabs", "QAM native Tabs discovery failed (expected exactly one semantic match).");
       return null;
@@ -405,7 +409,7 @@
   }
 
   function trySelectAddonTabForFreshOpen() {
-    if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested) return;
+    if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested || !state.addonTabDescriptor) return;
     state.qamInitialSelectionRequested = false;
     selectAddonTabForFreshOpen();
   }

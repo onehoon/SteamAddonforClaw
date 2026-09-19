@@ -201,7 +201,7 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("activeTab", selection);
         Assert.Contains("function selectAddonTabForFreshOpen()", selection);
         Assert.Contains("function trySelectAddonTabForFreshOpen()", selection);
-        Assert.Contains("if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested) return;", selection);
+        Assert.Contains("if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested || !state.addonTabDescriptor) return;", selection);
         Assert.Contains("authority.set(ADDON_TAB_KEY);", selection);
         Assert.DoesNotContain("captureStatus", selection);
         Assert.DoesNotContain("if (!state.installed || !state.qamSurfaceActive) return;", selection);
@@ -260,6 +260,8 @@ public sealed class QamFrontendContractTests
         var triggerIndex = insertion.IndexOf("trySelectAddonTabForFreshOpen();", StringComparison.Ordinal);
         Assert.True(triggerIndex >= 0);
         Assert.DoesNotContain("state.qamSelectionContext", insertion);
+        var descriptorIndex = insertion.IndexOf("const descriptor = buildAddonTab(React, native);", StringComparison.Ordinal);
+        Assert.True(descriptorIndex >= 0 && descriptorIndex < triggerIndex);
 
         var notificationStart = source.IndexOf("function receiveBridgeNotification", StringComparison.Ordinal);
         var notificationEnd = source.IndexOf("function retireBridgeConsumers", notificationStart, StringComparison.Ordinal);
@@ -439,7 +441,10 @@ public sealed class QamFrontendContractTests
         Assert.Contains("PanelSectionRow", source);
         Assert.Contains(".TabRowTabs", source);
         Assert.Contains("activeTab:", source);
-        Assert.Contains("const Tabs = findUniqueFunction(tabsModule", source);
+        Assert.Contains("const Tabs = findUniqueObject(", source);
+        Assert.Contains("typeof value?.type === \"function\"", source);
+        Assert.Contains("String(value.type).includes(\"(function()\")", source);
+        Assert.DoesNotContain("findUniqueFunction(tabsModule", source);
         Assert.Contains("native.Tabs", source);
         Assert.Contains("QAM native Tabs discovery failed", source);
         Assert.DoesNotContain("marginTop: \"-4px\"", source);
