@@ -10,7 +10,6 @@ using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI.ViewManagement;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
 namespace SteamInputAddonforClaw.Overlay;
@@ -36,7 +35,7 @@ public sealed partial class OverlayWindow : Window
     private sealed class QuickSettingsSurface
     {
         internal required QuickSettingsPageId PageId { get; init; }
-        internal required OverlayTabId TabId { get; init; }
+        internal required AddonQuickSettingsTabId TabId { get; init; }
         internal required StackPanel Content { get; init; }
         internal required TextBlock FailureText { get; init; }
         internal OverlayQuickSettingsPageBinding? Binding { get; set; }
@@ -60,10 +59,10 @@ public sealed partial class OverlayWindow : Window
     private uint _lastConfiguredDpi;
 
     private readonly OverlayTabState _tabState = new();
-    private readonly Dictionary<OverlayTabId, Button> _tabButtons = new();
-    private readonly Dictionary<OverlayTabId, FrameworkElement> _tabPages = new();
-    private readonly Dictionary<OverlayTabId, IReadOnlyList<OverlayRow>> _pageRows = new();
-    private readonly Dictionary<OverlayTabId, OverlayTabOrderRow> _tabOrderRows = new();
+    private readonly Dictionary<AddonQuickSettingsTabId, Button> _tabButtons = new();
+    private readonly Dictionary<AddonQuickSettingsTabId, FrameworkElement> _tabPages = new();
+    private readonly Dictionary<AddonQuickSettingsTabId, IReadOnlyList<OverlayRow>> _pageRows = new();
+    private readonly Dictionary<AddonQuickSettingsTabId, AddonQuickSettingsTabOrderRow> _tabOrderRows = new();
     private readonly OverlayRowSelection _rowSelection = new();
     private readonly Brush _rowSelectedBrush;
     private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Colors.Transparent);
@@ -93,7 +92,7 @@ public sealed partial class OverlayWindow : Window
 
     // OQ5-UI-10: the Setting-page editor proposes a one-position tab move; App forwards it through the
     // existing OQ5-UI-09 SendSetTabOrderAsync seam. OverlayWindow never owns the transport client.
-    internal event Action<IReadOnlyList<OverlayTabId>>? TabOrderChangeRequested;
+    internal event Action<IReadOnlyList<AddonQuickSettingsTabId>>? TabOrderChangeRequested;
 
     public OverlayWindow()
     {
@@ -246,7 +245,7 @@ public sealed partial class OverlayWindow : Window
     }
 
     // OQ5-UI-01: five-tab shell. Tab buttons and placeholder pages are built once from the
-    // current tab order; identity (OverlayTabId) is carried on Button.Tag and kept separate
+    // current tab order; identity (AddonQuickSettingsTabId) is carried on Button.Tag and kept separate
     // from the visible label text so a later persisted order can reorder known IDs.
     private void BuildShell()
     {
@@ -286,12 +285,12 @@ public sealed partial class OverlayWindow : Window
     // Device and Profile both get the SF-V2-07/09 generic Quick Settings renderer; Setting gets the
     // OQ5-UI-10 tab-order editor; Shortcut gets the OQ5-UI-11 2x2 slot shell; every other tab keeps
     // its OQ5-UI-01 placeholder with zero selectable rows.
-    private FrameworkElement BuildPage(OverlayTabId id, List<OverlayRow> rows) => id switch
+    private FrameworkElement BuildPage(AddonQuickSettingsTabId id, List<OverlayRow> rows) => id switch
     {
-        OverlayTabId.Setting => BuildTabOrderEditorPage(rows),
-        OverlayTabId.Shortcut => BuildShortcutPage(),
-        OverlayTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
-        OverlayTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile),
+        AddonQuickSettingsTabId.Setting => BuildTabOrderEditorPage(rows),
+        AddonQuickSettingsTabId.Shortcut => BuildShortcutPage(),
+        AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
+        AddonQuickSettingsTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile),
         _ => CreatePlaceholderPage(id),
     };
 
@@ -299,7 +298,7 @@ public sealed partial class OverlayWindow : Window
     // RenderQuickSettingsPage() populates/updates both once ConfigureQuickSettings/
     // ApplyQuickSettingsPage runs. The caller's `rows` (== _pageRows[tabId]) starts empty and is
     // replaced wholesale on first render.
-    private FrameworkElement BuildQuickSettingsPage(OverlayTabId tabId, QuickSettingsPageId pageId)
+    private FrameworkElement BuildQuickSettingsPage(AddonQuickSettingsTabId tabId, QuickSettingsPageId pageId)
     {
         var failureText = CreateQuickSettingsMessageText(string.Empty, "CaptionTextBlockStyle");
         failureText.Visibility = Visibility.Collapsed;
@@ -564,7 +563,7 @@ public sealed partial class OverlayWindow : Window
     }
 
     // OQ5-UI-10: the five fixed tab-order rows live in one 5-row Grid, created once and kept by
-    // OverlayTabId. ApplyTabOrder repositions them via Grid.SetRow -- instances are never recreated.
+    // AddonQuickSettingsTabId. ApplyTabOrder repositions them via Grid.SetRow -- instances are never recreated.
     private FrameworkElement BuildTabOrderEditorPage(List<OverlayRow> rows)
     {
         var section = new StackPanel { Spacing = 8 };
@@ -580,7 +579,7 @@ public sealed partial class OverlayWindow : Window
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var id = order[i];
-            var row = new OverlayTabOrderRow(id, LabelFor(id), delta => RequestTabOrderMove(id, delta));
+            var row = new AddonQuickSettingsTabOrderRow(id, LabelFor(id), delta => RequestTabOrderMove(id, delta));
             row.SetPosition(i, order.Count);
             Grid.SetRow(row.Container, i);
             grid.Children.Add(row.Container);
@@ -594,7 +593,7 @@ public sealed partial class OverlayWindow : Window
 
     // OQ5-UI-10: a proposal is only a request. The visible order changes only when the Runtime
     // republishes TabOrderState -> ApplyTabOrder. A boundary move produces no proposal and no request.
-    private void RequestTabOrderMove(OverlayTabId tab, int delta)
+    private void RequestTabOrderMove(AddonQuickSettingsTabId tab, int delta)
     {
         if (!_tabState.TryCreateMovedOrder(tab, delta, out var proposed))
             return;
@@ -681,17 +680,9 @@ public sealed partial class OverlayWindow : Window
             tile.BorderBrush = id == _shortcutSelection.SelectedSlot ? _rowSelectedBrush : RowUnselectedBrush;
     }
 
-    private static string LabelFor(OverlayTabId id) => id switch
-    {
-        OverlayTabId.Device => "Device",
-        OverlayTabId.Profile => "Profile",
-        OverlayTabId.Controller => "Controller",
-        OverlayTabId.Shortcut => "Shortcut",
-        OverlayTabId.Setting => "Setting",
-        _ => id.ToString(),
-    };
+    private static string LabelFor(AddonQuickSettingsTabId id) => AddonQuickSettingsShellContract.LabelFor(id);
 
-    private static FrameworkElement CreatePlaceholderPage(OverlayTabId id)
+    private static FrameworkElement CreatePlaceholderPage(AddonQuickSettingsTabId id)
     {
         var page = new TextBlock
         {
@@ -706,7 +697,7 @@ public sealed partial class OverlayWindow : Window
 
     private void OnTabHeaderClick(object sender, RoutedEventArgs args)
     {
-        if (sender is Button { Tag: OverlayTabId id } && id != _tabState.SelectedTab)
+        if (sender is Button { Tag: AddonQuickSettingsTabId id } && id != _tabState.SelectedTab)
         {
             _tabState.Select(id);
             ApplySelectedTabVisualState();
@@ -775,7 +766,7 @@ public sealed partial class OverlayWindow : Window
         if (_rowSelection.ActivateSelected()) RefreshRowSelectionAfterMove();
     }
 
-    private bool OnShortcutPage() => _tabState.SelectedTab == OverlayTabId.Shortcut;
+    private bool OnShortcutPage() => _tabState.SelectedTab == AddonQuickSettingsTabId.Shortcut;
 
     private void MoveRowSelection(bool up)
     {
@@ -793,12 +784,12 @@ public sealed partial class OverlayWindow : Window
     // session. The five page/button/row instances are preserved; only the tab-strip column order and
     // the selected-header accent change. Selected page/row/scroll position stay exactly as they are
     // (s.11.1) -- the new first tab only takes effect on the next Show via ResetForShow().
-    internal void ApplyTabOrder(IReadOnlyList<OverlayTabId> order)
+    internal void ApplyTabOrder(IReadOnlyList<AddonQuickSettingsTabId> order)
     {
         // Capture the Setting-editor row identity selected right now (before the order changes) so a
         // live reorder preserves the selected tab rather than the old numeric row slot.
-        OverlayTabId? selectedEditorTab = null;
-        var settingVisible = _tabState.SelectedTab == OverlayTabId.Setting;
+        AddonQuickSettingsTabId? selectedEditorTab = null;
+        var settingVisible = _tabState.SelectedTab == AddonQuickSettingsTabId.Setting;
         if (settingVisible && _rowSelection.SelectedIndex is { } selected && selected >= 0 && selected < _tabState.Order.Count)
             selectedEditorTab = _tabState.Order[selected];
 
@@ -821,9 +812,9 @@ public sealed partial class OverlayWindow : Window
         }
 
         // Rebuild the Setting page's ordered row list so CapabilitiesFor(Setting) / the selection
-        // model see the authoritative order. The OverlayTabOrderRow instances are reused.
+        // model see the authoritative order. The AddonQuickSettingsTabOrderRow instances are reused.
         if (_tabOrderRows.Count == applied.Count)
-            _pageRows[OverlayTabId.Setting] = applied
+            _pageRows[AddonQuickSettingsTabId.Setting] = applied
                 .Select(id => new OverlayRow(_tabOrderRows[id].Container, _tabOrderRows[id].Capabilities))
                 .ToArray();
 
@@ -838,7 +829,7 @@ public sealed partial class OverlayWindow : Window
             if (selectedEditorTab is { } tab)
                 for (var i = 0; i < applied.Count; i++)
                     if (applied[i] == tab) { preferredIndex = i; break; }
-            _rowSelection.SetRows(CapabilitiesFor(OverlayTabId.Setting), preferredIndex);
+            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
             ApplyRowSelectionVisual();
         }
 
@@ -892,14 +883,14 @@ public sealed partial class OverlayWindow : Window
         // OQ5-UI-11 s.7.4: entering the Shortcut page selects Slot 1. CapabilitiesFor(Shortcut) is
         // empty, so _rowSelection has no selected row and OverlayShortcutSelection is the one
         // selection authority for that page.
-        if (selected == OverlayTabId.Shortcut)
+        if (selected == AddonQuickSettingsTabId.Shortcut)
         {
             _shortcutSelection.Reset();
             ApplyShortcutSelectionVisual();
         }
     }
 
-    private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(OverlayTabId tab) =>
+    private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(AddonQuickSettingsTabId tab) =>
         _pageRows.TryGetValue(tab, out var rows)
             ? rows.Select(row => row.Capabilities).ToArray()
             : [];

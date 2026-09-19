@@ -140,10 +140,10 @@ public sealed class OverlayDeviceRendererWiringTests
     {
         var source = ReadOverlayWindowSource();
 
-        Assert.Contains("OverlayTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device)", source);
-        Assert.Contains("OverlayTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile)", source);
-        Assert.DoesNotContain("CreatePlaceholderPage(OverlayTabId.Profile)", source);
-        Assert.DoesNotContain("CreatePlaceholderPage(id: OverlayTabId.Profile)", source);
+        Assert.Contains("AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device)", source);
+        Assert.Contains("AddonQuickSettingsTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile)", source);
+        Assert.DoesNotContain("CreatePlaceholderPage(AddonQuickSettingsTabId.Profile)", source);
+        Assert.DoesNotContain("CreatePlaceholderPage(id: AddonQuickSettingsTabId.Profile)", source);
     }
 
     // SF-V2-09 section 32/13.1: exactly one page-local surface type/dictionary backs both pages --

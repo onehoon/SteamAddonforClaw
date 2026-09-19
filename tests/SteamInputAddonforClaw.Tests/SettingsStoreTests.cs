@@ -1,4 +1,4 @@
-using SteamInputAddonforClaw.Contracts.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using Xunit;
@@ -202,23 +202,23 @@ public sealed class SettingsStoreTests : IDisposable
 
     // ---- OQ5-UI-08: Overlay tab order --------------------------------------------------------------
 
-    private static readonly OverlayTabId[] CustomTabOrder =
+    private static readonly AddonQuickSettingsTabId[] CustomTabOrder =
     [
-        OverlayTabId.Controller,
-        OverlayTabId.Device,
-        OverlayTabId.Profile,
-        OverlayTabId.Shortcut,
-        OverlayTabId.Setting,
+        AddonQuickSettingsTabId.Controller,
+        AddonQuickSettingsTabId.Device,
+        AddonQuickSettingsTabId.Profile,
+        AddonQuickSettingsTabId.Shortcut,
+        AddonQuickSettingsTabId.Setting,
     ];
 
     [Fact]
-    public void NewAppSettings_DefaultsOverlayTabOrderToTheFrozenOrder()
+    public void NewAppSettings_DefaultsAddonQuickSettingsTabOrderToTheFrozenOrder()
     {
-        Assert.Equal(OverlayTabOrderContract.DefaultOrder, new AppSettings().OverlayTabOrder);
+        Assert.Equal(AddonQuickSettingsTabOrderContract.DefaultOrder, new AppSettings().AddonQuickSettingsTabOrder);
     }
 
     [Fact]
-    public void Load_WhenOverlayTabOrderIsMissing_DefaultsWithoutLosingOtherSettings()
+    public void Load_WhenAddonQuickSettingsTabOrderIsMissing_DefaultsWithoutLosingOtherSettings()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         Directory.CreateDirectory(_testDirectory);
@@ -226,21 +226,23 @@ public sealed class SettingsStoreTests : IDisposable
 
         var settings = new SettingsStore(path).Load();
 
-        Assert.Equal(OverlayTabOrderContract.DefaultOrder, settings.OverlayTabOrder);
+        Assert.Equal(AddonQuickSettingsTabOrderContract.DefaultOrder, settings.AddonQuickSettingsTabOrder);
         Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
     }
 
     [Fact]
-    public void SaveAndLoad_PreservesACustomOverlayTabOrderAsEnumNames()
+    public void SaveAndLoad_PreservesACustomAddonQuickSettingsTabOrderAsEnumNames()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         var store = new SettingsStore(path);
 
-        store.Save(new AppSettings { OverlayTabOrder = CustomTabOrder });
+        store.Save(new AppSettings { AddonQuickSettingsTabOrder = CustomTabOrder });
 
-        Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);
+        Assert.Equal(CustomTabOrder, store.Load().AddonQuickSettingsTabOrder);
         var json = File.ReadAllText(path);
-        foreach (var tab in OverlayTabOrderContract.DefaultOrder)
+        Assert.Contains("\"OverlayTabOrder\"", json);
+        Assert.DoesNotContain("\"AddonQuickSettingsTabOrder\"", json);
+        foreach (var tab in AddonQuickSettingsTabOrderContract.DefaultOrder)
             Assert.Contains($"\"{tab}\"", json);                 // every tab persisted as its enum name
         Assert.DoesNotContain("DefaultOverlayTab", json);
         Assert.DoesNotContain("LastOverlayTab", json);
@@ -255,7 +257,7 @@ public sealed class SettingsStoreTests : IDisposable
     [InlineData("\"OverlayTabOrder\":[\"Device\",\"Profile\",\"Controller\",\"Shortcut\",\"Nope\"]")] // unknown name
     [InlineData("\"OverlayTabOrder\":[0,1,2,3,4]")]                                                   // numeric enum
     [InlineData("\"OverlayTabOrder\":[\"Device\",\"Profile\",\"Controller\",\"Shortcut\",null]")]     // null element
-    public void Load_InvalidOverlayTabOrder_FallsBackToDefaultAndKeepsOtherSettings(string tabOrderFragment)
+    public void Load_InvalidAddonQuickSettingsTabOrder_FallsBackToDefaultAndKeepsOtherSettings(string tabOrderFragment)
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         Directory.CreateDirectory(_testDirectory);
@@ -263,62 +265,62 @@ public sealed class SettingsStoreTests : IDisposable
 
         var settings = new SettingsStore(path).Load();
 
-        Assert.Equal(OverlayTabOrderContract.DefaultOrder, settings.OverlayTabOrder);
+        Assert.Equal(AddonQuickSettingsTabOrderContract.DefaultOrder, settings.AddonQuickSettingsTabOrder);
         Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
     }
 
     [Fact]
-    public void TryChangeOverlayTabOrder_WithAValidOrder_PersistsAndPublishes()
+    public void TryChangeAddonQuickSettingsTabOrder_WithAValidOrder_PersistsAndPublishes()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         var store = new SettingsStore(path);
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
 
-        Assert.True(coordinator.TryChangeOverlayTabOrder(CustomTabOrder));
+        Assert.True(coordinator.TryChangeAddonQuickSettingsTabOrder(CustomTabOrder));
 
-        Assert.Equal(CustomTabOrder, coordinator.OverlayTabOrder);
-        Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);
+        Assert.Equal(CustomTabOrder, coordinator.AddonQuickSettingsTabOrder);
+        Assert.Equal(CustomTabOrder, store.Load().AddonQuickSettingsTabOrder);
     }
 
     [Fact]
-    public void TryChangeOverlayTabOrder_EqualToCurrent_IsAnAcceptedNoOp()
+    public void TryChangeAddonQuickSettingsTabOrder_EqualToCurrent_IsAnAcceptedNoOp()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         var store = new SettingsStore(path);
         var coordinator = new StartupSettingsCoordinator(
-            new AppSettings { OverlayTabOrder = CustomTabOrder }, store, new FakeStartupManager());
+            new AppSettings { AddonQuickSettingsTabOrder = CustomTabOrder }, store, new FakeStartupManager());
 
-        Assert.True(coordinator.TryChangeOverlayTabOrder([.. CustomTabOrder]));
-        Assert.Equal(CustomTabOrder, coordinator.OverlayTabOrder);
+        Assert.True(coordinator.TryChangeAddonQuickSettingsTabOrder([.. CustomTabOrder]));
+        Assert.Equal(CustomTabOrder, coordinator.AddonQuickSettingsTabOrder);
         Assert.False(File.Exists(path)); // no disk write for a no-op
     }
 
     [Fact]
-    public void TryChangeOverlayTabOrder_WithAnInvalidOrder_IsRejectedWithoutStateChange()
+    public void TryChangeAddonQuickSettingsTabOrder_WithAnInvalidOrder_IsRejectedWithoutStateChange()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         var store = new SettingsStore(path);
-        store.Save(new AppSettings { OverlayTabOrder = CustomTabOrder });
+        store.Save(new AppSettings { AddonQuickSettingsTabOrder = CustomTabOrder });
         var coordinator = new StartupSettingsCoordinator(
-            new AppSettings { OverlayTabOrder = CustomTabOrder }, store, new FakeStartupManager());
+            new AppSettings { AddonQuickSettingsTabOrder = CustomTabOrder }, store, new FakeStartupManager());
 
-        Assert.False(coordinator.TryChangeOverlayTabOrder([OverlayTabId.Device, OverlayTabId.Device]));
+        Assert.False(coordinator.TryChangeAddonQuickSettingsTabOrder([AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Device]));
 
-        Assert.Equal(CustomTabOrder, coordinator.OverlayTabOrder);          // unchanged, NOT reset to default
-        Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);         // disk unchanged
+        Assert.Equal(CustomTabOrder, coordinator.AddonQuickSettingsTabOrder);          // unchanged, NOT reset to default
+        Assert.Equal(CustomTabOrder, store.Load().AddonQuickSettingsTabOrder);         // disk unchanged
     }
 
     [Fact]
-    public void ExistingSettingsMutations_PreserveACustomOverlayTabOrder()
+    public void ExistingSettingsMutations_PreserveACustomAddonQuickSettingsTabOrder()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         var store = new SettingsStore(path);
         var coordinator = new StartupSettingsCoordinator(
-            new AppSettings { OverlayTabOrder = CustomTabOrder }, store, new FakeStartupManager());
+            new AppSettings { AddonQuickSettingsTabOrder = CustomTabOrder }, store, new FakeStartupManager());
 
         coordinator.ChangeLogLevel(AppLogPreference.Info);
 
-        Assert.Equal(CustomTabOrder, store.Load().OverlayTabOrder);
+        Assert.Equal(CustomTabOrder, store.Load().AddonQuickSettingsTabOrder);
     }
 
     public void Dispose()

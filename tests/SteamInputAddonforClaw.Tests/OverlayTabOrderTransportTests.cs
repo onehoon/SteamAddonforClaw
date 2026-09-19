@@ -1,22 +1,22 @@
 using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Text;
-using SteamInputAddonforClaw.Contracts.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 // OQ5-UI-09: Runtime <-> Overlay tab-order preference transport over .Overlay v5.
-public sealed class OverlayTabOrderTransportTests
+public sealed class AddonQuickSettingsTabOrderTransportTests
 {
-    private static readonly OverlayTabId[] Custom =
+    private static readonly AddonQuickSettingsTabId[] Custom =
     [
-        OverlayTabId.Controller,
-        OverlayTabId.Device,
-        OverlayTabId.Profile,
-        OverlayTabId.Shortcut,
-        OverlayTabId.Setting,
+        AddonQuickSettingsTabId.Controller,
+        AddonQuickSettingsTabId.Device,
+        AddonQuickSettingsTabId.Profile,
+        AddonQuickSettingsTabId.Shortcut,
+        AddonQuickSettingsTabId.Setting,
     ];
 
     private static string Pipe() => $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
@@ -54,7 +54,7 @@ public sealed class OverlayTabOrderTransportTests
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
 
-        var received = new TaskCompletionSource<IReadOnlyList<OverlayTabId>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = new TaskCompletionSource<IReadOnlyList<AddonQuickSettingsTabId>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var run = client.RunAsync(_ => Task.CompletedTask, null, async order =>
         {
@@ -95,15 +95,15 @@ public sealed class OverlayTabOrderTransportTests
     public async Task D_set_tab_order_reaches_the_runtime_mutator_and_the_result_is_republished()
     {
         var pipeName = Pipe();
-        IReadOnlyList<OverlayTabId> current = OverlayTabOrderContract.DefaultOrder;
-        IReadOnlyList<OverlayTabId>? seen = null;
+        IReadOnlyList<AddonQuickSettingsTabId> current = AddonQuickSettingsTabOrderContract.DefaultOrder;
+        IReadOnlyList<AddonQuickSettingsTabId>? seen = null;
         await using var server = new NamedPipeOverlayServer(pipeName,
             () => current,
             requested => { seen = requested; current = requested; return true; });
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
 
-        var orders = new List<IReadOnlyList<OverlayTabId>>();
+        var orders = new List<IReadOnlyList<AddonQuickSettingsTabId>>();
         var republished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var run = client.RunAsync(_ => Task.CompletedTask, null, order =>
         {
@@ -126,11 +126,11 @@ public sealed class OverlayTabOrderTransportTests
     public async Task E_rejected_request_republishes_the_previous_authority_and_the_connection_stays_usable()
     {
         var pipeName = Pipe();
-        await using var server = new NamedPipeOverlayServer(pipeName, () => OverlayTabOrderContract.DefaultOrder, _ => false);
+        await using var server = new NamedPipeOverlayServer(pipeName, () => AddonQuickSettingsTabOrderContract.DefaultOrder, _ => false);
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
 
-        var orders = new List<IReadOnlyList<OverlayTabId>>();
+        var orders = new List<IReadOnlyList<AddonQuickSettingsTabId>>();
         var republished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var run = client.RunAsync(_ => Task.CompletedTask, null, order =>
         {
@@ -141,7 +141,7 @@ public sealed class OverlayTabOrderTransportTests
 
         Assert.True(await client.SendSetTabOrderAsync(Custom));
         await republished.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        lock (orders) Assert.Equal(OverlayTabOrderContract.DefaultOrder, orders[^1]); // unchanged
+        lock (orders) Assert.Equal(AddonQuickSettingsTabOrderContract.DefaultOrder, orders[^1]); // unchanged
 
         // Command / navigation still work after preference traffic.
         Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
@@ -155,7 +155,7 @@ public sealed class OverlayTabOrderTransportTests
     public async Task F_tab_order_replies_and_navigation_share_one_write_gate_and_never_interleave()
     {
         var pipeName = Pipe();
-        IReadOnlyList<OverlayTabId> current = OverlayTabOrderContract.DefaultOrder;
+        IReadOnlyList<AddonQuickSettingsTabId> current = AddonQuickSettingsTabOrderContract.DefaultOrder;
         await using var server = new NamedPipeOverlayServer(pipeName,
             () => current,
             requested => { current = requested; return true; });
@@ -163,7 +163,7 @@ public sealed class OverlayTabOrderTransportTests
         await using var client = new NamedPipeOverlayClient(pipeName);
 
         var navActions = new List<OverlayNavigationAction>();
-        var orders = new List<IReadOnlyList<OverlayTabId>>();
+        var orders = new List<IReadOnlyList<AddonQuickSettingsTabId>>();
         var run = client.RunAsync(
             _ => Task.CompletedTask,
             action => { lock (navActions) navActions.Add(action); return Task.CompletedTask; },
@@ -176,7 +176,7 @@ public sealed class OverlayTabOrderTransportTests
         // server navigation writes. A corrupt/interleaved frame would throw out of the client loop.
         for (var i = 0; i < 40; i++)
         {
-            var order = i % 2 == 0 ? Custom : (IReadOnlyList<OverlayTabId>)OverlayTabOrderContract.DefaultOrder;
+            var order = i % 2 == 0 ? Custom : (IReadOnlyList<AddonQuickSettingsTabId>)AddonQuickSettingsTabOrderContract.DefaultOrder;
             var setTask = client.SendSetTabOrderAsync(order);
             var navTask = server.SendNavigationAsync(OverlayNavigationAction.NavigateDown);
             Assert.True(await setTask);
@@ -231,7 +231,7 @@ public sealed class OverlayTabOrderTransportTests
         await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None);
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState,
-            TabOrder: new[] { OverlayTabId.Device, OverlayTabId.Profile, OverlayTabId.Controller, OverlayTabId.Shortcut }), writeGate, CancellationToken.None);
+            TabOrder: new[] { AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut }), writeGate, CancellationToken.None);
 
         await Assert.ThrowsAsync<FrontendProtocolException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
     }
@@ -249,7 +249,7 @@ public sealed class OverlayTabOrderTransportTests
         Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
 
         await OverlayWireCodec.WriteAsync(client, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.SetTabOrder,
-            Command: OverlayCommand.Show, TabOrder: OverlayTabOrderContract.DefaultOrder), writeGate, CancellationToken.None);
+            Command: OverlayCommand.Show, TabOrder: AddonQuickSettingsTabOrderContract.DefaultOrder), writeGate, CancellationToken.None);
 
         // The server aborts the connection; the next read fails rather than returning a frame.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

@@ -125,6 +125,28 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Capture_shell_projects_the_runtime_tab_order_and_canonical_labels()
+    {
+        var order = new[]
+        {
+            AddonQuickSettingsTabId.Setting,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut,
+        };
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = order }, store, new FakeStartupManager());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+
+        var shell = await control.CaptureAddonQuickSettingsShellAsync();
+
+        Assert.True(shell.Available);
+        Assert.Equal(order, shell.Tabs.Select(tab => tab.TabId));
+        Assert.Equal(["Setting", "Device", "Profile", "Controller", "Shortcut"], shell.Tabs.Select(tab => tab.Label));
+    }
+
+    [Fact]
     public async Task Shutdown_barrier_rejects_page_capture_and_mutation()
     {
         var control = CreateControl(cpuBoostRuntime: null);

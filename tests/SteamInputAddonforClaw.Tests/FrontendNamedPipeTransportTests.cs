@@ -71,7 +71,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(30, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(31, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -128,6 +128,22 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Shared_shell_round_trip_uses_the_runtime_snapshot()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var shell = await client.CaptureAddonQuickSettingsShellAsync();
+
+        Assert.True(shell.Available);
+        Assert.Equal(fake.ShellSnapshot.Tabs.Select(tab => tab.TabId), shell.Tabs.Select(tab => tab.TabId));
+        Assert.Equal(fake.ShellSnapshot.Tabs.Select(tab => tab.Label), shell.Tabs.Select(tab => tab.Label));
+        Assert.Equal(1, fake.CaptureShellCount);
+    }
+
+    [Fact]
     public async Task Device_quick_settings_aggregate_rejects_unexpected_payload_without_invoking_frontend()
     {
         var fake = new RecordingFrontendControl();
@@ -145,6 +161,26 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
         Assert.Equal(0, fake.CaptureDeviceQuickSettingsCount);
+    }
+
+    [Fact]
+    public async Task Shared_shell_capture_rejects_unexpected_payload_without_invoking_frontend()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync();
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"CaptureAddonQuickSettingsShell\",\"Payload\":{{}}}}");
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.CaptureShellCount);
     }
 
     [Fact]
@@ -1133,13 +1169,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 30 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 31 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":30,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":30,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":30,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":31,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":31,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":31,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1510,6 +1546,9 @@ public sealed class FrontendNamedPipeTransportTests
             new(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null));
         public int CaptureDeviceQuickSettingsCount { get; private set; }
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) { TotalCalls++; CaptureDeviceQuickSettingsCount++; return Task.FromResult(DeviceQuickSettingsSnapshot); }
+        public AddonQuickSettingsShellSnapshot ShellSnapshot { get; } = AddonQuickSettingsShellContract.Create([AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting]);
+        public int CaptureShellCount { get; private set; }
+        public Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken t = default) { TotalCalls++; CaptureShellCount++; return Task.FromResult(ShellSnapshot); }
 
         // SF-V2-04: generic shared Quick Settings seam. The page carries every closed contract shape
         // (Toggle/Numeric/Discrete rows, TrailingDebounce policy, TDP commit group, linked constraint)

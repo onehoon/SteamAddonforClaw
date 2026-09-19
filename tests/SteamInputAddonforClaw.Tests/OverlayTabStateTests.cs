@@ -1,4 +1,4 @@
-using SteamInputAddonforClaw.Contracts.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay;
 using Xunit;
 
@@ -12,11 +12,11 @@ public sealed class OverlayTabStateTests
         Assert.Equal(
             new[]
             {
-                OverlayTabId.Device,
-                OverlayTabId.Profile,
-                OverlayTabId.Controller,
-                OverlayTabId.Shortcut,
-                OverlayTabId.Setting,
+                AddonQuickSettingsTabId.Device,
+                AddonQuickSettingsTabId.Profile,
+                AddonQuickSettingsTabId.Controller,
+                AddonQuickSettingsTabId.Shortcut,
+                AddonQuickSettingsTabId.Setting,
             },
             OverlayTabState.DefaultOrder);
 
@@ -29,7 +29,7 @@ public sealed class OverlayTabStateTests
     {
         var state = new OverlayTabState();
 
-        Assert.Equal(OverlayTabId.Device, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
     }
 
     [Fact]
@@ -50,18 +50,18 @@ public sealed class OverlayTabStateTests
     {
         var state = new OverlayTabState();
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => state.Select((OverlayTabId)42));
+        Assert.Throws<ArgumentOutOfRangeException>(() => state.Select((AddonQuickSettingsTabId)42));
     }
 
     [Fact]
     public void ResetForShowReturnsToTheFirstTabInDefaultOrder()
     {
         var state = new OverlayTabState();
-        state.Select(OverlayTabId.Shortcut);
+        state.Select(AddonQuickSettingsTabId.Shortcut);
 
         state.ResetForShow();
 
-        Assert.Equal(OverlayTabId.Device, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
     }
 
     [Fact]
@@ -69,27 +69,27 @@ public sealed class OverlayTabStateTests
     {
         var state = new OverlayTabState(
         [
-            OverlayTabId.Controller,
-            OverlayTabId.Device,
-            OverlayTabId.Profile,
-            OverlayTabId.Shortcut,
-            OverlayTabId.Setting,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
         ]);
-        state.Select(OverlayTabId.Setting);
+        state.Select(AddonQuickSettingsTabId.Setting);
 
         state.ResetForShow();
 
-        Assert.Equal(OverlayTabId.Controller, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Controller, state.SelectedTab);
     }
 
     [Fact]
     public void InvalidOrderFallsBackToTheFrozenDefault()
     {
-        OverlayTabId[][] invalidOrders =
+        AddonQuickSettingsTabId[][] invalidOrders =
         [
             [],
-            [OverlayTabId.Device, OverlayTabId.Device, OverlayTabId.Profile, OverlayTabId.Controller, OverlayTabId.Shortcut],
-            [OverlayTabId.Device, OverlayTabId.Profile, OverlayTabId.Controller],
+            [AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut],
+            [AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller],
         ];
 
         foreach (var order in invalidOrders)
@@ -97,7 +97,7 @@ public sealed class OverlayTabStateTests
             var state = new OverlayTabState(order);
 
             Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
-            Assert.Equal(OverlayTabId.Device, state.SelectedTab);
+            Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
         }
     }
 
@@ -106,11 +106,11 @@ public sealed class OverlayTabStateTests
     {
         var state = new OverlayTabState(
         [
-            OverlayTabId.Device,
-            OverlayTabId.Profile,
-            OverlayTabId.Controller,
-            OverlayTabId.Shortcut,
-            (OverlayTabId)99,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut,
+            (AddonQuickSettingsTabId)99,
         ]);
 
         Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
@@ -122,10 +122,10 @@ public sealed class OverlayTabStateTests
         var state = new OverlayTabState();
 
         Assert.True(state.SelectNext());
-        Assert.Equal(OverlayTabId.Profile, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
 
         Assert.True(state.SelectPrevious());
-        Assert.Equal(OverlayTabId.Device, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
     }
 
     [Fact]
@@ -134,17 +134,17 @@ public sealed class OverlayTabStateTests
         var state = new OverlayTabState();
 
         Assert.False(state.SelectPrevious());
-        Assert.Equal(OverlayTabId.Device, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
     }
 
     [Fact]
     public void NextAtTheLastTabIsANoOpAndDoesNotWrap()
     {
         var state = new OverlayTabState();
-        state.Select(OverlayTabId.Setting);
+        state.Select(AddonQuickSettingsTabId.Setting);
 
         Assert.False(state.SelectNext());
-        Assert.Equal(OverlayTabId.Setting, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab);
     }
 
     [Fact]
@@ -152,11 +152,11 @@ public sealed class OverlayTabStateTests
     {
         var state = new OverlayTabState(); // Device, Profile, Controller, Shortcut, Setting
 
-        Assert.True(state.TryCreateMovedOrder(OverlayTabId.Controller, -1, out var earlier));
-        Assert.Equal(new[] { OverlayTabId.Device, OverlayTabId.Controller, OverlayTabId.Profile, OverlayTabId.Shortcut, OverlayTabId.Setting }, earlier);
+        Assert.True(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Controller, -1, out var earlier));
+        Assert.Equal(new[] { AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting }, earlier);
 
-        Assert.True(state.TryCreateMovedOrder(OverlayTabId.Controller, +1, out var later));
-        Assert.Equal(new[] { OverlayTabId.Device, OverlayTabId.Profile, OverlayTabId.Shortcut, OverlayTabId.Controller, OverlayTabId.Setting }, later);
+        Assert.True(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Controller, +1, out var later));
+        Assert.Equal(new[] { AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Setting }, later);
 
         Assert.Equal(5, earlier.Distinct().Count());
     }
@@ -166,60 +166,60 @@ public sealed class OverlayTabStateTests
     {
         var state = new OverlayTabState();
 
-        Assert.False(state.TryCreateMovedOrder(OverlayTabId.Device, -1, out _));   // first tab earlier
-        Assert.False(state.TryCreateMovedOrder(OverlayTabId.Setting, +1, out _));  // last tab later
-        Assert.False(state.TryCreateMovedOrder(OverlayTabId.Profile, 2, out _));   // delta must be +/-1
+        Assert.False(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Device, -1, out _));   // first tab earlier
+        Assert.False(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Setting, +1, out _));  // last tab later
+        Assert.False(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Profile, 2, out _));   // delta must be +/-1
     }
 
     [Fact]
     public void TryCreateMovedOrderDoesNotMutateTheCurrentOrder()
     {
         var state = new OverlayTabState();
-        state.Select(OverlayTabId.Setting);
+        state.Select(AddonQuickSettingsTabId.Setting);
 
-        Assert.True(state.TryCreateMovedOrder(OverlayTabId.Setting, -1, out var proposed));
+        Assert.True(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Setting, -1, out var proposed));
 
         Assert.Equal(OverlayTabState.DefaultOrder, state.Order); // unchanged -- proposal only
-        Assert.Equal(OverlayTabId.Setting, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab);
 
         // Only an authoritative apply changes the current order.
         Assert.True(state.TryApplyOrder(proposed));
-        Assert.Equal(OverlayTabId.Setting, state.Order[3]);
+        Assert.Equal(AddonQuickSettingsTabId.Setting, state.Order[3]);
     }
 
     [Fact]
     public void TryApplyOrderReplacesTheOrderAndPreservesTheSelectedTab()
     {
         var state = new OverlayTabState();
-        state.Select(OverlayTabId.Setting);
+        state.Select(AddonQuickSettingsTabId.Setting);
 
         Assert.True(state.TryApplyOrder(
         [
-            OverlayTabId.Controller,
-            OverlayTabId.Device,
-            OverlayTabId.Profile,
-            OverlayTabId.Shortcut,
-            OverlayTabId.Setting,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
         ]));
 
-        Assert.Equal(OverlayTabId.Controller, state.Order[0]);
-        Assert.Equal(OverlayTabId.Setting, state.SelectedTab); // preserved on a live reorder
+        Assert.Equal(AddonQuickSettingsTabId.Controller, state.Order[0]);
+        Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab); // preserved on a live reorder
 
         state.ResetForShow();
-        Assert.Equal(OverlayTabId.Controller, state.SelectedTab); // new first tab on the next Show
+        Assert.Equal(AddonQuickSettingsTabId.Controller, state.SelectedTab); // new first tab on the next Show
     }
 
     [Fact]
     public void TryApplyOrderRejectsAnInvalidOrderWithoutCorruptingCurrentState()
     {
         var state = new OverlayTabState();
-        state.Select(OverlayTabId.Profile);
+        state.Select(AddonQuickSettingsTabId.Profile);
 
-        Assert.False(state.TryApplyOrder([OverlayTabId.Device, OverlayTabId.Device, OverlayTabId.Profile, OverlayTabId.Controller, OverlayTabId.Shortcut]));
-        Assert.False(state.TryApplyOrder([OverlayTabId.Device, OverlayTabId.Profile]));
+        Assert.False(state.TryApplyOrder([AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut]));
+        Assert.False(state.TryApplyOrder([AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile]));
 
         Assert.Equal(OverlayTabState.DefaultOrder, state.Order);
-        Assert.Equal(OverlayTabId.Profile, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
     }
 
     [Fact]
@@ -227,19 +227,19 @@ public sealed class OverlayTabStateTests
     {
         var state = new OverlayTabState(
         [
-            OverlayTabId.Controller,
-            OverlayTabId.Device,
-            OverlayTabId.Profile,
-            OverlayTabId.Shortcut,
-            OverlayTabId.Setting,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
         ]);
-        state.Select(OverlayTabId.Device);
+        state.Select(AddonQuickSettingsTabId.Device);
 
         Assert.True(state.SelectPrevious());
-        Assert.Equal(OverlayTabId.Controller, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Controller, state.SelectedTab);
 
-        state.Select(OverlayTabId.Device);
+        state.Select(AddonQuickSettingsTabId.Device);
         Assert.True(state.SelectNext());
-        Assert.Equal(OverlayTabId.Profile, state.SelectedTab);
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
     }
 }

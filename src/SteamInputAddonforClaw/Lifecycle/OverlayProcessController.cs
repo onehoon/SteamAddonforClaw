@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Contracts.Overlay;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.FrontendTransport;
 
@@ -22,8 +21,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private readonly Func<string, NamedPipeOverlayServer> _serverFactory;
     // OQ5-UI-09: bound once by AddonProcessHost onto the ONE StartupSettingsCoordinator before warm
     // start. FrontendTransport never sees the coordinator -- only these two narrow operations.
-    private Func<IReadOnlyList<OverlayTabId>>? _getTabOrder;
-    private Func<IReadOnlyList<OverlayTabId>, bool>? _tryChangeTabOrder;
+    private Func<IReadOnlyList<AddonQuickSettingsTabId>>? _getTabOrder;
+    private Func<IReadOnlyList<AddonQuickSettingsTabId>, bool>? _tryChangeTabOrder;
     // SF-V2-02/06/09 section 14/7.2: bound once by AddonProcessHost onto the ONE _frontendControl.
     // `_mutateQuickSettings` is handed to each new NamedPipeOverlayServer so a request arriving on its
     // read loop can reach Runtime; the two capture delegates are used here for the Runtime-initiated
@@ -60,8 +59,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
     // called before the first warm start; a later call replaces the delegates for the next connection.
     internal void BindTabOrderAuthority(
-        Func<IReadOnlyList<OverlayTabId>> getTabOrder,
-        Func<IReadOnlyList<OverlayTabId>, bool> tryChangeTabOrder)
+        Func<IReadOnlyList<AddonQuickSettingsTabId>> getTabOrder,
+        Func<IReadOnlyList<AddonQuickSettingsTabId>, bool> tryChangeTabOrder)
     {
         _getTabOrder = getTabOrder ?? throw new ArgumentNullException(nameof(getTabOrder));
         _tryChangeTabOrder = tryChangeTabOrder ?? throw new ArgumentNullException(nameof(tryChangeTabOrder));

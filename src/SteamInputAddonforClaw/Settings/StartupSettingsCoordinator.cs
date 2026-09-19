@@ -1,5 +1,5 @@
 using SteamInputAddonforClaw.Contracts.FrontButtons;
-using SteamInputAddonforClaw.Contracts.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Install;
 
 namespace SteamInputAddonforClaw.Settings;
@@ -20,7 +20,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
 
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
-    public IReadOnlyList<OverlayTabId> OverlayTabOrder => Settings.OverlayTabOrder;
+    public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
     public event EventHandler? FrontButtonMappingChanged;
 
     /// <summary>Installed-app lifecycle infrastructure: make sure the owned Task Scheduler task
@@ -84,15 +84,15 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     /// accepted no-op. An invalid request is rejected: it is NOT silently converted to the default --
     /// the user's current valid order stays exactly as it is, and nothing is written to disk.
     /// </summary>
-    public bool TryChangeOverlayTabOrder(IReadOnlyList<OverlayTabId> requested)
+    public bool TryChangeAddonQuickSettingsTabOrder(IReadOnlyList<AddonQuickSettingsTabId> requested)
     {
-        if (!OverlayTabOrderContract.TryNormalize(requested, out var normalized))
+        if (!AddonQuickSettingsTabOrderContract.TryNormalize(requested, out var normalized))
             return false;
 
-        if (normalized.SequenceEqual(Settings.OverlayTabOrder))
+        if (normalized.SequenceEqual(Settings.AddonQuickSettingsTabOrder))
             return true;
 
-        var next = Settings with { OverlayTabOrder = normalized };
+        var next = Settings with { AddonQuickSettingsTabOrder = normalized };
         _settingsStore.Save(next);
         Settings = next;
         return true;

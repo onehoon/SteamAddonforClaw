@@ -142,6 +142,23 @@ public sealed class QamFrontendBridgeTests
     }
 
     [Fact]
+    public async Task Shared_shell_capture_round_trips_without_qam_admission()
+    {
+        var (bridge, fake, server) = await StartAsync(new(true, 480, FrontendSteamSource.Actual));
+        await using var _ = server;
+        await using var __ = bridge;
+
+        var response = await bridge.HandleRequestAsync(Request("captureQuickSettingsShell", new { }), CancellationToken.None);
+
+        Assert.True(response.Ok);
+        Assert.Equal(1, fake.CaptureShellCount);
+        var shell = Assert.IsType<AddonQuickSettingsShellSnapshot>(response.Payload);
+        Assert.Equal(fake.ShellSnapshot.Available, shell.Available);
+        Assert.Equal(fake.ShellSnapshot.Tabs.Select(tab => tab.TabId), shell.Tabs.Select(tab => tab.TabId));
+        Assert.Equal(fake.ShellSnapshot.Tabs.Select(tab => tab.Label), shell.Tabs.Select(tab => tab.Label));
+    }
+
+    [Fact]
     public async Task Malformed_bridge_payload_returns_bounded_error()
     {
         await using var bridge = new QamFrontendBridge();
@@ -160,6 +177,8 @@ public sealed class QamFrontendBridgeTests
         public FrontendStatusSnapshot Status { get; set; } = null!;
         public int CaptureCount { get; private set; }
         public int MutateCount { get; private set; }
+        public int CaptureShellCount { get; private set; }
+        public AddonQuickSettingsShellSnapshot ShellSnapshot { get; } = AddonQuickSettingsShellContract.Create(AddonQuickSettingsTabOrderContract.DefaultOrder);
         public QuickSettingsPageId? LastPageId { get; private set; }
         public QuickSettingsMutationIntent? LastIntent { get; private set; }
 
@@ -176,6 +195,9 @@ public sealed class QamFrontendBridgeTests
 
         public Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken t = default)
         { MutateCount++; LastIntent = intent; return Task.FromResult(new QuickSettingsMutationResult(true, null, Page)); }
+
+        public Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken t = default)
+        { CaptureShellCount++; return Task.FromResult(ShellSnapshot); }
 
         public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) => throw new NotSupportedException();
         public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) => throw new NotSupportedException();

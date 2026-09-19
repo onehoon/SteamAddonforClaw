@@ -4,7 +4,6 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Contracts.Overlay;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
 
@@ -15,7 +14,7 @@ internal static class OverlayTransportProtocol
     // ever cross this wire. A v2 peer must fail the handshake rather than silently ignore Navigation.
     // Version 4 (OQ5-UI-02): adds PreviousTab / NextTab semantic actions for LB/RB tab navigation.
     // Version 5 (OQ5-UI-09): adds TabOrderState (Runtime -> Overlay) and SetTabOrder (Overlay ->
-    // Runtime) carrying the shared OverlayTabId list. The Runtime sends the authoritative order right
+    // Runtime) carrying the shared AddonQuickSettingsTabId list. The Runtime sends the authoritative order right
     // after HandshakeAccepted and the Overlay must apply it before it reports Ready. No fallback --
     // a v4 peer must fail the handshake.
     // Version 6 (SF-V2-02): adds typed Device Quick Settings state delivery
@@ -57,7 +56,7 @@ internal sealed record OverlayWireMessage(
     OverlayNavigationAction? Navigation = null,
     OverlayState? State = null,
     string? Error = null,
-    IReadOnlyList<OverlayTabId>? TabOrder = null,
+    IReadOnlyList<AddonQuickSettingsTabId>? TabOrder = null,
     QuickSettingsPageSnapshot? QuickSettingsPage = null,
     OverlayQuickSettingsMutationRequest? QuickSettingsMutationRequest = null,
     OverlayQuickSettingsMutationResponse? QuickSettingsMutationResponse = null);
@@ -166,8 +165,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(5);
     private readonly string _pipeName;
     private readonly Func<NamedPipeServerStream> _pipeFactory;
-    private readonly Func<IReadOnlyList<OverlayTabId>> _getTabOrder;
-    private readonly Func<IReadOnlyList<OverlayTabId>, bool> _tryChangeTabOrder;
+    private readonly Func<IReadOnlyList<AddonQuickSettingsTabId>> _getTabOrder;
+    private readonly Func<IReadOnlyList<AddonQuickSettingsTabId>, bool> _tryChangeTabOrder;
     // SF-V2-02/06: bound once by OverlayProcessController onto the ONE _frontendControl. Without a
     // bind (tests, no-authority contexts) every Quick Settings mutation request is answered "not
     // admitted" and invokes zero Runtime operations. The delegate itself owns admission
@@ -190,8 +189,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     internal event Action<NamedPipeOverlayServer>? DismissRequested;
 
     internal NamedPipeOverlayServer(string pipeName,
-        Func<IReadOnlyList<OverlayTabId>>? getTabOrder = null,
-        Func<IReadOnlyList<OverlayTabId>, bool>? tryChangeTabOrder = null,
+        Func<IReadOnlyList<AddonQuickSettingsTabId>>? getTabOrder = null,
+        Func<IReadOnlyList<AddonQuickSettingsTabId>, bool>? tryChangeTabOrder = null,
         Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? mutateQuickSettings = null)
         : this(pipeName, () => new NamedPipeServerStream(
             pipeName,
@@ -201,15 +200,15 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly), getTabOrder, tryChangeTabOrder, mutateQuickSettings) { }
 
     internal NamedPipeOverlayServer(string pipeName, Func<NamedPipeServerStream> pipeFactory,
-        Func<IReadOnlyList<OverlayTabId>>? getTabOrder = null,
-        Func<IReadOnlyList<OverlayTabId>, bool>? tryChangeTabOrder = null,
+        Func<IReadOnlyList<AddonQuickSettingsTabId>>? getTabOrder = null,
+        Func<IReadOnlyList<AddonQuickSettingsTabId>, bool>? tryChangeTabOrder = null,
         Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? mutateQuickSettings = null)
     {
         _pipeName = pipeName;
         _pipeFactory = pipeFactory;
         // OQ5-UI-09: the Runtime binds these onto the ONE StartupSettingsCoordinator. Without a bind
         // (tests, no-authority contexts) the server reports the frozen default and rejects mutations.
-        _getTabOrder = getTabOrder ?? (() => OverlayTabOrderContract.DefaultOrder);
+        _getTabOrder = getTabOrder ?? (() => AddonQuickSettingsTabOrderContract.DefaultOrder);
         _tryChangeTabOrder = tryChangeTabOrder ?? (_ => false);
         _mutateQuickSettings = mutateQuickSettings;
     }
@@ -326,9 +325,9 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     // the one instance write gate shared with SendCommandAsync / SendNavigationAsync.
     private async Task SendTabOrderStateAsync(Stream pipe, CancellationToken token)
     {
-        IReadOnlyList<OverlayTabId> order;
-        try { order = OverlayTabOrderContract.NormalizeOrDefault(_getTabOrder()); }
-        catch { order = OverlayTabOrderContract.DefaultOrder; }
+        IReadOnlyList<AddonQuickSettingsTabId> order;
+        try { order = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(_getTabOrder()); }
+        catch { order = AddonQuickSettingsTabOrderContract.DefaultOrder; }
         await OverlayWireCodec.WriteAsync(pipe,
             new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.TabOrderState, TabOrder: order),
             _writeGate, token).ConfigureAwait(false);
@@ -527,14 +526,14 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     internal async Task RunAsync(
         Func<OverlayCommand, Task> commandHandler,
         Func<OverlayNavigationAction, Task>? navigationHandler,
-        Func<IReadOnlyList<OverlayTabId>, Task>? tabOrderHandler,
+        Func<IReadOnlyList<AddonQuickSettingsTabId>, Task>? tabOrderHandler,
         CancellationToken token = default)
         => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(
         Func<OverlayCommand, Task> commandHandler,
         Func<OverlayNavigationAction, Task>? navigationHandler,
-        Func<IReadOnlyList<OverlayTabId>, Task>? tabOrderHandler,
+        Func<IReadOnlyList<AddonQuickSettingsTabId>, Task>? tabOrderHandler,
         Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
         CancellationToken token = default)
     {
@@ -616,18 +615,18 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     private async Task SendStateAsync(Stream pipe, OverlayState state, CancellationToken token) =>
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.State, State: state), _writeGate, token).ConfigureAwait(false);
 
-    private static IReadOnlyList<OverlayTabId> ValidateTabOrderMessage(OverlayWireMessage message)
+    private static IReadOnlyList<AddonQuickSettingsTabId> ValidateTabOrderMessage(OverlayWireMessage message)
     {
         if (message.TabOrder is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null)
             throw new FrontendProtocolException("Invalid Overlay tab-order message.");
-        if (!OverlayTabOrderContract.TryNormalize(message.TabOrder, out var order))
+        if (!AddonQuickSettingsTabOrderContract.TryNormalize(message.TabOrder, out var order))
             throw new FrontendProtocolException("Overlay tab-order state was not a complete five-tab order.");
         return order;
     }
 
     // OQ5-UI-09 section 8: the OQ5-UI-10 reorder-editor seam. true only means the request frame was
     // written; the authoritative result is the TabOrderState the Runtime republishes afterwards.
-    internal async Task<bool> SendSetTabOrderAsync(IReadOnlyList<OverlayTabId> requested, CancellationToken token = default)
+    internal async Task<bool> SendSetTabOrderAsync(IReadOnlyList<AddonQuickSettingsTabId> requested, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         var pipe = _pipe;
