@@ -135,19 +135,20 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_stable_tab_descriptors_are_generation_scoped_and_cleaned_up()
+    public void Qam_single_addon_tab_descriptor_is_generation_scoped_and_cleaned_up()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js").ReplaceLineEndings("\n");
 
-        Assert.Contains("const ADDON_DEVICE_TAB_KEY = \"steam-input-addon-device\";", source);
-        Assert.Contains("const ADDON_PROFILE_TAB_KEY = \"steam-input-addon-profile\";", source);
-        Assert.Contains("state.addonTabDescriptors", source);
-        Assert.Contains("buildAddonTab(React, native, QS_PAGE_DEVICE)", source);
-        Assert.Contains("buildAddonTab(React, native, QS_PAGE_PROFILE)", source);
-        Assert.Contains("[TAB_MARKER]: key", source);
-        Assert.Contains("panel: React.createElement(QuickSettingsPanel, { pageId })", source);
+        Assert.Contains("const ADDON_TAB_KEY = \"steam-input-addon\";", source);
+        Assert.Contains("const LEGACY_ADDON_DEVICE_TAB_KEY = \"steam-input-addon-device\";", source);
+        Assert.Contains("const LEGACY_ADDON_PROFILE_TAB_KEY = \"steam-input-addon-profile\";", source);
+        Assert.Contains("state.addonTabDescriptor", source);
+        Assert.Contains("function buildAddonTab(React, native)", source);
+        Assert.Contains("[TAB_MARKER]: ADDON_TAB_KEY", source);
+        Assert.Contains("panel: React.createElement(AddonQuickSettingsPanel)", source);
+        Assert.DoesNotContain("state.addonTabDescriptors", source);
         var installStart = source.IndexOf("function install()", StringComparison.Ordinal);
-        var installReset = source.IndexOf("state.addonTabDescriptors = null;", installStart, StringComparison.Ordinal);
+        var installReset = source.IndexOf("state.addonTabDescriptor = null;", installStart, StringComparison.Ordinal);
         Assert.True(installStart >= 0);
         Assert.True(installReset > installStart);
         Assert.True(installReset < source.IndexOf("state.diagnostics = {};", installReset, StringComparison.Ordinal));
@@ -155,30 +156,31 @@ public sealed class QamFrontendContractTests
         var teardownStart = source.IndexOf("Object.assign(state, {\n      patches: null,", StringComparison.Ordinal);
         Assert.True(teardownStart >= 0);
         var teardown = source[teardownStart..source.IndexOf("    });", teardownStart, StringComparison.Ordinal)];
-        Assert.Contains("addonTabDescriptors: null,", teardown);
+        Assert.Contains("addonTabDescriptor: null,", teardown);
         Assert.Contains("qamSurfaceActive: false,", teardown);
 
         var uninstallStart = source.IndexOf("function uninstall()", StringComparison.Ordinal);
         var uninstall = source[uninstallStart..source.IndexOf("    state.installed = false;", uninstallStart, StringComparison.Ordinal)];
         Assert.Contains("state.addonTabDescriptor = null;", uninstall);
-        Assert.Contains("state.addonTabDescriptors = null;", uninstall);
+        Assert.DoesNotContain("state.addonTabDescriptors", uninstall);
     }
 
     [Fact]
-    public void Qam_stable_tab_insertion_preserves_steam_tabs_and_removes_legacy_or_duplicate_addon_tabs()
+    public void Qam_single_tab_insertion_preserves_steam_tabs_and_removes_historical_addon_tabs()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var insertion = source[source.IndexOf("function ensureAddonTabs", StringComparison.Ordinal)..source.IndexOf("function preservePatchedFunctionShape", StringComparison.Ordinal)];
 
         Assert.Contains("function addonTabKey(tab)", source);
         Assert.Contains("if (marker === true) return \"legacy\";", source);
-        Assert.Contains("if (!key) {", insertion);
-        Assert.Contains("steamTabs.push(tab);", insertion);
-        Assert.Contains("else if (seen.has(key)) duplicatesRemoved++;", insertion);
+        Assert.Contains("if (marker === ADDON_TAB_KEY) return ADDON_TAB_KEY;", source);
+        Assert.Contains("if (marker === LEGACY_ADDON_DEVICE_TAB_KEY) return LEGACY_ADDON_DEVICE_TAB_KEY;", source);
+        Assert.Contains("if (marker === LEGACY_ADDON_PROFILE_TAB_KEY) return LEGACY_ADDON_PROFILE_TAB_KEY;", source);
+        Assert.Contains("const steamTabs = tabs.filter(tab => !addonTabKey(tab));", insertion);
+        Assert.Contains("const desired = [descriptor];", insertion);
         Assert.Contains("tabs.splice(0, tabs.length, ...nextTabs);", insertion);
-        Assert.Contains("const desired = [descriptors[ADDON_DEVICE_TAB_KEY], descriptors[ADDON_PROFILE_TAB_KEY]];", insertion);
-        Assert.Contains("LegacyRemoved=${legacyRemoved} DuplicatesRemoved=${duplicatesRemoved}", insertion);
-        Assert.Contains("state.qamSelectionContext = { descriptors };", insertion);
+        Assert.Contains("RemovedOwned=${removedCount}", insertion);
+        Assert.DoesNotContain("state.qamSelectionContext", source);
     }
 
     [Fact]
@@ -194,14 +196,15 @@ public sealed class QamFrontendContractTests
         Assert.Contains("window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore?.MainWindowInstance?.MenuStore", selection);
         Assert.Contains("typeof menuStore.OpenQuickAccessMenu !== \"function\"", selection);
         Assert.Contains("menuStore.OpenQuickAccessMenu(key, false);", selection);
-        Assert.Contains("if (key !== ADDON_DEVICE_TAB_KEY && key !== ADDON_PROFILE_TAB_KEY) return;", selection);
+        Assert.Contains("if (key !== ADDON_TAB_KEY) return;", selection);
         Assert.DoesNotContain("const candidates =", selection);
         Assert.DoesNotContain("activeTab", selection);
-        Assert.Contains("function selectAddonTabForFreshOpen(descriptors)", selection);
+        Assert.Contains("function selectAddonTabForFreshOpen()", selection);
         Assert.Contains("function trySelectAddonTabForFreshOpen()", selection);
-        Assert.Contains("if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested || !state.qamSelectionContext) return;", selection);
-        Assert.Contains("void request(\"captureStatus\").then", selection);
-        Assert.Contains("if (!state.installed || !state.qamSurfaceActive) return;", selection);
+        Assert.Contains("if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested) return;", selection);
+        Assert.Contains("authority.set(ADDON_TAB_KEY);", selection);
+        Assert.DoesNotContain("captureStatus", selection);
+        Assert.DoesNotContain("if (!state.installed || !state.qamSurfaceActive) return;", selection);
         Assert.Contains("QAM initial Addon tab selection unavailable; tabs remain usable.", selection);
         Assert.DoesNotContain("initialTabSelectionOwners", selection);
         Assert.DoesNotContain("owner?._owner", selection);
@@ -254,9 +257,9 @@ public sealed class QamFrontendContractTests
         var insertionEnd = source.IndexOf("function preservePatchedFunctionShape", insertionStart, StringComparison.Ordinal);
         var insertion = source[insertionStart..insertionEnd];
         Assert.DoesNotContain("selectAddonTabForFreshOpen(owner", insertion);
-        var contextIndex = insertion.IndexOf("state.qamSelectionContext = { descriptors };", StringComparison.Ordinal);
         var triggerIndex = insertion.IndexOf("trySelectAddonTabForFreshOpen();", StringComparison.Ordinal);
-        Assert.True(contextIndex >= 0 && triggerIndex > contextIndex);
+        Assert.True(triggerIndex >= 0);
+        Assert.DoesNotContain("state.qamSelectionContext", insertion);
 
         var notificationStart = source.IndexOf("function receiveBridgeNotification", StringComparison.Ordinal);
         var notificationEnd = source.IndexOf("function retireBridgeConsumers", notificationStart, StringComparison.Ordinal);
@@ -422,7 +425,7 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         Assert.DoesNotContain("QAM integration test", source);
-        Assert.Contains("title: key === ADDON_DEVICE_TAB_KEY ? \"Device\" : \"Profile\"", source);
+        Assert.Contains("title: \"Addon\"", source);
         Assert.DoesNotContain("QamTitleClass", source);
         Assert.DoesNotContain("paddingTop: \"16px\"", source);
         Assert.DoesNotContain("function findPanelComponents(modules)", source);
@@ -434,6 +437,11 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("justifyContent: \"space-between\"", source);
         Assert.Contains("PanelSection", source);
         Assert.Contains("PanelSectionRow", source);
+        Assert.Contains(".TabRowTabs", source);
+        Assert.Contains("activeTab:", source);
+        Assert.Contains("const Tabs = findUniqueFunction(tabsModule", source);
+        Assert.Contains("native.Tabs", source);
+        Assert.Contains("QAM native Tabs discovery failed", source);
         Assert.DoesNotContain("marginTop: \"-4px\"", source);
         Assert.Contains("fill: \"currentColor\"", source);
         Assert.DoesNotContain("AC Mode", source);
@@ -495,6 +503,50 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("fontFamily: \"sans-serif\"", source);
         Assert.Contains("const failClosed", source);
         Assert.Contains("QAM native semantic controls resolved", source);
+    }
+
+    [Fact]
+    public void Qam_addon_panel_maps_runtime_shell_to_native_inner_tabs_without_local_order_or_fake_apis()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var panelStart = source.IndexOf("function AddonQuickSettingsPanel()", StringComparison.Ordinal);
+        var panelEnd = source.IndexOf("state.addonTabDescriptor =", panelStart, StringComparison.Ordinal);
+        Assert.True(panelStart >= 0 && panelEnd > panelStart);
+        var panel = source[panelStart..panelEnd];
+
+        Assert.Contains("request(\"captureQuickSettingsShell\")", panel);
+        Assert.Contains("validateQuickSettingsShell(shell)", panel);
+        Assert.Contains("setShellError(\"Addon Quick Settings shell is unavailable.\")", panel);
+        Assert.Contains("const innerTabs = shellTabs.map(tab => ({", panel);
+        Assert.Contains("id: String(tab.tabId)", panel);
+        Assert.Contains("title: tab.label", panel);
+        Assert.Contains("content: buildInnerTabContent(React, native, tab, QuickSettingsPanel)", panel);
+        Assert.Contains("tabs: innerTabs", panel);
+        Assert.Contains("activeTab,", panel);
+        Assert.Contains("onShowTab: setActiveTab", panel);
+        Assert.Contains("autoFocusContents: true", panel);
+        Assert.Contains("const preferred = appId > 0 ? AQS_TAB_PROFILE : AQS_TAB_DEVICE;", panel);
+        Assert.DoesNotContain("[\"Device\", \"Profile\", \"Controller\", \"Shortcut\", \"Setting\"]", source);
+        Assert.DoesNotContain("QuickSettingsPageId", source);
+        Assert.Contains("This page is not available in QAM yet.", source);
+    }
+
+    [Fact]
+    public void Qam_shell_validation_is_fail_closed_and_only_accepts_the_five_known_identities()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var validationStart = source.IndexOf("function validateQuickSettingsShell(shell)", StringComparison.Ordinal);
+        var validationEnd = source.IndexOf("function preservePatchedFunctionShape", validationStart, StringComparison.Ordinal);
+        Assert.True(validationStart >= 0 && validationEnd > validationStart);
+        var validation = source[validationStart..validationEnd];
+
+        Assert.Contains("shell?.available !== true", validation);
+        Assert.Contains("shell.tabs.length !== 5", validation);
+        Assert.Contains("KNOWN_AQS_TAB_IDS.has(tab?.tabId)", validation);
+        Assert.Contains("seen.has(tab.tabId)", validation);
+        Assert.Contains("typeof tab.label !== \"string\" || tab.label.length === 0", validation);
+        Assert.Contains("return null;", validation);
+        Assert.DoesNotContain("shell.tabs.sort", validation);
     }
 
     [Fact]
@@ -610,7 +662,7 @@ public sealed class QamFrontendContractTests
 
         var panelStart = source.IndexOf("function QuickSettingsPanel({ pageId })", StringComparison.Ordinal);
         Assert.True(panelStart >= 0);
-        var panel = source[panelStart..source.IndexOf("state.addonTabDescriptors[key] =", panelStart, StringComparison.Ordinal)];
+        var panel = source[panelStart..source.IndexOf("function AddonQuickSettingsPanel()", panelStart, StringComparison.Ordinal)];
         Assert.Contains("if (pageId === QS_PAGE_DEVICE)", panel);
         var deviceBranch = panel[panel.IndexOf("if (pageId === QS_PAGE_DEVICE)", StringComparison.Ordinal)..panel.IndexOf("} else {", panel.IndexOf("if (pageId === QS_PAGE_DEVICE)", StringComparison.Ordinal), StringComparison.Ordinal)];
         Assert.Contains("nextContext = { pageId: QS_PAGE_DEVICE, appId: null };", deviceBranch);
@@ -840,11 +892,11 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        Assert.Contains("state.addonTabDescriptors[key]", source);
-        Assert.Contains("[TAB_MARKER]: key", source);
+        Assert.Contains("state.addonTabDescriptor", source);
+        Assert.Contains("[TAB_MARKER]: ADDON_TAB_KEY", source);
         Assert.Contains("function ensureAddonTabs", source);
         Assert.Contains("addonTabKey(tab)", source);
-        Assert.Contains("const desired = [descriptors[ADDON_DEVICE_TAB_KEY], descriptors[ADDON_PROFILE_TAB_KEY]];", source);
+        Assert.Contains("const desired = [descriptor];", source);
         // Row mutation is gated only by shared writability and local busy state.
         Assert.Contains("const canMutateQuickSettingsRow = row => quickSettingsRowMutationBlockReason(row, busy) == null;", source);
         Assert.Contains("const requireQuickSettingsRowMutation = row =>", source);

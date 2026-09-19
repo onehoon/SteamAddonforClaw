@@ -10,8 +10,8 @@
  *   1. Locate Steam's webpack module runtime.
  *   2. Find the QAM renderer element: a module export whose `.type` function source contains the
  *      QuickAccessMenuBrowserView / QuickAccessMenuEmbedded signature.
- *   3. Patch that element's `.type` so its returned React tree gains one extra tab, keyed so
- *      re-running this script is a no-op (idempotent).
+ *   3. Patch that element's `.type` so its returned React tree gains one current Addon tab with
+ *      a native inner Quick Settings shell, keyed so re-running this script is a no-op (idempotent).
  *   4. Expose install()/uninstall() on a single Addon-owned global so QamHost can clean up on
  *      graceful shutdown.
  *
@@ -25,8 +25,9 @@
   const TAB_MARKER = "steamInputAddonQam";
   const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
-  const ADDON_DEVICE_TAB_KEY = "steam-input-addon-device";
-  const ADDON_PROFILE_TAB_KEY = "steam-input-addon-profile";
+  const ADDON_TAB_KEY = "steam-input-addon";
+  const LEGACY_ADDON_DEVICE_TAB_KEY = "steam-input-addon-device";
+  const LEGACY_ADDON_PROFILE_TAB_KEY = "steam-input-addon-profile";
   // Defensive fallback only (SF-V2-05/08): every real product row supplies a valid
   // row.commitPolicy.delayMilliseconds, so this is never expected to be hit in practice.
   const QS_FALLBACK_COMMIT_DELAY_MS = 2000;
@@ -43,6 +44,21 @@
   const QS_COMMIT_TRAILING = 1;
   const QS_VALUE_BOOLEAN = 0;
   const QS_VALUE_INTEGER = 1;
+
+  // Shared Quick Settings shell ABI identities. The Runtime owns the order and labels; these
+  // numeric identities only let the QAM renderer choose a surface adapter.
+  const AQS_TAB_DEVICE = 0;
+  const AQS_TAB_PROFILE = 1;
+  const AQS_TAB_CONTROLLER = 2;
+  const AQS_TAB_SHORTCUT = 3;
+  const AQS_TAB_SETTING = 4;
+  const KNOWN_AQS_TAB_IDS = new Set([
+    AQS_TAB_DEVICE,
+    AQS_TAB_PROFILE,
+    AQS_TAB_CONTROLLER,
+    AQS_TAB_SHORTCUT,
+    AQS_TAB_SETTING,
+  ]);
 
   function log(message) {
     console.log("[SteamInputAddon:QAM] " + message);
@@ -274,8 +290,35 @@
       return null;
     }
 
+    const tabsFactory = findUniqueFactory(webpackRequire, [
+      ".TabRowTabs",
+      "activeTab:",
+    ]);
+    if (!tabsFactory) {
+      logOnce("nativeTabsFactory", "QAM native Tabs factory discovery failed (expected exactly one semantic match).");
+      return null;
+    }
+
+    let tabsModule;
+    try {
+      tabsModule = webpackRequire(tabsFactory[0]);
+    } catch (err) {
+      logOnce("nativeTabsExports", `QAM native Tabs module load failed: ${String(err)}`);
+      return null;
+    }
+
+    const Tabs = findUniqueFunction(tabsModule, [
+      ".TabRowTabs",
+      "activeTab:",
+    ]);
+    if (!Tabs) {
+      logOnce("nativeTabs", "QAM native Tabs discovery failed (expected exactly one semantic match).");
+      return null;
+    }
+
     logOnce("nativeControls", "QAM native semantic controls resolved.");
-    return { SliderField, ToggleField, PanelSection, PanelSectionRow };
+    logOnce("nativeTabs", "QAM native Tabs resolved.");
+    return { SliderField, ToggleField, PanelSection, PanelSectionRow, Tabs };
   }
 
   // Purpose-built, bounded walker for the specific React node shapes Steam exposes for QAM: plain
@@ -325,8 +368,9 @@
   function addonTabKey(tab) {
     const marker = tab?.[TAB_MARKER];
     if (marker === true) return "legacy";
-    if (marker === ADDON_DEVICE_TAB_KEY) return ADDON_DEVICE_TAB_KEY;
-    if (marker === ADDON_PROFILE_TAB_KEY) return ADDON_PROFILE_TAB_KEY;
+    if (marker === ADDON_TAB_KEY) return ADDON_TAB_KEY;
+    if (marker === LEGACY_ADDON_DEVICE_TAB_KEY) return LEGACY_ADDON_DEVICE_TAB_KEY;
+    if (marker === LEGACY_ADDON_PROFILE_TAB_KEY) return LEGACY_ADDON_PROFILE_TAB_KEY;
     return null;
   }
 
@@ -339,41 +383,31 @@
     if (!menuStore || typeof menuStore.OpenQuickAccessMenu !== "function") return null;
     return {
       set: key => {
-        if (key !== ADDON_DEVICE_TAB_KEY && key !== ADDON_PROFILE_TAB_KEY) return;
+        if (key !== ADDON_TAB_KEY) return;
         menuStore.OpenQuickAccessMenu(key, false);
       },
     };
   }
 
-  function selectAddonTabForFreshOpen(descriptors) {
+  function selectAddonTabForFreshOpen() {
     const authority = resolveNativeTabSelection();
     if (!authority) {
       logOnce("initialTabSelectionUnavailable", "QAM initial Addon tab selection unavailable; tabs remain usable.");
       return;
     }
 
-    void request("captureStatus").then(status => {
-      if (!state.installed || !state.qamSurfaceActive) return;
-      const appId = Number(status?.steam?.appId || 0);
-      const key = appId > 0 ? ADDON_PROFILE_TAB_KEY : ADDON_DEVICE_TAB_KEY;
-      const descriptor = descriptors[key];
-      if (!descriptor) return;
-      try {
-        authority.set(key);
-        log(`QAM open selection: ${key === ADDON_DEVICE_TAB_KEY ? "Device Reason=NoActiveGame" : `Profile AppId=${appId}`}`);
-      } catch (error) {
-        logOnce("initialTabSelectionFailure", `QAM initial Addon tab selection unavailable; tabs remain usable. Reason=${String(error)}`);
-      }
-    }).catch(() => {
-      logOnce("initialTabSelectionBridgeFailure", "QAM initial Addon tab selection unavailable; tabs remain usable.");
-    });
+    try {
+      authority.set(ADDON_TAB_KEY);
+      log("QAM open selection: Addon");
+    } catch (error) {
+      logOnce("initialTabSelectionFailure", `QAM initial Addon tab selection unavailable; tabs remain usable. Reason=${String(error)}`);
+    }
   }
 
   function trySelectAddonTabForFreshOpen() {
-    if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested || !state.qamSelectionContext) return;
+    if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested) return;
     state.qamInitialSelectionRequested = false;
-    const { descriptors } = state.qamSelectionContext;
-    selectAddonTabForFreshOpen(descriptors);
+    selectAddonTabForFreshOpen();
   }
 
   function updateQamSurfaceVisibility(visible) {
@@ -403,36 +437,51 @@
     const tabs = owner?.props?.tabs;
     if (!Array.isArray(tabs)) return null;
 
-    const descriptors = {
-      [ADDON_DEVICE_TAB_KEY]: buildAddonTab(React, native, QS_PAGE_DEVICE),
-      [ADDON_PROFILE_TAB_KEY]: buildAddonTab(React, native, QS_PAGE_PROFILE),
-    };
-    const seen = new Set();
-    let legacyRemoved = 0;
-    let duplicatesRemoved = 0;
-    const steamTabs = [];
-    for (const tab of tabs) {
-      const key = addonTabKey(tab);
-      if (!key) {
-        steamTabs.push(tab);
-        continue;
-      }
-      if (key === "legacy") legacyRemoved++;
-      else if (seen.has(key)) duplicatesRemoved++;
-      else seen.add(key);
-    }
-
-    const desired = [descriptors[ADDON_DEVICE_TAB_KEY], descriptors[ADDON_PROFILE_TAB_KEY]];
+    const descriptor = buildAddonTab(React, native);
+    const steamTabs = tabs.filter(tab => !addonTabKey(tab));
+    const removedCount = tabs.length - steamTabs.length;
+    const desired = [descriptor];
     const nextTabs = [...steamTabs, ...desired];
     const unchanged = tabs.length === nextTabs.length && tabs.every((tab, index) => tab === nextTabs[index]);
     if (!unchanged) tabs.splice(0, tabs.length, ...nextTabs);
     logOnce(
       "stableTabs",
-      `QAM stable Addon tabs ensured. Device=${!!descriptors[ADDON_DEVICE_TAB_KEY]} Profile=${!!descriptors[ADDON_PROFILE_TAB_KEY]} LegacyRemoved=${legacyRemoved} DuplicatesRemoved=${duplicatesRemoved}`
+      `QAM stable Addon tab ensured. Current=${!!descriptor} RemovedOwned=${removedCount}`
     );
-    state.qamSelectionContext = { descriptors };
     trySelectAddonTabForFreshOpen();
     return tabs;
+  }
+
+  function buildInnerTabContent(React, native, tab, QuickSettingsPanel) {
+    switch (tab.tabId) {
+      case AQS_TAB_DEVICE:
+        return React.createElement(QuickSettingsPanel, { pageId: QS_PAGE_DEVICE });
+      case AQS_TAB_PROFILE:
+        return React.createElement(QuickSettingsPanel, { pageId: QS_PAGE_PROFILE });
+      case AQS_TAB_CONTROLLER:
+      case AQS_TAB_SHORTCUT:
+      case AQS_TAB_SETTING:
+        return React.createElement(
+          native.PanelSection,
+          { title: tab.label },
+          React.createElement(
+            native.PanelSectionRow,
+            null,
+            React.createElement("p", null, "This page is not available in QAM yet.")));
+      default:
+        return null;
+    }
+  }
+
+  function validateQuickSettingsShell(shell) {
+    if (shell?.available !== true || !Array.isArray(shell.tabs) || shell.tabs.length !== 5) return null;
+    const seen = new Set();
+    for (const tab of shell.tabs) {
+      if (!KNOWN_AQS_TAB_IDS.has(tab?.tabId) || seen.has(tab.tabId)) return null;
+      if (typeof tab.label !== "string" || tab.label.length === 0) return null;
+      seen.add(tab.tabId);
+    }
+    return shell.tabs;
   }
 
   function preservePatchedFunctionShape(patched, original) {
@@ -620,10 +669,8 @@
     state.liveFibers = [];
   }
 
-  function buildAddonTab(React, native, pageId) {
-    state.addonTabDescriptors ??= {};
-    const key = pageId === QS_PAGE_DEVICE ? ADDON_DEVICE_TAB_KEY : ADDON_PROFILE_TAB_KEY;
-    if (state.addonTabDescriptors[key]) return state.addonTabDescriptors[key];
+  function buildAddonTab(React, native) {
+    if (state.addonTabDescriptor) return state.addonTabDescriptor;
 
     const icon = React.createElement(
       "svg",
@@ -857,14 +904,71 @@
         ...sections);
     }
 
-    state.addonTabDescriptors[key] = {
-      [TAB_MARKER]: key,
-      key,
-      title: key === ADDON_DEVICE_TAB_KEY ? "Device" : "Profile",
+    function AddonQuickSettingsPanel() {
+      const [shellTabs, setShellTabs] = React.useState(null);
+      const [activeTab, setActiveTab] = React.useState(null);
+      const [shellError, setShellError] = React.useState(null);
+
+      React.useEffect(() => {
+        let cancelled = false;
+        void (async () => {
+          try {
+            const shell = await request("captureQuickSettingsShell");
+            const nextTabs = validateQuickSettingsShell(shell);
+            if (!nextTabs) {
+              if (!cancelled) setShellError("Addon Quick Settings shell is unavailable.");
+              return;
+            }
+
+            const status = await request("captureStatus");
+            const appId = Number(status?.steam?.appId || 0);
+            const preferred = appId > 0 ? AQS_TAB_PROFILE : AQS_TAB_DEVICE;
+            const initialTab = nextTabs.find(tab => tab.tabId === preferred);
+            if (!cancelled) {
+              setShellTabs(nextTabs);
+              setActiveTab(initialTab ? String(initialTab.tabId) : null);
+              setShellError(null);
+            }
+          } catch (_) {
+            if (!cancelled) setShellError("QAM bridge unavailable");
+          }
+        })();
+        return () => { cancelled = true; };
+      }, []);
+
+      if (shellError) {
+        return React.createElement(
+          native.PanelSection,
+          { title: "Addon" },
+          React.createElement(native.PanelSectionRow, null, React.createElement("p", null, shellError)));
+      }
+
+      if (!shellTabs || !activeTab) {
+        return React.createElement("p", null, "Loading Addon Quick Settings...");
+      }
+
+      const innerTabs = shellTabs.map(tab => ({
+        id: String(tab.tabId),
+        title: tab.label,
+        content: buildInnerTabContent(React, native, tab, QuickSettingsPanel),
+      }));
+
+      return React.createElement(native.Tabs, {
+        tabs: innerTabs,
+        activeTab,
+        onShowTab: setActiveTab,
+        autoFocusContents: true,
+      });
+    }
+
+    state.addonTabDescriptor = {
+      [TAB_MARKER]: ADDON_TAB_KEY,
+      key: ADDON_TAB_KEY,
+      title: "Addon",
       tab: icon,
-      panel: React.createElement(QuickSettingsPanel, { pageId }),
+      panel: React.createElement(AddonQuickSettingsPanel),
     };
-    return state.addonTabDescriptors[key];
+    return state.addonTabDescriptor;
   }
 
   // One stable, Addon-owned state object. install()/uninstall() mutate it in place rather than
@@ -1094,10 +1198,8 @@
     // A tab descriptor closes over the React/native components and panel implementation from the
     // script generation that created it. Never reuse it across uninstall/reinstall or upgrades.
     state.addonTabDescriptor = null;
-    state.addonTabDescriptors = null;
     state.qamSurfaceActive = false;
     state.qamInitialSelectionRequested = false;
-    state.qamSelectionContext = null;
     state.stateInvalidationSubscribers?.clear();
     state.diagnostics = {};
     state.runtimeDiagnostics = {};
@@ -1171,10 +1273,8 @@
   function uninstall() {
     retireBridgeConsumers();
     state.addonTabDescriptor = null;
-    state.addonTabDescriptors = null;
     state.qamSurfaceActive = false;
     state.qamInitialSelectionRequested = false;
-    state.qamSelectionContext = null;
     if (!state.installed) {
       log("uninstall() called but not installed; no-op.");
       return true;
@@ -1196,10 +1296,8 @@
       patches: null,
       nestedPatches: null,
       addonTabDescriptor: null,
-      addonTabDescriptors: null,
       qamSurfaceActive: false,
       qamInitialSelectionRequested: false,
-      qamSelectionContext: null,
       install,
       uninstall,
     });
