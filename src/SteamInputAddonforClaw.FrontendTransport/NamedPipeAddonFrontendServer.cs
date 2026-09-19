@@ -14,6 +14,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
     private sealed class ServedConnection
     {
         internal required Func<Task> SendCloseRequestedAsync { get; init; }
+        internal required Func<Task> SendSelectAddonOnNextQuickAccessOpenRequestedAsync { get; init; }
         internal required Task Completion { get; init; }
     }
     public NamedPipeAddonFrontendServer(string pipeName, IAddonFrontendControl inner) : this(pipeName, inner, () => new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly)) { }
@@ -50,6 +51,29 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         catch (OperationCanceledException)
         {
             return served.Completion.IsCompleted;
+        }
+    }
+
+    /// <summary>Send one causal Addon-first selection intent to the connected QamHost. This is
+    /// best-effort only; the caller must preserve the native Quick Access pulse when no QamHost is
+    /// connected or the notification cannot be written.</summary>
+    public async Task<bool> RequestSelectAddonOnNextQuickAccessOpenAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var served = _servedConnection;
+        if (served is null) return false;
+        try
+        {
+            await served.SendSelectAddonOnNextQuickAccessOpenRequestedAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
         }
     }
     private async Task AcceptLoopAsync()
@@ -117,6 +141,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
             _servedConnection = new ServedConnection
             {
                 SendCloseRequestedAsync = () => Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Notification, Notification: FrontendNotificationKind.CloseRequested)),
+                SendSelectAddonOnNextQuickAccessOpenRequestedAsync = () => Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Notification, Notification: FrontendNotificationKind.SelectAddonOnNextQuickAccessOpenRequested)),
                 Completion = connectionClosed.Task
             };
             while (!connection.IsCancellationRequested)

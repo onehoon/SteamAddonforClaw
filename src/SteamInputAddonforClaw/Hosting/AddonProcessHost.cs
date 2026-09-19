@@ -61,6 +61,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // OQ3-A: one narrow cross-surface ordering gate so a normal user request cannot run the two
     // opposite Main UI <-> Overlay visibility transitions at the same time. Not a surface manager.
     private readonly SemaphoreSlim _visibleSurfaceTransition = new(1, 1);
+    // QAM fresh-open selection: serialize only the causal intent + native pulse pair. This is not a
+    // general front-button scheduler; it prevents two adjacent Quick Access actions from swapping
+    // their notification/pulse order while keeping pipe I/O off the input callback thread.
+    private readonly SemaphoreSlim _quickAccessRequestGate = new(1, 1);
+    private Task _quickAccessCoordination = Task.CompletedTask;
     private static readonly TimeSpan MainUiCloseTimeout = TimeSpan.FromSeconds(6);
     // OQ4 section 4: one in-memory Overlay-capture fact + the one active semantic input router.
     // Not another controller authority. Never persisted, never restored across process restart.
@@ -587,7 +592,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     // existing Runtime-owned coordinated Overlay toggle seam, never the Overlay process
                     // controller / transport directly.
                     requestOverlayToggle: RequestOverlayToggle,
-                    tryRequestQuickAccessPulse: () => _presentationOwnership?.TryRequestQuickAccessPulse() ?? false,
+                    tryRequestQuickAccessPulse: RequestSteamQuickAccess,
                     tryRequestSteamPulse: () => _presentationOwnership?.TryRequestSteamPulse() ?? false,
                     // Full1902 Policy B (already merged, #473): Gamebar / WING custom delivery is live
                     // only while native Win+G suppression is proven armed for this Addon-authority
@@ -822,6 +827,56 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // This stays the narrow host-facing entry point; CoordinateOverlayToggleAsync remains the single
     // owner of visible-surface ordering and controller capture.
     internal void RequestOverlayToggle() => _ = CoordinateOverlayToggleAsync();
+
+    // QAM fresh-open selection: the native SteamDeck Quick Access pulse remains the sole open/close
+    // authority. The optional QamHost intent is attempted first, and the input callback returns
+    // immediately while the pair is coordinated off-thread.
+    private bool RequestSteamQuickAccess()
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return false;
+        var task = CoordinateSteamQuickAccessAsync();
+        Volatile.Write(ref _quickAccessCoordination, task);
+        return true;
+    }
+
+    private async Task CoordinateSteamQuickAccessAsync()
+    {
+        var gateAcquired = false;
+        try
+        {
+            await _quickAccessRequestGate.WaitAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            gateAcquired = true;
+            try
+            {
+                var delivered = false;
+                if (_qamFrontendServer is { } server)
+                    delivered = await server.RequestSelectAddonOnNextQuickAccessOpenAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+
+                AppLog.Debug("QAM", delivered
+                    ? "QAM Addon first-tab intent delivered."
+                    : "QAM Addon first-tab intent unavailable; native Quick Access pulse continues.");
+            }
+            catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                AppLog.Debug("QAM", "QAM Addon first-tab intent unavailable; native Quick Access pulse continues.",
+                    ("ExceptionType", exception.GetType().Name));
+            }
+            finally
+            {
+                if (!_startupCancellationTokenSource.IsCancellationRequested)
+                    _presentationOwnership?.TryRequestQuickAccessPulse();
+            }
+        }
+        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+        finally
+        {
+            if (gateAcquired) _quickAccessRequestGate.Release();
+        }
+    }
 
     private async Task CoordinateFrontendOpenAsync(FrontendOpenReason reason)
     {
@@ -1383,6 +1438,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // the token; drain the last in-flight one before tearing down the presentation owner.
         try { await _presentationReconcile.ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Runtime presentation reconcile failed during shutdown.", exception); }
+        try { await Volatile.Read(ref _quickAccessCoordination).ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("QAM", "Quick Access coordination failed during shutdown.", exception); }
         if (_frontButtonRuntime is not null)
         {
             // Full1902 A2 section 14: stop accepting front-button events and drop pulse callbacks into
@@ -1449,6 +1506,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // OQ3-A: disposed last, after the frontend server and Overlay controller are gone, so any
         // in-flight visible-surface coordination has already unwound and released the gate.
         try { _visibleSurfaceTransition.Dispose(); } catch (ObjectDisposedException) { }
+        try { _quickAccessRequestGate.Dispose(); } catch (ObjectDisposedException) { }
         _startupComposition = null;
     }
 

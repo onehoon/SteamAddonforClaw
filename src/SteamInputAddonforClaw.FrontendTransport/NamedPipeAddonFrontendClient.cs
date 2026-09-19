@@ -24,6 +24,7 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     // OQ3-A: the Runtime asks the connected Main UI to run its normal close path before the Addon
     // Overlay is shown. Narrow notification only -- not a general command bus.
     public event EventHandler? CloseRequested;
+    public event EventHandler? SelectAddonOnNextQuickAccessOpenRequested;
     public NamedPipeAddonFrontendClient(string pipeName) : this(pipeName, FrontendTransportProtocol.CurrentVersion) { }
     internal NamedPipeAddonFrontendClient(string pipeName, int version) { _pipeName = pipeName; _version = version; }
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -156,6 +157,11 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
                 if (message.Kind == FrontendWireMessageKind.Notification && message.Notification == FrontendNotificationKind.CloseRequested)
                 {
                     CloseRequested?.Invoke(this, EventArgs.Empty);
+                    continue;
+                }
+                if (message.Kind == FrontendWireMessageKind.Notification && message.Notification == FrontendNotificationKind.SelectAddonOnNextQuickAccessOpenRequested)
+                {
+                    SelectAddonOnNextQuickAccessOpenRequested?.Invoke(this, EventArgs.Empty);
                     continue;
                 }
                 if (message.Kind != FrontendWireMessageKind.Response || message.RequestId is not > 0)

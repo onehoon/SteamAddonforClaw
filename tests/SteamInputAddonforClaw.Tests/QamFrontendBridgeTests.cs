@@ -56,6 +56,19 @@ public sealed class QamFrontendBridgeTests
     }
 
     [Fact]
+    public async Task Select_addon_on_next_quick_access_open_notification_forwards_as_a_dedicated_bridge_event()
+    {
+        var (bridge, _, server) = await StartAsync(new(true, 0, FrontendSteamSource.BigPicture));
+        await using var _ = server;
+        await using var __ = bridge;
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bridge.SelectAddonOnNextQuickAccessOpenRequested += (_, _) => received.TrySetResult();
+
+        Assert.True(await server.RequestSelectAddonOnNextQuickAccessOpenAsync());
+        await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Generic_profile_mutation_reaches_the_runtime_without_device_admission()
     {
         // Section 9.3: Profile has no bridge-level admission check -- it must reach the Runtime even

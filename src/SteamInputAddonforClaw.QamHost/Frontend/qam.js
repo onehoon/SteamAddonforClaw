@@ -26,6 +26,9 @@
   const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
   const ADDON_TAB_KEY = "steam-input-addon";
+  // Steam's current GamepadUI MenuStore enum uses 2 for the native Quick Access side menu.
+  // Keep this check on the same verified MenuStore authority as OpenQuickAccessMenu.
+  const QUICK_ACCESS_SIDE_MENU_ID = 2;
   // Historical descriptor cleanup identities only. These markers recognize stale pre-shell tabs
   // during QAM restart/reload/uninstall cleanup; they are not current product tab identities.
   const LEGACY_ADDON_DEVICE_TAB_KEY = "steam-input-addon-device";
@@ -390,63 +393,55 @@
     return null;
   }
 
-  function resolveNativeTabSelection() {
+  function resolveNativeQamMenuAuthority() {
     // Live current-Steam QAM inspection shows the native tab handler passes its descriptor's
     // `sr.key` directly to MainWindowInstance.MenuStore.OpenQuickAccessMenu. The same live store
-    // path is used here, including its verified `false` argument to suppress side-menu opening;
-    // every other shape fails open rather than guessing a React prop or DOM interaction.
+    // path owns the current side-menu enum, so open/close causality and selection share one authority.
     const menuStore = window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore?.MainWindowInstance?.MenuStore;
-    if (!menuStore || typeof menuStore.OpenQuickAccessMenu !== "function") return null;
+    if (!menuStore || typeof menuStore.OpenQuickAccessMenu !== "function" ||
+        !Object.prototype.hasOwnProperty.call(menuStore, "m_eOpenSideMenu")) return null;
     return {
-      set: key => {
-        if (key !== ADDON_TAB_KEY) return;
-        menuStore.OpenQuickAccessMenu(key, false);
+      isQuickAccessOpen: () => menuStore.m_eOpenSideMenu === QUICK_ACCESS_SIDE_MENU_ID,
+      selectAddon: () => {
+        menuStore.OpenQuickAccessMenu(ADDON_TAB_KEY, false);
       },
     };
   }
 
-  function selectAddonTabForFreshOpen() {
-    const authority = resolveNativeTabSelection();
+  function requestAddonSelectionOnNextQuickAccessOpen() {
+    const authority = resolveNativeQamMenuAuthority();
+    if (!authority) {
+      state.selectAddonOnNextOpenRequested = false;
+      logOnce("quickAccessMenuAuthorityUnavailable", "QAM Addon first-tab request ignored; native menu authority unavailable.");
+      return;
+    }
+
+    if (authority.isQuickAccessOpen()) {
+      state.selectAddonOnNextOpenRequested = false;
+      log("QAM Addon first-tab request ignored; Quick Access already open.");
+      return;
+    }
+
+    state.selectAddonOnNextOpenRequested = true;
+    log("QAM Addon first-tab request armed.");
+  }
+
+  function tryConsumeAddonSelectionRequest() {
+    if (!state.selectAddonOnNextOpenRequested || !state.addonTabDescriptor) return;
+    state.selectAddonOnNextOpenRequested = false;
+
+    const authority = resolveNativeQamMenuAuthority();
     if (!authority) {
       logOnce("initialTabSelectionUnavailable", "QAM initial Addon tab selection unavailable; tabs remain usable.");
       return;
     }
 
     try {
-      authority.set(ADDON_TAB_KEY);
+      authority.selectAddon();
       log("QAM open selection: Addon");
     } catch (error) {
       logOnce("initialTabSelectionFailure", `QAM initial Addon tab selection unavailable; tabs remain usable. Reason=${String(error)}`);
     }
-  }
-
-  function trySelectAddonTabForFreshOpen() {
-    if (!state.qamSurfaceActive || !state.qamInitialSelectionRequested || !state.addonTabDescriptor) return;
-    state.qamInitialSelectionRequested = false;
-    selectAddonTabForFreshOpen();
-  }
-
-  function updateQamSurfaceVisibility(visible) {
-    if (visible === true) {
-      activateQamSurface();
-    } else if (visible === false) {
-      deactivateQamSurface();
-    }
-  }
-
-  function activateQamSurface() {
-    if (state.qamSurfaceActive) return;
-    state.qamSurfaceActive = true;
-    state.qamInitialSelectionRequested = true;
-    log("QAM surface activated.");
-    trySelectAddonTabForFreshOpen();
-  }
-
-  function deactivateQamSurface() {
-    if (!state.qamSurfaceActive) return;
-    state.qamSurfaceActive = false;
-    state.qamInitialSelectionRequested = false;
-    log("QAM surface deactivated.");
   }
 
   function ensureAddonTabs(owner, React, native) {
@@ -464,7 +459,7 @@
       "stableTabs",
       `QAM stable Addon tab ensured. Current=${!!descriptor} RemovedOwned=${removedCount}`
     );
-    trySelectAddonTabForFreshOpen();
+    tryConsumeAddonSelectionRequest();
     return tabs;
   }
 
@@ -1384,6 +1379,7 @@
 
   function receiveBridgeNotification(kind) {
     if (kind === "state-invalidated") notifyStateInvalidated();
+    else if (kind === "select-addon-on-next-open") requestAddonSelectionOnNextQuickAccessOpen();
   }
 
   function retireBridgeConsumers() {
@@ -1393,6 +1389,7 @@
     }
     state.bridgePending?.clear();
     state.stateInvalidationSubscribers?.clear();
+    state.selectAddonOnNextOpenRequested = false;
   }
 
   function install() {
@@ -1404,8 +1401,7 @@
     // A tab descriptor closes over the React/native components and panel implementation from the
     // script generation that created it. Never reuse it across uninstall/reinstall or upgrades.
     state.addonTabDescriptor = null;
-    state.qamSurfaceActive = false;
-    state.qamInitialSelectionRequested = false;
+    state.selectAddonOnNextOpenRequested = false;
     state.stateInvalidationSubscribers?.clear();
     state.diagnostics = {};
     state.runtimeDiagnostics = {};
@@ -1442,9 +1438,6 @@
       const patchedType = preservePatchedFunctionShape(function patchedType(...args) {
         const result = originalType.apply(this, args);
         if (!state.installed) return result;
-        // Review fix: the live QAM renderer exposes visibility on its render props. This is the
-        // native open/close seam; do not infer QAM lifetime from a nested React owner or focus nav.
-        updateQamSurfaceVisibility(args[0]?.visible);
         // Review fix: proves the patched outer renderer actually ran on live Steam, separating
         // "never invoked" from every failure mode further down the augmentation chain.
         logOnce("outerRendererInvoked", "QAM outer renderer invoked.");
@@ -1479,8 +1472,7 @@
   function uninstall() {
     retireBridgeConsumers();
     state.addonTabDescriptor = null;
-    state.qamSurfaceActive = false;
-    state.qamInitialSelectionRequested = false;
+    state.selectAddonOnNextOpenRequested = false;
     if (!state.installed) {
       log("uninstall() called but not installed; no-op.");
       return true;
@@ -1502,8 +1494,7 @@
       patches: null,
       nestedPatches: null,
       addonTabDescriptor: null,
-      qamSurfaceActive: false,
-      qamInitialSelectionRequested: false,
+      selectAddonOnNextOpenRequested: false,
       install,
       uninstall,
     });

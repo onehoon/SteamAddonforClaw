@@ -20,6 +20,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     private readonly NamedPipeAddonFrontendClient _client;
     internal NamedPipeAddonFrontendClient Client => _client;
     internal event EventHandler? StateInvalidated;
+    internal event EventHandler? SelectAddonOnNextQuickAccessOpenRequested;
     private int _stopping;
 
     internal QamFrontendBridge() : this(FrontendPipeEndpoint.CreateQamForCurrentUser()) { }
@@ -30,6 +31,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     {
         _client = new NamedPipeAddonFrontendClient(pipeName);
         _client.StateInvalidated += OnStateInvalidated;
+        _client.SelectAddonOnNextQuickAccessOpenRequested += OnSelectAddonOnNextQuickAccessOpenRequested;
     }
 
     // SF-V2-04: bridge-local generic Quick Settings capture request. Kept private rather than making
@@ -43,6 +45,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     }
 
     private void OnStateInvalidated(object? sender, EventArgs e) => StateInvalidated?.Invoke(this, e);
+    private void OnSelectAddonOnNextQuickAccessOpenRequested(object? sender, EventArgs e) => SelectAddonOnNextQuickAccessOpenRequested?.Invoke(this, e);
     internal async Task<Response> HandleRequestAsync(string payload, CancellationToken token)
     {
         long id = 0;
@@ -113,6 +116,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     {
         StopAccepting();
         _client.StateInvalidated -= OnStateInvalidated;
+        _client.SelectAddonOnNextQuickAccessOpenRequested -= OnSelectAddonOnNextQuickAccessOpenRequested;
         await _client.DisposeAsync().ConfigureAwait(false);
     }
 }
