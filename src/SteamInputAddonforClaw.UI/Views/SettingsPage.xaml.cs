@@ -67,6 +67,7 @@ public sealed partial class SettingsPage : UserControl
         finally
         {
             Volatile.Write(ref _updateOperationInProgress, 0);
+            await RefreshAppUpdateAsync().ConfigureAwait(true);
         }
     }
 
