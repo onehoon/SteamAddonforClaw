@@ -439,24 +439,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 await _qamFrontendServer.DisposeAsync().ConfigureAwait(false);
             _qamFrontendServer = null;
         }
-        // OQ5-UI-09: give the Overlay transport a read + validated-mutation seam onto the ONE
-        // StartupSettingsCoordinator before warm startup, so every Overlay connection applies the
-        // authoritative AddonQuickSettingsTabOrder before it reports Ready. A settings write failure is
-        // feature-local -- it never touches controller Runtime ownership.
+        // PR3: give the Overlay transport the same typed Setting capture/move seam used by QAM before
+        // warm startup. The Overlay never reaches StartupSettingsCoordinator directly.
         _overlayController.BindTabOrderAuthority(
-            () => composition.StartupSettings.AddonQuickSettingsTabOrder,
-            requested =>
-            {
-                try
-                {
-                    return composition.StartupSettings.TryChangeAddonQuickSettingsTabOrder(requested);
-                }
-                catch (Exception exception)
-                {
-                    AppLog.Warn("Overlay", "Overlay tab-order persistence failed; keeping the current authoritative order.", exception);
-                    return false;
-                }
-            });
+            capture: token => _frontendControl!.CaptureAddonQuickSettingsTabOrderAsync(token),
+            move: (intent, token) => _frontendControl!.MoveAddonQuickSettingsTabAsync(intent, token));
         // SF-V2-02/06/09 section 14/14.2/7.2/7.3: bind the Overlay shared Quick Settings transport
         // onto the SAME _frontendControl at the same stage as BindTabOrderAuthority, before the first
         // warm Overlay connection. Both Device and Profile are captured/exposed to the Overlay as of
@@ -952,6 +939,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // is committed, and is fire-and-forget -- a slow/failed snapshot must never extend how
             // long this method (and the _visibleSurfaceTransition it holds) delays a concurrent Hide.
             _ = _overlayController.RefreshQuickSettingsAsync();
+            _ = _overlayController.RefreshTabOrderAsync();
         }
         catch (Exception exception)
         {
@@ -975,6 +963,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // suppression could otherwise lose: the active game changing while a mutation is in flight.
         if (Volatile.Read(ref _overlayQuickSettingsMutationInFlight) != 0) return;
         _ = _overlayController.RefreshQuickSettingsAsync();
+        _ = _overlayController.RefreshTabOrderAsync();
     }
 
     // SF-V2-02/06/09 section 15/16/11: the admission Runtime-side fact this class owns

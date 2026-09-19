@@ -65,6 +65,28 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Contains("captureProfilePage: token => CaptureOverlayProfileQuickSettingsPageAsync(token)", source);
     }
 
+    [Fact]
+    public void Overlay_tab_order_binds_to_the_shared_frontend_control_seam()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+
+        Assert.Contains("_overlayController.BindTabOrderAuthority(", source);
+        Assert.Contains("_frontendControl!.CaptureAddonQuickSettingsTabOrderAsync(token)", source);
+        Assert.Contains("_frontendControl!.MoveAddonQuickSettingsTabAsync(intent, token)", source);
+        Assert.DoesNotContain("TryChangeAddonQuickSettingsTabOrder", source);
+    }
+
+    [Fact]
+    public void Overlay_tab_order_refresh_is_event_driven_and_visible_session_local()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var handler = ExtractMethod(source, "private void OnFrontendStateInvalidatedForOverlay");
+
+        Assert.Contains("_overlayController.RefreshTabOrderAsync()", handler);
+        Assert.DoesNotContain("setInterval", source);
+        Assert.DoesNotContain("Task.Delay", handler);
+    }
+
     // Section 7.3/7.4: no active game (AppId 0) resolves to an explicit Unavailable page WITHOUT
     // calling into the frontend control at all -- never a fake AppId-0 profile, never a direct
     // ProfileStore/game scan.

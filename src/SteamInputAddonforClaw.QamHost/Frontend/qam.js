@@ -456,7 +456,7 @@
     return tabs;
   }
 
-  function buildInnerTabContent(React, native, tab, QuickSettingsPanel) {
+  function buildInnerTabContent(React, native, tab, QuickSettingsPanel, settingProps) {
     switch (tab.tabId) {
       case AQS_TAB_DEVICE:
         return React.createElement(QuickSettingsPanel, { pageId: QS_PAGE_DEVICE });
@@ -464,17 +464,60 @@
         return React.createElement(QuickSettingsPanel, { pageId: QS_PAGE_PROFILE });
       case AQS_TAB_CONTROLLER:
       case AQS_TAB_SHORTCUT:
-      case AQS_TAB_SETTING:
         return React.createElement(
           native.PanelSection,
           { title: tab.label },
           React.createElement(
             native.PanelSectionRow,
             null,
-            React.createElement("p", null, "This page is not available in QAM yet.")));
+             React.createElement("p", null, "This page is not available in QAM yet.")));
+      case AQS_TAB_SETTING:
+        return React.createElement(SettingTabOrderPanel, settingProps);
       default:
         return null;
     }
+  }
+
+  function SettingTabOrderPanel({ tabOrderState, busy, error, onMove }) {
+    if (!tabOrderState?.available) {
+      return React.createElement(
+        native.PanelSection,
+        { title: "Tab Order" },
+        React.createElement(native.PanelSectionRow, null,
+          React.createElement("p", null, error || "Tab order is unavailable.")));
+    }
+
+    const notchLabels = tabOrderState.rows.map((row, notchIndex) => ({
+      notchIndex,
+      label: String(notchIndex + 1),
+      value: notchIndex,
+    }));
+    const rows = tabOrderState.rows.map((row, index) => React.createElement(
+      native.PanelSectionRow,
+      { key: `tab-order-${row.tabId}` },
+      React.createElement(native.SliderField, {
+        label: row.label,
+        min: 0,
+        max: tabOrderState.rows.length - 1,
+        step: 1,
+        value: index,
+        notchCount: tabOrderState.rows.length,
+        notchLabels,
+        notchTicksVisible: true,
+        showValue: true,
+        disabled: busy,
+        onChange: next => {
+          const delta = Math.sign(Math.round(Number(next)) - index);
+          if (delta === -1 && row.canMoveEarlier) void onMove(row.tabId, -1);
+          else if (delta === 1 && row.canMoveLater) void onMove(row.tabId, 1);
+        },
+      })));
+
+    return React.createElement(
+      React.Fragment,
+      null,
+      error ? React.createElement("p", { key: "tab-order-error" }, error) : null,
+      React.createElement(native.PanelSection, { title: "Tab Order" }, ...rows));
   }
 
   function validateQuickSettingsShell(shell) {
@@ -486,6 +529,20 @@
       seen.add(tab.tabId);
     }
     return shell.tabs;
+  }
+
+  function validateTabOrderState(tabOrderState) {
+    if (tabOrderState?.available !== true || !Array.isArray(tabOrderState.rows) || tabOrderState.rows.length !== 5)
+      return null;
+    const seen = new Set();
+    for (const row of tabOrderState.rows) {
+      if (!KNOWN_AQS_TAB_IDS.has(row?.tabId) || seen.has(row.tabId) ||
+          typeof row.label !== "string" || row.label.length === 0 ||
+          typeof row.canMoveEarlier !== "boolean" || typeof row.canMoveLater !== "boolean")
+        return null;
+      seen.add(row.tabId);
+    }
+    return tabOrderState;
   }
 
   function preservePatchedFunctionShape(patched, original) {
@@ -910,35 +967,93 @@
 
     function AddonQuickSettingsPanel() {
       const [shellTabs, setShellTabs] = React.useState(null);
+      const [tabOrderState, setTabOrderState] = React.useState(null);
       const [activeTab, setActiveTab] = React.useState(null);
       const [shellError, setShellError] = React.useState(null);
+      const [tabOrderBusy, setTabOrderBusy] = React.useState(false);
+      const [tabOrderError, setTabOrderError] = React.useState(null);
+      const tabOrderBusyRef = React.useRef(false);
+      const refreshInFlightRef = React.useRef(false);
+      const refreshDirtyRef = React.useRef(false);
 
-      React.useEffect(() => {
-        let cancelled = false;
+      const refresh = React.useCallback(async initialSelection => {
+        if (refreshInFlightRef.current) {
+          refreshDirtyRef.current = true;
+          return;
+        }
+        refreshInFlightRef.current = true;
         void (async () => {
           try {
-            const shell = await request("captureQuickSettingsShell");
+            const [shell, order] = await Promise.all([
+              request("captureQuickSettingsShell"),
+              request("captureQuickSettingsTabOrder"),
+            ]);
             const nextTabs = validateQuickSettingsShell(shell);
-            if (!nextTabs) {
-              if (!cancelled) setShellError("Addon Quick Settings shell is unavailable.");
-              return;
+            const nextOrder = validateTabOrderState(order);
+            if (!nextTabs || !nextOrder) throw new Error("Invalid Addon Quick Settings state.");
+
+            let initialTab = null;
+            if (initialSelection) {
+              const status = await request("captureStatus");
+              const preferred = Number(status?.steam?.appId || 0) > 0 ? AQS_TAB_PROFILE : AQS_TAB_DEVICE;
+              initialTab = nextTabs.find(tab => tab.tabId === preferred);
             }
 
-            const status = await request("captureStatus");
-            const appId = Number(status?.steam?.appId || 0);
-            const preferred = appId > 0 ? AQS_TAB_PROFILE : AQS_TAB_DEVICE;
-            const initialTab = nextTabs.find(tab => tab.tabId === preferred);
-            if (!cancelled) {
-              setShellTabs(nextTabs);
-              setActiveTab(initialTab ? String(initialTab.tabId) : null);
-              setShellError(null);
-            }
+            setShellTabs(nextTabs);
+            setTabOrderState(nextOrder);
+            setTabOrderError(null);
+            if (initialSelection) setActiveTab(initialTab ? String(initialTab.tabId) : null);
+            setShellError(null);
           } catch (_) {
-            if (!cancelled) setShellError("QAM bridge unavailable");
+            setShellError("QAM bridge unavailable");
+          }
+          finally {
+            refreshInFlightRef.current = false;
+            if (refreshDirtyRef.current) {
+              refreshDirtyRef.current = false;
+              void refresh(false);
+            }
           }
         })();
-        return () => { cancelled = true; };
       }, []);
+
+      React.useEffect(() => { void refresh(true); }, [refresh]);
+
+      React.useEffect(() => {
+        const handler = () => {
+          if (tabOrderBusyRef.current) {
+            refreshDirtyRef.current = true;
+            return;
+          }
+          void refresh(false);
+        };
+        return subscribeStateInvalidation(handler);
+      }, [refresh]);
+
+      const moveTab = React.useCallback(async (tabId, delta) => {
+        if (tabOrderBusyRef.current) return;
+        tabOrderBusyRef.current = true;
+        setTabOrderBusy(true);
+        setTabOrderError(null);
+        try {
+          const result = await request("moveQuickSettingsTab", { tabId, delta });
+          const authoritative = validateTabOrderState(result?.state);
+          if (!authoritative) throw new Error("Tab order is unavailable.");
+          setTabOrderState(authoritative);
+          setShellTabs(authoritative.rows.map(row => ({ tabId: row.tabId, label: row.label })));
+          if (result?.succeeded !== true)
+            setTabOrderError(result?.failureMessage || "Tab order update failed.");
+        } catch (_) {
+          setTabOrderError("Tab order update failed.");
+        } finally {
+          tabOrderBusyRef.current = false;
+          setTabOrderBusy(false);
+          if (refreshDirtyRef.current) {
+            refreshDirtyRef.current = false;
+            void refresh(false);
+          }
+        }
+      }, [refresh]);
 
       if (shellError) {
         return React.createElement(
@@ -954,7 +1069,12 @@
       const innerTabs = shellTabs.map(tab => ({
         id: String(tab.tabId),
         title: tab.label,
-        content: buildInnerTabContent(React, native, tab, QuickSettingsPanel),
+        content: buildInnerTabContent(React, native, tab, QuickSettingsPanel, {
+          tabOrderState,
+          busy: tabOrderBusy,
+          error: tabOrderError,
+          onMove: moveTab,
+        }),
       }));
 
       return React.createElement(native.Tabs, {

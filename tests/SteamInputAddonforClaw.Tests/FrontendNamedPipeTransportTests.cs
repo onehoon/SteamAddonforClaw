@@ -71,7 +71,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(31, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(32, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -141,6 +141,66 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(fake.ShellSnapshot.Tabs.Select(tab => tab.TabId), shell.Tabs.Select(tab => tab.TabId));
         Assert.Equal(fake.ShellSnapshot.Tabs.Select(tab => tab.Label), shell.Tabs.Select(tab => tab.Label));
         Assert.Equal(1, fake.CaptureShellCount);
+    }
+
+    [Fact]
+    public async Task Shared_tab_order_capture_and_move_round_trip_as_typed_contracts()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var snapshot = await client.CaptureAddonQuickSettingsTabOrderAsync();
+        var intent = new AddonQuickSettingsTabOrderMoveIntent(AddonQuickSettingsTabId.Profile, -1);
+        var result = await client.MoveAddonQuickSettingsTabAsync(intent);
+
+        Assert.Equal(1, fake.CaptureTabOrderCount);
+        Assert.Equal(intent, fake.LastTabOrderIntent);
+        Assert.Equal(fake.TabOrderSnapshot.Rows.Select(row => row.TabId), snapshot.Rows.Select(row => row.TabId));
+        Assert.Equal(fake.TabOrderMutationResult.Succeeded, result.Succeeded);
+        Assert.Equal(fake.TabOrderMutationResult.FailureMessage, result.FailureMessage);
+        Assert.Equal(fake.TabOrderMutationResult.State.Rows.Select(row => row.TabId), result.State.Rows.Select(row => row.TabId));
+    }
+
+    [Fact]
+    public async Task Shared_tab_order_capture_rejects_unexpected_payload_without_invoking_frontend()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"CaptureAddonQuickSettingsTabOrder\",\"Payload\":{{}}}}");
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.CaptureTabOrderCount);
+    }
+
+    [Fact]
+    public async Task Shared_tab_order_move_rejects_malformed_payload_without_invoking_frontend()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"MoveAddonQuickSettingsTab\",\"Payload\":{{\"TabId\":\"Profile\",\"Delta\":\"left\"}}}}");
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Null(fake.LastTabOrderIntent);
     }
 
     [Fact]
@@ -1169,13 +1229,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 31 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 32 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":31,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":31,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":31,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":32,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":32,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":32,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1549,6 +1609,12 @@ public sealed class FrontendNamedPipeTransportTests
         public AddonQuickSettingsShellSnapshot ShellSnapshot { get; } = AddonQuickSettingsShellContract.Create([AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting]);
         public int CaptureShellCount { get; private set; }
         public Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken t = default) { TotalCalls++; CaptureShellCount++; return Task.FromResult(ShellSnapshot); }
+        public AddonQuickSettingsTabOrderSnapshot TabOrderSnapshot { get; } = AddonQuickSettingsTabOrderProduct.Create([AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut]);
+        public AddonQuickSettingsTabOrderMutationResult TabOrderMutationResult { get; } = new(true, null, AddonQuickSettingsTabOrderProduct.Create([AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Shortcut]));
+        public int CaptureTabOrderCount { get; private set; }
+        public AddonQuickSettingsTabOrderMoveIntent? LastTabOrderIntent { get; private set; }
+        public Task<AddonQuickSettingsTabOrderSnapshot> CaptureAddonQuickSettingsTabOrderAsync(CancellationToken t = default) { TotalCalls++; CaptureTabOrderCount++; return Task.FromResult(TabOrderSnapshot); }
+        public Task<AddonQuickSettingsTabOrderMutationResult> MoveAddonQuickSettingsTabAsync(AddonQuickSettingsTabOrderMoveIntent intent, CancellationToken t = default) { TotalCalls++; LastTabOrderIntent = intent; return Task.FromResult(TabOrderMutationResult); }
 
         // SF-V2-04: generic shared Quick Settings seam. The page carries every closed contract shape
         // (Toggle/Numeric/Discrete rows, TrailingDebounce policy, TDP commit group, linked constraint)

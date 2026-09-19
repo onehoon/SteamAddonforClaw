@@ -450,6 +450,17 @@ public interface IAddonFrontendControl
     /// fail-closed for implementations that do not opt into the PR1 foundation seam.</summary>
     Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(AddonQuickSettingsShellSnapshot.Unavailable());
+    /// <summary>Captures the Runtime-owned Setting tab-order projection.</summary>
+    Task<AddonQuickSettingsTabOrderSnapshot> CaptureAddonQuickSettingsTabOrderAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(AddonQuickSettingsTabOrderSnapshot.Unavailable());
+    /// <summary>Moves one shared Setting tab by exactly one position and returns authoritative readback.</summary>
+    Task<AddonQuickSettingsTabOrderMutationResult> MoveAddonQuickSettingsTabAsync(
+        AddonQuickSettingsTabOrderMoveIntent intent,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(
+            false,
+            "Tab order is unavailable.",
+            AddonQuickSettingsTabOrderSnapshot.Unavailable()));
     /// <summary>Validates and dispatches a shared Quick Settings mutation intent onto the existing
     /// typed Device mutation methods, then returns a freshly re-projected page (work order section
     /// 21/28). The default fails closed without fabricating a successful mutation.</summary>

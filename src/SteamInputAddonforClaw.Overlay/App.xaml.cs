@@ -21,7 +21,7 @@ public partial class App : Application
         OverlayLog.Info("App", "DispatcherQueue acquired.");
         _window = new OverlayWindow();
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
-        _window.TabOrderChangeRequested += OnTabOrderChangeRequested;
+        _window.TabOrderMoveRequested += OnTabOrderMoveRequested;
         OverlayLog.Info("App", "OverlayWindow constructed.", ("Hwnd", _window.HandleForDiagnostics));
         _window.Closed += (_, _) => { OverlayLog.Info("Window", "Closed received."); Exit(); };
         OverlayLog.Info("Window", "Initial hidden preparation started.");
@@ -84,15 +84,15 @@ public partial class App : Application
     // OQ5-UI-09: authoritative tab order from the Runtime. Used for the mandatory initial snapshot
     // (the returned Task must complete before the client reports Ready) and any later republish.
     // Marshalled through the existing DispatcherQueue; completes only after the shell has applied it.
-    private Task HandleTabOrderAsync(IReadOnlyList<AddonQuickSettingsTabId> order)
+    private Task HandleTabOrderAsync(AddonQuickSettingsTabOrderSnapshot state)
     {
-        OverlayLog.Info("TabOrder", "Authoritative tab order received.", ("Count", order.Count));
+        OverlayLog.Info("TabOrder", "Authoritative tab-order state received.", ("Available", state.Available), ("Count", state.Rows.Count));
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
         {
             try
             {
-                _window?.ApplyTabOrder(order);
+                _window?.ApplyTabOrderState(state);
                 completion.TrySetResult();
             }
             catch (Exception exception)
@@ -134,22 +134,26 @@ public partial class App : Application
         return completion.Task;
     }
 
-    // OQ5-UI-10: the Setting-page editor proposed a one-position tab move. Forward it through the
-    // existing OQ5-UI-09 request seam; the visible order only changes when the Runtime republishes
-    // TabOrderState. A write failure is preference-local -- the Overlay stays on its current order.
-    private void OnTabOrderChangeRequested(IReadOnlyList<AddonQuickSettingsTabId> proposed) => _ = SendTabOrderAsync(proposed);
+    // PR3: forward the typed move and apply only the authoritative mutation result.
+    private void OnTabOrderMoveRequested(AddonQuickSettingsTabOrderMoveIntent intent) => _ = SendTabOrderMoveAsync(intent);
 
-    private async Task SendTabOrderAsync(IReadOnlyList<AddonQuickSettingsTabId> proposed)
+    private async Task SendTabOrderMoveAsync(AddonQuickSettingsTabOrderMoveIntent intent)
     {
         try
         {
             if (_client is null) return;
-            if (!await _client.SendSetTabOrderAsync(proposed).ConfigureAwait(false))
-                OverlayLog.Warn("TabOrder", "SetTabOrder request could not be written; keeping the current authoritative order.");
+            var result = await _client.SendTabOrderMoveAsync(intent).ConfigureAwait(false);
+            if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+            {
+                _window?.ApplyTabOrderState(result.State);
+                if (!result.Succeeded)
+                    OverlayLog.Warn("TabOrder", result.FailureMessage ?? "Tab order update failed.");
+            }))
+                OverlayLog.Warn("TabOrder", "Could not enqueue authoritative tab-order result.");
         }
         catch (Exception exception)
         {
-            OverlayLog.Error("TabOrder", "SetTabOrder request failed; Overlay remains Runtime-owned.", exception);
+            OverlayLog.Error("TabOrder", "Tab-order move request failed; Overlay remains Runtime-owned.", exception);
         }
     }
 

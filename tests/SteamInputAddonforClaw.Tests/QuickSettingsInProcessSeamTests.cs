@@ -147,6 +147,102 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Capture_tab_order_projects_rows_and_boundaries_from_runtime_settings()
+    {
+        var order = new[]
+        {
+            AddonQuickSettingsTabId.Setting,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut,
+        };
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = order }, store, new FakeStartupManager());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+
+        var snapshot = await control.CaptureAddonQuickSettingsTabOrderAsync();
+
+        Assert.True(snapshot.Available);
+        Assert.Equal(order, snapshot.Rows.Select(row => row.TabId));
+        Assert.Equal(["Setting", "Device", "Profile", "Controller", "Shortcut"], snapshot.Rows.Select(row => row.Label));
+        Assert.False(snapshot.Rows[0].CanMoveEarlier);
+        Assert.False(snapshot.Rows[^1].CanMoveLater);
+    }
+
+    [Fact]
+    public async Task Move_tab_order_persists_authoritative_readback_and_publishes_once()
+    {
+        var order = new[]
+        {
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
+        };
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = order }, store, new FakeStartupManager());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        var result = await control.MoveAddonQuickSettingsTabAsync(new(AddonQuickSettingsTabId.Setting, -1));
+
+        Assert.True(result.Succeeded);
+        Assert.Null(result.FailureMessage);
+        Assert.Equal([AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Setting, AddonQuickSettingsTabId.Shortcut], result.State.Rows.Select(row => row.TabId));
+        Assert.Equal(result.State.Rows.Select(row => row.TabId), coordinator.AddonQuickSettingsTabOrder);
+        Assert.Equal(result.State.Rows.Select(row => row.TabId), store.Load().AddonQuickSettingsTabOrder);
+        Assert.Equal(1, invalidations);
+    }
+
+    [Fact]
+    public async Task Boundary_move_is_rejected_without_write_or_invalidation()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+        var before = coordinator.AddonQuickSettingsTabOrder.ToArray();
+
+        var result = await control.MoveAddonQuickSettingsTabAsync(new(AddonQuickSettingsTabId.Device, -1));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(before, result.State.Rows.Select(row => row.TabId));
+        Assert.Equal(before, coordinator.AddonQuickSettingsTabOrder);
+        Assert.Equal(0, invalidations);
+    }
+
+    [Fact]
+    public async Task Persistence_failure_returns_current_truth_without_invalidation()
+    {
+        var settingsPath = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(settingsPath);
+        var current = new[]
+        {
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
+        };
+        var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = current }, new SettingsStore(settingsPath), new FakeStartupManager());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        var result = await control.MoveAddonQuickSettingsTabAsync(new(AddonQuickSettingsTabId.Profile, -1));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Failed to save the tab order.", result.FailureMessage);
+        Assert.Equal(current, result.State.Rows.Select(row => row.TabId));
+        Assert.Equal(current, coordinator.AddonQuickSettingsTabOrder);
+        Assert.Equal(0, invalidations);
+    }
+
+    [Fact]
     public async Task Shutdown_barrier_rejects_page_capture_and_mutation()
     {
         var control = CreateControl(cpuBoostRuntime: null);

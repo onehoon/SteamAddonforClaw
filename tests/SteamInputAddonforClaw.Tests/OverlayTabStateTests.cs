@@ -148,36 +148,18 @@ public sealed class OverlayTabStateTests
     }
 
     [Fact]
-    public void TryCreateMovedOrderSwapsExactlyOneAdjacentPair()
-    {
-        var state = new OverlayTabState(); // Device, Profile, Controller, Shortcut, Setting
-
-        Assert.True(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Controller, -1, out var earlier));
-        Assert.Equal(new[] { AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting }, earlier);
-
-        Assert.True(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Controller, +1, out var later));
-        Assert.Equal(new[] { AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Setting }, later);
-
-        Assert.Equal(5, earlier.Distinct().Count());
-    }
-
-    [Fact]
-    public void TryCreateMovedOrderIsABoundedNoOpAtEitherEnd()
-    {
-        var state = new OverlayTabState();
-
-        Assert.False(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Device, -1, out _));   // first tab earlier
-        Assert.False(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Setting, +1, out _));  // last tab later
-        Assert.False(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Profile, 2, out _));   // delta must be +/-1
-    }
-
-    [Fact]
-    public void TryCreateMovedOrderDoesNotMutateTheCurrentOrder()
+    public void OverlayStateChangesOnlyWhenAuthoritativeOrderIsApplied()
     {
         var state = new OverlayTabState();
         state.Select(AddonQuickSettingsTabId.Setting);
-
-        Assert.True(state.TryCreateMovedOrder(AddonQuickSettingsTabId.Setting, -1, out var proposed));
+        IReadOnlyList<AddonQuickSettingsTabId> proposed =
+        [
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Setting,
+            AddonQuickSettingsTabId.Shortcut,
+        ];
 
         Assert.Equal(OverlayTabState.DefaultOrder, state.Order); // unchanged -- proposal only
         Assert.Equal(AddonQuickSettingsTabId.Setting, state.SelectedTab);

@@ -1210,6 +1210,58 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(AddonQuickSettingsShellContract.Create(_settings.AddonQuickSettingsTabOrder));
     }
 
+    public Task<AddonQuickSettingsTabOrderSnapshot> CaptureAddonQuickSettingsTabOrderAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(AddonQuickSettingsTabOrderProduct.Create(_settings.AddonQuickSettingsTabOrder));
+    }
+
+    public Task<AddonQuickSettingsTabOrderMutationResult> MoveAddonQuickSettingsTabAsync(
+        AddonQuickSettingsTabOrderMoveIntent intent,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var before = _settings.AddonQuickSettingsTabOrder;
+        if (!AddonQuickSettingsTabOrderProduct.TryCreateMovedOrder(before, intent, out var proposed))
+        {
+            return Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(
+                false,
+                "The requested tab-order move is not valid.",
+                AddonQuickSettingsTabOrderProduct.Create(before)));
+        }
+
+        try
+        {
+            if (!_settings.TryChangeAddonQuickSettingsTabOrder(proposed))
+            {
+                return Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(
+                    false,
+                    "The requested tab order was rejected.",
+                    AddonQuickSettingsTabOrderProduct.Create(_settings.AddonQuickSettingsTabOrder)));
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("QuickSettings", "Tab-order persistence failed; keeping the authoritative order.", exception);
+            return Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(
+                false,
+                "Failed to save the tab order.",
+                AddonQuickSettingsTabOrderProduct.Create(_settings.AddonQuickSettingsTabOrder)));
+        }
+
+        var after = _settings.AddonQuickSettingsTabOrder;
+        if (!before.SequenceEqual(after))
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+
+        return Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(
+            true,
+            null,
+            AddonQuickSettingsTabOrderProduct.Create(after)));
+    }
+
     public Task<FrontendCenterMStartupSnapshot> CaptureCenterMStartupAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
