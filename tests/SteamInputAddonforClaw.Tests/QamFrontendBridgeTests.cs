@@ -159,6 +159,24 @@ public sealed class QamFrontendBridgeTests
     }
 
     [Fact]
+    public async Task Shared_shortcut_capture_uses_the_static_contract_without_frontend_rpc()
+    {
+        var (bridge, fake, server) = await StartAsync(new(true, 480, FrontendSteamSource.Actual));
+        await using var _ = server;
+        await using var __ = bridge;
+
+        var response = await bridge.HandleRequestAsync(Request("captureQuickSettingsShortcut", new { }), CancellationToken.None);
+
+        Assert.True(response.Ok);
+        var snapshot = Assert.IsType<AddonQuickSettingsShortcutSnapshot>(response.Payload);
+        var expected = AddonQuickSettingsShortcutContract.Create();
+        Assert.Equal(expected.Available, snapshot.Available);
+        Assert.Equal(expected.Slots.Select(slot => (slot.SlotId, slot.Label, slot.StatusLabel)),
+            snapshot.Slots.Select(slot => (slot.SlotId, slot.Label, slot.StatusLabel)));
+        Assert.Equal(0, fake.CaptureShellCount);
+    }
+
+    [Fact]
     public async Task Shared_tab_order_capture_round_trips_once_without_qam_admission()
     {
         var (bridge, fake, server) = await StartAsync(new(true, 480, FrontendSteamSource.Actual));

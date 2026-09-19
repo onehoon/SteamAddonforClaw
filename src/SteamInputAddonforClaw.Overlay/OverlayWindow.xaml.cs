@@ -79,7 +79,7 @@ public sealed partial class OverlayWindow : Window
 
     // OQ5-UI-11: the fixed 2x2 Shortcut grid -- one pure selection model + the four tile borders.
     private readonly OverlayShortcutSelection _shortcutSelection = new();
-    private readonly Dictionary<OverlayShortcutSlotId, Border> _shortcutTiles = new();
+    private readonly Dictionary<AddonQuickSettingsShortcutSlotId, Border> _shortcutTiles = new();
 
     // SF-V2-07/09: the Device and Profile pages' generic Quick Settings renderer state, one surface
     // per PageId. Each surface's Binding is configured once App has a transport client
@@ -621,21 +621,16 @@ public sealed partial class OverlayWindow : Window
             },
         };
 
-        var slots = new (OverlayShortcutSlotId Id, string Label, int Row, int Column)[]
+        var shortcut = AddonQuickSettingsShortcutContract.Create();
+        foreach (var (slot, index) in shortcut.Slots.Select((slot, index) => (slot, index)))
         {
-            (OverlayShortcutSlotId.Slot1, "Slot 1", 0, 0),
-            (OverlayShortcutSlotId.Slot2, "Slot 2", 0, 1),
-            (OverlayShortcutSlotId.Slot3, "Slot 3", 1, 0),
-            (OverlayShortcutSlotId.Slot4, "Slot 4", 1, 1),
-        };
-
-        foreach (var (id, label, row, column) in slots)
-        {
-            var title = new TextBlock { Text = label };
+            var row = index / 2;
+            var column = index % 2;
+            var title = new TextBlock { Text = slot.Label };
             if (Application.Current.Resources.TryGetValue("BodyStrongTextBlockStyle", out var titleStyle) && titleStyle is Style ts)
                 title.Style = ts;
 
-            var state = new TextBlock { Text = "Unassigned", Opacity = 0.6 };
+            var state = new TextBlock { Text = slot.StatusLabel, Opacity = 0.6 };
             if (Application.Current.Resources.TryGetValue("CaptionTextBlockStyle", out var stateStyle) && stateStyle is Style ss)
                 state.Style = ss;
 
@@ -655,18 +650,18 @@ public sealed partial class OverlayWindow : Window
             };
             if (Application.Current.Resources.TryGetValue("CardBackgroundFillColorDefaultBrush", out var fill) && fill is Brush fillBrush)
                 tile.Background = fillBrush;
-            tile.Tapped += (_, _) => SelectShortcutSlot(id, "Pointer");
+            tile.Tapped += (_, _) => SelectShortcutSlot(slot.SlotId, "Pointer");
             Grid.SetRow(tile, row);
             Grid.SetColumn(tile, column);
             grid.Children.Add(tile);
-            _shortcutTiles[id] = tile;
+            _shortcutTiles[slot.SlotId] = tile;
         }
 
         ApplyShortcutSelectionVisual();
         return grid;
     }
 
-    private void SelectShortcutSlot(OverlayShortcutSlotId slot, string source)
+    private void SelectShortcutSlot(AddonQuickSettingsShortcutSlotId slot, string source)
     {
         if (!_shortcutSelection.Select(slot)) return;
         OverlayLog.Debug("Shortcut", "Shortcut tile selected.", ("Slot", slot), ("Source", source));

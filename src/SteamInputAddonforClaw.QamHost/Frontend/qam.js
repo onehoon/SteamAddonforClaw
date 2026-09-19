@@ -60,6 +60,19 @@
     AQS_TAB_SETTING,
   ]);
 
+  // Shared Shortcut ABI identities. Labels, status text, and payload order remain owned by the
+  // compiled Contracts product definition returned by the bridge.
+  const AQS_SHORTCUT_SLOT_1 = 0;
+  const AQS_SHORTCUT_SLOT_2 = 1;
+  const AQS_SHORTCUT_SLOT_3 = 2;
+  const AQS_SHORTCUT_SLOT_4 = 3;
+  const KNOWN_AQS_SHORTCUT_SLOT_IDS = new Set([
+    AQS_SHORTCUT_SLOT_1,
+    AQS_SHORTCUT_SLOT_2,
+    AQS_SHORTCUT_SLOT_3,
+    AQS_SHORTCUT_SLOT_4,
+  ]);
+
   function log(message) {
     console.log("[SteamInputAddon:QAM] " + message);
   }
@@ -463,7 +476,6 @@
       case AQS_TAB_PROFILE:
         return React.createElement(QuickSettingsPanel, { pageId: QS_PAGE_PROFILE });
       case AQS_TAB_CONTROLLER:
-      case AQS_TAB_SHORTCUT:
         return React.createElement(
           native.PanelSection,
           { title: tab.label },
@@ -471,11 +483,70 @@
             native.PanelSectionRow,
             null,
              React.createElement("p", null, "This page is not available in QAM yet.")));
+      case AQS_TAB_SHORTCUT:
+        return React.createElement(QuickSettingsShortcutPanel, { React, native, title: tab.label });
       case AQS_TAB_SETTING:
         return React.createElement(SettingTabOrderPanel, settingProps);
       default:
         return null;
     }
+  }
+
+  function validateQuickSettingsShortcut(snapshot) {
+    if (snapshot?.available !== true || !Array.isArray(snapshot.slots) || snapshot.slots.length !== 4)
+      return null;
+    const seen = new Set();
+    for (const slot of snapshot.slots) {
+      if (!KNOWN_AQS_SHORTCUT_SLOT_IDS.has(slot?.slotId) || seen.has(slot.slotId) ||
+          typeof slot.label !== "string" || slot.label.length === 0 ||
+          typeof slot.statusLabel !== "string" || slot.statusLabel.length === 0)
+        return null;
+      seen.add(slot.slotId);
+    }
+    return snapshot.slots;
+  }
+
+  function QuickSettingsShortcutPanel({ React, native, title }) {
+    const [slots, setSlots] = React.useState(null);
+    const [error, setError] = React.useState(null);
+
+    React.useEffect(() => {
+      let active = true;
+      (async () => {
+        try {
+          const snapshot = await request("captureQuickSettingsShortcut");
+          const nextSlots = validateQuickSettingsShortcut(snapshot);
+          if (!nextSlots) throw new Error("Invalid Shortcut state.");
+          if (active) {
+            setSlots(nextSlots);
+            setError(null);
+          }
+        } catch (_) {
+          if (active) {
+            setSlots(null);
+            setError("Shortcut is unavailable.");
+          }
+        }
+      })();
+      return () => { active = false; };
+    }, []);
+
+    if (!slots) {
+      return React.createElement(
+        native.PanelSection,
+        { title },
+        React.createElement(native.PanelSectionRow, null,
+          React.createElement("p", null, error || "Loading Shortcut...")));
+    }
+
+    return React.createElement(
+      native.PanelSection,
+      { title },
+      ...slots.map(slot => React.createElement(
+        native.PanelSectionRow,
+        { key: `shortcut-${slot.slotId}` },
+        React.createElement("p", null, slot.label),
+        React.createElement("p", null, slot.statusLabel))));
   }
 
   function SettingTabOrderPanel({ tabOrderState, busy, error, onMove }) {

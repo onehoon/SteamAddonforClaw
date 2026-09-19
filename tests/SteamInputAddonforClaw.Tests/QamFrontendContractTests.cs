@@ -84,6 +84,7 @@ public sealed class QamFrontendContractTests
         // SF-V2-05/08 plus shared-surface PR1: the bridge exposes only the closed shell read seam
         // and the Device/Profile generic page/mutation allow-list.
         Assert.Contains("\"captureQuickSettingsShell\" => await _client.CaptureAddonQuickSettingsShellAsync(token),", bridge);
+        Assert.Contains("\"captureQuickSettingsShortcut\" => AddonQuickSettingsShortcutContract.Create(),", bridge);
         Assert.Contains("\"captureQuickSettingsPage\" => await CaptureQuickSettingsPageAsync(root, token),", bridge);
         Assert.Contains("\"mutateQuickSetting\" => await MutateQuickSettingAsync(root, token),", bridge);
         Assert.Contains("case QuickSettingsPageId.Device:", bridge);
@@ -539,6 +540,52 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("[\"Device\", \"Profile\", \"Controller\", \"Shortcut\", \"Setting\"]", source);
         Assert.DoesNotContain("QuickSettingsPageId", source);
         Assert.Contains("This page is not available in QAM yet.", source);
+    }
+
+    [Fact]
+    public void Qam_shortcut_is_a_feature_local_read_only_shared_payload_renderer()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var inner = source[source.IndexOf("function buildInnerTabContent", StringComparison.Ordinal)..source.IndexOf("function SettingTabOrderPanel", StringComparison.Ordinal)];
+        var shortcut = source[source.IndexOf("function validateQuickSettingsShortcut", StringComparison.Ordinal)..source.IndexOf("function preservePatchedFunctionShape", StringComparison.Ordinal)];
+
+        Assert.Contains("case AQS_TAB_SHORTCUT:", inner);
+        Assert.Contains("QuickSettingsShortcutPanel", inner);
+        Assert.Contains("request(\"captureQuickSettingsShortcut\")", shortcut);
+        Assert.Contains("validateQuickSettingsShortcut(snapshot)", shortcut);
+        Assert.Contains("snapshot.slots.length !== 4", shortcut);
+        Assert.Contains("KNOWN_AQS_SHORTCUT_SLOT_IDS.has(slot?.slotId)", shortcut);
+        Assert.Contains("slot.label", shortcut);
+        Assert.Contains("slot.statusLabel", shortcut);
+        Assert.Contains("slots.map(slot =>", shortcut);
+        Assert.Contains("native.PanelSection", shortcut);
+        Assert.Contains("native.PanelSectionRow", shortcut);
+        Assert.DoesNotContain("onClick", shortcut);
+        Assert.DoesNotContain("ButtonItem", source);
+        Assert.DoesNotContain("DialogButton", source);
+        Assert.DoesNotContain("setInterval", shortcut);
+        Assert.DoesNotContain("captureQuickSettingsShortcut", source[source.IndexOf("function AddonQuickSettingsPanel", StringComparison.Ordinal)..]);
+        Assert.Contains("case AQS_TAB_CONTROLLER:", inner);
+        Assert.Contains("This page is not available in QAM yet.", inner);
+    }
+
+    [Fact]
+    public void Overlay_shortcut_renderer_consumes_the_shared_contract_but_keeps_local_geometry()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+        var pageStart = source.IndexOf("private FrameworkElement BuildShortcutPage()", StringComparison.Ordinal);
+        var pageEnd = source.IndexOf("private void SelectShortcutSlot", pageStart, StringComparison.Ordinal);
+        Assert.True(pageStart >= 0 && pageEnd > pageStart);
+        var page = source[pageStart..pageEnd];
+
+        Assert.Contains("AddonQuickSettingsShortcutContract.Create()", page);
+        Assert.Contains("slot.Label", page);
+        Assert.Contains("slot.StatusLabel", page);
+        Assert.DoesNotContain("OverlayShortcutSlotId", source);
+        Assert.DoesNotContain("(\"Slot 1\"", page);
+        Assert.DoesNotContain("\"Unassigned\"", page);
+        Assert.Contains("index / 2", page);
+        Assert.Contains("index % 2", page);
     }
 
     [Fact]

@@ -1,14 +1,6 @@
-namespace SteamInputAddonforClaw.Overlay;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
-// OQ5-UI-11: the four fixed Shortcut slots. Local to the Overlay project -- if OQ5-UI-12 needs a
-// shared persisted/wire identity it can promote this then.
-internal enum OverlayShortcutSlotId
-{
-    Slot1,
-    Slot2,
-    Slot3,
-    Slot4,
-}
+namespace SteamInputAddonforClaw.Overlay;
 
 // OQ5-UI-11: pure selection state for the fixed 2x2 Shortcut grid. Not a navigation-graph framework
 // -- the geometry is small and fixed, so it is expressed directly. Bounded / no-wrap; each move
@@ -18,12 +10,12 @@ internal enum OverlayShortcutSlotId
 //   Slot3 (1,0)  Slot4 (1,1)
 internal sealed class OverlayShortcutSelection
 {
-    internal OverlayShortcutSlotId SelectedSlot { get; private set; } = OverlayShortcutSlotId.Slot1;
+    internal AddonQuickSettingsShortcutSlotId SelectedSlot { get; private set; } = AddonQuickSettingsShortcutSlotId.Slot1;
 
     // Entering the Shortcut tab always starts on Slot 1 (matches "entering a page selects its first item").
-    internal void Reset() => SelectedSlot = OverlayShortcutSlotId.Slot1;
+    internal void Reset() => SelectedSlot = AddonQuickSettingsShortcutSlotId.Slot1;
 
-    internal bool Select(OverlayShortcutSlotId slot)
+    internal bool Select(AddonQuickSettingsShortcutSlotId slot)
     {
         if (slot == SelectedSlot)
             return false;
@@ -51,20 +43,20 @@ internal sealed class OverlayShortcutSelection
         return true;
     }
 
-    private static (int Row, int Column) PositionOf(OverlayShortcutSlotId slot) => slot switch
+    private static (int Row, int Column) PositionOf(AddonQuickSettingsShortcutSlotId slot) => slot switch
     {
-        OverlayShortcutSlotId.Slot1 => (0, 0),
-        OverlayShortcutSlotId.Slot2 => (0, 1),
-        OverlayShortcutSlotId.Slot3 => (1, 0),
-        OverlayShortcutSlotId.Slot4 => (1, 1),
+        AddonQuickSettingsShortcutSlotId.Slot1 => (0, 0),
+        AddonQuickSettingsShortcutSlotId.Slot2 => (0, 1),
+        AddonQuickSettingsShortcutSlotId.Slot3 => (1, 0),
+        AddonQuickSettingsShortcutSlotId.Slot4 => (1, 1),
         _ => (0, 0),
     };
 
-    private static OverlayShortcutSlotId SlotAt(int row, int column) => (row, column) switch
+    private static AddonQuickSettingsShortcutSlotId SlotAt(int row, int column) => (row, column) switch
     {
-        (0, 0) => OverlayShortcutSlotId.Slot1,
-        (0, 1) => OverlayShortcutSlotId.Slot2,
-        (1, 0) => OverlayShortcutSlotId.Slot3,
-        _ => OverlayShortcutSlotId.Slot4,
+        (0, 0) => AddonQuickSettingsShortcutSlotId.Slot1,
+        (0, 1) => AddonQuickSettingsShortcutSlotId.Slot2,
+        (1, 0) => AddonQuickSettingsShortcutSlotId.Slot3,
+        _ => AddonQuickSettingsShortcutSlotId.Slot4,
     };
 }
