@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Velopack;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Updates;
 using Xunit;
 
@@ -78,6 +79,52 @@ public sealed class VelopackUpdateClientTests
         var client = new VelopackUpdateClient(operations);
 
         Assert.False(client.TrySchedulePendingUpdateApply(["--background"]));
+    }
+
+    [Fact]
+    public async Task Main_ui_install_requests_a_safe_restart_after_the_response_without_applying_updates_in_runtime()
+    {
+        var operations = new FakeOperations
+        {
+            PendingUpdate = UninitializedAsset(),
+            CheckResult = null
+        };
+        var client = new VelopackUpdateClient(operations);
+        var restartRequests = 0;
+        var coordinator = new FrontendUpdateCoordinator(client, () =>
+        {
+            restartRequests++;
+            return true;
+        });
+
+        var checkedSnapshot = await coordinator.CheckAndDownloadAsync(CancellationToken.None);
+        Assert.Equal(FrontendUpdateState.ReadyToInstall, checkedSnapshot.State);
+
+        var result = await coordinator.InstallAsync(CancellationToken.None);
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, restartRequests);
+        Assert.Equal(0, operations.ApplyCount);
+
+        await coordinator.CompleteInstallAfterResponseAsync();
+
+        Assert.Equal(1, restartRequests);
+        Assert.Equal(0, operations.ApplyCount);
+    }
+
+    [Fact]
+    public async Task Main_ui_install_surfaces_restart_failure_without_applying_the_pending_update()
+    {
+        var operations = new FakeOperations { PendingUpdate = UninitializedAsset() };
+        var coordinator = new FrontendUpdateCoordinator(new VelopackUpdateClient(operations), () => false);
+
+        var result = await coordinator.InstallAsync(CancellationToken.None);
+        Assert.True(result.Succeeded);
+
+        await coordinator.CompleteInstallAfterResponseAsync();
+
+        Assert.Equal(FrontendUpdateState.ReadyToInstall, coordinator.Capture().State);
+        Assert.Contains("could not be restarted", coordinator.Capture().Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, operations.ApplyCount);
     }
 
     [Fact]

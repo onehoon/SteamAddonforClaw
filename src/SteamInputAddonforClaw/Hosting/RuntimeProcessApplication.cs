@@ -12,6 +12,7 @@ internal sealed class RuntimeProcessApplication
     private AddonProcessHost? _processHost;
     private NativeMessageLoop? _messageLoop;
     private int _shutdownRequested;
+    private int _restartRequestAccepted;
 
     internal RuntimeProcessApplication(string[] arguments, SingleInstanceGate singleInstanceGate)
     {
@@ -24,6 +25,7 @@ internal sealed class RuntimeProcessApplication
         AppLog.Info("Runtime", "True-headless Runtime shell entered.", ("LaunchMode", _shouldLaunchFrontend ? "Manual" : "Background"));
         _messageLoop = new NativeMessageLoop();
         _processHost = new AddonProcessHost();
+        _processHost.SetRestartRequest(TryRequestRestart);
         _singleInstanceGate.RegisterActivation(() => _processHost?.RequestFrontendOpen(FrontendOpenReason.RuntimeActivation));
         _singleInstanceGate.RegisterUninstallRequest(RequestExitForUninstall);
         if (_shouldLaunchFrontend)
@@ -110,6 +112,7 @@ internal sealed class RuntimeProcessApplication
             if (Process.Start(restartInfo) is null)
                 throw new InvalidOperationException("Process.Start returned no replacement process.");
 
+            Interlocked.Increment(ref _restartRequestAccepted);
             AppLog.Info("Lifecycle", "Restart request accepted.");
             BeginShutdownAndRequestLoopExit();
         }
@@ -117,6 +120,13 @@ internal sealed class RuntimeProcessApplication
         {
             AppLog.Error("Lifecycle", "Application restart could not be started.", exception);
         }
+    }
+
+    private bool TryRequestRestart()
+    {
+        var before = Volatile.Read(ref _restartRequestAccepted);
+        RequestRestart();
+        return Volatile.Read(ref _restartRequestAccepted) != before;
     }
 
     private void BeginShutdownAndRequestLoopExit()

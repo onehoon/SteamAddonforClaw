@@ -372,12 +372,37 @@ public sealed record FrontendStatusSnapshot(
     string SetupReason,
     bool CanInstallRequiredComponents);
 
+public enum FrontendUpdateState { Unavailable, Idle, Checking, UpToDate, ReadyToInstall, Installing, Failed }
+
+public sealed record FrontendUpdateSnapshot(FrontendUpdateState State, string Message)
+{
+    public static readonly FrontendUpdateSnapshot Unavailable = new(FrontendUpdateState.Unavailable, "Updates are unavailable in this installation.");
+    public bool CanCheck => State is FrontendUpdateState.Idle or FrontendUpdateState.UpToDate or FrontendUpdateState.Failed;
+    public bool CanInstall => State == FrontendUpdateState.ReadyToInstall;
+}
+
+public enum FrontendUpdateInstallOutcome { Scheduled, NoUpdateReady, Unavailable, Failed }
+
+public sealed record FrontendUpdateInstallResult(
+    FrontendUpdateInstallOutcome Outcome,
+    FrontendUpdateSnapshot Snapshot,
+    string? FailureMessage)
+{
+    public bool Succeeded => Outcome == FrontendUpdateInstallOutcome.Scheduled;
+}
+
 public interface IAddonFrontendControl
 {
     event EventHandler? StateInvalidated;
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);
+    Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendUpdateSnapshot.Unavailable);
+    Task<FrontendUpdateSnapshot> CheckAndDownloadAppUpdateAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendUpdateSnapshot.Unavailable);
+    Task<FrontendUpdateInstallResult> InstallAppUpdateAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendUpdateInstallResult(FrontendUpdateInstallOutcome.Unavailable, FrontendUpdateSnapshot.Unavailable, "Updates are unavailable in this installation."));
     /// <summary>Persists the COMPLETE new front-button mapping (both buttons, both domains --
     /// four bindings). Whole-record, not per-binding: the cross-button same-domain uniqueness rule
     /// belongs to one whole mapping. An invalid candidate is rejected by the settings layer and the

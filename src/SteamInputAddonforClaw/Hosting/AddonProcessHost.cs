@@ -56,7 +56,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly QamHostProcessController _qamHostController;
     private readonly OverlayProcessController _overlayController;
-    private SilentUpdateService? _backgroundUpdateService;
+    private FrontendUpdateCoordinator? _updateCoordinator;
+    private Func<bool>? _requestRestart;
     // OQ3-A: one narrow cross-surface ordering gate so a normal user request cannot run the two
     // opposite Main UI <-> Overlay visibility transitions at the same time. Not a surface manager.
     private readonly SemaphoreSlim _visibleSurfaceTransition = new(1, 1);
@@ -162,6 +163,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
     internal IAddonFrontendControl FrontendControl => _frontendControl ?? throw new InvalidOperationException("Frontend control has not been initialized.");
+
+    internal void SetRestartRequest(Func<bool> requestRestart) => _requestRestart = requestRestart ?? throw new ArgumentNullException(nameof(requestRestart));
 
     internal void TestOnly_SetStartupForInitialization(AddonStartupComposition composition, StartupResult result)
     {
@@ -379,6 +382,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // Full1902 Cleanup I: the Developer Test toggle is disconnected UI-only state. No controller /
         // presentation / Steam owner consumes it -- this standalone instance exists only so the
         // frontend RPC and FrontendDeveloperSnapshot(TestModeEnabled) stay coherent.
+        if (_runtimeCompositionFactory is null)
+            _updateCoordinator = new FrontendUpdateCoordinator(new VelopackUpdateClient(),
+                () => _requestRestart?.Invoke() == true);
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, new SteamInputAddonforClaw.Developer.DeveloperTestModeState(),
             // Same single startup hardware-support result the routing composition's OEM1 gate above
@@ -395,9 +401,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // MSI Center M startup Enable/Disable (work order PR1). The one shared reader -- also
             // consulted by the mandatory Runtime termination / launch-at-startup policy (PR2.5).
             centerMStartup: _centerMStartupControl,
-            centerMAuthorityTransition: centerMAuthorityTransition);
+            centerMAuthorityTransition: centerMAuthorityTransition,
+            updateCoordinator: _updateCoordinator);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
+        _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
 
         // Full1902 Policy B review [BLOCKER]: the whole Disabled-mode controller startup sequence
@@ -1175,34 +1183,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return;
 
         var cancellationToken = _startupCancellationTokenSource.Token;
-        _backgroundUpdateService ??= new SilentUpdateService(new VelopackUpdateClient());
-        AppLog.Info("Update", "Update.BackgroundCheckStarted", ("Action", "CheckAndDownload"));
-        _backgroundUpdateTask = RunBackgroundUpdateAsync(cancellationToken);
-    }
-
-    private async Task RunBackgroundUpdateAsync(CancellationToken cancellationToken)
-    {
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        using var timeoutCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCancellationTokenSource.CancelAfter(TimeSpan.FromMinutes(2));
-        try
-        {
-            await _backgroundUpdateService!.CheckAndDownloadAsync(timeoutCancellationTokenSource.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            AppLog.Debug("Update", "Background update operation canceled during Runtime shutdown.", ("ElapsedMs", stopwatch.ElapsedMilliseconds));
-        }
-        catch (OperationCanceledException exception)
-        {
-            AppLog.Warn("Update", "Update.BackgroundCheckFailed", exception,
-                ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("ExceptionType", exception.GetType().Name), ("Action", "Continue"));
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Update", "Update.BackgroundCheckFailed", exception,
-                ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("ExceptionType", exception.GetType().Name), ("Action", "Continue"));
-        }
+        _backgroundUpdateTask = _updateCoordinator?.StartBackgroundAsync(cancellationToken);
     }
 
     /// <summary>

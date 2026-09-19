@@ -24,6 +24,8 @@ internal sealed class VelopackUpdateClient : IUpdateClient
 
     public bool IsInstalled => _operations.IsInstalled;
 
+    internal bool HasPendingUpdate => _operations.IsInstalled && _operations.UpdatePendingRestart is not null;
+
     internal bool TrySchedulePendingUpdateApply(string[]? restartArguments)
     {
         if (!_operations.IsInstalled)

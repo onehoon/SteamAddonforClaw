@@ -58,7 +58,7 @@ public sealed partial class MainWindow : Window
         ApplyDefaultWindowSize();
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
-        SettingsContent.Initialize(_bootstrap);
+        SettingsContent.Initialize(_bootstrap, _frontend);
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
         ControllerContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
@@ -89,7 +89,11 @@ public sealed partial class MainWindow : Window
         _ = RefreshSystemStatusAsync();
     }
 
-    private void OnFrontendStateInvalidated(object? sender, EventArgs args) => RequestStatusRefresh();
+    private void OnFrontendStateInvalidated(object? sender, EventArgs args)
+    {
+        RequestStatusRefresh();
+        SettingsContent.RequestAppUpdateRefresh();
+    }
 
     private void OnWindowClosed(object sender, WindowEventArgs args) => _frontend.StateInvalidated -= OnFrontendStateInvalidated;
 

@@ -8,6 +8,9 @@ namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class SettingsPage : UserControl
 {
+    private IAddonFrontendControl? _frontend;
+    private FrontendUpdateSnapshot _updateSnapshot = FrontendUpdateSnapshot.Unavailable;
+    private int _updateOperationInProgress;
     public event EventHandler? DeveloperMenuRequested;
 
     public SettingsPage()
@@ -15,9 +18,56 @@ public sealed partial class SettingsPage : UserControl
         InitializeComponent();
     }
 
-    internal void Initialize(FrontendBootstrapSnapshot bootstrap)
+    internal void Initialize(FrontendBootstrapSnapshot bootstrap, IAddonFrontendControl frontend)
     {
+        _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
+        _ = RefreshAppUpdateAsync();
+    }
+
+    internal void RequestAppUpdateRefresh() => _ = RefreshAppUpdateAsync();
+
+    private async Task RefreshAppUpdateAsync()
+    {
+        if (_frontend is null || Volatile.Read(ref _updateOperationInProgress) != 0) return;
+        try { RenderAppUpdate(await _frontend.CaptureAppUpdateAsync().ConfigureAwait(true)); }
+        catch (Exception exception) { AppLog.Warn("Update", "Main UI update state refresh failed.", exception); }
+    }
+
+    private void RenderAppUpdate(FrontendUpdateSnapshot snapshot)
+    {
+        _updateSnapshot = snapshot;
+        UpdateCard.Description = snapshot.Message;
+        UpdateButton.Content = snapshot.CanInstall ? "Install update" : "Check";
+        UpdateButton.IsEnabled = snapshot.CanCheck || snapshot.CanInstall;
+    }
+
+    private async void UpdateButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_frontend is null || Interlocked.Exchange(ref _updateOperationInProgress, 1) != 0) return;
+        try
+        {
+            if (_updateSnapshot.CanInstall)
+            {
+                var result = await _frontend.InstallAppUpdateAsync();
+                RenderAppUpdate(result.Snapshot);
+                if (!result.Succeeded && result.FailureMessage is not null)
+                    UpdateCard.Description = result.FailureMessage;
+                return;
+            }
+
+            RenderAppUpdate(new(FrontendUpdateState.Checking, "Checking for updates…"));
+            RenderAppUpdate(await _frontend.CheckAndDownloadAppUpdateAsync().ConfigureAwait(true));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Update", "Main UI update action failed.", exception);
+            RenderAppUpdate(new(FrontendUpdateState.Failed, "The update operation failed. Try again."));
+        }
+        finally
+        {
+            Volatile.Write(ref _updateOperationInProgress, 0);
+        }
     }
 
     /// <summary>Renders the read-only Required Components list (moved here from the Status page) from
