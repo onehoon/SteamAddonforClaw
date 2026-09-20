@@ -282,6 +282,90 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_width_class_discovery_uses_unique_semantic_quick_access_keys_and_fails_open()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var start = source.IndexOf("function findQuickAccessMenuClasses", StringComparison.Ordinal);
+        var end = source.IndexOf("function findNativeQamComponents", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var discovery = source[start..end];
+
+        Assert.Contains("candidate.Title", discovery);
+        Assert.Contains("candidate.QuickAccessMenu", discovery);
+        Assert.Contains("candidate.BatteryDetailsLabels", discovery);
+        Assert.Contains("candidate.PanelOuterNav", discovery);
+        Assert.Contains("unique.length !== 1", discovery);
+        Assert.Contains("return null", discovery);
+        Assert.DoesNotContain("quickaccessmenu_PanelOuterNav_2BB6u", source);
+    }
+
+    [Fact]
+    public void Qam_width_selection_wraps_the_verified_menu_store_before_native_selection()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var hookStart = source.IndexOf("function installAddonQamWidthSelectionHook", StringComparison.Ordinal);
+        var hookEnd = source.IndexOf("function uninstallAddonQamWidthSelectionHook", hookStart, StringComparison.Ordinal);
+        Assert.True(hookStart >= 0 && hookEnd > hookStart);
+        var hook = source[hookStart..hookEnd];
+
+        Assert.Contains("const previous = state.addonQamWidthActive === true", hook);
+        Assert.Contains("state.addonQamWidthActive = key === ADDON_TAB_KEY", hook);
+        Assert.Contains("return original.apply(this, [key, ...args]);", hook);
+        Assert.Contains("state.addonQamWidthActive = previous", hook);
+        Assert.Contains("hadOwn", hook);
+        Assert.True(hook.IndexOf("state.addonQamWidthActive = key === ADDON_TAB_KEY", StringComparison.Ordinal) < hook.IndexOf("original.apply", StringComparison.Ordinal));
+
+        var insertionStart = source.IndexOf("function ensureAddonTabs", StringComparison.Ordinal);
+        var insertionEnd = source.IndexOf("function preservePatchedFunctionShape", insertionStart, StringComparison.Ordinal);
+        var insertion = source[insertionStart..insertionEnd];
+        Assert.True(insertion.IndexOf("installAddonQamWidthSelectionHook();", StringComparison.Ordinal) < insertion.IndexOf("tryConsumeAddonSelectionRequest();", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Qam_width_patch_targets_only_panel_outer_nav_and_restores_original_style()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        Assert.Contains("const ADDON_QAM_WIDTH_PX = 400;", source);
+        var start = source.IndexOf("function applyAddonQamWidth", StringComparison.Ordinal);
+        var end = source.IndexOf("function findTabsPropOwner", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var width = source[start..end];
+
+        Assert.Contains("PanelOuterNav", width);
+        Assert.Contains("state.qamWidthOriginalStyles ??= new WeakMap();", width);
+        Assert.Contains("width: `${ADDON_QAM_WIDTH_PX}px`", width);
+        Assert.Contains("maxWidth: `${ADDON_QAM_WIDTH_PX}px`", width);
+        Assert.Contains("state.qamWidthOriginalStyles.get(target)", width);
+        Assert.Contains("state.qamWidthOriginalStyles.delete(target)", width);
+        Assert.DoesNotContain("height:", width);
+        Assert.DoesNotContain("margin:", width);
+        Assert.DoesNotContain("MutationObserver", width);
+        Assert.DoesNotContain("setInterval", width);
+    }
+
+    [Fact]
+    public void Qam_width_cleanup_is_conservative_and_generation_local()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var cleanupStart = source.IndexOf("function uninstallAddonQamWidthSelectionHook", StringComparison.Ordinal);
+        var cleanupEnd = source.IndexOf("function requestAddonSelectionOnNextQuickAccessOpen", cleanupStart, StringComparison.Ordinal);
+        Assert.True(cleanupStart >= 0 && cleanupEnd > cleanupStart);
+        var cleanup = source[cleanupStart..cleanupEnd];
+
+        Assert.Contains("state.qamWidthSelectionPatch = null", cleanup);
+        Assert.Contains("state.addonQamWidthActive = false", cleanup);
+        Assert.Contains("patch.menuStore.OpenQuickAccessMenu !== patch.wrapped", cleanup);
+        Assert.Contains("patch.menuStore.OpenQuickAccessMenu = patch.original", cleanup);
+        Assert.Contains("delete patch.menuStore.OpenQuickAccessMenu", cleanup);
+
+        var installStart = source.IndexOf("function install()", StringComparison.Ordinal);
+        var install = source[installStart..source.IndexOf("const webpackRequire", installStart, StringComparison.Ordinal)];
+        Assert.Contains("state.qamWidthClassNames = null", install);
+        Assert.Contains("state.qamWidthSelectionPatch = null", install);
+        Assert.Contains("state.qamWidthOriginalStyles = new WeakMap()", install);
+    }
+
+    [Fact]
     public void Qam_invalidation_subscribers_are_shared_but_each_panel_owns_its_refresh_and_pending_context()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
