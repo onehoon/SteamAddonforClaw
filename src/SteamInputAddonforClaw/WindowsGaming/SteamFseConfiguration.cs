@@ -18,6 +18,18 @@ internal interface ISteamFsePackageProbe
     bool TryRemoveOwnedPackage();
 }
 
+internal sealed record SteamFsePackageInfo(
+    string IdentityName,
+    string FamilyName,
+    string FullName,
+    Version Version);
+
+internal interface ISteamFsePackageEnumeration
+{
+    IReadOnlyList<SteamFsePackageInfo> FindCurrentUserPackages();
+    void RemovePackage(string fullName);
+}
+
 internal interface IGamingConfigurationStore
 {
     string? ReadGamingHomeApp();
@@ -59,6 +71,10 @@ internal sealed class WindowsSteamFsePackageProbe : ISteamFsePackageProbe
 {
     internal const string PackageIdentityName = "SteamInputAddonforClaw.FseHome";
     internal const string ApplicationId = "App";
+    private readonly ISteamFsePackageEnumeration _packageEnumeration;
+
+    internal WindowsSteamFsePackageProbe(ISteamFsePackageEnumeration? packageEnumeration = null) =>
+        _packageEnumeration = packageEnumeration ?? new WindowsSteamFsePackageEnumeration();
 
     public string? TryGetOwnedAumid()
     {
@@ -66,8 +82,8 @@ internal sealed class WindowsSteamFsePackageProbe : ISteamFsePackageProbe
 
         try
         {
-            var package = FindOwnedPackages().OrderByDescending(item => item.Id.Version).FirstOrDefault();
-            return package is null ? null : $"{package.Id.FamilyName}!{ApplicationId}";
+            var package = FindOwnedPackages().OrderByDescending(item => item.Version).FirstOrDefault();
+            return package is null ? null : $"{package.FamilyName}!{ApplicationId}";
         }
         catch (Exception exception)
         {
@@ -83,9 +99,8 @@ internal sealed class WindowsSteamFsePackageProbe : ISteamFsePackageProbe
 
         try
         {
-            var manager = new PackageManager();
-            foreach (var package in FindOwnedPackages(manager))
-                manager.RemovePackageAsync(package.Id.FullName).AsTask().GetAwaiter().GetResult();
+            foreach (var package in FindOwnedPackages())
+                _packageEnumeration.RemovePackage(package.FullName);
             return true;
         }
         catch (Exception exception)
@@ -96,11 +111,26 @@ internal sealed class WindowsSteamFsePackageProbe : ISteamFsePackageProbe
         }
     }
 
-    private static IEnumerable<Windows.ApplicationModel.Package> FindOwnedPackages()
-        => FindOwnedPackages(new PackageManager());
+    private IEnumerable<SteamFsePackageInfo> FindOwnedPackages() =>
+        _packageEnumeration.FindCurrentUserPackages()
+            .Where(package => string.Equals(package.IdentityName, PackageIdentityName, StringComparison.Ordinal));
 
-    private static IEnumerable<Windows.ApplicationModel.Package> FindOwnedPackages(PackageManager manager)
-        => manager.FindPackagesForUser(string.Empty, PackageIdentityName);
+}
+
+internal sealed class WindowsSteamFsePackageEnumeration : ISteamFsePackageEnumeration
+{
+    public IReadOnlyList<SteamFsePackageInfo> FindCurrentUserPackages() =>
+        new PackageManager()
+            .FindPackagesForUser(string.Empty)
+            .Select(package => new SteamFsePackageInfo(
+                package.Id.Name,
+                package.Id.FamilyName,
+                package.Id.FullName,
+                new Version(package.Id.Version.Major, package.Id.Version.Minor, package.Id.Version.Build, package.Id.Version.Revision)))
+            .ToArray();
+
+    public void RemovePackage(string fullName) =>
+        new PackageManager().RemovePackageAsync(fullName).AsTask().GetAwaiter().GetResult();
 }
 
 internal sealed class WindowsGamingConfigurationStore : IGamingConfigurationStore

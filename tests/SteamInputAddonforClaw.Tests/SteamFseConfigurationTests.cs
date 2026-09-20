@@ -87,6 +87,27 @@ public sealed class SteamFseConfigurationTests
         Assert.Equal(1, package.RemoveCalls);
     }
 
+    [Fact]
+    public void Package_probe_matches_identity_name_but_derives_aumid_from_family_name()
+    {
+        var owned = new SteamFsePackageInfo(
+            WindowsSteamFsePackageProbe.PackageIdentityName,
+            "SteamInputAddonforClaw.FseHome_realPublisher_abc",
+            "SteamInputAddonforClaw.FseHome_realPublisher_abc_1.0.0.0_x64__full",
+            new Version(1, 0));
+        var other = new SteamFsePackageInfo(
+            "OtherPackage",
+            owned.FamilyName,
+            "other-full-name",
+            new Version(9, 0));
+        var enumeration = new FakePackageEnumeration([other, owned]);
+        var probe = new WindowsSteamFsePackageProbe(enumeration);
+
+        Assert.Equal($"{owned.FamilyName}!App", probe.TryGetOwnedAumid());
+        Assert.True(probe.TryRemoveOwnedPackage());
+        Assert.Equal([owned.FullName], enumeration.RemovedPackages);
+    }
+
     private static WindowsGamingHomeConfiguration CreateConfiguration(
         string? home = null,
         bool startup = false,
@@ -113,6 +134,13 @@ public sealed class SteamFseConfigurationTests
         public int RemoveCalls { get; private set; }
         public string? TryGetOwnedAumid() => aumid;
         public bool TryRemoveOwnedPackage() { RemoveCalls++; return true; }
+    }
+
+    private sealed class FakePackageEnumeration(IReadOnlyList<SteamFsePackageInfo> packages) : ISteamFsePackageEnumeration
+    {
+        public List<string> RemovedPackages { get; } = [];
+        public IReadOnlyList<SteamFsePackageInfo> FindCurrentUserPackages() => packages;
+        public void RemovePackage(string fullName) => RemovedPackages.Add(fullName);
     }
 
     private sealed class FakeConfigurationStore : IGamingConfigurationStore
