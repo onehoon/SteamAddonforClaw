@@ -353,8 +353,6 @@ public sealed class QamFrontendContractTests
         Assert.Contains("Object.prototype.hasOwnProperty.call(props, \"activeTab\")", width);
         Assert.Contains("const activeTab = tabOwner?.props?.activeTab", width);
         Assert.Contains("activeTab === ADDON_TAB_KEY", width);
-        Assert.Contains("props?.id === ADDON_QAM_CONTENT_ID", width);
-        Assert.Contains("state.qamWidthClassNames?.TabGroupPanel", width);
         Assert.Contains("String(activeTab)", width);
         Assert.DoesNotContain("typeof activeTab !== \"string\"", width);
         Assert.Contains("QAM active top-level tab was not found", width);
@@ -374,11 +372,24 @@ public sealed class QamFrontendContractTests
         var nestedEnd = source.IndexOf("}, originalTarget);", nestedStart, StringComparison.Ordinal);
         Assert.True(nestedStart >= 0 && nestedEnd > nestedStart);
         var nested = source[nestedStart..nestedEnd];
-        Assert.Contains("applyAddonQamContentWidth(result);", nested);
+        Assert.Contains("patchQamTabGroupOwner(owner);", nested);
+        Assert.DoesNotContain("applyAddonQamContentWidth(result);", nested);
 
-        var restoreStart = width.IndexOf("state.qamWidthOriginalStyles.has(target)", StringComparison.Ordinal);
-        Assert.True(restoreStart >= 0);
-        Assert.Contains("target.props.style = state.qamWidthOriginalStyles.get(target)", width[restoreStart..]);
+        var ownerStart = source.IndexOf("function patchQamTabGroupOwner", StringComparison.Ordinal);
+        var producerStart = source.IndexOf("function patchQamTabGroupProducer", StringComparison.Ordinal);
+        Assert.True(producerStart >= 0 && ownerStart > producerStart);
+        var producer = source[producerStart..ownerStart];
+        Assert.Contains("args[0]?.tab?.key !== ADDON_TAB_KEY", producer);
+        Assert.Contains("function findQamAddonTabPanelProducer(result)", source);
+        Assert.Contains("Object.prototype.hasOwnProperty.call(node.props, \"bActive\")", source);
+        Assert.Contains("function patchQamTabPanelProducer(node)", source);
+        Assert.Contains("return applyAddonQamTabGroupPanelWidth(result);", source);
+        Assert.Contains("patchQamTabPanelProducer(panelProducerSearch.node)", producer);
+        Assert.DoesNotContain("applyAddonQamTabGroupPanelWidth(result)", producer);
+        Assert.Contains("rebuildComponentType(node.type, resolved, patchedTarget)", source);
+        Assert.Contains("function patchQamTabGroupOwner(node)", source);
+        Assert.Contains("findQamAddonTabProducer(result)", source);
+        Assert.Contains("patchQamTabGroupProducer(tabProducerSearch.node)", source);
     }
 
     [Fact]
@@ -447,24 +458,21 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_width_patch_targets_only_addon_content_and_restores_original_style()
+    public void Qam_width_patch_targets_only_addon_tab_group_panel_return_element()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         Assert.Contains("const ADDON_QAM_WIDTH_PX = 400;", source);
-        Assert.Contains("const ADDON_QAM_CONTENT_ID = \"quickaccess_content_steam-input-addon\";", source);
-        var start = source.IndexOf("function applyAddonQamContentWidth", StringComparison.Ordinal);
+        var start = source.IndexOf("function applyAddonQamTabGroupPanelWidth", StringComparison.Ordinal);
         var end = source.IndexOf("function findTabsPropOwner", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var width = source[start..end];
 
-        Assert.Contains("ADDON_QAM_CONTENT_ID", width);
-        Assert.Contains("props?.id === ADDON_QAM_CONTENT_ID", width);
-        Assert.Contains("state.qamWidthOriginalStyles ??= new WeakMap();", width);
+        Assert.Contains("findReactNode(result, node => hasExactClass(node, tabGroupPanelClass))", width);
+        Assert.Contains("QAM Addon TabGroupPanel element was not found in the producer result", width);
         Assert.Contains("width: `${ADDON_QAM_WIDTH_PX}px`", width);
         Assert.Contains("maxWidth: `${ADDON_QAM_WIDTH_PX}px`", width);
-        Assert.Contains("state.qamWidthOriginalStyles.get(target)", width);
-        Assert.Contains("state.qamWidthOriginalStyles.delete(target)", width);
-        Assert.DoesNotContain("PanelOuterNav", width);
+        Assert.DoesNotContain("ADDON_QAM_CONTENT_ID", source);
+        Assert.DoesNotContain("props?.id ===", width);
         Assert.DoesNotContain("height:", width);
         Assert.DoesNotContain("margin:", width);
         Assert.DoesNotContain("MutationObserver", width);
@@ -476,7 +484,7 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var start = source.IndexOf("function describeQamGeometry", StringComparison.Ordinal);
-        var end = source.IndexOf("function applyAddonQamContentWidth", start, StringComparison.Ordinal);
+        var end = source.IndexOf("function applyAddonQamTabGroupPanelWidth", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var diagnostic = source[start..end];
 
@@ -513,12 +521,13 @@ public sealed class QamFrontendContractTests
         var install = source[installStart..source.IndexOf("const webpackRequire", installStart, StringComparison.Ordinal)];
         Assert.Contains("cancelQamGeometryReadback();", install);
         Assert.Contains("state.qamWidthClassNames = null", install);
-        Assert.Contains("state.qamWidthOriginalStyles = new WeakMap()", install);
+        Assert.Contains("state.qamWidthPatches = new Map()", install);
 
         Assert.DoesNotContain("state.qamWidthSelectionPatch", source);
         Assert.DoesNotContain("state.addonQamWidthActive", source);
         Assert.Contains("state.qamWidthClassNames = null", source);
-        Assert.Contains("state.qamWidthOriginalStyles = new WeakMap()", source);
+        Assert.Contains("function restoreQamWidthPatches()", source);
+        Assert.Contains("qamWidthPatches: null", source);
         Assert.Contains("cancelQamGeometryReadback();", source[source.IndexOf("function uninstall()", StringComparison.Ordinal)..]);
     }
 
@@ -638,18 +647,21 @@ public sealed class QamFrontendContractTests
     public void Nested_producer_compare_and_restore_ownership_is_preserved()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var nestedStart = source.IndexOf("function patchTabsProducer", StringComparison.Ordinal);
+        var nestedEnd = source.IndexOf("function findReactRootFiber", nestedStart, StringComparison.Ordinal);
+        Assert.True(nestedStart >= 0 && nestedEnd > nestedStart);
+        var nested = source[nestedStart..nestedEnd];
 
-        Assert.Contains("if (node.type === record.originalType) {", source);
-        Assert.Contains("record = { node: null, originalType: null, patchedType: null, tabs: null }", source);
-        Assert.Contains("record.node = node;", source);
-        Assert.Contains("if (record.node?.type === record.patchedType)", source);
-        Assert.Contains("record.node.type = record.originalType;", source);
-        Assert.Contains("record.tabs = ensureAddonTabs(owner, React, native);", source);
-        Assert.Contains("record.node = null;", source);
-        Assert.Contains("record.tabs = null;", source);
-        Assert.DoesNotContain("record.nodes", source);
-        Assert.DoesNotContain("record.tabs.add", source);
-        Assert.Contains("state.nestedPatches ??= new Map();", source);
+        Assert.Contains("if (node.type === record.originalType) {", nested);
+        Assert.Contains("record = { node: null, originalType: null, patchedType: null, tabs: null }", nested);
+        Assert.Contains("record.node = node;", nested);
+        Assert.Contains("record.tabs = ensureAddonTabs(owner, React, native);", nested);
+        Assert.DoesNotContain("record.nodes", nested);
+        Assert.DoesNotContain("record.tabs.add", nested);
+        Assert.Contains("state.nestedPatches ??= new Map();", nested);
+
+        Assert.Contains("function restoreQamWidthPatches()", source);
+        Assert.Contains("if (node?.type === record.patchedType) node.type = record.originalType;", source);
     }
 
     [Fact]
