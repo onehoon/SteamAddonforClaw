@@ -27,7 +27,6 @@
   const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
   const ADDON_TAB_KEY = "steam-input-addon";
-  const ADDON_QAM_CONTENT_ID = "quickaccess_content_steam-input-addon";
   // Steam's current GamepadUI MenuStore enum uses 2 for the native Quick Access side menu.
   // Keep this check on the same verified MenuStore authority as OpenQuickAccessMenu.
   const QUICK_ACCESS_SIDE_MENU_ID = 2;
@@ -551,6 +550,24 @@
     }).node;
   }
 
+  function findQamTabGroupPanel(result, tabOwner, tabKey) {
+    const expectedTab = tabOwner?.props?.tabs?.find(tab => tab?.key === tabKey);
+    const search = findReactNode(result, node => {
+      const tab = node?.props?.tab;
+      return tab && (tab === expectedTab || tab.key === tabKey);
+    });
+    return search;
+  }
+
+  function restoreAddonQamContentWidth() {
+    const target = state.qamWidthPatchedTarget;
+    if (target?.props && state.qamWidthOriginalStyles?.has(target)) {
+      target.props.style = state.qamWidthOriginalStyles.get(target);
+      state.qamWidthOriginalStyles.delete(target);
+    }
+    state.qamWidthPatchedTarget = null;
+  }
+
   function applyAddonQamContentWidth(result) {
     const tabOwner = findQamActiveTabOwner(result);
     const activeTab = tabOwner?.props?.activeTab;
@@ -559,13 +576,6 @@
       logOnce("qamWidthSelectionMissing", "QAM active top-level tab was not found in the current menu render; leaving Steam width unchanged.");
       return;
     }
-
-    const tabGroupClass = state.qamWidthClassNames?.TabGroupPanel;
-    const target = findReactNode(result, node => {
-      const props = node?.props;
-      return props?.id === ADDON_QAM_CONTENT_ID &&
-        (!tabGroupClass || hasExactClass(node, tabGroupClass));
-    }).node;
 
     logStateChange(
       "qamWidthSelection",
@@ -580,18 +590,22 @@
 
     state.qamWidthOriginalStyles ??= new WeakMap();
     if (activeTab !== ADDON_TAB_KEY) {
-      if (target?.props && state.qamWidthOriginalStyles.has(target)) {
-        target.props.style = state.qamWidthOriginalStyles.get(target);
-        state.qamWidthOriginalStyles.delete(target);
-      }
+      restoreAddonQamContentWidth();
       return;
     }
 
+    const targetSearch = findQamTabGroupPanel(result, tabOwner, ADDON_TAB_KEY);
+    const target = targetSearch.node;
     if (!target?.props) {
-      logOnce("qamWidthNodeMissing", `QAM Addon content target was not found in the current render. Expected id=${ADDON_QAM_CONTENT_ID}.`);
+      logOnce(
+        "qamWidthNodeMissing",
+        `QAM Addon TabGroupPanel producer target was not found. TabKey=${ADDON_TAB_KEY} Visited=${targetSearch.visited} BudgetExhausted=${targetSearch.budgetExhausted}.`
+      );
       return;
     }
 
+    if (state.qamWidthPatchedTarget !== target)
+      restoreAddonQamContentWidth();
     if (!state.qamWidthOriginalStyles.has(target))
       state.qamWidthOriginalStyles.set(target, target.props.style);
     target.props.style = {
@@ -599,6 +613,8 @@
       width: `${ADDON_QAM_WIDTH_PX}px`,
       maxWidth: `${ADDON_QAM_WIDTH_PX}px`,
     };
+    state.qamWidthPatchedTarget = target;
+    logOnce("qamWidthProducerTarget", "QAM Addon TabGroupPanel producer target found and widened.");
   }
 
   function qamDiagnosticObjectId(value) {
@@ -1783,6 +1799,7 @@
     state.selectAddonOnNextOpenRequested = false;
     state.qamWidthClassNames = null;
     state.qamWidthOriginalStyles = new WeakMap();
+    state.qamWidthPatchedTarget = null;
     state.qamAuthorityObjectIds = new WeakMap();
     state.qamAuthorityObjectIdNext = 0;
     state.qamAuthorityDiagnosticActiveTab = null;
@@ -1858,10 +1875,12 @@
   function uninstall() {
     cancelQamGeometryReadback();
     retireBridgeConsumers();
+    restoreAddonQamContentWidth();
     state.addonTabDescriptor = null;
     state.selectAddonOnNextOpenRequested = false;
     state.qamWidthClassNames = null;
     state.qamWidthOriginalStyles = new WeakMap();
+    state.qamWidthPatchedTarget = null;
     if (!state.installed) {
       log("uninstall() called but not installed; no-op.");
       return true;
@@ -1886,6 +1905,7 @@
       selectAddonOnNextOpenRequested: false,
       qamWidthClassNames: null,
       qamWidthOriginalStyles: new WeakMap(),
+      qamWidthPatchedTarget: null,
       install,
       uninstall,
     });
