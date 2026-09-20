@@ -27,6 +27,7 @@
   const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
   const ADDON_TAB_KEY = "steam-input-addon";
+  const ADDON_QAM_CONTENT_ID = "quickaccess_content_steam-input-addon";
   // Steam's current GamepadUI MenuStore enum uses 2 for the native Quick Access side menu.
   // Keep this check on the same verified MenuStore authority as OpenQuickAccessMenu.
   const QUICK_ACCESS_SIDE_MENU_ID = 2;
@@ -536,27 +537,35 @@
     };
   }
 
-  function applyAddonQamWidth(result) {
-    const className = state.qamWidthClassNames?.PanelOuterNav;
-    if (!className) return;
+  function findQamActiveTabOwner(result) {
+    const panelOuterClass = state.qamWidthClassNames?.PanelOuterNav;
+    if (!panelOuterClass) return null;
 
-    const target = findReactNode(result, node => hasExactClass(node, className)).node;
-    if (!target?.props) {
-      logOnce("qamWidthNodeMissing", "QAM Addon width target was not found in the current render.");
-      return;
-    }
+    const panelOuter = findReactNode(result, node => hasExactClass(node, panelOuterClass)).node;
+    if (!panelOuter) return null;
 
-    const tabOwner = findReactNode(target, node => {
+    return findReactNode(panelOuter, node => {
       const props = node?.props;
       return props && Array.isArray(props.tabs) &&
         Object.prototype.hasOwnProperty.call(props, "activeTab");
     }).node;
+  }
+
+  function applyAddonQamContentWidth(result) {
+    const tabOwner = findQamActiveTabOwner(result);
     const activeTab = tabOwner?.props?.activeTab;
     if (!tabOwner?.props ||
         !Object.prototype.hasOwnProperty.call(tabOwner.props, "activeTab")) {
       logOnce("qamWidthSelectionMissing", "QAM active top-level tab was not found in the current menu render; leaving Steam width unchanged.");
       return;
     }
+
+    const tabGroupClass = state.qamWidthClassNames?.TabGroupPanel;
+    const target = findReactNode(result, node => {
+      const props = node?.props;
+      return props?.id === ADDON_QAM_CONTENT_ID &&
+        (!tabGroupClass || hasExactClass(node, tabGroupClass));
+    }).node;
 
     logStateChange(
       "qamWidthSelection",
@@ -570,21 +579,26 @@
     scheduleQamGeometryReadback(activeTab);
 
     state.qamWidthOriginalStyles ??= new WeakMap();
-    if (activeTab === ADDON_TAB_KEY) {
-      if (!state.qamWidthOriginalStyles.has(target))
-        state.qamWidthOriginalStyles.set(target, target.props.style);
-      target.props.style = {
-        ...(target.props.style || {}),
-        width: `${ADDON_QAM_WIDTH_PX}px`,
-        maxWidth: `${ADDON_QAM_WIDTH_PX}px`,
-      };
+    if (activeTab !== ADDON_TAB_KEY) {
+      if (target?.props && state.qamWidthOriginalStyles.has(target)) {
+        target.props.style = state.qamWidthOriginalStyles.get(target);
+        state.qamWidthOriginalStyles.delete(target);
+      }
       return;
     }
 
-    if (state.qamWidthOriginalStyles.has(target)) {
-      target.props.style = state.qamWidthOriginalStyles.get(target);
-      state.qamWidthOriginalStyles.delete(target);
+    if (!target?.props) {
+      logOnce("qamWidthNodeMissing", `QAM Addon content target was not found in the current render. Expected id=${ADDON_QAM_CONTENT_ID}.`);
+      return;
     }
+
+    if (!state.qamWidthOriginalStyles.has(target))
+      state.qamWidthOriginalStyles.set(target, target.props.style);
+    target.props.style = {
+      ...(target.props.style || {}),
+      width: `${ADDON_QAM_WIDTH_PX}px`,
+      maxWidth: `${ADDON_QAM_WIDTH_PX}px`,
+    };
   }
 
   function qamDiagnosticObjectId(value) {
@@ -1036,7 +1050,7 @@
           }
           logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
           record.tabs = ensureAddonTabs(owner, React, native);
-          applyAddonQamWidth(result);
+          applyAddonQamContentWidth(result);
         } catch (err) {
           logOnce("nestedAugmentationFailed", `QAM nested augmentation failed: ${String(err)}`);
         }

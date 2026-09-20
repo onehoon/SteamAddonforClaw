@@ -342,15 +342,19 @@ public sealed class QamFrontendContractTests
     public void Qam_width_selection_uses_the_rendered_native_active_tab_without_patching_menu_store()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var widthStart = source.IndexOf("function applyAddonQamWidth", StringComparison.Ordinal);
+        var widthStart = source.IndexOf("function findQamActiveTabOwner", StringComparison.Ordinal);
         var widthEnd = source.IndexOf("function findTabsPropOwner", widthStart, StringComparison.Ordinal);
         Assert.True(widthStart >= 0 && widthEnd > widthStart);
         var width = source[widthStart..widthEnd];
 
+        Assert.Contains("state.qamWidthClassNames?.PanelOuterNav", width);
+        Assert.Contains("findReactNode(panelOuter", width);
         Assert.Contains("Array.isArray(props.tabs)", width);
         Assert.Contains("Object.prototype.hasOwnProperty.call(props, \"activeTab\")", width);
         Assert.Contains("const activeTab = tabOwner?.props?.activeTab", width);
         Assert.Contains("activeTab === ADDON_TAB_KEY", width);
+        Assert.Contains("props?.id === ADDON_QAM_CONTENT_ID", width);
+        Assert.Contains("state.qamWidthClassNames?.TabGroupPanel", width);
         Assert.Contains("String(activeTab)", width);
         Assert.DoesNotContain("typeof activeTab !== \"string\"", width);
         Assert.Contains("QAM active top-level tab was not found", width);
@@ -370,9 +374,9 @@ public sealed class QamFrontendContractTests
         var nestedEnd = source.IndexOf("}, originalTarget);", nestedStart, StringComparison.Ordinal);
         Assert.True(nestedStart >= 0 && nestedEnd > nestedStart);
         var nested = source[nestedStart..nestedEnd];
-        Assert.Contains("applyAddonQamWidth(result);", nested);
+        Assert.Contains("applyAddonQamContentWidth(result);", nested);
 
-        var restoreStart = width.IndexOf("if (state.qamWidthOriginalStyles.has(target))", StringComparison.Ordinal);
+        var restoreStart = width.IndexOf("state.qamWidthOriginalStyles.has(target)", StringComparison.Ordinal);
         Assert.True(restoreStart >= 0);
         Assert.Contains("target.props.style = state.qamWidthOriginalStyles.get(target)", width[restoreStart..]);
     }
@@ -443,21 +447,24 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_width_patch_targets_only_panel_outer_nav_and_restores_original_style()
+    public void Qam_width_patch_targets_only_addon_content_and_restores_original_style()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         Assert.Contains("const ADDON_QAM_WIDTH_PX = 400;", source);
-        var start = source.IndexOf("function applyAddonQamWidth", StringComparison.Ordinal);
+        Assert.Contains("const ADDON_QAM_CONTENT_ID = \"quickaccess_content_steam-input-addon\";", source);
+        var start = source.IndexOf("function applyAddonQamContentWidth", StringComparison.Ordinal);
         var end = source.IndexOf("function findTabsPropOwner", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var width = source[start..end];
 
-        Assert.Contains("PanelOuterNav", width);
+        Assert.Contains("ADDON_QAM_CONTENT_ID", width);
+        Assert.Contains("props?.id === ADDON_QAM_CONTENT_ID", width);
         Assert.Contains("state.qamWidthOriginalStyles ??= new WeakMap();", width);
         Assert.Contains("width: `${ADDON_QAM_WIDTH_PX}px`", width);
         Assert.Contains("maxWidth: `${ADDON_QAM_WIDTH_PX}px`", width);
         Assert.Contains("state.qamWidthOriginalStyles.get(target)", width);
         Assert.Contains("state.qamWidthOriginalStyles.delete(target)", width);
+        Assert.DoesNotContain("PanelOuterNav", width);
         Assert.DoesNotContain("height:", width);
         Assert.DoesNotContain("margin:", width);
         Assert.DoesNotContain("MutationObserver", width);
@@ -469,7 +476,7 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var start = source.IndexOf("function describeQamGeometry", StringComparison.Ordinal);
-        var end = source.IndexOf("function applyAddonQamWidth", start, StringComparison.Ordinal);
+        var end = source.IndexOf("function applyAddonQamContentWidth", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var diagnostic = source[start..end];
 
