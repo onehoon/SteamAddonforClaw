@@ -123,6 +123,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("QamHostTransformPatcher.CreateUninstallExpression", program);
         Assert.Contains("ConnectUnboundAsync", program);
         Assert.Contains("TryParseQamHostWidthSelection", program);
+        Assert.DoesNotContain("ApplyQamHostTransformAsync(true", program);
         Assert.Contains("QuickAccessTargetSelector.SelectQuickAccessTargets", program);
         Assert.Contains("QamHostTargetSelector.SelectQamHostTargets", program);
         Assert.Contains("ConnectReadOnlyAsync", program);

@@ -103,25 +103,21 @@ public sealed class QuickAccessTargetSelectorTests
     }
 
     [Fact]
-    public void Qam_host_transform_expression_rewrites_react_output_and_restores_the_owner()
+    public void Qam_host_transform_expression_uses_immediate_browser_bounds_and_does_not_mutate_fibers()
     {
         var expression = QamHostTransformPatcher.CreateApplyExpression("view-placeholder-class", addonSelected: true);
         var uninstall = QamHostTransformPatcher.CreateUninstallExpression("view-placeholder-class");
 
         Assert.Contains("__reactFiber$", expression);
-        Assert.Contains("patchedAlternate", expression);
-        Assert.Contains("alternateOriginalType", expression);
-        Assert.Contains("alternate.type = patchedType", expression);
-        Assert.Contains("alternate.elementType = patchedType", expression);
-        Assert.Contains("offsetLeft", expression);
+        Assert.Contains("browser.SetBounds", expression);
+        Assert.Contains("originalSetBounds", expression);
+        Assert.Contains("applyCurrentBounds", expression);
+        Assert.Contains("ImmediateApplied", expression);
         Assert.Contains("desiredLeft", expression);
-        Assert.Contains("matrix3d", expression);
-        Assert.Contains("owner.type = patchedType", expression);
-        Assert.Contains("owner.elementType = patchedType", expression);
-        Assert.Contains("restoreOwner", uninstall);
-        Assert.Contains("owner.type = state.originalType", uninstall);
-        Assert.Contains("alternate.type = state.alternateOriginalType", uninstall);
-        Assert.Contains("alternate.elementType = state.alternateOriginalElementType", uninstall);
+        Assert.DoesNotContain("owner.type = patchedType", expression);
+        Assert.DoesNotContain("alternate.type = patchedType", expression);
+        Assert.Contains("restoreBoundsPatch", uninstall);
+        Assert.Contains("originalSetBounds.call(browser", uninstall);
         Assert.DoesNotContain("element.style", expression);
         Assert.DoesNotContain("classList", expression);
         Assert.DoesNotContain("MutationObserver", expression);

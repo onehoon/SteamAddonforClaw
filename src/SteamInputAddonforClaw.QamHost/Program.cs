@@ -371,7 +371,6 @@ try
             void OnSelectAddonOnNextQuickAccessOpen(object? _, EventArgs __)
             {
                 var admittedGeneration = Volatile.Read(ref documentGeneration);
-                _ = Task.Run(() => ApplyQamHostTransformAsync(true, "select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
                 _ = Task.Run(() => DeliverSelectAddonOnNextQuickAccessOpenAsync(admittedGeneration), lifetimeToken);
                 _ = Task.Run(() => LogTargetSnapshotAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
                 _ = Task.Run(() => LogQuickAccessGeometrySnapshotsAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
