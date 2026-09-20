@@ -1,6 +1,7 @@
 # Work Order — FAN-0: Redesign Developer Fan Hardware Probe into EX Calibration & Lifecycle Console
 
 > **Date:** 2026-09-10  
+> **Hardware-evidence addendum:** 2026-09-20 — CG3EM BIOS E1T91IMS.10D Auto zero-fan / revised factory table observation  
 > **Status:** Ready for implementation  
 > **Reviewed baseline:** `main` at `bc0200fc75df3d12d451fe2945c73c25758952c8`  
 > **Primary design authority:** `docs/Full 1902 Implementation/EX_FIRST_FAN_CONTROL_ARCHITECTURE_2026-09-10.md`  
@@ -36,6 +37,7 @@ The redesigned page must make the live hardware state visible, make each calibra
 - Set_Fan/readback reliability
 - suspend/resume persistence behavior
 - safe CG3EM production calibration envelope
+- Firmware Auto zero-fan behavior and whether any custom-mode zero-fan mechanism is actually supported
 ```
 
 This PR is **not** the production `FanControlService` PR.
@@ -168,21 +170,84 @@ Do not weaken existing cleanup behavior merely to make calibration code shorter.
 
 ## 4. Important hardware evidence already known
 
-### 4.1 CG3EM reference recorded by current Addon
+### 4.1 CG3EM reference is firmware-versioned, not one fixed table
 
-Current source records this known EX comparison reference:
+The original probe/source reference came from an earlier EX / BIOS 10A observation:
 
 ```text
+BIOS E1T91IMS.10A
+
 Temperature labels:
 47 / 50 / 57 / 64 / 71 / 78 C
 
-Fan1/Fan2 logical block reference:
+Fan1/Fan2 logical observation:
 58 | 70 74 76 78 80 84 | 94
 ```
 
-The six middle bytes are the current mutable duty/speed positions.
+A new real-device run on 2026-09-20 with BIOS 10D observed:
 
-The first and last bytes must continue to be treated conservatively as observed framing/calibration data unless exact semantics are proven.
+```text
+BIOS E1T91IMS.10D
+
+Temperature labels:
+47 / 50 / 57 / 64 / 71 / 78 C
+
+Firmware Auto Fan1/Fan2:
+00 | 60 64 68 74 80 84 | 94
+```
+
+The temperature axis remained stable while the lower four duty points changed:
+
+```text
+P1 70 -> 60
+P2 74 -> 64
+P3 76 -> 68
+P4 78 -> 74
+P5 80 -> 80
+P6 84 -> 84
+```
+
+Therefore FAN-0 must treat the fan table as **live firmware calibration evidence**. Do not hard-code the 10A table as the expected CG3EM default.
+
+The first and last bytes must continue to be treated conservatively:
+
+- byte0 is strongly supported as EC/live/current-command state, not a user curve point;
+- byte7 must be preserved until exact semantics are proven;
+- only bytes 1..6 are the validated curve positions.
+
+#### BIOS 10D zero-fan observation
+
+In Firmware Auto, the 10D probe first observed approximately 3750 RPM and then, a few seconds later at idle, observed:
+
+```text
+Get_Fan(0): 00 00 00 00 ...
+Fan RPM: 0 / unavailable
+Fan1/Fan2 six-duty tables unchanged:
+60 / 64 / 68 / 74 / 80 / 84
+ownership OFF
+```
+
+This is direct evidence that Firmware Auto can stop the fans without storing zero in the six duty points.
+
+Under custom ownership, the bounded physical-response test then observed approximately:
+
+```text
+duty 75 -> ~3555 RPM
+duty 40 -> ~3116 RPM after settling
+duty 10 -> ~2890 RPM after settling
+```
+
+So `custom duty 10` did **not** reproduce zero-fan.
+
+FAN-0 must therefore preserve the distinction:
+
+```text
+Firmware Auto zero-fan
+!=
+low custom duty
+```
+
+Do not write an all-zero custom curve merely to probe this behavior. A custom zero-fan mechanism remains unproven.
 
 ### 4.2 Do not reuse the diagnostic `10..75` guard as production limits
 
@@ -324,9 +389,9 @@ Ownership raw     0x..
 
 [Fan Tables]
                  P1   P2   P3   P4   P5   P6
-Temperature      47   50   57   64   71   78
-Fan 1 Duty       70   74   76   78   80   84
-Fan 2 Duty       70   74   76   78   80   84
+Temperature      <live firmware labels>
+Fan 1 Duty       <live Fan1 bytes 1..6>
+Fan 2 Duty       <live Fan2 bytes 1..6>
 
 [Refresh Live State] [Capture Baseline]
 
@@ -408,6 +473,7 @@ public enum FrontendFanProbeOperation
 {
     Refresh,
     CaptureBaseline,
+    ObserveFirmwareAutoIdle,
     Fan1StepTest,
     Fan2StepTest,
     SafeExCalibration,
@@ -419,7 +485,42 @@ public enum FrontendFanProbeOperation
 
 `Refresh` may instead remain `OpenFanProbeAsync()` if keeping a separate read path is cleaner. Do not add both redundant mechanisms without reason.
 
-### 9.1 Remove/retire legacy operations
+### 9.1 Bounded Firmware Auto idle observation
+
+Add one **read-only, bounded** observation action to capture the newly discovered zero-fan behavior.
+
+Suggested behavior:
+
+```text
+precondition:
+    ownership OFF
+    Cooler Boost OFF
+
+sample for a bounded window:
+    Get_Fan(0) tach data
+    Fan1/Fan2 logical blocks
+    byte0 for both fan blocks
+    ownership/AP
+    Get_Temperature(1/2)
+    timestamps
+
+stop:
+    fixed timeout or user cancel
+```
+
+A 30-60 second developer-only window is sufficient for initial validation; do not create a permanent telemetry loop.
+
+The report should state whether the run observed:
+
+```text
+FAN_STOP_OBSERVED
+FAN_STOP_NOT_OBSERVED
+READ_INCONCLUSIVE
+```
+
+This is an evidence classification only. It is not a production runtime state.
+
+### 9.2 Remove/retire legacy operations
 
 Retire the old product concepts:
 
@@ -1048,6 +1149,16 @@ At minimum cover:
 - every completed/failed write test attempts cleanup and Auto hand-back
 ```
 
+### Firmware Auto idle / zero-fan observation
+
+```text
+- observation performs no fan-table or ownership writes
+- a real zero tach is distinguishable from telemetry-unavailable
+- curve bytes remain visible while tach reaches zero
+- bounded timeout/cancel always terminates
+- report records BIOS/firmware and ownership state
+```
+
 ### Safe EX calibration
 
 ```text
@@ -1094,14 +1205,15 @@ Run and preserve reports for:
 ```text
 1. cold/normal Firmware Auto -> Capture Baseline
 2. Refresh Live State at idle
-3. Fan 1 Step Test
-4. Fan 2 Step Test
-5. Safe EX Calibration
-6. Return to Firmware Auto
-7. Arm Sleep/Resume -> sleep -> resume
-8. Arm Hibernate/Resume -> hibernate -> resume, if the same plumbing supports it
-9. controlled app exit after a completed calibration
-10. app shutdown/cancel while a lifecycle test is armed
+3. Bounded Firmware Auto idle observation long enough to detect zero-fan if conditions permit
+4. Fan 1 Step Test
+5. Fan 2 Step Test
+6. Safe EX Calibration
+7. Return to Firmware Auto
+8. Arm Sleep/Resume -> sleep -> resume
+9. Arm Hibernate/Resume -> hibernate -> resume, if the same plumbing supports it
+10. controlled app exit after a completed calibration
+11. app shutdown/cancel while a lifecycle test is armed
 ```
 
 For each run verify physically and in report:
@@ -1181,7 +1293,12 @@ validated duty envelope
 minimum useful response step
 settling/dwell behavior
 factory/firmware persistence behavior
+firmware-versioned baseline behavior
+Firmware Auto zero-fan semantics
+whether custom zero-fan is supported/validated or must remain unsupported
 ```
+
+Do not finalize a custom `Quiet` preset until the zero-fan result is understood. BIOS 10D already proves that a naive low-duty custom Quiet curve can be louder than Firmware Auto at idle.
 
 Then prepare **FAN-1** for the smallest production owner:
 
