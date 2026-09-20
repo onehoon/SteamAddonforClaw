@@ -203,11 +203,19 @@ internal static class WindowInterop
     internal static void ShowWithoutActivation(OverlayWindow window)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
-        if (!SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0,
-                SwpNoActivate | SwpNoSendChanging | SwpNoSize | SwpNoMove | SwpShowWindow))
+        if (!SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
+                SwpNoActivate | SwpNoSendChanging | SwpNoZOrder | SwpNoSize | SwpNoMove | SwpShowWindow))
         {
             var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not show the Overlay window.");
-            OverlayLog.Error("Window", "Overlay show operation failed.", exception, ("Operation", "SetWindowPos.Show"), ("OverlayHwnd", hwnd));
+            OverlayLog.Error("Window", "Overlay visibility update failed.", exception, ("Operation", "SetWindowPos.ShowVisibility"), ("OverlayHwnd", hwnd));
+            throw exception;
+        }
+
+        if (!SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0,
+                SwpNoActivate | SwpNoSendChanging | SwpNoSize | SwpNoMove))
+        {
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not promote the Overlay window to the topmost band.");
+            OverlayLog.Error("Window", "Overlay topmost promotion failed.", exception, ("Operation", "SetWindowPos.ShowTopmost"), ("OverlayHwnd", hwnd));
             throw exception;
         }
 
