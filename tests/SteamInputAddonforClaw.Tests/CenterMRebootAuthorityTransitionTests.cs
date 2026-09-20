@@ -408,6 +408,134 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Contains("cleared", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ---- Enter BIOS firmware restart ----
+
+    [Fact]
+    public async Task Enter_bios_disabled_path_releases_to_xinput_without_mutating_authority_state()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = new(true, "Released", ["owned-target"]),
+        };
+        h.Hid.Active = true;
+        h.Hid.Whitelist.Add(AddonExe);
+        h.Hid.Hidden.Add("owned-target");
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
+
+        Assert.Equal(FrontendEnterBiosOutcome.RestartRequested, result.Outcome);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "firmware-restart" }, h.Order);
+        Assert.Equal(1, restart.FirmwareCalls);
+        Assert.Equal(0, restart.Calls);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, h.Roots.Classify());
+        Assert.True(h.Hid.Active);
+        Assert.Contains(AddonExe, h.Hid.Whitelist);
+        Assert.Contains("owned-target", h.Hid.Hidden);
+        Assert.Equal(0, h.StockAuthorityRestoredCalls);
+    }
+
+    [Fact]
+    public async Task Enter_bios_enabled_path_verifies_stock_without_creating_addon_authority()
+    {
+        var h = new Harness(this) { StartEnabled = true };
+        h.Hid.Active = true;
+        h.Hid.Whitelist.Add(AddonExe);
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
+
+        Assert.Equal(FrontendEnterBiosOutcome.RestartRequested, result.Outcome);
+        Assert.Equal(new[] { "physical-release", "stock-baseline", "firmware-restart" }, h.Order);
+        Assert.Equal(FrontendCenterMStartupState.Enabled, h.Roots.Classify());
+        Assert.True(h.Hid.Active);
+        Assert.Contains(AddonExe, h.Hid.Whitelist);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Enter_bios_fails_closed_for_ambiguous_or_unavailable_center_m_state(bool partial)
+    {
+        var h = partial
+            ? new Harness(this) { StartPartial = true }
+            : new Harness(this) { CenterMAvailable = false };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
+
+        Assert.Equal(partial ? FrontendEnterBiosOutcome.Blocked : FrontendEnterBiosOutcome.Unavailable, result.Outcome);
+        Assert.Empty(h.Order);
+        Assert.Equal(0, restart.FirmwareCalls);
+    }
+
+    [Fact]
+    public async Task Enter_bios_stops_before_restart_when_presentation_or_physical_release_fails()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = new(false, "VirtualPresentationReleaseFailed", []),
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
+
+        Assert.Equal(FrontendEnterBiosOutcome.Failed, result.Outcome);
+        Assert.Equal(["physical-release"], h.Order);
+        Assert.Equal(0, h.StockBaselineCalls);
+        Assert.Equal(0, restart.FirmwareCalls);
+    }
+
+    [Fact]
+    public async Task Enter_bios_requires_independent_xinput_proof_before_firmware_restart()
+    {
+        var h = new Harness(this) { StartEnabled = false, StockBaselineSucceeds = false };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
+
+        Assert.Equal(FrontendEnterBiosOutcome.Failed, result.Outcome);
+        Assert.Equal(["physical-release", "stock-baseline"], h.Order);
+        Assert.Equal(0, restart.FirmwareCalls);
+    }
+
+    [Fact]
+    public async Task Firmware_restart_failure_leaves_verified_temporary_xinput_state_and_allows_retry()
+    {
+        var h = new Harness(this) { StartEnabled = false };
+        var restart = new FakeRestart { FirmwareResult = WindowsRestartRequestResult.Failed };
+        var transition = h.Build(restart);
+
+        var failed = await transition.RequestEnterBiosAsync(CancellationToken.None);
+
+        Assert.Equal(FrontendEnterBiosOutcome.Failed, failed.Outcome);
+        Assert.Contains("temporarily in XInput", failed.FailureMessage, StringComparison.Ordinal);
+        Assert.Equal(1, restart.FirmwareCalls);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, h.Roots.Classify());
+
+        restart.FirmwareResult = WindowsRestartRequestResult.Requested;
+        var retried = await transition.RequestEnterBiosAsync(CancellationToken.None);
+
+        Assert.Equal(FrontendEnterBiosOutcome.RestartRequested, retried.Outcome);
+        Assert.Equal(2, restart.FirmwareCalls);
+    }
+
+    [Fact]
+    public async Task Enter_bios_honors_cancellation_before_any_controller_mutation()
+    {
+        var h = new Harness(this) { StartEnabled = false };
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var result = await h.Build().RequestEnterBiosAsync(cancellation.Token);
+
+        Assert.Equal(FrontendEnterBiosOutcome.Blocked, result.Outcome);
+        Assert.Empty(h.Order);
+    }
+
     // ---- Architecture guards ----
 
     [Fact]
@@ -433,11 +561,26 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var root = TestPaths.RepositoryRoot();
         var source = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/CenterMRebootAuthorityTransition.cs"));
         Assert.Contains("\"shutdown.exe\", \"/r /t 0\"", source);
-        Assert.DoesNotContain("/r /f", source);
-        Assert.DoesNotContain("/f /t", source);
+        Assert.Contains("\"shutdown.exe\", \"/r /fw /t 0\"", source);
+        Assert.DoesNotContain("\"/r /f /t 0\"", source);
         // A started process is not an accepted restart: the seam must verify the command result.
         Assert.Contains("WaitForExit", source);
         Assert.Contains("ExitCode", source);
+    }
+
+    [Fact]
+    public void Production_firmware_restart_seam_uses_exact_fw_arguments_and_bounded_result_checks()
+    {
+        var root = TestPaths.RepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/CenterMRebootAuthorityTransition.cs"));
+        var start = source.IndexOf("public WindowsRestartRequestResult RequestFirmwareRestart()", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var method = source[start..];
+
+        Assert.Contains("\"shutdown.exe\", \"/r /fw /t 0\"", method);
+        Assert.Contains("WaitForExit", method);
+        Assert.Contains("ExitCode", method);
+        Assert.DoesNotContain("\"/r /f /t 0\"", method);
     }
 
     // ================= PR12: stock-safe uninstall preparation (work order section 22) =================
@@ -880,14 +1023,23 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     private sealed class FakeRestart : IWindowsRestartRequester
     {
         public WindowsRestartRequestResult Result { get; set; } = WindowsRestartRequestResult.Requested;
+        public WindowsRestartRequestResult FirmwareResult { get; set; } = WindowsRestartRequestResult.Requested;
         public List<string>? Order { get; set; }
         public int Calls { get; private set; }
+        public int FirmwareCalls { get; private set; }
 
         public WindowsRestartRequestResult RequestRestart()
         {
             Calls++;
             if (Result == WindowsRestartRequestResult.Requested) Order?.Add("restart");
             return Result;
+        }
+
+        public WindowsRestartRequestResult RequestFirmwareRestart()
+        {
+            FirmwareCalls++;
+            if (FirmwareResult == WindowsRestartRequestResult.Requested) Order?.Add("firmware-restart");
+            return FirmwareResult;
         }
     }
 

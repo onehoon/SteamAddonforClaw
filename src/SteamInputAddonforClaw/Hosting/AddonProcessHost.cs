@@ -326,6 +326,37 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var authorityHidHideBaseline = new SteamInputAddonforClaw.HidHide.AddonControllerHidHideBaseline(
             new SteamInputAddonforClaw.HidHide.HidHideDriverClient(),
             Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable."));
+        async Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult> ReleasePhysicalOwnershipAsync(
+            CancellationToken token,
+            bool firmwareRestart)
+        {
+            // Full1902 A2 section 14: stop the feature-local front-button owner (WMI observation +
+            // pulse callbacks into the presentation) before the presentation it targets is retired.
+            if (_frontButtonRuntime is { } frontButtons)
+            {
+                await frontButtons.DisposeAsync().ConfigureAwait(false);
+                _frontButtonRuntime = null;
+            }
+
+            if (_presentationOwnership is { } presentation)
+            {
+                var released = firmwareRestart
+                    ? await presentation.ReleaseForFirmwareRestartAsync(token).ConfigureAwait(false)
+                    : await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false);
+                if (!released)
+                {
+                    AppLog.Warn("CenterM.Authority", "Controller presentation could not be retired for the requested restart.", null,
+                        ("Event", firmwareRestart ? "EnterBiosPresentationReleaseFailed" : "StockAuthorityPresentationReleaseFailed"));
+                    return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", []);
+                }
+            }
+
+            return _physicalOwnership is { } owner
+                ? firmwareRestart
+                    ? await owner.ReleaseForFirmwareRestartAsync(token).ConfigureAwait(false)
+                    : await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
+                : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
+        }
         var centerMAuthorityTransition = new SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition(
             _centerMStartupControl,
             composition.StartupSettings,
@@ -345,21 +376,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // Disabled boot. PR6 section 17: the virtual presentation is retired and canonical VIIPER
             // is torn down BEFORE PR5 physical release; a virtual-release failure prevents everything
             // downstream (DirectInput stop, PID1901 restore, HidHide clear, Center M roots, restart).
-            async token =>
-            {
-                // Full1902 A2 section 14: stop the feature-local front-button owner (WMI observation +
-                // pulse callbacks into the presentation) before the presentation it targets is retired.
-                if (_frontButtonRuntime is { } frontButtons)
-                {
-                    await frontButtons.DisposeAsync().ConfigureAwait(false);
-                    _frontButtonRuntime = null;
-                }
-                if (_presentationOwnership is { } presentation && !await presentation.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false))
-                    return new SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult(false, "VirtualPresentationReleaseFailed", []);
-                return _physicalOwnership is { } owner
-                    ? await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
-                    : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
-            },
+            token => ReleasePhysicalOwnershipAsync(token, firmwareRestart: false),
             // PR12 section 6/7: reuse the composition's existing StockCenterMStartupBaseline (the one
             // built from the shared MsiClawNativeStateManager). A machine with no MSI Claw fails
             // closed here rather than assuming stock.
@@ -382,7 +399,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 AppLog.Info("Wing.Guard", "Full1902 Win+G suppression released; stock controller authority restored.",
                     ("Authority", "StockCenterM"), ("Event", "Full1902WinGSuppressionReleased"));
             },
-            new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
+            new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester(),
+            releasePhysicalOwnershipForFirmwareRestart: token => ReleasePhysicalOwnershipAsync(token, firmwareRestart: true));
         _centerMAuthorityTransition = centerMAuthorityTransition;
         // Full1902 Cleanup I: the Developer Test toggle is disconnected UI-only state. No controller /
         // presentation / Steam owner consumes it -- this standalone instance exists only so the

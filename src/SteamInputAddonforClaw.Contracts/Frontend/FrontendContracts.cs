@@ -258,6 +258,15 @@ public sealed record FrontendCenterMStartupMutationResult(
 {
     public bool Succeeded => Outcome == FrontendCenterMStartupMutationOutcome.Succeeded;
 }
+
+public enum FrontendEnterBiosOutcome { RestartRequested, Blocked, Failed, Unavailable }
+
+public sealed record FrontendEnterBiosResult(
+    FrontendEnterBiosOutcome Outcome,
+    string? FailureMessage)
+{
+    public bool Succeeded => Outcome == FrontendEnterBiosOutcome.RestartRequested;
+}
 /// <param name="FrontButtonMappingAvailable">Whether the front-button mapping feature (Gamebar
 /// Button + Center M Button) exists at all on this machine. It is the runtime's single startup
 /// hardware-support result (a supported MSI Claw), NOT a Steam/BPM/presentation/Overlay/Win+G runtime
@@ -429,6 +438,11 @@ public interface IAddonFrontendControl
     /// authority); <see langword="false"/> = Disable and Restart (switch authority to the Addon).</param>
     Task<FrontendCenterMStartupMutationResult> RequestCenterMAuthorityTransitionAsync(bool centerMEnabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable."));
+    /// <summary>Requests a temporary verified PID1901/XInput transition followed by a firmware
+    /// restart. This does not change Center M startup roots, persistent HidHide, or Addon startup
+    /// authority; the existing next-boot Full1902 reconcile remains the return path.</summary>
+    Task<FrontendEnterBiosResult> RequestEnterBiosAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendEnterBiosResult(FrontendEnterBiosOutcome.Unavailable, "Enter BIOS is unavailable."));
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);
     Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default);
     /// <summary>Captures the current CPU Boost frontend snapshot. Never mutates anything -- opening

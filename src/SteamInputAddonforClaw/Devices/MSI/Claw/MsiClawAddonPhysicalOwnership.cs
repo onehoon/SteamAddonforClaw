@@ -60,6 +60,10 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
     /// enable Center M roots -- the authority transition does that next with the returned target.</summary>
     Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken);
 
+    /// <summary>Enter BIOS release: retire process-owned DirectInput and restore verified PID1901/XInput
+    /// without clearing HidHide, changing Center M roots, or releasing Addon authority policy.</summary>
+    Task<PhysicalOwnershipReleaseResult> ReleaseForFirmwareRestartAsync(CancellationToken cancellationToken);
+
     /// <summary>PR8: reacquire an unexpectedly lost owned DirectInput session on the SAME input source
     /// object, only when the same strongly-identified MSI Claw is still PID1902 with the same exact
     /// persistent HidHide target. Runs through the same owner gate. Verifies/repairs the persistent
@@ -111,6 +115,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     // Enable-and-Restart release still needs it as ownership evidence.
     private MsiClawPhysicalIdentity? _ownedPhysicalIdentity;
     private bool _releasedForEnable;
+    private bool _releasedForFirmwareRestart;
     private int _disposed;
 
     internal MsiClawAddonPhysicalOwnership(
@@ -177,6 +182,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         {
             if (Volatile.Read(ref _disposed) != 0) return Fail("OwnerDisposed", false);
             if (_releasedForEnable) return Fail("ReleasedForCenterMEnable", false);
+            if (_releasedForFirmwareRestart) return Fail("ReleasedForFirmwareRestart", false);
             if (_ownsInputSource) return new(MsiClawPhysicalOwnershipOutcome.Owned, "AlreadyOwned", false, _ownedHiddenTargets);
             return await AcquireCoreAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -349,7 +355,16 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         return new(MsiClawPhysicalOwnershipOutcome.Owned, "PhysicalOwnershipVerified", modeWriteIssued, _ownedHiddenTargets);
     }
 
-    public async Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken)
+    public Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken) =>
+        ReleaseToXInputAsync(cancellationToken, "CenterMEnable", firmwareRestart: false);
+
+    public Task<PhysicalOwnershipReleaseResult> ReleaseForFirmwareRestartAsync(CancellationToken cancellationToken) =>
+        ReleaseToXInputAsync(cancellationToken, "EnterBios", firmwareRestart: true);
+
+    private async Task<PhysicalOwnershipReleaseResult> ReleaseToXInputAsync(
+        CancellationToken cancellationToken,
+        string releaseReason,
+        bool firmwareRestart)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -359,7 +374,13 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             var targets = _ownedHiddenTargets.Count != 0
                 ? _ownedHiddenTargets
                 : _captureExistingOwnedHiddenTargets();
-            _releasedForEnable = true;
+            if (firmwareRestart)
+                _releasedForFirmwareRestart = true;
+            else
+                _releasedForEnable = true;
+            AppLog.Info("ControllerOwnership", "Physical release to XInput started.",
+                ("Event", firmwareRestart ? "EnterBiosPhysicalReleaseStarted" : "PhysicalOwnershipReleaseStarted"),
+                ("Reason", releaseReason));
             if (_ownsInputSource)
             {
                 await _inputSource.StopAsync().ConfigureAwait(false);
@@ -369,8 +390,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                 ClearLivePhysicalSession();
             }
 
-            // Restore the same strongly-verified physical MSI Claw to PID1901. Center M roots are
-            // about to become Enabled, so PID1901 is now the desired stock authority.
+            // Restore the same strongly-verified physical MSI Claw to PID1901. Enter BIOS keeps
+            // Center M roots unchanged; PID1901 is the temporary firmware-compatible state.
             var current = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
             if (!TryReadIdentity(current, out var mode, out var identity, out var reason))
                 return new(false, "ReleaseNativeState:" + reason, targets);
@@ -394,8 +415,9 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
                     return new(false, "Pid1901RestoreFinalModeNotXInput:" + finalMode, targets);
             }
 
-            AppLog.Info("ControllerOwnership", "Physical ownership released for Center M enable.",
-                ("Event", "PhysicalOwnershipReleased"), ("PrimaryHiddenTarget", _ownedPrimaryHiddenTarget ?? "None"),
+            AppLog.Info("ControllerOwnership", "Physical ownership released to XInput.",
+                ("Event", firmwareRestart ? "EnterBiosPhysicalReleaseCompleted" : "PhysicalOwnershipReleased"),
+                ("Reason", releaseReason), ("PrimaryHiddenTarget", _ownedPrimaryHiddenTarget ?? "None"),
                 ("HiddenTargetCount", targets.Count), ("HiddenTargets", string.Join(";", targets)));
             return new(true, "Released", targets);
         }
@@ -409,6 +431,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         {
             if (Volatile.Read(ref _disposed) != 0) return RecoveryFail("OwnerDisposed");
             if (_releasedForEnable) return RecoveryFail("ReleasedForCenterMEnable");
+            if (_releasedForFirmwareRestart) return RecoveryFail("ReleasedForFirmwareRestart");
             return await RecoverLostInputCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
