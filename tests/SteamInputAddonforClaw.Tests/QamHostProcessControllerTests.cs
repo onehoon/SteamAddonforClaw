@@ -73,6 +73,50 @@ public sealed class QamHostProcessControllerTests
     }
 
     [Fact]
+    public async Task Unexpected_exit_reacquires_qam_host_while_presentation_authority_is_active()
+    {
+        using var scope = new QamHostTestScope();
+        var starts = 0;
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            var ordinal = Interlocked.Increment(ref starts);
+            return ordinal == 1
+                ? StartCommand("/c", "exit 0")
+                : StartCommand("/c", "ping 127.0.0.1 -n 30 > nul");
+        });
+
+        controller.OnBigPictureStateChanged(true);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (Volatile.Read(ref starts) < 2 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+
+        Assert.Equal(2, Volatile.Read(ref starts));
+        Assert.True(controller.HasTrackedProcess);
+        await controller.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Expected_stop_does_not_reacquire_qam_host()
+    {
+        using var scope = new QamHostTestScope();
+        var starts = 0;
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            Interlocked.Increment(ref starts);
+            return StartCommand("/c", "ping 127.0.0.1 -n 30 > nul");
+        });
+
+        controller.OnBigPictureStateChanged(true);
+        await WaitForTrackedProcessAsync(controller);
+        await controller.StopAsync();
+        await Task.Delay(100);
+
+        Assert.Equal(1, Volatile.Read(ref starts));
+        Assert.False(controller.HasTrackedProcess);
+    }
+
+    [Fact]
     public async Task Steam_game_exit_stops_qam_host_without_big_picture()
     {
         using var scope = new QamHostTestScope();

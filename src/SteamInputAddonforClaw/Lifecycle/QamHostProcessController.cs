@@ -12,6 +12,7 @@ internal sealed class QamHostProcessController : IAsyncDisposable
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private Process? _process;
+    private Process? _expectedStopProcess;
     private bool _bigPictureActive;
     private bool _steamGameActive;
     private bool _stopping;
@@ -72,14 +73,26 @@ internal sealed class QamHostProcessController : IAsyncDisposable
 
     private void StartLocked()
     {
+        Process? exitedProcess = null;
         lock (_sync)
         {
             if (_stopping) return;
-            if (_process is { HasExited: false })
+            if (_process is { } trackedProcess && !trackedProcess.HasExited)
             {
-                AppLog.Info("QAM.Host", "QamHost start skipped; already running.", ("PID", _process.Id));
+                AppLog.Info("QAM.Host", "QamHost start skipped; already running.", ("PID", trackedProcess.Id));
                 return;
             }
+            if (_process is { } alreadyExited)
+            {
+                _process = null;
+                exitedProcess = alreadyExited;
+            }
+        }
+
+        if (exitedProcess is not null)
+        {
+            exitedProcess.Exited -= OnProcessExited;
+            exitedProcess.Dispose();
         }
 
         if (!File.Exists(_executablePath))
@@ -102,7 +115,18 @@ internal sealed class QamHostProcessController : IAsyncDisposable
             startInfo.ArgumentList.Add(_logDirectory);
             var process = _startProcess(startInfo);
             if (process is null) { AppLog.Warn("QAM.Host", "QamHost process launch returned no process."); return; }
-            lock (_sync) _process = process;
+            process.Exited += OnProcessExited;
+            lock (_sync)
+            {
+                if (_stopping)
+                {
+                    process.Exited -= OnProcessExited;
+                    process.Dispose();
+                    return;
+                }
+                _process = process;
+            }
+            process.EnableRaisingEvents = true;
             AppLog.Info("QAM.Host", "QamHost process started.", ("PID", process.Id));
         }
         catch (Exception exception)
@@ -111,10 +135,41 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         }
     }
 
+    private void OnProcessExited(object? sender, EventArgs eventArgs)
+    {
+        if (sender is not Process exitedProcess) return;
+
+        bool restart;
+        lock (_sync)
+        {
+            if (!ReferenceEquals(_process, exitedProcess)) return;
+            if (ReferenceEquals(_expectedStopProcess, exitedProcess)) return;
+
+            restart = !_stopping && (_bigPictureActive || _steamGameActive);
+            _process = null;
+        }
+
+        exitedProcess.Exited -= OnProcessExited;
+        if (!restart)
+        {
+            AppLog.Info("QAM.Host", "QamHost exited unexpectedly while no Steam presentation authority was active.", ("PID", exitedProcess.Id));
+            exitedProcess.Dispose();
+            return;
+        }
+
+        AppLog.Warn("QAM.Host", "QamHost exited unexpectedly; reacquiring while Steam presentation authority remains active.", null, ("PID", exitedProcess.Id));
+        exitedProcess.Dispose();
+        _ = ReconcileDesiredStateAsync();
+    }
+
     private async Task StopLockedAsync()
     {
         Process? process;
-        lock (_sync) process = _process;
+        lock (_sync)
+        {
+            process = _process;
+            if (process is not null) _expectedStopProcess = process;
+        }
         if (process is null) return;
 
         try
@@ -144,8 +199,13 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         }
         finally
         {
+            process.Exited -= OnProcessExited;
             process.Dispose();
-            lock (_sync) { if (ReferenceEquals(_process, process)) _process = null; }
+            lock (_sync)
+            {
+                if (ReferenceEquals(_process, process)) _process = null;
+                if (ReferenceEquals(_expectedStopProcess, process)) _expectedStopProcess = null;
+            }
         }
     }
 

@@ -286,6 +286,28 @@ try
             }
         }
 
+        async Task<bool> ReadCurrentAddonSelectionAsync(CancellationToken token)
+        {
+            try
+            {
+                var result = CdpEvaluateResult.Parse(await sessionClient.EvaluateAsync(
+                    "JSON.stringify(window.__STEAM_INPUT_ADDON_QAM__?.__getQamHostWidthSelection?.() ?? null)",
+                    token).ConfigureAwait(false));
+                if (!result.Succeeded || result.StringValue is null) return false;
+                var activeTab = JsonSerializer.Deserialize<string?>(result.StringValue);
+                return string.Equals(activeTab, "steam-input-addon", StringComparison.Ordinal);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+            catch (Exception exception)
+            {
+                log.Info($"QAM host width selection read skipped. {exception.GetType().Name}: {exception.Message}");
+                return false;
+            }
+        }
+
         async Task UninstallQamHostTransformAsync(CancellationToken token)
         {
             try
@@ -409,7 +431,8 @@ try
             log.Info("CDP connected.");
             installationSucceeded = true; // cleanup is eligible once the remote install may execute
             await InstallForCurrentDocumentAsync(currentClient);
-            await ApplyQamHostTransformAsync(false, "gamepad-ui-install", lifetimeToken);
+            var currentAddonSelection = await ReadCurrentAddonSelectionAsync(lifetimeToken);
+            await ApplyQamHostTransformAsync(currentAddonSelection, "gamepad-ui-install", lifetimeToken);
             recoveryDeadline = null;
 
             while (!lifetimeToken.IsCancellationRequested)
@@ -425,7 +448,8 @@ try
                     log.Info("GamepadUI document reloaded; reinjecting QAM.");
                     reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     await InstallForCurrentDocumentAsync(currentClient);
-                    await ApplyQamHostTransformAsync(false, "gamepad-ui-reload", lifetimeToken);
+                    var reloadedAddonSelection = await ReadCurrentAddonSelectionAsync(lifetimeToken);
+                    await ApplyQamHostTransformAsync(reloadedAddonSelection, "gamepad-ui-reload", lifetimeToken);
                     continue;
                 }
                 log.Warn("CDP connection lost.");

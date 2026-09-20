@@ -554,6 +554,10 @@
     };
   }
 
+  function getQamHostWidthSelection() {
+    return state.qamHostWidthActiveTab ?? null;
+  }
+
   function findQamActiveTabOwner(result) {
     const panelOuterClass = state.qamWidthClassNames?.PanelOuterNav;
     if (!panelOuterClass) return null;
@@ -681,6 +685,7 @@
       return null;
     }
 
+    state.qamHostWidthActiveTab = activeTab == null ? null : String(activeTab);
     logStateChange(
       "qamWidthSelection",
       String(activeTab),
@@ -2307,6 +2312,8 @@
       addonTabDescriptor: null,
       selectAddonOnNextOpenRequested: false,
       qamWidthClassNames: null,
+      qamAuthorityDiagnosticActiveTab: null,
+      qamHostWidthActiveTab: null,
       qamWidthPatches: null,
       qamOuterStyleRecords: new WeakMap(),
       qamOuterPatchedTarget: null,
@@ -2326,6 +2333,7 @@
     uninstall,
     request,
     __getQamGeometryClassNames: getQamGeometryClassNames,
+    __getQamHostWidthSelection: getQamHostWidthSelection,
     __receiveBridgeResponse: receiveBridgeResponse,
     __receiveBridgeNotification: receiveBridgeNotification,
   });
