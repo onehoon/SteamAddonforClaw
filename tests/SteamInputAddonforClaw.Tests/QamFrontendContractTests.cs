@@ -298,6 +298,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("candidate.QuickAccessMenu", discovery);
         Assert.Contains("candidate.BatteryDetailsLabels", discovery);
         Assert.Contains("candidate.PanelOuterNav", discovery);
+        Assert.Contains("unique[0].TabGroupPanel", discovery);
+        Assert.Contains("TabGroupPanel: tabGroupPanel", discovery);
         Assert.Contains("unique.length !== 1", discovery);
         Assert.Contains("return null", discovery);
         Assert.DoesNotContain("quickaccessmenu_PanelOuterNav_2BB6u", source);
@@ -365,11 +367,42 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_width_geometry_diagnostic_is_read_only_and_active_tab_scoped()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var start = source.IndexOf("function describeQamGeometry", StringComparison.Ordinal);
+        var end = source.IndexOf("function applyAddonQamWidth", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var diagnostic = source[start..end];
+
+        Assert.Contains("getBoundingClientRect", diagnostic);
+        Assert.Contains("getComputedStyle", diagnostic);
+        Assert.Contains("getElementsByClassName", diagnostic);
+        Assert.Contains("parentElement", diagnostic);
+        Assert.Contains("depth < 6", diagnostic);
+        Assert.Contains("requestAnimationFrame", diagnostic);
+        Assert.Contains("cancelAnimationFrame", diagnostic);
+        Assert.Contains("qamGeometryScheduledSignature === signature", diagnostic);
+        Assert.Contains("logStateChange(\"qamGeometry\", String(activeTab)", diagnostic);
+        Assert.Contains("Functional QAM discovery remains React-based", diagnostic);
+        Assert.DoesNotContain(".style =", diagnostic);
+        Assert.DoesNotContain(".style.", diagnostic);
+        Assert.DoesNotContain("classList", diagnostic);
+        Assert.DoesNotContain("setProperty", diagnostic);
+        Assert.DoesNotContain("appendChild", diagnostic);
+        Assert.DoesNotContain("removeChild", diagnostic);
+        Assert.DoesNotContain("MutationObserver", diagnostic);
+        Assert.DoesNotContain("setInterval", diagnostic);
+        Assert.DoesNotContain("setTimeout", diagnostic);
+    }
+
+    [Fact]
     public void Qam_width_cleanup_is_conservative_and_generation_local()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var installStart = source.IndexOf("function install()", StringComparison.Ordinal);
         var install = source[installStart..source.IndexOf("const webpackRequire", installStart, StringComparison.Ordinal)];
+        Assert.Contains("cancelQamGeometryReadback();", install);
         Assert.Contains("state.qamWidthClassNames = null", install);
         Assert.Contains("state.qamWidthOriginalStyles = new WeakMap()", install);
 
@@ -377,6 +410,7 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("state.addonQamWidthActive", source);
         Assert.Contains("state.qamWidthClassNames = null", source);
         Assert.Contains("state.qamWidthOriginalStyles = new WeakMap()", source);
+        Assert.Contains("cancelQamGeometryReadback();", source[source.IndexOf("function uninstall()", StringComparison.Ordinal)..]);
     }
 
     [Fact]
