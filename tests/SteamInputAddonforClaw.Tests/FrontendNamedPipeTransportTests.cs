@@ -64,6 +64,20 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Steam_fse_operations_round_trip_through_the_named_pipe()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        Assert.Equal(36, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
+        Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
+        Assert.True(fake.LastSteamFseEnabled);
+    }
+
+    [Fact]
     public async Task Battery_charge_limit_test_operations_round_trip_through_the_named_pipe()
     {
         var fake = new RecordingFrontendControl();
@@ -1594,6 +1608,10 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, new(false), @"C:\Logs", true);
         public FrontendPrerequisiteSetupResult SetupResult { get; } = new(FrontendPrerequisiteSetupResultKind.Installed, Status);
         public FrontendEnvironmentReportResult EnvironmentResult { get; } = new(true, null);
+        public FrontendSteamFseSnapshot SteamFseSnapshot { get; } = new(true, false, null);
+        public FrontendSteamFseMutationResult SteamFseMutationResult { get; } = new(
+            FrontendSteamFseMutationOutcome.Succeeded, new(true, true, null), null);
+        public bool LastSteamFseEnabled { get; private set; }
         public int TotalCalls { get; private set; }
         public FrontendLogLevel LastLogLevel { get; private set; }
         public FrontButtonMappingSettings? LastFrontButtonMapping { get; private set; }
@@ -1612,6 +1630,8 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastDeveloperTestModeEnabled = enabled; return Task.FromResult(new FrontendDeveloperSnapshot(enabled)); }
         public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken t = default) { TotalCalls++; if (!BlockPrerequisiteSetup) return SetupResult; PrerequisiteSetupStarted.TrySetResult(); try { await Task.Delay(Timeout.InfiniteTimeSpan, t); throw new UnreachableException(); } catch (OperationCanceledException) { PrerequisiteSetupCancelled.TrySetResult(); throw; } }
         public Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(EnvironmentResult); }
+        public Task<FrontendSteamFseSnapshot> CaptureSteamFseAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(SteamFseSnapshot); }
+        public Task<FrontendSteamFseMutationResult> SetSteamFseEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastSteamFseEnabled = enabled; return Task.FromResult(SteamFseMutationResult); }
         public FrontendCpuBoostSnapshot CpuBoostSnapshot { get; } = new(
             new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, null),
             new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, null),

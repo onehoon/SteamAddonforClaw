@@ -13,7 +13,9 @@ function New-Fixture {
         (Join-Path $root 'Dependencies\Viiper'),
         (Join-Path $root 'ui\Views'),
         (Join-Path $root 'qam\Frontend'),
-        (Join-Path $root 'overlay')
+        (Join-Path $root 'overlay'),
+        (Join-Path $root 'fse\Package\Assets'),
+        (Join-Path $root 'fse\Package\Public')
     )
     New-Item -ItemType Directory -Force -Path $directories | Out-Null
 
@@ -45,11 +47,22 @@ function New-Fixture {
         'overlay\App.xbf' = 'overlay app xbf'
         'overlay\OverlayWindow.xbf' = 'overlay window xbf'
         'overlay\Microsoft.UI.Xaml.winmd' = 'overlay winmd payload'
+        'fse\SteamInputAddonforClaw.FseHome.exe' = 'fse executable'
+        'fse\SteamInputAddonforClaw.FseHome.dll' = 'fse managed payload'
+        'fse\Package\AppxManifest.xml' = '<Identity Name="SteamInputAddonforClaw.FseHome" /><Application Id="App"><uap3:AppExtension Name="windows.gamingApp" /><uap4:CustomCapability Name="Microsoft.appCategory.gamingHome_8wekyb3d8bbwe" /></Application>'
+        'fse\Package\CustomCapability.SCCD' = '<CustomCapability Name="Microsoft.appCategory.gamingHome_8wekyb3d8bbwe" />'
+        'fse\Package\Assets\AppIcon.ico' = 'icon'
+        'fse\Package\Public\README.txt' = 'public folder'
     }
 
     foreach ($entry in $files.GetEnumerator()) {
         $destination = Join-Path $root $entry.Key
-        if ($entry.Value -is [string] -and (Test-Path -LiteralPath $entry.Value -PathType Leaf)) {
+        $sourceExists = $false
+        if ($entry.Value -is [string]) {
+            try { $sourceExists = Test-Path -LiteralPath $entry.Value -PathType Leaf }
+            catch [ArgumentException] { $sourceExists = $false }
+        }
+        if ($sourceExists) {
             Copy-Item -LiteralPath $entry.Value -Destination $destination
         }
         else {
@@ -135,6 +148,11 @@ try {
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'ui\Views\HowToUsePage.xbf')
     Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing child-view XBF' -Asset 'ui\Views\HowToUsePage.xbf'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Remove-Item -LiteralPath (Join-Path $root 'fse\Package\AppxManifest.xml')
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing FSE package manifest' -Asset 'fse\Package\AppxManifest.xml'
 
     $root = New-Fixture
     $fixturesToClean += $root

@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Profiles.Performance;
+using SteamInputAddonforClaw.WindowsGaming;
 
 namespace SteamInputAddonforClaw.Install;
 
@@ -38,8 +39,9 @@ internal static class UninstallBootstrap
             return;
         var cefCleaned = Steam.SteamCefDebugBootstrap.RemoveOwnedMarker();
         var fpsCleaned = TryCleanupOwnedIntelFpsForUninstall();
+        var steamFseCleaned = new WindowsGamingHomeConfiguration().TryCleanupForUninstall();
         TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-        if (cefCleaned && fpsCleaned)
+        if (cefCleaned && fpsCleaned && steamFseCleaned)
             AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
     }
 
