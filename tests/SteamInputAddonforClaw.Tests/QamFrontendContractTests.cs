@@ -378,7 +378,9 @@ public sealed class QamFrontendContractTests
         var nestedEnd = source.IndexOf("}, originalTarget);", nestedStart, StringComparison.Ordinal);
         Assert.True(nestedStart >= 0 && nestedEnd > nestedStart);
         var nested = source[nestedStart..nestedEnd];
-        Assert.Contains("patchQamTabGroupOwner(owner);", nested);
+        Assert.Contains("const contentOwner = observeQamActiveTab(result);", nested);
+        Assert.Contains("if (contentOwner) patchQamTabGroupOwner(contentOwner);", nested);
+        Assert.DoesNotContain("patchQamTabGroupOwner(owner);", nested);
         Assert.DoesNotContain("applyAddonQamContentWidth(result);", nested);
 
         var ownerStart = source.IndexOf("function patchQamTabGroupOwner", StringComparison.Ordinal);
