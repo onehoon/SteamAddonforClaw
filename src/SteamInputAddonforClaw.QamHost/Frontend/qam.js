@@ -552,6 +552,11 @@
       "qamWidthSelection",
       String(activeTab),
       `QAM width selection: ActiveTab=${String(activeTab)} AddonSelected=${activeTab === ADDON_TAB_KEY}`);
+    const authorityTabSignature = String(activeTab);
+    if (state.qamAuthorityDiagnosticActiveTab !== authorityTabSignature) {
+      state.qamAuthorityDiagnosticActiveTab = authorityTabSignature;
+      void captureQamAuthorityDiagnostic("render-active-tab", activeTab);
+    }
     scheduleQamGeometryReadback(activeTab);
 
     state.qamWidthOriginalStyles ??= new WeakMap();
@@ -570,6 +575,104 @@
       target.props.style = state.qamWidthOriginalStyles.get(target);
       state.qamWidthOriginalStyles.delete(target);
     }
+  }
+
+  function qamDiagnosticObjectId(value) {
+    if (!value || (typeof value !== "object" && typeof value !== "function")) return null;
+    state.qamAuthorityObjectIds ??= new WeakMap();
+    state.qamAuthorityObjectIdNext ??= 0;
+    if (!state.qamAuthorityObjectIds.has(value))
+      state.qamAuthorityObjectIds.set(value, ++state.qamAuthorityObjectIdNext);
+    return state.qamAuthorityObjectIds.get(value);
+  }
+
+  function qamDiagnosticValue(value) {
+    if (value == null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+    try { return String(value); } catch (_) { return "<unreadable>"; }
+  }
+
+  function qamDiagnosticProperty(target, propertyName) {
+    try { return qamDiagnosticValue(target?.[propertyName]); }
+    catch (_) { return "<throws>"; }
+  }
+
+  function qamDiagnosticRawProperty(target, propertyName) {
+    try { return target?.[propertyName] ?? null; }
+    catch (_) { return null; }
+  }
+
+  function qamDiagnosticMethod(target, methodName) {
+    try {
+      const method = target?.[methodName];
+      if (typeof method !== "function") return { available: false };
+      try { return { available: true, value: qamDiagnosticValue(method.call(target)) }; }
+      catch (error) { return { available: true, error: String(error) }; }
+    } catch (error) {
+      return { available: false, error: String(error) };
+    }
+  }
+
+  function describeQamMenuStore(menuStore) {
+    if (!menuStore || (typeof menuStore !== "object" && typeof menuStore !== "function"))
+      return { exists: false };
+    return {
+      exists: true,
+      objectId: qamDiagnosticObjectId(menuStore),
+      openQuickAccessMenuAvailable: typeof menuStore["OpenQuickAccessMenu"] === "function",
+      m_eOpenSideMenu: qamDiagnosticProperty(menuStore, "m_eOpenSideMenu"),
+      m_eQuickAccessTab: qamDiagnosticProperty(menuStore, "m_eQuickAccessTab"),
+      m_strQuickAccessTab: qamDiagnosticProperty(menuStore, "m_strQuickAccessTab"),
+      activeTab: qamDiagnosticProperty(menuStore, "activeTab"),
+      getOpenSideMenu: qamDiagnosticMethod(menuStore, "GetOpenSideMenu"),
+      getQuickAccessTab: qamDiagnosticMethod(menuStore, "GetQuickAccessTab"),
+    };
+  }
+
+  function describeQamWindowInstance(instance) {
+    if (!instance || (typeof instance !== "object" && typeof instance !== "function"))
+      return { exists: false };
+    return {
+      exists: true,
+      objectId: qamDiagnosticObjectId(instance),
+      menuStore: describeQamMenuStore(qamDiagnosticRawProperty(instance, "MenuStore")),
+    };
+  }
+
+  // Read-only authority diagnostic. It deliberately inspects only the known Main/Overlay
+  // window seams and primitive method results; it never calls a mutating Steam method.
+  async function captureQamAuthorityDiagnostic(reason, activeTab = null) {
+    const windowStore = window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore;
+    let appId = null;
+    let statusError = null;
+    try {
+      const status = await request("captureStatus");
+      const candidate = Number(status?.steam?.appId || 0);
+      appId = candidate > 0 ? candidate : null;
+    } catch (error) {
+      statusError = String(error);
+    }
+
+    let overlay = null;
+    let overlayLookup = "unavailable";
+    if (windowStore && typeof windowStore.GetOverlayInstanceWithFallback === "function") {
+      try {
+        overlay = windowStore.GetOverlayInstanceWithFallback(appId || 0, 0);
+        overlayLookup = overlay ? "resolved" : "empty";
+      } catch (error) {
+        overlayLookup = `failed:${String(error)}`;
+      }
+    }
+
+    const snapshot = {
+      Reason: reason,
+      AppId: appId,
+      ActiveTab: activeTab == null ? null : String(activeTab),
+      StatusError: statusError,
+      Main: describeQamWindowInstance(windowStore?.MainWindowInstance),
+      OverlayLookup: overlayLookup,
+      Overlay: describeQamWindowInstance(overlay),
+    };
+    logStateChange("qamAuthority", JSON.stringify(snapshot), `QAM authority diagnostic ${JSON.stringify(snapshot)}`);
   }
 
   function findTabsPropOwner(node) {
@@ -603,6 +706,7 @@
   }
 
   function requestAddonSelectionOnNextQuickAccessOpen() {
+    void captureQamAuthorityDiagnostic("selection-request");
     const authority = resolveNativeQamMenuAuthority();
     if (!authority) {
       state.selectAddonOnNextOpenRequested = false;
@@ -631,7 +735,9 @@
     }
 
     try {
+      void captureQamAuthorityDiagnostic("selection-before", ADDON_TAB_KEY);
       authority.selectAddon();
+      void captureQamAuthorityDiagnostic("selection-after", ADDON_TAB_KEY);
       log("QAM open selection: Addon");
     } catch (error) {
       logOnce("initialTabSelectionFailure", `QAM initial Addon tab selection unavailable; tabs remain usable. Reason=${String(error)}`);
@@ -1609,6 +1715,9 @@
     state.selectAddonOnNextOpenRequested = false;
     state.qamWidthClassNames = null;
     state.qamWidthOriginalStyles = new WeakMap();
+    state.qamAuthorityObjectIds = new WeakMap();
+    state.qamAuthorityObjectIdNext = 0;
+    state.qamAuthorityDiagnosticActiveTab = null;
     state.stateInvalidationSubscribers?.clear();
     state.diagnostics = {};
     state.runtimeDiagnostics = {};

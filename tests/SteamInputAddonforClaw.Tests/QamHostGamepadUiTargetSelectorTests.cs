@@ -93,4 +93,25 @@ public class QamHostGamepadUiTargetSelectorTests
 
         Assert.Null(selected);
     }
+
+    [Fact]
+    public void FormatsReadOnlyTargetInventoryWithoutLoggingWebSocketUrls()
+    {
+        var targets = new[]
+        {
+            Page("SharedJSContext", "https://steamloopback.host/routes/library/home"),
+            Page("NoSocket", "https://steamloopback.host/routes/notifications", ws: null),
+        };
+
+        var snapshot = CdpTargetSnapshotFormatter.Format("test", targets);
+
+        Assert.Contains("QAM CDP target snapshot.", snapshot);
+        Assert.Contains("\"Reason\":\"test\"", snapshot);
+        Assert.Contains("\"Id\":\"id-SharedJSContext\"", snapshot);
+        Assert.Contains("\"Type\":\"page\"", snapshot);
+        Assert.Contains("\"Title\":\"NoSocket\"", snapshot);
+        Assert.Contains("\"WebSocketDebuggerUrlPresent\":true", snapshot);
+        Assert.Contains("\"WebSocketDebuggerUrlPresent\":false", snapshot);
+        Assert.DoesNotContain("ws://127.0.0.1:8080/devtools/page/1", snapshot);
+    }
 }

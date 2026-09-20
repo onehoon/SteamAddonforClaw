@@ -68,6 +68,26 @@ try
         var sessionClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
         currentClient = sessionClient;
         long documentGeneration = 0;
+        var sessionDiagnosticsCts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+        var targetSnapshotGate = new SemaphoreSlim(1, 1);
+        async Task LogTargetSnapshotAsync(string reason, CancellationToken token)
+        {
+            try
+            {
+                await targetSnapshotGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    var snapshotTargets = await sessionClient.ListTargetsAsync(token).ConfigureAwait(false);
+                    log.Info(CdpTargetSnapshotFormatter.Format(reason, snapshotTargets));
+                }
+                finally { targetSnapshotGate.Release(); }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                log.Warn($"QAM CDP target snapshot unavailable. Reason={reason}. {exception.GetType().Name}: {exception.Message}");
+            }
+        }
         // Cleanup ownership belongs to this CDP/GamepadUI session only.
         installationSucceeded = false;
         installMayExist = false;
@@ -110,6 +130,7 @@ try
             {
                 var admittedGeneration = Volatile.Read(ref documentGeneration);
                 _ = Task.Run(() => DeliverSelectAddonOnNextQuickAccessOpenAsync(admittedGeneration), lifetimeToken);
+                _ = Task.Run(() => LogTargetSnapshotAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
             }
             sessionClient.BindingCalled += OnBindingCalled;
             frontendBridge.StateInvalidated += OnStateInvalidated;
@@ -120,9 +141,15 @@ try
         CdpTarget? target = null;
         try
         {
+            var initialTargetSnapshotLogged = false;
             while (!lifetimeToken.IsCancellationRequested)
             {
                 var targets = await currentClient.ListTargetsAsync(lifetimeToken);
+                if (!initialTargetSnapshotLogged)
+                {
+                    log.Info(CdpTargetSnapshotFormatter.Format("initial-acquisition", targets));
+                    initialTargetSnapshotLogged = true;
+                }
                 target = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
                 if (target is not null || !managed || !QamHostRecovery.IsOpen(DateTimeOffset.UtcNow, recoveryDeadline)) break;
                 await Task.Delay(250, lifetimeToken);
@@ -188,6 +215,8 @@ try
             frontendBridge.StateInvalidated -= OnStateInvalidated;
             frontendBridge.SelectAddonOnNextQuickAccessOpenRequested -= OnSelectAddonOnNextQuickAccessOpen;
             sessionClient.BindingCalled -= OnBindingCalled;
+            sessionDiagnosticsCts.Cancel();
+            sessionDiagnosticsCts.Dispose();
             if (installMayExist) await TeardownAsync(sessionClient);
             await sessionClient.DisposeAsync();
             if (ReferenceEquals(currentClient, sessionClient)) currentClient = null;
