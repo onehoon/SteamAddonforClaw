@@ -386,10 +386,9 @@ public sealed class QamFrontendContractTests
         Assert.True(producerStart >= 0 && ownerStart > producerStart);
         var producer = source[producerStart..ownerStart];
         Assert.Contains("args[0]?.tab?.key !== ADDON_TAB_KEY", producer);
-        Assert.DoesNotContain("function findQamAddonTabPanelProducer(result)", source);
-        Assert.DoesNotContain("function patchQamTabPanelProducer(node)", source);
-        Assert.DoesNotContain("applyAddonQamTabGroupPanelWidth", source);
-        Assert.DoesNotContain("patchQamTabPanelProducer", producer);
+        Assert.Contains("captureQamFeReturnTreeDiagnostic(result);", producer);
+        Assert.Contains("findQamAddonTabPanelProducer(result)", producer);
+        Assert.Contains("patchQamTabPanelProducer(panelProducerSearch.node)", producer);
         Assert.Contains("rebuildComponentType(node.type, resolved, patchedTarget)", source);
         Assert.Contains("function patchQamTabGroupOwner(node)", source);
         Assert.Contains("findQamAddonTabProducer(result)", source);
@@ -410,6 +409,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("state.diagnostics?.qamFeReturnTree", diagnostic);
         Assert.Contains("propsKeys", diagnostic);
         Assert.Contains("tabKey", diagnostic);
+        Assert.Contains("activeTabPresent", diagnostic);
+        Assert.Contains("bMenuVisiblePresent", diagnostic);
         Assert.Contains("bActivePresent", diagnostic);
         Assert.Contains("describeQamDiagnosticChild", diagnostic);
         Assert.Contains("kind: \"function\"", source);
@@ -497,13 +498,34 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_tab_group_panel_width_patch_is_deferred_until_fe_shape_is_confirmed()
+    public void Qam_fe_and_ge_discovery_are_semantic_and_content_width_is_addon_only()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         Assert.Contains("const ADDON_QAM_WIDTH_PX = 400;", source);
-        Assert.DoesNotContain("applyAddonQamTabGroupPanelWidth", source);
-        Assert.DoesNotContain("findQamAddonTabPanelProducer", source);
-        Assert.DoesNotContain("patchQamTabPanelProducer", source);
+        var feStart = source.IndexOf("function findQamAddonTabProducer", StringComparison.Ordinal);
+        var panelStart = source.IndexOf("function findQamAddonTabPanelProducer", feStart, StringComparison.Ordinal);
+        var diagnosticStart = source.IndexOf("const QAM_FE_DIAGNOSTIC_NODE_BUDGET", panelStart, StringComparison.Ordinal);
+        Assert.True(feStart >= 0 && panelStart > feStart && diagnosticStart > panelStart);
+        var fe = source[feStart..panelStart];
+        var panel = source[panelStart..diagnosticStart];
+        Assert.Contains("props?.tab?.key === ADDON_TAB_KEY", fe);
+        Assert.Contains("hasOwnProperty.call(props, \"activeTab\")", fe);
+        Assert.Contains("hasOwnProperty.call(props, \"bMenuVisible\")", fe);
+        Assert.Contains("resolveComponentTarget(node.type)", fe);
+        Assert.Contains("hasOwnProperty.call(props, \"bActive\")", panel);
+        Assert.Contains("resolveComponentTarget(node.type)", panel);
+
+        var applyStart = source.IndexOf("function applyAddonQamTabGroupPanelWidth", StringComparison.Ordinal);
+        var applyEnd = source.IndexOf("function applyQamPanelOuterWidth", applyStart, StringComparison.Ordinal);
+        Assert.True(applyStart >= 0 && applyEnd > applyStart);
+        var apply = source[applyStart..applyEnd];
+        Assert.Contains("maxWidth: \"none\"", apply);
+        Assert.DoesNotContain("width:", apply);
+        Assert.Contains("target.props.style === record.appliedStyle", source[source.IndexOf("function restoreQamTabGroupPanelWidth", StringComparison.Ordinal)..applyStart]);
+        Assert.Contains("restoreQamTabGroupPanelWidth();", apply);
+        Assert.DoesNotContain("document", apply);
+        Assert.DoesNotContain("MutationObserver", apply);
+        Assert.DoesNotContain("setTimeout", apply);
         Assert.DoesNotContain("ADDON_QAM_CONTENT_ID", source);
         Assert.DoesNotContain("props?.id ===", source);
     }
@@ -553,13 +575,17 @@ public sealed class QamFrontendContractTests
         Assert.Contains("state.qamWidthPatches = new Map()", install);
         Assert.Contains("state.qamOuterStyleRecords = new WeakMap()", install);
         Assert.Contains("state.qamOuterPatchedTarget = null", install);
+        Assert.Contains("state.qamTabGroupPanelStyleRecords = new WeakMap()", install);
+        Assert.Contains("state.qamTabGroupPanelPatchedTarget = null", install);
 
         Assert.DoesNotContain("state.qamWidthSelectionPatch", source);
         Assert.DoesNotContain("state.addonQamWidthActive", source);
         Assert.Contains("state.qamWidthClassNames = null", source);
         Assert.Contains("function restoreQamWidthPatches()", source);
         Assert.Contains("function restoreQamPanelOuterWidth()", source);
+        Assert.Contains("function restoreQamTabGroupPanelWidth()", source);
         Assert.Contains("qamOuterStyleRecords: new WeakMap()", source);
+        Assert.Contains("qamTabGroupPanelStyleRecords: new WeakMap()", source);
         Assert.Contains("qamWidthPatches: null", source);
         Assert.Contains("cancelQamGeometryReadback();", source[source.IndexOf("function uninstall()", StringComparison.Ordinal)..]);
     }
