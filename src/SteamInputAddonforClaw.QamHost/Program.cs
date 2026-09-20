@@ -94,7 +94,7 @@ try
                 log.Warn($"QAM CDP target snapshot unavailable. Reason={reason}. {exception.GetType().Name}: {exception.Message}");
             }
         }
-        async Task LogQuickAccessGeometrySnapshotsAsync(string reason, CancellationToken token)
+        async Task LogQuickAccessGeometrySnapshotsAsync(string reason, CancellationToken token, string? activeTab = null)
         {
             try
             {
@@ -131,7 +131,7 @@ try
                         {
                             await diagnosticClient.ConnectReadOnlyAsync(target, token).ConfigureAwait(false);
                             var result = CdpEvaluateResult.Parse(await diagnosticClient.EvaluateAsync(
-                                QuickAccessGeometryDiagnostic.CreateExpression(classNames), token).ConfigureAwait(false));
+                                QuickAccessGeometryDiagnostic.CreateExpression(classNames, activeTab), token).ConfigureAwait(false));
                             if (!result.Succeeded || string.IsNullOrWhiteSpace(result.StringValue))
                             {
                                 log.Warn($"QAM QuickAccess geometry target evaluation failed. Reason={reason} TargetTitle={target.Title} TargetId={target.Id} Error={result.ErrorText ?? "empty result"}");
@@ -357,10 +357,23 @@ try
             {
                 if (string.Equals(name, "__steamInputAddonQamHost", StringComparison.Ordinal))
                 {
-                    if (TryParseQamHostWidthSelection(payload, out var addonSelected))
+                    if (TryParseQamHostWidthSelection(payload, out var addonSelected, out var activeTab))
                     {
                         var admittedGeneration = Volatile.Read(ref documentGeneration);
                         _ = Task.Run(() => DeliverQamHostSelectionAsync(addonSelected, admittedGeneration), lifetimeToken);
+                        _ = Task.Run(() => LogQuickAccessGeometrySnapshotsAsync(
+                            $"active-tab-notification:{activeTab ?? "null"}",
+                            sessionDiagnosticsCts.Token,
+                            activeTab), sessionDiagnosticsCts.Token);
+                        return;
+                    }
+
+                    if (TryParseQamInnerTabSelection(payload, out var innerTab))
+                    {
+                        _ = Task.Run(() => LogQuickAccessGeometrySnapshotsAsync(
+                            $"inner-tab-notification:{innerTab}",
+                            sessionDiagnosticsCts.Token,
+                            innerTab), sessionDiagnosticsCts.Token);
                         return;
                     }
                     var bridgeGeneration = Volatile.Read(ref documentGeneration);
@@ -564,9 +577,10 @@ static async Task WaitForConsoleShutdownAsync()
     await tcs.Task;
 }
 
-static bool TryParseQamHostWidthSelection(string payload, out bool addonSelected)
+static bool TryParseQamHostWidthSelection(string payload, out bool addonSelected, out string? activeTab)
 {
     addonSelected = false;
+    activeTab = null;
     try
     {
         using var document = JsonDocument.Parse(payload);
@@ -577,9 +591,34 @@ static bool TryParseQamHostWidthSelection(string payload, out bool addonSelected
             return false;
         }
 
-        addonSelected = root.TryGetProperty("activeTab", out var activeTab) &&
-                        string.Equals(activeTab.GetString(), "steam-input-addon", StringComparison.Ordinal);
+        if (root.TryGetProperty("activeTab", out var activeTabElement) && activeTabElement.ValueKind == JsonValueKind.String)
+            activeTab = activeTabElement.GetString();
+        addonSelected = string.Equals(activeTab, "steam-input-addon", StringComparison.Ordinal);
         return true;
+    }
+    catch (JsonException)
+    {
+        return false;
+    }
+}
+
+static bool TryParseQamInnerTabSelection(string payload, out string? activeTab)
+{
+    activeTab = null;
+    try
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("kind", out var kind) ||
+            !string.Equals(kind.GetString(), "qam-inner-tab-selection", StringComparison.Ordinal) ||
+            !root.TryGetProperty("activeTab", out var activeTabElement) ||
+            activeTabElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        activeTab = activeTabElement.GetString();
+        return !string.IsNullOrWhiteSpace(activeTab);
     }
     catch (JsonException)
     {
