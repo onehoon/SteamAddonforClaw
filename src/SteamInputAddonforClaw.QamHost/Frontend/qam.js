@@ -623,32 +623,6 @@
     return tabOwner;
   }
 
-  function applyAddonQamTabGroupPanelWidth(result) {
-    const tabGroupPanelClass = state.qamWidthClassNames?.TabGroupPanel;
-    if (!tabGroupPanelClass) {
-      logOnce("qamWidthTabGroupPanelClassMissing", "QAM TabGroupPanel class was not resolved; leaving Steam width unchanged.");
-      return result;
-    }
-
-    const targetSearch = findReactNode(result, node => hasExactClass(node, tabGroupPanelClass));
-    const target = targetSearch.node;
-    if (!target?.props) {
-      logOnce(
-        "qamWidthNodeMissing",
-        `QAM Addon TabGroupPanel element was not found in the producer result. Visited=${targetSearch.visited} BudgetExhausted=${targetSearch.budgetExhausted}.`
-      );
-      return result;
-    }
-
-    target.props.style = {
-      ...(target.props.style || {}),
-      width: `${ADDON_QAM_WIDTH_PX}px`,
-      maxWidth: `${ADDON_QAM_WIDTH_PX}px`,
-    };
-    logOnce("qamWidthProducerTarget", "QAM Addon TabGroupPanel element found and widened.");
-    return result;
-  }
-
   function qamDiagnosticObjectId(value) {
     if (!value || (typeof value !== "object" && typeof value !== "function")) return null;
     state.qamAuthorityObjectIds ??= new WeakMap();
@@ -1056,13 +1030,6 @@
       node?.props?.tab?.key === ADDON_TAB_KEY && resolveComponentTarget(node.type));
   }
 
-  function findQamAddonTabPanelProducer(result) {
-    return findReactNode(result, node =>
-      node?.props?.tab?.key === ADDON_TAB_KEY &&
-      Object.prototype.hasOwnProperty.call(node.props, "bActive") &&
-      resolveComponentTarget(node.type));
-  }
-
   const QAM_FE_DIAGNOSTIC_NODE_BUDGET = 32;
   const QAM_FE_DIAGNOSTIC_DEPTH_BUDGET = 5;
 
@@ -1152,36 +1119,6 @@
     logOnce("qamFeReturnTree", `QAM Fe return tree diagnostic ${JSON.stringify(snapshot)}`);
   }
 
-  function patchQamTabPanelProducer(node) {
-    const resolved = resolveComponentTarget(node?.type);
-    if (!resolved) {
-      logOnce("qamWidthPanelProducerUnsupported", "QAM Addon tab panel producer was found but its component type is unsupported.");
-      return false;
-    }
-
-    const originalTarget = resolved.target;
-    state.qamWidthPatches ??= new Map();
-    let record = state.qamWidthPatches.get(originalTarget);
-    if (!record) {
-      const patchedTarget = preservePatchedFunctionShape(function patchedQamTabPanelProducer(...args) {
-        const result = originalTarget.apply(this, args);
-        if (!state.installed || args[0]?.tab?.key !== ADDON_TAB_KEY) return result;
-        return applyAddonQamTabGroupPanelWidth(result);
-      }, originalTarget);
-      record = {
-        originalType: node.type,
-        patchedType: rebuildComponentType(node.type, resolved, patchedTarget),
-        nodes: new Set(),
-      };
-      state.qamWidthPatches.set(originalTarget, record);
-    }
-
-    record.nodes.add(node);
-    if (node.type === record.originalType) node.type = record.patchedType;
-    logOnce("qamWidthPanelProducer", "QAM Addon tab panel producer patched.");
-    return true;
-  }
-
   function patchQamTabGroupProducer(node) {
     const resolved = resolveComponentTarget(node?.type);
     if (!resolved) {
@@ -1198,17 +1135,6 @@
         if (!state.installed || args[0]?.tab?.key !== ADDON_TAB_KEY) return result;
 
         captureQamFeReturnTreeDiagnostic(result);
-
-        const panelProducerSearch = findQamAddonTabPanelProducer(result);
-        if (!panelProducerSearch.node) {
-          logOnce(
-            "qamWidthPanelProducerMissing",
-            `QAM Addon tab panel producer was not found in the tab producer result. Visited=${panelProducerSearch.visited} BudgetExhausted=${panelProducerSearch.budgetExhausted}.`
-          );
-          return result;
-        }
-
-        patchQamTabPanelProducer(panelProducerSearch.node);
         return result;
       }, originalTarget);
       record = {

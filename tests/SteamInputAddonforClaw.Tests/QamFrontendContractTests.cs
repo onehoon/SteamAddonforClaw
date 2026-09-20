@@ -386,12 +386,10 @@ public sealed class QamFrontendContractTests
         Assert.True(producerStart >= 0 && ownerStart > producerStart);
         var producer = source[producerStart..ownerStart];
         Assert.Contains("args[0]?.tab?.key !== ADDON_TAB_KEY", producer);
-        Assert.Contains("function findQamAddonTabPanelProducer(result)", source);
-        Assert.Contains("Object.prototype.hasOwnProperty.call(node.props, \"bActive\")", source);
-        Assert.Contains("function patchQamTabPanelProducer(node)", source);
-        Assert.Contains("return applyAddonQamTabGroupPanelWidth(result);", source);
-        Assert.Contains("patchQamTabPanelProducer(panelProducerSearch.node)", producer);
-        Assert.DoesNotContain("applyAddonQamTabGroupPanelWidth(result)", producer);
+        Assert.DoesNotContain("function findQamAddonTabPanelProducer(result)", source);
+        Assert.DoesNotContain("function patchQamTabPanelProducer(node)", source);
+        Assert.DoesNotContain("applyAddonQamTabGroupPanelWidth", source);
+        Assert.DoesNotContain("patchQamTabPanelProducer", producer);
         Assert.Contains("rebuildComponentType(node.type, resolved, patchedTarget)", source);
         Assert.Contains("function patchQamTabGroupOwner(node)", source);
         Assert.Contains("findQamAddonTabProducer(result)", source);
@@ -403,7 +401,7 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var start = source.IndexOf("function captureQamFeReturnTreeDiagnostic", StringComparison.Ordinal);
-        var end = source.IndexOf("function patchQamTabPanelProducer", start, StringComparison.Ordinal);
+        var end = source.IndexOf("function patchQamTabGroupProducer", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var diagnostic = source[start..end];
 
@@ -499,25 +497,15 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_width_patch_targets_only_addon_tab_group_panel_return_element()
+    public void Qam_tab_group_panel_width_patch_is_deferred_until_fe_shape_is_confirmed()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         Assert.Contains("const ADDON_QAM_WIDTH_PX = 400;", source);
-        var start = source.IndexOf("function applyAddonQamTabGroupPanelWidth", StringComparison.Ordinal);
-        var end = source.IndexOf("function findTabsPropOwner", start, StringComparison.Ordinal);
-        Assert.True(start >= 0 && end > start);
-        var width = source[start..end];
-
-        Assert.Contains("findReactNode(result, node => hasExactClass(node, tabGroupPanelClass))", width);
-        Assert.Contains("QAM Addon TabGroupPanel element was not found in the producer result", width);
-        Assert.Contains("width: `${ADDON_QAM_WIDTH_PX}px`", width);
-        Assert.Contains("maxWidth: `${ADDON_QAM_WIDTH_PX}px`", width);
+        Assert.DoesNotContain("applyAddonQamTabGroupPanelWidth", source);
+        Assert.DoesNotContain("findQamAddonTabPanelProducer", source);
+        Assert.DoesNotContain("patchQamTabPanelProducer", source);
         Assert.DoesNotContain("ADDON_QAM_CONTENT_ID", source);
-        Assert.DoesNotContain("props?.id ===", width);
-        Assert.DoesNotContain("height:", width);
-        Assert.DoesNotContain("margin:", width);
-        Assert.DoesNotContain("MutationObserver", width);
-        Assert.DoesNotContain("setInterval", width);
+        Assert.DoesNotContain("props?.id ===", source);
     }
 
     [Fact]
