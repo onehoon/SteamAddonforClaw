@@ -97,6 +97,19 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void QamHost_target_inventory_is_read_only_and_event_driven()
+    {
+        var program = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Program.cs");
+
+        Assert.Contains("CdpTargetSnapshotFormatter.Format(\"initial-acquisition\", targets)", program);
+        Assert.Contains("CdpTargetSnapshotFormatter.Format(reason, snapshotTargets)", program);
+        Assert.Contains("LogTargetSnapshotAsync(\"select-addon-on-next-open\"", program);
+        Assert.Contains("sessionDiagnosticsCts", program);
+        Assert.Contains("sessionClient.ListTargetsAsync(token)", program);
+        Assert.DoesNotContain("ConnectAsync(snapshot", program);
+    }
+
+    [Fact]
     public void Qam_bridge_path_is_only_the_generic_quick_settings_seam_for_device_and_profile()
     {
         var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
@@ -342,6 +355,71 @@ public sealed class QamFrontendContractTests
         var restoreStart = width.IndexOf("if (state.qamWidthOriginalStyles.has(target))", StringComparison.Ordinal);
         Assert.True(restoreStart >= 0);
         Assert.Contains("target.props.style = state.qamWidthOriginalStyles.get(target)", width[restoreStart..]);
+    }
+
+    [Fact]
+    public void Qam_authority_diagnostic_is_read_only_and_compares_main_with_overlay_instance()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var diagnosticStart = source.IndexOf("function qamDiagnosticObjectId", StringComparison.Ordinal);
+        var authorityStart = source.IndexOf("function captureQamAuthorityState", diagnosticStart, StringComparison.Ordinal);
+        var authorityEnd = source.IndexOf("function findTabsPropOwner", authorityStart, StringComparison.Ordinal);
+        Assert.True(diagnosticStart >= 0 && authorityStart > diagnosticStart && authorityEnd > authorityStart);
+        var diagnostic = source[diagnosticStart..authorityEnd];
+
+        Assert.Contains("function captureQamAuthorityState(activeTab = null)", diagnostic);
+        Assert.Contains("function captureQamAuthorityDiagnostic(reason, activeTab = null)", diagnostic);
+        Assert.Contains("const capturedState = captureQamAuthorityState(activeTab);", diagnostic);
+        Assert.Contains("void enrichAndLogQamAuthorityDiagnostic(reason, capturedState);", diagnostic);
+        var stateStart = diagnostic.IndexOf("function captureQamAuthorityState", StringComparison.Ordinal);
+        var stateEnd = diagnostic.IndexOf("// Runtime AppId remains", stateStart, StringComparison.Ordinal);
+        var state = diagnostic[stateStart..stateEnd];
+        var enrichStart = diagnostic.IndexOf("async function enrichAndLogQamAuthorityDiagnostic", stateEnd, StringComparison.Ordinal);
+        var enrichEnd = diagnostic.IndexOf("// Read-only authority diagnostic", enrichStart, StringComparison.Ordinal);
+        var enrich = diagnostic[enrichStart..enrichEnd];
+        Assert.Contains("MainRunningAppID", state);
+        Assert.Contains("GetOverlayInstanceWithFallback", state);
+        Assert.Contains("describeQamWindowInstance(overlay)", state);
+        Assert.DoesNotContain("GetOverlayInstanceWithFallback", enrich);
+        Assert.DoesNotContain("describeQamWindowInstance(overlay)", enrich);
+        Assert.Contains("GetOverlayInstanceWithFallback", diagnostic);
+        Assert.Contains("GetOpenSideMenu", diagnostic);
+        Assert.Contains("GetQuickAccessTab", diagnostic);
+        Assert.Contains("captureStatus", diagnostic);
+        Assert.Contains("MainWindowInstance", diagnostic);
+        Assert.Contains("OverlayLookup", diagnostic);
+        Assert.Contains("logStateChange(\"qamAuthority\"", diagnostic);
+        Assert.DoesNotContain("OpenQuickAccessMenu(ADDON_TAB_KEY", diagnostic);
+        Assert.DoesNotContain("document", diagnostic);
+        Assert.DoesNotContain(".click(", diagnostic);
+        Assert.DoesNotContain("focus()", diagnostic);
+        Assert.DoesNotContain("MutationObserver", diagnostic);
+        Assert.DoesNotContain("setInterval", diagnostic);
+    }
+
+    [Fact]
+    public void Qam_authority_diagnostic_is_triggered_at_selection_and_render_boundaries()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("captureQamAuthorityDiagnostic(\"selection-request\")", source);
+        Assert.Contains("captureQamAuthorityDiagnostic(\"selection-before\", ADDON_TAB_KEY)", source);
+        Assert.Contains("captureQamAuthorityDiagnostic(\"selection-after\", ADDON_TAB_KEY)", source);
+        Assert.Contains("captureQamAuthorityDiagnostic(\"render-active-tab\", activeTab)", source);
+
+        var selectionStart = source.IndexOf("function tryConsumeAddonSelectionRequest", StringComparison.Ordinal);
+        var selectionEnd = source.IndexOf("function ensureAddonTabs", selectionStart, StringComparison.Ordinal);
+        var selection = source[selectionStart..selectionEnd];
+        var beforeIndex = selection.IndexOf("captureQamAuthorityDiagnostic(\"selection-before\", ADDON_TAB_KEY)", StringComparison.Ordinal);
+        var selectIndex = selection.IndexOf("authority.selectAddon();", StringComparison.Ordinal);
+        var afterIndex = selection.IndexOf("captureQamAuthorityDiagnostic(\"selection-after\", ADDON_TAB_KEY)", StringComparison.Ordinal);
+        Assert.True(beforeIndex >= 0 && beforeIndex < selectIndex && selectIndex < afterIndex);
+
+        var diagnosticStart = source.IndexOf("function captureQamAuthorityDiagnostic", StringComparison.Ordinal);
+        var diagnosticEnd = source.IndexOf("function findTabsPropOwner", diagnosticStart, StringComparison.Ordinal);
+        var diagnostic = source[diagnosticStart..diagnosticEnd];
+        Assert.Contains("const capturedState = captureQamAuthorityState(activeTab);", diagnostic);
+        Assert.DoesNotContain("await", diagnostic[..diagnostic.IndexOf("void enrichAndLogQamAuthorityDiagnostic", StringComparison.Ordinal)]);
     }
 
     [Fact]
