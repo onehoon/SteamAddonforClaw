@@ -19,6 +19,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public AppSettings Settings { get; private set; }
 
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
+    public bool QuickSettingsCurrentPowerSourceOnly => Settings.QuickSettingsCurrentPowerSourceOnly;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
     public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
     public event EventHandler? FrontButtonMappingChanged;
@@ -102,6 +103,14 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     {
         if (Settings.SuppressDeveloperMenuWarning) return;
         var next = Settings with { SuppressDeveloperMenuWarning = true };
+        _settingsStore.Save(next);
+        Settings = next;
+    }
+
+    public void ChangeQuickSettingsCurrentPowerSourceOnly(bool enabled)
+    {
+        if (Settings.QuickSettingsCurrentPowerSourceOnly == enabled) return;
+        var next = Settings with { QuickSettingsCurrentPowerSourceOnly = enabled };
         _settingsStore.Save(next);
         Settings = next;
     }

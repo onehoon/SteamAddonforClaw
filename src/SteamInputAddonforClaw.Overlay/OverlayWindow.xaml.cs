@@ -26,7 +26,7 @@ public sealed partial class OverlayWindow : Window
     // row VALUES changed (the common case while a slider is being edited/settled) -- update the
     // existing WinUI controls in place. A different shape means a row appeared/disappeared/changed
     // kind -- rebuild.
-    private readonly record struct QuickSettingsRowShape(QuickSettingsRowId RowId, QuickSettingsControlKind ControlKind, QuickSettingsSliderKind? SliderKind, bool WellFormed);
+    private readonly record struct QuickSettingsRowShape(QuickSettingsRowId RowId, QuickSettingsControlKind ControlKind, QuickSettingsSliderKind? SliderKind, bool Visible, bool WellFormed);
 
     // SF-V2-09 section 13.1: the small page-local surface state a generic Device/Profile Quick
     // Settings renderer needs -- grouping what used to be five parallel Device-only fields. Window-
@@ -363,6 +363,7 @@ public sealed partial class OverlayWindow : Window
         row.RowId,
         row.ControlKind,
         row.ControlKind == QuickSettingsControlKind.Slider ? row.SliderSpec?.Kind : null,
+        row.Visible,
         QuickSettingsRowRendering.IsWellFormed(row));
 
     // PR #510 review: the Profile game identity (section heading/message -- e.g. the enriched
@@ -387,7 +388,7 @@ public sealed partial class OverlayWindow : Window
     private static void ApplyQuickSettingsToggleState(OverlayToggleRow toggle, QuickSettingsRow row)
     {
         var isOn = row.Value is { Kind: QuickSettingsValueKind.Boolean, BooleanValue: true };
-        var isAvailable = row.Available && row.Writable && row.Value is { Kind: QuickSettingsValueKind.Boolean };
+        var isAvailable = row.Visible && row.Available && row.Writable && row.Value is { Kind: QuickSettingsValueKind.Boolean };
         toggle.ApplyState(isAvailable, isOn);
     }
 
@@ -398,7 +399,7 @@ public sealed partial class OverlayWindow : Window
         {
             var hasValue = row.Value is { Kind: QuickSettingsValueKind.Integer, IntegerValue: not null };
             var value = hasValue ? row.Value!.IntegerValue!.Value : spec.Minimum;
-            var available = row.Available && row.Writable && hasValue;
+            var available = row.Visible && row.Available && row.Writable && hasValue;
             slider.ApplyState(available, spec.Minimum, spec.Maximum, spec.Step, value);
         }
         else
@@ -407,7 +408,7 @@ public sealed partial class OverlayWindow : Window
             var index = row.Value is { Kind: QuickSettingsValueKind.Integer, IntegerValue: { } iv }
                 ? QuickSettingsRowRendering.FindDiscreteIndex(options, iv)
                 : -1;
-            var available = row.Available && row.Writable && index >= 0;
+            var available = row.Visible && row.Available && row.Writable && index >= 0;
             slider.ApplyState(available, 0, Math.Max(0, options.Count - 1), 1, Math.Max(0, index));
         }
     }
@@ -439,12 +440,14 @@ public sealed partial class OverlayWindow : Window
         {
             foreach (var section in page.Sections)
             {
+                var visibleRows = section.Rows.Where(row => row.Visible).ToArray();
+                if (visibleRows.Length == 0) continue;
                 if (!string.IsNullOrEmpty(section.Label))
                     surface.Content.Children.Add(CreateQuickSettingsMessageText(section.Label, "BodyStrongTextBlockStyle"));
                 if (!string.IsNullOrEmpty(section.Message))
                     surface.Content.Children.Add(CreateQuickSettingsMessageText(section.Message, "CaptionTextBlockStyle"));
 
-                foreach (var row in section.Rows)
+                foreach (var row in visibleRows)
                 {
                     if (!TryCreateQuickSettingsRow(surface, row, out var overlayRow)) continue;
                     rows.Add(overlayRow);

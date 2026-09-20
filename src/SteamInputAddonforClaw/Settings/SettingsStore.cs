@@ -39,11 +39,14 @@ public sealed class SettingsStore
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
             var developerMenuEnabled = root.TryGetProperty("DeveloperMenuEnabled", out var developerMenuProperty) && developerMenuProperty.ValueKind == JsonValueKind.True && developerMenuProperty.GetBoolean();
+            var quickSettingsCurrentPowerSourceOnly = root.TryGetProperty("QuickSettingsCurrentPowerSourceOnly", out var currentPowerProperty)
+                && currentPowerProperty.ValueKind == JsonValueKind.True && currentPowerProperty.GetBoolean();
             var settings = new AppSettings(
                 LogLevel: logLevel,
                 SuppressDeveloperMenuWarning: suppressDeveloperMenuWarning)
             {
                 DeveloperMenuEnabled = developerMenuEnabled,
+                QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
                 FrontButtonMapping = ReadFrontButtonMapping(root),
                 AddonQuickSettingsTabOrder = ReadAddonQuickSettingsTabOrder(root)
             };
@@ -144,7 +147,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.FrontButtonMapping, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.FrontButtonMapping, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

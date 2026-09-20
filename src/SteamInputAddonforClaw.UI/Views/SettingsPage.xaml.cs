@@ -11,6 +11,7 @@ public sealed partial class SettingsPage : UserControl
     private IAddonFrontendControl? _frontend;
     private FrontendUpdateSnapshot _updateSnapshot = FrontendUpdateSnapshot.Unavailable;
     private int _updateOperationInProgress;
+    private bool _applyingQuickSettingsPowerSourcePreference;
     public event EventHandler? DeveloperMenuRequested;
 
     public SettingsPage()
@@ -22,6 +23,7 @@ public sealed partial class SettingsPage : UserControl
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
+        SetQuickSettingsPowerSourceToggle(bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly);
         _ = RefreshAppUpdateAsync();
     }
 
@@ -68,6 +70,37 @@ public sealed partial class SettingsPage : UserControl
         {
             Volatile.Write(ref _updateOperationInProgress, 0);
             await RefreshAppUpdateAsync().ConfigureAwait(true);
+        }
+    }
+
+    private void SetQuickSettingsPowerSourceToggle(bool enabled)
+    {
+        _applyingQuickSettingsPowerSourcePreference = true;
+        try { QuickSettingsPowerSourceToggleSwitch.IsOn = enabled; }
+        finally { _applyingQuickSettingsPowerSourcePreference = false; }
+    }
+
+    private async void QuickSettingsPowerSourceToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_applyingQuickSettingsPowerSourcePreference || _frontend is null) return;
+
+        try
+        {
+            var settings = await _frontend.SetQuickSettingsCurrentPowerSourceOnlyAsync(QuickSettingsPowerSourceToggleSwitch.IsOn).ConfigureAwait(true);
+            SetQuickSettingsPowerSourceToggle(settings.QuickSettingsCurrentPowerSourceOnly);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("QuickSettings", "Current power-source preference update failed.", exception);
+            try
+            {
+                var bootstrap = await _frontend.GetBootstrapAsync().ConfigureAwait(true);
+                SetQuickSettingsPowerSourceToggle(bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly);
+            }
+            catch (Exception refreshException)
+            {
+                AppLog.Warn("QuickSettings", "Current power-source preference rollback failed.", refreshException);
+            }
         }
     }
 

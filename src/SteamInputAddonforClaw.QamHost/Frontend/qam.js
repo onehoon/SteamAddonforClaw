@@ -155,6 +155,7 @@
   }
 
   function quickSettingsRowMutationBlockReason(row, busy) {
+    if (row?.visible !== true) return "row-hidden";
     if (!row?.available) return "row-unavailable";
     if (!row?.writable) return "row-readonly";
     if (busy) return "busy";
@@ -1646,6 +1647,10 @@
           quickSettingsContextRef.current = nextContext;
 
           const nextPage = await request("captureQuickSettingsPage", { pageId: nextContext.pageId, appId: nextContext.appId });
+          if (!validateQuickSettingsPage(nextPage)) {
+            failClosed("Quick Settings unavailable");
+            return;
+          }
           // Late-result guard (section 16): only install this fetch if the visible context has not
           // already moved on again while the request was in flight.
           if (sameQuickSettingsContext(quickSettingsContextRef.current, nextContext)) {
@@ -1702,6 +1707,7 @@
         // Section 16: ignore a settlement whose page context no longer matches what is currently
         // visible (the user already moved to a different game/Device before this arrived) -- it
         // must never replace the newer context's page or surface its own error.
+        if (!validateQuickSettingsPage(result?.page)) { failClosed("Quick Settings unavailable"); return; }
         if (!sameQuickSettingsContext(quickSettingsContextOf(result?.page), quickSettingsContextRef.current)) return;
         // The adapter always returns a fresh authoritative page -- it wins on success AND on a
         // typed feature failure (a failed Windows apply may still have persisted the desired value).
@@ -1781,6 +1787,7 @@
       };
 
       const renderQuickSettingsRow = (page, section, row) => {
+        if (row?.visible !== true) return null;
         if (row.controlKind === QS_CONTROL_TOGGLE) {
           return React.createElement(native.ToggleField, {
             label: row.label,
@@ -1827,6 +1834,7 @@
         const rows = (section.rows ?? [])
           .map(row => ({ key: `qs-row-${row.rowId}`, node: renderQuickSettingsRow(quickSettingsPage, section, row) }))
           .filter(entry => entry.node);
+        if (rows.length === 0) return null;
         return React.createElement(native.PanelSection, { key: `qs-section-${section.sectionId}`, title: section.label || undefined },
           ...rows.map(entry => React.createElement(native.PanelSectionRow, { key: entry.key }, entry.node)));
       });
@@ -2025,10 +2033,16 @@
       if (pending?.pageId !== page.pageId || (pending?.appId ?? null) !== (page.appId ?? null)) continue;
       const editedRowId = pending?.payload?.editedRowId;
       const row = findQuickSettingsRow(page, editedRowId);
-      if (row?.available === true && row?.writable === true) continue;
+      if (row?.visible === true && row?.available === true && row?.writable === true) continue;
       clearTimeout(pending.timer);
       state.qamSliderCommits.delete(key);
     }
+  }
+
+  function validateQuickSettingsPage(page) {
+    if (!page || !Array.isArray(page.sections)) return false;
+    return page.sections.every(section => section && Array.isArray(section.rows)
+      && section.rows.every(row => row && typeof row.visible === "boolean"));
   }
 
   // onRequestStart / onRequestEnd wrap ONLY the actual delayed RPC execution (never the debounce
@@ -2054,7 +2068,16 @@
             // Reuses the same generic capture seam Device uses (section 9.1) rather than a
             // legacy Profile-only bridge method.
             const currentPage = await request("captureQuickSettingsPage", { pageId: QS_PAGE_PROFILE, appId: entry.appId });
-            if (!currentPage?.available || Number(currentPage.appId || 0) !== entry.appId) {
+            if (!validateQuickSettingsPage(currentPage)) {
+              if (state.qamSliderCommits.get(key)?.token === token) {
+                state.qamSliderCommits.delete(key);
+                notifyStateInvalidated();
+              }
+              return;
+            }
+            const pendingRow = findQuickSettingsRow(currentPage, entry.payload?.editedRowId);
+            if (!currentPage?.available || Number(currentPage.appId || 0) !== entry.appId
+                || pendingRow?.visible !== true || pendingRow?.available !== true || pendingRow?.writable !== true) {
               if (state.qamSliderCommits.get(key)?.token === token) {
                 state.qamSliderCommits.delete(key);
                 notifyStateInvalidated();

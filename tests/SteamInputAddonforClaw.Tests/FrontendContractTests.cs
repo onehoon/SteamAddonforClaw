@@ -50,11 +50,13 @@ public sealed class FrontendContractTests
         var value = new FrontendSettingsSnapshot(FrontendLogLevel.Debug, SuppressDeveloperMenuWarning: true, FrontButtonMappingSettings.Default)
         {
             DeveloperMenuEnabled = true,
+            QuickSettingsCurrentPowerSourceOnly = true,
         };
         var restored = JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
         Assert.True(restored!.SuppressDeveloperMenuWarning);
         Assert.True(restored.DeveloperMenuEnabled);
+        Assert.True(restored.QuickSettingsCurrentPowerSourceOnly);
     }
 
     [Fact]

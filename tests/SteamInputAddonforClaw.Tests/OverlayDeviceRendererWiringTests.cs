@@ -195,6 +195,17 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("_profileRowSelection", source);
     }
 
+    [Fact]
+    public void Quick_settings_renderer_uses_visibility_in_shape_admission_and_rebuild()
+    {
+        var source = ReadOverlayWindowSource();
+
+        Assert.Contains("bool Visible, bool WellFormed", source);
+        Assert.Contains("row.Visible", source);
+        Assert.Contains("var visibleRows = section.Rows.Where(row => row.Visible).ToArray();", source);
+        Assert.Contains("if (visibleRows.Length == 0) continue;", source);
+    }
+
     private static string ReadOverlayWindowSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
 
     private static string ReadWindowInteropSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "WindowInterop.cs");

@@ -126,7 +126,12 @@ public sealed record QuickSettingsRow(
     QuickSettingsValue? Value,
     QuickSettingsSliderSpec? SliderSpec,
     QuickSettingsCommitPolicy CommitPolicy,
-    QuickSettingsCommitGroupId? CommitGroupId = null);
+    QuickSettingsCommitGroupId? CommitGroupId = null)
+{
+    /// <summary>Presentation-only admission for compact Quick Settings surfaces. False rows remain
+    /// in the authoritative page so grouped drafts and hidden-side values stay complete.</summary>
+    public bool Visible { get; init; } = true;
+}
 
 public sealed record QuickSettingsSection(QuickSettingsSectionId SectionId, string? Label, IReadOnlyList<QuickSettingsRow> Rows, string? Message = null);
 

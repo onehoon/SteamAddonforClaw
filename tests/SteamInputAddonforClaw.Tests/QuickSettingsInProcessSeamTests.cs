@@ -43,6 +43,68 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public async Task Capture_device_page_projects_current_power_source_without_removing_companion_rows()
+    {
+        var cpuPolicy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var control = CreateControl(CreateReconciledCpuBoostRuntime(cpuPolicy),
+            appSettings: new AppSettings { QuickSettingsCurrentPowerSourceOnly = true },
+            powerSource: () => AcDcPowerSource.AC);
+
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device);
+        var ac = page.Sections.SelectMany(section => section.Rows).Single(row => row.RowId == QuickSettingsRowId.DeviceCpuBoostAc);
+        var dc = page.Sections.SelectMany(section => section.Rows).Single(row => row.RowId == QuickSettingsRowId.DeviceCpuBoostDc);
+
+        Assert.True(ac.Visible);
+        Assert.False(dc.Visible);
+        Assert.NotNull(dc.Value);
+    }
+
+    [Fact]
+    public async Task Current_power_source_preference_mutation_persists_and_publishes_once()
+    {
+        var control = CreateControl(cpuBoostRuntime: null);
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        var settings = await control.SetQuickSettingsCurrentPowerSourceOnlyAsync(true);
+
+        Assert.True(settings.QuickSettingsCurrentPowerSourceOnly);
+        Assert.Equal(1, invalidations);
+    }
+
+    [Fact]
+    public async Task Hidden_power_source_row_is_rejected_before_the_typed_mutation()
+    {
+        var cpuPolicy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Disabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Aggressive) };
+        var control = CreateControl(CreateReconciledCpuBoostRuntime(cpuPolicy),
+            appSettings: new AppSettings { QuickSettingsCurrentPowerSourceOnly = true },
+            powerSource: () => AcDcPowerSource.AC);
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Device, null, QuickSettingsRowId.DeviceCpuBoostDc,
+            [new(QuickSettingsRowId.DeviceCpuBoostDc, QuickSettingsValue.Integer((int)CpuBoostMode.Disabled))]);
+
+        var result = await control.MutateQuickSettingAsync(intent);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.Page.Sections.SelectMany(section => section.Rows).Single(row => row.RowId == QuickSettingsRowId.DeviceCpuBoostDc).Visible);
+        Assert.Equal(0, cpuPolicy.DcWriteCount);
+    }
+
+    [Fact]
+    public async Task Power_source_notification_is_gated_by_the_persisted_preference()
+    {
+        var control = CreateControl(cpuBoostRuntime: null);
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        control.NotifyQuickSettingsPowerSourceChanged();
+        Assert.Equal(0, invalidations);
+
+        await control.SetQuickSettingsCurrentPowerSourceOnlyAsync(true);
+        control.NotifyQuickSettingsPowerSourceChanged();
+        Assert.Equal(2, invalidations);
+    }
+
+    [Fact]
     public async Task Capture_profile_page_with_no_active_game_is_unavailable_with_zero_side_effects()
     {
         var control = CreateControl(cpuBoostRuntime: null);
@@ -284,11 +346,11 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         return runtime;
     }
 
-    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime? cpuBoostRuntime, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null)
+    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime? cpuBoostRuntime, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, AppSettings? appSettings = null, Func<AcDcPowerSource?>? powerSource = null)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+        var coordinator = new StartupSettingsCoordinator(appSettings ?? new AppSettings(), store, new FakeStartupManager());
         return new InProcessAddonFrontendControl(
             coordinator,
             new ThrowingSystemStatusProvider(),
@@ -297,7 +359,8 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
             cpuBoostRuntime: cpuBoostRuntime,
             powerModeRuntime: null,
             gameProfileMutations: gameProfileMutations,
-            actualRunningAppIdSource: actualRunningAppIdSource);
+            actualRunningAppIdSource: actualRunningAppIdSource,
+            quickSettingsPowerSource: powerSource);
     }
 
     public void Dispose()

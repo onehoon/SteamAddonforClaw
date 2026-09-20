@@ -185,7 +185,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         _authoritativePage = page;
     }
 
-    internal static bool CanMutate(QuickSettingsRow row) => row.Available && row.Writable;
+    internal static bool CanMutate(QuickSettingsRow row) => row.Visible && row.Available && row.Writable;
 
     // Sections 15/16/33: one immediate mutation at a time; cancels unsubmitted same-section drafts
     // first so a parent toggle cannot leave a stale child timer alive. Returns true only when a
@@ -433,7 +433,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         {
             if (!entry.Commit.TryGetPendingIntent(out var intent)) continue;
             var row = page.Sections.SelectMany(s => s.Rows).FirstOrDefault(r => r.RowId == intent.EditedRowId);
-            if (row is { Available: true, Writable: true }) continue;
+            if (row is { Visible: true, Available: true, Writable: true }) continue;
 
             entry.Commit.CancelUnsubmitted();
             if (entry.Commit.HasPendingDraft) continue; // already in flight -- leave it to settle

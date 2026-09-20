@@ -84,6 +84,42 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void QuickSettingsCurrentPowerSourceOnly_DefaultsToFalse_WhenMissing()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LogLevel\":\"Info\"}");
+
+        Assert.False(new SettingsStore(path).Load().QuickSettingsCurrentPowerSourceOnly);
+    }
+
+    [Fact]
+    public void QuickSettingsCurrentPowerSourceOnly_RoundTripsAndPersistsThroughCoordinator()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        coordinator.ChangeQuickSettingsCurrentPowerSourceOnly(true);
+
+        Assert.True(coordinator.QuickSettingsCurrentPowerSourceOnly);
+        Assert.True(store.Load().QuickSettingsCurrentPowerSourceOnly);
+        Assert.Contains("\"QuickSettingsCurrentPowerSourceOnly\": true", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
+    }
+
+    [Fact]
+    public void QuickSettingsCurrentPowerSourceOnly_InvalidJsonKind_FailsClosedWithoutAffectingOtherSettings()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LogLevel\":\"Debug\",\"QuickSettingsCurrentPowerSourceOnly\":\"true\"}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+        Assert.False(settings.QuickSettingsCurrentPowerSourceOnly);
+    }
+
+    [Fact]
     public void ExistingSettingsSaveOperations_PreserveDeveloperMenuEnabled()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));

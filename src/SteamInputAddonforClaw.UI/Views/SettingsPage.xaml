@@ -14,6 +14,16 @@
                 <Button x:Name="UpdateButton" Content="Check" Click="UpdateButton_Click" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard
+                x:Name="QuickSettingsPowerSourceCard"
+                Description="Show only the controls for the currently connected power source in QAM and Overlay."
+                Header="Show only current power source">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Repair" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch x:Name="QuickSettingsPowerSourceToggleSwitch" Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsExpander x:Name="RequiredComponentsExpander" Header="Required Components">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <SymbolIcon Symbol="Repair" />
