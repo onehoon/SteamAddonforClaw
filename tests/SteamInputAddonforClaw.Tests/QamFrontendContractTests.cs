@@ -409,6 +409,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("state.diagnostics?.qamFeReturnTree", diagnostic);
         Assert.Contains("propsKeys", diagnostic);
         Assert.Contains("tabKey", diagnostic);
+        Assert.Contains("InstallGeneration", diagnostic);
         Assert.Contains("activeTabPresent", diagnostic);
         Assert.Contains("bMenuVisiblePresent", diagnostic);
         Assert.Contains("bActivePresent", diagnostic);
@@ -430,6 +431,45 @@ public sealed class QamFrontendContractTests
         var producer = source[producerStart..ownerStart];
         Assert.Contains("captureQamFeReturnTreeDiagnostic(result);", producer);
         Assert.Contains("args[0]?.tab?.key !== ADDON_TAB_KEY", producer);
+    }
+
+    [Fact]
+    public void Qam_owner_return_tree_diagnostic_is_bounded_generation_scoped_and_read_only()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var start = source.IndexOf("function captureQamOwnerReturnTreeDiagnostic", StringComparison.Ordinal);
+        var end = source.IndexOf("function patchQamTabGroupOwner", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var diagnostic = source[start..end];
+
+        Assert.Contains("QAM_OWNER_DIAGNOSTIC_NODE_BUDGET", source);
+        Assert.Contains("QAM_OWNER_DIAGNOSTIC_DEPTH_BUDGET", source);
+        Assert.Contains("state.diagnostics?.qamOwnerReturnTree", diagnostic);
+        Assert.Contains("InstallGeneration", diagnostic);
+        Assert.Contains("path", diagnostic);
+        Assert.Contains("type", diagnostic);
+        Assert.Contains("propsKeys", diagnostic);
+        Assert.Contains("tabKey", diagnostic);
+        Assert.Contains("selected", diagnostic);
+        Assert.Contains("activeTabPresent", diagnostic);
+        Assert.Contains("bMenuVisiblePresent", diagnostic);
+        Assert.Contains("bActivePresent", diagnostic);
+        Assert.Contains("describeQamDiagnosticChild", diagnostic);
+        Assert.Contains("BudgetExhausted", diagnostic);
+        Assert.Contains("logOnce(\"qamOwnerReturnTree\"", diagnostic);
+        Assert.DoesNotContain("document", diagnostic);
+        Assert.DoesNotContain("MutationObserver", diagnostic);
+        Assert.DoesNotContain("setInterval", diagnostic);
+        Assert.DoesNotContain("setTimeout", diagnostic);
+        Assert.DoesNotContain(".style =", diagnostic);
+        Assert.DoesNotContain(".style.", diagnostic);
+
+        var ownerStart = source.IndexOf("function patchQamTabGroupOwner", StringComparison.Ordinal);
+        var producerSearchIndex = source.IndexOf("const tabProducerSearch = findQamAddonTabProducer(result);", ownerStart, StringComparison.Ordinal);
+        var captureIndex = source.IndexOf("captureQamOwnerReturnTreeDiagnostic(result);", ownerStart, StringComparison.Ordinal);
+        Assert.True(captureIndex >= 0 && producerSearchIndex > captureIndex);
+        Assert.Contains("Generation=${state.installGeneration ?? 0}", source);
+        Assert.Contains("state.installGeneration = (state.installGeneration ?? 0) + 1;", source);
     }
 
     [Fact]

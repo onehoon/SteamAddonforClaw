@@ -1158,6 +1158,7 @@
         type: describeQamDiagnosticType(value.type),
         propsKeys: props ? Object.keys(props).slice(0, 32) : [],
         tabKey: props?.tab?.key ?? null,
+        selected: props?.["aria-selected"] ?? null,
         activeTabPresent: !!props && Object.prototype.hasOwnProperty.call(props, "activeTab"),
         activeTab: props?.activeTab ?? null,
         bMenuVisiblePresent: !!props && Object.prototype.hasOwnProperty.call(props, "bMenuVisible"),
@@ -1183,12 +1184,80 @@
     }
 
     const snapshot = {
+      InstallGeneration: state.installGeneration ?? 0,
       RootTabKey: result?.props?.tab?.key ?? ADDON_TAB_KEY,
       Nodes: entries,
       Visited: visited.size,
       BudgetExhausted: budget === 0 && stack.length > 0,
     };
     logOnce("qamFeReturnTree", `QAM Fe return tree diagnostic ${JSON.stringify(snapshot)}`);
+  }
+
+  const QAM_OWNER_DIAGNOSTIC_NODE_BUDGET = 64;
+  const QAM_OWNER_DIAGNOSTIC_DEPTH_BUDGET = 6;
+
+  function captureQamOwnerReturnTreeDiagnostic(result) {
+    if (state.diagnostics?.qamOwnerReturnTree) return;
+
+    const entries = [];
+    const visited = new Set();
+    const stack = [{ value: result, path: "root", depth: 0 }];
+    let budget = QAM_OWNER_DIAGNOSTIC_NODE_BUDGET;
+
+    while (stack.length > 0 && budget > 0) {
+      const current = stack.pop();
+      const value = current.value;
+      if (value == null || typeof value !== "object") continue;
+      if (visited.has(value)) continue;
+      visited.add(value);
+      budget--;
+
+      if (Array.isArray(value)) {
+        entries.push({ path: current.path, kind: "array", count: value.length });
+        if (current.depth < QAM_OWNER_DIAGNOSTIC_DEPTH_BUDGET) {
+          for (let index = Math.min(value.length, 8) - 1; index >= 0; index--)
+            stack.push({ value: value[index], path: `${current.path}[${index}]`, depth: current.depth + 1 });
+        }
+        continue;
+      }
+
+      const props = value.props && typeof value.props === "object" ? value.props : null;
+      entries.push({
+        path: current.path,
+        type: describeQamDiagnosticType(value.type),
+        propsKeys: props ? Object.keys(props).slice(0, 32) : [],
+        tabKey: props?.tab?.key ?? null,
+        selected: props?.["aria-selected"] ?? null,
+        activeTabPresent: !!props && Object.prototype.hasOwnProperty.call(props, "activeTab"),
+        activeTab: props?.activeTab ?? null,
+        bMenuVisiblePresent: !!props && Object.prototype.hasOwnProperty.call(props, "bMenuVisible"),
+        bMenuVisible: props?.bMenuVisible ?? null,
+        bActivePresent: !!props && Object.prototype.hasOwnProperty.call(props, "bActive"),
+        bActive: props?.bActive ?? null,
+        children: describeQamDiagnosticChild(props?.children),
+      });
+
+      if (current.depth >= QAM_OWNER_DIAGNOSTIC_DEPTH_BUDGET) continue;
+      const links = [
+        [".props.children", props?.children],
+        [".children", value.children],
+        [".child", value.child],
+        [".sibling", value.sibling],
+      ];
+      for (let index = links.length - 1; index >= 0; index--) {
+        const [suffix, next] = links[index];
+        if (next && typeof next === "object")
+          stack.push({ value: next, path: `${current.path}${suffix}`, depth: current.depth + 1 });
+      }
+    }
+
+    const snapshot = {
+      InstallGeneration: state.installGeneration ?? 0,
+      Nodes: entries,
+      Visited: visited.size,
+      BudgetExhausted: budget === 0 && stack.length > 0,
+    };
+    logOnce("qamOwnerReturnTree", `QAM owner return tree diagnostic ${JSON.stringify(snapshot)}`);
   }
 
   function patchQamTabGroupProducer(node) {
@@ -1278,11 +1347,12 @@
         const result = originalTarget.apply(this, args);
         if (!state.installed) return result;
 
+        captureQamOwnerReturnTreeDiagnostic(result);
         const tabProducerSearch = findQamAddonTabProducer(result);
         if (!tabProducerSearch.node) {
           logOnce(
             "qamWidthTabProducerMissing",
-            `QAM Addon tab group producer was not found in the rendered owner result. Visited=${tabProducerSearch.visited} BudgetExhausted=${tabProducerSearch.budgetExhausted}.`
+            `QAM Addon tab group producer was not found in the rendered owner result. Generation=${state.installGeneration ?? 0} Visited=${tabProducerSearch.visited} BudgetExhausted=${tabProducerSearch.budgetExhausted}.`
           );
           return result;
         }
@@ -2101,6 +2171,7 @@
     // script generation that created it. Never reuse it across uninstall/reinstall or upgrades.
     state.addonTabDescriptor = null;
     state.selectAddonOnNextOpenRequested = false;
+    state.installGeneration = (state.installGeneration ?? 0) + 1;
     state.qamWidthClassNames = null;
     state.qamWidthPatches = new Map();
     state.qamOuterStyleRecords = new WeakMap();
