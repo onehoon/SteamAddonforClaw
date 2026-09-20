@@ -638,10 +638,20 @@
     };
   }
 
-  // Read-only authority diagnostic. It deliberately inspects only the known Main/Overlay
-  // window seams and primitive method results; it never calls a mutating Steam method.
-  async function captureQamAuthorityDiagnostic(reason, activeTab = null) {
+  function captureQamAuthorityState(activeTab = null) {
     const windowStore = window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore;
+    return {
+      ActiveTab: activeTab == null ? null : String(activeTab),
+      Main: describeQamWindowInstance(windowStore?.MainWindowInstance),
+      windowStore,
+    };
+  }
+
+  // Runtime AppId and the app-specific Overlay instance require an asynchronous bridge read.
+  // The Main/MenuStore state is captured before that await so selection-before/after retains its
+  // call-boundary meaning.
+  async function enrichAndLogQamAuthorityDiagnostic(reason, capturedState) {
+    const { windowStore, ...serializableState } = capturedState;
     let appId = null;
     let statusError = null;
     try {
@@ -665,14 +675,20 @@
 
     const snapshot = {
       Reason: reason,
-      AppId: appId,
-      ActiveTab: activeTab == null ? null : String(activeTab),
-      StatusError: statusError,
-      Main: describeQamWindowInstance(windowStore?.MainWindowInstance),
+      ...serializableState,
+      RuntimeAppId: appId,
+      RuntimeStatusError: statusError,
       OverlayLookup: overlayLookup,
       Overlay: describeQamWindowInstance(overlay),
     };
     logStateChange("qamAuthority", JSON.stringify(snapshot), `QAM authority diagnostic ${JSON.stringify(snapshot)}`);
+  }
+
+  // Read-only authority diagnostic. It deliberately inspects only the known Main/Overlay
+  // window seams and primitive method results; it never calls a mutating Steam method.
+  function captureQamAuthorityDiagnostic(reason, activeTab = null) {
+    const capturedState = captureQamAuthorityState(activeTab);
+    void enrichAndLogQamAuthorityDiagnostic(reason, capturedState);
   }
 
   function findTabsPropOwner(node) {

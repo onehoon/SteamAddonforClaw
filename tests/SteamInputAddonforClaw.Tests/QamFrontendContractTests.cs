@@ -362,11 +362,15 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var diagnosticStart = source.IndexOf("function qamDiagnosticObjectId", StringComparison.Ordinal);
-        var authorityStart = source.IndexOf("async function captureQamAuthorityDiagnostic", diagnosticStart, StringComparison.Ordinal);
+        var authorityStart = source.IndexOf("function captureQamAuthorityState", diagnosticStart, StringComparison.Ordinal);
         var authorityEnd = source.IndexOf("function findTabsPropOwner", authorityStart, StringComparison.Ordinal);
         Assert.True(diagnosticStart >= 0 && authorityStart > diagnosticStart && authorityEnd > authorityStart);
         var diagnostic = source[diagnosticStart..authorityEnd];
 
+        Assert.Contains("function captureQamAuthorityState(activeTab = null)", diagnostic);
+        Assert.Contains("function captureQamAuthorityDiagnostic(reason, activeTab = null)", diagnostic);
+        Assert.Contains("const capturedState = captureQamAuthorityState(activeTab);", diagnostic);
+        Assert.Contains("void enrichAndLogQamAuthorityDiagnostic(reason, capturedState);", diagnostic);
         Assert.Contains("GetOverlayInstanceWithFallback", diagnostic);
         Assert.Contains("GetOpenSideMenu", diagnostic);
         Assert.Contains("GetQuickAccessTab", diagnostic);
@@ -391,6 +395,20 @@ public sealed class QamFrontendContractTests
         Assert.Contains("captureQamAuthorityDiagnostic(\"selection-before\", ADDON_TAB_KEY)", source);
         Assert.Contains("captureQamAuthorityDiagnostic(\"selection-after\", ADDON_TAB_KEY)", source);
         Assert.Contains("captureQamAuthorityDiagnostic(\"render-active-tab\", activeTab)", source);
+
+        var selectionStart = source.IndexOf("function tryConsumeAddonSelectionRequest", StringComparison.Ordinal);
+        var selectionEnd = source.IndexOf("function ensureAddonTabs", selectionStart, StringComparison.Ordinal);
+        var selection = source[selectionStart..selectionEnd];
+        var beforeIndex = selection.IndexOf("captureQamAuthorityDiagnostic(\"selection-before\", ADDON_TAB_KEY)", StringComparison.Ordinal);
+        var selectIndex = selection.IndexOf("authority.selectAddon();", StringComparison.Ordinal);
+        var afterIndex = selection.IndexOf("captureQamAuthorityDiagnostic(\"selection-after\", ADDON_TAB_KEY)", StringComparison.Ordinal);
+        Assert.True(beforeIndex >= 0 && beforeIndex < selectIndex && selectIndex < afterIndex);
+
+        var diagnosticStart = source.IndexOf("function captureQamAuthorityDiagnostic", StringComparison.Ordinal);
+        var diagnosticEnd = source.IndexOf("function findTabsPropOwner", diagnosticStart, StringComparison.Ordinal);
+        var diagnostic = source[diagnosticStart..diagnosticEnd];
+        Assert.Contains("const capturedState = captureQamAuthorityState(activeTab);", diagnostic);
+        Assert.DoesNotContain("await", diagnostic[..diagnostic.IndexOf("void enrichAndLogQamAuthorityDiagnostic", StringComparison.Ordinal)]);
     }
 
     [Fact]
