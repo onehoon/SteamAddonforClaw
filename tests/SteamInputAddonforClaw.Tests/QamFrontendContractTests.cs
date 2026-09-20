@@ -380,8 +380,13 @@ public sealed class QamFrontendContractTests
         Assert.True(producerStart >= 0 && ownerStart > producerStart);
         var producer = source[producerStart..ownerStart];
         Assert.Contains("args[0]?.tab?.key !== ADDON_TAB_KEY", producer);
-        Assert.Contains("return applyAddonQamTabGroupPanelWidth(result);", producer);
-        Assert.Contains("rebuildComponentType(node.type, resolved, patchedTarget)", producer);
+        Assert.Contains("function findQamAddonTabPanelProducer(result)", source);
+        Assert.Contains("Object.prototype.hasOwnProperty.call(node.props, \"bActive\")", source);
+        Assert.Contains("function patchQamTabPanelProducer(node)", source);
+        Assert.Contains("return applyAddonQamTabGroupPanelWidth(result);", source);
+        Assert.Contains("patchQamTabPanelProducer(panelProducerSearch.node)", producer);
+        Assert.DoesNotContain("applyAddonQamTabGroupPanelWidth(result)", producer);
+        Assert.Contains("rebuildComponentType(node.type, resolved, patchedTarget)", source);
         Assert.Contains("function patchQamTabGroupOwner(node)", source);
         Assert.Contains("findQamAddonTabProducer(result)", source);
         Assert.Contains("patchQamTabGroupProducer(tabProducerSearch.node)", source);
@@ -453,7 +458,7 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_width_patch_targets_only_addon_tab_group_panel_and_restores_original_style()
+    public void Qam_width_patch_targets_only_addon_tab_group_panel_return_element()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         Assert.Contains("const ADDON_QAM_WIDTH_PX = 400;", source);

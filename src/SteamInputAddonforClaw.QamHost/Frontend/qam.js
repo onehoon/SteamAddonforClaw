@@ -1005,10 +1005,17 @@
       node?.props?.tab?.key === ADDON_TAB_KEY && resolveComponentTarget(node.type));
   }
 
-  function patchQamTabGroupProducer(node) {
+  function findQamAddonTabPanelProducer(result) {
+    return findReactNode(result, node =>
+      node?.props?.tab?.key === ADDON_TAB_KEY &&
+      Object.prototype.hasOwnProperty.call(node.props, "bActive") &&
+      resolveComponentTarget(node.type));
+  }
+
+  function patchQamTabPanelProducer(node) {
     const resolved = resolveComponentTarget(node?.type);
     if (!resolved) {
-      logOnce("qamWidthTabProducerUnsupported", "QAM Addon tab producer was found but its component type is unsupported.");
+      logOnce("qamWidthPanelProducerUnsupported", "QAM Addon tab panel producer was found but its component type is unsupported.");
       return false;
     }
 
@@ -1016,7 +1023,7 @@
     state.qamWidthPatches ??= new Map();
     let record = state.qamWidthPatches.get(originalTarget);
     if (!record) {
-      const patchedTarget = preservePatchedFunctionShape(function patchedQamTabGroupProducer(...args) {
+      const patchedTarget = preservePatchedFunctionShape(function patchedQamTabPanelProducer(...args) {
         const result = originalTarget.apply(this, args);
         if (!state.installed || args[0]?.tab?.key !== ADDON_TAB_KEY) return result;
         return applyAddonQamTabGroupPanelWidth(result);
@@ -1031,7 +1038,48 @@
 
     record.nodes.add(node);
     if (node.type === record.originalType) node.type = record.patchedType;
-    logOnce("qamWidthTabProducer", "QAM Addon tab group producer patched.");
+    logOnce("qamWidthPanelProducer", "QAM Addon tab panel producer patched.");
+    return true;
+  }
+
+  function patchQamTabGroupProducer(node) {
+    const resolved = resolveComponentTarget(node?.type);
+    if (!resolved) {
+      logOnce("qamWidthTabProducerUnsupported", "QAM Addon tab producer was found but its component type is unsupported.");
+      return false;
+    }
+
+    const originalTarget = resolved.target;
+    state.qamWidthPatches ??= new Map();
+    let record = state.qamWidthPatches.get(originalTarget);
+    if (!record) {
+      const patchedTarget = preservePatchedFunctionShape(function patchedQamTabGroupProducer(...args) {
+        const result = originalTarget.apply(this, args);
+        if (!state.installed || args[0]?.tab?.key !== ADDON_TAB_KEY) return result;
+
+        const panelProducerSearch = findQamAddonTabPanelProducer(result);
+        if (!panelProducerSearch.node) {
+          logOnce(
+            "qamWidthPanelProducerMissing",
+            `QAM Addon tab panel producer was not found in the tab producer result. Visited=${panelProducerSearch.visited} BudgetExhausted=${panelProducerSearch.budgetExhausted}.`
+          );
+          return result;
+        }
+
+        patchQamTabPanelProducer(panelProducerSearch.node);
+        return result;
+      }, originalTarget);
+      record = {
+        originalType: node.type,
+        patchedType: rebuildComponentType(node.type, resolved, patchedTarget),
+        nodes: new Set(),
+      };
+      state.qamWidthPatches.set(originalTarget, record);
+    }
+
+    record.nodes.add(node);
+    if (node.type === record.originalType) node.type = record.patchedType;
+    logOnce("qamWidthTabProducer", "QAM Addon tab producer patched.");
     return true;
   }
 
