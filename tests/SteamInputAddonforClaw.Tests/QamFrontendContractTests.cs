@@ -371,6 +371,17 @@ public sealed class QamFrontendContractTests
         Assert.Contains("function captureQamAuthorityDiagnostic(reason, activeTab = null)", diagnostic);
         Assert.Contains("const capturedState = captureQamAuthorityState(activeTab);", diagnostic);
         Assert.Contains("void enrichAndLogQamAuthorityDiagnostic(reason, capturedState);", diagnostic);
+        var stateStart = diagnostic.IndexOf("function captureQamAuthorityState", StringComparison.Ordinal);
+        var stateEnd = diagnostic.IndexOf("// Runtime AppId remains", stateStart, StringComparison.Ordinal);
+        var state = diagnostic[stateStart..stateEnd];
+        var enrichStart = diagnostic.IndexOf("async function enrichAndLogQamAuthorityDiagnostic", stateEnd, StringComparison.Ordinal);
+        var enrichEnd = diagnostic.IndexOf("// Read-only authority diagnostic", enrichStart, StringComparison.Ordinal);
+        var enrich = diagnostic[enrichStart..enrichEnd];
+        Assert.Contains("MainRunningAppID", state);
+        Assert.Contains("GetOverlayInstanceWithFallback", state);
+        Assert.Contains("describeQamWindowInstance(overlay)", state);
+        Assert.DoesNotContain("GetOverlayInstanceWithFallback", enrich);
+        Assert.DoesNotContain("describeQamWindowInstance(overlay)", enrich);
         Assert.Contains("GetOverlayInstanceWithFallback", diagnostic);
         Assert.Contains("GetOpenSideMenu", diagnostic);
         Assert.Contains("GetQuickAccessTab", diagnostic);

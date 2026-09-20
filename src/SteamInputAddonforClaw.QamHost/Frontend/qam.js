@@ -639,47 +639,52 @@
   }
 
   function captureQamAuthorityState(activeTab = null) {
-    const windowStore = window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore;
-    return {
-      ActiveTab: activeTab == null ? null : String(activeTab),
-      Main: describeQamWindowInstance(windowStore?.MainWindowInstance),
-      windowStore,
-    };
-  }
-
-  // Runtime AppId and the app-specific Overlay instance require an asynchronous bridge read.
-  // The Main/MenuStore state is captured before that await so selection-before/after retains its
-  // call-boundary meaning.
-  async function enrichAndLogQamAuthorityDiagnostic(reason, capturedState) {
-    const { windowStore, ...serializableState } = capturedState;
-    let appId = null;
-    let statusError = null;
-    try {
-      const status = await request("captureStatus");
-      const candidate = Number(status?.steam?.appId || 0);
-      appId = candidate > 0 ? candidate : null;
-    } catch (error) {
-      statusError = String(error);
-    }
+    const steamStore = window.SteamUIStore?.m_WindowStore?.m_Parent;
+    const windowStore = steamStore?.m_WindowStore;
+    const steamAppIdValue = Number(steamStore?.MainRunningAppID || 0);
+    const steamAppId = Number.isFinite(steamAppIdValue) && steamAppIdValue > 0
+      ? steamAppIdValue
+      : null;
 
     let overlay = null;
     let overlayLookup = "unavailable";
     if (windowStore && typeof windowStore.GetOverlayInstanceWithFallback === "function") {
       try {
-        overlay = windowStore.GetOverlayInstanceWithFallback(appId || 0, 0);
+        overlay = windowStore.GetOverlayInstanceWithFallback(steamAppId || 0, 0);
         overlayLookup = overlay ? "resolved" : "empty";
       } catch (error) {
         overlayLookup = `failed:${String(error)}`;
       }
     }
 
-    const snapshot = {
-      Reason: reason,
-      ...serializableState,
-      RuntimeAppId: appId,
-      RuntimeStatusError: statusError,
+    return {
+      ActiveTab: activeTab == null ? null : String(activeTab),
+      SteamAppId: steamAppId,
+      Main: describeQamWindowInstance(windowStore?.MainWindowInstance),
       OverlayLookup: overlayLookup,
       Overlay: describeQamWindowInstance(overlay),
+    };
+  }
+
+  // Runtime AppId remains an asynchronous correlation field only. Main/MenuStore and Overlay
+  // state are both captured before that await so selection-before/after retain their call-boundary
+  // meaning and share one Steam-side app identity.
+  async function enrichAndLogQamAuthorityDiagnostic(reason, capturedState) {
+    let runtimeAppId = null;
+    let statusError = null;
+    try {
+      const status = await request("captureStatus");
+      const candidate = Number(status?.steam?.appId || 0);
+      runtimeAppId = candidate > 0 ? candidate : null;
+    } catch (error) {
+      statusError = String(error);
+    }
+
+    const snapshot = {
+      Reason: reason,
+      ...capturedState,
+      RuntimeAppId: runtimeAppId,
+      RuntimeStatusError: statusError,
     };
     logStateChange("qamAuthority", JSON.stringify(snapshot), `QAM authority diagnostic ${JSON.stringify(snapshot)}`);
   }
