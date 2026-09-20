@@ -71,6 +71,7 @@ try
         var sessionDiagnosticsCts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
         var targetSnapshotGate = new SemaphoreSlim(1, 1);
         var geometryDiagnosticGate = new SemaphoreSlim(1, 1);
+        var hostGeometryDiagnosticGate = new SemaphoreSlim(1, 1);
         async Task LogTargetSnapshotAsync(string reason, CancellationToken token)
         {
             try
@@ -153,6 +154,70 @@ try
                 log.Warn($"QAM QuickAccess geometry diagnostic unavailable. Reason={reason}. {exception.GetType().Name}: {exception.Message}");
             }
         }
+        async Task LogQamHostGeometrySnapshotsAsync(string reason, CancellationToken token)
+        {
+            try
+            {
+                await hostGeometryDiagnosticGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    var classNamesResult = CdpEvaluateResult.Parse(await sessionClient.EvaluateAsync(
+                        "JSON.stringify(window.__STEAM_INPUT_ADDON_QAM__?.__getQamGeometryClassNames?.() ?? null)",
+                        token).ConfigureAwait(false));
+                    if (!classNamesResult.Succeeded || string.IsNullOrWhiteSpace(classNamesResult.StringValue) || classNamesResult.StringValue == "null")
+                    {
+                        log.Info($"QAM host geometry unavailable. Reason={reason} Semantic class names were not exposed by the current QAM document.");
+                        return;
+                    }
+
+                    var classNames = JsonSerializer.Deserialize<QamGeometryClassNames>(classNamesResult.StringValue);
+                    if (classNames is null || string.IsNullOrWhiteSpace(classNames.ViewPlaceholder))
+                    {
+                        log.Info($"QAM host geometry unavailable. Reason={reason} ViewPlaceholder semantic class was not resolved.");
+                        return;
+                    }
+
+                    var targets = QamHostTargetSelector.SelectQamHostTargets(await sessionClient.ListTargetsAsync(token).ConfigureAwait(false));
+                    if (targets.Count == 0)
+                    {
+                        log.Info($"QAM host geometry unavailable. Reason={reason} No bounded Steam QAM host target was present.");
+                        return;
+                    }
+
+                    foreach (var target in targets)
+                    {
+                        await using var diagnosticClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+                        try
+                        {
+                            await diagnosticClient.ConnectReadOnlyAsync(target, token).ConfigureAwait(false);
+                            var result = CdpEvaluateResult.Parse(await diagnosticClient.EvaluateAsync(
+                                QamHostGeometryDiagnostic.CreateExpression(classNames), token).ConfigureAwait(false));
+                            if (!result.Succeeded || string.IsNullOrWhiteSpace(result.StringValue))
+                            {
+                                log.Warn($"QAM host geometry target evaluation failed. Reason={reason} TargetTitle={target.Title} TargetId={target.Id} Error={result.ErrorText ?? "empty result"}");
+                                continue;
+                            }
+
+                            log.Info($"QAM host geometry snapshot. Reason={reason} TargetTitle={target.Title} TargetId={target.Id} Snapshot={result.StringValue}");
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            return;
+                        }
+                        catch (Exception exception)
+                        {
+                            log.Warn($"QAM host geometry target unavailable. Reason={reason} TargetTitle={target.Title} TargetId={target.Id} {exception.GetType().Name}: {exception.Message}");
+                        }
+                    }
+                }
+                finally { hostGeometryDiagnosticGate.Release(); }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                log.Warn($"QAM host geometry diagnostic unavailable. Reason={reason}. {exception.GetType().Name}: {exception.Message}");
+            }
+        }
         // Cleanup ownership belongs to this CDP/GamepadUI session only.
         installationSucceeded = false;
         installMayExist = false;
@@ -197,6 +262,7 @@ try
                 _ = Task.Run(() => DeliverSelectAddonOnNextQuickAccessOpenAsync(admittedGeneration), lifetimeToken);
                 _ = Task.Run(() => LogTargetSnapshotAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
                 _ = Task.Run(() => LogQuickAccessGeometrySnapshotsAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
+                _ = Task.Run(() => LogQamHostGeometrySnapshotsAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
             }
             sessionClient.BindingCalled += OnBindingCalled;
             frontendBridge.StateInvalidated += OnStateInvalidated;

@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace SteamInputAddonforClaw.QamHost;
 
-public sealed record QamGeometryClassNames(string PanelOuterNav, string TabGroupPanel);
+public sealed record QamGeometryClassNames(string PanelOuterNav, string TabGroupPanel, string? ViewPlaceholder = null);
 
 /// <summary>Builds the read-only DOM measurement used only in Steam Quick Access targets.</summary>
 public static class QuickAccessGeometryDiagnostic
