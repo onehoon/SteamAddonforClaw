@@ -65,10 +65,16 @@ public sealed class OverlayDeviceRendererWiringTests
 
         var show = source[source.IndexOf("internal static void ShowWithoutActivation", StringComparison.Ordinal)..
             source.IndexOf("internal static void Hide", StringComparison.Ordinal)];
-        Assert.Contains("HwndTopmost", show);
         Assert.Contains("SwpNoActivate", show);
+        Assert.Contains("SwpNoZOrder", show);
         Assert.Contains("SwpShowWindow", show);
-        Assert.DoesNotContain("SwpNoZOrder", show);
+
+        var visibilityUpdate = show.IndexOf("SwpNoActivate | SwpNoSendChanging | SwpNoZOrder | SwpNoSize | SwpNoMove | SwpShowWindow", StringComparison.Ordinal);
+        var topmostPromotion = show.IndexOf("HwndTopmost", StringComparison.Ordinal);
+        Assert.True(visibilityUpdate >= 0);
+        Assert.True(topmostPromotion > visibilityUpdate);
+        Assert.Contains("SwpNoActivate | SwpNoSendChanging | SwpNoSize | SwpNoMove", show[topmostPromotion..]);
+        Assert.DoesNotContain("SwpShowWindow", show[topmostPromotion..]);
 
         var hide = source[source.IndexOf("internal static void Hide", StringComparison.Ordinal)..
             source.IndexOf("private static void LogTopmostStateAfterShow", StringComparison.Ordinal)];
