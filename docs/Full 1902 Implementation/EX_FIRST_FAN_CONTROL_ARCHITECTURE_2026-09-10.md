@@ -2,6 +2,7 @@
 
 **Project:** SteamInputAddonforClaw  
 **Document date:** 2026-09-10  
+**Latest hardware-evidence update:** 2026-09-20 (CG3EM BIOS E1T91IMS.10D zero-fan observation)  
 **Primary hardware target:** MSI Claw 8 EX AI+ / CG3EM / MS-1T91  
 **Secondary target:** MSI Claw 8/7 AI+ A2VM / MS-1T52 / MS-1T42 after separate calibration  
 **Status:** Architecture / calibration contract. Not yet a production implementation specification.  
@@ -223,30 +224,196 @@ The six middle bytes are the duty/speed portion modified by current diagnostic l
 
 The meaning of boundary bytes `0` and `7` must be treated as **observed framing/calibration data, not guessed semantics**, until separately proven.
 
-### 6.4 EX recorded reference
+### 6.4 EX firmware-versioned observations
 
-Current Addon diagnostics record this CG3EM comparison reference:
+The original EX probe/reference must no longer be treated as one universal CG3EM factory baseline. Real MS-1T91 captures now show that the firmware Auto table changed across BIOS revisions.
+
+#### 6.4.1 Earlier BIOS 10A observation
+
+The earlier on-device EX run used:
 
 ```text
-EX Fan 1/2 logical:
-58 | 70 74 76 78 80 84 | 94
+BIOS: E1T91IMS.10A
 
 temperature labels:
 47 / 50 / 57 / 64 / 71 / 78 C
 
-ownership: OFF in the recorded reference
-Cooler Boost: OFF in the recorded reference
+Firmware Auto Fan1/Fan2 logical observation:
+58 | 70 74 76 78 80 84 | 94
 ```
 
-The corresponding test fixture also uses:
+That run established the original reference used by the first probe/tests and confirmed that the six middle values were writable, Fan1/Fan2 could be changed independently, custom ownership via data/AP bit 7 worked, and firmware Auto hand-back worked.
+
+It did **not** establish low-temperature fan-stop behavior. The fan was still rotating at roughly the mid-3000 RPM range during the relevant observation window.
+
+Therefore:
 
 ```text
-[58, 70, 74, 76, 78, 80, 84, 94]
+58 | 70 74 76 78 80 84 | 94
 ```
 
-as the expected normalized eight-byte logical block.
+is now a **historical BIOS-10A observation**, not a model-wide CG3EM constant.
 
-This is the strongest current EX starting point, but production code must still capture the live EC values from the actual MS-1T91 before treating this as universal across firmware revisions.
+#### 6.4.2 BIOS 10D Firmware Auto observation — 2026-09-20
+
+The newer probe run on the same board family recorded:
+
+```text
+Device: Claw 8 EX AI+ CG3EM Launch Pack
+Board: MS-1T91
+BIOS: E1T91IMS.10D
+WMI: 9.0 as decoded by the current probe
+```
+
+The temperature labels remained unchanged:
+
+```text
+47 / 50 / 57 / 64 / 71 / 78 C
+```
+
+but the live Firmware Auto fan tables changed to:
+
+```text
+Fan 1:
+00 | 60 64 68 74 80 84 | 94
+
+Fan 2:
+00 | 60 64 68 74 80 84 | 94
+```
+
+The low/mid points changed substantially relative to 10A:
+
+| Curve point | BIOS 10A observed | BIOS 10D observed | Delta |
+|---|---:|---:|---:|
+| P1 | 70 | 60 | -10 |
+| P2 | 74 | 64 | -10 |
+| P3 | 76 | 68 | -8 |
+| P4 | 78 | 74 | -4 |
+| P5 | 80 | 80 | 0 |
+| P6 | 84 | 84 | 0 |
+
+The high-temperature end remained unchanged while the low-temperature region was reduced. This is consistent with a firmware acoustic-policy change, but the motivation is an inference; the values themselves are directly observed.
+
+Ownership/override observations in the 10D Auto capture were:
+
+```text
+Get_AP(1) first byte:   0x0D
+Get_Data(212):          0x0D
+custom ownership bit7: OFF
+
+Get_Data(152):          0x06
+Cooler Boost bit7:      OFF
+```
+
+#### 6.4.3 BIOS 10D idle zero-fan is directly observed in Firmware Auto
+
+The 10D capture first observed a rotating fan:
+
+```text
+Get_Fan(0): 00 80 00 7D ...
+Fan 1 RPM: ~3750 RPM
+```
+
+while the Auto tables were already:
+
+```text
+60 / 64 / 68 / 74 / 80 / 84
+```
+
+A few seconds later, before custom ownership was enabled, the AutomaticTest preflight observed:
+
+```text
+Get_Fan(0):
+00 00 00 00 ...
+
+Fan 1 RPM: unavailable / 0
+
+Fan1/Fan2 curve:
+60 / 64 / 68 / 74 / 80 / 84
+
+custom ownership:
+OFF
+```
+
+The important fact is that **the stored Auto curve did not need a zero first duty value for the physical fan to stop**.
+
+This proves that, on the tested BIOS 10D system, Firmware Auto can enter an idle zero-fan state while the six curve values remain non-zero.
+
+It does **not** yet prove the exact internal firmware rule that decides when to stop or restart the fans.
+
+#### 6.4.4 Custom ownership does not automatically preserve Auto zero-fan behavior
+
+During the same 10D AutomaticTest, a temporary shared curve was applied and custom ownership enabled:
+
+```text
+temporary six-duty curve:
+60 / 64 / 68 / 75 / 80 / 84
+
+ownership:
+0x0D -> 0x8D
+bit7 = ON
+```
+
+Immediately after the ownership transition one fan still briefly reported byte0 = 0, while the other had already moved to 60. By T+250 ms both Fan1 and Fan2 read:
+
+```text
+60 | 60 64 68 75 80 84 | 94
+```
+
+and remained at byte0 = 60 through the short observation.
+
+This strongly supports the earlier hypothesis that fan-table byte0 is an EC/live/current-command field rather than one of the six persisted user curve points. The exact semantic name of byte0 remains intentionally unresolved.
+
+More importantly, the bounded Physical Response test showed:
+
+```text
+custom 75 duty stage:
+eventual Fan 1 RPM ~3555
+
+custom 40 duty stage:
+eventual Fan 1 RPM ~3116
+
+custom 10 duty stage:
+eventual Fan 1 RPM ~2890
+
+75 recovery:
+RPM rises again
+```
+
+So on this BIOS/device:
+
+> **Custom ownership + a low validated duty of 10 did not produce zero-fan.**
+
+This is strong evidence that Firmware Auto zero-fan is not simply the natural consequence of lowering the six custom duty values far enough within the currently validated diagnostic range.
+
+Do **not** infer from this that custom zero-fan is impossible. A separate MSI mode/bit/threshold behavior may exist, or a zero-duty custom curve may have special semantics. Neither is proven yet.
+
+#### 6.4.5 Current production interpretation
+
+The production design must now treat these as separate capabilities:
+
+```text
+Firmware Auto
+    firmware owns fan policy
+    BIOS 10D observed to support idle zero-fan
+
+Custom ownership
+    Addon/advanced table owns the six duty points
+    low custom duty 10 observed to keep fan rotating
+```
+
+Consequences:
+
+1. Do not hard-code one EX factory curve as a universal MS-1T91 truth.
+2. Keep the temperature axis model-specific, but treat the live fan baseline as firmware-version-sensitive.
+3. Capture/read the current Firmware Auto table before deriving calibration or comparing behavior.
+4. Treat byte0 as live/EC-owned state; preserve it during RMW and do not make it a user-settable curve point.
+5. Preserve byte7 until its exact semantics are proven.
+6. Do not attempt custom zero-fan by writing all-zero duties without explicit hardware evidence and a bounded safety plan.
+7. Do not claim a custom `Quiet` preset is quieter than Firmware Auto until idle acoustics/zero-fan behavior is validated.
+8. Firmware Auto remains a real ownership hand-back, not a generated preset.
+
+The old test/reference fixture `[58,70,74,76,78,80,84,94]` remains useful as a historical normalization sample, but it must not be used as a current universal EX expected-value assertion.
 
 ### 6.5 Critical correction: probe mutation guard is not hardware maximum
 
@@ -419,13 +586,31 @@ This proves an important real-world lifecycle fact: fan policy may need post-res
 
 The Addon should adopt the lifecycle lesson but not blindly copy CTW's implementation. Our existing FanProbe is already better aligned to the desired Full1902 style because it classifies actual post-resume state before deciding what it means.
 
-### 8.5 Do not create dual fan writers
+### 8.5 CTW is research/reference only; no production integration
 
-CTW and Addon should not both independently write the same fan tables while both consider themselves authoritative.
+SteamAddonforClaw is now a **standalone Full1902 application**. CTW coexistence, CTW ownership arbitration, and CTW-integrated fan-control modes are no longer production requirements.
 
-This does **not** justify a new generalized distributed fan-lock system. Use the existing supported product/integration mode to determine which product owns device settings. If CTW-integrated operation defines CTW as the device-feature owner, Addon fan control should be unavailable/inert in that mode. If a later product decision transfers fan ownership to Addon, that transfer must be explicit and singular.
+CTW remains useful only as a research source for:
 
-The project should not defend against unsupported arbitrary third-party simultaneous EC mutation with an ever-growing cross-process authority protocol.
+- MSI/Claw fan-control precedent;
+- resume/recovery behavior;
+- historical curve handling;
+- practical UI/telemetry lessons.
+
+Production code must **not** add:
+
+```text
+CTW detection
+CTW fan ownership negotiation
+cross-process CTW/Add-on fan lease
+CTW compatibility state
+dual-writer arbitration
+```
+
+solely because CTW research exists.
+
+The supported product design is one Addon runtime owning its own Device fan feature when the user selects an Addon-controlled fan mode, and handing the hardware back to MSI Firmware Auto when the user selects `Firmware Auto` or when fail-safe policy requires release.
+
 
 ---
 
@@ -461,6 +646,9 @@ A separate `CustomCurve` user mode should not exist in v1.
 - prioritizes reduced audible fan changes/noise;
 - slower downward transitions and more dwell;
 - **never disables safety escalation** at high temperature.
+- must not be marketed or treated as acoustically superior to Firmware Auto until custom-mode idle behavior is measured;
+- on BIOS 10D, Firmware Auto has demonstrated true idle zero-fan while custom duty 10 remained near 2.9k RPM, so a naive always-custom Quiet preset could be *louder* than Auto at idle;
+- zero-fan semantics are therefore a release gate for the final Quiet behavior, not an optional polish item.
 
 #### Balanced
 
@@ -1326,14 +1514,23 @@ Fan2 RPM
 CPU/GPU/package temperatures
 ```
 
-Confirm whether live EX matches the recorded:
+Record the live values without enforcing one historical table.
 
-```text
-47/50/57/64/71/78 C
-58 | 70/74/76/78/80/84 | 94
-```
+Current firmware-versioned observations are:
 
-and whether Fan1/Fan2 are truly equal.
+| BIOS | Temperature labels | Firmware Auto six-duty curve | Auto byte0 observation |
+|---|---|---|---|
+| E1T91IMS.10A | 47/50/57/64/71/78 C | 70/74/76/78/80/84 | 58 during the recorded run |
+| E1T91IMS.10D | 47/50/57/64/71/78 C | 60/64/68/74/80/84 | 0 during idle fan-stop; later live values vary with EC command |
+
+For every new BIOS/EC revision:
+
+- capture both Fan1/Fan2 blocks;
+- record the temperature labels;
+- record ownership and Cooler Boost state;
+- record idle RPM for long enough to determine whether fan-stop occurs;
+- do not overwrite the firmware-specific observation with the previous revision's constants;
+- preserve the historical observation table so regressions/firmware policy changes remain visible.
 
 ### 25.3 Load response runs
 
@@ -1380,7 +1577,49 @@ Use bounded, prevalidated test curves to determine:
 
 OpenBMC's tuning practice of sweeping setpoints and logging actual RPM is a useful methodology reference here.
 
-### 25.5 Lifecycle matrix
+### 25.5 Zero-fan semantics validation
+
+BIOS 10D changed the calibration priority. Before finalizing `Quiet`, explicitly determine the boundary between native Auto fan-stop and custom ownership.
+
+Required bounded observations:
+
+```text
+A. Firmware Auto idle
+   - wait for stable low load
+   - record temperature, Fan1/Fan2 tach, byte0, six-duty tables, ownership
+   - confirm whether both fans reach zero and under what observed temperature/load region
+
+B. Firmware Auto wake from fan-stop
+   - apply a small normal workload
+   - record restart latency and initial RPM
+   - do not induce a thermal stress event solely for this test
+
+C. Custom ownership with validated low duty
+   - use only already-safe bounded custom values
+   - record whether fan-stop occurs
+   - current 10D evidence: duty 10 remained around 2.9k RPM
+
+D. MSI Center M Advanced observation, if available and safe
+   - inspect whether MSI's own Advanced/custom mode ever permits zero-fan
+   - capture ownership/table/byte0/tach without assuming the mechanism
+```
+
+Safety rule:
+
+> Do not write an all-zero six-duty curve merely to search for zero-fan behavior. First establish from MSI behavior/RE that such a write is intentional and safe.
+
+The outcome must be classified as one of:
+
+```text
+AUTO_ONLY_ZERO_FAN
+CUSTOM_ZERO_FAN_SUPPORTED_AND_VALIDATED
+CUSTOM_ZERO_FAN_MECHANISM_UNKNOWN
+INCONCLUSIVE
+```
+
+This classification is calibration evidence, not a new runtime state machine.
+
+### 25.6 Lifecycle matrix
 
 Run at least:
 
@@ -1474,6 +1713,9 @@ No production UI yet.
 - extend structured EX capture if needed;
 - confirm Fan1/Fan2 factory tables and temperature labels;
 - measure duty->RPM behavior;
+- preserve firmware-versioned Auto baselines instead of one fixed EX default;
+- close BIOS 10D zero-fan semantics: Auto fan-stop vs custom ownership behavior;
+- determine whether MSI Advanced/custom mode has a validated zero-fan mechanism;
 - run suspend/resume and crash persistence tests;
 - establish the accepted CG3EM safety envelope.
 
@@ -1488,7 +1730,11 @@ Balanced
 Performance
 ```
 
-with model-specific static/derived validated curves, readback, hand-back, startup/reconcile, and lifecycle handling.
+with model-specific, firmware-aware validated curves, readback, hand-back, startup/reconcile, and lifecycle handling.
+
+`Firmware Auto` may ship once hand-back is validated.
+
+`Quiet` must not be finalized merely by subtracting duty from the live Auto curve. BIOS 10D demonstrates that native Auto can stop the fans while a low custom duty can keep them rotating; Quiet's idle acoustic behavior must therefore be explicitly validated.
 
 Do not implement target feedback yet if the fixed modes themselves are not stable.
 
