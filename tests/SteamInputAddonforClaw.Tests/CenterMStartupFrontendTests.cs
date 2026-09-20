@@ -68,6 +68,24 @@ public sealed class CenterMStartupFrontendTests : IDisposable
     }
 
     [Fact]
+    public async Task Enter_bios_request_flows_through_without_state_invalidation()
+    {
+        var owner = new FakeTransition
+        {
+            EnterBiosResult = new(FrontendEnterBiosOutcome.RestartRequested, null),
+        };
+        var control = CreateControl(owner);
+        var invalidations = 0;
+        control.StateInvalidated += (_, _) => invalidations++;
+
+        var result = await control.RequestEnterBiosAsync();
+
+        Assert.Same(owner.EnterBiosResult, result);
+        Assert.Equal(1, owner.EnterBiosCalls);
+        Assert.Equal(0, invalidations);
+    }
+
+    [Fact]
     public async Task Capture_flows_through_the_frontend()
     {
         var centerM = new CenterMStartupControl(true, ReaderFor(true, true, CenterMFoundationServiceMode.Automatic), new FakeInvoker());
@@ -109,6 +127,8 @@ public sealed class CenterMStartupFrontendTests : IDisposable
         public FrontendCenterMStartupMutationResult Result { get; set; } =
             new(FrontendCenterMStartupMutationOutcome.Succeeded, FrontendCenterMStartupSnapshot.Unavailable, null);
         public bool? LastRequest { get; private set; }
+        public FrontendEnterBiosResult EnterBiosResult { get; set; } = new(FrontendEnterBiosOutcome.Unavailable, "unavailable");
+        public int EnterBiosCalls { get; private set; }
 
         public Task<FrontendCenterMStartupMutationResult> RequestAsync(bool centerMEnabled, CancellationToken cancellationToken)
         {
@@ -118,6 +138,12 @@ public sealed class CenterMStartupFrontendTests : IDisposable
 
         public Task<SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult> PrepareForUninstallAsync(CancellationToken cancellationToken)
             => Task.FromResult(SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult.Ok());
+
+        public Task<FrontendEnterBiosResult> RequestEnterBiosAsync(CancellationToken cancellationToken)
+        {
+            EnterBiosCalls++;
+            return Task.FromResult(EnterBiosResult);
+        }
 
         public bool IsInProgress { get; set; }
     }

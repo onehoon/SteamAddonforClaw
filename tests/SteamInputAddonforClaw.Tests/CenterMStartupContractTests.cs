@@ -17,7 +17,8 @@ public sealed class CenterMStartupContractTests
         // Bumped to 25 by App UI PR-C; 24 by App UI PR-B (obsolete LaunchAtWindowsStartup user-preference contract removed);
         // 26 by Shared Frontend V2 SF-V2-01 (CaptureDeviceQuickSettings aggregate); 27 by SD6A PR B (Claw
         // Sensor Probe capture modes); 28 by Shared Frontend V2 SF-V2-04 (generic Quick Settings RPC seam).
-        Assert.Equal(35, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(36, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal("RequestEnterBios", FrontendRpcMethod.RequestEnterBios.ToString());
     }
 
     [Fact]

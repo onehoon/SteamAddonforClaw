@@ -195,6 +195,10 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// Must reach a proven-safe state before physical ownership is released to MSI.</summary>
     Task<bool> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken);
 
+    /// <summary>Enter BIOS step: stop/join the publisher, neutral+detach the selected typed device,
+    /// and tear down canonical VIIPER without changing Center M authority or HidHide state.</summary>
+    Task<bool> ReleaseForFirmwareRestartAsync(CancellationToken cancellationToken);
+
     /// <summary>OQ4: stop the current publisher, prove it joined, and write the SAME attached typed
     /// device neutral -- WITHOUT detaching it or recreating VIIPER. On a proven-stopped publisher
     /// with a rejected neutral write the current presentation is retired through the existing owner
@@ -564,6 +568,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     }
 
     public Task<bool> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken) => RetireAsync("CenterMEnable");
+
+    public Task<bool> ReleaseForFirmwareRestartAsync(CancellationToken cancellationToken) => RetireAsync("EnterBios");
 
     public async Task<OverlayPauseResult> PauseForOverlayAsync(CancellationToken cancellationToken)
     {

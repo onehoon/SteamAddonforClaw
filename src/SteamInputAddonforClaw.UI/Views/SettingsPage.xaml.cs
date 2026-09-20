@@ -11,6 +11,7 @@ public sealed partial class SettingsPage : UserControl
     private IAddonFrontendControl? _frontend;
     private FrontendUpdateSnapshot _updateSnapshot = FrontendUpdateSnapshot.Unavailable;
     private int _updateOperationInProgress;
+    private int _enterBiosOperationInProgress;
     private bool _applyingQuickSettingsPowerSourcePreference;
     private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
     public event EventHandler? DeveloperMenuRequested;
@@ -45,6 +46,58 @@ public sealed partial class SettingsPage : UserControl
         UpdateButton.Content = snapshot.CanInstall ? "Install update" : "Check";
         UpdateButton.IsEnabled = snapshot.CanCheck || snapshot.CanInstall;
     }
+
+    private async void EnterBiosButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_frontend is null || !TryBeginEnterBiosOperation(ref _enterBiosOperationInProgress)) return;
+
+        EnterBiosCard.IsEnabled = false;
+        EnterBiosButton.IsEnabled = false;
+        try
+        {
+            var confirmation = new ContentDialog
+            {
+                Title = "Enter BIOS?",
+                Content = "The controller will temporarily switch to XInput so it can be used in BIOS.\n\nSave your work before continuing.",
+                PrimaryButtonText = "Restart and Enter BIOS",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot,
+            };
+            if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            var result = await _frontend.RequestEnterBiosAsync().ConfigureAwait(true);
+            if (!result.Succeeded)
+                await ShowEnterBiosFailureAsync(result.FailureMessage ?? "Enter BIOS could not be started. Try again.").ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("EnterBios", "Enter BIOS UI action failed.", exception);
+            await ShowEnterBiosFailureAsync("Enter BIOS could not be started. Try again.").ConfigureAwait(true);
+        }
+        finally
+        {
+            EnterBiosButton.IsEnabled = true;
+            EnterBiosCard.IsEnabled = true;
+            Volatile.Write(ref _enterBiosOperationInProgress, 0);
+        }
+    }
+
+    private async Task ShowEnterBiosFailureAsync(string message)
+    {
+        if (XamlRoot is null) return;
+        await new ContentDialog
+        {
+            Title = "Enter BIOS unavailable",
+            Content = message,
+            CloseButtonText = "OK",
+            XamlRoot = XamlRoot,
+        }.ShowAsync();
+    }
+
+    internal static bool TryBeginEnterBiosOperation(ref int operationInProgress) =>
+        Interlocked.Exchange(ref operationInProgress, 1) == 0;
 
     private async void UpdateButton_Click(object sender, RoutedEventArgs args)
     {

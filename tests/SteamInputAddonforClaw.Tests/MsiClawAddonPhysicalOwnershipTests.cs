@@ -504,6 +504,36 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.False(h.InputSource.StopCalled);
     }
 
+    [Fact]
+    public async Task Firmware_release_uses_the_same_verified_xinput_path_without_enabling_center_m()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        var owner = h.Build();
+        Assert.True((await owner.AcquireAsync(default)).IsOwned);
+
+        var release = await owner.ReleaseForFirmwareRestartAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Equal(new[] { MsiClawNativeMode.XInput }, h.SwitchTargets);
+        Assert.Null(owner.LiveInputSource);
+        var recovery = await owner.RecoverLostInputAsync(default);
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+        Assert.Contains("ReleasedForFirmwareRestart", recovery.Reason);
+    }
+
+    [Fact]
+    public async Task Firmware_release_when_already_xinput_does_not_issue_a_native_mode_write()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.XInput };
+        var owner = h.Build();
+
+        var release = await owner.ReleaseForFirmwareRestartAsync(default);
+
+        Assert.True(release.Succeeded);
+        Assert.Empty(h.SwitchTargets);
+        Assert.False(h.InputSource.StopCalled);
+    }
+
     // ================= PR8: owned DirectInput session recovery (work order section 21) =================
 
     private static async Task<(MsiClawAddonPhysicalOwnership Owner, Harness Harness)> AcquiredThenLost(Harness h)
