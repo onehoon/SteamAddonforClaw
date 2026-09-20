@@ -304,25 +304,42 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
-    public void Qam_width_selection_wraps_the_verified_menu_store_before_native_selection()
+    public void Qam_width_selection_uses_the_rendered_native_active_tab_without_patching_menu_store()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var hookStart = source.IndexOf("function installAddonQamWidthSelectionHook", StringComparison.Ordinal);
-        var hookEnd = source.IndexOf("function uninstallAddonQamWidthSelectionHook", hookStart, StringComparison.Ordinal);
-        Assert.True(hookStart >= 0 && hookEnd > hookStart);
-        var hook = source[hookStart..hookEnd];
+        var widthStart = source.IndexOf("function applyAddonQamWidth", StringComparison.Ordinal);
+        var widthEnd = source.IndexOf("function findTabsPropOwner", widthStart, StringComparison.Ordinal);
+        Assert.True(widthStart >= 0 && widthEnd > widthStart);
+        var width = source[widthStart..widthEnd];
 
-        Assert.Contains("const previous = state.addonQamWidthActive === true", hook);
-        Assert.Contains("state.addonQamWidthActive = key === ADDON_TAB_KEY", hook);
-        Assert.Contains("return original.apply(this, [key, ...args]);", hook);
-        Assert.Contains("state.addonQamWidthActive = previous", hook);
-        Assert.Contains("hadOwn", hook);
-        Assert.True(hook.IndexOf("state.addonQamWidthActive = key === ADDON_TAB_KEY", StringComparison.Ordinal) < hook.IndexOf("original.apply", StringComparison.Ordinal));
+        Assert.Contains("Array.isArray(props.tabs)", width);
+        Assert.Contains("Object.prototype.hasOwnProperty.call(props, \"activeTab\")", width);
+        Assert.Contains("const activeTab = tabOwner?.props?.activeTab", width);
+        Assert.Contains("activeTab === ADDON_TAB_KEY", width);
+        Assert.Contains("String(activeTab)", width);
+        Assert.DoesNotContain("typeof activeTab !== \"string\"", width);
+        Assert.Contains("QAM active top-level tab was not found", width);
+        Assert.DoesNotContain("addonQamWidthActive", width);
+
+        Assert.DoesNotContain("function installAddonQamWidthSelectionHook", source);
+        Assert.DoesNotContain("function uninstallAddonQamWidthSelectionHook", source);
+        Assert.DoesNotContain("menuStore.OpenQuickAccessMenu =", source);
 
         var insertionStart = source.IndexOf("function ensureAddonTabs", StringComparison.Ordinal);
         var insertionEnd = source.IndexOf("function preservePatchedFunctionShape", insertionStart, StringComparison.Ordinal);
         var insertion = source[insertionStart..insertionEnd];
-        Assert.True(insertion.IndexOf("installAddonQamWidthSelectionHook();", StringComparison.Ordinal) < insertion.IndexOf("tryConsumeAddonSelectionRequest();", StringComparison.Ordinal));
+        Assert.DoesNotContain("installAddonQamWidthSelectionHook", insertion);
+        Assert.Contains("tryConsumeAddonSelectionRequest();", insertion);
+
+        var nestedStart = source.IndexOf("function patchedTabsProducer", StringComparison.Ordinal);
+        var nestedEnd = source.IndexOf("}, originalTarget);", nestedStart, StringComparison.Ordinal);
+        Assert.True(nestedStart >= 0 && nestedEnd > nestedStart);
+        var nested = source[nestedStart..nestedEnd];
+        Assert.Contains("applyAddonQamWidth(result);", nested);
+
+        var restoreStart = width.IndexOf("if (state.qamWidthOriginalStyles.has(target))", StringComparison.Ordinal);
+        Assert.True(restoreStart >= 0);
+        Assert.Contains("target.props.style = state.qamWidthOriginalStyles.get(target)", width[restoreStart..]);
     }
 
     [Fact]
@@ -351,22 +368,15 @@ public sealed class QamFrontendContractTests
     public void Qam_width_cleanup_is_conservative_and_generation_local()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var cleanupStart = source.IndexOf("function uninstallAddonQamWidthSelectionHook", StringComparison.Ordinal);
-        var cleanupEnd = source.IndexOf("function requestAddonSelectionOnNextQuickAccessOpen", cleanupStart, StringComparison.Ordinal);
-        Assert.True(cleanupStart >= 0 && cleanupEnd > cleanupStart);
-        var cleanup = source[cleanupStart..cleanupEnd];
-
-        Assert.Contains("state.qamWidthSelectionPatch = null", cleanup);
-        Assert.Contains("state.addonQamWidthActive = false", cleanup);
-        Assert.Contains("patch.menuStore.OpenQuickAccessMenu !== patch.wrapped", cleanup);
-        Assert.Contains("patch.menuStore.OpenQuickAccessMenu = patch.original", cleanup);
-        Assert.Contains("delete patch.menuStore.OpenQuickAccessMenu", cleanup);
-
         var installStart = source.IndexOf("function install()", StringComparison.Ordinal);
         var install = source[installStart..source.IndexOf("const webpackRequire", installStart, StringComparison.Ordinal)];
         Assert.Contains("state.qamWidthClassNames = null", install);
-        Assert.Contains("state.qamWidthSelectionPatch = null", install);
         Assert.Contains("state.qamWidthOriginalStyles = new WeakMap()", install);
+
+        Assert.DoesNotContain("state.qamWidthSelectionPatch", source);
+        Assert.DoesNotContain("state.addonQamWidthActive", source);
+        Assert.Contains("state.qamWidthClassNames = null", source);
+        Assert.Contains("state.qamWidthOriginalStyles = new WeakMap()", source);
     }
 
     [Fact]
