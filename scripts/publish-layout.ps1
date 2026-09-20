@@ -62,7 +62,7 @@ Get-ChildItem -LiteralPath $fseOutput -File | Copy-Item -Destination $packageOut
 $packageVersion = (($Version -split '-')[0] + '.0')
 $manifest = Get-Content (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\AppxManifest.xml') -Raw
 $manifest = $manifest.Replace('__PACKAGE_VERSION__', $packageVersion)
-Set-Content -LiteralPath (Join-Path $packageOutput 'AppxManifest.xml') -Value $manifest -Encoding utf8NoBOM
+Set-Content -LiteralPath (Join-Path $packageOutput 'AppxManifest.xml') -Value $manifest -Encoding UTF8
 Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\CustomCapability.SCCD') (Join-Path $packageOutput 'CustomCapability.SCCD') -Force
 Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\Public\README.txt') (Join-Path $packagePublicOutput 'README.txt') -Force
 Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw\Assets\AppIcon.ico') (Join-Path $packageAssetsOutput 'AppIcon.ico') -Force
