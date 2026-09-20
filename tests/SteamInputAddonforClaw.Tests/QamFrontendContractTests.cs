@@ -316,6 +316,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("Object.prototype.hasOwnProperty.call(props, \"activeTab\")", width);
         Assert.Contains("const activeTab = tabOwner?.props?.activeTab", width);
         Assert.Contains("activeTab === ADDON_TAB_KEY", width);
+        Assert.Contains("String(activeTab)", width);
+        Assert.DoesNotContain("typeof activeTab !== \"string\"", width);
         Assert.Contains("QAM active top-level tab was not found", width);
         Assert.DoesNotContain("addonQamWidthActive", width);
 
@@ -334,6 +336,10 @@ public sealed class QamFrontendContractTests
         Assert.True(nestedStart >= 0 && nestedEnd > nestedStart);
         var nested = source[nestedStart..nestedEnd];
         Assert.Contains("applyAddonQamWidth(result);", nested);
+
+        var restoreStart = width.IndexOf("if (state.qamWidthOriginalStyles.has(target))", StringComparison.Ordinal);
+        Assert.True(restoreStart >= 0);
+        Assert.Contains("target.props.style = state.qamWidthOriginalStyles.get(target)", width[restoreStart..]);
     }
 
     [Fact]

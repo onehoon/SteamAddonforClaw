@@ -434,15 +434,16 @@
         Object.prototype.hasOwnProperty.call(props, "activeTab");
     }).node;
     const activeTab = tabOwner?.props?.activeTab;
-    if (typeof activeTab !== "string") {
+    if (!tabOwner?.props ||
+        !Object.prototype.hasOwnProperty.call(tabOwner.props, "activeTab")) {
       logOnce("qamWidthSelectionMissing", "QAM active top-level tab was not found in the current menu render; leaving Steam width unchanged.");
       return;
     }
 
     logStateChange(
       "qamWidthSelection",
-      activeTab,
-      `QAM width selection: ActiveTab=${activeTab} AddonSelected=${activeTab === ADDON_TAB_KEY}`);
+      String(activeTab),
+      `QAM width selection: ActiveTab=${String(activeTab)} AddonSelected=${activeTab === ADDON_TAB_KEY}`);
 
     state.qamWidthOriginalStyles ??= new WeakMap();
     if (activeTab === ADDON_TAB_KEY) {
