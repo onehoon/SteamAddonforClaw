@@ -160,6 +160,38 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Device_closed_info_bars_are_removed_from_stack_panel_spacing()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var infoBarNames = new[]
+        {
+            "CenterMStartupInfoBar",
+            "BatteryChargeLimitInfoBar",
+            "TdpInfoBar",
+            "CpuBoostInfoBar",
+            "PowerModeInfoBar",
+        };
+
+        foreach (var name in infoBarNames)
+        {
+            var declarationStart = xaml.IndexOf($"x:Name=\"{name}\"", StringComparison.Ordinal);
+            var declarationEnd = xaml.IndexOf("/>", declarationStart, StringComparison.Ordinal);
+            Assert.True(declarationStart >= 0 && declarationEnd > declarationStart, $"Missing XAML declaration for {name}.");
+
+            var declaration = xaml[declarationStart..declarationEnd];
+            Assert.Contains("IsOpen=\"False\"", declaration, StringComparison.Ordinal);
+            Assert.Contains("Visibility=\"Collapsed\"", declaration, StringComparison.Ordinal);
+            Assert.DoesNotContain($"{name}.IsOpen =", codeBehind, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("private static void SetInfoBarOpen(InfoBar infoBar, bool isOpen)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("infoBar.Visibility = Visibility.Visible;", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("infoBar.Visibility = Visibility.Collapsed;", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Device_page_exposes_production_battery_control_as_an_inline_card()
     {
         var root = FindRepositoryRoot();

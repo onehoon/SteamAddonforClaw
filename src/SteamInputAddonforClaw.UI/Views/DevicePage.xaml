@@ -21,7 +21,7 @@
                 </StackPanel>
             </Border>
 
-            <InfoBar x:Name="CenterMStartupInfoBar" IsClosable="False" IsOpen="False" Severity="Informational" />
+            <InfoBar x:Name="CenterMStartupInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Informational" />
             <ctcontrols:SettingsCard x:Name="CenterMStartupCard" Header="MSI Center M"
                 Description="Control whether MSI Center M starts with Windows. Changes take effect after a Windows restart.">
                 <ctcontrols:SettingsCard.HeaderIcon>
@@ -34,7 +34,7 @@
                 </StackPanel>
             </ctcontrols:SettingsCard>
 
-            <InfoBar x:Name="BatteryChargeLimitInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+            <InfoBar x:Name="BatteryChargeLimitInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
             <ctcontrols:SettingsCard x:Name="BatteryChargeLimitCard" Header="Battery charge limit">
                 <ctcontrols:SettingsCard.Description>
                     <TextBlock x:Name="BatteryChargeLimitStatusText" Opacity="0.7" TextWrapping="Wrap" />
@@ -52,7 +52,7 @@
                 </StackPanel>
             </ctcontrols:SettingsCard>
 
-            <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+            <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control"
                 Description="Configure processor power limits for plugged-in and battery operation.">
                 <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
@@ -73,7 +73,7 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
-            <InfoBar x:Name="CpuBoostInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+            <InfoBar x:Name="CpuBoostInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
 
             <ctcontrols:SettingsExpander
                 x:Name="CpuBoostExpander"
@@ -105,7 +105,7 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
-            <InfoBar x:Name="PowerModeInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+            <InfoBar x:Name="PowerModeInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="PowerModeExpander" Header="Windows Power Mode" Description="Configured Windows 11 power mode for each power rail.">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE83F;" />
