@@ -127,6 +127,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("ReadCurrentAddonSelectionAsync", program);
         Assert.Contains("__getQamHostWidthSelection", program);
         Assert.Contains("var currentAddonSelection", program);
+        Assert.Contains("MaxUnexpectedRestartAttempts", ReadSource("src", "SteamInputAddonforClaw", "Lifecycle", "QamHostProcessController.cs"));
         Assert.Contains("QuickAccessTargetSelector.SelectQuickAccessTargets", program);
         Assert.Contains("QamHostTargetSelector.SelectQamHostTargets", program);
         Assert.Contains("ConnectReadOnlyAsync", program);

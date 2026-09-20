@@ -6,6 +6,7 @@ namespace SteamInputAddonforClaw.Lifecycle;
 internal sealed class QamHostProcessController : IAsyncDisposable
 {
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(3);
+    internal const int MaxUnexpectedRestartAttempts = 2;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly string _executablePath;
@@ -13,6 +14,7 @@ internal sealed class QamHostProcessController : IAsyncDisposable
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private Process? _process;
     private Process? _expectedStopProcess;
+    private int _unexpectedRestartAttempts;
     private bool _bigPictureActive;
     private bool _steamGameActive;
     private bool _stopping;
@@ -33,6 +35,8 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         {
             if (_stopping) return;
             _bigPictureActive = active;
+            if (!_bigPictureActive && !_steamGameActive)
+                _unexpectedRestartAttempts = 0;
         }
 
         _ = ReconcileDesiredStateAsync();
@@ -44,6 +48,8 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         {
             if (_stopping) return;
             _steamGameActive = appId != 0;
+            if (!_bigPictureActive && !_steamGameActive)
+                _unexpectedRestartAttempts = 0;
         }
 
         _ = ReconcileDesiredStateAsync();
@@ -140,24 +146,41 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         if (sender is not Process exitedProcess) return;
 
         bool restart;
+        var attempt = 0;
         lock (_sync)
         {
             if (!ReferenceEquals(_process, exitedProcess)) return;
             if (ReferenceEquals(_expectedStopProcess, exitedProcess)) return;
 
-            restart = !_stopping && (_bigPictureActive || _steamGameActive);
             _process = null;
+            var authorityActive = !_stopping && (_bigPictureActive || _steamGameActive);
+            if (!authorityActive)
+            {
+                _unexpectedRestartAttempts = 0;
+                restart = false;
+            }
+            else if (_unexpectedRestartAttempts < MaxUnexpectedRestartAttempts)
+            {
+                attempt = ++_unexpectedRestartAttempts;
+                restart = true;
+            }
+            else
+            {
+                restart = false;
+            }
         }
 
         exitedProcess.Exited -= OnProcessExited;
         if (!restart)
         {
-            AppLog.Info("QAM.Host", "QamHost exited unexpectedly while no Steam presentation authority was active.", ("PID", exitedProcess.Id));
+            AppLog.Warn("QAM.Host", "QamHost exited unexpectedly; restart budget exhausted or Steam presentation authority is inactive.", null,
+                ("PID", exitedProcess.Id), ("RestartAttempts", _unexpectedRestartAttempts), ("MaxRestartAttempts", MaxUnexpectedRestartAttempts));
             exitedProcess.Dispose();
             return;
         }
 
-        AppLog.Warn("QAM.Host", "QamHost exited unexpectedly; reacquiring while Steam presentation authority remains active.", null, ("PID", exitedProcess.Id));
+        AppLog.Warn("QAM.Host", "QamHost exited unexpectedly; bounded reacquire requested.", null,
+            ("PID", exitedProcess.Id), ("Attempt", attempt), ("MaxAttempts", MaxUnexpectedRestartAttempts));
         exitedProcess.Dispose();
         _ = ReconcileDesiredStateAsync();
     }
