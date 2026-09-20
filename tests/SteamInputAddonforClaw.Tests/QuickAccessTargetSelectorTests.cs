@@ -101,4 +101,30 @@ public sealed class QuickAccessTargetSelectorTests
         Assert.DoesNotContain("setProperty", expression);
         Assert.DoesNotContain(".style", expression);
     }
+
+    [Fact]
+    public void Qam_host_transform_expression_uses_immediate_browser_bounds_and_does_not_mutate_fibers()
+    {
+        var expression = QamHostTransformPatcher.CreateApplyExpression("view-placeholder-class", addonSelected: true);
+        var uninstall = QamHostTransformPatcher.CreateUninstallExpression("view-placeholder-class");
+
+        Assert.Contains("__reactFiber$", expression);
+        Assert.Contains("browser.SetBounds", expression);
+        Assert.Contains("originalSetBounds", expression);
+        Assert.Contains("applyCurrentBounds", expression);
+        Assert.Contains("ImmediateApplied", expression);
+        Assert.Contains("desiredLeft", expression);
+        Assert.DoesNotContain("owner.type = patchedType", expression);
+        Assert.DoesNotContain("alternate.type = patchedType", expression);
+        Assert.Contains("restoreBoundsPatch", uninstall);
+        Assert.Contains("originalSetBounds.call(browser", uninstall);
+        Assert.DoesNotContain("element.style", expression);
+        Assert.DoesNotContain("classList", expression);
+        Assert.DoesNotContain("MutationObserver", expression);
+        Assert.DoesNotContain("setInterval", expression);
+        Assert.DoesNotContain("setTimeout", expression);
+        Assert.DoesNotContain("appendChild", expression);
+        Assert.DoesNotContain("removeChild", expression);
+        Assert.DoesNotContain("setProperty", expression);
+    }
 }

@@ -95,6 +95,18 @@
     log(message);
   }
 
+  function notifyQamHostWidthSelection(activeTab) {
+    if (typeof window[BRIDGE_BINDING] !== "function") return;
+    try {
+      window[BRIDGE_BINDING](JSON.stringify({
+        kind: "qam-host-width-selection",
+        activeTab: activeTab == null ? null : String(activeTab),
+      }));
+    } catch (error) {
+      logOnce("qamHostWidthNotification", `QAM host width selection notification unavailable: ${String(error)}`);
+    }
+  }
+
   function quickSettingsPageName(pageId) {
     if (pageId === QS_PAGE_DEVICE) return "Device";
     if (pageId === QS_PAGE_PROFILE) return "Profile";
@@ -542,6 +554,10 @@
     };
   }
 
+  function getQamHostWidthSelection() {
+    return state.qamHostWidthActiveTab ?? null;
+  }
+
   function findQamActiveTabOwner(result) {
     const panelOuterClass = state.qamWidthClassNames?.PanelOuterNav;
     if (!panelOuterClass) return null;
@@ -669,6 +685,7 @@
       return null;
     }
 
+    state.qamHostWidthActiveTab = activeTab == null ? null : String(activeTab);
     logStateChange(
       "qamWidthSelection",
       String(activeTab),
@@ -677,6 +694,7 @@
     if (state.qamAuthorityDiagnosticActiveTab !== authorityTabSignature) {
       state.qamAuthorityDiagnosticActiveTab = authorityTabSignature;
       void captureQamAuthorityDiagnostic("render-active-tab", activeTab);
+      notifyQamHostWidthSelection(activeTab);
     }
     scheduleQamGeometryReadback(activeTab);
     applyQamPanelOuterWidth(result, activeTab);
@@ -2294,6 +2312,8 @@
       addonTabDescriptor: null,
       selectAddonOnNextOpenRequested: false,
       qamWidthClassNames: null,
+      qamAuthorityDiagnosticActiveTab: null,
+      qamHostWidthActiveTab: null,
       qamWidthPatches: null,
       qamOuterStyleRecords: new WeakMap(),
       qamOuterPatchedTarget: null,
@@ -2313,6 +2333,7 @@
     uninstall,
     request,
     __getQamGeometryClassNames: getQamGeometryClassNames,
+    __getQamHostWidthSelection: getQamHostWidthSelection,
     __receiveBridgeResponse: receiveBridgeResponse,
     __receiveBridgeNotification: receiveBridgeNotification,
   });

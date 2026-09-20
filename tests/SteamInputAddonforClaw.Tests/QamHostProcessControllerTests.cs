@@ -62,13 +62,109 @@ public sealed class QamHostProcessControllerTests
     }
 
     [Fact]
-    public async Task Already_exited_child_is_cleared_on_stop()
+    public async Task Running_child_is_cleared_on_stop()
     {
         using var scope = new QamHostTestScope();
-        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "exit 0"));
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "ping 127.0.0.1 -n 30 > nul"));
         controller.OnBigPictureStateChanged(true);
-        await Task.Delay(100);
+        await WaitForTrackedProcessAsync(controller);
         await controller.StopAsync();
+        Assert.False(controller.HasTrackedProcess);
+    }
+
+    [Fact]
+    public async Task Immediately_exiting_child_is_capped_by_unexpected_restart_budget()
+    {
+        using var scope = new QamHostTestScope();
+        var starts = 0;
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            Interlocked.Increment(ref starts);
+            return StartCommand("/c", "exit 0");
+        });
+
+        controller.OnBigPictureStateChanged(true);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (Volatile.Read(ref starts) < QamHostProcessController.MaxUnexpectedRestartAttempts + 1 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        await Task.Delay(100);
+
+        Assert.Equal(QamHostProcessController.MaxUnexpectedRestartAttempts + 1, Volatile.Read(ref starts));
+        Assert.False(controller.HasTrackedProcess);
+        await controller.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Inactive_authority_resets_restart_budget_for_a_later_activation()
+    {
+        using var scope = new QamHostTestScope();
+        var starts = 0;
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            Interlocked.Increment(ref starts);
+            return StartCommand("/c", "exit 0");
+        });
+
+        controller.OnBigPictureStateChanged(true);
+        var firstBudgetDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (Volatile.Read(ref starts) < QamHostProcessController.MaxUnexpectedRestartAttempts + 1 && DateTime.UtcNow < firstBudgetDeadline)
+            await Task.Delay(10);
+        Assert.Equal(QamHostProcessController.MaxUnexpectedRestartAttempts + 1, Volatile.Read(ref starts));
+
+        controller.OnBigPictureStateChanged(false);
+        await Task.Delay(50);
+        controller.OnBigPictureStateChanged(true);
+
+        var secondActivationDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (Volatile.Read(ref starts) < QamHostProcessController.MaxUnexpectedRestartAttempts + 2 && DateTime.UtcNow < secondActivationDeadline)
+            await Task.Delay(10);
+
+        Assert.True(Volatile.Read(ref starts) >= QamHostProcessController.MaxUnexpectedRestartAttempts + 2);
+        await controller.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Unexpected_exit_reacquires_qam_host_while_presentation_authority_is_active()
+    {
+        using var scope = new QamHostTestScope();
+        var starts = 0;
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            var ordinal = Interlocked.Increment(ref starts);
+            return ordinal == 1
+                ? StartCommand("/c", "exit 0")
+                : StartCommand("/c", "ping 127.0.0.1 -n 30 > nul");
+        });
+
+        controller.OnBigPictureStateChanged(true);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (Volatile.Read(ref starts) < 2 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+
+        Assert.Equal(2, Volatile.Read(ref starts));
+        Assert.True(controller.HasTrackedProcess);
+        await controller.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Expected_stop_does_not_reacquire_qam_host()
+    {
+        using var scope = new QamHostTestScope();
+        var starts = 0;
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            Interlocked.Increment(ref starts);
+            return StartCommand("/c", "ping 127.0.0.1 -n 30 > nul");
+        });
+
+        controller.OnBigPictureStateChanged(true);
+        await WaitForTrackedProcessAsync(controller);
+        await controller.StopAsync();
+        await Task.Delay(100);
+
+        Assert.Equal(1, Volatile.Read(ref starts));
         Assert.False(controller.HasTrackedProcess);
     }
 

@@ -6,12 +6,15 @@ namespace SteamInputAddonforClaw.Lifecycle;
 internal sealed class QamHostProcessController : IAsyncDisposable
 {
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(3);
+    internal const int MaxUnexpectedRestartAttempts = 2;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly string _executablePath;
     private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private Process? _process;
+    private Process? _expectedStopProcess;
+    private int _unexpectedRestartAttempts;
     private bool _bigPictureActive;
     private bool _steamGameActive;
     private bool _stopping;
@@ -32,6 +35,8 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         {
             if (_stopping) return;
             _bigPictureActive = active;
+            if (!_bigPictureActive && !_steamGameActive)
+                _unexpectedRestartAttempts = 0;
         }
 
         _ = ReconcileDesiredStateAsync();
@@ -43,6 +48,8 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         {
             if (_stopping) return;
             _steamGameActive = appId != 0;
+            if (!_bigPictureActive && !_steamGameActive)
+                _unexpectedRestartAttempts = 0;
         }
 
         _ = ReconcileDesiredStateAsync();
@@ -72,14 +79,26 @@ internal sealed class QamHostProcessController : IAsyncDisposable
 
     private void StartLocked()
     {
+        Process? exitedProcess = null;
         lock (_sync)
         {
             if (_stopping) return;
-            if (_process is { HasExited: false })
+            if (_process is { } trackedProcess && !trackedProcess.HasExited)
             {
-                AppLog.Info("QAM.Host", "QamHost start skipped; already running.", ("PID", _process.Id));
+                AppLog.Info("QAM.Host", "QamHost start skipped; already running.", ("PID", trackedProcess.Id));
                 return;
             }
+            if (_process is { } alreadyExited)
+            {
+                _process = null;
+                exitedProcess = alreadyExited;
+            }
+        }
+
+        if (exitedProcess is not null)
+        {
+            exitedProcess.Exited -= OnProcessExited;
+            exitedProcess.Dispose();
         }
 
         if (!File.Exists(_executablePath))
@@ -102,7 +121,18 @@ internal sealed class QamHostProcessController : IAsyncDisposable
             startInfo.ArgumentList.Add(_logDirectory);
             var process = _startProcess(startInfo);
             if (process is null) { AppLog.Warn("QAM.Host", "QamHost process launch returned no process."); return; }
-            lock (_sync) _process = process;
+            process.Exited += OnProcessExited;
+            lock (_sync)
+            {
+                if (_stopping)
+                {
+                    process.Exited -= OnProcessExited;
+                    process.Dispose();
+                    return;
+                }
+                _process = process;
+            }
+            process.EnableRaisingEvents = true;
             AppLog.Info("QAM.Host", "QamHost process started.", ("PID", process.Id));
         }
         catch (Exception exception)
@@ -111,10 +141,58 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         }
     }
 
+    private void OnProcessExited(object? sender, EventArgs eventArgs)
+    {
+        if (sender is not Process exitedProcess) return;
+
+        bool restart;
+        var attempt = 0;
+        lock (_sync)
+        {
+            if (!ReferenceEquals(_process, exitedProcess)) return;
+            if (ReferenceEquals(_expectedStopProcess, exitedProcess)) return;
+
+            _process = null;
+            var authorityActive = !_stopping && (_bigPictureActive || _steamGameActive);
+            if (!authorityActive)
+            {
+                _unexpectedRestartAttempts = 0;
+                restart = false;
+            }
+            else if (_unexpectedRestartAttempts < MaxUnexpectedRestartAttempts)
+            {
+                attempt = ++_unexpectedRestartAttempts;
+                restart = true;
+            }
+            else
+            {
+                restart = false;
+            }
+        }
+
+        exitedProcess.Exited -= OnProcessExited;
+        if (!restart)
+        {
+            AppLog.Warn("QAM.Host", "QamHost exited unexpectedly; restart budget exhausted or Steam presentation authority is inactive.", null,
+                ("PID", exitedProcess.Id), ("RestartAttempts", _unexpectedRestartAttempts), ("MaxRestartAttempts", MaxUnexpectedRestartAttempts));
+            exitedProcess.Dispose();
+            return;
+        }
+
+        AppLog.Warn("QAM.Host", "QamHost exited unexpectedly; bounded reacquire requested.", null,
+            ("PID", exitedProcess.Id), ("Attempt", attempt), ("MaxAttempts", MaxUnexpectedRestartAttempts));
+        exitedProcess.Dispose();
+        _ = ReconcileDesiredStateAsync();
+    }
+
     private async Task StopLockedAsync()
     {
         Process? process;
-        lock (_sync) process = _process;
+        lock (_sync)
+        {
+            process = _process;
+            if (process is not null) _expectedStopProcess = process;
+        }
         if (process is null) return;
 
         try
@@ -144,8 +222,13 @@ internal sealed class QamHostProcessController : IAsyncDisposable
         }
         finally
         {
+            process.Exited -= OnProcessExited;
             process.Dispose();
-            lock (_sync) { if (ReferenceEquals(_process, process)) _process = null; }
+            lock (_sync)
+            {
+                if (ReferenceEquals(_process, process)) _process = null;
+                if (ReferenceEquals(_expectedStopProcess, process)) _expectedStopProcess = null;
+            }
         }
     }
 
