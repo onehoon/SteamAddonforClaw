@@ -550,6 +550,56 @@
     }).node;
   }
 
+  function restoreQamPanelOuterWidth() {
+    const target = state.qamOuterPatchedTarget;
+    const record = target && state.qamOuterStyleRecords?.get(target);
+    if (target?.props && record) {
+      // Restore only the exact style object written by this generation. Do not overwrite a
+      // later Steam or another integration update to the same React element.
+      if (target.props.style === record.appliedStyle)
+        target.props.style = record.originalStyle;
+      state.qamOuterStyleRecords.delete(target);
+    }
+    state.qamOuterPatchedTarget = null;
+  }
+
+  function applyQamPanelOuterWidth(result, activeTab) {
+    const panelOuterClass = state.qamWidthClassNames?.PanelOuterNav;
+    if (!panelOuterClass) return;
+
+    const target = findReactNode(result, node => hasExactClass(node, panelOuterClass)).node;
+    if (!target?.props) {
+      logOnce("qamOuterWidthTargetMissing", "QAM PanelOuterNav target was not found in the current render; leaving Steam width unchanged.");
+      restoreQamPanelOuterWidth();
+      return;
+    }
+
+    if (activeTab !== ADDON_TAB_KEY) {
+      restoreQamPanelOuterWidth();
+      return;
+    }
+
+    state.qamOuterStyleRecords ??= new WeakMap();
+    if (state.qamOuterPatchedTarget !== target)
+      restoreQamPanelOuterWidth();
+
+    let record = state.qamOuterStyleRecords.get(target);
+    if (!record || target.props.style !== record.appliedStyle) {
+      if (record) state.qamOuterStyleRecords.delete(target);
+      const appliedStyle = {
+        ...(target.props.style || {}),
+        width: `${ADDON_QAM_WIDTH_PX}px`,
+        maxWidth: `${ADDON_QAM_WIDTH_PX}px`,
+      };
+      record = { originalStyle: target.props.style, appliedStyle };
+      state.qamOuterStyleRecords.set(target, record);
+      target.props.style = appliedStyle;
+    }
+
+    state.qamOuterPatchedTarget = target;
+    logOnce("qamOuterWidthPatched", "QAM PanelOuterNav Addon width applied.");
+  }
+
   function observeQamActiveTab(result) {
     const tabOwner = findQamActiveTabOwner(result);
     const activeTab = tabOwner?.props?.activeTab;
@@ -569,6 +619,7 @@
       void captureQamAuthorityDiagnostic("render-active-tab", activeTab);
     }
     scheduleQamGeometryReadback(activeTab);
+    applyQamPanelOuterWidth(result, activeTab);
     return tabOwner;
   }
 
@@ -1012,6 +1063,95 @@
       resolveComponentTarget(node.type));
   }
 
+  const QAM_FE_DIAGNOSTIC_NODE_BUDGET = 32;
+  const QAM_FE_DIAGNOSTIC_DEPTH_BUDGET = 5;
+
+  function describeQamDiagnosticType(type) {
+    if (typeof type === "function") return { kind: "function", name: type.name || "" };
+    if (type && typeof type === "object") {
+      return {
+        kind: "object",
+        hasRender: typeof type.render === "function",
+        hasType: typeof type.type === "function",
+      };
+    }
+    return { kind: typeof type };
+  }
+
+  function describeQamDiagnosticChild(value) {
+    if (Array.isArray(value)) {
+      return {
+        kind: "array",
+        count: value.length,
+        itemKinds: value.slice(0, 8).map(item =>
+          item == null ? "null" : Array.isArray(item) ? "array" : typeof item),
+      };
+    }
+    if (typeof value === "function") return { kind: "function", name: value.name || "" };
+    if (value && typeof value === "object") return { kind: "element", type: describeQamDiagnosticType(value.type) };
+    return { kind: value == null ? "null" : typeof value };
+  }
+
+  function captureQamFeReturnTreeDiagnostic(result) {
+    if (state.diagnostics?.qamFeReturnTree) return;
+
+    const entries = [];
+    const visited = new Set();
+    const stack = [{ value: result, path: "root", depth: 0 }];
+    let budget = QAM_FE_DIAGNOSTIC_NODE_BUDGET;
+
+    while (stack.length > 0 && budget > 0) {
+      const current = stack.pop();
+      const value = current.value;
+      if (value == null || typeof value !== "object") continue;
+      if (visited.has(value)) continue;
+      visited.add(value);
+      budget--;
+
+      if (Array.isArray(value)) {
+        entries.push({ path: current.path, kind: "array", count: value.length });
+        if (current.depth < QAM_FE_DIAGNOSTIC_DEPTH_BUDGET) {
+          for (let index = Math.min(value.length, 8) - 1; index >= 0; index--)
+            stack.push({ value: value[index], path: `${current.path}[${index}]`, depth: current.depth + 1 });
+        }
+        continue;
+      }
+
+      const props = value.props && typeof value.props === "object" ? value.props : null;
+      entries.push({
+        path: current.path,
+        type: describeQamDiagnosticType(value.type),
+        propsKeys: props ? Object.keys(props).slice(0, 32) : [],
+        tabKey: props?.tab?.key ?? null,
+        bActivePresent: !!props && Object.prototype.hasOwnProperty.call(props, "bActive"),
+        bActive: props?.bActive ?? null,
+        className: typeof props?.className === "string" ? props.className : null,
+        children: describeQamDiagnosticChild(props?.children),
+      });
+
+      if (current.depth >= QAM_FE_DIAGNOSTIC_DEPTH_BUDGET) continue;
+      const links = [
+        [".props.children", props?.children],
+        [".children", value.children],
+        [".child", value.child],
+        [".sibling", value.sibling],
+      ];
+      for (let index = links.length - 1; index >= 0; index--) {
+        const [suffix, next] = links[index];
+        if (next && typeof next === "object")
+          stack.push({ value: next, path: `${current.path}${suffix}`, depth: current.depth + 1 });
+      }
+    }
+
+    const snapshot = {
+      RootTabKey: result?.props?.tab?.key ?? ADDON_TAB_KEY,
+      Nodes: entries,
+      Visited: visited.size,
+      BudgetExhausted: budget === 0 && stack.length > 0,
+    };
+    logOnce("qamFeReturnTree", `QAM Fe return tree diagnostic ${JSON.stringify(snapshot)}`);
+  }
+
   function patchQamTabPanelProducer(node) {
     const resolved = resolveComponentTarget(node?.type);
     if (!resolved) {
@@ -1056,6 +1196,8 @@
       const patchedTarget = preservePatchedFunctionShape(function patchedQamTabGroupProducer(...args) {
         const result = originalTarget.apply(this, args);
         if (!state.installed || args[0]?.tab?.key !== ADDON_TAB_KEY) return result;
+
+        captureQamFeReturnTreeDiagnostic(result);
 
         const panelProducerSearch = findQamAddonTabPanelProducer(result);
         if (!panelProducerSearch.node) {
@@ -1913,6 +2055,8 @@
     }
 
     cancelQamGeometryReadback();
+    restoreQamPanelOuterWidth();
+    restoreQamWidthPatches();
 
     // A tab descriptor closes over the React/native components and panel implementation from the
     // script generation that created it. Never reuse it across uninstall/reinstall or upgrades.
@@ -1920,6 +2064,8 @@
     state.selectAddonOnNextOpenRequested = false;
     state.qamWidthClassNames = null;
     state.qamWidthPatches = new Map();
+    state.qamOuterStyleRecords = new WeakMap();
+    state.qamOuterPatchedTarget = null;
     state.qamAuthorityObjectIds = new WeakMap();
     state.qamAuthorityObjectIdNext = 0;
     state.qamAuthorityDiagnosticActiveTab = null;
@@ -1985,6 +2131,8 @@
       patches,
       nestedPatches: new Map(),
       qamWidthPatches: new Map(),
+      qamOuterStyleRecords: new WeakMap(),
+      qamOuterPatchedTarget: null,
       install,
       uninstall,
     });
@@ -1998,6 +2146,7 @@
     retireBridgeConsumers();
     state.addonTabDescriptor = null;
     state.selectAddonOnNextOpenRequested = false;
+    restoreQamPanelOuterWidth();
     state.qamWidthClassNames = null;
     restoreQamWidthPatches();
     if (!state.installed) {
@@ -2025,6 +2174,8 @@
       selectAddonOnNextOpenRequested: false,
       qamWidthClassNames: null,
       qamWidthPatches: null,
+      qamOuterStyleRecords: new WeakMap(),
+      qamOuterPatchedTarget: null,
       install,
       uninstall,
     });
