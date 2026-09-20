@@ -1427,8 +1427,8 @@
           }
           logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
           record.tabs = ensureAddonTabs(owner, React, native);
-          observeQamActiveTab(result);
-          patchQamTabGroupOwner(owner);
+          const contentOwner = observeQamActiveTab(result);
+          if (contentOwner) patchQamTabGroupOwner(contentOwner);
         } catch (err) {
           logOnce("nestedAugmentationFailed", `QAM nested augmentation failed: ${String(err)}`);
         }
