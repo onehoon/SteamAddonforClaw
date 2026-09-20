@@ -109,6 +109,10 @@ public sealed class QuickAccessTargetSelectorTests
         var uninstall = QamHostTransformPatcher.CreateUninstallExpression("view-placeholder-class");
 
         Assert.Contains("__reactFiber$", expression);
+        Assert.Contains("patchedAlternate", expression);
+        Assert.Contains("alternateOriginalType", expression);
+        Assert.Contains("alternate.type = patchedType", expression);
+        Assert.Contains("alternate.elementType = patchedType", expression);
         Assert.Contains("offsetLeft", expression);
         Assert.Contains("desiredLeft", expression);
         Assert.Contains("matrix3d", expression);
@@ -116,6 +120,8 @@ public sealed class QuickAccessTargetSelectorTests
         Assert.Contains("owner.elementType = patchedType", expression);
         Assert.Contains("restoreOwner", uninstall);
         Assert.Contains("owner.type = state.originalType", uninstall);
+        Assert.Contains("alternate.type = state.alternateOriginalType", uninstall);
+        Assert.Contains("alternate.elementType = state.alternateOriginalElementType", uninstall);
         Assert.DoesNotContain("element.style", expression);
         Assert.DoesNotContain("classList", expression);
         Assert.DoesNotContain("MutationObserver", expression);

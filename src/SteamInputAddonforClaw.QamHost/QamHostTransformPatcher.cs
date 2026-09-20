@@ -27,8 +27,11 @@ public static class QamHostTransformPatcher
             installed: false,
             addonSelected: false,
             patchedFiber: null,
+            patchedAlternate: null,
             originalType: null,
             originalElementType: null,
+            alternateOriginalType: null,
+            alternateOriginalElementType: null,
             patchedType: null,
             originalStyle: null,
             originalTransform: null,
@@ -197,12 +200,7 @@ public static class QamHostTransformPatcher
             return rewritten;
           }
 
-          function wrapOwner(owner) {
-            if (!owner || !isComponentType(owner.type)) return false;
-            if (state.patchedFiber === owner) return true;
-            if (state.patchedFiber) restoreOwner();
-
-            const originalType = owner.type;
+          function createPatchedType(originalType) {
             let patchedType;
             if (typeof originalType === "function" && originalType.prototype?.isReactComponent) {
               patchedType = class SteamInputAddonQamHostPatched extends originalType {
@@ -219,15 +217,37 @@ public static class QamHostTransformPatcher
                 return rewriteResult(originalType.render.apply(this, args));
               } };
             } else {
-              return false;
+              return null;
             }
+            return patchedType;
+          }
+
+          function wrapOwner(owner) {
+            if (!owner || !isComponentType(owner.type)) return false;
+            const alternate = owner.alternate || null;
+            if (state.patchedFiber === owner || state.patchedAlternate === owner) return true;
+            if (state.patchedFiber) restoreOwner();
+
+            const originalType = owner.type;
+            const originalElementType = owner.elementType;
+            const alternateOriginalType = alternate?.type ?? null;
+            const alternateOriginalElementType = alternate?.elementType ?? null;
+            const patchedType = createPatchedType(originalType);
+            if (!patchedType) return false;
 
             state.patchedFiber = owner;
+            state.patchedAlternate = alternate;
             state.originalType = originalType;
-            state.originalElementType = owner.elementType;
+            state.originalElementType = originalElementType;
+            state.alternateOriginalType = alternateOriginalType;
+            state.alternateOriginalElementType = alternateOriginalElementType;
             state.patchedType = patchedType;
             owner.type = patchedType;
             owner.elementType = patchedType;
+            if (alternate) {
+              alternate.type = patchedType;
+              alternate.elementType = patchedType;
+            }
             state.installed = true;
             return true;
           }
@@ -241,13 +261,21 @@ public static class QamHostTransformPatcher
 
           function restoreOwner() {
             const owner = state.patchedFiber;
+            const alternate = state.patchedAlternate;
             if (owner) {
               if (owner.type === state.patchedType) owner.type = state.originalType;
               if (owner.elementType === state.patchedType) owner.elementType = state.originalElementType;
             }
+            if (alternate) {
+              if (alternate.type === state.patchedType) alternate.type = state.alternateOriginalType;
+              if (alternate.elementType === state.patchedType) alternate.elementType = state.alternateOriginalElementType;
+            }
             state.patchedFiber = null;
+            state.patchedAlternate = null;
             state.originalType = null;
             state.originalElementType = null;
+            state.alternateOriginalType = null;
+            state.alternateOriginalElementType = null;
             state.patchedType = null;
             state.originalStyle = null;
             state.originalTransform = null;
