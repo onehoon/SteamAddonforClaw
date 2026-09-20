@@ -118,6 +118,11 @@ public sealed class QamFrontendContractTests
         Assert.Contains("LogTargetSnapshotAsync(\"select-addon-on-next-open\"", program);
         Assert.Contains("LogQuickAccessGeometrySnapshotsAsync(\"select-addon-on-next-open\"", program);
         Assert.Contains("LogQamHostGeometrySnapshotsAsync(\"select-addon-on-next-open\"", program);
+        Assert.Contains("ApplyQamHostTransformAsync", program);
+        Assert.Contains("QamHostTransformPatcher.CreateApplyExpression", program);
+        Assert.Contains("QamHostTransformPatcher.CreateUninstallExpression", program);
+        Assert.Contains("ConnectUnboundAsync", program);
+        Assert.Contains("TryParseQamHostWidthSelection", program);
         Assert.Contains("QuickAccessTargetSelector.SelectQuickAccessTargets", program);
         Assert.Contains("QamHostTargetSelector.SelectQamHostTargets", program);
         Assert.Contains("ConnectReadOnlyAsync", program);
@@ -607,6 +612,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("function getQamGeometryClassNames()", source);
         Assert.Contains("__getQamGeometryClassNames", source);
         Assert.Contains("ViewPlaceholder", source);
+        Assert.Contains("kind: \"qam-host-width-selection\"", source);
+        Assert.Contains("notifyQamHostWidthSelection(activeTab)", source);
     }
 
     [Fact]

@@ -72,6 +72,10 @@ try
         var targetSnapshotGate = new SemaphoreSlim(1, 1);
         var geometryDiagnosticGate = new SemaphoreSlim(1, 1);
         var hostGeometryDiagnosticGate = new SemaphoreSlim(1, 1);
+        var hostTransformGate = new SemaphoreSlim(1, 1);
+        SteamGamepadUiCdpClient? hostTransformClient = null;
+        string? hostTransformTargetId = null;
+        string? hostTransformViewPlaceholderClass = null;
         async Task LogTargetSnapshotAsync(string reason, CancellationToken token)
         {
             try
@@ -218,6 +222,103 @@ try
                 log.Warn($"QAM host geometry diagnostic unavailable. Reason={reason}. {exception.GetType().Name}: {exception.Message}");
             }
         }
+
+        async Task ApplyQamHostTransformAsync(bool addonSelected, string reason, CancellationToken token)
+        {
+            try
+            {
+                await hostTransformGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    var classNamesResult = CdpEvaluateResult.Parse(await sessionClient.EvaluateAsync(
+                        "JSON.stringify(window.__STEAM_INPUT_ADDON_QAM__?.__getQamGeometryClassNames?.() ?? null)",
+                        token).ConfigureAwait(false));
+                    if (!classNamesResult.Succeeded || string.IsNullOrWhiteSpace(classNamesResult.StringValue) || classNamesResult.StringValue == "null")
+                    {
+                        log.Info($"QAM host transform unavailable. Reason={reason} Semantic class names were not exposed by the current QAM document.");
+                        return;
+                    }
+
+                    var classNames = JsonSerializer.Deserialize<QamGeometryClassNames>(classNamesResult.StringValue);
+                    if (classNames is null || string.IsNullOrWhiteSpace(classNames.ViewPlaceholder))
+                    {
+                        log.Info($"QAM host transform unavailable. Reason={reason} ViewPlaceholder semantic class was not resolved.");
+                        return;
+                    }
+
+                    hostTransformViewPlaceholderClass = classNames.ViewPlaceholder;
+                    var hostTarget = QamHostTargetSelector
+                        .SelectQamHostTargets(await sessionClient.ListTargetsAsync(token).ConfigureAwait(false))
+                        .FirstOrDefault(target => string.Equals(target.Title, "Steam Big Picture Mode", StringComparison.OrdinalIgnoreCase));
+                    if (hostTarget is null)
+                    {
+                        log.Info($"QAM host transform unavailable. Reason={reason} Steam Big Picture Mode target was not present.");
+                        return;
+                    }
+
+                    if (hostTransformClient is null ||
+                        !string.Equals(hostTransformTargetId, hostTarget.Id, StringComparison.Ordinal) ||
+                        hostTransformClient.ConnectionEnded.IsCompleted)
+                    {
+                        if (hostTransformClient is not null)
+                            await hostTransformClient.DisposeAsync().ConfigureAwait(false);
+                        hostTransformClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+                        await hostTransformClient.ConnectUnboundAsync(hostTarget, token).ConfigureAwait(false);
+                        hostTransformTargetId = hostTarget.Id;
+                    }
+
+                    var result = CdpEvaluateResult.Parse(await hostTransformClient.EvaluateAsync(
+                        QamHostTransformPatcher.CreateApplyExpression(classNames.ViewPlaceholder, addonSelected), token).ConfigureAwait(false));
+                    if (!result.Succeeded || string.IsNullOrWhiteSpace(result.StringValue))
+                    {
+                        log.Warn($"QAM host transform evaluation failed. Reason={reason} TargetTitle={hostTarget.Title} TargetId={hostTarget.Id} Error={result.ErrorText ?? "empty result"}");
+                        return;
+                    }
+
+                    log.Info($"QAM host transform selection applied. Reason={reason} AddonSelected={addonSelected} TargetId={hostTarget.Id} Result={result.StringValue}");
+                }
+                finally { hostTransformGate.Release(); }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                log.Warn($"QAM host transform unavailable. Reason={reason}. {exception.GetType().Name}: {exception.Message}");
+            }
+        }
+
+        async Task UninstallQamHostTransformAsync(CancellationToken token)
+        {
+            try
+            {
+                await hostTransformGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    if (hostTransformClient is not null && !string.IsNullOrWhiteSpace(hostTransformViewPlaceholderClass))
+                    {
+                        var result = CdpEvaluateResult.Parse(await hostTransformClient.EvaluateAsync(
+                            QamHostTransformPatcher.CreateUninstallExpression(hostTransformViewPlaceholderClass), token).ConfigureAwait(false));
+                        if (!result.Succeeded)
+                            log.Warn($"QAM host transform cleanup failed. Error={result.ErrorText ?? "empty result"}");
+                        else
+                            log.Info($"QAM host transform cleanup completed. Result={result.StringValue ?? "null"}");
+                    }
+                }
+                finally
+                {
+                    if (hostTransformClient is not null)
+                        await hostTransformClient.DisposeAsync().ConfigureAwait(false);
+                    hostTransformClient = null;
+                    hostTransformTargetId = null;
+                    hostTransformViewPlaceholderClass = null;
+                    hostTransformGate.Release();
+                }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                log.Info($"QAM host transform cleanup skipped. {exception.GetType().Name}: {exception.Message}");
+            }
+        }
         // Cleanup ownership belongs to this CDP/GamepadUI session only.
         installationSucceeded = false;
         installMayExist = false;
@@ -234,8 +335,14 @@ try
             {
                 if (string.Equals(name, "__steamInputAddonQamHost", StringComparison.Ordinal))
                 {
-                    var admittedGeneration = Volatile.Read(ref documentGeneration);
-                    _ = Task.Run(() => DeliverResponseAsync(payload, admittedGeneration), lifetimeToken);
+                    if (TryParseQamHostWidthSelection(payload, out var addonSelected))
+                    {
+                        var admittedGeneration = Volatile.Read(ref documentGeneration);
+                        _ = Task.Run(() => DeliverQamHostSelectionAsync(addonSelected, admittedGeneration), lifetimeToken);
+                        return;
+                    }
+                    var bridgeGeneration = Volatile.Read(ref documentGeneration);
+                    _ = Task.Run(() => DeliverResponseAsync(payload, bridgeGeneration), lifetimeToken);
                 }
             }
             async Task DeliverInvalidationAsync()
@@ -255,10 +362,16 @@ try
                 }
                 catch (Exception exception) { log.Info($"QAM Addon first-tab request delivery skipped for retired CDP session. {exception.Message}"); }
             }
+            async Task DeliverQamHostSelectionAsync(bool addonSelected, long admittedGeneration)
+            {
+                if (admittedGeneration != Volatile.Read(ref documentGeneration)) return;
+                await ApplyQamHostTransformAsync(addonSelected, "active-tab-notification", lifetimeToken).ConfigureAwait(false);
+            }
             void OnStateInvalidated(object? _, EventArgs __) => _ = Task.Run(DeliverInvalidationAsync, lifetimeToken);
             void OnSelectAddonOnNextQuickAccessOpen(object? _, EventArgs __)
             {
                 var admittedGeneration = Volatile.Read(ref documentGeneration);
+                _ = Task.Run(() => ApplyQamHostTransformAsync(true, "select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
                 _ = Task.Run(() => DeliverSelectAddonOnNextQuickAccessOpenAsync(admittedGeneration), lifetimeToken);
                 _ = Task.Run(() => LogTargetSnapshotAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
                 _ = Task.Run(() => LogQuickAccessGeometrySnapshotsAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
@@ -297,6 +410,7 @@ try
             log.Info("CDP connected.");
             installationSucceeded = true; // cleanup is eligible once the remote install may execute
             await InstallForCurrentDocumentAsync(currentClient);
+            await ApplyQamHostTransformAsync(false, "gamepad-ui-install", lifetimeToken);
             recoveryDeadline = null;
 
             while (!lifetimeToken.IsCancellationRequested)
@@ -312,6 +426,7 @@ try
                     log.Info("GamepadUI document reloaded; reinjecting QAM.");
                     reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     await InstallForCurrentDocumentAsync(currentClient);
+                    await ApplyQamHostTransformAsync(false, "gamepad-ui-reload", lifetimeToken);
                     continue;
                 }
                 log.Warn("CDP connection lost.");
@@ -349,6 +464,7 @@ try
             sessionClient.BindingCalled -= OnBindingCalled;
             sessionDiagnosticsCts.Cancel();
             sessionDiagnosticsCts.Dispose();
+            await UninstallQamHostTransformAsync(CancellationToken.None);
             if (installMayExist) await TeardownAsync(sessionClient);
             await sessionClient.DisposeAsync();
             if (ReferenceEquals(currentClient, sessionClient)) currentClient = null;
@@ -423,4 +539,27 @@ static async Task WaitForConsoleShutdownAsync()
     var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; tcs.TrySetResult(); };
     await tcs.Task;
+}
+
+static bool TryParseQamHostWidthSelection(string payload, out bool addonSelected)
+{
+    addonSelected = false;
+    try
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("kind", out var kind) ||
+            !string.Equals(kind.GetString(), "qam-host-width-selection", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        addonSelected = root.TryGetProperty("activeTab", out var activeTab) &&
+                        string.Equals(activeTab.GetString(), "steam-input-addon", StringComparison.Ordinal);
+        return true;
+    }
+    catch (JsonException)
+    {
+        return false;
+    }
 }

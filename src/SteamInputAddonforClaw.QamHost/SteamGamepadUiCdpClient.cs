@@ -73,6 +73,16 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         await ConnectSocketAsync(target, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Connects without the Addon bridge or protocol enablement. This is reserved for the
+    /// bounded BPM host producer patch, whose expression owns its own cleanup and remains
+    /// independent from the QAM frontend bridge.
+    /// </summary>
+    internal async Task ConnectUnboundAsync(CdpTarget target, CancellationToken cancellationToken)
+    {
+        await ConnectSocketAsync(target, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task ConnectSocketAsync(CdpTarget target, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);

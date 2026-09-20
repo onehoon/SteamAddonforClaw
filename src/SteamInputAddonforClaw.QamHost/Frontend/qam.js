@@ -95,6 +95,18 @@
     log(message);
   }
 
+  function notifyQamHostWidthSelection(activeTab) {
+    if (typeof window[BRIDGE_BINDING] !== "function") return;
+    try {
+      window[BRIDGE_BINDING](JSON.stringify({
+        kind: "qam-host-width-selection",
+        activeTab: activeTab == null ? null : String(activeTab),
+      }));
+    } catch (error) {
+      logOnce("qamHostWidthNotification", `QAM host width selection notification unavailable: ${String(error)}`);
+    }
+  }
+
   function quickSettingsPageName(pageId) {
     if (pageId === QS_PAGE_DEVICE) return "Device";
     if (pageId === QS_PAGE_PROFILE) return "Profile";
@@ -677,6 +689,7 @@
     if (state.qamAuthorityDiagnosticActiveTab !== authorityTabSignature) {
       state.qamAuthorityDiagnosticActiveTab = authorityTabSignature;
       void captureQamAuthorityDiagnostic("render-active-tab", activeTab);
+      notifyQamHostWidthSelection(activeTab);
     }
     scheduleQamGeometryReadback(activeTab);
     applyQamPanelOuterWidth(result, activeTab);

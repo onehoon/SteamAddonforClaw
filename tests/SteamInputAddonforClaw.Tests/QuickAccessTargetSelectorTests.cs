@@ -101,4 +101,28 @@ public sealed class QuickAccessTargetSelectorTests
         Assert.DoesNotContain("setProperty", expression);
         Assert.DoesNotContain(".style", expression);
     }
+
+    [Fact]
+    public void Qam_host_transform_expression_rewrites_react_output_and_restores_the_owner()
+    {
+        var expression = QamHostTransformPatcher.CreateApplyExpression("view-placeholder-class", addonSelected: true);
+        var uninstall = QamHostTransformPatcher.CreateUninstallExpression("view-placeholder-class");
+
+        Assert.Contains("__reactFiber$", expression);
+        Assert.Contains("offsetLeft", expression);
+        Assert.Contains("desiredLeft", expression);
+        Assert.Contains("matrix3d", expression);
+        Assert.Contains("owner.type = patchedType", expression);
+        Assert.Contains("owner.elementType = patchedType", expression);
+        Assert.Contains("restoreOwner", uninstall);
+        Assert.Contains("owner.type = state.originalType", uninstall);
+        Assert.DoesNotContain("element.style", expression);
+        Assert.DoesNotContain("classList", expression);
+        Assert.DoesNotContain("MutationObserver", expression);
+        Assert.DoesNotContain("setInterval", expression);
+        Assert.DoesNotContain("setTimeout", expression);
+        Assert.DoesNotContain("appendChild", expression);
+        Assert.DoesNotContain("removeChild", expression);
+        Assert.DoesNotContain("setProperty", expression);
+    }
 }
