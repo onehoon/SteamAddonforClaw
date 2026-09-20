@@ -42,12 +42,19 @@ public sealed class QuickAccessTargetSelectorTests
     public void Geometry_expression_only_reads_the_target_dom()
     {
         var expression = QuickAccessGeometryDiagnostic.CreateExpression(
-            new QamGeometryClassNames("panel-class", "tab-group-class"));
+            new QamGeometryClassNames("panel-class", "tab-group-class"),
+            activeTab: "Device");
 
         Assert.Contains("getBoundingClientRect", expression);
         Assert.Contains("getComputedStyle", expression);
         Assert.Contains("getElementsByClassName", expression);
         Assert.Contains("parentElement", expression);
+        Assert.Contains("paddingLeft", expression);
+        Assert.Contains("paddingRight", expression);
+        Assert.Contains("marginLeft", expression);
+        Assert.Contains("marginRight", expression);
+        Assert.Contains("layoutTree", expression);
+        Assert.Contains("Device", expression);
         Assert.Contains("depth < 6", expression);
         Assert.DoesNotContain("MutationObserver", expression);
         Assert.DoesNotContain("setInterval", expression);

@@ -123,6 +123,9 @@ public sealed class QamFrontendContractTests
         Assert.Contains("QamHostTransformPatcher.CreateUninstallExpression", program);
         Assert.Contains("ConnectUnboundAsync", program);
         Assert.Contains("TryParseQamHostWidthSelection", program);
+        Assert.Contains("TryParseQamInnerTabSelection", program);
+        Assert.Contains("inner-tab-notification", program);
+        Assert.Contains("CreateExpression(classNames, activeTab)", program);
         Assert.DoesNotContain("ApplyQamHostTransformAsync(true", program);
         Assert.Contains("ReadCurrentAddonSelectionAsync", program);
         Assert.Contains("__getQamHostWidthSelection", program);
@@ -619,6 +622,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("ViewPlaceholder", source);
         Assert.Contains("kind: \"qam-host-width-selection\"", source);
         Assert.Contains("notifyQamHostWidthSelection(activeTab)", source);
+        Assert.Contains("kind: \"qam-inner-tab-selection\"", source);
+        Assert.Contains("notifyQamInnerTabSelection(activeTab)", source);
         Assert.Contains("qamHostWidthActiveTab", source);
         Assert.Contains("__getQamHostWidthSelection", source);
     }

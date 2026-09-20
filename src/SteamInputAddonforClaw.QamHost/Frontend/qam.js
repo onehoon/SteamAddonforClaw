@@ -107,6 +107,21 @@
     }
   }
 
+  // Diagnostic-only notification for the Addon-owned native inner Tabs. This does not participate
+  // in selection or width authority; it only lets QamHost sample the committed QuickAccess DOM for
+  // the currently visible inner surface.
+  function notifyQamInnerTabSelection(activeTab) {
+    if (typeof window[BRIDGE_BINDING] !== "function") return;
+    try {
+      window[BRIDGE_BINDING](JSON.stringify({
+        kind: "qam-inner-tab-selection",
+        activeTab: activeTab == null ? null : String(activeTab),
+      }));
+    } catch (error) {
+      logOnce("qamInnerTabDiagnosticNotification", `QAM inner tab diagnostic notification unavailable: ${String(error)}`);
+    }
+  }
+
   function quickSettingsPageName(pageId) {
     if (pageId === QS_PAGE_DEVICE) return "Device";
     if (pageId === QS_PAGE_PROFILE) return "Profile";
@@ -1874,6 +1889,10 @@
       }, []);
 
       React.useEffect(() => { void refresh(true); }, [refresh]);
+
+      React.useEffect(() => {
+        if (activeTab != null) notifyQamInnerTabSelection(activeTab);
+      }, [activeTab]);
 
       React.useEffect(() => {
         const handler = () => {
