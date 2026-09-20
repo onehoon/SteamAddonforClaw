@@ -270,10 +270,15 @@
     const tabGroupPanel = typeof unique[0].TabGroupPanel === "string"
       ? unique[0].TabGroupPanel
       : null;
+    const viewPlaceholder = typeof unique[0].ViewPlaceholder === "string"
+      ? unique[0].ViewPlaceholder
+      : null;
     logOnce(
       "qamWidthClassResolved",
-      `QAM Addon width class resolved. PanelOuterNav=${unique[0].PanelOuterNav} TabGroupPanel=${tabGroupPanel || "unresolved"}`);
-    return { PanelOuterNav: unique[0].PanelOuterNav, TabGroupPanel: tabGroupPanel };
+      `QAM Addon width class resolved. PanelOuterNav=${unique[0].PanelOuterNav} TabGroupPanel=${tabGroupPanel || "unresolved"} ViewPlaceholder=${viewPlaceholder || "unresolved"}`);
+    if (!viewPlaceholder)
+      logOnce("qamViewPlaceholderClassUnresolved", "QAM outer-host geometry diagnostic unavailable; ViewPlaceholder semantic class was not present in the resolved class module.");
+    return { PanelOuterNav: unique[0].PanelOuterNav, TabGroupPanel: tabGroupPanel, ViewPlaceholder: viewPlaceholder };
   }
 
   function findNativeQamComponents(webpackRequire) {
@@ -533,6 +538,7 @@
     return {
       PanelOuterNav: String(classNames.PanelOuterNav),
       TabGroupPanel: String(classNames.TabGroupPanel),
+      ViewPlaceholder: classNames.ViewPlaceholder ? String(classNames.ViewPlaceholder) : null,
     };
   }
 

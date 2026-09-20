@@ -57,4 +57,48 @@ public sealed class QuickAccessTargetSelectorTests
         Assert.DoesNotContain("removeChild", expression);
         Assert.DoesNotContain("setProperty", expression);
     }
+
+    [Fact]
+    public void Selects_only_bounded_qam_host_targets_for_outer_geometry_diagnostics()
+    {
+        var targets = new[]
+        {
+            Page("QuickAccess_uid165", "about:blank?browserviewpopup=1&parentpopup=165"),
+            Page("notificationtoasts_uid165", "about:blank?browserviewpopup=1&parentpopup=165"),
+            Page("MainMenu_uid165", "about:blank?browserviewpopup=1&parentpopup=165"),
+            Page("Menu", "about:blank?openerid=165"),
+            Page("Steam Big Picture Mode", "about:blank?pid=0"),
+            Page("SharedJSContext", "https://steamloopback.host/routes/library/home"),
+            Page("Menu", "about:blank?openerid=165", ws: null),
+        };
+
+        var selected = QamHostTargetSelector.SelectQamHostTargets(targets);
+
+        Assert.Equal(new[] { "Menu", "Steam Big Picture Mode", "SharedJSContext", "MainMenu_uid165" }, selected.Select(target => target.Title));
+    }
+
+    [Fact]
+    public void Qam_host_geometry_expression_is_read_only_and_captures_outer_layout_metrics()
+    {
+        var expression = QamHostGeometryDiagnostic.CreateExpression(
+            new QamGeometryClassNames("panel-class", "tab-group-class", "view-placeholder-class"));
+
+        Assert.Contains("view-placeholder-class", expression);
+        Assert.Contains("getBoundingClientRect", expression);
+        Assert.Contains("getComputedStyle", expression);
+        Assert.Contains("parentElement", expression);
+        Assert.Contains("scrollWidth", expression);
+        Assert.Contains("clientWidth", expression);
+        Assert.Contains("transformOrigin", expression);
+        Assert.Contains("floatingSidePanelWidth", expression);
+        Assert.Contains("--vrgamepadui-floating-side-panel-width", expression);
+        Assert.DoesNotContain("MutationObserver", expression);
+        Assert.DoesNotContain("setInterval", expression);
+        Assert.DoesNotContain("setTimeout", expression);
+        Assert.DoesNotContain("classList", expression);
+        Assert.DoesNotContain("appendChild", expression);
+        Assert.DoesNotContain("removeChild", expression);
+        Assert.DoesNotContain("setProperty", expression);
+        Assert.DoesNotContain(".style", expression);
+    }
 }
