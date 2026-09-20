@@ -533,7 +533,7 @@ if their behavior is fully superseded by the explicit calibration operations.
 
 Do not keep dead enum members or hidden UI buttons solely for backward compatibility; the project is pre-release and the frontend protocol may be bumped.
 
-### 9.2 Preserve one-operation-at-a-time behavior
+### 9.3 Preserve one-operation-at-a-time behavior
 
 Keep the existing single-operation gate.
 
@@ -763,11 +763,17 @@ logical[7]
 
 Normal Developer table presentation should emphasize `[1..6]` as duty values but still show boundary bytes somewhere in diagnostics/readout.
 
-Example:
+Example presentation using the **current live read**, not a hard-coded reference:
 
 ```text
-Fan1 raw logical: 58 | 70 74 76 78 80 84 | 94
-Fan2 raw logical: 58 | 70 74 76 78 80 84 | 94
+Fan1 raw logical: <byte0> | <six live duty bytes> | <byte7>
+Fan2 raw logical: <byte0> | <six live duty bytes> | <byte7>
+
+Historical BIOS 10A example:
+58 | 70 74 76 78 80 84 | 94
+
+Observed BIOS 10D Auto example:
+00 | 60 64 68 74 80 84 | 94
 ```
 
 If Fan1 and Fan2 differ, show the difference. Do not normalize them to one shared curve in the UI.
