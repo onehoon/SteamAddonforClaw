@@ -285,11 +285,15 @@ public sealed class QamFrontendContractTests
     public void Qam_width_class_discovery_uses_unique_semantic_quick_access_keys_and_fails_open()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var start = source.IndexOf("function findQuickAccessMenuClasses", StringComparison.Ordinal);
+        var start = source.IndexOf("function isQuickAccessMenuClassModule", StringComparison.Ordinal);
         var end = source.IndexOf("function findNativeQamComponents", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var discovery = source[start..end];
 
+        Assert.Contains("function isQuickAccessMenuClassModule(candidate)", discovery);
+        Assert.Contains("isQuickAccessMenuClassModule(moduleExports)", discovery);
+        Assert.Contains("isQuickAccessMenuClassModule(candidate)", discovery);
+        Assert.True(discovery.IndexOf("isQuickAccessMenuClassModule(moduleExports)", StringComparison.Ordinal) < discovery.IndexOf("Object.values(moduleExports)", StringComparison.Ordinal));
         Assert.Contains("candidate.Title", discovery);
         Assert.Contains("candidate.QuickAccessMenu", discovery);
         Assert.Contains("candidate.BatteryDetailsLabels", discovery);

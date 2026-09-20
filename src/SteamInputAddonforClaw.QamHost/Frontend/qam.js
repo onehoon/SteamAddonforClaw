@@ -238,18 +238,25 @@
     return matches.length === 1 ? matches[0] : null;
   }
 
+  function isQuickAccessMenuClassModule(candidate) {
+    return !!candidate &&
+      typeof candidate === "object" &&
+      typeof candidate.Title === "string" &&
+      typeof candidate.QuickAccessMenu === "string" &&
+      typeof candidate.BatteryDetailsLabels === "string" &&
+      typeof candidate.PanelOuterNav === "string";
+  }
+
   function findQuickAccessMenuClasses(webpackRequire) {
     const matches = [];
 
     for (const moduleExports of collectSearchableModules(webpackRequire)) {
       if (!moduleExports || (typeof moduleExports !== "object" && typeof moduleExports !== "function")) continue;
+      if (isQuickAccessMenuClassModule(moduleExports))
+        matches.push(moduleExports);
       for (const candidate of Object.values(moduleExports)) {
-        if (!candidate || typeof candidate !== "object") continue;
-        if (typeof candidate.Title !== "string" ||
-            typeof candidate.QuickAccessMenu !== "string" ||
-            typeof candidate.BatteryDetailsLabels !== "string" ||
-            typeof candidate.PanelOuterNav !== "string") continue;
-        matches.push(candidate);
+        if (isQuickAccessMenuClassModule(candidate))
+          matches.push(candidate);
       }
     }
 
