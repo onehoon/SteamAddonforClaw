@@ -77,6 +77,18 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_read_only_target_diagnostic_does_not_register_the_addon_bridge()
+    {
+        var cdp = ReadSource("src", "SteamInputAddonforClaw.QamHost", "SteamGamepadUiCdpClient.cs");
+        var start = cdp.IndexOf("internal async Task ConnectReadOnlyAsync", StringComparison.Ordinal);
+        var end = cdp.IndexOf("private async Task ConnectSocketAsync", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        Assert.DoesNotContain("Runtime.enable", cdp[start..end]);
+        Assert.DoesNotContain("Page.enable", cdp[start..end]);
+        Assert.DoesNotContain("Runtime.addBinding", cdp[start..end]);
+    }
+
+    [Fact]
     public void Qam_first_tab_intent_uses_a_dedicated_current_document_notification()
     {
         var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
@@ -104,6 +116,9 @@ public sealed class QamFrontendContractTests
         Assert.Contains("CdpTargetSnapshotFormatter.Format(\"initial-acquisition\", targets)", program);
         Assert.Contains("CdpTargetSnapshotFormatter.Format(reason, snapshotTargets)", program);
         Assert.Contains("LogTargetSnapshotAsync(\"select-addon-on-next-open\"", program);
+        Assert.Contains("LogQuickAccessGeometrySnapshotsAsync(\"select-addon-on-next-open\"", program);
+        Assert.Contains("QuickAccessTargetSelector.SelectQuickAccessTargets", program);
+        Assert.Contains("ConnectReadOnlyAsync", program);
         Assert.Contains("sessionDiagnosticsCts", program);
         Assert.Contains("sessionClient.ListTargetsAsync(token)", program);
         Assert.DoesNotContain("ConnectAsync(snapshot", program);
@@ -228,8 +243,13 @@ public sealed class QamFrontendContractTests
         Assert.True(selectionStart >= 0 && selectionEnd > selectionStart);
         var selection = source[selectionStart..selectionEnd];
 
+        Assert.Contains("function resolveQamWindowAuthority()", source);
+        Assert.Contains("windowStore.GetOverlayInstance(steamAppId, 0)", source);
+        Assert.Contains("lookup: \"method-unavailable\"", source);
+        Assert.DoesNotContain("GetOverlayInstanceWithFallback", source);
         Assert.Contains("function resolveNativeQamMenuAuthority()", selection);
-        Assert.Contains("window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore?.MainWindowInstance?.MenuStore", selection);
+        Assert.Contains("const resolved = resolveQamWindowAuthority();", selection);
+        Assert.Contains("const menuStore = resolved.instance?.MenuStore;", selection);
         Assert.Contains("typeof menuStore.OpenQuickAccessMenu !== \"function\"", selection);
         Assert.Contains("!Object.prototype.hasOwnProperty.call(menuStore, \"m_eOpenSideMenu\")", selection);
         Assert.Contains("const QUICK_ACCESS_SIDE_MENU_ID = 2;", source);
@@ -377,12 +397,12 @@ public sealed class QamFrontendContractTests
         var enrichStart = diagnostic.IndexOf("async function enrichAndLogQamAuthorityDiagnostic", stateEnd, StringComparison.Ordinal);
         var enrichEnd = diagnostic.IndexOf("// Read-only authority diagnostic", enrichStart, StringComparison.Ordinal);
         var enrich = diagnostic[enrichStart..enrichEnd];
-        Assert.Contains("MainRunningAppID", state);
-        Assert.Contains("GetOverlayInstanceWithFallback", state);
-        Assert.Contains("describeQamWindowInstance(overlay)", state);
+        Assert.Contains("MainRunningAppID", diagnostic);
+        Assert.Contains("resolveQamWindowAuthority", state);
+        Assert.Contains("describeQamWindowInstance(resolved.instance)", state);
         Assert.DoesNotContain("GetOverlayInstanceWithFallback", enrich);
         Assert.DoesNotContain("describeQamWindowInstance(overlay)", enrich);
-        Assert.Contains("GetOverlayInstanceWithFallback", diagnostic);
+        Assert.Contains("GetOverlayInstance(steamAppId, 0)", diagnostic);
         Assert.Contains("GetOpenSideMenu", diagnostic);
         Assert.Contains("GetQuickAccessTab", diagnostic);
         Assert.Contains("captureStatus", diagnostic);
@@ -462,6 +482,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("cancelAnimationFrame", diagnostic);
         Assert.Contains("qamGeometryScheduledSignature === signature", diagnostic);
         Assert.Contains("logStateChange(\"qamGeometry\", String(activeTab)", diagnostic);
+        Assert.Contains("Realm: \"SharedJSContext\"", diagnostic);
+        Assert.Contains("QAM SharedJSContext geometry fallback", diagnostic);
         Assert.Contains("Functional QAM discovery remains React-based", diagnostic);
         Assert.DoesNotContain(".style =", diagnostic);
         Assert.DoesNotContain(".style.", diagnostic);
@@ -472,6 +494,8 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("MutationObserver", diagnostic);
         Assert.DoesNotContain("setInterval", diagnostic);
         Assert.DoesNotContain("setTimeout", diagnostic);
+        Assert.Contains("function getQamGeometryClassNames()", source);
+        Assert.Contains("__getQamGeometryClassNames", source);
     }
 
     [Fact]
