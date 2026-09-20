@@ -29,6 +29,7 @@
   // Steam's current GamepadUI MenuStore enum uses 2 for the native Quick Access side menu.
   // Keep this check on the same verified MenuStore authority as OpenQuickAccessMenu.
   const QUICK_ACCESS_SIDE_MENU_ID = 2;
+  const ADDON_QAM_WIDTH_PX = 400;
   // Historical descriptor cleanup identities only. These markers recognize stale pre-shell tabs
   // during QAM restart/reload/uninstall cleanup; they are not current product tab identities.
   const LEGACY_ADDON_DEVICE_TAB_KEY = "steam-input-addon-device";
@@ -237,6 +238,38 @@
     return matches.length === 1 ? matches[0] : null;
   }
 
+  function isQuickAccessMenuClassModule(candidate) {
+    return !!candidate &&
+      typeof candidate === "object" &&
+      typeof candidate.Title === "string" &&
+      typeof candidate.QuickAccessMenu === "string" &&
+      typeof candidate.BatteryDetailsLabels === "string" &&
+      typeof candidate.PanelOuterNav === "string";
+  }
+
+  function findQuickAccessMenuClasses(webpackRequire) {
+    const matches = [];
+
+    for (const moduleExports of collectSearchableModules(webpackRequire)) {
+      if (!moduleExports || (typeof moduleExports !== "object" && typeof moduleExports !== "function")) continue;
+      if (isQuickAccessMenuClassModule(moduleExports))
+        matches.push(moduleExports);
+      for (const candidate of Object.values(moduleExports)) {
+        if (isQuickAccessMenuClassModule(candidate))
+          matches.push(candidate);
+      }
+    }
+
+    const unique = [...new Set(matches)];
+    if (unique.length !== 1) {
+      logOnce("qamWidthClassModule", `QAM width class discovery unavailable; expected one Quick Access class module, found ${unique.length}.`);
+      return null;
+    }
+
+    logOnce("qamWidthClassResolved", `QAM Addon width class resolved. PanelOuterNav=${unique[0].PanelOuterNav}`);
+    return { PanelOuterNav: unique[0].PanelOuterNav };
+  }
+
   function findNativeQamComponents(webpackRequire) {
     const fieldsFactory = findUniqueFactory(webpackRequire, [
       "DialogSlider_Container",
@@ -379,6 +412,40 @@
     return { node: null, visited: visited.size, budgetExhausted: budget === 0 && stack.length > 0 };
   }
 
+  function hasExactClass(node, className) {
+    const value = node?.props?.className;
+    if (typeof value !== "string") return false;
+    return value.split(/\s+/).filter(Boolean).includes(className);
+  }
+
+  function applyAddonQamWidth(result) {
+    const className = state.qamWidthClassNames?.PanelOuterNav;
+    if (!className) return;
+
+    const target = findReactNode(result, node => hasExactClass(node, className)).node;
+    if (!target?.props) {
+      logOnce("qamWidthNodeMissing", "QAM Addon width target was not found in the current render.");
+      return;
+    }
+
+    state.qamWidthOriginalStyles ??= new WeakMap();
+    if (state.addonQamWidthActive === true) {
+      if (!state.qamWidthOriginalStyles.has(target))
+        state.qamWidthOriginalStyles.set(target, target.props.style);
+      target.props.style = {
+        ...(target.props.style || {}),
+        width: `${ADDON_QAM_WIDTH_PX}px`,
+        maxWidth: `${ADDON_QAM_WIDTH_PX}px`,
+      };
+      return;
+    }
+
+    if (state.qamWidthOriginalStyles.has(target)) {
+      target.props.style = state.qamWidthOriginalStyles.get(target);
+      state.qamWidthOriginalStyles.delete(target);
+    }
+  }
+
   function findTabsPropOwner(node) {
     return findReactNode(node, (candidate) =>
       candidate.props && Array.isArray(candidate.props.tabs));
@@ -401,11 +468,55 @@
     if (!menuStore || typeof menuStore.OpenQuickAccessMenu !== "function" ||
         !Object.prototype.hasOwnProperty.call(menuStore, "m_eOpenSideMenu")) return null;
     return {
+      menuStore,
       isQuickAccessOpen: () => menuStore.m_eOpenSideMenu === QUICK_ACCESS_SIDE_MENU_ID,
       selectAddon: () => {
         menuStore.OpenQuickAccessMenu(ADDON_TAB_KEY, false);
       },
     };
+  }
+
+  function installAddonQamWidthSelectionHook() {
+    if (state.qamWidthSelectionPatch) return true;
+
+    const authority = resolveNativeQamMenuAuthority();
+    const menuStore = authority?.menuStore;
+    if (!menuStore || typeof menuStore.OpenQuickAccessMenu !== "function") {
+      logOnce("qamWidthSelectionHook", "QAM width selection hook unavailable; Quick Access width remains stock.");
+      return false;
+    }
+
+    const hadOwn = Object.prototype.hasOwnProperty.call(menuStore, "OpenQuickAccessMenu");
+    const original = menuStore.OpenQuickAccessMenu;
+    function wrappedOpenQuickAccessMenu(key, ...args) {
+      const previous = state.addonQamWidthActive === true;
+      state.addonQamWidthActive = key === ADDON_TAB_KEY;
+      try {
+        return original.apply(this, [key, ...args]);
+      } catch (error) {
+        state.addonQamWidthActive = previous;
+        throw error;
+      }
+    }
+
+    try {
+      menuStore.OpenQuickAccessMenu = wrappedOpenQuickAccessMenu;
+    } catch (error) {
+      logOnce("qamWidthSelectionHook", `QAM width selection hook unavailable; Quick Access width remains stock. Reason=${String(error)}`);
+      return false;
+    }
+    state.qamWidthSelectionPatch = { menuStore, original, wrapped: wrappedOpenQuickAccessMenu, hadOwn };
+    logOnce("qamWidthSelectionHookInstalled", "QAM Addon width selection hook installed.");
+    return true;
+  }
+
+  function uninstallAddonQamWidthSelectionHook() {
+    const patch = state.qamWidthSelectionPatch;
+    state.qamWidthSelectionPatch = null;
+    state.addonQamWidthActive = false;
+    if (!patch || patch.menuStore.OpenQuickAccessMenu !== patch.wrapped) return;
+    if (patch.hadOwn) patch.menuStore.OpenQuickAccessMenu = patch.original;
+    else delete patch.menuStore.OpenQuickAccessMenu;
   }
 
   function requestAddonSelectionOnNextQuickAccessOpen() {
@@ -459,6 +570,7 @@
       "stableTabs",
       `QAM stable Addon tab ensured. Current=${!!descriptor} RemovedOwned=${removedCount}`
     );
+    installAddonQamWidthSelectionHook();
     tryConsumeAddonSelectionRequest();
     return tabs;
   }
@@ -1402,6 +1514,10 @@
     // script generation that created it. Never reuse it across uninstall/reinstall or upgrades.
     state.addonTabDescriptor = null;
     state.selectAddonOnNextOpenRequested = false;
+    state.addonQamWidthActive = false;
+    state.qamWidthClassNames = null;
+    state.qamWidthSelectionPatch = null;
+    state.qamWidthOriginalStyles = new WeakMap();
     state.stateInvalidationSubscribers?.clear();
     state.diagnostics = {};
     state.runtimeDiagnostics = {};
@@ -1412,6 +1528,8 @@
       log("QAM integration unavailable (webpack runtime not found).");
       return false;
     }
+
+    state.qamWidthClassNames = findQuickAccessMenuClasses(webpackRequire);
 
     const patches = findQamRenderers(webpackRequire);
     logOnce("rendererCount", `QAM renderer count=${patches.length}.`);
@@ -1446,6 +1564,11 @@
         } catch (err) {
           logOnce("outerAugmentationFailed", `QAM outer augmentation failed: ${String(err)}`);
         }
+        try {
+          applyAddonQamWidth(result);
+        } catch (err) {
+          logOnce("qamWidthPatchFailed", `QAM Addon width patch failed: ${String(err)}`);
+        }
         return result;
       }, originalType);
 
@@ -1471,8 +1594,11 @@
 
   function uninstall() {
     retireBridgeConsumers();
+    uninstallAddonQamWidthSelectionHook();
     state.addonTabDescriptor = null;
     state.selectAddonOnNextOpenRequested = false;
+    state.qamWidthClassNames = null;
+    state.qamWidthOriginalStyles = new WeakMap();
     if (!state.installed) {
       log("uninstall() called but not installed; no-op.");
       return true;
@@ -1495,6 +1621,10 @@
       nestedPatches: null,
       addonTabDescriptor: null,
       selectAddonOnNextOpenRequested: false,
+      addonQamWidthActive: false,
+      qamWidthClassNames: null,
+      qamWidthSelectionPatch: null,
+      qamWidthOriginalStyles: new WeakMap(),
       install,
       uninstall,
     });
