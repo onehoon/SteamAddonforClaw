@@ -70,6 +70,7 @@ try
         long documentGeneration = 0;
         var sessionDiagnosticsCts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
         var targetSnapshotGate = new SemaphoreSlim(1, 1);
+        var geometryDiagnosticGate = new SemaphoreSlim(1, 1);
         async Task LogTargetSnapshotAsync(string reason, CancellationToken token)
         {
             try
@@ -86,6 +87,70 @@ try
             catch (Exception exception)
             {
                 log.Warn($"QAM CDP target snapshot unavailable. Reason={reason}. {exception.GetType().Name}: {exception.Message}");
+            }
+        }
+        async Task LogQuickAccessGeometrySnapshotsAsync(string reason, CancellationToken token)
+        {
+            try
+            {
+                await geometryDiagnosticGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    var classNamesResult = CdpEvaluateResult.Parse(await sessionClient.EvaluateAsync(
+                        "JSON.stringify(window.__STEAM_INPUT_ADDON_QAM__?.__getQamGeometryClassNames?.() ?? null)",
+                        token).ConfigureAwait(false));
+                    if (!classNamesResult.Succeeded || string.IsNullOrWhiteSpace(classNamesResult.StringValue) || classNamesResult.StringValue == "null")
+                    {
+                        log.Info($"QAM QuickAccess geometry unavailable. Reason={reason} Semantic class names were not exposed by the current QAM document.");
+                        return;
+                    }
+
+                    var classNames = JsonSerializer.Deserialize<QamGeometryClassNames>(classNamesResult.StringValue);
+                    if (classNames is null || string.IsNullOrWhiteSpace(classNames.PanelOuterNav) || string.IsNullOrWhiteSpace(classNames.TabGroupPanel))
+                    {
+                        log.Info($"QAM QuickAccess geometry unavailable. Reason={reason} Semantic class names were invalid.");
+                        return;
+                    }
+
+                    var targets = QuickAccessTargetSelector.SelectQuickAccessTargets(await sessionClient.ListTargetsAsync(token).ConfigureAwait(false));
+                    if (targets.Count == 0)
+                    {
+                        log.Info($"QAM QuickAccess geometry unavailable. Reason={reason} No usable QuickAccess_uid target was present.");
+                        return;
+                    }
+
+                    foreach (var target in targets)
+                    {
+                        await using var diagnosticClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+                        try
+                        {
+                            await diagnosticClient.ConnectReadOnlyAsync(target, token).ConfigureAwait(false);
+                            var result = CdpEvaluateResult.Parse(await diagnosticClient.EvaluateAsync(
+                                QuickAccessGeometryDiagnostic.CreateExpression(classNames), token).ConfigureAwait(false));
+                            if (!result.Succeeded || string.IsNullOrWhiteSpace(result.StringValue))
+                            {
+                                log.Warn($"QAM QuickAccess geometry target evaluation failed. Reason={reason} TargetTitle={target.Title} TargetId={target.Id} Error={result.ErrorText ?? "empty result"}");
+                                continue;
+                            }
+
+                            log.Info($"QAM QuickAccess geometry snapshot. Reason={reason} TargetTitle={target.Title} TargetId={target.Id} Snapshot={result.StringValue}");
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            return;
+                        }
+                        catch (Exception exception)
+                        {
+                            log.Warn($"QAM QuickAccess geometry target unavailable. Reason={reason} TargetTitle={target.Title} TargetId={target.Id} {exception.GetType().Name}: {exception.Message}");
+                        }
+                    }
+                }
+                finally { geometryDiagnosticGate.Release(); }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                log.Warn($"QAM QuickAccess geometry diagnostic unavailable. Reason={reason}. {exception.GetType().Name}: {exception.Message}");
             }
         }
         // Cleanup ownership belongs to this CDP/GamepadUI session only.
@@ -131,6 +196,7 @@ try
                 var admittedGeneration = Volatile.Read(ref documentGeneration);
                 _ = Task.Run(() => DeliverSelectAddonOnNextQuickAccessOpenAsync(admittedGeneration), lifetimeToken);
                 _ = Task.Run(() => LogTargetSnapshotAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
+                _ = Task.Run(() => LogQuickAccessGeometrySnapshotsAsync("select-addon-on-next-open", sessionDiagnosticsCts.Token), sessionDiagnosticsCts.Token);
             }
             sessionClient.BindingCalled += OnBindingCalled;
             frontendBridge.StateInvalidated += OnStateInvalidated;

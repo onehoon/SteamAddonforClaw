@@ -58,6 +58,23 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     public async Task ConnectAsync(CdpTarget target, CancellationToken cancellationToken)
     {
+        await ConnectSocketAsync(target, cancellationToken).ConfigureAwait(false);
+        await SendCommandAsync("Runtime.enable", parameters: null, cancellationToken).ConfigureAwait(false);
+        await SendCommandAsync("Page.enable", parameters: null, cancellationToken).ConfigureAwait(false);
+        await SendCommandAsync("Runtime.addBinding", new { name = "__steamInputAddonQamHost" }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Connects without enabling the Addon bridge or registering a binding. This is reserved for
+    /// one-shot, read-only diagnostics against a separate Steam Quick Access target.
+    /// </summary>
+    internal async Task ConnectReadOnlyAsync(CdpTarget target, CancellationToken cancellationToken)
+    {
+        await ConnectSocketAsync(target, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ConnectSocketAsync(CdpTarget target, CancellationToken cancellationToken)
+    {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (string.IsNullOrWhiteSpace(target.WebSocketDebuggerUrl))
         {
@@ -73,9 +90,6 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
         _receiveLoopCts = new CancellationTokenSource();
         _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage, () => DocumentLoaded?.Invoke(), (name, payload) => BindingCalled?.Invoke(name, payload), _connectionEnded);
-        await SendCommandAsync("Runtime.enable", parameters: null, cancellationToken).ConfigureAwait(false);
-        await SendCommandAsync("Page.enable", parameters: null, cancellationToken).ConfigureAwait(false);
-        await SendCommandAsync("Runtime.addBinding", new { name = "__steamInputAddonQamHost" }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs <c>Runtime.evaluate</c> with the given JS expression and returns the raw JSON result.</summary>

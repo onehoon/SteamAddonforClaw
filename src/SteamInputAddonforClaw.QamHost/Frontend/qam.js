@@ -486,6 +486,7 @@
       const panel = selectVisibleQamGeometryCandidate(panelCandidates);
       const panelElements = document.getElementsByClassName(classNames.PanelOuterNav);
       const snapshot = {
+        Realm: "SharedJSContext",
         ActiveTab: String(activeTab),
         PanelOuterNav: {
           candidates: panelCandidates,
@@ -496,7 +497,7 @@
           candidates: tabGroupCandidates,
         },
       };
-      logStateChange("qamGeometry", String(activeTab), `QAM geometry ${JSON.stringify(snapshot)}`);
+      logStateChange("qamGeometry", String(activeTab), `QAM SharedJSContext geometry fallback ${JSON.stringify(snapshot)}`);
     } catch (error) {
       logOnce("qamGeometryFailure", `QAM geometry readback unavailable: ${String(error)}`);
     }
@@ -524,6 +525,15 @@
       if (!state.installed || state.qamGeometryToken !== token) return;
       readQamGeometry(activeTab);
     });
+  }
+
+  function getQamGeometryClassNames() {
+    const classNames = state.qamWidthClassNames;
+    if (!classNames?.PanelOuterNav || !classNames?.TabGroupPanel) return null;
+    return {
+      PanelOuterNav: String(classNames.PanelOuterNav),
+      TabGroupPanel: String(classNames.TabGroupPanel),
+    };
   }
 
   function applyAddonQamWidth(result) {
@@ -638,31 +648,54 @@
     };
   }
 
-  function captureQamAuthorityState(activeTab = null) {
+  function resolveQamWindowAuthority() {
     const steamStore = window.SteamUIStore?.m_WindowStore?.m_Parent;
     const windowStore = steamStore?.m_WindowStore;
-    const steamAppIdValue = Number(steamStore?.MainRunningAppID || 0);
-    const steamAppId = Number.isFinite(steamAppIdValue) && steamAppIdValue > 0
-      ? steamAppIdValue
-      : null;
+    const appIdValue = Number(steamStore?.MainRunningAppID || 0);
+    const steamAppId = Number.isFinite(appIdValue) && appIdValue > 0 ? appIdValue : null;
+    const main = windowStore?.MainWindowInstance ?? null;
 
-    let overlay = null;
-    let overlayLookup = "unavailable";
-    if (windowStore && typeof windowStore.GetOverlayInstanceWithFallback === "function") {
-      try {
-        overlay = windowStore.GetOverlayInstanceWithFallback(steamAppId || 0, 0);
-        overlayLookup = overlay ? "resolved" : "empty";
-      } catch (error) {
-        overlayLookup = `failed:${String(error)}`;
-      }
+    if (!windowStore) {
+      return { steamAppId, windowStore: null, main, instance: null, lookup: "unavailable" };
     }
+
+    if (steamAppId == null) {
+      return {
+        steamAppId,
+        windowStore,
+        main,
+        instance: main,
+        lookup: main ? "main" : "empty",
+      };
+    }
+
+    if (typeof windowStore.GetOverlayInstance !== "function") {
+      return { steamAppId, windowStore, main, instance: null, lookup: "method-unavailable" };
+    }
+
+    try {
+      const overlay = windowStore.GetOverlayInstance(steamAppId, 0);
+      return {
+        steamAppId,
+        windowStore,
+        main,
+        instance: overlay ?? null,
+        lookup: overlay ? "resolved" : "empty",
+      };
+    } catch (error) {
+      return { steamAppId, windowStore, main, instance: null, lookup: `failed:${String(error)}` };
+    }
+  }
+
+  function captureQamAuthorityState(activeTab = null) {
+    const resolved = resolveQamWindowAuthority();
 
     return {
       ActiveTab: activeTab == null ? null : String(activeTab),
-      SteamAppId: steamAppId,
-      Main: describeQamWindowInstance(windowStore?.MainWindowInstance),
-      OverlayLookup: overlayLookup,
-      Overlay: describeQamWindowInstance(overlay),
+      SteamAppId: resolved.steamAppId,
+      Main: describeQamWindowInstance(resolved.main),
+      OverlayLookup: resolved.lookup,
+      Overlay: describeQamWindowInstance(resolved.instance),
     };
   }
 
@@ -711,10 +744,10 @@
   }
 
   function resolveNativeQamMenuAuthority() {
-    // Live current-Steam QAM inspection shows the native tab handler passes its descriptor's
-    // `sr.key` directly to MainWindowInstance.MenuStore.OpenQuickAccessMenu. The same live store
-    // path owns the current side-menu enum, so open/close causality and selection share one authority.
-    const menuStore = window.SteamUIStore?.m_WindowStore?.m_Parent?.m_WindowStore?.MainWindowInstance?.MenuStore;
+    // Main owns BPM QAM. While a game is active, only the exact game Overlay instance owns the
+    // QAM state; resolveQamWindowAuthority deliberately does not fall back to Main in that case.
+    const resolved = resolveQamWindowAuthority();
+    const menuStore = resolved.instance?.MenuStore;
     if (!menuStore || typeof menuStore.OpenQuickAccessMenu !== "function" ||
         !Object.prototype.hasOwnProperty.call(menuStore, "m_eOpenSideMenu")) return null;
     return {
@@ -1848,7 +1881,14 @@
     return true;
   }
 
-  Object.assign(state, { install, uninstall, request, __receiveBridgeResponse: receiveBridgeResponse, __receiveBridgeNotification: receiveBridgeNotification });
+  Object.assign(state, {
+    install,
+    uninstall,
+    request,
+    __getQamGeometryClassNames: getQamGeometryClassNames,
+    __receiveBridgeResponse: receiveBridgeResponse,
+    __receiveBridgeNotification: receiveBridgeNotification,
+  });
 
   return install();
 })();
