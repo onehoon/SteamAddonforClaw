@@ -16,7 +16,8 @@
  *      graceful shutdown.
  *
  * Fails closed: if the expected Steam module/renderer signature is not found, this script logs
- * "QAM integration unavailable" and injects nothing. It never falls back to DOM scraping.
+ * "QAM integration unavailable" and injects nothing. Functional integration never falls back to
+ * DOM scraping; the optional geometry diagnostic only reads the committed DOM.
  */
 (function () {
   "use strict";
@@ -266,8 +267,13 @@
       return null;
     }
 
-    logOnce("qamWidthClassResolved", `QAM Addon width class resolved. PanelOuterNav=${unique[0].PanelOuterNav}`);
-    return { PanelOuterNav: unique[0].PanelOuterNav };
+    const tabGroupPanel = typeof unique[0].TabGroupPanel === "string"
+      ? unique[0].TabGroupPanel
+      : null;
+    logOnce(
+      "qamWidthClassResolved",
+      `QAM Addon width class resolved. PanelOuterNav=${unique[0].PanelOuterNav} TabGroupPanel=${tabGroupPanel || "unresolved"}`);
+    return { PanelOuterNav: unique[0].PanelOuterNav, TabGroupPanel: tabGroupPanel };
   }
 
   function findNativeQamComponents(webpackRequire) {
@@ -418,6 +424,108 @@
     return value.split(/\s+/).filter(Boolean).includes(className);
   }
 
+  function describeQamGeometry(element) {
+    if (!element || typeof element.getBoundingClientRect !== "function" ||
+        typeof window.getComputedStyle !== "function") return null;
+
+    try {
+      const rect = element.getBoundingClientRect();
+      const css = window.getComputedStyle(element);
+      return {
+        tag: element.tagName,
+        id: element.id || "",
+        className: String(element.className || ""),
+        x: rect.x,
+        width: rect.width,
+        right: rect.right,
+        height: rect.height,
+        maxWidth: css.maxWidth,
+        widthCss: css.width,
+        transform: css.transform,
+        position: css.position,
+        overflow: css.overflow,
+        visible: rect.width > 0 && rect.height > 0,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function describeQamGeometryCandidates(className) {
+    if (!className || typeof document.getElementsByClassName !== "function") return [];
+    const elements = document.getElementsByClassName(className);
+    return Array.from(elements, (element, index) => ({
+      index,
+      geometry: describeQamGeometry(element),
+    }));
+  }
+
+  function selectVisibleQamGeometryCandidate(candidates) {
+    return candidates.find(candidate => candidate.geometry?.visible) || candidates[0] || null;
+  }
+
+  function describeQamGeometryAncestors(element) {
+    const ancestors = [];
+    let current = element;
+    for (let depth = 0; current && depth < 6; depth++, current = current.parentElement) {
+      const geometry = describeQamGeometry(current);
+      if (geometry) ancestors.push({ depth, ...geometry });
+    }
+    return ancestors;
+  }
+
+  // Diagnostic-only readback. This deliberately observes the committed DOM without changing
+  // style, class, transform, or lifecycle state. Functional QAM discovery remains React-based.
+  function readQamGeometry(activeTab) {
+    const classNames = state.qamWidthClassNames;
+    if (!classNames?.PanelOuterNav) return;
+
+    try {
+      const panelCandidates = describeQamGeometryCandidates(classNames.PanelOuterNav);
+      const tabGroupCandidates = describeQamGeometryCandidates(classNames.TabGroupPanel);
+      const panel = selectVisibleQamGeometryCandidate(panelCandidates);
+      const panelElements = document.getElementsByClassName(classNames.PanelOuterNav);
+      const snapshot = {
+        ActiveTab: String(activeTab),
+        PanelOuterNav: {
+          candidates: panelCandidates,
+          ancestors: panel ? describeQamGeometryAncestors(panelElements[panel.index]) : [],
+        },
+        TabGroupPanel: {
+          className: classNames.TabGroupPanel,
+          candidates: tabGroupCandidates,
+        },
+      };
+      logStateChange("qamGeometry", String(activeTab), `QAM geometry ${JSON.stringify(snapshot)}`);
+    } catch (error) {
+      logOnce("qamGeometryFailure", `QAM geometry readback unavailable: ${String(error)}`);
+    }
+  }
+
+  // Read after the current React commit so the snapshot describes the visible DOM rather than
+  // the previous render. This is one post-commit read, not a timer retry or a polling loop.
+  function scheduleQamGeometryReadback(activeTab) {
+    if (typeof window.requestAnimationFrame !== "function") {
+      logOnce("qamGeometrySchedulingUnavailable", "QAM geometry readback unavailable; requestAnimationFrame was not found.");
+      return;
+    }
+
+    const signature = String(activeTab);
+    if (state.qamGeometryScheduledSignature === signature) return;
+    state.qamGeometryScheduledSignature = signature;
+
+    if (state.qamGeometryFrameId != null && typeof window.cancelAnimationFrame === "function")
+      window.cancelAnimationFrame(state.qamGeometryFrameId);
+
+    const token = (state.qamGeometryToken || 0) + 1;
+    state.qamGeometryToken = token;
+    state.qamGeometryFrameId = window.requestAnimationFrame(() => {
+      state.qamGeometryFrameId = null;
+      if (!state.installed || state.qamGeometryToken !== token) return;
+      readQamGeometry(activeTab);
+    });
+  }
+
   function applyAddonQamWidth(result) {
     const className = state.qamWidthClassNames?.PanelOuterNav;
     if (!className) return;
@@ -444,6 +552,7 @@
       "qamWidthSelection",
       String(activeTab),
       `QAM width selection: ActiveTab=${String(activeTab)} AddonSelected=${activeTab === ADDON_TAB_KEY}`);
+    scheduleQamGeometryReadback(activeTab);
 
     state.qamWidthOriginalStyles ??= new WeakMap();
     if (activeTab === ADDON_TAB_KEY) {
@@ -1468,6 +1577,14 @@
     else if (kind === "select-addon-on-next-open") requestAddonSelectionOnNextQuickAccessOpen();
   }
 
+  function cancelQamGeometryReadback() {
+    if (state.qamGeometryFrameId != null && typeof window.cancelAnimationFrame === "function")
+      window.cancelAnimationFrame(state.qamGeometryFrameId);
+    state.qamGeometryFrameId = null;
+    state.qamGeometryScheduledSignature = null;
+    state.qamGeometryToken = (state.qamGeometryToken || 0) + 1;
+  }
+
   function retireBridgeConsumers() {
     cancelQamSliderCommits();
     for (const pending of state.bridgePending?.values() ?? []) {
@@ -1483,6 +1600,8 @@
       log("install() called but already installed; no-op.");
       return true;
     }
+
+    cancelQamGeometryReadback();
 
     // A tab descriptor closes over the React/native components and panel implementation from the
     // script generation that created it. Never reuse it across uninstall/reinstall or upgrades.
@@ -1560,6 +1679,7 @@
   }
 
   function uninstall() {
+    cancelQamGeometryReadback();
     retireBridgeConsumers();
     state.addonTabDescriptor = null;
     state.selectAddonOnNextOpenRequested = false;
