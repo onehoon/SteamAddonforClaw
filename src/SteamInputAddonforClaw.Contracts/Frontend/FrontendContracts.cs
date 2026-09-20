@@ -206,6 +206,7 @@ public sealed record FrontendBatteryChargeLimitMutationResult(
 public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool SuppressDeveloperMenuWarning, FrontButtonMappingSettings FrontButtonMapping)
 {
     public bool DeveloperMenuEnabled { get; init; }
+    public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
 }
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
 
@@ -397,6 +398,8 @@ public interface IAddonFrontendControl
     Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default);
     Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);
+    async Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        (await GetBootstrapAsync(cancellationToken).ConfigureAwait(false)).Settings;
     Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendUpdateSnapshot.Unavailable);
     Task<FrontendUpdateSnapshot> CheckAndDownloadAppUpdateAsync(CancellationToken cancellationToken = default) =>

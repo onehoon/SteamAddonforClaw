@@ -11,6 +11,10 @@ public sealed record AppSettings(
 {
     public bool DeveloperMenuEnabled { get; init; }
 
+    /// <summary>When enabled, compact Quick Settings surfaces show only the currently active AC/DC
+    /// side. The complete saved configuration is always retained.</summary>
+    public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
+
     /// <summary>
     /// The one atomic front-button mapping (Gamebar Button and Center M Button, each with a Normal
     /// and a Steam Game / Big Picture action), persisted through this same settings file rather than

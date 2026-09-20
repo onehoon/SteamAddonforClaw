@@ -4,14 +4,6 @@ using SteamInputAddonforClaw.Install;
 
 namespace SteamInputAddonforClaw.Profiles.Performance;
 
-internal enum FpsPowerSource { AC, DC }
-internal static class WindowsFpsPowerSource
-{
-    [StructLayout(LayoutKind.Sequential)] private struct SYSTEM_POWER_STATUS { public byte ACLineStatus; public byte BatteryFlag; public byte BatteryLifePercent; public byte Reserved; public int BatteryLifeTime; public int BatteryFullLifeTime; }
-    [DllImport("kernel32.dll")] private static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
-    internal static FpsPowerSource? Read() => !GetSystemPowerStatus(out var s) ? null : s.ACLineStatus switch { 1 => FpsPowerSource.AC, 0 => FpsPowerSource.DC, _ => null };
-}
-
 internal readonly record struct IntelFpsCapability(int Minimum, int Maximum, int Step, int ValueType, short FeatureMiscSupport, bool PerAppSupport)
 {
     private const short LiveChange = 1 << 4;
@@ -25,8 +17,8 @@ internal interface IIntelFrameLimiter : IDisposable
     bool Available { get; }
     string? UnavailableReason { get; }
     IntelFpsCapability? Capability { get; }
-    IntelFpsApplyOutcome Enable(int fps, FpsPowerSource source, uint appId);
-    bool Disable(FpsPowerSource? source, uint appId);
+    IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId);
+    bool Disable(AcDcPowerSource? source, uint appId);
 }
 
 internal enum IntelFpsApplyOutcome
@@ -43,8 +35,8 @@ internal sealed class IntelFrameLimiter : IIntelFrameLimiter
     public bool Available => _native.Available;
     public string? UnavailableReason => _native.UnavailableReason;
     public IntelFpsCapability? Capability => _native.Capability;
-    public IntelFpsApplyOutcome Enable(int fps, FpsPowerSource source, uint appId) => _native.Set(true, fps, source, appId);
-    public bool Disable(FpsPowerSource? source, uint appId) => _native.Set(false, 0, source, appId) == IntelFpsApplyOutcome.Succeeded;
+    public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId) => _native.Set(true, fps, source, appId);
+    public bool Disable(AcDcPowerSource? source, uint appId) => _native.Set(false, 0, source, appId) == IntelFpsApplyOutcome.Succeeded;
     public void Dispose() => _native.Dispose();
 }
 
@@ -54,17 +46,17 @@ internal sealed class UnavailableIntelFrameLimiter : IIntelFrameLimiter
     public bool Available => false;
     public string? UnavailableReason => "Intel IGCL is unavailable in this test host.";
     public IntelFpsCapability? Capability => null;
-    public IntelFpsApplyOutcome Enable(int fps, FpsPowerSource source, uint appId) => IntelFpsApplyOutcome.Failed;
-    public bool Disable(FpsPowerSource? source, uint appId) => false;
+    public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId) => IntelFpsApplyOutcome.Failed;
+    public bool Disable(AcDcPowerSource? source, uint appId) => false;
     public void Dispose() { }
 }
 
 internal sealed class IntelFrameLimiterRuntime : IDisposable
 {
     internal const int DefaultFps = 60;
-    private readonly ProfileStore _store; private readonly ProfileMutationGate _gate; private readonly IIntelFrameLimiter _limiter; private readonly Func<FpsPowerSource?> _power; private readonly string _marker;
+    private readonly ProfileStore _store; private readonly ProfileMutationGate _gate; private readonly IIntelFrameLimiter _limiter; private readonly Func<AcDcPowerSource?> _power; private readonly string _marker;
     private Func<uint> _app = static () => 0; private bool _shutdown; private bool _ownsGlobalState;
-    internal IntelFrameLimiterRuntime(ProfileStore store, ProfileMutationGate gate, IIntelFrameLimiter limiter, Func<FpsPowerSource?>? power = null, string? marker = null) { _store = store; _gate = gate; _limiter = limiter; _power = power ?? WindowsFpsPowerSource.Read; _marker = marker ?? AddonDataPaths.IntelFpsLimitOwnershipPath; }
+    internal IntelFrameLimiterRuntime(ProfileStore store, ProfileMutationGate gate, IIntelFrameLimiter limiter, Func<AcDcPowerSource?>? power = null, string? marker = null) { _store = store; _gate = gate; _limiter = limiter; _power = power ?? WindowsAcDcPowerSource.Read; _marker = marker ?? AddonDataPaths.IntelFpsLimitOwnershipPath; }
     internal bool Available => _limiter.Available;
     internal string? UnavailableReason => _limiter.UnavailableReason;
     internal IntelFpsCapability? Capability => _limiter.Capability;
@@ -80,7 +72,7 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
         var target = appId > 0 && doc.Games.TryGetValue(appId.ToString(System.Globalization.CultureInfo.InvariantCulture), out var game) && game.Enabled && game.Performance.FpsLimit is { Enabled: true } fps ? fps : null;
         if (target is null) return Release(appId, reason);
         var source = _power(); if (source is null) return FailClosedOwnedState(appId, reason, "UnknownPowerSource");
-        var value = source == FpsPowerSource.AC ? target.AcFps : target.DcFps;
+        var value = source == AcDcPowerSource.AC ? target.AcFps : target.DcFps;
         if (value is < 40 or > 120) return FailClosedOwnedState(appId, reason, "InvalidTarget");
         var outcome = _limiter.Enable(value, source.Value, appId);
         if (outcome != IntelFpsApplyOutcome.Succeeded)
@@ -139,20 +131,6 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
     }
     internal void BeginShutdown() => _shutdown = true;
     public void Dispose() { if (_shutdown) { try { lock (_gate.Sync) Release(_app(), "Shutdown"); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS shutdown cleanup failed.", e); } } _limiter.Dispose(); }
-}
-
-internal sealed class WindowsIntelFpsPowerNotificationSource : IDisposable
-{
-    private static readonly Guid AcDc = new("5D3E9A59-E9D5-4B00-A6BD-FF34FF516548"); private readonly DeviceNotifyCallbackRoutine _callback; private nint _registration;
-    internal event Action? Changed;
-    internal WindowsIntelFpsPowerNotificationSource() => _callback = OnNotification;
-    internal bool TryRegister() { var guid = AcDc; var p = new Parameters { Callback = Marshal.GetFunctionPointerForDelegate(_callback) }; var result = PowerSettingRegisterNotification(ref guid, 2, ref p, out _registration); return result == 0; }
-    private uint OnNotification(nint context, uint type, nint setting) { if (type != 4 && type != 7 && type != 18) Changed?.Invoke(); return 0; }
-    public void Dispose() { var h = Interlocked.Exchange(ref _registration, 0); if (h != 0) _ = PowerSettingUnregisterNotification(h); }
-    [StructLayout(LayoutKind.Sequential)] private struct Parameters { public nint Callback; public nint Context; }
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate uint DeviceNotifyCallbackRoutine(nint context, uint type, nint setting);
-    [DllImport("powrprof.dll")] private static extern uint PowerSettingRegisterNotification(ref Guid guid, uint flags, ref Parameters recipient, out nint handle);
-    [DllImport("powrprof.dll")] private static extern uint PowerSettingUnregisterNotification(nint handle);
 }
 
 // Minimal ABI projection of the official Intel IGCL v298 header (reviewed upstream commit
@@ -249,7 +227,7 @@ internal sealed class NativeIgcl : IDisposable
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
-    internal IntelFpsApplyOutcome Set(bool enable, int fps, FpsPowerSource? source, uint appId)
+    internal IntelFpsApplyOutcome Set(bool enable, int fps, AcDcPowerSource? source, uint appId)
     {
         var adapter = enable ? _adapter : _cleanupAdapter;
         if (adapter == 0 || (enable && !Available)) return IntelFpsApplyOutcome.Failed;
@@ -270,7 +248,7 @@ internal sealed class NativeIgcl : IDisposable
         ValueType = Int32,
         Value = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps }
     };
-    private void LogFrameLimitSet(bool enable, FpsPowerSource? source, uint appId, int requestedFps, uint setResult)
+    private void LogFrameLimitSet(bool enable, AcDcPowerSource? source, uint appId, int requestedFps, uint setResult)
     {
         var fields = new (string Key, object? Value)[]
         {
@@ -313,7 +291,7 @@ internal sealed class NativeIgcl : IDisposable
     }
     private static byte[] EncodeFrameLimitPropertyBytes(Property property) => MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref property, 1)).ToArray();
     private readonly record struct AdapterDiagnostics(int Index, string Name, uint VendorId, uint DeviceId);
-    private static void Log(string operation, uint result, int? fps = null, FpsPowerSource? source = null, uint? appId = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source), ("RunningAppID", appId)); }
+    private static void Log(string operation, uint result, int? fps = null, AcDcPowerSource? source = null, uint? appId = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source), ("RunningAppID", appId)); }
     public void Dispose() { if (_closed) return; _closed = true; if (_api != 0) { var result = _close(_api); Log("ctlClose", result); _api = 0; } if (_library != 0) { NativeLibrary.Free(_library); _library = 0; } }
     [StructLayout(LayoutKind.Sequential)] private struct ApplicationId { public uint Data1; public ushort Data2; public ushort Data3; public byte Data4_0; public byte Data4_1; public byte Data4_2; public byte Data4_3; public byte Data4_4; public byte Data4_5; public byte Data4_6; public byte Data4_7; }
     [StructLayout(LayoutKind.Sequential)] private struct InitArgs { public uint Size; public byte Version; public uint AppVersion; public uint Flags; public uint SupportedVersion; public ApplicationId ApplicationUid; }

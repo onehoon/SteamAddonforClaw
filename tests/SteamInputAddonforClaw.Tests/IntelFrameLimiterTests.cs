@@ -107,7 +107,7 @@ public sealed class IntelFrameLimiterTests
     public void Active_reconcile_selects_current_rail_and_ownership_cleanup_is_marker_bounded()
     {
         using var fixture = new FpsFixture(); fixture.Store.Save(new ProfileDocument { Games = new() { ["42"] = EnabledProfile(new GameFpsLimitSettings { Enabled = true, AcFps = 73, DcFps = 47 }) } });
-        var fake = new FakeLimiter(); var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.DC, fixture.Marker); runtime.Reconcile(42);
+        var fake = new FakeLimiter(); var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.DC, fixture.Marker); runtime.Reconcile(42);
         Assert.Equal((true, 47), (fake.LastEnable, fake.LastFps)); Assert.True(File.Exists(fixture.Marker));
         runtime.Reconcile(0); Assert.True(fake.LastDisable); Assert.False(File.Exists(fixture.Marker));
     }
@@ -117,7 +117,7 @@ public sealed class IntelFrameLimiterTests
     {
         using var fixture = new FpsFixture();
         var fake = new FakeLimiter();
-        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.AC, fixture.Marker);
         runtime.StartupRecover();
         Assert.Equal(0, fake.DisableCalls);
     }
@@ -129,7 +129,7 @@ public sealed class IntelFrameLimiterTests
         Directory.CreateDirectory(fixture.DirectoryPath);
         File.WriteAllText(fixture.Marker, "{\"fps\":60}");
         var fake = new FakeLimiter { DisableResult = false };
-        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.DC, fixture.Marker);
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.DC, fixture.Marker);
         runtime.StartupRecover();
         Assert.Equal(1, fake.DisableCalls);
         Assert.True(File.Exists(fixture.Marker));
@@ -142,7 +142,7 @@ public sealed class IntelFrameLimiterTests
         Directory.CreateDirectory(fixture.DirectoryPath);
         File.WriteAllText(fixture.Marker, "{\"fps\":60}");
         var fake = new FakeLimiter { AvailableValue = false };
-        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.AC, fixture.Marker);
 
         runtime.Reconcile(0);
 
@@ -156,7 +156,7 @@ public sealed class IntelFrameLimiterTests
         using var fixture = new FpsFixture();
         fixture.Store.Save(new ProfileDocument { Games = new() { ["42"] = EnabledProfile(new GameFpsLimitSettings { Enabled = true, AcFps = 73, DcFps = 47 }) } });
         var fake = new FakeLimiter();
-        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.AC, fixture.Marker);
         runtime.Reconcile(43);
         Assert.Equal(0, fake.EnableCalls);
         Assert.Equal(0, fake.DisableCalls);
@@ -169,7 +169,7 @@ public sealed class IntelFrameLimiterTests
         fixture.Store.Save(new ProfileDocument { Games = new() { ["42"] = EnabledProfile(new GameFpsLimitSettings { Enabled = true, AcFps = 73, DcFps = 47 }) } });
         Directory.CreateDirectory(fixture.Marker);
         var fake = new FakeLimiter();
-        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.AC, fixture.Marker);
         Assert.False(runtime.ReconcileWithResult(42));
         Assert.Equal(1, fake.EnableCalls);
         Assert.Equal(1, fake.DisableCalls);
@@ -183,7 +183,7 @@ public sealed class IntelFrameLimiterTests
         Directory.CreateDirectory(fixture.DirectoryPath);
         File.WriteAllText(fixture.Marker, "{\"fps\":73}");
         var fake = new FakeLimiter { EnableOutcome = IntelFpsApplyOutcome.Failed };
-        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.AC, fixture.Marker);
 
         Assert.False(runtime.ReconcileWithResult(42));
         Assert.Equal(1, fake.EnableCalls);
@@ -199,7 +199,7 @@ public sealed class IntelFrameLimiterTests
         Directory.CreateDirectory(fixture.DirectoryPath);
         File.WriteAllText(fixture.Marker, "{\"fps\":73}");
         var fake = new FakeLimiter { EnableOutcome = IntelFpsApplyOutcome.Failed, DisableResult = false };
-        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.AC, fixture.Marker);
 
         Assert.False(runtime.ReconcileWithResult(42));
         Assert.True(File.Exists(fixture.Marker));
@@ -212,7 +212,7 @@ public sealed class IntelFrameLimiterTests
         fixture.Store.Save(new ProfileDocument { Games = new() { ["42"] = EnabledProfile(new GameFpsLimitSettings { Enabled = true, AcFps = 73, DcFps = 47 }) } });
         Directory.CreateDirectory(fixture.Marker);
         var fake = new FakeLimiter { DisableResult = false };
-        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => AcDcPowerSource.AC, fixture.Marker);
 
         Assert.False(runtime.ReconcileWithResult(42));
         Assert.Equal(1, fake.DisableCalls);
@@ -235,8 +235,8 @@ public sealed class IntelFrameLimiterTests
     {
         public void Initialize() { }
         public bool Available => AvailableValue; public bool AvailableValue = true; public string? UnavailableReason => null; public IntelFpsCapability? Capability => new(30, 300, 1, 2, 1 << 4, true); public bool LastEnable; public bool LastDisable; public int LastFps; public int EnableCalls; public int DisableCalls; public IntelFpsApplyOutcome EnableOutcome = IntelFpsApplyOutcome.Succeeded; public bool DisableResult = true;
-        public IntelFpsApplyOutcome Enable(int fps, FpsPowerSource source, uint appId) { EnableCalls++; LastEnable = true; LastDisable = false; LastFps = fps; return EnableOutcome; }
-        public bool Disable(FpsPowerSource? source, uint appId) { DisableCalls++; LastDisable = true; LastEnable = false; return DisableResult; }
+        public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId) { EnableCalls++; LastEnable = true; LastDisable = false; LastFps = fps; return EnableOutcome; }
+        public bool Disable(AcDcPowerSource? source, uint appId) { DisableCalls++; LastDisable = true; LastEnable = false; return DisableResult; }
         public void Dispose() { }
     }
 }

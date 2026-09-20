@@ -1237,7 +1237,9 @@ public sealed class QamFrontendContractTests
         Assert.Contains("pending?.pageId !== page.pageId || (pending?.appId ?? null) !== (page.appId ?? null)", prune);
         Assert.Contains("const editedRowId = pending?.payload?.editedRowId;", prune);
         Assert.Contains("const row = findQuickSettingsRow(page, editedRowId);", prune);
-        Assert.Contains("if (row?.available === true && row?.writable === true) continue;", prune);
+        Assert.Contains("if (row?.visible === true && row?.available === true && row?.writable === true) continue;", prune);
+        Assert.Contains("if (row?.visible !== true) return \"row-hidden\";", source);
+        Assert.Contains("function validateQuickSettingsPage(page)", source);
         Assert.Contains("clearTimeout(pending.timer);", prune);
         Assert.Contains("state.qamSliderCommits.delete(key);", prune);
         // Purely page/row-metadata driven -- never special-cases a specific row/section identity.

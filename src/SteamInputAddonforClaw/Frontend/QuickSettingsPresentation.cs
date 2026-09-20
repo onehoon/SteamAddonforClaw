@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Profiles.Performance;
 
 namespace SteamInputAddonforClaw.Frontend;
 
@@ -9,6 +10,44 @@ namespace SteamInputAddonforClaw.Frontend;
 /// caches -- a pure function of its input.</summary>
 internal static class QuickSettingsPresentation
 {
+    internal static QuickSettingsPageSnapshot ApplyPowerSourceVisibility(
+        QuickSettingsPageSnapshot page,
+        bool currentPowerSourceOnly,
+        AcDcPowerSource? source)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        return page with
+        {
+            Sections = page.Sections
+                .Select(section => section with
+                {
+                    Rows = section.Rows
+                        .Select(row => row with
+                        {
+                            Visible = !currentPowerSourceOnly || source is null
+                                || IsVisibleForPowerSource(row.RowId, source.Value),
+                        })
+                        .ToArray(),
+                })
+                .ToArray(),
+        };
+    }
+
+    private static bool IsVisibleForPowerSource(QuickSettingsRowId rowId, AcDcPowerSource source) => rowId switch
+    {
+        QuickSettingsRowId.DeviceTdpAcPl1 or QuickSettingsRowId.DeviceTdpAcPl2
+            or QuickSettingsRowId.DeviceCpuBoostAc or QuickSettingsRowId.DevicePowerModeAc
+            or QuickSettingsRowId.ProfileTdpAcPl1 or QuickSettingsRowId.ProfileTdpAcPl2
+            or QuickSettingsRowId.ProfileCpuBoostAc or QuickSettingsRowId.ProfilePowerModeAc
+            => source == AcDcPowerSource.AC,
+        QuickSettingsRowId.DeviceTdpDcPl1 or QuickSettingsRowId.DeviceTdpDcPl2
+            or QuickSettingsRowId.DeviceCpuBoostDc or QuickSettingsRowId.DevicePowerModeDc
+            or QuickSettingsRowId.ProfileTdpDcPl1 or QuickSettingsRowId.ProfileTdpDcPl2
+            or QuickSettingsRowId.ProfileCpuBoostDc or QuickSettingsRowId.ProfilePowerModeDc
+            => source == AcDcPowerSource.DC,
+        _ => true,
+    };
     /// <summary>CPU Boost discrete option order/labels (work order section 16.1). Fixed, not derived
     /// from the enum member names in each renderer.</summary>
     private static readonly (CpuBoostMode Mode, string Label)[] CpuBoostOptions =

@@ -41,6 +41,7 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) => SendAsync<FrontendBootstrapSnapshot>(FrontendRpcMethod.GetBootstrap, null, t);
     public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) => SendAsync<FrontendStatusSnapshot>(FrontendRpcMethod.CaptureStatus, null, t);
     public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) => SendAsync<FrontendSettingsSnapshot>(FrontendRpcMethod.SetLogLevel, FrontendWireCodec.Payload(new SetLogLevelRequest(level)), t);
+    public Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken t = default) => SendAsync<FrontendSettingsSnapshot>(FrontendRpcMethod.SetQuickSettingsCurrentPowerSourceOnly, FrontendWireCodec.Payload(new SetQuickSettingsCurrentPowerSourceOnlyRequest(enabled)), t);
     public Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken t = default) => SendAsync<FrontendUpdateSnapshot>(FrontendRpcMethod.CaptureAppUpdate, null, t);
     public Task<FrontendUpdateSnapshot> CheckAndDownloadAppUpdateAsync(CancellationToken t = default) => SendAsync<FrontendUpdateSnapshot>(FrontendRpcMethod.CheckAndDownloadAppUpdate, null, t);
     public Task<FrontendUpdateInstallResult> InstallAppUpdateAsync(CancellationToken t = default) => SendAsync<FrontendUpdateInstallResult>(FrontendRpcMethod.InstallAppUpdate, null, t);

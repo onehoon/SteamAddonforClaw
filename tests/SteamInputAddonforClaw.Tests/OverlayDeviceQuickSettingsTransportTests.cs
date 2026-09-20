@@ -35,10 +35,10 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     [Fact]
     public void Protocol_is_v8_and_frontend_transport_is_current()
     {
-        Assert.Equal(8, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(9, OverlayTransportProtocol.CurrentVersion);
         // The desktop/QAM frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(34, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(35, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]

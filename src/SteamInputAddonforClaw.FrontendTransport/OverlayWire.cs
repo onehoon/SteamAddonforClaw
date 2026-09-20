@@ -30,7 +30,9 @@ internal static class OverlayTransportProtocol
     // Version 8 (shared-surface PR3): replaces raw whole-order Setting state/mutation with the typed
     // AddonQuickSettingsTabOrderSnapshot and one-position move intent/result contract. A v7 peer must
     // fail the handshake rather than send complete-order requests to the new Runtime seam.
-    internal const int CurrentVersion = 8;
+    // Version 9: shared Quick Settings rows carry renderer-only Visible metadata for current
+    // AC/DC projection. Hidden rows remain in the authoritative page and grouped drafts.
+    internal const int CurrentVersion = 9;
     internal const int MaxFrameBytes = 64 * 1024;
 }
 

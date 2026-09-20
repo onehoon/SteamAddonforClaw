@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Frontend;
+using SteamInputAddonforClaw.Profiles.Performance;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -26,6 +27,51 @@ public sealed class QuickSettingsPresentationTests
             s => Assert.Equal(QuickSettingsSectionId.DeviceCpuBoost, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.DevicePowerMode, s.SectionId));
     }
+
+    [Fact]
+    public void Power_source_projection_hides_only_the_opposite_side_and_preserves_rows_and_values()
+    {
+        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
+        var ac = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.AC);
+        var dc = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.DC);
+
+        var allRows = page.Sections.SelectMany(section => section.Rows).ToDictionary(row => row.RowId);
+        foreach (var row in ac.Sections.SelectMany(section => section.Rows))
+        {
+            Assert.Equal(allRows[row.RowId].Value, row.Value);
+            Assert.Equal(allRows[row.RowId].CommitGroupId, row.CommitGroupId);
+            Assert.Equal(IsAcRow(row.RowId) || !IsDcRow(row.RowId), row.Visible);
+        }
+        foreach (var row in dc.Sections.SelectMany(section => section.Rows))
+            Assert.Equal(!IsAcRow(row.RowId) || IsDcRow(row.RowId), row.Visible);
+    }
+
+    [Fact]
+    public void Power_source_projection_is_fail_open_for_unknown_and_disabled_for_preference_off()
+    {
+        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
+
+        Assert.All(QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, null).Sections.SelectMany(section => section.Rows), row => Assert.True(row.Visible));
+        Assert.All(QuickSettingsPresentation.ApplyPowerSourceVisibility(page, false, AcDcPowerSource.DC).Sections.SelectMany(section => section.Rows), row => Assert.True(row.Visible));
+    }
+
+    [Fact]
+    public void Power_source_projection_applies_to_profile_rows_without_removing_hidden_companions()
+    {
+        var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, 42, true, null,
+        [new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP", [
+            new(QuickSettingsRowId.ProfileTdpAcPl1, "AC", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(20), new(QuickSettingsSliderKind.Numeric, 8, 30), QuickSettingsCommitPolicy.TrailingDebounce2000, QuickSettingsCommitGroupId.ProfileTdpConfiguration),
+            new(QuickSettingsRowId.ProfileTdpDcPl1, "DC", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(10), new(QuickSettingsSliderKind.Numeric, 8, 30), QuickSettingsCommitPolicy.TrailingDebounce2000, QuickSettingsCommitGroupId.ProfileTdpConfiguration),
+        ])], []);
+
+        var projected = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.DC);
+        Assert.Equal(2, projected.Sections.Single().Rows.Count);
+        Assert.False(projected.Sections.Single().Rows.Single(row => row.RowId == QuickSettingsRowId.ProfileTdpAcPl1).Visible);
+        Assert.True(projected.Sections.Single().Rows.Single(row => row.RowId == QuickSettingsRowId.ProfileTdpDcPl1).Visible);
+    }
+
+    private static bool IsAcRow(QuickSettingsRowId rowId) => rowId.ToString().Contains("Ac", StringComparison.Ordinal);
+    private static bool IsDcRow(QuickSettingsRowId rowId) => rowId.ToString().Contains("Dc", StringComparison.Ordinal);
 
     [Fact]
     public void Exact_device_row_order_when_all_enabled()

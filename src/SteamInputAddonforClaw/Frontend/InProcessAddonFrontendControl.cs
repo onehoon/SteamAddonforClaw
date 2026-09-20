@@ -76,6 +76,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // valid passive state -- the request just reports unavailable, like every other null fallback here.
     private readonly ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
     private readonly FrontendUpdateCoordinator? _updateCoordinator;
+    private readonly Func<AcDcPowerSource?> _quickSettingsPowerSource;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -86,7 +87,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _centerMStartup = centerMStartup;
@@ -103,6 +104,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _fanProbeTransport = fanProbeTransport;
         _batteryChargeLimitRuntime = batteryChargeLimitRuntime;
         _batteryChargeLimitHardware = batteryChargeLimitHardware ?? (fanProbeTransport is null ? null : new MsiClawBatteryChargeLimitHardware(fanProbeTransport));
+        _quickSettingsPowerSource = quickSettingsPowerSource ?? WindowsAcDcPowerSource.Read;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -360,6 +362,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
+    public Task<FrontendSettingsSnapshot> SetQuickSettingsCurrentPowerSourceOnlyAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        _settings.ChangeQuickSettingsCurrentPowerSourceOnly(enabled);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(MapSettings());
+    }
+
     public Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(Contracts.FrontButtons.FrontButtonMappingSettings mapping, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(mapping);
@@ -502,6 +512,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             if (result is null) return;
             session.LastResult = MapFanProbe(result.Succeeded ? FrontendFanProbeState.Completed : FrontendFanProbeState.Failed, result.Status, result.ReportPath);
         });
+    }
+
+    internal void NotifyQuickSettingsPowerSourceChanged()
+    {
+        if (Volatile.Read(ref _shutdownStarted) != 0 || !_settings.QuickSettingsCurrentPowerSourceOnly) return;
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
     }
 
     private static string ReadFanProbeFirmwareIdentity()
@@ -960,7 +976,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1
@@ -1202,7 +1218,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private async Task<QuickSettingsPageSnapshot> CaptureDeviceQuickSettingsPageAsync(CancellationToken cancellationToken)
     {
         var snapshot = await CaptureDeviceQuickSettingsAsync(cancellationToken).ConfigureAwait(false);
-        return QuickSettingsPresentation.BuildDevice(snapshot);
+        return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildDevice(snapshot));
     }
 
     /// <summary>Section 7.1-7.3: a Profile page is only ever the current active game's own product --
@@ -1217,15 +1233,34 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (snapshot.AppId != appId)
             return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, "The requested game is not currently active.");
 
-        return QuickSettingsPresentation.BuildProfile(snapshot);
+        return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildProfile(snapshot));
     }
 
     /// <summary>Shared Quick Settings mutation seam (section 22/24): validates and dispatches onto
     /// the existing typed Device mutation methods via <see cref="QuickSettingsMutationAdapter"/>.</summary>
-    public Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken cancellationToken = default)
+    public async Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        return QuickSettingsMutationAdapter.MutateAsync(this, intent, cancellationToken);
+        var currentPage = await CaptureQuickSettingsPageAsync(intent.PageId, intent.AppId, cancellationToken).ConfigureAwait(false);
+        if (currentPage.Available)
+        {
+            var currentRow = currentPage.Sections.SelectMany(section => section.Rows).FirstOrDefault(row => row.RowId == intent.EditedRowId);
+            if (currentRow is not { Visible: true, Available: true, Writable: true })
+                return new QuickSettingsMutationResult(false, "This row is not editable.", currentPage);
+        }
+        var result = await QuickSettingsMutationAdapter.MutateAsync(this, intent, cancellationToken).ConfigureAwait(false);
+        return result with { Page = ApplyQuickSettingsPowerSourceVisibility(result.Page) };
+    }
+
+    private QuickSettingsPageSnapshot ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPageSnapshot page)
+    {
+        if (!_settings.QuickSettingsCurrentPowerSourceOnly)
+            return QuickSettingsPresentation.ApplyPowerSourceVisibility(page, false, null);
+
+        AcDcPowerSource? source = null;
+        try { source = _quickSettingsPowerSource(); }
+        catch (Exception exception) { AppLog.Warn("QuickSettings", "AC/DC power source read failed; retaining both power-source rows.", exception); }
+        return QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, source);
     }
 
     public Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken cancellationToken = default)

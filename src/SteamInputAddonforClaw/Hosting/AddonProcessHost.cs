@@ -89,7 +89,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly GameProfileMutations _gameProfileMutations;
     private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
     private readonly IntelFrameLimiterRuntime _intelFpsRuntime;
-    private WindowsIntelFpsPowerNotificationSource? _intelFpsPowerSource;
+    private WindowsAcDcPowerNotificationSource? _acDcPowerSource;
     private TdpRuntime? _tdpRuntime;
     private HelperMsiClawTdpTransport? _tdpTransport;
     private MsiClawBatteryChargeLimitHardware? _batteryChargeLimitHardware;
@@ -407,7 +407,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // consulted by the mandatory Runtime termination / launch-at-startup policy (PR2.5).
             centerMStartup: _centerMStartupControl,
             centerMAuthorityTransition: centerMAuthorityTransition,
-            updateCoordinator: _updateCoordinator);
+            updateCoordinator: _updateCoordinator,
+            quickSettingsPowerSource: WindowsAcDcPowerSource.Read);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -1266,14 +1267,26 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         try { _powerModeRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0); }
         catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode startup reconcile failed.", exception); }
+        // The AC/DC fact is shared by compact Quick Settings and Intel FPS. Register its
+        // event-driven notification independently of IGCL availability so a missing Intel driver
+        // cannot disable Quick Settings power-source refresh.
+        try
+        {
+            _acDcPowerSource = new WindowsAcDcPowerNotificationSource();
+            if (!_acDcPowerSource.TryRegister())
+                AppLog.Warn("PowerSource", "AC/DC power notification registration failed.");
+            _acDcPowerSource.Changed += OnAcDcPowerSourceChanged;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("PowerSource", "AC/DC power notification setup failed.", exception);
+        }
+
         try
         {
             _intelFpsRuntime.Initialize();
             _intelFpsRuntime.StartupRecover();
             _intelFpsRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0);
-            _intelFpsPowerSource = new WindowsIntelFpsPowerNotificationSource();
-            if (!_intelFpsPowerSource.TryRegister()) AppLog.Warn("Profiles.IntelFps", "AC/DC power notification registration failed.");
-            _intelFpsPowerSource.Changed += OnIntelFpsPowerSourceChanged;
         }
         catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "Intel FPS startup reconcile failed.", exception); }
 
@@ -1400,7 +1413,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _tdpCenterMRegistryWatcher = null;
         _tdpPowerLifecycleWatcher?.Dispose();
         _tdpPowerLifecycleWatcher = null;
-        _intelFpsPowerSource?.Dispose(); _intelFpsPowerSource = null;
+        if (_acDcPowerSource is not null)
+        {
+            _acDcPowerSource.Changed -= OnAcDcPowerSourceChanged;
+            _acDcPowerSource.Dispose();
+            _acDcPowerSource = null;
+        }
         _intelFpsRuntime.BeginShutdown();
         // PR10 section 15: stop the Device Arrival watcher before recovery drains -- no WMI callback
         // may reach OnControllerDeviceArrived after this, and _processShutdownStarted is already set
@@ -1704,6 +1722,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // unrelated 2.5 s CPU Boost / Power Mode profile settle below.
         RequestControllerPresentationReconcile("PowerResume");
 
+        if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
+            control.NotifyQuickSettingsPowerSourceChanged();
+
         _ = ReconcilePerformanceAfterResumeAsync(
             _startupCancellationTokenSource.Token,
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken),
@@ -1759,7 +1780,26 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
-    private void OnIntelFpsPowerSourceChanged() => _ = Task.Run(() => _intelFpsRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0, "PowerSourceChanged"));
+    private void OnAcDcPowerSourceChanged()
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        _ = Task.Run(() =>
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+            try
+            {
+                _intelFpsRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0, "PowerSourceChanged");
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("Profiles.IntelFps", "FPS reconcile failed after AC/DC change.", exception);
+            }
+
+            if (Volatile.Read(ref _processShutdownStarted) == 0
+                && _frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
+                control.NotifyQuickSettingsPowerSourceChanged();
+        });
+    }
 }
 
 internal static class NativeStartupWarning

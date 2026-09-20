@@ -44,7 +44,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
     // the real Device page exercises (work order sections 12/24/26).
     private static QuickSettingsPageSnapshot TdpPage(
         int pl1Ac = 20, int pl2Ac = 25, int pl1Dc = 15, int pl2Dc = 20, bool tdpEnabled = true,
-        IReadOnlyList<QuickSettingsLinkedSliderConstraint>? linked = null) => new(
+        IReadOnlyList<QuickSettingsLinkedSliderConstraint>? linked = null, bool hideDcRows = false) => new(
         QuickSettingsPageId.Device, null, true, null,
         [
             new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP",
@@ -52,8 +52,8 @@ public sealed class OverlayQuickSettingsPageBindingTests
                 Toggle(QuickSettingsRowId.DeviceTdpEnabled, tdpEnabled),
                 Numeric(QuickSettingsRowId.DeviceTdpAcPl1, pl1Ac, 8, 30, QuickSettingsCommitGroupId.DeviceTdpConfiguration),
                 Numeric(QuickSettingsRowId.DeviceTdpAcPl2, pl2Ac, 8, 37, QuickSettingsCommitGroupId.DeviceTdpConfiguration),
-                Numeric(QuickSettingsRowId.DeviceTdpDcPl1, pl1Dc, 8, 30, QuickSettingsCommitGroupId.DeviceTdpConfiguration),
-                Numeric(QuickSettingsRowId.DeviceTdpDcPl2, pl2Dc, 8, 37, QuickSettingsCommitGroupId.DeviceTdpConfiguration),
+                Numeric(QuickSettingsRowId.DeviceTdpDcPl1, pl1Dc, 8, 30, QuickSettingsCommitGroupId.DeviceTdpConfiguration) with { Visible = !hideDcRows },
+                Numeric(QuickSettingsRowId.DeviceTdpDcPl2, pl2Dc, 8, 37, QuickSettingsCommitGroupId.DeviceTdpConfiguration) with { Visible = !hideDcRows },
             ]),
             new QuickSettingsSection(QuickSettingsSectionId.DeviceCpuBoost, "CPU Boost",
             [
@@ -238,6 +238,23 @@ public sealed class OverlayQuickSettingsPageBindingTests
         Assert.True(binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpDcPl2, QuickSettingsValue.Integer(22)));
 
         Assert.Single(binding.PendingKeys);
+    }
+
+    [Fact]
+    public async Task Hidden_rows_are_not_mutable_but_remain_in_grouped_drafts()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewBinding(TdpPage(hideDcRows: true), mutate.Func, delay.Func);
+
+        Assert.False(binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsValue.Integer(18)));
+        Assert.True(binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsValue.Integer(26)));
+        delay.Elapse();
+
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "hidden companion grouped draft submitted");
+        var intent = mutate.Calls[0];
+        Assert.Equal(5, intent.Values.Count);
+        Assert.Equal(15, intent.Values.Single(value => value.RowId == QuickSettingsRowId.DeviceTdpDcPl1).Value.IntegerValue);
     }
 
     // --- Independent slider intent (section 47.C) ---------------------------------------------
