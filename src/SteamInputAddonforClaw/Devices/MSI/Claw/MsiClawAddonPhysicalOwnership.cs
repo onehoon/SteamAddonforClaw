@@ -120,6 +120,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     private bool _preparedForFirmwareBios;
     private int _disposed;
 
+    private sealed record GamepadModeNormalizationResult(
+        bool Succeeded,
+        bool WriteIssued,
+        MsiClawGamepadMode? ObservedMode,
+        string Reason);
+
     internal MsiClawAddonPhysicalOwnership(
         Func<FrontendCenterMStartupState> captureCenterMStartupState,
         Func<CancellationToken, Task<NativeStateCaptureResult>> captureStableNativeState,
@@ -210,47 +216,15 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             ("Mode", initialMode), ("IdentityConfidence", initialIdentity.Confidence),
             ("ModeWriteRequired", initialMode == MsiClawNativeMode.XInput));
 
-        // PID1902 is not proof of DirectInput: CTW hardware evidence shows that it can also be
-        // exposed for Desktop and other firmware modes. Query the firmware mode before accepting
-        // an already-present PID1902 boot as the normal DirectInput path. Query failure preserves
-        // the existing acquisition behavior; a verified BIOS or Desktop mode must be actively
-        // reconciled before DirectInput ownership is acquired.
-        if (initialMode == MsiClawNativeMode.DirectInput && _gamepadModeClient is { } gamepadModeClient)
-        {
-            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
-                return Fail("AuthorityChangedBeforeGamepadModeQuery", false);
-            var observedMode = await gamepadModeClient.QueryAsync(initialIdentity, cancellationToken).ConfigureAwait(false);
-            AppLog.Info("ControllerOwnership", "Disabled-boot GamepadMode observed.",
-                ("Event", "DisabledBootGamepadModeObserved"), ("Succeeded", observedMode.Succeeded),
-                ("Mode", observedMode.Mode), ("Reason", observedMode.Reason));
-            if (observedMode.Succeeded &&
-                observedMode.Mode is (MsiClawGamepadMode.Bios or MsiClawGamepadMode.Desktop))
-            {
-                if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
-                    return Fail("AuthorityChangedBeforeGamepadModeRestore", false);
-
-                AppLog.Info("ControllerOwnership", "Disabled-boot GamepadMode restore started.",
-                    ("Event", "DisabledBootGamepadModeRestoreStarted"),
-                    ("TargetMode", MsiClawGamepadMode.DirectInput));
-                var restored = await gamepadModeClient.SwitchAndVerifyAsync(
-                    initialIdentity, MsiClawGamepadMode.DirectInput, cancellationToken).ConfigureAwait(false);
-                if (!restored.Succeeded)
-                    return Fail("DisabledBootGamepadModeRestoreFailed:" + restored.Reason, restored.WriteIssued);
-                AppLog.Info("ControllerOwnership", "Disabled-boot GamepadMode restore verified.",
-                    ("Event", "DisabledBootGamepadModeRestoreVerified"), ("Mode", restored.Mode),
-                    ("ReadbackVerified", restored.ReadbackVerified));
-            }
-        }
-
         // 5. PID1901 -> PID1902 once, for the same strong physical MSI Claw. The mode write is the
         //    first physical mutation, so the single required fresh authority read is immediately here.
-        var modeWriteIssued = false;
+        var pidTransitionWriteIssued = false;
         if (initialMode == MsiClawNativeMode.XInput)
         {
             if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
                 return Fail("AuthorityChangedBeforeModeWrite", false);
             var transition = await _switchMode(MsiClawNativeMode.DirectInput, initialIdentity, cancellationToken).ConfigureAwait(false);
-            modeWriteIssued = true;
+            pidTransitionWriteIssued = true;
             // PR11 section 6.2: the Addon's own controlled transition is the cross-mode continuity
             // bridge -- the write succeeded, the old PID1901 disappeared, exactly one present PID1902
             // target logical group appeared, and both source and target topology verified. The
@@ -268,44 +242,50 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         //      Never auto-roll PID1902 back to PID1901 on a later failure.
         var finalCapture = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
         if (!TryReadIdentity(finalCapture, out var finalMode, out var finalIdentity, out var finalReason))
-            return Fail("FinalNativeState:" + finalReason, modeWriteIssued);
+            return Fail("FinalNativeState:" + finalReason, pidTransitionWriteIssued);
         if (finalMode != MsiClawNativeMode.DirectInput)
-            return Fail("FinalModeNotPid1902:" + finalMode, modeWriteIssued);
+            return Fail("FinalModeNotPid1902:" + finalMode, pidTransitionWriteIssued);
         // Strong physical-identity equality is a SAME-MODE predicate only. Apply it only on an
         // already-PID1902 boot (no mode write); a PID1901->PID1902 transition is proven by the
         // controlled-transition evidence above plus the live-DirectInput proof below (PR11 section 4).
-        if (!modeWriteIssued && !initialIdentity.StronglyMatches(finalIdentity))
-            return Fail("SameModeIdentityMismatch", modeWriteIssued);
+        if (!pidTransitionWriteIssued && !initialIdentity.StronglyMatches(finalIdentity))
+            return Fail("SameModeIdentityMismatch", pidTransitionWriteIssued);
+
+        var gamepadMode = await EnsureDirectInputGamepadModeAsync(
+            finalIdentity, "Startup", cancellationToken).ConfigureAwait(false);
+        if (!gamepadMode.Succeeded)
+            return Fail(gamepadMode.Reason, pidTransitionWriteIssued || gamepadMode.WriteIssued);
+        var anyModeWriteIssued = pidTransitionWriteIssued || gamepadMode.WriteIssued;
         AppLog.Info("ControllerOwnership", "PID1902 transition completed.", ("Event", "Pid1902TransitionCompleted"),
-            ("ModeWriteIssued", modeWriteIssued), ("FinalMode", finalMode),
-            ("SamePhysicalIdentity", !modeWriteIssued), ("CrossModeTransitionVerified", modeWriteIssued));
+            ("ModeWriteIssued", anyModeWriteIssued), ("FinalMode", finalMode),
+            ("SamePhysicalIdentity", !pidTransitionWriteIssued), ("CrossModeTransitionVerified", pidTransitionWriteIssued));
 
         // 8. Bounded DirectInput descriptor resolution (same logic whether or not a mode write ran).
         var descriptor = await ResolveDirectInputDescriptorAsync(cancellationToken).ConfigureAwait(false);
         if (descriptor is null)
-            return Fail("DirectInputNotResolved", modeWriteIssued);
+            return Fail("DirectInputNotResolved", anyModeWriteIssued);
 
         // 9-10. The selected DirectInput PnP collection must be the exact primary PID1902 collection
         //       AND belong to the same strong native physical MSI Claw.
         if (!MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(descriptor.PnpInstanceId))
-            return Fail("DirectInputNotPrimaryCollection", modeWriteIssued);
+            return Fail("DirectInputNotPrimaryCollection", anyModeWriteIssued);
         var pnpDevice = _resolvePnpDevice(descriptor.PnpInstanceId!);
         if (pnpDevice is null)
-            return Fail("DirectInputPnpNodeMissing", modeWriteIssued);
+            return Fail("DirectInputPnpNodeMissing", anyModeWriteIssued);
         var directInputIdentity = MsiClawPhysicalIdentity.From(pnpDevice);
         if (directInputIdentity.Confidence != MsiClawIdentityConfidence.Strong || !finalIdentity.StronglyMatches(directInputIdentity))
-            return Fail("DirectInputPhysicalIdentityMismatch", modeWriteIssued);
+            return Fail("DirectInputPhysicalIdentityMismatch", anyModeWriteIssued);
         AppLog.Info("ControllerOwnership", "DirectInput candidate resolved.", ("Event", "DirectInputCandidateResolved"),
             ("PnpInstanceId", descriptor.PnpInstanceId), ("SamePhysicalIdentity", true));
 
         // 11. Acquire DirectInput and require a first valid state before any HidHide target mutation.
         //     For an already-PID1902 boot no mode write ran, so DirectInput acquire is the first
         //     process-owned controller mutation -- do the one fresh authority read here instead.
-        if (!modeWriteIssued && _captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+        if (!anyModeWriteIssued && _captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
             return Fail("AuthorityChangedBeforeDirectInputAcquire", false);
         var start = _inputSource.StartPrepared(descriptor);
         if (!start.Started || !_inputSource.IsRunning)
-            return Fail("DirectInputStartFailed:" + start.Status, modeWriteIssued);
+            return Fail("DirectInputStartFailed:" + start.Status, anyModeWriteIssued);
         bool ready;
         try
         {
@@ -319,7 +299,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         if (!ready || !_inputSource.IsRunning)
         {
             await SafeStopAsync().ConfigureAwait(false);
-            return Fail("FirstValidStateNotObserved", modeWriteIssued);
+            return Fail("FirstValidStateNotObserved", anyModeWriteIssued);
         }
         AppLog.Info("ControllerOwnership", "DirectInput ready.", ("Event", "DirectInputReady"), ("FirstValidState", true));
 
@@ -330,7 +310,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         if (!MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(target))
         {
             await SafeStopAsync().ConfigureAwait(false);
-            return Fail("HidHideTargetNotPrimaryCollection", modeWriteIssued);
+            return Fail("HidHideTargetNotPrimaryCollection", anyModeWriteIssued);
         }
         MsiClawHidHideTargetResolution targetResolution;
         try
@@ -341,12 +321,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         {
             AppLog.Warn("ControllerOwnership", "PID1902 HidHide target-set resolution threw.", exception);
             await SafeStopAsync().ConfigureAwait(false);
-            return Fail("HidHideTargetSetResolutionThrew", modeWriteIssued);
+            return Fail("HidHideTargetSetResolutionThrew", anyModeWriteIssued);
         }
         if (targetResolution.Targets.Count == 0 || !string.Equals(targetResolution.Targets[0], target, StringComparison.OrdinalIgnoreCase))
         {
             await SafeStopAsync().ConfigureAwait(false);
-            return Fail("HidHideTargetSetMissingPrimary", modeWriteIssued);
+            return Fail("HidHideTargetSetMissingPrimary", anyModeWriteIssued);
         }
         foreach (var diagnostic in targetResolution.Diagnostics)
             AppLog.Warn("ControllerOwnership", "An auxiliary PID1902 HidHide target was omitted.", null, ("Event", "AuxiliaryHidHideTargetOmitted"), ("Diagnostic", diagnostic));
@@ -364,12 +344,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         {
             AppLog.Warn("ControllerOwnership", "HidHide target reconciliation threw.", exception);
             await SafeStopAsync().ConfigureAwait(false);
-            return Fail("HidHideReconcileThrew", modeWriteIssued);
+            return Fail("HidHideReconcileThrew", anyModeWriteIssued);
         }
         if (!baseline.IsCompliant)
         {
             await SafeStopAsync().ConfigureAwait(false);
-            return Fail("HidHideReconcile:" + baseline.Outcome + ":" + baseline.Reason, modeWriteIssued);
+            return Fail("HidHideReconcile:" + baseline.Outcome + ":" + baseline.Reason, anyModeWriteIssued);
         }
         AppLog.Info("ControllerOwnership", "Physical isolation verified.", ("Event", "PhysicalIsolationVerified"),
             ("PrimaryHiddenTarget", target), ("HiddenTargetCount", targetResolution.Targets.Count),
@@ -386,9 +366,57 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         _ownedPhysicalIdentity = finalIdentity;
         PublishLivePhysicalSession(descriptor);
         AppLog.Info("ControllerOwnership", "Physical ownership acquired.", ("Result", "Owned"),
-            ("ModeWriteIssued", modeWriteIssued), ("PrimaryHiddenTarget", target),
+            ("ModeWriteIssued", anyModeWriteIssued), ("PrimaryHiddenTarget", target),
             ("HiddenTargetCount", _ownedHiddenTargets.Count));
-        return new(MsiClawPhysicalOwnershipOutcome.Owned, "PhysicalOwnershipVerified", modeWriteIssued, _ownedHiddenTargets);
+        return new(MsiClawPhysicalOwnershipOutcome.Owned, "PhysicalOwnershipVerified", anyModeWriteIssued, _ownedHiddenTargets);
+    }
+
+    private async Task<GamepadModeNormalizationResult> EnsureDirectInputGamepadModeAsync(
+        MsiClawPhysicalIdentity pid1902Identity,
+        string context,
+        CancellationToken cancellationToken)
+    {
+        if (_gamepadModeClient is not { } gamepadModeClient)
+        {
+            AppLog.Warn("ControllerOwnership", "GamepadMode client is unavailable.", null,
+                ("Event", "GamepadModeInvariantObserved"), ("Context", context),
+                ("Succeeded", false), ("Reason", "GamepadModeClientUnavailable"));
+            return new(false, false, null, "GamepadModeClientUnavailable");
+        }
+
+        var observed = await gamepadModeClient.QueryAsync(pid1902Identity, cancellationToken).ConfigureAwait(false);
+        AppLog.Info("ControllerOwnership", "GamepadMode invariant observed.",
+            ("Event", "GamepadModeInvariantObserved"), ("Context", context),
+            ("Succeeded", observed.Succeeded), ("ObservedMode", observed.Mode),
+            ("Reason", observed.Reason));
+        if (observed.Succeeded && observed.Mode == MsiClawGamepadMode.DirectInput)
+            return new(true, false, observed.Mode, "GamepadModeDirectInputVerified");
+
+        if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
+        {
+            return new(false, false, observed.Mode,
+                "AuthorityChangedBeforeGamepadModeNormalization");
+        }
+
+        AppLog.Info("ControllerOwnership", "GamepadMode normalization started.",
+            ("Event", "GamepadModeNormalizationStarted"), ("Context", context),
+            ("TargetMode", MsiClawGamepadMode.DirectInput), ("ObservedMode", observed.Mode),
+            ("QuerySucceeded", observed.Succeeded));
+        var normalized = await gamepadModeClient.SwitchAndVerifyAsync(
+            pid1902Identity, MsiClawGamepadMode.DirectInput, cancellationToken).ConfigureAwait(false);
+        var verified = normalized.Succeeded
+            && normalized.WriteIssued
+            && normalized.ReadbackVerified
+            && normalized.Mode == MsiClawGamepadMode.DirectInput;
+        var reason = verified
+            ? "GamepadModeDirectInputVerified"
+            : "GamepadModeDirectInputNotVerified:" + normalized.Reason;
+        AppLog.Info("ControllerOwnership", "GamepadMode normalization verification completed.",
+            ("Event", "GamepadModeNormalizationVerified"), ("Context", context),
+            ("Succeeded", verified), ("ObservedMode", normalized.Mode),
+            ("WriteIssued", normalized.WriteIssued),
+            ("ReadbackVerified", normalized.ReadbackVerified), ("Reason", reason));
+        return new(verified, normalized.WriteIssued, normalized.Mode, reason);
     }
 
     public Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken) =>
@@ -561,7 +589,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         //     cross-mode bridge -- the old PID1902 root string is NOT compared to the PID1901 root
         //     string (hardware validation proved it changes across a real MSI native mode switch);
         //   - anything else: fail closed. (Ambiguity is already fail-closed inside the native capture.)
-        var modeWriteIssued = false;
+        var pidTransitionWriteIssued = false;
         MsiClawPhysicalIdentity finalPid1902Identity;
         if (mode == MsiClawNativeMode.DirectInput)
         {
@@ -584,7 +612,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             // 7. Exactly one PID1901 -> PID1902 transition per recovery invocation, expecting the
             //    fresh current PID1901 identity as the source. No retry loop, no PID1901 fallback.
             var transition = await _switchMode(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
-            modeWriteIssued = true;
+            pidTransitionWriteIssued = true;
             if (!IsCrossModeTransitionProven(transition, out var transitionFailure))
                 return RecoveryFail("OwnedPhysicalStateDriftReclaimFailed:" + transitionFailure, true);
 
@@ -612,37 +640,42 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         {
             return RecoveryFail("PhysicalDeviceMissing:UnsupportedMode:" + mode);
         }
+        var gamepadMode = await EnsureDirectInputGamepadModeAsync(
+            finalPid1902Identity, "Recovery", cancellationToken).ConfigureAwait(false);
+        if (!gamepadMode.Succeeded)
+            return RecoveryFail(gamepadMode.Reason, pidTransitionWriteIssued || gamepadMode.WriteIssued);
+        var anyModeWriteIssued = pidTransitionWriteIssued || gamepadMode.WriteIssued;
         AppLog.Info("ControllerOwnership", "Owned physical recovery native state proven.",
             ("Event", "OwnedPhysicalRecoveryNativeProven"), ("CurrentNativeMode", MsiClawNativeMode.DirectInput),
-            ("ModeWriteIssued", modeWriteIssued));
+            ("ModeWriteIssued", anyModeWriteIssued), ("CrossModeTransitionVerified", pidTransitionWriteIssued));
 
         // 10.5. Re-resolve the DirectInput descriptor through the same bounded selector path.
         var descriptor = await ResolveDirectInputDescriptorAsync(cancellationToken).ConfigureAwait(false);
         if (descriptor is null)
-            return RecoveryFail("DirectInputNotResolved", modeWriteIssued);
+            return RecoveryFail("DirectInputNotResolved", anyModeWriteIssued);
         if (!MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(descriptor.PnpInstanceId))
-            return RecoveryFail("DirectInputNotResolved:NotPrimaryCollection", modeWriteIssued);
+            return RecoveryFail("DirectInputNotResolved:NotPrimaryCollection", anyModeWriteIssued);
         var pnpDevice = _resolvePnpDevice(descriptor.PnpInstanceId!);
         if (pnpDevice is null)
-            return RecoveryFail("DirectInputNotResolved:PnpNodeMissing", modeWriteIssued);
+            return RecoveryFail("DirectInputNotResolved:PnpNodeMissing", anyModeWriteIssued);
         var directInputIdentity = MsiClawPhysicalIdentity.From(pnpDevice);
         // Same-mode PID1902 <-> PID1902 comparison: the fresh final PID1902 native identity must match
         // the resolved PID1902 DirectInput PnP collection (PR11 sections 4, 8.2).
         if (directInputIdentity.Confidence != MsiClawIdentityConfidence.Strong || !finalPid1902Identity.StronglyMatches(directInputIdentity))
-            return RecoveryFail("DirectInputPhysicalIdentityMismatch", modeWriteIssued);
+            return RecoveryFail("DirectInputPhysicalIdentityMismatch", anyModeWriteIssued);
 
         // 10.6. PR8 only reacquires the exact same persistent hidden target. A changed exact PnP
         //       collection is HidHide target migration -- explicitly a later PR.
         var recoveredTarget = descriptor.PnpInstanceId!;
         if (!string.Equals(recoveredTarget, ownedTarget, StringComparison.OrdinalIgnoreCase))
-            return RecoveryFail("RecoveredTargetChanged", modeWriteIssued);
+            return RecoveryFail("RecoveredTargetChanged", anyModeWriteIssued);
         AppLog.Info("ControllerOwnership", "Owned physical recovery DirectInput candidate resolved.",
             ("Event", "OwnedPhysicalRecoveryDirectInputResolved"), ("RecoveredTarget", recoveredTarget));
 
         // 10.8. A fresh shared Center M authority read immediately before the first recovery mutation.
         //       The bounded settle capture above may have taken time.
         if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
-            return RecoveryFail("AuthorityNotDisabled", modeWriteIssued);
+            return RecoveryFail("AuthorityNotDisabled", anyModeWriteIssued);
 
         // 10.7. Verify/repair the persistent HidHide baseline for the current exact target set BEFORE
         //       restarting DirectInput -- a virtual presentation is already attached to this source,
@@ -656,11 +689,11 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         catch (Exception exception)
         {
             AppLog.Warn("ControllerOwnership", "Owned physical recovery target-set resolution threw.", exception);
-            return RecoveryFail("HidHideTargetSetResolutionThrew", modeWriteIssued);
+            return RecoveryFail("HidHideTargetSetResolutionThrew", anyModeWriteIssued);
         }
         if (recoveredResolution.Targets.Count == 0
             || !string.Equals(recoveredResolution.Targets[0], ownedTarget, StringComparison.OrdinalIgnoreCase))
-            return RecoveryFail("HidHideTargetSetMissingPrimary", modeWriteIssued);
+            return RecoveryFail("HidHideTargetSetMissingPrimary", anyModeWriteIssued);
         foreach (var diagnostic in recoveredResolution.Diagnostics)
             AppLog.Warn("ControllerOwnership", "An auxiliary PID1902 HidHide target was omitted during recovery.", null,
                 ("Event", "AuxiliaryHidHideTargetOmitted"), ("Diagnostic", diagnostic));
@@ -676,10 +709,10 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         catch (Exception exception)
         {
             AppLog.Warn("ControllerOwnership", "Owned physical recovery HidHide reconciliation threw.", exception);
-            return RecoveryFail("HidHideReconcileFailed:Threw", modeWriteIssued);
+            return RecoveryFail("HidHideReconcileFailed:Threw", anyModeWriteIssued);
         }
         if (!baseline.IsCompliant)
-            return RecoveryFail("HidHideReconcileFailed:" + baseline.Outcome + ":" + baseline.Reason, modeWriteIssued);
+            return RecoveryFail("HidHideReconcileFailed:" + baseline.Outcome + ":" + baseline.Reason, anyModeWriteIssued);
         _ownedHiddenTargets = recoveredResolution.Targets;
         AppLog.Info("ControllerOwnership", "Owned physical recovery isolation verified.",
             ("Event", "OwnedPhysicalRecoveryIsolationVerified"), ("PrimaryHiddenTarget", ownedTarget),
@@ -691,7 +724,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         if (!start.Started || !_inputSource.IsRunning)
         {
             await SafeStopAsync().ConfigureAwait(false);
-            return RecoveryFail("DirectInputStartFailed:" + start.Status, modeWriteIssued);
+            return RecoveryFail("DirectInputStartFailed:" + start.Status, anyModeWriteIssued);
         }
         bool ready;
         try
@@ -706,7 +739,7 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         if (!ready || !_inputSource.IsRunning)
         {
             await SafeStopAsync().ConfigureAwait(false);
-            return RecoveryFail("FirstValidStateNotObserved", modeWriteIssued);
+            return RecoveryFail("FirstValidStateNotObserved", anyModeWriteIssued);
         }
 
         // 10.10 / PR11 section 8.4. Commit. The primary hidden target is unchanged; the existing
@@ -715,12 +748,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         //        the fresh Strong PID1902 identity right after the post-reclaim capture verified.)
         _ownsInputSource = true;
         PublishLivePhysicalSession(descriptor);
-        var successReason = modeWriteIssued ? "OwnedPhysicalStateDriftReclaimed" : "OwnedPhysicalInputRecovered";
+        var successReason = pidTransitionWriteIssued ? "OwnedPhysicalStateDriftReclaimed" : "OwnedPhysicalInputRecovered";
         AppLog.Info("ControllerOwnership", "Owned physical input recovery succeeded.",
             ("Event", "OwnedPhysicalRecoverySucceeded"), ("Reason", successReason),
             ("PrimaryHiddenTarget", ownedTarget), ("HiddenTargetCount", _ownedHiddenTargets.Count),
-            ("ModeWriteIssued", modeWriteIssued), ("DirectInputStartStatus", start.Status));
-        return new(MsiClawPhysicalOwnershipOutcome.Owned, successReason, modeWriteIssued, _ownedHiddenTargets);
+            ("ModeWriteIssued", anyModeWriteIssued), ("DirectInputStartStatus", start.Status));
+        return new(MsiClawPhysicalOwnershipOutcome.Owned, successReason, anyModeWriteIssued, _ownedHiddenTargets);
     }
 
     private MsiClawPhysicalOwnershipResult RecoveryFail(string reason, bool modeWriteIssued = false)
