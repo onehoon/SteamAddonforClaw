@@ -121,6 +121,47 @@ The current large Overlay width remains unchanged in this PR. Width/content-rail
 
 ---
 
+
+## 2.1 Surface scope — Overlay only
+
+This PR changes **only** the Addon-owned WinUI Overlay renderer under:
+
+```text
+src/SteamInputAddonforClaw.Overlay/
+```
+
+It must **not** change the desktop WinUI application under:
+
+```text
+src/SteamInputAddonforClaw.UI/
+```
+
+Desktop UI controls remain exactly as they are today.
+
+In particular, do **not** remove or replace desktop:
+
+- `Slider` controls;
+- `ComboBox` / dropdown controls;
+- `ToggleSwitch` controls;
+- SettingsCard/form-style layouts;
+- desktop page interaction patterns.
+
+The product intentionally has different presentation rules:
+
+```text
+Desktop UI
+→ mouse/keyboard-oriented configuration surface
+→ native Slider / ComboBox / SettingsCard patterns remain valid
+
+Overlay UI
+→ controller-first handheld surface
+→ ordered numeric/discrete settings render as ValueRow
+```
+
+Do not attempt to create one shared visual control implementation for Desktop UI and Overlay.
+
+They may share product/runtime state and mutation contracts, but they should remain separate presentation layers.
+
 ## 3. Why PR-B is intentionally narrower than the earlier conceptual primitive list
 
 Earlier Foundation discussion considered:
