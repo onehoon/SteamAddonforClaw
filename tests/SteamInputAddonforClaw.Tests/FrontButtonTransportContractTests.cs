@@ -15,7 +15,7 @@ public sealed class FrontButtonTransportContractTests
         // PR-C bumped 24 -> 25; Shared Frontend V2 SF-V2-01 subsequently bumped 25 -> 26
         // (CaptureDeviceQuickSettings aggregate); SD6A PR B bumped 26 -> 27 (Claw Sensor Probe capture modes);
         // Shared Frontend V2 SF-V2-04 bumped 27 -> 28 (generic Quick Settings RPC seam).
-        => Assert.Equal(37, FrontendTransportProtocol.CurrentVersion);
+        => Assert.Equal(38, FrontendTransportProtocol.CurrentVersion);
 
     [Fact]
     public void The_split_oem1_wing_rpcs_and_snapshot_members_are_gone()
@@ -32,6 +32,7 @@ public sealed class FrontButtonTransportContractTests
         Assert.Null(typeof(IAddonFrontendControl).GetMethod("SetOem1MappingAsync"));
         Assert.Null(typeof(IAddonFrontendControl).GetMethod("SetWingMappingAsync"));
         Assert.NotNull(typeof(IAddonFrontendControl).GetMethod("SetFrontButtonMappingAsync"));
+        Assert.NotNull(typeof(IAddonFrontendControl).GetMethod("SetBackButtonMappingAsync"));
     }
 
     [Fact]
@@ -44,12 +45,32 @@ public sealed class FrontButtonTransportContractTests
     }
 
     [Fact]
+    public void Settings_snapshot_carries_the_back_button_mapping_and_round_trips()
+    {
+        var mapping = new SteamInputAddonforClaw.Contracts.BackButtons.BackButtonMappingSettings(
+            SteamInputAddonforClaw.Contracts.BackButtons.Xbox360BackButtonTarget.A,
+            SteamInputAddonforClaw.Contracts.BackButtons.Xbox360BackButtonTarget.RightBumper);
+        var value = new FrontendSettingsSnapshot(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default)
+        {
+            BackButtonMapping = mapping,
+        };
+
+        var restored = JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(value));
+
+        Assert.Equal(mapping, restored!.BackButtonMapping);
+    }
+
+    [Fact]
     public void Bootstrap_snapshot_carries_one_front_button_availability_fact()
     {
         var value = new FrontendBootstrapSnapshot(
-            new(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default), new(false), @"C:\Logs", FrontButtonMappingAvailable: true);
+            new(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default), new(false), @"C:\Logs", FrontButtonMappingAvailable: true)
+        {
+            BackButtonMappingAvailable = true,
+        };
         var restored = JsonSerializer.Deserialize<FrontendBootstrapSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
         Assert.True(restored!.FrontButtonMappingAvailable);
+        Assert.True(restored.BackButtonMappingAvailable);
     }
 }

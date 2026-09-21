@@ -38,7 +38,7 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         Assert.Equal(9, OverlayTransportProtocol.CurrentVersion);
         // The desktop/QAM frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(37, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(38, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]
@@ -555,6 +555,7 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) => throw new NotSupportedException();
         public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) => throw new NotSupportedException();
         public Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(SteamInputAddonforClaw.Contracts.FrontButtons.FrontButtonMappingSettings mapping, CancellationToken t = default) => throw new NotSupportedException();
+        public Task<FrontendSettingsSnapshot> SetBackButtonMappingAsync(SteamInputAddonforClaw.Contracts.BackButtons.BackButtonMappingSettings mapping, CancellationToken t = default) => throw new NotSupportedException();
         public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken t = default) => throw new NotSupportedException();
         public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken t = default) => throw new NotSupportedException();
         public Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken t = default) => throw new NotSupportedException();

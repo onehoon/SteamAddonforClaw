@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
@@ -48,6 +49,7 @@ public sealed class SettingsStore
                 DeveloperMenuEnabled = developerMenuEnabled,
                 QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
                 FrontButtonMapping = ReadFrontButtonMapping(root),
+                BackButtonMapping = ReadBackButtonMapping(root),
                 AddonQuickSettingsTabOrder = ReadAddonQuickSettingsTabOrder(root)
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LogLevel", settings.LogLevel));
@@ -139,6 +141,61 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>
+    /// Reads the global M1/M2 mapping in isolation. Both required members must be explicit string
+    /// enum names; a malformed value falls back only this feature to its locked defaults.
+    /// </summary>
+    private static BackButtonMappingSettings ReadBackButtonMapping(JsonElement root)
+    {
+        if (!root.TryGetProperty("BackButtonMapping", out var property) || property.ValueKind != JsonValueKind.Object)
+        {
+            AppLog.Warn("Settings", "Back-button mapping is missing; using defaults.", null,
+                ("Reason", "MissingBackButtonMapping"));
+            return BackButtonMappingSettings.Default;
+        }
+
+        try
+        {
+            if (!TryReadTarget(property, "M1", out var m1) || !TryReadTarget(property, "M2", out var m2))
+            {
+                AppLog.Warn("Settings", "Back-button mapping is invalid; using the frozen defaults for this feature only.", null,
+                    ("Reason", "IncompleteBackButtonMapping"));
+                return BackButtonMappingSettings.Default;
+            }
+
+            var mapping = new BackButtonMappingSettings(m1, m2);
+            var reason = BackButtonMappingValidation.Validate(mapping);
+            if (reason is not null)
+            {
+                AppLog.Warn("Settings", "Back-button mapping is invalid; using the frozen defaults for this feature only.", null,
+                    ("Reason", reason));
+                return BackButtonMappingSettings.Default;
+            }
+
+            AppLog.Debug("Settings", "Back-button mapping loaded.", ("M1", mapping.M1), ("M2", mapping.M2));
+            return mapping;
+        }
+        catch (JsonException exception)
+        {
+            AppLog.Warn("Settings", "Back-button mapping could not be parsed; using the frozen defaults for this feature only.", exception);
+            return BackButtonMappingSettings.Default;
+        }
+    }
+
+    private static bool TryReadTarget(JsonElement parent, string propertyName, out Xbox360BackButtonTarget target)
+    {
+        target = Xbox360BackButtonTarget.Disabled;
+        if (!parent.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+            return false;
+
+        var name = property.GetString();
+        // Enum.TryParse accepts numeric strings; the persisted contract is intentionally names-only.
+        return !string.IsNullOrEmpty(name)
+            && char.IsLetter(name[0])
+            && Enum.TryParse(name, ignoreCase: false, out target)
+            && Enum.IsDefined(target);
+    }
+
     public void Save(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -147,7 +204,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.FrontButtonMapping, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.FrontButtonMapping, settings.BackButtonMapping, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

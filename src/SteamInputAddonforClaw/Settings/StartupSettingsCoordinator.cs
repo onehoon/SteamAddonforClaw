@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Install;
@@ -21,6 +22,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public bool QuickSettingsCurrentPowerSourceOnly => Settings.QuickSettingsCurrentPowerSourceOnly;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
+    public BackButtonMappingSettings BackButtonMapping => Settings.BackButtonMapping;
     public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
     public event EventHandler? FrontButtonMappingChanged;
 
@@ -75,6 +77,28 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
             ("SteamGamebar", Settings.FrontButtonMapping.Steam.Gamebar.Action),
             ("SteamCenterM", Settings.FrontButtonMapping.Steam.CenterM.Action));
         FrontButtonMappingChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    /// <summary>Persists the whole M1/M2 mapping before publishing it as current state.</summary>
+    public bool ChangeBackButtonMapping(BackButtonMappingSettings mapping)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+
+        var reason = BackButtonMappingValidation.Validate(mapping);
+        if (reason is not null)
+        {
+            SteamInputAddonforClaw.Diagnostics.AppLog.Warn("Settings", "Rejected an invalid back-button mapping candidate.", null, ("Reason", reason));
+            return false;
+        }
+
+        if (Settings.BackButtonMapping == mapping) return true;
+
+        var next = Settings with { BackButtonMapping = mapping };
+        _settingsStore.Save(next);
+        Settings = next;
+        SteamInputAddonforClaw.Diagnostics.AppLog.Debug("Settings", "Back-button mapping saved.",
+            ("M1", Settings.BackButtonMapping.M1), ("M2", Settings.BackButtonMapping.M2));
         return true;
     }
 
