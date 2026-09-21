@@ -20,8 +20,9 @@ This PR is deliberately limited to the outer window/surface presentation:
 2. base that margin on approximately one Windows taskbar thickness on all four sides, plus a small additional visual gap;
 3. round the real top-level window corners;
 4. replace the current near-white `#FFF3F3F3` surface with a neutral light-gray WinUI-style surface;
-5. preserve the current Overlay content, navigation, controller capture, no-activate behavior, topmost behavior, show/hide lifecycle, and Runtime authority;
-6. hardware-validate that the enlarged Overlay still appears above Steam Big Picture and a representative supported game surface.
+5. replace the current narrow-panel left-slide animation with a large-surface-appropriate centered scale/fade animation;
+6. preserve the current Overlay content, navigation, controller capture, no-activate behavior, topmost behavior, show/hide lifecycle authority, and Runtime authority;
+7. hardware-validate that the enlarged Overlay still appears above Steam Big Picture and a representative supported game surface.
 
 This is **not yet** the PR that promotes Overlay to the final product Main UI.
 
@@ -517,7 +518,173 @@ The neutral surface should remain opaque.
 
 ---
 
-## 9. Preserve the existing inner UI
+## 9. Replace the narrow-panel slide animation with centered scale + fade
+
+### 9.1 Why the current animation must change
+
+The current `OverlayWindow` animation was designed for a narrow left-side Quick Settings panel.
+
+Current behavior is conceptually:
+
+```text
+Show
+translation X = -32 DIP → 0
+opacity       = 0.90 → 1.00
+duration      = ~180 ms
+
+Hide
+translation X = 0 → -32 DIP
+opacity       = 1.00 → 0.90
+duration      = ~150 ms
+```
+
+That visual language becomes wrong once the Overlay occupies most of the display.
+
+A nearly full-screen floating surface sliding sideways by 32 DIP reads as a moving desktop window rather than a handheld control surface.
+
+Remove the left/right slide behavior for this large-surface POC.
+
+### 9.2 Target animation
+
+Use a subtle centered **scale + fade**, with only a small vertical translation.
+
+Recommended starting values:
+
+```text
+SHOW
+Scale           0.98 → 1.00
+Translation Y   +8 DIP → 0
+Opacity         0.90 → 1.00
+Duration        180 ms
+Easing          ease-out
+
+HIDE
+Scale           1.00 → 0.98
+Translation Y   0 → +8 DIP
+Opacity         1.00 → 0.90
+Duration        140 ms
+Easing          ease-in
+```
+
+A very small implementation-time polish adjustment is acceptable, but keep the effect restrained.
+
+Do not turn this into a zoom-heavy modal animation.
+
+Do not drop opacity to 0.
+
+### 9.3 Scale from the visual center
+
+The scale origin must be the center of the animated surface.
+
+Conceptually:
+
+```text
+CenterPoint.X = actual visual width  / 2
+CenterPoint.Y = actual visual height / 2
+```
+
+Do not scale from the default top-left origin.
+
+Top-left scale would make the large window appear to grow diagonally from one corner and is not the intended product motion.
+
+Use the existing Composition visual path rather than introducing another animation framework.
+
+### 9.4 Animate content/composition only — never HWND geometry
+
+The native Overlay HWND must already be at its final rectangle before the visual reveal.
+
+Forbidden:
+
+```text
+SetWindowPos width/height animation
+AppWindow resize animation
+repeated native window movement during show/hide
+```
+
+Required:
+
+```text
+final native geometry
++ existing topmost/no-activate HWND
++ Composition visual Scale
++ Composition visual Translation
++ Composition visual Opacity
+```
+
+This avoids disturbing:
+
+- topmost ordering;
+- rounded DWM corners;
+- monitor/DPI geometry;
+- foreground ownership;
+- BPM/game composition behavior.
+
+### 9.5 Reuse the existing animation lifecycle
+
+Keep the current `ShowForPocAsync()` / `HideForPocAsync()` lifecycle and fallback behavior.
+
+The change should be narrow:
+
+```text
+old:
+horizontal translation + opacity
+
+new:
+centered scale + small Y translation + opacity
+```
+
+Do not create:
+
+- `OverlayAnimationManager`;
+- storyboard/state-machine infrastructure;
+- animation epochs;
+- timers;
+- retry loops.
+
+The existing "animations disabled" / failure fallback behavior must continue to leave the Overlay in a valid visible/hidden state.
+
+### 9.6 Replace obsolete constants
+
+Remove or replace narrow-panel-only constants such as:
+
+```text
+ContentSlideDistanceDip
+```
+
+Recommended simple local constants:
+
+```csharp
+private const float HiddenScale = 0.98f;
+private const float HiddenTranslateYDip = 8.0f;
+private const double HiddenOpacity = 0.90;
+```
+
+Keep the existing show/hide duration constants if their values already match the target closely, or adjust them narrowly to:
+
+```text
+ShowDuration ≈ 180 ms
+HideDuration ≈ 140 ms
+```
+
+Do not expose animation values as user settings.
+
+### 9.7 Rounded-corner interaction
+
+The scale/fade effect must visually remain inside the rounded large surface.
+
+Do not solve animation clipping by adding:
+
+- per-pixel transparent windows;
+- custom HWND regions;
+- DirectComposition host architecture.
+
+If the current composition target scales only inner content while the opaque root remains static and that produces an undesirable visual result on hardware, move the animation target to the smallest existing root visual that represents the whole visible surface.
+
+Do not add a second decorative surface solely for animation.
+
+---
+
+## 10. Preserve the existing inner UI
 
 Do not use the new space to redesign content yet.
 
@@ -544,7 +711,7 @@ Do not fill the new area with speculative cards in this PR.
 
 ---
 
-## 10. Preserve controller / Runtime behavior exactly
+## 11. Preserve controller / Runtime behavior exactly
 
 Zero behavior change is allowed to:
 
@@ -573,7 +740,7 @@ The existing Runtime semantic navigation remains authoritative.
 
 ---
 
-## 11. Preserve topmost / no-activate behavior
+## 12. Preserve topmost / no-activate behavior
 
 Keep:
 
@@ -600,7 +767,7 @@ The enlarged Overlay must still appear visually above normal supported desktop/B
 
 ---
 
-## 12. QAM remains untouched
+## 13. QAM remains untouched
 
 This PR does not decide the final renderer architecture.
 
@@ -618,7 +785,7 @@ That decision comes **after** hardware proof.
 
 ---
 
-## 13. Expected files
+## 14. Expected files
 
 The implementation should normally remain within:
 
@@ -626,6 +793,7 @@ The implementation should normally remain within:
 src/SteamInputAddonforClaw.Overlay/OverlayWindowGeometry.cs
 src/SteamInputAddonforClaw.Overlay/WindowInterop.cs
 src/SteamInputAddonforClaw.Overlay/OverlayWindow.xaml
+src/SteamInputAddonforClaw.Overlay/OverlayWindow.xaml.cs
 src/SteamInputAddonforClaw.Overlay/App.xaml           # only if used for OverlaySurfaceBrush
 tests/SteamInputAddonforClaw.Tests/OverlayWindowGeometryTests.cs
 relevant existing Overlay source-contract test        # only if useful
@@ -639,13 +807,13 @@ If implementation requires broader changes, re-check whether the PR is drifting 
 
 ---
 
-## 14. Geometry tests
+## 15. Geometry tests
 
 Replace the old fixed-width tests.
 
 At minimum cover:
 
-### 14.1 1920×1200 / 150% / bottom taskbar reference
+### 15.1 1920×1200 / 150% / bottom taskbar reference
 
 Use a synthetic monitor/work-area matching:
 
@@ -669,11 +837,11 @@ result = X 90
          H 1020
 ```
 
-### 14.2 Non-zero monitor origin
+### 15.2 Non-zero monitor origin
 
 Verify monitor placement still works for a monitor whose origin is not `0,0`.
 
-### 14.3 Different DPI
+### 15.3 Different DPI
 
 Verify the 48-DIP reference and 12-DIP gap scale using the existing DPI rule.
 
@@ -689,15 +857,15 @@ Representative:
 
 Do not assert a hard-coded 1920×1200 rectangle for all DPI cases.
 
-### 14.4 Larger-than-reference reserved edge
+### 15.4 Larger-than-reference reserved edge
 
 If a synthetic work area reports a reserved edge thicker than the 48-DIP reference, that real reserved thickness must win before the extra 12-DIP gap is added.
 
-### 14.5 Zero reserved edge
+### 15.5 Zero reserved edge
 
 If `rcWork == rcMonitor`, the 48-DIP reference must still preserve the intended large floating margin.
 
-### 14.6 Small monitor/work area
+### 15.6 Small monitor/work area
 
 Never return:
 
@@ -711,7 +879,7 @@ Do not add a geometry framework.
 
 ---
 
-## 15. Build / static validation
+## 16. Build / static validation
 
 Run:
 
@@ -727,7 +895,7 @@ Existing Overlay/controller/Full1902 tests must remain green.
 
 ---
 
-## 16. Required MSI Claw hardware validation
+## 17. Required MSI Claw hardware validation
 
 Do not mark hardware-only acceptance as proven from unit tests.
 
@@ -805,12 +973,16 @@ Verify:
 - no Z-order regression;
 - no activation steal;
 - no square-corner regression after warm reuse;
-- no animation failure;
+- Show uses centered scale/fade rather than the old left slide;
+- Hide uses the matching restrained reverse scale/fade;
+- no visible top-left-origin scaling;
+- no HWND resize/move animation;
+- no animation failure or visible stuck intermediate state;
 - no controller leak after close.
 
 ---
 
-## 17. Acceptance criteria
+## 18. Acceptance criteria
 
 Merge only when all are true:
 
@@ -826,12 +998,17 @@ Merge only when all are true:
 10. Existing Runtime-owned controller capture/navigation/release behavior remains unchanged.
 11. BPM-only hardware validation proves the large Overlay can remain visually above Steam Big Picture.
 12. A representative supported game validation proves the large Overlay can remain visually above the game without minimizing or activating away from it.
-13. QAM is untouched.
-14. No new manager, state machine, polling loop, window watchdog, input reader, or generalized layout abstraction is introduced.
+13. The old left-slide animation is removed for the large surface.
+14. Show uses a centered ~0.98→1.00 scale, small +Y→0 movement, and subtle fade.
+15. Hide uses the restrained reverse effect.
+16. HWND geometry is not animated.
+17. Animation failure/disabled paths still converge to correct visible/hidden state.
+18. QAM is untouched.
+19. No new manager, state machine, polling loop, window watchdog, input reader, animation framework, or generalized layout abstraction is introduced.
 
 ---
 
-## 18. Follow-up boundary
+## 19. Follow-up boundary
 
 If this POC passes the BPM/game acceptance cases, the next design step may evaluate promoting:
 
