@@ -166,12 +166,48 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("surface.RenderedAppId == page.AppId", renderQuickSettingsPage);
         Assert.Contains("surface.RenderedSections is not null && surface.RenderedSections.SequenceEqual(sectionShape)", renderQuickSettingsPage);
-        Assert.Contains("surface.RowShape.SequenceEqual(rowShape)", renderQuickSettingsPage);
+        Assert.Contains("QuickSettingsRowShapesEqual(surface.RowShape, rowShape)", renderQuickSettingsPage);
+        Assert.DoesNotContain("surface.RowShape.SequenceEqual(rowShape)", renderQuickSettingsPage);
 
         var rebuildContent = source[source.IndexOf("private void RebuildQuickSettingsContent(QuickSettingsSurface surface", StringComparison.Ordinal)..
             source.IndexOf("private static TextBlock CreateQuickSettingsMessageText", StringComparison.Ordinal)];
         Assert.Contains("surface.RenderedAppId = page.AppId;", rebuildContent);
         Assert.Contains("surface.RenderedSections = QuickSettingsSectionShapeOf(page);", rebuildContent);
+    }
+
+    [Fact]
+    public void Quick_settings_fast_path_reconciles_selection_after_authoritative_row_state_updates()
+    {
+        var source = ReadOverlayWindowSource();
+        var renderQuickSettingsPage = source[source.IndexOf("private void RenderQuickSettingsPage(QuickSettingsSurface surface)", StringComparison.Ordinal)..
+            source.IndexOf("private static QuickSettingsRowShape QuickSettingsRowShapeOf", StringComparison.Ordinal)];
+
+        Assert.Contains("var previousSelection = _rowSelection.SelectedIndex;", renderQuickSettingsPage);
+        Assert.Contains("UpdateQuickSettingsRowValues(surface, page);", renderQuickSettingsPage);
+        Assert.Contains("if (_tabState.SelectedTab == surface.TabId)", renderQuickSettingsPage);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(surface.TabId), previousSelection);", renderQuickSettingsPage);
+        Assert.Contains("ApplyRowSelectionVisual();", renderQuickSettingsPage);
+        Assert.Contains("if (_rowSelection.SelectedIndex != previousSelection)", renderQuickSettingsPage);
+        Assert.Contains("BringSelectedRowIntoView();", renderQuickSettingsPage);
+    }
+
+    [Fact]
+    public void Quick_settings_fast_path_identity_includes_metadata_captured_by_row_renderers()
+    {
+        var source = ReadOverlayWindowSource();
+        var shape = source[source.IndexOf("private readonly record struct QuickSettingsRowShape", StringComparison.Ordinal)..
+            source.IndexOf("private sealed class QuickSettingsSurface", StringComparison.Ordinal)];
+        var shapeFactory = source[source.IndexOf("private static QuickSettingsRowShape QuickSettingsRowShapeOf", StringComparison.Ordinal)..
+            source.IndexOf("private static (QuickSettingsSectionId", StringComparison.Ordinal)];
+
+        Assert.Contains("string Label", shape);
+        Assert.Contains("string? NumericSuffix", shape);
+        Assert.Contains("QuickSettingsDiscreteOption[]? DiscreteOptions", shape);
+        Assert.Contains("row.Label", shapeFactory);
+        Assert.Contains("spec is { Kind: QuickSettingsSliderKind.Numeric } ? spec.Suffix : null", shapeFactory);
+        Assert.Contains("spec is { Kind: QuickSettingsSliderKind.Discrete } ? spec.Options?.ToArray() : null", shapeFactory);
+        Assert.Contains("QuickSettingsRowShapesEqual", source);
+        Assert.Contains("return left.SequenceEqual(right);", source);
     }
 
     // SF-V2-09 section 32: Device and Profile share one generic renderer/binder path -- BuildPage's
@@ -278,7 +314,8 @@ public sealed class OverlayDeviceRendererWiringTests
     {
         var source = ReadOverlayWindowSource();
 
-        Assert.Contains("bool Visible, bool WellFormed", source);
+        Assert.Contains("bool Visible,", source);
+        Assert.Contains("bool WellFormed,", source);
         Assert.Contains("row.Visible", source);
         Assert.Contains("var visibleRows = section.Rows.Where(row => row.Visible).ToArray();", source);
         Assert.Contains("if (visibleRows.Length == 0) continue;", source);
