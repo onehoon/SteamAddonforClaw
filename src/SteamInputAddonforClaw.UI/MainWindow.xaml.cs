@@ -503,6 +503,14 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>Waits for the already-queued front and back controller mapping saves.</summary>
+    internal Task DrainPendingControllerMappingSavesAsync()
+    {
+        var front = _frontButtonSaveChain;
+        var back = _backButtonSaveChain;
+        return Task.WhenAll(front, back);
+    }
+
     private void ReturnToSettings(string reason)
     {
         var previousPage = _navigationState.CurrentPage;
