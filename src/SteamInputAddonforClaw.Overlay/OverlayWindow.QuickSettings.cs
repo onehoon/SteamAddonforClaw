@@ -9,9 +9,19 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow
 {
-    // The flattened (RowId, ControlKind, SliderKind, WellFormed) shape of a last-rendered
-    // Quick Settings page. Equal shape plus equal page identity means only row values changed.
-    private readonly record struct QuickSettingsRowShape(QuickSettingsRowId RowId, QuickSettingsControlKind ControlKind, QuickSettingsSliderKind? SliderKind, bool Visible, bool WellFormed);
+    // The flattened structural/rendering identity of a last-rendered Quick Settings page. Equal
+    // shape plus equal page identity means only authoritative row values changed. Metadata captured
+    // by row-renderer closures is included so a value-only update cannot keep stale presentation or
+    // stale discrete option values.
+    private readonly record struct QuickSettingsRowShape(
+        QuickSettingsRowId RowId,
+        QuickSettingsControlKind ControlKind,
+        QuickSettingsSliderKind? SliderKind,
+        bool Visible,
+        bool WellFormed,
+        string Label,
+        string? NumericSuffix,
+        QuickSettingsDiscreteOption[]? DiscreteOptions);
 
     // Page-local state shared by the generic Device/Profile renderer. Binding is assigned only after
     // App supplies the narrow mutation delegate through ConfigureQuickSettings.
@@ -95,11 +105,19 @@ public sealed partial class OverlayWindow
         {
             var rowShape = page.Sections.SelectMany(s => s.Rows).Select(QuickSettingsRowShapeOf).ToArray();
             var sectionShape = QuickSettingsSectionShapeOf(page);
-            if (surface.RowShape is not null && surface.RowShape.SequenceEqual(rowShape) &&
+            if (surface.RowShape is not null && QuickSettingsRowShapesEqual(surface.RowShape, rowShape) &&
                 surface.RenderedAppId == page.AppId &&
                 surface.RenderedSections is not null && surface.RenderedSections.SequenceEqual(sectionShape))
             {
+                var previousSelection = _rowSelection.SelectedIndex;
                 UpdateQuickSettingsRowValues(surface, page);
+                if (_tabState.SelectedTab == surface.TabId)
+                {
+                    _rowSelection.SetRows(CapabilitiesFor(surface.TabId), previousSelection);
+                    ApplyRowSelectionVisual();
+                    if (_rowSelection.SelectedIndex != previousSelection)
+                        BringSelectedRowIntoView();
+                }
                 ApplyQuickSettingsLocalFailure(surface);
                 return;
             }
@@ -119,12 +137,48 @@ public sealed partial class OverlayWindow
         surface.FailureText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private static QuickSettingsRowShape QuickSettingsRowShapeOf(QuickSettingsRow row) => new(
-        row.RowId,
-        row.ControlKind,
-        row.ControlKind == QuickSettingsControlKind.Slider ? row.SliderSpec?.Kind : null,
-        row.Visible,
-        QuickSettingsRowRendering.IsWellFormed(row));
+    private static QuickSettingsRowShape QuickSettingsRowShapeOf(QuickSettingsRow row)
+    {
+        var spec = row.SliderSpec;
+        return new(
+            row.RowId,
+            row.ControlKind,
+            row.ControlKind == QuickSettingsControlKind.Slider ? spec?.Kind : null,
+            row.Visible,
+            QuickSettingsRowRendering.IsWellFormed(row),
+            row.Label,
+            spec is { Kind: QuickSettingsSliderKind.Numeric } ? spec.Suffix : null,
+            spec is { Kind: QuickSettingsSliderKind.Discrete } ? spec.Options?.ToArray() : null);
+    }
+
+    private static bool QuickSettingsRowShapesEqual(QuickSettingsRowShape[] left, QuickSettingsRowShape[] right)
+    {
+        if (left.Length != right.Length) return false;
+        for (var i = 0; i < left.Length; i++)
+        {
+            var leftRow = left[i];
+            var rightRow = right[i];
+            if (leftRow.RowId != rightRow.RowId ||
+                leftRow.ControlKind != rightRow.ControlKind ||
+                leftRow.SliderKind != rightRow.SliderKind ||
+                leftRow.Visible != rightRow.Visible ||
+                leftRow.WellFormed != rightRow.WellFormed ||
+                !string.Equals(leftRow.Label, rightRow.Label, StringComparison.Ordinal) ||
+                !string.Equals(leftRow.NumericSuffix, rightRow.NumericSuffix, StringComparison.Ordinal) ||
+                !QuickSettingsDiscreteOptionsEqual(leftRow.DiscreteOptions, rightRow.DiscreteOptions))
+                return false;
+        }
+        return true;
+    }
+
+    private static bool QuickSettingsDiscreteOptionsEqual(
+        QuickSettingsDiscreteOption[]? left,
+        QuickSettingsDiscreteOption[]? right)
+    {
+        if (ReferenceEquals(left, right)) return true;
+        if (left is null || right is null || left.Length != right.Length) return false;
+        return left.SequenceEqual(right);
+    }
 
     private static (QuickSettingsSectionId Id, string? Label, string? Message)[] QuickSettingsSectionShapeOf(QuickSettingsPageSnapshot page) =>
         page.Sections.Select(s => (s.SectionId, s.Label, s.Message)).ToArray();
