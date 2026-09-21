@@ -8,7 +8,11 @@ param(
 
     [switch]$PreserveReleases,
 
-    [string]$ReleaseNotesPath
+    [string]$ReleaseNotesPath,
+
+    [string]$FseCertificatePath,
+
+    [SecureString]$FseCertificatePassword
 )
 
 Set-StrictMode -Version Latest
@@ -41,7 +45,24 @@ if (-not (Test-Path -LiteralPath $iconPath)) {
     -Configuration $Configuration `
     -PublishDirectory $publishDirectory
 
-& (Join-Path $PSScriptRoot 'verify-publish-assets.ps1') -PublishDirectory $publishDirectory
+if ([string]::IsNullOrWhiteSpace($FseCertificatePath) -or $null -eq $FseCertificatePassword) {
+    throw 'Release packaging requires the stable FSE signing certificate and password. No private signing material is stored in the repository.'
+}
+
+$fsePackageVersion = (($Version -split '-')[0] + '.0')
+$fsePackagePath = Join-Path $publishDirectory 'fse\SteamInputAddonforClaw.FseHome.msix'
+& (Join-Path $PSScriptRoot 'package-fse-home.ps1') `
+    -PublishDirectory $publishDirectory `
+    -OutputPath $fsePackagePath `
+    -CertificatePath $FseCertificatePath `
+    -CertificatePassword $FseCertificatePassword `
+    -ExpectedVersion $fsePackageVersion
+if ($LASTEXITCODE -ne 0) { throw "FSE Home package creation failed with exit code $LASTEXITCODE." }
+
+& (Join-Path $PSScriptRoot 'verify-publish-assets.ps1') `
+    -PublishDirectory $publishDirectory `
+    -RequireFsePackage `
+    -ExpectedFsePackageVersion $fsePackageVersion
 
 & (Join-Path $PSScriptRoot 'report-publish-size.ps1') -PublishDirectory $publishDirectory
 

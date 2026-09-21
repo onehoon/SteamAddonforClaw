@@ -20,6 +20,7 @@ using SteamInputAddonforClaw.GameBar;
 using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Updates;
 using SteamInputAddonforClaw.ClawHud;
+using SteamInputAddonforClaw.WindowsGaming;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -35,6 +36,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 {
     private readonly Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? _runtimeCompositionFactory;
     private readonly Func<string>? _frontendPipeNameFactory;
+    private readonly ISteamFsePackageProvisioner _steamFsePackageProvisioner;
     private readonly CancellationTokenSource _startupCancellationTokenSource = new();
     private AddonStartupComposition? _startupComposition;
     private AddonRuntimeHost? _runtimeHost;
@@ -152,10 +154,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal AddonProcessHost(Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
         string? testOnlyDataRoot = null,
         Func<string>? testFrontendPipeNameFactory = null,
-        Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null)
+        Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null,
+        ISteamFsePackageProvisioner? testOnlyFsePackageProvisioner = null)
     {
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
         _frontendPipeNameFactory = testFrontendPipeNameFactory;
+        _steamFsePackageProvisioner = testOnlyFsePackageProvisioner ?? new SteamFsePackageProvisioner();
         var profilePath = testOnlyDataRoot is null
             ? AddonDataPaths.ProfilesPath
             : Path.Combine(testOnlyDataRoot, "profiles.json");
@@ -495,6 +499,20 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _runtimeStartupSettings = composition.StartupSettings;
         if (startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled)
             Volatile.Write(ref _disabledControllerStartupPending, 1);
+
+        try
+        {
+            var provisioning = _steamFsePackageProvisioner.EnsureProvisioned(_startupCancellationTokenSource.Token);
+            AppLog.Info("SteamFSE", "FSE package provisioning reconcile completed.",
+                ("Outcome", provisioning.Outcome), ("Version", provisioning.PackageVersion),
+                ("Aumid", provisioning.Aumid), ("FailureReason", provisioning.FailureReason));
+        }
+        catch (Exception exception)
+        {
+            // FSE is an optional infrastructure feature. Never make package registration a
+            // controller, frontend, or Full1902 startup barrier.
+            AppLog.Warn("SteamFSE", "FSE package provisioning threw; continuing Runtime startup.", exception);
+        }
 
         try
         {

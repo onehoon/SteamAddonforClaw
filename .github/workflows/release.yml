@@ -133,13 +133,35 @@ jobs:
           --outputDir artifacts/Releases
 
       - name: Package release
+        shell: pwsh
         env:
           VERSION: ${{ steps.metadata.outputs.VERSION }}
-        run: >-
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/pack.ps1
-          -Version $env:VERSION
-          -PreserveReleases
-          -ReleaseNotesPath artifacts/release-notes.md
+          FSE_SIGNING_CERTIFICATE_BASE64: ${{ secrets.FSE_SIGNING_CERTIFICATE_BASE64 }}
+          FSE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.FSE_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FSE_SIGNING_CERTIFICATE_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:FSE_SIGNING_CERTIFICATE_PASSWORD)) {
+            throw 'Release requires FSE_SIGNING_CERTIFICATE_BASE64 and FSE_SIGNING_CERTIFICATE_PASSWORD secrets.'
+          }
+
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'SteamInputAddonforClaw-FseHome-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:FSE_SIGNING_CERTIFICATE_BASE64))
+            $certificatePassword = ConvertTo-SecureString $env:FSE_SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
+            & ./scripts/pack.ps1 `
+              -Version $env:VERSION `
+              -PreserveReleases `
+              -ReleaseNotesPath artifacts/release-notes.md `
+              -FseCertificatePath $certificatePath `
+              -FseCertificatePassword $certificatePassword
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          finally {
+            $certificatePassword = $null
+            if (Test-Path -LiteralPath $certificatePath) {
+              Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Publish GitHub release
         env:

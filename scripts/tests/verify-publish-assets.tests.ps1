@@ -51,6 +51,7 @@ function New-Fixture {
         'overlay\Microsoft.UI.Xaml.winmd' = 'overlay winmd payload'
         'fse\SteamInputAddonforClaw.FseHome.exe' = 'fse executable'
         'fse\SteamInputAddonforClaw.FseHome.dll' = 'fse managed payload'
+        'fse\SteamInputAddonforClaw.FseHome.msix' = 'signed fse package placeholder'
         'fse\Package\AppxManifest.xml' = '<Identity Name="SteamInputAddonforClaw.FseHome" /><Application Id="App"><uap3:AppExtension Name="windows.gamingApp" /><uap4:CustomCapability Name="Microsoft.appCategory.gamingHome_8wekyb3d8bbwe" /></Application>'
         'fse\Package\CustomCapability.SCCD' = '<CustomCapability Name="Microsoft.appCategory.gamingHome_8wekyb3d8bbwe" />'
         'fse\Package\Assets\AppIcon.ico' = 'icon'
@@ -76,11 +77,13 @@ function New-Fixture {
 }
 
 function Invoke-Verify {
-    param([Parameter(Mandatory)] [string] $PublishDirectory)
+    param([Parameter(Mandatory)] [string] $PublishDirectory, [switch] $RequireFsePackage)
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -PublishDirectory $PublishDirectory 2>&1
+        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath, '-PublishDirectory', $PublishDirectory)
+        if ($RequireFsePackage) { $arguments += '-RequireFsePackage' }
+        $output = & powershell.exe @arguments 2>&1
         $exitCode = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $previousPreference }
@@ -103,6 +106,11 @@ try {
     $validRoot = New-Fixture
     $fixturesToClean += $validRoot
     Assert-Success -Result (Invoke-Verify -PublishDirectory $validRoot) -Case 'complete application asset set'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Remove-Item -LiteralPath (Join-Path $root 'fse\SteamInputAddonforClaw.FseHome.msix')
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing final FSE MSIX' -Asset 'fse\SteamInputAddonforClaw.FseHome.msix'
 
     $root = New-Fixture
     $fixturesToClean += $root

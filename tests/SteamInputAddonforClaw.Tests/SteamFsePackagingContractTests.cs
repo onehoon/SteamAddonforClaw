@@ -28,7 +28,24 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("Version=\"__PACKAGE_VERSION__\"", manifest, StringComparison.Ordinal);
         Assert.Contains("<Application Id=\"App\"", manifest, StringComparison.Ordinal);
         Assert.Contains("Microsoft.appCategory.gamingHome_8wekyb3d8bbwe", sccd, StringComparison.Ordinal);
+        Assert.DoesNotContain("AllowExternalContent", manifest, StringComparison.Ordinal);
         Assert.DoesNotContain("SteamInputAddonforClaw.csproj", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Release_packaging_requires_a_signed_final_msix_and_keeps_identity_versioned_from_release()
+    {
+        var pack = ReadSource("scripts", "pack.ps1");
+        var package = ReadSource("scripts", "package-fse-home.ps1");
+        var verifier = ReadSource("scripts", "verify-publish-assets.ps1");
+
+        Assert.Contains("package-fse-home.ps1", pack, StringComparison.Ordinal);
+        Assert.Contains("-RequireFsePackage", pack, StringComparison.Ordinal);
+        Assert.Contains("SteamInputAddonforClaw.FseHome.msix", pack, StringComparison.Ordinal);
+        Assert.Contains("CertificatePath", package, StringComparison.Ordinal);
+        Assert.Contains("CertificatePassword", package, StringComparison.Ordinal);
+        Assert.Contains("signtool", verifier, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CustomCapability.SCCD", verifier, StringComparison.Ordinal);
     }
 
     [Fact]

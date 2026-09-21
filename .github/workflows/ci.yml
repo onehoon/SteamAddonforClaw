@@ -101,6 +101,43 @@ jobs:
           -PublishDirectory artifacts/publish
           -NoRestore
 
+      - name: Build and verify CI FSE package
+        shell: pwsh
+        run: |
+          $certificate = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject 'CN=SteamInputAddonforClaw' `
+            -CertStoreLocation Cert:\CurrentUser\My
+          $certificatePassword = ConvertTo-SecureString 'ci-only-fse-package-test' -AsPlainText -Force
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'SteamInputAddonforClaw-FseHome-ci.pfx'
+          $cerPath = Join-Path $env:RUNNER_TEMP 'SteamInputAddonforClaw-FseHome-ci.cer'
+          try {
+            Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $certificatePassword | Out-Null
+            Export-Certificate -Cert $certificate -FilePath $cerPath | Out-Null
+            Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+            Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+
+            & ./scripts/package-fse-home.ps1 `
+              -PublishDirectory artifacts/publish `
+              -OutputPath artifacts/publish/fse/SteamInputAddonforClaw.FseHome.msix `
+              -CertificatePath $pfxPath `
+              -CertificatePassword $certificatePassword `
+              -ExpectedVersion 0.1.0
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            & ./scripts/verify-publish-assets.ps1 `
+              -PublishDirectory artifacts/publish `
+              -RequireFsePackage `
+              -ExpectedFsePackageVersion 0.1.0
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          finally {
+            Remove-Item -LiteralPath $pfxPath, $cerPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "Cert:\CurrentUser\TrustedPeople\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Verify published Runtime assets
         run: >-
           powershell.exe -NoProfile -ExecutionPolicy Bypass

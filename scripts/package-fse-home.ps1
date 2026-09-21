@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$PublishDirectory,
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$OutputPath,
     [string]$CertificatePath,
-    [SecureString]$CertificatePassword
+    [SecureString]$CertificatePassword,
+    [string]$ExpectedVersion
 )
 
 Set-StrictMode -Version Latest
@@ -37,6 +38,37 @@ $makeAppx = Find-SdkTool 'makeappx'
 $signTool = Find-SdkTool 'signtool'
 $packageSource = Join-Path $PublishDirectory 'fse\Package'
 $output = [System.IO.Path]::GetFullPath($OutputPath)
+$manifestPath = Join-Path $packageSource 'AppxManifest.xml'
+$manifestXml = [System.Xml.Linq.XDocument]::Load($manifestPath)
+$identityElement = $manifestXml.Root.Elements() | Where-Object { $_.Name.LocalName -eq 'Identity' } | Select-Object -First 1
+if ($null -eq $identityElement) { throw 'FSE Home package manifest does not contain an Identity element.' }
+$identityName = $identityElement.Attribute('Name')
+if ($null -eq $identityName -or $identityName.Value -ne 'SteamInputAddonforClaw.FseHome') { throw 'FSE Home package identity is not stable.' }
+$manifestVersion = $identityElement.Attribute('Version').Value
+if ($ExpectedVersion -and $manifestVersion -ne $ExpectedVersion) {
+    throw "FSE Home package version '$manifestVersion' does not match expected release version '$ExpectedVersion'."
+}
+$manifestPublisher = $identityElement.Attribute('Publisher').Value
+$certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+    $CertificatePath,
+    $CertificatePassword,
+    [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+if ($certificate.Subject -ne $manifestPublisher) {
+    throw "FSE Home manifest Publisher '$manifestPublisher' does not match signing certificate subject '$($certificate.Subject)'."
+}
+$applications = @($manifestXml.Descendants() | Where-Object {
+    $id = $_.Attribute('Id')
+    $_.Name.LocalName -eq 'Application' -and $null -ne $id -and $id.Value -eq 'App'
+})
+if ($applications.Count -eq 0) {
+    throw 'FSE Home package manifest is missing Application Id App.'
+}
+if (-not (Get-Content -LiteralPath $manifestPath -Raw | Select-String -SimpleMatch 'windows.gamingApp')) {
+    throw 'FSE Home package manifest is missing the windows.gamingApp extension.'
+}
+if (-not (Get-Content -LiteralPath $manifestPath -Raw | Select-String -SimpleMatch 'Microsoft.appCategory.gamingHome_8wekyb3d8bbwe')) {
+    throw 'FSE Home package manifest is missing the Gaming Home custom capability.'
+}
 New-Item -ItemType Directory -Path (Split-Path -Parent $output) -Force | Out-Null
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }
 
@@ -44,8 +76,13 @@ if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }
 if ($LASTEXITCODE -ne 0) { throw "makeappx failed with exit code $LASTEXITCODE." }
 
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($CertificatePassword)
-try { $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
-finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-& $signTool sign /fd SHA256 /f $CertificatePath /p $password $output
-if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE." }
+try {
+    $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    & $signTool sign /fd SHA256 /f $CertificatePath /p $password $output
+    if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE." }
+}
+finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    $password = $null
+}
 Write-Host "Signed FSE Home package: $output"

@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.WindowsGaming;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -26,7 +27,8 @@ public sealed class AddonProcessHostStartupTests
             runtimeHost, null!, null!);
         var testDataRoot = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw-HostTests", Guid.NewGuid().ToString("N"));
         var host = new AddonProcessHost((_, _) => runtimeComposition, testDataRoot,
-            () => $"SteamInputAddonforClaw.Frontend.Test.{Guid.NewGuid():N}");
+            () => $"SteamInputAddonforClaw.Frontend.Test.{Guid.NewGuid():N}",
+            testOnlyFsePackageProvisioner: new FailingFsePackageProvisioner());
         host.TestOnly_SetStartupForInitialization(
             new AddonStartupComposition(null!, null!, null!, null!, new CenterMStartupControl(available: false)),
             new StartupResult(true));
@@ -36,5 +38,11 @@ public sealed class AddonProcessHostStartupTests
         await initialization.WaitAsync(TimeSpan.FromSeconds(5));
 
         await host.DisposeAsync();
+    }
+
+    private sealed class FailingFsePackageProvisioner : ISteamFsePackageProvisioner
+    {
+        public SteamFsePackageProvisioningResult EnsureProvisioned(CancellationToken cancellationToken = default) =>
+            new(SteamFsePackageProvisioningOutcome.Failed, null, null, "test-provisioning-failure");
     }
 }
