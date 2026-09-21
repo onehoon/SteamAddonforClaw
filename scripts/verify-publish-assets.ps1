@@ -2,11 +2,52 @@
 param(
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
-    [string]$PublishDirectory
+    [string]$PublishDirectory,
+
+    [switch]$RequireFsePackage,
+
+    [string]$ExpectedFsePackageVersion
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'invoke-sdk-tool.ps1')
+
+function Find-SdkTool([string]$name) {
+    $command = Get-Command "$name.exe" -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $roots = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:WindowsSdkDir)) {
+        $roots += Join-Path $env:WindowsSdkDir 'bin'
+    }
+    $roots += @(
+        (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'),
+        (Join-Path $env:ProgramFiles 'Windows Kits\10\bin')
+    )
+
+    foreach ($root in ($roots | Where-Object { $_ } | Select-Object -Unique) ) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+
+        $versionDirectories = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending)
+        foreach ($architecture in @('x64', 'x86', 'arm64')) {
+            $directCandidate = Join-Path $root "$architecture\$name.exe"
+            if (Test-Path -LiteralPath $directCandidate -PathType Leaf) {
+                return (Get-Item -LiteralPath $directCandidate).FullName
+            }
+
+            foreach ($versionDirectory in $versionDirectories) {
+                $candidate = Join-Path $versionDirectory.FullName "$architecture\$name.exe"
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    return (Get-Item -LiteralPath $candidate).FullName
+                }
+            }
+        }
+    }
+
+    throw "$name.exe was not found in the Windows SDK."
+}
 
 if (-not (Test-Path -LiteralPath $PublishDirectory -PathType Container)) {
     throw "Publish directory was not found: $PublishDirectory"
@@ -39,9 +80,10 @@ $requiredAssets = @(
     'overlay\OverlayWindow.xbf',
     'fse\SteamInputAddonforClaw.FseHome.exe',
     'fse\SteamInputAddonforClaw.FseHome.dll',
+    'fse\SteamInputAddonforClaw.FseHome.msix',
     'fse\Package\AppxManifest.xml',
     'fse\Package\CustomCapability.SCCD',
-    'fse\Package\Assets\AppIcon.ico',
+    'fse\Package\Assets\AppIcon.png',
     'fse\Package\Public\README.txt'
 )
 
@@ -113,6 +155,62 @@ foreach ($requiredText in @('windows.gamingApp', 'Microsoft.appCategory.gamingHo
 $sccd = Get-Content -LiteralPath (Join-Path $PublishDirectory 'fse\Package\CustomCapability.SCCD') -Raw
 if ($sccd -notmatch 'Microsoft\.appCategory\.gamingHome_8wekyb3d8bbwe') {
     throw 'FSE Home package SCCD is missing the Gaming Home custom capability.'
+}
+
+if ($RequireFsePackage) {
+    $fsePackagePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.msix'
+    if (-not (Test-Path -LiteralPath $fsePackagePath -PathType Leaf)) {
+        throw "Final signed FSE Home package is missing: $fsePackagePath"
+    }
+
+    $makeAppx = Find-SdkTool 'makeappx'
+    $signTool = Find-SdkTool 'signtool'
+    $unpackDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("SteamInputAddonforClaw-fse-verify-" + [Guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Path $unpackDirectory -Force | Out-Null
+        Write-Host "Unpacking final FSE MSIX package: $fsePackagePath"
+        Invoke-SdkTool -FilePath $makeAppx -Arguments @('unpack', '/p', $fsePackagePath, '/d', $unpackDirectory, '/o') -TimeoutSeconds 60 -Operation 'makeappx unpack'
+
+        Write-Host "Verifying final FSE MSIX signature: $fsePackagePath"
+        Invoke-SdkTool -FilePath $signTool -Arguments @('verify', '/pa', '/all', '/v', $fsePackagePath) -TimeoutSeconds 60 -Operation 'signtool verify'
+
+        $finalManifestPath = Join-Path $unpackDirectory 'AppxManifest.xml'
+        $finalManifest = Get-Content -LiteralPath $finalManifestPath -Raw
+        $sourceManifest = Get-Content -LiteralPath (Join-Path $PublishDirectory 'fse\Package\AppxManifest.xml') -Raw
+        foreach ($requiredText in @('Name="SteamInputAddonforClaw.FseHome"', 'Id="App"', 'windows.gamingApp', 'Microsoft.appCategory.gamingHome_8wekyb3d8bbwe')) {
+            if ($finalManifest -notmatch [regex]::Escape($requiredText)) {
+                throw "Final FSE Home package manifest is missing required content: $requiredText"
+            }
+        }
+
+        $sourceXml = [System.Xml.Linq.XDocument]::Parse($sourceManifest)
+        $finalXml = [System.Xml.Linq.XDocument]::Parse($finalManifest)
+        $sourceIdentity = $sourceXml.Root.Elements() | Where-Object { $_.Name.LocalName -eq 'Identity' } | Select-Object -First 1
+        $finalIdentity = $finalXml.Root.Elements() | Where-Object { $_.Name.LocalName -eq 'Identity' } | Select-Object -First 1
+        if ($null -eq $sourceIdentity -or $null -eq $finalIdentity) { throw 'FSE Home package identity could not be parsed.' }
+        foreach ($attribute in @('Name', 'Publisher', 'ProcessorArchitecture')) {
+            $sourceAttribute = $sourceIdentity.Attribute($attribute)
+            $finalAttribute = $finalIdentity.Attribute($attribute)
+            $sourceValue = if ($null -eq $sourceAttribute) { $null } else { $sourceAttribute.Value }
+            $finalValue = if ($null -eq $finalAttribute) { $null } else { $finalAttribute.Value }
+            if ($sourceValue -ne $finalValue) {
+                throw "Final FSE Home package identity attribute '$attribute' does not match the source manifest."
+            }
+        }
+        $finalVersionAttribute = $finalIdentity.Attribute('Version')
+        $finalVersion = if ($null -eq $finalVersionAttribute) { $null } else { $finalVersionAttribute.Value }
+        if ($ExpectedFsePackageVersion -and $finalVersion -ne $ExpectedFsePackageVersion) {
+            throw "Final FSE Home package version '$finalVersion' does not match expected version '$ExpectedFsePackageVersion'."
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $unpackDirectory 'CustomCapability.SCCD') -PathType Leaf)) {
+            throw 'Final FSE Home package does not contain CustomCapability.SCCD.'
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $unpackDirectory) {
+            Remove-Item -LiteralPath $unpackDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 $uiDirectory = Join-Path $PublishDirectory 'ui'

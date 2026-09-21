@@ -65,6 +65,6 @@ $manifest = $manifest.Replace('__PACKAGE_VERSION__', $packageVersion)
 Set-Content -LiteralPath (Join-Path $packageOutput 'AppxManifest.xml') -Value $manifest -Encoding UTF8
 Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\CustomCapability.SCCD') (Join-Path $packageOutput 'CustomCapability.SCCD') -Force
 Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\Public\README.txt') (Join-Path $packagePublicOutput 'README.txt') -Force
-Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw\Assets\AppIcon.ico') (Join-Path $packageAssetsOutput 'AppIcon.ico') -Force
+Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw\Assets\AppIcon.png') (Join-Path $packageAssetsOutput 'AppIcon.png') -Force
 
 Write-Host "Published Runtime, external UI, QAM, Overlay, and FSE Home layout at $runtimeOutput with version $Version."
