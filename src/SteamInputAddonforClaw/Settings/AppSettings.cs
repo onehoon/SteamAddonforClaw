@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
@@ -23,6 +24,9 @@ public sealed record AppSettings(
     /// first-install defaults.
     /// </summary>
     public FrontButtonMappingSettings FrontButtonMapping { get; init; } = FrontButtonMappingSettings.Default;
+
+    /// <summary>Global Xbox360-only mapping for the physical Full1902 M1/M2 rear buttons.</summary>
+    public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
 
     /// <summary>
     /// The order of the five fixed top-level Overlay tabs. Same init-only compatibility pattern as

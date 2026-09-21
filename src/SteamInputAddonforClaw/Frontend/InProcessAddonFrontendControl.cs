@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.CenterMStartup;
@@ -328,7 +329,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(false, new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
     private FrontendGameProfileMutationResult UnavailableMutation(uint appId, string message) => new(FrontendGameProfileMutationOutcome.Unavailable, message, CaptureGameProfile(appId));
 
-    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), new(_developer.IsEnabled), AppLog.DirectoryPath, _frontButtonMappingAvailable));
+    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), new(_developer.IsEnabled), AppLog.DirectoryPath, _frontButtonMappingAvailable) { BackButtonMappingAvailable = _frontButtonMappingAvailable });
 
     public Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default)
     {
@@ -394,6 +395,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         // Invalid candidates are rejected inside ChangeFrontButtonMapping (no write, no publish); the
         // snapshot below then just reflects the unchanged persisted state.
         _settings.ChangeFrontButtonMapping(mapping);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(MapSettings());
+    }
+
+    public Task<FrontendSettingsSnapshot> SetBackButtonMappingAsync(BackButtonMappingSettings mapping, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+        ThrowIfShuttingDown();
+        // Invalid candidates are rejected inside ChangeBackButtonMapping; the returned snapshot
+        // therefore always reflects the unchanged persisted value when validation fails.
+        _settings.ChangeBackButtonMapping(mapping);
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(MapSettings());
     }
@@ -993,7 +1005,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1

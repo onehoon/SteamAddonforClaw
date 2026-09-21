@@ -106,7 +106,10 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // firmware restart, and adds the Windows Gaming Full Screen Experience capture and mutation RPCs.
 // Version 37: both contracts are present in the current wire contract, so a v36 peer must fail
 // the handshake before either operation is used.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 37; }
+// Version 38: Full1902 M1/M2 Xbox360 mapping adds BackButtonMapping to settings/bootstrap and
+// one atomic SetBackButtonMapping RPC. A v37 peer must fail the handshake before the new contract
+// can be misinterpreted. Pre-release: no compatibility shim.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 38; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -138,7 +141,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, CaptureAppUpdate, CheckAndDownloadAppUpdate, InstallAppUpdate, SetFrontButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, RequestEnterBios, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder, MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled, SetDeviceBatteryChargeLimitPercent, AcknowledgeQamSelectAddonOnNextOpenPrepared, SetQuickSettingsCurrentPowerSourceOnly, CaptureSteamFse, SetSteamFseEnabled }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, CaptureAppUpdate, CheckAndDownloadAppUpdate, InstallAppUpdate, SetFrontButtonMapping, SetBackButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, RequestEnterBios, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder, MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled, SetDeviceBatteryChargeLimitPercent, AcknowledgeQamSelectAddonOnNextOpenPrepared, SetQuickSettingsCurrentPowerSourceOnly, CaptureSteamFse, SetSteamFseEnabled }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested, SelectAddonOnNextQuickAccessOpenRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -147,6 +150,7 @@ internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetQuickSettingsCurrentPowerSourceOnlyRequest(bool Enabled);
 internal sealed record SetSteamFseEnabledRequest(bool Enabled);
 internal sealed record SetFrontButtonMappingRequest(SteamInputAddonforClaw.Contracts.FrontButtons.FrontButtonMappingSettings Mapping);
+internal sealed record SetBackButtonMappingRequest(SteamInputAddonforClaw.Contracts.BackButtons.BackButtonMappingSettings Mapping);
 internal sealed record SetDeveloperTestModeRequest(bool Enabled);
 internal sealed record StartClawSensorProbeRequest(FrontendClawSensorProbeMode Mode);
 internal sealed record RunFanProbeRequest(FrontendFanProbeOperation Operation);

@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 
@@ -207,6 +208,7 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
 {
     public bool DeveloperMenuEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
+    public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
 }
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
 
@@ -273,7 +275,12 @@ public sealed record FrontendEnterBiosResult(
 /// condition -- a machine that is not a recognized Claw reports false while its saved mapping stays
 /// untouched. A startup fact, so it lives on bootstrap rather than on the settings snapshot every
 /// setter returns.</param>
-public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool FrontButtonMappingAvailable);
+public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool FrontButtonMappingAvailable)
+{
+    /// <summary>Whether the supported Full1902 M1/M2 physical input contract exists on this machine.
+    /// This is the same stable startup hardware fact as FrontButtonMappingAvailable.</summary>
+    public bool BackButtonMappingAvailable { get; init; }
+}
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
 public sealed record FrontendDeviceSnapshot(string Manufacturer, string Model, string BaseBoard, IReadOnlyList<string> GpuModels);
@@ -442,6 +449,9 @@ public interface IAddonFrontendControl
     /// belongs to one whole mapping. An invalid candidate is rejected by the settings layer and the
     /// returned snapshot reflects the unchanged persisted state.</summary>
     Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(FrontButtonMappingSettings mapping, CancellationToken cancellationToken = default);
+    /// <summary>Persists the complete global Xbox360 M1/M2 mapping as one atomic setting. An invalid
+    /// candidate is rejected by the settings layer and the returned snapshot keeps the current value.</summary>
+    Task<FrontendSettingsSnapshot> SetBackButtonMappingAsync(BackButtonMappingSettings mapping, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default);
     Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default);
     /// <summary>Captures the current MSI Center M startup configuration (work order PR1). Read-only:
