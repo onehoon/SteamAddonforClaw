@@ -1,5 +1,6 @@
 using Velopack;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Hosting;
 using SteamInputAddonforClaw.Lifecycle;
@@ -43,6 +44,11 @@ public static class Program
             if (args.Contains(ElevatedStartupTaskSetup.RemoveArgument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = ElevatedStartupTaskSetup.RunRemove(args);
+                return;
+            }
+            if (FirmwareRestartHelper.TryRun(args, out var helperExitCode))
+            {
+                Environment.ExitCode = helperExitCode;
                 return;
             }
 

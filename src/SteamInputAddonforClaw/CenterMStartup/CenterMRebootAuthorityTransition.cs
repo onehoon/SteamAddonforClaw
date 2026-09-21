@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
@@ -33,17 +32,16 @@ internal sealed record StockRestorationResult(bool Succeeded, string Reason, Fro
 
 /// <summary>The one Runtime-owned Windows-restart seam for the reboot-bound authority transition
 /// (work order PR3 section 10). Production issues a normal local interactive-user restart
-/// (<c>shutdown.exe /r /t 0</c>) -- no <c>/f</c>, no privileged reboot helper.</summary>
+/// (<c>shutdown.exe /r /t 0</c>) and uses the narrow Enter BIOS helper handshake for the
+/// firmware restart.</summary>
 internal interface IWindowsRestartRequester
 {
     WindowsRestartRequestResult RequestRestart();
-    WindowsRestartRequestResult RequestFirmwareRestart();
+    Task<FirmwareRestartAuthorizationResult> PrepareFirmwareRestartAsync(CancellationToken cancellationToken);
 }
 
 internal sealed class WindowsRestartRequester : IWindowsRestartRequester
 {
-    private const int ErrorCancelled = 1223; // ERROR_CANCELLED -- the UAC consent prompt was dismissed.
-
     public WindowsRestartRequestResult RequestRestart()
     {
         try
@@ -78,41 +76,8 @@ internal sealed class WindowsRestartRequester : IWindowsRestartRequester
         }
     }
 
-    public WindowsRestartRequestResult RequestFirmwareRestart()
-    {
-        try
-        {
-            using var started = Process.Start(new ProcessStartInfo("shutdown.exe", "/r /fw /t 0")
-            {
-                UseShellExecute = true,
-                Verb = "runas",
-            });
-            if (started is null) return WindowsRestartRequestResult.Failed;
-
-            if (!started.WaitForExit(milliseconds: 5000))
-            {
-                AppLog.Warn("CenterM.Authority", "Windows firmware restart command did not complete within the expected window.");
-                return WindowsRestartRequestResult.Failed;
-            }
-            if (started.ExitCode != 0)
-            {
-                AppLog.Warn("CenterM.Authority", "Windows firmware restart command failed.", null, ("ExitCode", started.ExitCode));
-                return WindowsRestartRequestResult.Failed;
-            }
-            return WindowsRestartRequestResult.Requested;
-        }
-        catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
-        {
-            AppLog.Warn("CenterM.Authority", "Windows firmware restart authorization was cancelled.", null,
-                ("ErrorCode", exception.NativeErrorCode));
-            return WindowsRestartRequestResult.Failed;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("CenterM.Authority", "Windows firmware restart request could not be started.", exception);
-            return WindowsRestartRequestResult.Failed;
-        }
-    }
+    public Task<FirmwareRestartAuthorizationResult> PrepareFirmwareRestartAsync(CancellationToken cancellationToken) =>
+        new FirmwareRestartHelperClient().PrepareAsync(cancellationToken);
 }
 
 internal interface ICenterMRebootAuthorityTransition
@@ -256,6 +221,14 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
             // Cancellation is honored only before the confirmed Runtime-owned mutation begins.
             cancellationToken.ThrowIfCancellationRequested();
 
+            var authorization = await _restartRequester.PrepareFirmwareRestartAsync(cancellationToken).ConfigureAwait(false);
+            if (authorization.Outcome == FirmwareRestartAuthorizationOutcome.Cancelled)
+                return EnterBiosBlocked(authorization.FailureMessage ?? "Enter BIOS was cancelled before the controller transition began.");
+            if (!authorization.Succeeded)
+                return EnterBiosFailed(authorization.FailureMessage ?? "The elevated firmware restart helper could not be authorized.");
+
+            await using var firmwareSession = authorization.Session!;
+
             var release = await _releasePhysicalOwnershipForFirmwareRestart(CancellationToken.None).ConfigureAwait(false);
             AppLog.Info("CenterM.Authority", "Enter BIOS physical release completed.",
                 ("Event", release.Succeeded ? "EnterBiosPhysicalReleaseCompleted" : "EnterBiosPhysicalReleaseFailed"),
@@ -271,7 +244,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
             if (!stock.Succeeded)
                 return EnterBiosFailed("The controller's XInput state could not be verified. BIOS restart was not requested.");
 
-            var restart = _restartRequester.RequestFirmwareRestart();
+            var restart = await firmwareSession.RequestRestartAsync(CancellationToken.None).ConfigureAwait(false);
             if (restart == WindowsRestartRequestResult.Requested)
             {
                 AppLog.Info("CenterM.Authority", "Firmware restart requested.", ("Event", "EnterBiosFirmwareRestartRequested"));
