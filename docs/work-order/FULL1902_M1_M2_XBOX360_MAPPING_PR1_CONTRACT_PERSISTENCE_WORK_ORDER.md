@@ -4,18 +4,18 @@
 
 Implementation work order for PR1 of the global M1/M2 back-button mapping feature.
 
-Baseline reviewed against current \`main\`:
+Baseline reviewed against current `main`:
 
-\`\`\`text
+```text
 a6682acb3651cdd488fd78c0a2a3ed859b6c97df
 Add Steam BPM Windows FSE toggle (#553)
-\`\`\`
+```
 
 This PR is **foundation only**. It must not change any controller output behavior.
 
 Planned sequence:
 
-\`\`\`text
+```text
 PR1  Contract + persistence + frontend transport foundation      [this PR]
  ↓
 PR2  Xbox360 M1/M2 software mapping
@@ -23,7 +23,7 @@ PR2  Xbox360 M1/M2 software mapping
 PR3  Xbox360 ↔ SteamDeck held-button release-to-rearm safety
  ↓
 PR4  Controller-page UI
-\`\`\`
+```
 
 The application is pre-release. Do not add compatibility shims for an unreleased back-button schema.
 
@@ -33,17 +33,17 @@ The application is pre-release. Do not add compatibility shims for an unreleased
 
 Read these documents before implementation:
 
-\`\`\`text
+```text
 docs/Full 1902 Implementation/README.md
 docs/Full 1902 Implementation/FULL_1902_IMPLEMENTATION_ARCHITECTURE.md
 docs/Full 1902 Implementation/HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md
 docs/appui/APP_UI_INFORMATION_ARCHITECTURE_2026-09-04.md
 docs/RE_MSI_PID1902_M1_M2_BackButton.md
-\`\`\`
+```
 
 Relevant current Full1902 policy:
 
-\`\`\`text
+```text
 Center M Disabled
 → physical PID1902 owned by Addon Runtime
 → one DirectInput source
@@ -54,11 +54,11 @@ Steam/BPM inactive
 
 Steam game or BPM active
 → SteamDeck presentation
-\`\`\`
+```
 
 M1/M2 are already captured from the physical PID1902 DirectInput source:
 
-\`\`\`text
+```text
 Buttons[15] = M1
 Buttons[16] = M2
         ↓
@@ -68,18 +68,18 @@ ControllerState.Auxiliary
         ↓
 M1 = RightRear
 M2 = LeftRear
-\`\`\`
+```
 
 Current virtual behavior is intentionally split:
 
-\`\`\`text
+```text
 Xbox360DeviceStateMapper
 → M1/M2 currently ignored
 
 SteamDeckDeviceStateMapper
 → M1 → R4
 → M2 → L4
-\`\`\`
+```
 
 PR1 must preserve all of that behavior exactly.
 
@@ -91,21 +91,21 @@ Introduce one global persisted contract describing what M1 and M2 should become 
 
 After PR1, the application must be capable of storing and transporting:
 
-\`\`\`text
+```text
 M1 = Disabled | Xbox360 target
 M2 = Disabled | Xbox360 target
-\`\`\`
+```
 
-but pressing M1/M2 must still produce exactly the same controller output as current \`main\`.
+but pressing M1/M2 must still produce exactly the same controller output as current `main`.
 
 In particular:
 
-\`\`\`text
+```text
 PR1 does NOT make M1=A work yet.
 PR1 does NOT alter SteamDeck R4/L4 behavior.
 PR1 does NOT add held-button transition handling.
 PR1 does NOT add UI.
-\`\`\`
+```
 
 Those belong to later PRs.
 
@@ -126,7 +126,7 @@ The mapping is:
 
 Example future behavior, implemented only in PR2+:
 
-\`\`\`text
+```text
 Saved:
 M1 = A
 M2 = RightBumper
@@ -138,22 +138,22 @@ M2 → RB
 SteamDeck presentation:
 M1 → R4
 M2 → L4
-\`\`\`
+```
 
-The saved Xbox360 mapping must never redefine the physical meaning of \`ControllerState.Auxiliary\`.
+The saved Xbox360 mapping must never redefine the physical meaning of `ControllerState.Auxiliary`.
 
 ---
 
 ## 4. Do not merge this into FrontButtonMappingSettings
 
-Current \`FrontButtonMappingSettings\` owns a different product concept:
+Current `FrontButtonMappingSettings` owns a different product concept:
 
-\`\`\`text
+```text
 Gamebar Button
 Center M Button
 ×
 Normal / Steam Game-Big Picture action domains
-\`\`\`
+```
 
 M1/M2 are not another pair of front-button action-domain bindings.
 
@@ -161,11 +161,11 @@ They are rear physical controls whose future mapping is an Xbox360 gamepad proje
 
 Therefore create a separate contract, for example under:
 
-\`\`\`text
+```text
 src/SteamInputAddonforClaw.Contracts/BackButtons/
-\`\`\`
+```
 
-Do not expand \`FrontButtonMappingSettings\` with M1/M2 members.
+Do not expand `FrontButtonMappingSettings` with M1/M2 members.
 
 Do not add Normal/Steam domains to the M1/M2 setting.
 
@@ -175,7 +175,7 @@ Do not add Normal/Steam domains to the M1/M2 setting.
 
 Preferred shape:
 
-\`\`\`csharp
+```csharp
 namespace SteamInputAddonforClaw.Contracts.BackButtons;
 
 public enum Xbox360BackButtonTarget
@@ -214,7 +214,7 @@ public sealed record BackButtonMappingSettings(
     public static BackButtonMappingSettings Default { get; } =
         new(Xbox360BackButtonTarget.Disabled, Xbox360BackButtonTarget.Disabled);
 }
-\`\`\`
+```
 
 Equivalent naming is acceptable if it remains narrow and explicit that these are Xbox360 targets.
 
@@ -243,14 +243,14 @@ Unlike the front-button mapping, M1 and M2 are allowed to target the same X360 c
 
 This must be valid:
 
-\`\`\`text
+```text
 M1 = A
 M2 = A
-\`\`\`
+```
 
 PR2 will use additive/OR semantics so either physical rear button can assert the same virtual control.
 
-Do not copy the \`FrontButtonMappingSettings\` same-domain uniqueness rule.
+Do not copy the `FrontButtonMappingSettings` same-domain uniqueness rule.
 
 ---
 
@@ -260,7 +260,7 @@ Add one small shared validation policy in the BackButtons contract area.
 
 Conceptually:
 
-\`\`\`csharp
+```csharp
 public static class BackButtonMappingValidation
 {
     public static bool IsValid(BackButtonMappingSettings? mapping)
@@ -280,7 +280,7 @@ public static class BackButtonMappingValidation
         return null;
     }
 }
-\`\`\`
+```
 
 Exact reason names may differ.
 
@@ -289,7 +289,7 @@ Required rules:
 - null mapping is invalid;
 - undefined/numeric-out-of-range M1 is invalid;
 - undefined/numeric-out-of-range M2 is invalid;
-- \`Disabled\` is valid;
+- `Disabled` is valid;
 - both buttons using the same valid target is valid;
 - no presentation/runtime state is consulted during validation.
 
@@ -299,16 +299,16 @@ Do not create a generic mapping framework.
 
 ## 7. AppSettings persistence
 
-Extend the existing Runtime-owned \`AppSettings\`.
+Extend the existing Runtime-owned `AppSettings`.
 
 Preferred shape:
 
-\`\`\`csharp
+```csharp
 public BackButtonMappingSettings BackButtonMapping { get; init; }
     = BackButtonMappingSettings.Default;
-\`\`\`
+```
 
-Use the existing \`settings.json\`.
+Use the existing `settings.json`.
 
 Do not create:
 
@@ -323,32 +323,32 @@ The setting belongs beside the existing global controller preferences.
 
 ## 8. SettingsStore load policy
 
-Add a feature-isolated reader equivalent in spirit to \`ReadFrontButtonMapping(...)\`, for example:
+Add a feature-isolated reader equivalent in spirit to `ReadFrontButtonMapping(...)`, for example:
 
-\`\`\`csharp
+```csharp
 private static BackButtonMappingSettings ReadBackButtonMapping(JsonElement root)
-\`\`\`
+```
 
-Important: because \`Disabled == 0\`, ordinary deserialization of a missing enum member could accidentally make an incomplete object look valid.
+Important: because `Disabled == 0`, ordinary deserialization of a missing enum member could accidentally make an incomplete object look valid.
 
 Therefore the reader must explicitly prove that both required members exist.
 
 Required persisted shape:
 
-\`\`\`json
+```json
 {
   "BackButtonMapping": {
     "M1": "Disabled",
     "M2": "Disabled"
   }
 }
-\`\`\`
+```
 
 Loading must require:
 
-- \`BackButtonMapping\` exists and is an object;
-- \`M1\` exists;
-- \`M2\` exists;
+- `BackButtonMapping` exists and is an object;
+- `M1` exists;
+- `M2` exists;
 - each value is a string enum name;
 - numeric enum values are rejected;
 - unknown names are rejected;
@@ -356,16 +356,16 @@ Loading must require:
 
 If any of those checks fail:
 
-\`\`\`text
+```text
 only BackButtonMapping
 → BackButtonMappingSettings.Default
-\`\`\`
+```
 
 Unrelated settings must remain loaded normally.
 
 Examples:
 
-\`\`\`text
+```text
 missing BackButtonMapping
 → M1=Disabled, M2=Disabled
 
@@ -380,7 +380,7 @@ numeric M1 target
 
 malformed BackButtonMapping object
 → whole BackButtonMapping defaults
-\`\`\`
+```
 
 Do not reset LogLevel, FrontButtonMapping, OverlayTabOrder, battery settings, or other unrelated preferences because this feature's value is malformed.
 
@@ -396,19 +396,19 @@ Do not add migration code from:
 - firmware EEPROM values;
 - hypothetical old Addon keys.
 
-Absent data simply means \`BackButtonMappingSettings.Default\`.
+Absent data simply means `BackButtonMappingSettings.Default`.
 
 ---
 
 ## 9. SettingsStore save policy
 
-Extend the one existing payload written by \`SettingsStore.Save(...)\`.
+Extend the one existing payload written by `SettingsStore.Save(...)`.
 
-The new member must round-trip as enum names through the current \`JsonStringEnumConverter\` policy.
+The new member must round-trip as enum names through the current `JsonStringEnumConverter` policy.
 
 Conceptually:
 
-\`\`\`csharp
+```csharp
 var payload = new
 {
     ...,
@@ -416,7 +416,7 @@ var payload = new
     settings.BackButtonMapping,
     ...
 };
-\`\`\`
+```
 
 Do not add a special BackButton JSON writer unless the current serializer cannot satisfy the required string-enum output.
 
@@ -428,20 +428,20 @@ Keep the existing temporary-file + overwrite save path.
 
 Expose the current value from the existing settings owner:
 
-\`\`\`csharp
+```csharp
 public BackButtonMappingSettings BackButtonMapping
     => Settings.BackButtonMapping;
-\`\`\`
+```
 
 Add one whole-record mutation, for example:
 
-\`\`\`csharp
+```csharp
 public bool ChangeBackButtonMapping(BackButtonMappingSettings mapping)
-\`\`\`
+```
 
 Required mutation policy:
 
-\`\`\`text
+```text
 validate candidate
 → invalid: reject, no write, Settings unchanged
 
@@ -452,22 +452,22 @@ valid changed candidate
 → build next AppSettings
 → save next
 → only after save succeeds assign Settings = next
-\`\`\`
+```
 
 This is the same save-then-current principle already used by current settings mutations.
 
-Do not silently repair an invalid target into \`Disabled\` on a direct mutation request. Load-time malformed persistence falls back to default; mutation-time invalid input is rejected.
+Do not silently repair an invalid target into `Disabled` on a direct mutation request. Load-time malformed persistence falls back to default; mutation-time invalid input is rejected.
 
 ### 10.1 No unused runtime abstraction in PR1
 
 Do not add a new:
 
-\`\`\`text
+```text
 BackButtonManager
 BackButtonRuntime
 BackButtonMappingService
 BackButtonOutputCoordinator
-\`\`\`
+```
 
 PR1 has no output consumer.
 
@@ -477,22 +477,22 @@ A narrow runtime read interface/event should be introduced in PR2 only if the re
 
 ## 11. Frontend settings contract
 
-Expose the same \`BackButtonMappingSettings\` type through \`FrontendSettingsSnapshot\`.
+Expose the same `BackButtonMappingSettings` type through `FrontendSettingsSnapshot`.
 
 Do not create a second frontend-shaped copy of the mapping enum/record.
 
 Preferred low-churn shape:
 
-\`\`\`csharp
+```csharp
 public sealed record FrontendSettingsSnapshot(...)
 {
     ...
     public BackButtonMappingSettings BackButtonMapping { get; init; }
         = BackButtonMappingSettings.Default;
 }
-\`\`\`
+```
 
-Then \`InProcessAddonFrontendControl.MapSettings()\` must populate the actual persisted value.
+Then `InProcessAddonFrontendControl.MapSettings()` must populate the actual persisted value.
 
 A fresh bootstrap must therefore carry the current M1/M2 mapping before PR4 UI exists.
 
@@ -502,43 +502,43 @@ A fresh bootstrap must therefore carry the current M1/M2 mapping before PR4 UI e
 
 Add one whole-record RPC:
 
-\`\`\`csharp
+```csharp
 Task<FrontendSettingsSnapshot> SetBackButtonMappingAsync(
     BackButtonMappingSettings mapping,
     CancellationToken cancellationToken = default);
-\`\`\`
+```
 
 Use one request record:
 
-\`\`\`csharp
+```csharp
 internal sealed record SetBackButtonMappingRequest(
     BackButtonMappingSettings Mapping);
-\`\`\`
+```
 
 and one enum method:
 
-\`\`\`text
+```text
 FrontendRpcMethod.SetBackButtonMapping
-\`\`\`
+```
 
 Required in-process behavior:
 
-\`\`\`text
+```text
 SetBackButtonMappingAsync(candidate)
 → ThrowIfShuttingDown()
 → ChangeBackButtonMapping(candidate)
 → StateInvalidated
 → return MapSettings()
-\`\`\`
+```
 
 If validation rejects the candidate, the returned settings snapshot must reflect the unchanged persisted mapping.
 
 Do not create separate:
 
-\`\`\`text
+```text
 SetM1Mapping
 SetM2Mapping
-\`\`\`
+```
 
 RPCs.
 
@@ -550,20 +550,20 @@ The pair is one atomic user setting.
 
 Wire the new RPC through the current transport:
 
-\`\`\`text
+```text
 IAddonFrontendControl
 NamedPipeAddonFrontendClient
 FrontendRpcMethod
 SetBackButtonMappingRequest
 NamedPipeAddonFrontendServer
 InProcessAddonFrontendControl
-\`\`\`
+```
 
 Do not invent a second pipe or transport endpoint.
 
 No QAM-specific or Overlay-specific pipe contract is needed for this PR.
 
-Any test fake implementing \`IAddonFrontendControl\` that requires a method stub should be updated mechanically.
+Any test fake implementing `IAddonFrontendControl` that requires a method stub should be updated mechanically.
 
 ---
 
@@ -571,9 +571,9 @@ Any test fake implementing \`IAddonFrontendControl\` that requires a method stub
 
 Current reviewed baseline:
 
-\`\`\`text
+```text
 FrontendTransportProtocol.CurrentVersion = 37
-\`\`\`
+```
 
 PR1 adds:
 
@@ -583,18 +583,18 @@ PR1 adds:
 
 Bump exactly once:
 
-\`\`\`text
+```text
 37 → 38
-\`\`\`
+```
 
 Add the version history comment explaining the new BackButtonMapping contract.
 
 Pre-release policy:
 
-\`\`\`text
+```text
 v37 peer
 → fail handshake against v38
-\`\`\`
+```
 
 Do not add a v37 compatibility shim.
 
@@ -606,15 +606,15 @@ The future Controller UI should not infer capability from Steam/BPM state or cur
 
 Add one bootstrap capability fact:
 
-\`\`\`text
+```text
 FrontendBootstrapSnapshot.BackButtonMappingAvailable
-\`\`\`
+```
 
 Its meaning:
 
 > the detected machine is a supported MSI Claw for which the Full1902 physical input contract includes M1/M2.
 
-For the current supported product scope this should use the same startup hardware-support fact already used to establish \`FrontButtonMappingAvailable\`.
+For the current supported product scope this should use the same startup hardware-support fact already used to establish `FrontButtonMappingAvailable`.
 
 Do not add another hardware probe.
 
@@ -629,7 +629,7 @@ Do not gate it on:
 
 It is a stable hardware/product capability fact for the current process bootstrap.
 
-To minimize constructor churn, an init-only property on \`FrontendBootstrapSnapshot\` is acceptable if consistent with current contract style.
+To minimize constructor churn, an init-only property on `FrontendBootstrapSnapshot` is acceptable if consistent with current contract style.
 
 ---
 
@@ -637,22 +637,22 @@ To minimize constructor churn, an init-only property on \`FrontendBootstrapSnaps
 
 Do not modify:
 
-\`\`\`text
+```text
 src/SteamInputAddonforClaw/Input/ControllerState.cs
 src/SteamInputAddonforClaw/Input/AuxiliaryButtonState.cs
 src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawControllerStateMapper.cs
 src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawInputSource.cs
-\`\`\`
+```
 
 Current physical mapping remains:
 
-\`\`\`text
+```text
 M1 physical press
 → ControllerState.Auxiliary[RightRear]
 
 M2 physical press
 → ControllerState.Auxiliary[LeftRear]
-\`\`\`
+```
 
 The saved target must not be applied at this layer.
 
@@ -664,23 +664,23 @@ PR2 will consume the raw state at the X360 output boundary.
 
 Do not modify:
 
-\`\`\`text
+```text
 src/SteamInputAddonforClaw/VirtualOutput/Viiper/Xbox360DeviceStateMapper.cs
 src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalXbox360InputPublisher.cs
 src/SteamInputAddonforClaw/VirtualOutput/Viiper/SteamDeckDeviceStateMapper.cs
 src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckInputPublisher.cs
-\`\`\`
+```
 
 After PR1:
 
-\`\`\`text
+```text
 Xbox360:
 M1/M2 still have no effect
 
 SteamDeck:
 M1 → R4 unchanged
 M2 → L4 unchanged
-\`\`\`
+```
 
 Keep the existing Xbox360 test that proves auxiliary M1/M2 do not affect the X360 result.
 
@@ -692,7 +692,7 @@ That test should change only in PR2.
 
 Do not modify M1/M2 behavior in:
 
-\`\`\`text
+```text
 MsiClawAddonPresentation
 AddonProcessHost controller presentation reconcile
 Suspend/Resume presentation pause
@@ -702,7 +702,7 @@ HidHide
 PID1901/PID1902 switching
 VIIPER attach/detach
 rumble feedback
-\`\`\`
+```
 
 PR3 owns held-button release-to-rearm behavior across X360 ↔ SteamDeck transitions.
 
@@ -718,12 +718,12 @@ That path is **not** this feature.
 
 Do not issue:
 
-\`\`\`text
+```text
 WriteProfile
 SyncToROM
 M1 slot write
 M2 slot write
-\`\`\`
+```
 
 from settings load or mutation.
 
@@ -731,11 +731,11 @@ Do not change the firmware profile to A/B/etc.
 
 Reason:
 
-\`\`\`text
+```text
 firmware remap
 → persists below the Addon's presentation boundary
 → can affect behavior outside the intended X360-only software projection
-\`\`\`
+```
 
 The desired product contract is software mapping at the virtual X360 output layer, implemented in PR2.
 
@@ -745,13 +745,13 @@ The desired product contract is software mapping at the virtual X360 output laye
 
 Do not modify:
 
-\`\`\`text
+```text
 ProfileStore
 GameProfile
 GameProfileMutations
 active-game reconcile
 Profile UI
-\`\`\`
+```
 
 There is intentionally one global M1 mapping and one global M2 mapping.
 
@@ -763,13 +763,13 @@ Per-game overrides are a future decision only if a concrete need is established.
 
 Expected new file:
 
-\`\`\`text
+```text
 src/SteamInputAddonforClaw.Contracts/BackButtons/BackButtonMapping.cs
-\`\`\`
+```
 
 Expected existing production files:
 
-\`\`\`text
+```text
 src/SteamInputAddonforClaw/Settings/AppSettings.cs
 src/SteamInputAddonforClaw/Settings/SettingsStore.cs
 src/SteamInputAddonforClaw/Settings/StartupSettingsCoordinator.cs
@@ -780,9 +780,9 @@ src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs
 src/SteamInputAddonforClaw.FrontendTransport/FrontendWire.cs
 src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs
 src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendServer.cs
-\`\`\`
+```
 
-Additional compile-only updates to tests/fakes implementing \`IAddonFrontendControl\` are expected.
+Additional compile-only updates to tests/fakes implementing `IAddonFrontendControl` are expected.
 
 Do not broaden the PR because nearby controller code looks convenient to change.
 
@@ -794,44 +794,44 @@ Do not broaden the PR because nearby controller code looks convenient to change.
 
 Prove:
 
-\`\`\`text
+```text
 BackButtonMappingSettings.Default.M1 == Disabled
 BackButtonMappingSettings.Default.M2 == Disabled
-\`\`\`
+```
 
 ### 22.2 Validation
 
 Cover:
 
-\`\`\`text
+```text
 null                         → invalid
 M1 undefined enum           → invalid
 M2 undefined enum           → invalid
 M1 Disabled / M2 Disabled   → valid
 M1 A / M2 RB                → valid
 M1 A / M2 A                 → valid
-\`\`\`
+```
 
 The last case is important: duplicates are intentionally permitted.
 
 ### 22.3 Settings missing value
 
-Given an existing settings file with no \`BackButtonMapping\`:
+Given an existing settings file with no `BackButtonMapping`:
 
-\`\`\`text
+```text
 Load
 → BackButtonMappingSettings.Default
 → unrelated settings preserved
-\`\`\`
+```
 
 ### 22.4 Settings round-trip
 
 Save a non-default mapping, for example:
 
-\`\`\`text
+```text
 M1 = A
 M2 = RightBumper
-\`\`\`
+```
 
 Reload and prove exact equality.
 
@@ -841,7 +841,7 @@ Also assert persisted JSON uses enum names, not integer values.
 
 Cover at least:
 
-\`\`\`text
+```text
 BackButtonMapping = string
 missing M1
 missing M2
@@ -849,20 +849,20 @@ unknown M1
 unknown M2
 numeric M1
 numeric M2
-\`\`\`
+```
 
 Each must:
 
-\`\`\`text
+```text
 default only BackButtonMapping
 preserve unrelated setting(s)
-\`\`\`
+```
 
 ### 22.6 Coordinator mutation
 
 Prove:
 
-\`\`\`text
+```text
 valid changed mapping
 → saved
 → current Settings updated
@@ -874,65 +874,65 @@ invalid mapping
 → false/rejected
 → no file mutation
 → Settings unchanged
-\`\`\`
+```
 
 Do not require an output-runtime notification in PR1.
 
 ### 22.7 Frontend settings snapshot
 
-Prove \`FrontendSettingsSnapshot\` JSON round-trips a non-default \`BackButtonMapping\`.
+Prove `FrontendSettingsSnapshot` JSON round-trips a non-default `BackButtonMapping`.
 
 ### 22.8 Bootstrap capability
 
-Prove \`BackButtonMappingAvailable\` round-trips and reflects the supplied startup hardware-support fact.
+Prove `BackButtonMappingAvailable` round-trips and reflects the supplied startup hardware-support fact.
 
 ### 22.9 In-process RPC
 
 Given a valid mapping:
 
-\`\`\`text
+```text
 SetBackButtonMappingAsync
 → coordinator contains new mapping
 → returned FrontendSettingsSnapshot contains new mapping
-\`\`\`
+```
 
 Given an invalid enum candidate:
 
-\`\`\`text
+```text
 RPC returns snapshot
 → persisted/current mapping remains unchanged
-\`\`\`
+```
 
 ### 22.10 Named-pipe transport
 
 Add a focused round-trip test:
 
-\`\`\`text
+```text
 client SetBackButtonMappingAsync
 → wire request
 → server dispatch
 → fake/in-process control receives exact mapping
 → response carries exact mapping
-\`\`\`
+```
 
 ### 22.11 Protocol
 
 Update protocol assertions:
 
-\`\`\`text
+```text
 CurrentVersion == 38
 SetBackButtonMapping exists
 SetBackButtonMappingRequest carries BackButtonMappingSettings
-\`\`\`
+```
 
 ### 22.12 No-output regression
 
 Keep current tests proving:
 
-\`\`\`text
+```text
 Xbox360 mapper ignores Auxiliary M1/M2
 SteamDeck mapper maps M1→R4 / M2→L4
-\`\`\`
+```
 
 PR1 must not modify those expectations.
 
@@ -944,14 +944,14 @@ Keep logs settings-level and transition-only.
 
 Useful examples:
 
-\`\`\`text
+```text
 Settings
   Back-button mapping loaded
   Back-button mapping missing; using defaults
   Back-button mapping invalid; using defaults
   Rejected invalid back-button mapping candidate
   Back-button mapping saved
-\`\`\`
+```
 
 Do not log every M1/M2 press.
 
@@ -965,7 +965,7 @@ This is a simple settings/transport foundation.
 
 Do not add:
 
-\`\`\`text
+```text
 BackButtonManager
 MappingEngine
 ControllerLayoutManager
@@ -979,11 +979,11 @@ generic input-action abstraction
 new synchronization primitive
 new background worker
 new polling loop
-\`\`\`
+```
 
 The actual product architecture already has:
 
-\`\`\`text
+```text
 raw ControllerState
 Xbox360 mapper
 SteamDeck mapper
@@ -991,7 +991,7 @@ one presentation owner
 one SettingsStore
 one StartupSettingsCoordinator
 one frontend pipe contract
-\`\`\`
+```
 
 Use those owners.
 
@@ -1002,7 +1002,7 @@ Use those owners.
 Explicitly out of scope for PR1:
 
 - applying M1/M2 mappings to Xbox360 output;
-- modifying \`Xbox360DeviceStateMapper\`;
+- modifying `Xbox360DeviceStateMapper`;
 - modifying the Xbox360 publisher;
 - changing SteamDeck R4/L4 mapping;
 - held-button release-to-rearm;
@@ -1029,16 +1029,16 @@ PR1 is complete only when all of the following are true.
 ### Contract
 
 - [ ] One dedicated BackButtons contract exists.
-- [ ] M1 and M2 each store one \`Xbox360BackButtonTarget\`.
-- [ ] Default for both is \`Disabled\`.
+- [ ] M1 and M2 each store one `Xbox360BackButtonTarget`.
+- [ ] Default for both is `Disabled`.
 - [ ] Initial target catalog is limited to ordinary X360 controls listed in this work order.
 - [ ] M1 and M2 may use the same target.
 - [ ] Undefined enum values are rejected.
 
 ### Persistence
 
-- [ ] \`AppSettings\` carries one global \`BackButtonMapping\`.
-- [ ] Existing Runtime-owned \`settings.json\` is the only persistence location.
+- [ ] `AppSettings` carries one global `BackButtonMapping`.
+- [ ] Existing Runtime-owned `settings.json` is the only persistence location.
 - [ ] Save writes enum names.
 - [ ] Load requires both M1 and M2 to be explicitly present.
 - [ ] Missing/malformed/unknown/numeric values default only this feature.
@@ -1047,7 +1047,7 @@ PR1 is complete only when all of the following are true.
 
 ### Settings mutation
 
-- [ ] \`StartupSettingsCoordinator\` exposes the current mapping.
+- [ ] `StartupSettingsCoordinator` exposes the current mapping.
 - [ ] One whole-record mutation persists M1+M2 atomically.
 - [ ] Save succeeds before current in-memory settings are published.
 - [ ] Invalid direct mutation is rejected rather than silently repaired.
@@ -1055,9 +1055,9 @@ PR1 is complete only when all of the following are true.
 
 ### Frontend
 
-- [ ] \`FrontendSettingsSnapshot\` carries \`BackButtonMappingSettings\`.
-- [ ] Bootstrap carries \`BackButtonMappingAvailable\`.
-- [ ] One \`SetBackButtonMappingAsync\` RPC exists.
+- [ ] `FrontendSettingsSnapshot` carries `BackButtonMappingSettings`.
+- [ ] Bootstrap carries `BackButtonMappingAvailable`.
+- [ ] One `SetBackButtonMappingAsync` RPC exists.
 - [ ] Named-pipe client/server transport the same shared contract type.
 - [ ] Protocol version is bumped once from 37 to 38.
 - [ ] No compatibility shim is added.
@@ -1088,7 +1088,7 @@ PR1 is complete only when all of the following are true.
 
 ## 27. Expected end state after PR1
 
-\`\`\`text
+```text
 settings.json
     |
     +-- BackButtonMapping
@@ -1106,11 +1106,11 @@ FrontendSettingsSnapshot
                 X
                 |
                 +-- NO controller-output connection yet
-\`\`\`
+```
 
 Physical/output path remains:
 
-\`\`\`text
+```text
 PID1902 DirectInput
        |
        v
@@ -1124,7 +1124,7 @@ M1/M2 ignored               M1→R4, M2→L4
        |                         |
        v                         v
 unchanged                    unchanged
-\`\`\`
+```
 
 PR2 will connect the persisted mapping to the Xbox360 output boundary.
 
