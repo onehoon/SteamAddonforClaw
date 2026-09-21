@@ -20,6 +20,73 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public void Gamepad_mode_read_command_is_exact_64_byte_report()
+    {
+        var report = MsiClawModeCommand.BuildReadGamepadMode();
+
+        Assert.Equal(64, report.Length);
+        Assert.Equal(new byte[] { 0x0F, 0x00, 0x00, 0x3C, 0x26, 0x00, 0x00 }, report[..7]);
+        Assert.All(report[7..], value => Assert.Equal(0, value));
+    }
+
+    [Fact]
+    public void Gamepad_mode_ack_parser_accepts_mode5_and_rejects_unrelated_reports()
+    {
+        var ack = new byte[64];
+        ack[0] = 0x10;
+        ack[3] = 0x3C;
+        ack[4] = 0x27;
+        ack[5] = 0x05;
+
+        Assert.True(MsiClawModeCommand.TryParseGamepadModeAck(ack, out var mode));
+        Assert.Equal(MsiClawGamepadMode.Bios, mode);
+        ack[4] = 0x24;
+        Assert.False(MsiClawModeCommand.TryParseGamepadModeAck(ack, out _));
+    }
+
+    [Fact]
+    public async Task Gamepad_mode_client_verifies_the_bounded_readback_result()
+    {
+        var device = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var io = new RecordingGamepadModeIo(
+        [
+            Ack(0x05),
+        ]);
+        var client = new MsiClawGamepadModeClient(
+            new StaticEnumerator([device]),
+            new MsiClawControlHidResolver(),
+            io,
+            TimeSpan.FromMilliseconds(100),
+            TimeSpan.Zero);
+
+        var result = await client.SwitchAndVerifyAsync(MsiClawPhysicalIdentity.From(device), MsiClawGamepadMode.Bios, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.ReadbackVerified);
+        Assert.Equal(MsiClawGamepadMode.Bios, result.Mode);
+        Assert.Equal([MsiClawGamepadMode.Bios], io.Writes);
+        Assert.Equal(1, io.ReadCalls);
+    }
+
+    [Fact]
+    public async Task Gamepad_mode_client_fails_closed_when_bounded_readback_has_no_ack()
+    {
+        var device = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var client = new MsiClawGamepadModeClient(
+            new StaticEnumerator([device]),
+            new MsiClawControlHidResolver(),
+            new RecordingGamepadModeIo([]),
+            TimeSpan.FromMilliseconds(5),
+            TimeSpan.Zero);
+
+        var result = await client.SwitchAndVerifyAsync(MsiClawPhysicalIdentity.From(device), MsiClawGamepadMode.Bios, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.True(result.WriteIssued);
+        Assert.False(result.ReadbackVerified);
+    }
+
+    [Fact]
     public void Strong_identity_requires_container_and_parent()
     {
         var strong = MsiClawPhysicalIdentity.From(Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI"));
@@ -123,6 +190,23 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Windows_writer_reads_gamepad_mode_with_the_0x26_command()
+    {
+        var container = Guid.NewGuid();
+        var device = Device(container, "USB\\ROOT", "HID\\MSI", 0x1902, 0xFFF0, 0x0040);
+        var expected = new MsiClawControlHidDevice(device, 0xFFF0, 0x0040, MsiClawPhysicalIdentity.From(device));
+        var transport = new RecordingRawTransport { ReadValues = [new byte[64], Ack(0x05)] };
+        var writer = new WindowsMsiClawModeWriter(new FixedLookup(new("hid-path", device.InstanceId, container)), transport);
+
+        var report = await writer.ReadGamepadModeAsync(expected, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+
+        Assert.Equal(Ack(0x05), report);
+        Assert.Equal(MsiClawModeCommand.BuildReadGamepadMode(), transport.Bytes);
+        Assert.Equal(1, transport.WriteAndReadCallCount);
+        Assert.Equal(0, transport.ReadCallCount);
+    }
+
+    [Fact]
     public async Task Windows_writer_propagates_transport_failure_and_rejects_empty_lookup()
     {
         var device = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1901, 0xFFA0, 0x0001);
@@ -168,6 +252,42 @@ public sealed class MsiClawModeSwitchTests
         fake.OnOpen = () => cancelled.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(() => transport.WriteAsync("hid-path", new byte[64], cancelled.Token));
         Assert.Equal(writesBeforeCancellation, fake.WriteCallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_requires_an_exact_full_input_report()
+    {
+        var fake = new FakeNativeHidApi { ReadResult = true, BytesRead = 64 };
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+
+        Assert.NotNull(await transport.ReadAsync("hid-path", 64, TimeSpan.FromSeconds(1), CancellationToken.None));
+        fake.BytesRead = 63;
+        Assert.Null(await transport.ReadAsync("hid-path", 64, TimeSpan.FromSeconds(1), CancellationToken.None));
+        Assert.Equal(2, fake.ReadCallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_writes_one_query_and_reads_unrelated_then_ack_on_one_handle()
+    {
+        var fake = new FakeNativeHidApi { WriteResult = true, BytesWritten = 64 };
+        fake.ReadReports.Enqueue(new byte[64]);
+        fake.ReadReports.Enqueue(Ack(0x05));
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+
+        var reports = await transport.WriteAndReadAsync(
+            "hid-path",
+            MsiClawModeCommand.BuildReadGamepadMode(),
+            reportLength: 64,
+            maxReports: 4,
+            timeout: TimeSpan.FromSeconds(1),
+            CancellationToken.None);
+
+        Assert.NotNull(reports);
+        Assert.Equal(2, reports.Count);
+        Assert.Equal(Ack(0x05), reports[1]);
+        Assert.Equal(1, fake.OpenCallCount);
+        Assert.Equal(1, fake.WriteCallCount);
+        Assert.Equal(3, fake.ReadCallCount);
     }
 
     [Fact]
@@ -387,6 +507,8 @@ public sealed class MsiClawModeSwitchTests
 
     private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] states) : IControllerDeviceEnumerator
     { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Length - 1)]; }
+    private sealed class StaticEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
+    { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices; }
     private sealed class RecordingWriter : IMsiClawModeWriter
     {
         public int CallCount { get; private set; }
@@ -412,6 +534,10 @@ public sealed class MsiClawModeSwitchTests
         public byte[] Bytes { get; private set; } = [];
         public bool Result { get; set; } = true;
         public int CallCount { get; private set; }
+        public byte[]? ReadValue { get; set; }
+        public IReadOnlyList<byte[]>? ReadValues { get; set; }
+        public int ReadCallCount { get; private set; }
+        public int WriteAndReadCallCount { get; private set; }
         public Task<bool> WriteAsync(string devicePath, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
         {
             DevicePath = devicePath;
@@ -419,6 +545,47 @@ public sealed class MsiClawModeSwitchTests
             CallCount++;
             return Task.FromResult(Result && !string.IsNullOrWhiteSpace(devicePath));
         }
+        public Task<byte[]?> ReadAsync(string devicePath, int reportLength, TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            ReadCallCount++;
+            return Task.FromResult(ReadValue);
+        }
+        public Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(string devicePath, ReadOnlyMemory<byte> bytes, int reportLength, int maxReports, TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            DevicePath = devicePath;
+            Bytes = bytes.ToArray();
+            WriteAndReadCallCount++;
+            return Task.FromResult(ReadValues);
+        }
+    }
+
+    private sealed class RecordingGamepadModeIo(IEnumerable<byte[]> reports) : IMsiClawGamepadModeIo
+    {
+        private readonly Queue<byte[]> _reports = new(reports);
+        public List<MsiClawGamepadMode> Writes { get; } = [];
+        public int ReadCalls { get; private set; }
+
+        public Task<bool> WriteGamepadModeAsync(MsiClawControlHidDevice device, MsiClawGamepadMode mode, CancellationToken cancellationToken)
+        {
+            Writes.Add(mode);
+            return Task.FromResult(true);
+        }
+
+        public Task<byte[]?> ReadGamepadModeAsync(MsiClawControlHidDevice device, TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            ReadCalls++;
+            return Task.FromResult(_reports.Count == 0 ? null : _reports.Dequeue());
+        }
+    }
+
+    private static byte[] Ack(byte mode)
+    {
+        var report = new byte[64];
+        report[0] = 0x10;
+        report[3] = 0x3C;
+        report[4] = 0x27;
+        report[5] = mode;
+        return report;
     }
 
     private sealed class FakeNativeHidApi : IMsiClawNativeHidApi
@@ -426,8 +593,12 @@ public sealed class MsiClawModeSwitchTests
         public bool WriteResult { get; set; }
         public bool OpenSucceeds { get; set; } = true;
         public uint BytesWritten { get; set; }
+        public bool ReadResult { get; set; }
+        public uint BytesRead { get; set; }
         public int OpenCallCount { get; private set; }
         public int WriteCallCount { get; private set; }
+        public int ReadCallCount { get; private set; }
+        public Queue<byte[]> ReadReports { get; } = new();
         public Action? OnOpen { get; set; }
         public int LastError => 123;
         public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
@@ -441,6 +612,19 @@ public sealed class MsiClawModeSwitchTests
             WriteCallCount++;
             bytesWritten = BytesWritten;
             return WriteResult;
+        }
+        public bool Read(SafeFileHandle handle, byte[] buffer, out uint bytesRead)
+        {
+            ReadCallCount++;
+            if (ReadReports.Count != 0)
+            {
+                var report = ReadReports.Dequeue();
+                report.CopyTo(buffer, 0);
+                bytesRead = (uint)report.Length;
+                return true;
+            }
+            bytesRead = BytesRead;
+            return ReadResult;
         }
         public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
         {

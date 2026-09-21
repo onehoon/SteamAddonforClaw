@@ -5,8 +5,8 @@ using System.Text.Json;
 namespace SteamInputAddonforClaw.CenterMStartup;
 
 /// <summary>Short-lived elevated child entrypoint for the Enter BIOS firmware restart handshake.
-/// It authorizes first, waits for the Runtime to prove PID1901/XInput, and executes the firmware
-/// restart only after receiving the explicit command over the parent-owned pipe.</summary>
+/// It authorizes first, waits for the Runtime to prove MSI GamepadMode BIOS mode 5, and executes
+/// the firmware restart only after receiving the explicit command over the parent-owned pipe.</summary>
 internal static class FirmwareRestartHelper
 {
     internal const string Argument = "--firmware-restart-helper";

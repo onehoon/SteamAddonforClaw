@@ -1,4 +1,5 @@
 using Microsoft.Win32.SafeHandles;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Diagnostics;
 
@@ -7,6 +8,14 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 internal interface IMsiClawRawHidTransport
 {
     Task<bool> WriteAsync(string devicePath, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken);
+    Task<byte[]?> ReadAsync(string devicePath, int reportLength, TimeSpan timeout, CancellationToken cancellationToken) => Task.FromResult<byte[]?>(null);
+    Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(
+        string devicePath,
+        ReadOnlyMemory<byte> bytes,
+        int reportLength,
+        int maxReports,
+        TimeSpan timeout,
+        CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<byte[]>?>(null);
 }
 
 internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
@@ -57,6 +66,100 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
         return Task.FromResult(true);
     }
 
+    public async Task<byte[]?> ReadAsync(string devicePath, int reportLength, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(devicePath) || reportLength <= 0 || reportLength > 4096)
+            return null;
+
+        using var handle = _api.Open(devicePath, GenericRead, ShareRead | ShareWrite, OpenExisting);
+        if (handle.IsInvalid)
+            return null;
+
+        return await ReadOneBoundedAsync(handle, reportLength, timeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(
+        string devicePath,
+        ReadOnlyMemory<byte> bytes,
+        int reportLength,
+        int maxReports,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(devicePath)
+            || bytes.Length != 64
+            || reportLength <= 0
+            || reportLength > 4096
+            || maxReports <= 0
+            || maxReports > 4
+            || timeout <= TimeSpan.Zero)
+            return null;
+
+        using var handle = _api.Open(devicePath, GenericRead | GenericWrite, ShareRead | ShareWrite, OpenExisting);
+        if (handle.IsInvalid)
+            return null;
+
+        var request = bytes.ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_api.Write(handle, request, out var bytesWritten) || bytesWritten != request.Length)
+            return null;
+
+        var reports = new List<byte[]>(maxReports);
+        var started = Stopwatch.GetTimestamp();
+        for (var i = 0; i < maxReports; i++)
+        {
+            var remaining = timeout - Stopwatch.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero)
+                break;
+
+            var report = await ReadOneBoundedAsync(handle, reportLength, remaining, cancellationToken).ConfigureAwait(false);
+            if (report is null)
+                break;
+            reports.Add(report);
+        }
+
+        return reports;
+    }
+
+    private async Task<byte[]?> ReadOneBoundedAsync(
+        SafeFileHandle handle,
+        int reportLength,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[reportLength];
+        var readTask = Task.Run(() =>
+        {
+            var ok = _api.Read(handle, buffer, out var bytesRead);
+            return (ok, bytesRead);
+        });
+        try
+        {
+            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutSource.CancelAfter(timeout);
+            var (succeeded, bytesRead) = await readTask.WaitAsync(timeoutSource.Token).ConfigureAwait(false);
+            if (!succeeded || bytesRead != reportLength)
+                return null;
+            return buffer;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _api.CancelRead(handle);
+            try { await readTask.ConfigureAwait(false); }
+            catch { /* the bounded read already failed closed */ }
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            _api.CancelRead(handle);
+            try { await readTask.ConfigureAwait(false); }
+            catch { /* cancellation is propagated below */ }
+            throw;
+        }
+    }
+
 }
 
 internal interface IMsiClawNativeHidApi
@@ -65,6 +168,8 @@ internal interface IMsiClawNativeHidApi
     SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition);
     bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten);
     void CancelWrite(SafeFileHandle handle) { }
+    bool Read(SafeFileHandle handle, byte[] buffer, out uint bytesRead) { bytesRead = 0; return false; }
+    void CancelRead(SafeFileHandle handle) { }
 
     /// <summary>
     /// Reads the true input/output report byte lengths and HID Usage/UsagePage for an opened HID
@@ -81,6 +186,9 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     private int _writeThreadId;
     private readonly object _writeCancellationGate = new();
     private SafeFileHandle? _activeWriteHandle;
+    private int _readThreadId;
+    private readonly object _readCancellationGate = new();
+    private SafeFileHandle? _activeReadHandle;
 
     public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
     {
@@ -116,6 +224,38 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
         {
             if (_writeThreadId == 0 || !ReferenceEquals(_activeWriteHandle, handle)) return;
             using var thread = OpenThread(ThreadTerminate, false, unchecked((uint)_writeThreadId));
+            if (!thread.IsInvalid && !CancelSynchronousIo(thread))
+                LastError = Marshal.GetLastWin32Error();
+        }
+    }
+
+    public bool Read(SafeFileHandle handle, byte[] buffer, out uint bytesRead)
+    {
+        lock (_readCancellationGate)
+        {
+            _readThreadId = unchecked((int)GetCurrentThreadId());
+            _activeReadHandle = handle;
+        }
+        bool result;
+        try { result = ReadFile(handle, buffer, (uint)buffer.Length, out bytesRead, IntPtr.Zero); }
+        finally
+        {
+            lock (_readCancellationGate)
+            {
+                _readThreadId = 0;
+                _activeReadHandle = null;
+            }
+        }
+        LastError = result ? 0 : Marshal.GetLastWin32Error();
+        return result;
+    }
+
+    public void CancelRead(SafeFileHandle handle)
+    {
+        lock (_readCancellationGate)
+        {
+            if (_readThreadId == 0 || !ReferenceEquals(_activeReadHandle, handle)) return;
+            using var thread = OpenThread(ThreadTerminate, false, unchecked((uint)_readThreadId));
             if (!thread.IsInvalid && !CancelSynchronousIo(thread))
                 LastError = Marshal.GetLastWin32Error();
         }
@@ -160,6 +300,9 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WriteFile(SafeFileHandle file, byte[] buffer, uint numberOfBytesToWrite, out uint numberOfBytesWritten, IntPtr overlapped);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReadFile(SafeFileHandle file, byte[] buffer, uint numberOfBytesToRead, out uint numberOfBytesRead, IntPtr overlapped);
     private const uint ThreadTerminate = 0x0001;
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern SafeFileHandle OpenThread(uint desiredAccess, bool inheritHandle, uint threadId);

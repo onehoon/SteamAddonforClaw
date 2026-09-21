@@ -411,7 +411,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     // ---- Enter BIOS firmware restart ----
 
     [Fact]
-    public async Task Enter_bios_disabled_path_releases_to_xinput_without_mutating_authority_state()
+    public async Task Enter_bios_disabled_path_prepares_mode5_without_mutating_authority_state()
     {
         var h = new Harness(this)
         {
@@ -426,7 +426,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
 
         Assert.Equal(FrontendEnterBiosOutcome.RestartRequested, result.Outcome);
-        Assert.Equal(new[] { "firmware-authorization", "physical-release", "stock-baseline", "firmware-restart" }, h.Order);
+        Assert.Equal(new[] { "firmware-authorization", "bios-mode-prepare", "firmware-restart" }, h.Order);
         Assert.Equal(1, restart.FirmwareAuthorizationCalls);
         Assert.Equal(1, restart.FirmwareCalls);
         Assert.Equal(0, restart.Calls);
@@ -439,7 +439,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
-    public async Task Enter_bios_enabled_path_verifies_stock_without_creating_addon_authority()
+    public async Task Enter_bios_enabled_path_prepares_mode5_without_creating_addon_authority()
     {
         var h = new Harness(this) { StartEnabled = true };
         h.Hid.Active = true;
@@ -449,7 +449,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
 
         Assert.Equal(FrontendEnterBiosOutcome.RestartRequested, result.Outcome);
-        Assert.Equal(new[] { "firmware-authorization", "physical-release", "stock-baseline", "firmware-restart" }, h.Order);
+        Assert.Equal(new[] { "firmware-authorization", "bios-mode-prepare", "firmware-restart" }, h.Order);
         Assert.Equal(1, restart.FirmwareAuthorizationCalls);
         Assert.Equal(FrontendCenterMStartupState.Enabled, h.Roots.Classify());
         Assert.True(h.Hid.Active);
@@ -488,22 +488,26 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
 
         Assert.Equal(FrontendEnterBiosOutcome.Failed, result.Outcome);
-        Assert.Equal(["firmware-authorization", "physical-release"], h.Order);
+        Assert.Equal(["firmware-authorization", "bios-mode-prepare"], h.Order);
         Assert.Equal(0, h.StockBaselineCalls);
         Assert.Equal(0, restart.FirmwareCalls);
         Assert.True(restart.FirmwareSessionDisposed);
     }
 
     [Fact]
-    public async Task Enter_bios_requires_independent_xinput_proof_before_firmware_restart()
+    public async Task Enter_bios_stops_before_restart_when_bios_mode_preparation_fails()
     {
-        var h = new Harness(this) { StartEnabled = false, StockBaselineSucceeds = false };
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PhysicalRelease = new(false, "BiosGamepadModeNotVerified", []),
+        };
         var restart = new FakeRestart();
 
         var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
 
         Assert.Equal(FrontendEnterBiosOutcome.Failed, result.Outcome);
-        Assert.Equal(["firmware-authorization", "physical-release", "stock-baseline"], h.Order);
+        Assert.Equal(["firmware-authorization", "bios-mode-prepare"], h.Order);
         Assert.Equal(0, restart.FirmwareCalls);
         Assert.True(restart.FirmwareSessionDisposed);
     }
@@ -525,7 +529,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
-    public async Task Firmware_restart_failure_leaves_verified_temporary_xinput_state_and_allows_retry()
+    public async Task Firmware_restart_failure_leaves_verified_temporary_bios_mode_and_allows_retry()
     {
         var h = new Harness(this) { StartEnabled = false };
         var restart = new FakeRestart { FirmwareResult = WindowsRestartRequestResult.Failed };
@@ -534,7 +538,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var failed = await transition.RequestEnterBiosAsync(CancellationToken.None);
 
         Assert.Equal(FrontendEnterBiosOutcome.Failed, failed.Outcome);
-        Assert.Contains("temporarily in XInput", failed.FailureMessage, StringComparison.Ordinal);
+        Assert.Equal("BIOS restart could not be started. Restart Windows, then try Enter BIOS again.", failed.FailureMessage);
         Assert.Equal(1, restart.FirmwareAuthorizationCalls);
         Assert.Equal(1, restart.FirmwareCalls);
         Assert.True(restart.FirmwareSessionDisposed);
@@ -1043,7 +1047,13 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                 // Full1902 Policy B: the verified stock-authority-restored boundary callback. Counted
                 // rather than added to Order so the existing ordering assertions stay unchanged.
                 () => { StockAuthorityRestoredCalls++; StockAuthorityRestoredAtOrderIndex = Order.Count; },
-                r);
+                r,
+                preparePhysicalOwnershipForFirmwareBios: token =>
+                {
+                    Assert.False(token.CanBeCanceled);
+                    Order.Add("bios-mode-prepare");
+                    return Task.FromResult(PhysicalRelease);
+                });
         }
 
         private sealed class FakeInvoker(Harness h) : ICenterMStartupHelperInvoker

@@ -470,8 +470,8 @@ public interface IAddonFrontendControl
     /// authority); <see langword="false"/> = Disable and Restart (switch authority to the Addon).</param>
     Task<FrontendCenterMStartupMutationResult> RequestCenterMAuthorityTransitionAsync(bool centerMEnabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable."));
-    /// <summary>Requests a temporary verified PID1901/XInput transition followed by a firmware
-    /// restart. This does not change Center M startup roots, persistent HidHide, or Addon startup
+    /// <summary>Requests a temporary verified MSI firmware BIOS-mode transition followed by a
+    /// firmware restart. This does not change Center M startup roots, persistent HidHide, or Addon startup
     /// authority; the existing next-boot Full1902 reconcile remains the return path.</summary>
     Task<FrontendEnterBiosResult> RequestEnterBiosAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendEnterBiosResult(FrontendEnterBiosOutcome.Unavailable, "Enter BIOS is unavailable."));
