@@ -123,6 +123,114 @@ Reference evidence:
 - Handheld Companion MSI Claw source independently exposes BIOS=5, SwitchMode=0x24, ReadGamepadMode=0x26, GamepadModeAck=0x27.
 - ClawConfigurator hardware notes independently document the 0x24/0x26/0x27 vendor-HID protocol and the requirement to query after a software switch.
 
+### 2.1 Fork CTW hardware evidence — PID and firmware GamepadMode are not the same state
+
+The current forked CTW source at `onehoon/ClawTweaks-Dev`, branch `release/v0.3.98.0`, already contains on-device firmware-mode readback and a directly relevant real-hardware result.
+
+Relevant files:
+
+~~~text
+XboxGamingBarHelper/Devices/MSIClaw/MSIClawHidController.cs
+XboxGamingBarHelper/Labs/ClawButtonMonitor.cs
+reverse_engineered/decompiled/API_ControlMode_v1.0.2608.3101.cs
+~~~
+
+`MSIClawHidController.TryReadGamepadMode()` sends:
+
+~~~text
+0F 00 00 3C 26 ...
+~~~
+
+then reads bounded input reports and accepts only:
+
+~~~text
+byte[4] == 0x27
+mode = byte[5]
+~~~
+
+The CTW source explicitly records this request/response as verified on a real MSI Claw:
+
+~~~text
+request  { 0F 00 00 3C 26 }
+response { 10 00 00 3C 27 <mode> ... }
+~~~
+
+Its implementation uses a bounded 300 ms read timeout and scans up to four reports so unrelated input reports do not get mistaken for the mode acknowledgement.
+
+More importantly, CTW's real-hardware `ClawButtonMonitor.ExitHwMouseMode()` documents and uses this transition:
+
+~~~text
+GamepadMode 4 / Desktop
+PID1902
+        ↓
+SwitchMode(2)
+        ↓
+ReadGamepadMode verifies 2
+        ↓
+GamepadMode 2 / DirectInput
+PID1902
+~~~
+
+The CTW source explicitly states that Desktop mode 4 and DirectInput mode 2 are both PID1902 on tested hardware and that the direct `4 → 2` transition does not re-enumerate the USB device.
+
+This is decisive for the Addon design:
+
+> **PID1902 does not prove GamepadMode 2.**
+
+Therefore the Full1902 boot fast path must not use PID1902 alone as proof that the controller firmware is already in DirectInput mode once BIOS mode support exists. Firmware GamepadMode readback is a distinct current-world fact.
+
+### 2.2 MSI original implementation confirms switch-then-readback ordering
+
+The decompiled MSI `API_ControlMode_v1.0.2608.3101.cs` contains:
+
+~~~csharp
+public void SwitchGamepadMode(GamepadMode mode, MKeysFunction mKeysFunction)
+{
+    CommandQueue.Instance.Push(
+        DeviceInfo,
+        DeviceMessage.Immediate(
+            CommandType.SwitchMode,
+            (byte)mode,
+            (byte)mKeysFunction));
+
+    Thread.Sleep(20);
+    ReadCurrentMode();
+}
+~~~
+
+and:
+
+~~~csharp
+public void ReadCurrentMode()
+{
+    CommandQueue.Instance.Push(
+        DeviceInfo,
+        DeviceMessage.Immediate(CommandType.ReadGamepadMode));
+}
+~~~
+
+The MSI response handler treats `GamepadModeAck` as authoritative state and updates:
+
+~~~text
+DeviceState.GamepadMode
+DeviceState.MKeysFunction
+~~~
+
+before raising the mode-updated event.
+
+The implementation lesson for this PR is therefore:
+
+~~~text
+SwitchMode
+→ short settle matching MSI's observed 20 ms ordering
+→ ReadGamepadMode
+→ require GamepadModeAck
+~~~
+
+Do not infer success merely from the output write.
+
+Do not overstate the RE: the MSI source proves command ordering and readback, but it does **not** by itself prove that the switch and read commands share one persistent HID handle. The Addon may use one short-lived session when safe, or re-resolve the same verified command interface if the handle becomes invalid, while preserving the same strong-identity rules.
+
 ---
 
 ## 3. Goal
@@ -321,17 +429,29 @@ Existing Build(MsiClawNativeMode) may remain and delegate to the typed firmware 
 
 Readback must use the exact verified control HID. Do not accept the first generic VID_0DB0 HID interface.
 
-Prefer one short-lived send/read operation on the exact command HID:
+Follow the firmware's observed command ordering:
 
 ~~~text
-open
-→ write 0x24
-→ write 0x26
-→ read matching 0x27
+resolve the exact strongly verified command HID
+→ write SwitchMode 0x24
+→ short settle; MSI reference implementation uses 20 ms
+→ write ReadGamepadMode 0x26
+→ read until matching GamepadModeAck 0x27 or bounded timeout
 → close
 ~~~
 
-Use a bounded timeout. Do not create a polling service.
+Prefer keeping the operation local and short-lived. If the same opened command-HID handle remains valid, it may be reused for the write/query/read sequence. If the firmware switch invalidates that handle, re-resolve only the same strongly verified physical MSI Claw command interface and continue the bounded readback. Do not broaden matching to an arbitrary VID_0DB0 interface.
+
+Use CTW's proven readback behavior as a practical reference:
+
+~~~text
+ReadTimeout = 300 ms
+skip unrelated reports
+accept only opcode 0x27
+bounded report attempts
+~~~
+
+The exact timeout/attempt constants may be adapted to the Addon's async/native transport, but the operation must remain bounded. Do not create a polling service or a long-lived firmware-mode watcher.
 
 ---
 
@@ -380,6 +500,8 @@ No new boot state is required.
 ### PID1902 return
 
 A PID1902 device may no longer be blindly assumed to mean firmware mode 2 after BIOS mode exists as an independent firmware fact.
+
+This is not theoretical. Fork CTW hardware validation already proved that `GamepadMode.Desktop = 4` and `GamepadMode.DirectInput = 2` can both exist under PID1902, and CTW must query `ReadGamepadMode` to distinguish them. Treat BIOS mode 5 the same way: PID and firmware mode are separate facts.
 
 Before accepting an already-present PID1902 as already DirectInput, perform the narrow mode query when the exact command HID is safely resolvable.
 
@@ -538,6 +660,13 @@ zero-padded to 64 bytes.
 Prove ReadGamepadMode uses opcode 0x26.
 
 Prove parsing of an inbound 0x27 acknowledgement containing mode 5.
+
+Also prove the practical readback behavior mirrored from the fork CTW evidence:
+
+- unrelated input reports before the 0x27 acknowledgement are ignored;
+- a matching 0x27 acknowledgement returns byte 5 as GamepadMode;
+- the read loop is bounded;
+- timeout/no acknowledgement is failure, not success-by-write.
 
 Reject wrong report id, wrong opcode, truncated responses, and invalid mode values where a known mode is required.
 
@@ -746,10 +875,11 @@ Reuse the existing owner, gate, and reconcile structure.
 6. Center M roots, HidHide, mandatory startup, and Full1902 authority remain unchanged.
 7. No persisted BIOS-return marker is introduced.
 8. Next Disabled boot converts PID1902 + firmware Mode 5 to verified Mode 2 before normal DirectInput ownership continues.
-9. PID1901 return still uses the existing verified PID1901 → PID1902 path.
-10. Enable Center M and Restart remains unchanged and still restores verified PID1901/XInput.
-11. UI no longer claims XInput is the BIOS controller mode.
-12. Real hardware validation confirms the built-in controller works inside BIOS after Mode 5 handoff.
-13. Real hardware validation confirms healthy Full1902 Mode 2 / PID1902 operation after returning to Windows.
-14. Debug and Release builds/tests pass.
-15. No new architecture exists solely for theoretical race defense.
+9. The implementation does not equate PID1902 with firmware Mode 2; this is covered by tests reflecting the CTW-proven PID1902 Mode4/Mode2 distinction.
+10. PID1901 return still uses the existing verified PID1901 → PID1902 path.
+11. Enable Center M and Restart remains unchanged and still restores verified PID1901/XInput.
+12. UI no longer claims XInput is the BIOS controller mode.
+13. Real hardware validation confirms the built-in controller works inside BIOS after Mode 5 handoff.
+14. Real hardware validation confirms healthy Full1902 Mode 2 / PID1902 operation after returning to Windows.
+15. Debug and Release builds/tests pass.
+16. No new architecture exists solely for theoretical race defense.
