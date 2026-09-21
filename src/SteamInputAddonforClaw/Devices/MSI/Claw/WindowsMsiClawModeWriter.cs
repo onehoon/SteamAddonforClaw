@@ -44,11 +44,19 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter, IMsiClawGam
         var selector = HidDevice.GetDeviceSelector(device.UsagePage, device.Usage, MsiClawHardware.VendorId, device.Device.ProductId ?? 0);
         var infos = await _lookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
         var matching = SelectDeviceInformation(device, infos);
-        return matching is null
-            ? null
-            : !await _transport.WriteAsync(matching.Id, MsiClawModeCommand.BuildReadGamepadMode(), cancellationToken).ConfigureAwait(false)
-                ? null
-                : await _transport.ReadAsync(matching.Id, 64, timeout, cancellationToken).ConfigureAwait(false);
+        if (matching is null) return null;
+
+        var reports = await _transport.WriteAndReadAsync(
+            matching.Id,
+            MsiClawModeCommand.BuildReadGamepadMode(),
+            reportLength: 64,
+            maxReports: 4,
+            timeout,
+            cancellationToken).ConfigureAwait(false);
+        if (reports is null) return null;
+
+        return reports.FirstOrDefault(report =>
+            MsiClawModeCommand.TryParseGamepadModeAck(report, out _));
     }
 
     internal static MsiClawHidDeviceInformation? SelectDeviceInformation(MsiClawControlHidDevice expected, IReadOnlyList<MsiClawHidDeviceInformation> candidates)

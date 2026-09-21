@@ -16,7 +16,6 @@ internal sealed class MsiClawGamepadModeClient(
     TimeSpan? readbackTimeout = null,
     TimeSpan? switchSettleDelay = null) : IMsiClawGamepadModeClient
 {
-    private const int MaxReadReports = 4;
     private static readonly TimeSpan DefaultReadbackTimeout = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan DefaultSwitchSettleDelay = TimeSpan.FromMilliseconds(20);
     private readonly TimeSpan _readbackTimeout = readbackTimeout ?? DefaultReadbackTimeout;
@@ -25,34 +24,31 @@ internal sealed class MsiClawGamepadModeClient(
     public async Task<MsiClawGamepadModeQueryResult> QueryAsync(MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
     {
         var started = Stopwatch.GetTimestamp();
-        for (var attempt = 1; attempt <= MaxReadReports; attempt++)
+        cancellationToken.ThrowIfCancellationRequested();
+        var remaining = _readbackTimeout - Stopwatch.GetElapsedTime(started);
+        if (remaining <= TimeSpan.Zero)
+            return MsiClawGamepadModeQueryResult.Unavailable("ReadbackTimeoutOrUnrelatedReports");
+
+        var control = ResolveCommand(expectedIdentity);
+        if (control is null)
+            return MsiClawGamepadModeQueryResult.Unavailable("CommandHidNotUniquelyResolved");
+
+        byte[]? report;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var remaining = _readbackTimeout - Stopwatch.GetElapsedTime(started);
-            if (remaining <= TimeSpan.Zero)
-                break;
+            report = await io.ReadGamepadModeAsync(control, remaining, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            report = null;
+        }
 
-            var control = ResolveCommand(expectedIdentity);
-            if (control is null)
-                return MsiClawGamepadModeQueryResult.Unavailable("CommandHidNotUniquelyResolved");
-
-            byte[]? report;
-            try
-            {
-                report = await io.ReadGamepadModeAsync(control, remaining, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                report = null;
-            }
-
-            if (report is not null && MsiClawModeCommand.TryParseGamepadModeAck(report, out var mode))
-            {
-                AppLog.Info("NativeMode", "MSI Claw GamepadMode readback completed.",
-                    ("Event", "GamepadModeQueryCompleted"), ("Mode", mode), ("Attempts", attempt),
-                    ("ElapsedMs", (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds));
-                return new(true, mode, "GamepadModeAckVerified");
-            }
+        if (report is not null && MsiClawModeCommand.TryParseGamepadModeAck(report, out var mode))
+        {
+            AppLog.Info("NativeMode", "MSI Claw GamepadMode readback completed.",
+                ("Event", "GamepadModeQueryCompleted"), ("Mode", mode), ("Attempts", 1),
+                ("ElapsedMs", (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds));
+            return new(true, mode, "GamepadModeAckVerified");
         }
 
         AppLog.Debug("NativeMode", "MSI Claw GamepadMode readback was unavailable.",

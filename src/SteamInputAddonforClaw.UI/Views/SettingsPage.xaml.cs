@@ -63,7 +63,7 @@ public sealed partial class SettingsPage : UserControl
             var confirmation = new ContentDialog
             {
                 Title = "Enter BIOS?",
-                Content = "The controller will temporarily switch to MSI BIOS mode before Windows restarts into firmware.\n\nSave your work before continuing.",
+                Content = "The device will restart directly into BIOS settings.\n\nSave your work before continuing.",
                 PrimaryButtonText = "Restart and Enter BIOS",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,

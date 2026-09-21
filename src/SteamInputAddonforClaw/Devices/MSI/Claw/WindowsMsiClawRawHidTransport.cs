@@ -1,4 +1,5 @@
 using Microsoft.Win32.SafeHandles;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Diagnostics;
 
@@ -8,6 +9,13 @@ internal interface IMsiClawRawHidTransport
 {
     Task<bool> WriteAsync(string devicePath, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken);
     Task<byte[]?> ReadAsync(string devicePath, int reportLength, TimeSpan timeout, CancellationToken cancellationToken) => Task.FromResult<byte[]?>(null);
+    Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(
+        string devicePath,
+        ReadOnlyMemory<byte> bytes,
+        int reportLength,
+        int maxReports,
+        TimeSpan timeout,
+        CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<byte[]>?>(null);
 }
 
 internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
@@ -68,6 +76,59 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
         if (handle.IsInvalid)
             return null;
 
+        return await ReadOneBoundedAsync(handle, reportLength, timeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(
+        string devicePath,
+        ReadOnlyMemory<byte> bytes,
+        int reportLength,
+        int maxReports,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(devicePath)
+            || bytes.Length != 64
+            || reportLength <= 0
+            || reportLength > 4096
+            || maxReports <= 0
+            || maxReports > 4
+            || timeout <= TimeSpan.Zero)
+            return null;
+
+        using var handle = _api.Open(devicePath, GenericRead | GenericWrite, ShareRead | ShareWrite, OpenExisting);
+        if (handle.IsInvalid)
+            return null;
+
+        var request = bytes.ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_api.Write(handle, request, out var bytesWritten) || bytesWritten != request.Length)
+            return null;
+
+        var reports = new List<byte[]>(maxReports);
+        var started = Stopwatch.GetTimestamp();
+        for (var i = 0; i < maxReports; i++)
+        {
+            var remaining = timeout - Stopwatch.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero)
+                break;
+
+            var report = await ReadOneBoundedAsync(handle, reportLength, remaining, cancellationToken).ConfigureAwait(false);
+            if (report is null)
+                break;
+            reports.Add(report);
+        }
+
+        return reports;
+    }
+
+    private async Task<byte[]?> ReadOneBoundedAsync(
+        SafeFileHandle handle,
+        int reportLength,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
         var buffer = new byte[reportLength];
         var readTask = Task.Run(() =>
         {

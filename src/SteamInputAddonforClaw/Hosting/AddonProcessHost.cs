@@ -113,6 +113,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // PR5: the process-lifetime Full PID1902 physical owner. Non-null only after an exact Disabled
     // boot; owns one live DirectInput session which PR6 consumes.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? _physicalOwnership;
+    // The command-HID GamepadMode client is shared by the Disabled-mode physical owner and the
+    // Center M Enabled Enter BIOS path, which has no physical ownership object to create it.
+    private SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator? _msiControllerDevices;
+    private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawGamepadModeClient? _gamepadModeClient;
     // PR6: the process-lifetime Full-1902 virtual-presentation owner (one canonical VIIPER runtime +
     // exactly one attached typed device + its publisher). Retired before _physicalOwnership.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPresentation? _presentationOwnership;
@@ -351,11 +355,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 }
             }
 
-            return _physicalOwnership is { } owner
-                ? firmwareRestart
+            if (_physicalOwnership is { } owner)
+            {
+                return firmwareRestart
                     ? await owner.PrepareForFirmwareBiosAsync(token).ConfigureAwait(false)
-                    : await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
-                : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
+                    : await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false);
+            }
+
+            if (!firmwareRestart)
+                return SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
+
+            return await PrepareUnownedPhysicalControllerForFirmwareBiosAsync(startupComposition, token).ConfigureAwait(false);
         }
         var centerMAuthorityTransition = new SteamInputAddonforClaw.CenterMStartup.CenterMRebootAuthorityTransition(
             _centerMStartupControl,
@@ -659,11 +669,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return null;
         }
 
-        var controllerDevices = new Controllers.Detection.WindowsControllerDeviceEnumerator();
-        var gamepadModeClient = new Devices.MSI.Claw.MsiClawGamepadModeClient(
-            controllerDevices,
-            new Devices.MSI.Claw.MsiClawControlHidResolver(),
-            new Devices.MSI.Claw.WindowsMsiClawModeWriter());
+        var controllerDevices = GetMsiControllerDevices();
+        var gamepadModeClient = GetGamepadModeClient(startupComposition);
         var directInputInputSource = new Devices.MSI.Claw.MsiClawInputSource(() => new Input.DirectInput.VorticeDirectInputDeviceEnumerator(IntPtr.Zero));
         // PR8 section 7: the one Full-1902 owned-input completion signal. MsiClawInputSource already
         // neutralizes LatestState and cleans up the dead session before raising this, so the callback
@@ -690,6 +697,64 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             () => hidHideBaseline.TryGetExistingOwnedTargets(
                 Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets),
             gamepadModeClient: gamepadModeClient);
+    }
+
+    private SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator GetMsiControllerDevices() =>
+        _msiControllerDevices ??= new SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator();
+
+    private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawGamepadModeClient? GetGamepadModeClient(AddonStartupComposition startupComposition)
+    {
+        if (startupComposition.HandheldDeviceAdapter.NativeState is not SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawNativeStateManager)
+            return null;
+
+        return _gamepadModeClient ??= new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawGamepadModeClient(
+            GetMsiControllerDevices(),
+            new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
+            new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawModeWriter());
+    }
+
+    private async Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult> PrepareUnownedPhysicalControllerForFirmwareBiosAsync(
+        AddonStartupComposition startupComposition,
+        CancellationToken cancellationToken)
+    {
+        if (startupComposition.HandheldDeviceAdapter.NativeState is not SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawNativeStateManager nativeState)
+            return new(false, "NativeStateManagerUnavailable", []);
+
+        var gamepadModeClient = GetGamepadModeClient(startupComposition);
+        if (gamepadModeClient is null)
+            return new(false, "GamepadModeClientUnavailable", []);
+
+        var current = await nativeState.CaptureStableCurrentSnapshotAsync(
+            cancellationToken,
+            allowTransientDeviceNotFound: false).ConfigureAwait(false);
+        if (!SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawAddonPhysicalOwnership.TryReadIdentity(
+                current, out var currentMode, out var identity, out var reason))
+        {
+            return new(false, "EnterBiosNativeState:" + reason, []);
+        }
+
+        AppLog.Info("ControllerOwnership", "Enter BIOS GamepadMode preparation started for an unowned controller.",
+            ("Event", "EnterBiosGamepadModePrepareStarted"),
+            ("Owned", false), ("Mode", currentMode), ("IdentityConfidence", identity.Confidence));
+
+        var prepared = await gamepadModeClient.SwitchAndVerifyAsync(
+            identity,
+            SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawGamepadMode.Bios,
+            cancellationToken).ConfigureAwait(false);
+        AppLog.Info("ControllerOwnership", "Enter BIOS BIOS-mode write completed.",
+            ("Event", "EnterBiosBiosModeWriteCompleted"), ("Succeeded", prepared.WriteIssued),
+            ("TargetMode", SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawGamepadMode.Bios), ("Reason", prepared.Reason));
+        AppLog.Info("ControllerOwnership", "Enter BIOS BIOS-mode verification completed.",
+            ("Event", "EnterBiosBiosModeVerified"), ("Succeeded", prepared.ReadbackVerified),
+            ("ObservedMode", prepared.Mode),
+            ("TargetMode", SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawGamepadMode.Bios));
+        if (!prepared.Succeeded)
+            return new(false, "BiosGamepadModeNotVerified:" + prepared.Reason, []);
+
+        AppLog.Info("ControllerOwnership", "Enter BIOS GamepadMode preparation completed.",
+            ("Event", "EnterBiosGamepadModePrepareCompleted"), ("Mode", prepared.Mode),
+            ("ReadbackVerified", prepared.ReadbackVerified), ("Owned", false));
+        return new(true, "PreparedForFirmwareBiosUnowned", []);
     }
 
     /// <summary>PR8 section 7: decide whether an owned DirectInput session completion is an unexpected

@@ -538,7 +538,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         var failed = await transition.RequestEnterBiosAsync(CancellationToken.None);
 
         Assert.Equal(FrontendEnterBiosOutcome.Failed, failed.Outcome);
-        Assert.Contains("temporarily in MSI BIOS mode", failed.FailureMessage, StringComparison.Ordinal);
+        Assert.Equal("BIOS restart could not be started. Restart Windows, then try Enter BIOS again.", failed.FailureMessage);
         Assert.Equal(1, restart.FirmwareAuthorizationCalls);
         Assert.Equal(1, restart.FirmwareCalls);
         Assert.True(restart.FirmwareSessionDisposed);

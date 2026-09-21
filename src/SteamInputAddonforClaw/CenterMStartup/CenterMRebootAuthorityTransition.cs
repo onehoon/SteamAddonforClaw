@@ -234,7 +234,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
                 ("Event", prepare.Succeeded ? "EnterBiosGamepadModePrepareCompleted" : "EnterBiosGamepadModePrepareFailed"),
                 ("Succeeded", prepare.Succeeded), ("Reason", prepare.Reason));
             if (!prepare.Succeeded)
-                return EnterBiosFailed("The controller could not be safely switched to MSI BIOS mode. BIOS restart was not requested. Try again.");
+                return EnterBiosFailed("The controller could not be prepared for BIOS. BIOS restart was not requested. Try again.");
 
             var restart = await firmwareSession.RequestRestartAsync(CancellationToken.None).ConfigureAwait(false);
             if (restart == WindowsRestartRequestResult.Requested)
@@ -243,9 +243,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
                 return new FrontendEnterBiosResult(FrontendEnterBiosOutcome.RestartRequested, null);
             }
 
-            AppLog.Warn("CenterM.Authority", "Firmware restart request failed after MSI BIOS mode was verified.", null,
+            AppLog.Warn("CenterM.Authority", "Firmware restart request failed after BIOS mode was verified.", null,
                 ("Event", "EnterBiosFirmwareRestartFailed"));
-            return EnterBiosFailed("BIOS restart could not be started. The controller is temporarily in MSI BIOS mode. Try Enter BIOS again or restart Windows.");
+            return EnterBiosFailed("BIOS restart could not be started. Restart Windows, then try Enter BIOS again.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
