@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using SteamInputAddonforClaw.Windowing;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Windows.Foundation;
@@ -42,6 +43,11 @@ public sealed partial class MainWindow : Window
     private Task _frontButtonSaveChain = Task.CompletedTask;
     private long _frontButtonEditVersion;
 
+    private BackButtonMappingSettings _backButtonUiMapping = BackButtonMappingSettings.Default;
+    private BackButtonMappingSettings _backButtonPersistedMapping = BackButtonMappingSettings.Default;
+    private Task _backButtonSaveChain = Task.CompletedTask;
+    private long _backButtonEditVersion;
+
     internal MainWindow(
         IAddonFrontendControl frontend,
         FrontendBootstrapSnapshot bootstrap)
@@ -51,6 +57,8 @@ public sealed partial class MainWindow : Window
         _suppressDeveloperMenuWarning = bootstrap.Settings.SuppressDeveloperMenuWarning;
         _frontButtonUiMapping = bootstrap.Settings.FrontButtonMapping;
         _frontButtonPersistedMapping = bootstrap.Settings.FrontButtonMapping;
+        _backButtonUiMapping = bootstrap.Settings.BackButtonMapping;
+        _backButtonPersistedMapping = bootstrap.Settings.BackButtonMapping;
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -69,6 +77,7 @@ public sealed partial class MainWindow : Window
         // single owner of the current OEM1 mapping and its one ordered save chain, exactly as it
         // already owns navigation between the two pages.
         ControllerContent.MappingEditRequested += (_, mapping) => QueueFrontButtonMutation(mapping);
+        ControllerContent.BackButtonMappingEditRequested += (_, mapping) => QueueBackButtonMutation(mapping);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
@@ -455,6 +464,42 @@ public sealed partial class MainWindow : Window
 
             _frontButtonUiMapping = _frontButtonPersistedMapping;
             ControllerContent.ApplyFrontButtonMapping(_frontButtonPersistedMapping);
+        }
+    }
+
+    /// <summary>The single ordered mutation path for the complete Xbox360 M1/M2 mapping record.</summary>
+    private void QueueBackButtonMutation(BackButtonMappingSettings next)
+    {
+        _backButtonUiMapping = next;
+        var version = ++_backButtonEditVersion;
+
+        ControllerContent.ApplyBackButtonMapping(next);
+
+        _backButtonSaveChain = SaveBackButtonAfterAsync(_backButtonSaveChain, next, version);
+    }
+
+    private async Task SaveBackButtonAfterAsync(Task previous, BackButtonMappingSettings next, long version)
+    {
+        try { await previous; }
+        catch { /* observed where it happened */ }
+
+        try
+        {
+            var result = await _frontend.SetBackButtonMappingAsync(next);
+            _backButtonPersistedMapping = result.BackButtonMapping;
+
+            if (version != _backButtonEditVersion) return;
+
+            _backButtonUiMapping = result.BackButtonMapping;
+            ControllerContent.ApplyBackButtonMapping(result.BackButtonMapping);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Window", "Back-button mapping save failed.", exception);
+            if (version != _backButtonEditVersion) return;
+
+            _backButtonUiMapping = _backButtonPersistedMapping;
+            ControllerContent.ApplyBackButtonMapping(_backButtonPersistedMapping);
         }
     }
 
