@@ -298,8 +298,10 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("RegisterRowPointerSelection(overlayRow.Container);", quickSettings);
         Assert.Contains("RegisterRowPointerSelection(row.Container);", source);
         Assert.Contains("_rowSelection.TrySelect(index)", navigation);
-        Assert.Contains("container.PointerPressed +=", navigation);
-        Assert.Contains("container.Tapped +=", navigation);
+        Assert.Contains("container.AddHandler(", navigation);
+        Assert.Contains("UIElement.PointerPressedEvent", navigation);
+        Assert.Contains("new PointerEventHandler", navigation);
+        Assert.Contains("handledEventsToo: true", navigation);
         Assert.DoesNotContain("overlayRow.Container.Tapped +=", quickSettings);
         Assert.DoesNotContain("sectionPanel.ColumnDefinitions", quickSettings);
         Assert.DoesNotContain("rowStack.ColumnDefinitions", quickSettings);

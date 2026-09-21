@@ -1,6 +1,7 @@
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
@@ -114,8 +115,10 @@ public sealed partial class OverlayWindow
     // select the wrong logical row after a reorder.
     private void RegisterRowPointerSelection(Border container)
     {
-        container.PointerPressed += (_, _) => SelectRenderedRow(container);
-        container.Tapped += (_, _) => SelectRenderedRow(container);
+        container.AddHandler(
+            UIElement.PointerPressedEvent,
+            new PointerEventHandler((_, _) => SelectRenderedRow(container)),
+            handledEventsToo: true);
     }
 
     private void SelectRenderedRow(Border container)
