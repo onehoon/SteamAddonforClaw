@@ -42,6 +42,7 @@ internal static class WindowInterop
     private const uint DwmwaWindowCornerPreference = 33;
     private const int DwmcpRound = 2;
     private const uint WmNcCalcSize = 0x0083;
+    private const uint WmSetCursor = 0x0020;
     private const uint WmMouseActivate = 0x0021;
     private const uint WmActivate = 0x0006;
     private const uint WmClose = 0x0010;
@@ -52,6 +53,8 @@ internal static class WindowInterop
     private const uint WmMButtonDown = 0x0207;
     private const uint WmXButtonDown = 0x020B;
     private const int WhMouseLl = 14;
+    private const int HtClient = 1;
+    private static readonly nint IdcArrow = 32512;
     private const nint MaNoActivate = 3;
     private const uint WsExNoActivate = 0x08000000;
     private const uint WsExToolWindow = 0x00000080;
@@ -366,6 +369,19 @@ internal static class WindowInterop
                 }
 
                 break;
+            case WmSetCursor:
+                var hitTest = unchecked((short)((long)lParam & 0xffff));
+                if (hitTest == HtClient)
+                {
+                    var arrowCursor = LoadCursor(IntPtr.Zero, IdcArrow);
+                    if (arrowCursor != IntPtr.Zero)
+                    {
+                        SetCursor(arrowCursor);
+                        return (nint)1;
+                    }
+                }
+
+                break;
             case WmMouseActivate:
                 var mouseActivateForeground = GetForegroundWindow();
                 OverlayLog.Info("Input", "WM_MOUSEACTIVATE received.",
@@ -436,6 +452,12 @@ internal static class WindowInterop
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", EntryPoint = "LoadCursorW", SetLastError = true)]
+    private static extern nint LoadCursor(nint instance, nint cursorName);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetCursor(nint cursor);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);

@@ -85,6 +85,21 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void WindowInterop_forces_the_arrow_cursor_for_client_area_messages()
+    {
+        var source = ReadWindowInteropSource();
+
+        Assert.Contains("private const uint WmSetCursor = 0x0020;", source);
+        Assert.Contains("private const int HtClient = 1;", source);
+        Assert.Contains("private static readonly nint IdcArrow = 32512;", source);
+        Assert.Contains("case WmSetCursor:", source);
+        Assert.Contains("var hitTest = unchecked((short)((long)lParam & 0xffff));", source);
+        Assert.Contains("var arrowCursor = LoadCursor(IntPtr.Zero, IdcArrow);", source);
+        Assert.Contains("SetCursor(arrowCursor);", source);
+        Assert.Contains("return (nint)1;", source);
+    }
+
+    [Fact]
     public void WindowInterop_requests_windows_11_round_corners_without_making_them_show_fatal()
     {
         var source = ReadWindowInteropSource();
