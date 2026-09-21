@@ -551,7 +551,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
-    public async Task Disabled_boot_pid1902_desktop_mode_is_observed_without_reconcile_write()
+    public async Task Disabled_boot_pid1902_desktop_mode_is_reconciled_to_directinput()
     {
         var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
         h.GamepadMode.ObservedMode = MsiClawGamepadMode.Desktop;
@@ -559,7 +559,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var result = await h.Build().AcquireAsync(default);
 
         Assert.True(result.IsOwned);
-        Assert.Empty(h.GamepadMode.SwitchTargets);
+        Assert.Equal([MsiClawGamepadMode.DirectInput], h.GamepadMode.SwitchTargets);
         Assert.True(h.InputSource.StartCalled);
     }
 
@@ -573,7 +573,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var result = await h.Build().AcquireAsync(default);
 
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
-        Assert.Contains("DisabledBootBiosModeRestoreFailed", result.Reason);
+        Assert.Contains("DisabledBootGamepadModeRestoreFailed", result.Reason);
         Assert.False(h.InputSource.StartCalled);
         Assert.Empty(h.SwitchTargets);
     }
