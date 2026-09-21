@@ -31,7 +31,9 @@ internal static class Xbox360DeviceStateMapper
 
     internal static Xbox360DeviceState Map(
         ControllerState state,
-        BackButtonMappingSettings mapping)
+        BackButtonMappingSettings mapping,
+        bool suppressM1 = false,
+        bool suppressM2 = false)
     {
         var buttons = state.Buttons;
 
@@ -53,8 +55,8 @@ internal static class Xbox360DeviceStateMapper
 
         var leftTrigger = state.Triggers.Left;
         var rightTrigger = state.Triggers.Right;
-        ApplyBackButtonTarget(mapping.M1, IsPressed(state.Auxiliary, AuxiliaryButtonSlot.RightRear), ref bits, ref leftTrigger, ref rightTrigger);
-        ApplyBackButtonTarget(mapping.M2, IsPressed(state.Auxiliary, AuxiliaryButtonSlot.LeftRear), ref bits, ref leftTrigger, ref rightTrigger);
+        ApplyBackButtonTarget(mapping.M1, IsPressed(state.Auxiliary, AuxiliaryButtonSlot.RightRear) && !suppressM1, ref bits, ref leftTrigger, ref rightTrigger);
+        ApplyBackButtonTarget(mapping.M2, IsPressed(state.Auxiliary, AuxiliaryButtonSlot.LeftRear) && !suppressM2, ref bits, ref leftTrigger, ref rightTrigger);
 
         return new Xbox360DeviceState
         {

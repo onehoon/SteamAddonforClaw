@@ -277,6 +277,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private Task? _faultCleanup;
     private bool _disposed;
     private bool _overlayPaused;
+    private int _suppressM1UntilRelease;
+    private int _suppressM2UntilRelease;
     // Full1902 Suspend/Resume section 6: one in-memory, never-persisted fact. Live game-facing
     // publication is blocked because the current power cycle entered Suspend and has not been safely
     // released. The existing _gate remains the serialization authority; this is not a second one.
@@ -299,9 +301,15 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 source,
                 setState,
                 fault: fault,
-                backButtonMappingProvider: _backButtonMappingProvider)));
+                backButtonMappingProvider: _backButtonMappingProvider,
+                rearButtonSuppressionProvider: ShouldSuppressRearButton)));
         _deckPublisherFactory = deckPublisherFactory
-            ?? ((source, sink, overlay, fault) => new PublisherAdapter(new CanonicalSteamDeckInputPublisher(source, sink, fault: fault, systemButtonOverlay: overlay)));
+            ?? ((source, sink, overlay, fault) => new PublisherAdapter(new CanonicalSteamDeckInputPublisher(
+                source,
+                sink,
+                fault: fault,
+                systemButtonOverlay: overlay,
+                rearButtonSuppressionProvider: ShouldSuppressRearButton)));
     }
 
     /// <summary>The canonical VIIPER runtime state, or <see langword="null"/> if VIIPER could not be
@@ -415,11 +423,16 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 return new(PresentationReconcileOutcome.Failed, previous, "RetireCurrentPresentationFailed");
             }
 
+            if (previous is not null && previous != desired)
+                ArmRearButtonReleaseGate(source.LatestState);
+
             var attach = desired == AddonPresentationKind.Xbox360
                 ? await AttachXbox360Async(source).ConfigureAwait(false)
                 : await AttachSteamDeckAsync(source).ConfigureAwait(false);
             if (!attach.Succeeded)
             {
+                if (previous is not null && previous != desired)
+                    ClearRearButtonReleaseGate();
                 // The previous presentation (if any) is already safely retired. No fallback / rollback
                 // to it or to any alternate presentation (section 15.3); both typed devices stay
                 // detached and a later real Steam/BPM event may reconcile again.
@@ -1087,10 +1100,47 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             _deckSession = null;
         }
         _activeKind = null;
+        ClearRearButtonReleaseGate();
         // OQ4 section 5.6: an explicit authority release / teardown that retires the presentation
         // also clears any Overlay pause so the closed state is consistent.
         _overlayPaused = false;
         return true;
+    }
+
+    internal bool ShouldSuppressRearButton(ControllerState state, AuxiliaryButtonSlot slot)
+    {
+        ref var flag = ref _suppressM1UntilRelease;
+        if (slot == AuxiliaryButtonSlot.LeftRear)
+            flag = ref _suppressM2UntilRelease;
+        else if (slot != AuxiliaryButtonSlot.RightRear)
+            return false;
+
+        if (Volatile.Read(ref flag) == 0)
+            return false;
+
+        if (IsRearPressed(state, slot))
+            return true;
+
+        Volatile.Write(ref flag, 0);
+        return false;
+    }
+
+    private void ArmRearButtonReleaseGate(ControllerState state)
+    {
+        Volatile.Write(ref _suppressM1UntilRelease, IsRearPressed(state, AuxiliaryButtonSlot.RightRear) ? 1 : 0);
+        Volatile.Write(ref _suppressM2UntilRelease, IsRearPressed(state, AuxiliaryButtonSlot.LeftRear) ? 1 : 0);
+    }
+
+    private void ClearRearButtonReleaseGate()
+    {
+        Volatile.Write(ref _suppressM1UntilRelease, 0);
+        Volatile.Write(ref _suppressM2UntilRelease, 0);
+    }
+
+    private static bool IsRearPressed(ControllerState state, AuxiliaryButtonSlot slot)
+    {
+        var index = (int)slot;
+        return index >= 0 && index < state.Auxiliary.Count && state.Auxiliary[index];
     }
 
     private async Task<bool> RetireAsync(string reason)

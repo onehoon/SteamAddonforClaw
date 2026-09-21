@@ -544,6 +544,87 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
+    public async Task Kind_switch_suppresses_held_M1_until_the_first_release_then_rearms()
+    {
+        var h = new SwitchHarness();
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([false, true]));
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Snapshot = WantsDeck();
+
+        Assert.Equal(PresentationReconcileOutcome.Switched,
+            (await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default)).Outcome);
+        Assert.True(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.RightRear));
+
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([false, false]));
+        Assert.False(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.RightRear));
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([false, true]));
+        Assert.False(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.RightRear));
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Kind_switch_rearms_M1_and_M2_independently()
+    {
+        var h = new SwitchHarness();
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([true, true]));
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Snapshot = WantsDeck();
+        await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.True(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.RightRear));
+        Assert.True(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.LeftRear));
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([true, false]));
+        Assert.False(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.RightRear));
+        Assert.True(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.LeftRear));
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([false, false]));
+        Assert.False(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.LeftRear));
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task NoChange_does_not_arm_release_to_rearm()
+    {
+        var h = new SwitchHarness();
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([false, true]));
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+
+        Assert.Equal(PresentationReconcileOutcome.NoChange,
+            (await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default)).Outcome);
+        Assert.False(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.RightRear));
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Same_kind_structural_restart_does_not_arm_release_to_rearm()
+    {
+        var h = new SwitchHarness();
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([false, true]));
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        await h.Xbox360Publishers[0].StopAsync();
+
+        var result = await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default);
+
+        Assert.Equal(PresentationReconcileOutcome.Switched, result.Outcome);
+        Assert.False(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.RightRear));
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Failed_target_attach_clears_a_fresh_release_gate()
+    {
+        var h = new SwitchHarness();
+        h.Source.LatestState = new ControllerState(new AuxiliaryButtonState([false, true]));
+        await h.Owner.AttachInitialAsync(h.Source, WantsXbox(), default);
+        h.Snapshot = WantsDeck();
+        h.Native.AttachResults.Enqueue(USBDeviceAttachResult.RetryableFailure);
+
+        Assert.Equal(PresentationReconcileOutcome.Failed,
+            (await h.Owner.ReconcileDesiredPresentationAsync(h.Source, h.Capture, default)).Outcome);
+        Assert.False(h.Owner.ShouldSuppressRearButton(h.Source.LatestState, AuxiliaryButtonSlot.RightRear));
+        await h.Owner.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Reconcile_is_a_noop_when_the_active_presentation_already_matches_policy()
     {
         var h = new SwitchHarness();
