@@ -223,31 +223,21 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
             AppLog.Info("ControllerOwnership", "Disabled-boot GamepadMode observed.",
                 ("Event", "DisabledBootGamepadModeObserved"), ("Succeeded", observedMode.Succeeded),
                 ("Mode", observedMode.Mode), ("Reason", observedMode.Reason));
-            if (observedMode.Succeeded && observedMode.Mode is { } observed && observed != MsiClawGamepadMode.DirectInput)
+            if (observedMode.Succeeded && observedMode.Mode == MsiClawGamepadMode.Bios)
             {
                 if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
                     return Fail("AuthorityChangedBeforeBiosModeRestore", false);
 
-                AppLog.Info("ControllerOwnership", "Disabled-boot non-DirectInput GamepadMode restore started.",
-                    ("Event", "DisabledBootGamepadModeRestoreStarted"), ("ObservedMode", observed),
+                AppLog.Info("ControllerOwnership", "Disabled-boot BIOS GamepadMode restore started.",
+                    ("Event", "DisabledBootBiosModeRestoreStarted"),
                     ("TargetMode", MsiClawGamepadMode.DirectInput));
-                if (observed == MsiClawGamepadMode.Bios)
-                    AppLog.Info("ControllerOwnership", "Disabled-boot BIOS GamepadMode restore started.",
-                        ("Event", "DisabledBootBiosModeRestoreStarted"), ("TargetMode", MsiClawGamepadMode.DirectInput));
                 var restored = await gamepadModeClient.SwitchAndVerifyAsync(
                     initialIdentity, MsiClawGamepadMode.DirectInput, cancellationToken).ConfigureAwait(false);
                 if (!restored.Succeeded)
-                    return Fail((observed == MsiClawGamepadMode.Bios
-                        ? "DisabledBootBiosModeRestoreFailed"
-                        : "DisabledBootGamepadModeRestoreFailed") + ":" + observed + ":" + restored.Reason, restored.WriteIssued);
-                AppLog.Info("ControllerOwnership", "Disabled-boot GamepadMode restore verified.",
-                    ("Event", "DisabledBootGamepadModeRestoreVerified"), ("ObservedMode", observed),
-                    ("Mode", restored.Mode),
+                    return Fail("DisabledBootBiosModeRestoreFailed:" + restored.Reason, restored.WriteIssued);
+                AppLog.Info("ControllerOwnership", "Disabled-boot BIOS GamepadMode restore verified.",
+                    ("Event", "DisabledBootBiosModeRestoreVerified"), ("Mode", restored.Mode),
                     ("ReadbackVerified", restored.ReadbackVerified));
-                if (observed == MsiClawGamepadMode.Bios)
-                    AppLog.Info("ControllerOwnership", "Disabled-boot BIOS GamepadMode restore verified.",
-                        ("Event", "DisabledBootBiosModeRestoreVerified"), ("Mode", restored.Mode),
-                        ("ReadbackVerified", restored.ReadbackVerified));
             }
         }
 

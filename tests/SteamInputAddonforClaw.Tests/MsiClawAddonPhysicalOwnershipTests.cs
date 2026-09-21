@@ -551,6 +551,19 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
+    public async Task Disabled_boot_pid1902_desktop_mode_is_observed_without_reconcile_write()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        h.GamepadMode.ObservedMode = MsiClawGamepadMode.Desktop;
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.Empty(h.GamepadMode.SwitchTargets);
+        Assert.True(h.InputSource.StartCalled);
+    }
+
+    [Fact]
     public async Task Disabled_boot_mode5_reconcile_failure_stops_before_directinput_acquisition()
     {
         var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
