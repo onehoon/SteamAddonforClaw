@@ -19,6 +19,8 @@ internal static class AddonDataPaths
     internal static string DisplayResolutionRecoveryPath => Path.Combine(RootDirectory, "display-resolution-recovery.json");
     internal static string IntelFpsLimitOwnershipPath => Path.Combine(RootDirectory, "intel-fps-limit-ownership.json");
 
+    internal static string ClawHudRuntimeRoot => ResolveClawHudRuntimeRoot(VelopackAppPaths.RootAppDirectory);
+
     internal static string ResolveSettingsPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "settings.json");
 
@@ -27,6 +29,15 @@ internal static class AddonDataPaths
 
     internal static string ResolveLogDirectory(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "logs");
+
+    internal static string ResolveClawHudRuntimeRoot(string rootAppDirectory) =>
+        Path.Combine(ResolveDataRoot(rootAppDirectory), "Runtime", "ClawHUD");
+
+    internal static string ResolveClawHudRuntimeVersionDirectory(string rootAppDirectory, string runtimeVersion)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(runtimeVersion);
+        return Path.Combine(ResolveClawHudRuntimeRoot(rootAppDirectory), runtimeVersion);
+    }
 
     internal static void DeleteFullResetRoot(string rootAppDirectory)
     {

@@ -11,6 +11,7 @@ function New-Fixture {
         (Join-Path $root 'Dependencies\HidHide'),
         (Join-Path $root 'Dependencies\UsbIpWin2'),
         (Join-Path $root 'Dependencies\Viiper'),
+        (Join-Path $root 'Dependencies\ClawHUD'),
         (Join-Path $root 'ui\Views'),
         (Join-Path $root 'qam\Frontend'),
         (Join-Path $root 'overlay'),
@@ -28,6 +29,7 @@ function New-Fixture {
         'Dependencies\Viiper\PROVENANCE.md' = (Join-Path $dependencyRoot 'Viiper\PROVENANCE.md')
         'Dependencies\Viiper\libVIIPER.h' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.h')
         'Dependencies\Viiper\LICENSE.txt' = (Join-Path $dependencyRoot 'Viiper\LICENSE.txt')
+        'Dependencies\ClawHUD\clawhud.lock.json' = (Join-Path $dependencyRoot 'ClawHUD\clawhud.lock.json')
         'ui\SteamInputAddonforClaw.UI.exe' = 'ui executable'
         'ui\SteamInputAddonforClaw.UI.dll' = 'managed payload'
         'ui\SteamInputAddonforClaw.UI.pri' = 'application pri'
@@ -101,6 +103,22 @@ try {
     $validRoot = New-Fixture
     $fixturesToClean += $validRoot
     Assert-Success -Result (Invoke-Verify -PublishDirectory $validRoot) -Case 'complete application asset set'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'Dependencies\ClawHUD\ClawHUDRuntime.zip') -Value 'forbidden ClawHUD Runtime payload'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'ClawHUDRuntime.zip') {
+        throw 'Expected a bundled ClawHUD Runtime ZIP to be rejected.'
+    }
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'Dependencies\ClawHUD\ClawHUD.exe') -Value 'forbidden ClawHUD Runtime payload'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'ClawHUD.exe') {
+        throw 'Expected a bundled ClawHUD executable to be rejected.'
+    }
 
     $root = New-Fixture
     $fixturesToClean += $root

@@ -28,6 +28,17 @@ public sealed class AddonDataPathsTests
     }
 
     [Fact]
+    public void ResolveClawHudRuntimePaths_UseCanonicalDataRootOutsideInstallRoot()
+    {
+        var runtimeRoot = AddonDataPaths.ResolveClawHudRuntimeRoot(InstallRoot);
+        var versionDirectory = AddonDataPaths.ResolveClawHudRuntimeVersionDirectory(InstallRoot, "1.0.1");
+
+        Assert.Equal(@"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\Runtime\ClawHUD", runtimeRoot);
+        Assert.Equal(@"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\Runtime\ClawHUD\1.0.1", versionDirectory);
+        Assert.False(versionDirectory.StartsWith(Path.GetFullPath(InstallRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Paths_AreInsideDataRootAndOutsideInstallRoot()
     {
         var settingsPath = AddonDataPaths.ResolveSettingsPath(InstallRoot);
