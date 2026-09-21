@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Input;
 
@@ -42,6 +43,7 @@ internal sealed class CanonicalXbox360InputPublisher
     private readonly IInputReportTickSource? _ticks;
     private readonly Action<Exception>? _fault;
     private readonly Func<long> _timestampProvider;
+    private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
     private CancellationTokenSource? _stop;
     private Task? _task;
     private int _publishedStateCount;
@@ -62,13 +64,15 @@ internal sealed class CanonicalXbox360InputPublisher
         Func<Xbox360DeviceState, bool> setState,
         IInputReportTickSource? ticks = null,
         Action<Exception>? fault = null,
-        Func<long>? timestampProvider = null)
+        Func<long>? timestampProvider = null,
+        Func<BackButtonMappingSettings>? backButtonMappingProvider = null)
     {
         _snapshot = snapshot;
         _setState = setState;
         _ticks = ticks;
         _fault = fault;
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
+        _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
     }
 
     internal bool IsRunning => _task is { IsCompleted: false } || _workerThread is { IsAlive: true };
@@ -283,11 +287,12 @@ internal sealed class CanonicalXbox360InputPublisher
     /// <summary>
     /// The single publish operation shared by both the production worker thread and the test/async
     /// tick loop: map the current snapshot through <see cref="Xbox360DeviceStateMapper"/>, invoke the
-    /// sink, and report+stop once on rejection. No overlay, no Guide mutation, no other transformation.
+    /// sink, and report+stop once on rejection. The current back-button mapping is read for each
+    /// report so a settings mutation does not require publisher restart or presentation churn.
     /// </summary>
     private bool PublishCurrentStateOnce()
     {
-        var mapped = Xbox360DeviceStateMapper.Map(_snapshot.LatestState);
+        var mapped = Xbox360DeviceStateMapper.Map(_snapshot.LatestState, _backButtonMappingProvider());
         if (!_setState(mapped))
         {
             ReportFault(new InvalidOperationException("Canonical VIIPER rejected a typed Xbox360 state."));

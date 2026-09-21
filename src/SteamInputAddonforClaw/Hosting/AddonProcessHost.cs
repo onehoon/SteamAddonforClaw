@@ -544,7 +544,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // presentation owner arms/disarms the active virtual presentation's feedback callback
             // against this one sink; it never reaches for a second physical writer or discovery.
             var rumbleSink = new Devices.MSI.Claw.MsiClawRumbleSink(owner, new Devices.MSI.Claw.WindowsMsiClawRumbleTransport());
-            var presentation = new Devices.MSI.Claw.MsiClawAddonPresentation(viiper, rumbleSink);
+            var presentation = new Devices.MSI.Claw.MsiClawAddonPresentation(
+                viiper,
+                rumbleSink,
+                backButtonMappingProvider: () => startupSettings.BackButtonMapping);
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));

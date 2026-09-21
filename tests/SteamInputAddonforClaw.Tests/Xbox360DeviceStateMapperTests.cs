@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
@@ -168,6 +169,104 @@ public sealed class Xbox360DeviceStateMapperTests
 
         Assert.Equal(neutral.Buttons, withAuxiliary.Buttons);
         Assert.Equal(0u, withAuxiliary.Buttons);
+    }
+
+    [Theory]
+    [InlineData(Xbox360BackButtonTarget.A, Xbox360ButtonBits.A)]
+    [InlineData(Xbox360BackButtonTarget.B, Xbox360ButtonBits.B)]
+    [InlineData(Xbox360BackButtonTarget.X, Xbox360ButtonBits.X)]
+    [InlineData(Xbox360BackButtonTarget.Y, Xbox360ButtonBits.Y)]
+    [InlineData(Xbox360BackButtonTarget.DPadUp, Xbox360ButtonBits.DPadUp)]
+    [InlineData(Xbox360BackButtonTarget.DPadRight, Xbox360ButtonBits.DPadRight)]
+    [InlineData(Xbox360BackButtonTarget.DPadDown, Xbox360ButtonBits.DPadDown)]
+    [InlineData(Xbox360BackButtonTarget.DPadLeft, Xbox360ButtonBits.DPadLeft)]
+    [InlineData(Xbox360BackButtonTarget.LeftBumper, Xbox360ButtonBits.LeftShoulder)]
+    [InlineData(Xbox360BackButtonTarget.RightBumper, Xbox360ButtonBits.RightShoulder)]
+    [InlineData(Xbox360BackButtonTarget.LeftStickClick, Xbox360ButtonBits.LeftThumb)]
+    [InlineData(Xbox360BackButtonTarget.RightStickClick, Xbox360ButtonBits.RightThumb)]
+    [InlineData(Xbox360BackButtonTarget.View, Xbox360ButtonBits.Back)]
+    [InlineData(Xbox360BackButtonTarget.Menu, Xbox360ButtonBits.Start)]
+    [InlineData(Xbox360BackButtonTarget.XboxGuide, Xbox360ButtonBits.Guide)]
+    public void M1_maps_each_digital_target_to_the_exact_Xbox360_bit(Xbox360BackButtonTarget target, uint expectedBit)
+    {
+        var mapped = Xbox360DeviceStateMapper.Map(
+            State(auxiliary: new AuxiliaryButtonState([false, true])),
+            new BackButtonMappingSettings(target, Xbox360BackButtonTarget.Disabled));
+
+        Assert.Equal(expectedBit, mapped.Buttons);
+    }
+
+    [Fact]
+    public void M2_maps_to_right_bumper_without_changing_M1_or_physical_controls()
+    {
+        var mapped = Xbox360DeviceStateMapper.Map(
+            State(buttons: Button("A"), auxiliary: new AuxiliaryButtonState([true, false])),
+            new BackButtonMappingSettings(Xbox360BackButtonTarget.Disabled, Xbox360BackButtonTarget.RightBumper));
+
+        Assert.Equal(Xbox360ButtonBits.A | Xbox360ButtonBits.RightShoulder, mapped.Buttons);
+    }
+
+    [Fact]
+    public void Trigger_targets_are_full_pull_only_while_the_rear_button_is_pressed()
+    {
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.LeftTrigger, Xbox360BackButtonTarget.RightTrigger);
+
+        var held = Xbox360DeviceStateMapper.Map(
+            State(triggers: new TriggerState(91, 37), auxiliary: new AuxiliaryButtonState([false, true])), mapping);
+        var m2Held = Xbox360DeviceStateMapper.Map(
+            State(triggers: new TriggerState(91, 37), auxiliary: new AuxiliaryButtonState([true, false])), mapping);
+        var released = Xbox360DeviceStateMapper.Map(
+            State(triggers: new TriggerState(91, 37), auxiliary: new AuxiliaryButtonState([false, false])), mapping);
+
+        Assert.Equal((byte)255, held.LT);
+        Assert.Equal((byte)37, held.RT);
+        Assert.Equal((byte)91, m2Held.LT);
+        Assert.Equal((byte)255, m2Held.RT);
+        Assert.Equal((byte)91, released.LT);
+        Assert.Equal((byte)37, released.RT);
+    }
+
+    [Fact]
+    public void Physical_and_rear_button_targets_are_additive_and_same_target_is_or_combined()
+    {
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.A);
+        var physicalAOnly = Xbox360DeviceStateMapper.Map(
+            State(buttons: Button("A"), auxiliary: new AuxiliaryButtonState([false, false])), mapping);
+        var m1Only = Xbox360DeviceStateMapper.Map(
+            State(auxiliary: new AuxiliaryButtonState([false, true])), mapping);
+        var m2Only = Xbox360DeviceStateMapper.Map(
+            State(auxiliary: new AuxiliaryButtonState([true, false])), mapping);
+        var bothReleased = Xbox360DeviceStateMapper.Map(
+            State(auxiliary: new AuxiliaryButtonState([false, false])), mapping);
+
+        Assert.Equal(Xbox360ButtonBits.A, physicalAOnly.Buttons);
+        Assert.Equal(Xbox360ButtonBits.A, m1Only.Buttons);
+        Assert.Equal(Xbox360ButtonBits.A, m2Only.Buttons);
+        Assert.Equal(0u, bothReleased.Buttons);
+    }
+
+    [Fact]
+    public void Default_controller_state_is_safe_with_a_non_default_mapping()
+    {
+        var mapped = Xbox360DeviceStateMapper.Map(
+            default,
+            new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.RightTrigger));
+
+        Assert.Equal(0u, mapped.Buttons);
+        Assert.Equal((byte)0, mapped.LT);
+        Assert.Equal((byte)0, mapped.RT);
+    }
+
+    [Fact]
+    public void Unknown_target_fails_closed_without_throwing_or_output()
+    {
+        var mapped = Xbox360DeviceStateMapper.Map(
+            State(auxiliary: new AuxiliaryButtonState([false, true])),
+            new BackButtonMappingSettings((Xbox360BackButtonTarget)999, Xbox360BackButtonTarget.Disabled));
+
+        Assert.Equal(0u, mapped.Buttons);
+        Assert.Equal((byte)0, mapped.LT);
+        Assert.Equal((byte)0, mapped.RT);
     }
 
     [Fact]
