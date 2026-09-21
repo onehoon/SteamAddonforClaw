@@ -176,6 +176,10 @@ internal sealed class ClawHudRuntimeAcquirer
         {
             return Fail(runtimeLock, ClawHudRuntimeAcquisitionFailure.Cancelled, "Runtime acquisition was cancelled.");
         }
+        catch (OperationCanceledException exception)
+        {
+            return Fail(runtimeLock, ClawHudRuntimeAcquisitionFailure.Network, "Runtime download timed out.", ("Reason", exception.Message));
+        }
         catch (HttpRequestException exception)
         {
             return Fail(runtimeLock, ClawHudRuntimeAcquisitionFailure.Network, "Runtime download failed.", ("Reason", exception.Message));

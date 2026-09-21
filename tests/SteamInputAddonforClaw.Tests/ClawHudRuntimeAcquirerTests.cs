@@ -75,6 +75,18 @@ public sealed class ClawHudRuntimeAcquirerTests
     }
 
     [Fact]
+    public async Task HttpTimeout_IsFeatureLocal()
+    {
+        using var fixture = new Fixture();
+        var handler = new RecordingHandler(_ => throw new TaskCanceledException("simulated HttpClient timeout"));
+        var result = await fixture.CreateAcquirer(handler).AcquireAsync(CancellationToken.None);
+
+        Assert.False(result.IsReady);
+        Assert.Equal(ClawHudRuntimeAcquisitionFailure.Network, result.Failure);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
     public async Task Cancellation_IsFeatureLocal()
     {
         using var fixture = new Fixture();
