@@ -83,7 +83,7 @@ $requiredAssets = @(
     'fse\SteamInputAddonforClaw.FseHome.msix',
     'fse\Package\AppxManifest.xml',
     'fse\Package\CustomCapability.SCCD',
-    'fse\Package\Assets\AppIcon.ico',
+    'fse\Package\Assets\AppIcon.png',
     'fse\Package\Public\README.txt'
 )
 

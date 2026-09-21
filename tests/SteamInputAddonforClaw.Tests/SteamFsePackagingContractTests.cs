@@ -26,6 +26,9 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("Name=\"windows.gamingApp\"", manifest, StringComparison.Ordinal);
         Assert.Contains("Name=\"Microsoft.appCategory.gamingHome_8wekyb3d8bbwe\"", manifest, StringComparison.Ordinal);
         Assert.Contains("Version=\"__PACKAGE_VERSION__\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("Logo>Assets\\AppIcon.png", manifest, StringComparison.Ordinal);
+        Assert.Contains("Square150x150Logo=\"Assets\\AppIcon.png\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("Square44x44Logo=\"Assets\\AppIcon.png\"", manifest, StringComparison.Ordinal);
         Assert.Contains("<Application Id=\"App\"", manifest, StringComparison.Ordinal);
         Assert.Contains("Microsoft.appCategory.gamingHome_8wekyb3d8bbwe", sccd, StringComparison.Ordinal);
         Assert.DoesNotContain("AllowExternalContent", manifest, StringComparison.Ordinal);

@@ -54,7 +54,7 @@ function New-Fixture {
         'fse\SteamInputAddonforClaw.FseHome.msix' = 'signed fse package placeholder'
         'fse\Package\AppxManifest.xml' = '<Identity Name="SteamInputAddonforClaw.FseHome" /><Application Id="App"><uap3:AppExtension Name="windows.gamingApp" /><uap4:CustomCapability Name="Microsoft.appCategory.gamingHome_8wekyb3d8bbwe" /></Application>'
         'fse\Package\CustomCapability.SCCD' = '<CustomCapability Name="Microsoft.appCategory.gamingHome_8wekyb3d8bbwe" />'
-        'fse\Package\Assets\AppIcon.ico' = 'icon'
+        'fse\Package\Assets\AppIcon.png' = 'icon'
         'fse\Package\Public\README.txt' = 'public folder'
     }
 
