@@ -106,6 +106,20 @@ if ($manifestSourceCommit -notmatch '^[0-9a-fA-F]{40}$') { throw 'Runtime manife
 if ($manifestAsset -cne $expectedAsset) { throw "Runtime manifest asset must be '$expectedAsset'." }
 if ($manifestSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Runtime manifest sha256 must be exactly 64 hexadecimal characters.' }
 
+$tagRefJson = gh api "repos/$repository/git/ref/tags/$Tag"
+if ($LASTEXITCODE -ne 0) { throw "Could not resolve Runtime tag '$Tag'." }
+$tagRef = $tagRefJson | ConvertFrom-Json
+$tagTargetSha = [string]$tagRef.object.sha
+if ($tagRef.object.type -eq 'tag') {
+    $annotatedJson = gh api "repos/$repository/git/tags/$tagTargetSha"
+    if ($LASTEXITCODE -ne 0) { throw "Could not dereference annotated Runtime tag '$Tag'." }
+    $annotated = $annotatedJson | ConvertFrom-Json
+    $tagTargetSha = [string]$annotated.object.sha
+}
+if ($tagTargetSha -notmatch '^[0-9a-fA-F]{40}$' -or $tagTargetSha.ToLowerInvariant() -cne $manifestSourceCommit.ToLowerInvariant()) {
+    throw 'Runtime tag target does not match runtime-manifest source_commit.'
+}
+
 $actualSha256 = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actualSha256 -cne $manifestSha256.ToLowerInvariant()) { throw 'Downloaded Runtime ZIP SHA-256 does not match runtime-manifest.json.' }
 $sidecarSha256 = ((Get-Content -LiteralPath $sidecarPath -Raw).Trim() -split '\s+')[0].ToLowerInvariant()

@@ -51,6 +51,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: |
             SteamAddonforClaw
+            ClawHUD
           permission-actions: read
           permission-contents: write
           permission-pull-requests: write
@@ -107,7 +108,8 @@ jobs:
           $branch = "automation/clawhud-runtime-$($env:TARGET_TAG)"
           $prJson = gh pr list --head $branch --state all --json number,isDraft,state
           $prExit = $LASTEXITCODE
-          $prs = if ($prExit -eq 0) { @($prJson | ConvertFrom-Json) } else { @() }
+          $existingPrsParsed = if ($prExit -eq 0) { $prJson | ConvertFrom-Json } else { @() }
+          $prs = @($existingPrsParsed)
           $refs = @(git ls-remote --heads origin "refs/heads/$branch")
           if ($LASTEXITCODE -ne 0) { throw "Could not query remote branch '$branch'." }
           if ($prs.Count -gt 0) {
