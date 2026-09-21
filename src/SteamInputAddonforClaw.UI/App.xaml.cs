@@ -194,6 +194,18 @@ public partial class App : Application
         {
             if (_frontendClient is not null)
             {
+                if (_mainWindow is not null)
+                {
+                    try
+                    {
+                        await _mainWindow.DrainPendingControllerMappingSavesAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception exception)
+                    {
+                        AppLog.Warn("Frontend", "Pending controller mapping save drain failed; frontend disposal will continue.", exception);
+                    }
+                }
+
                 _frontendClient.Disconnected -= OnFrontendDisconnected;
                 _frontendClient.CloseRequested -= OnFrontendCloseRequested;
                 AppLog.Info("Frontend", "Frontend client disposal started.");
