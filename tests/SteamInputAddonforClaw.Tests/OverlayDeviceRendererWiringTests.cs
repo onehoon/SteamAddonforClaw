@@ -242,7 +242,60 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("if (visibleRows.Length == 0) continue;", source);
     }
 
-    private static string ReadOverlayWindowSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+    [Fact]
+    public void OverlayWindow_code_behind_is_only_the_composition_root()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+
+        Assert.DoesNotContain("RenderQuickSettingsPage", source);
+        Assert.DoesNotContain("RebuildQuickSettingsContent", source);
+        Assert.DoesNotContain("BuildTabOrderEditorPage", source);
+        Assert.DoesNotContain("NavigateUp", source);
+        Assert.DoesNotContain("AnimateAsync", source);
+    }
+
+    [Fact]
+    public void OverlayWindow_partial_files_keep_one_owner_and_explicit_responsibilities()
+    {
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+
+        Assert.Contains("partial class OverlayWindow", presentation);
+        Assert.Contains("ShowForPocAsync", presentation);
+        Assert.Contains("HideForPocAsync", presentation);
+        Assert.Contains("AnimateAsync", presentation);
+
+        Assert.Contains("partial class OverlayWindow", shell);
+        Assert.Contains("BuildShell", shell);
+        Assert.Contains("ApplyTabOrderState", shell);
+        Assert.Contains("ApplySelectedTabVisualState", shell);
+
+        Assert.Contains("partial class OverlayWindow", navigation);
+        Assert.Contains("NavigateUp", navigation);
+        Assert.Contains("AdjustSelectedRow", navigation);
+        Assert.Contains("BringSelectedRowIntoView", navigation);
+
+        Assert.Contains("partial class OverlayWindow", quickSettings);
+        Assert.Contains("ConfigureQuickSettings", quickSettings);
+        Assert.Contains("RenderQuickSettingsPage", quickSettings);
+        Assert.Contains("RebuildQuickSettingsContent", quickSettings);
+
+        var splitSources = string.Join(Environment.NewLine, presentation, shell, navigation, quickSettings);
+        Assert.DoesNotContain("class OverlayNavigationManager", splitSources);
+        Assert.DoesNotContain("class OverlayPresentationManager", splitSources);
+        Assert.DoesNotContain("class OverlayShellManager", splitSources);
+        Assert.DoesNotContain("class OverlayQuickSettingsManager", splitSources);
+    }
+
+    private static string ReadOverlayWindowSource() => string.Join(
+        Environment.NewLine,
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
 
     private static string ReadWindowInteropSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "WindowInterop.cs");
 

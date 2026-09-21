@@ -969,7 +969,7 @@ public sealed class QamFrontendContractTests
     [Fact]
     public void Overlay_shortcut_renderer_consumes_the_shared_contract_but_keeps_local_geometry()
     {
-        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+        var source = ReadOverlayWindowSources();
         var pageStart = source.IndexOf("private FrameworkElement BuildShortcutPage()", StringComparison.Ordinal);
         var pageEnd = source.IndexOf("private void SelectShortcutSlot", pageStart, StringComparison.Ordinal);
         Assert.True(pageStart >= 0 && pageEnd > pageStart);
@@ -1377,4 +1377,12 @@ public sealed class QamFrontendContractTests
         Assert.NotNull(directory);
         return File.ReadAllText(Path.Combine([directory!.FullName, .. parts])).ReplaceLineEndings("\n");
     }
+
+    private static string ReadOverlayWindowSources() => string.Join(
+        Environment.NewLine,
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
 }
