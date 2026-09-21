@@ -159,6 +159,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
                 }
             }
 
+            var childRetired = child is null || child.HasExited;
             if (child is not null && !child.HasExited)
             {
                 if (failure is null)
@@ -174,19 +175,35 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
                     try
                     {
                         child.Kill(entireProcessTree: true);
+                        childRetired = true;
                         AppLog.Warn(Category, "Managed ClawHUD graceful shutdown failed; proven child was terminated.", null,
                             ("Event", "ManagedShutdownFallbackKill"));
                     }
                     catch (Exception exception)
                     {
+                        childRetired = false;
                         failure ??= $"ManagedShutdownKillFailed:{exception.GetType().Name}";
                     }
                 }
+                else
+                {
+                    childRetired = true;
+                }
             }
 
-            _ownedChild = null;
-            _managedClassified = false;
-            _managedReady = false;
+            if (child is null)
+            {
+                _ownedChild = null;
+                _managedClassified = false;
+                _managedReady = false;
+            }
+            else if (childRetired && ReferenceEquals(_ownedChild, child))
+            {
+                _ownedChild = null;
+                _managedClassified = false;
+                _managedReady = false;
+                await DisposeChildAsync(child).ConfigureAwait(false);
+            }
             State = failure is null
                 ? new(desiredEnabled, ClawHudFeatureState.Disabled)
                 : new(desiredEnabled, ClawHudFeatureState.Unavailable, failure);
@@ -211,11 +228,14 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
         _managedClassified = false;
         _managedReady = false;
         if (child is not null)
-        {
-            try { await child.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception exception) { AppLog.Warn(Category, "Managed child handle disposal failed.", exception); }
-        }
+            await DisposeChildAsync(child).ConfigureAwait(false);
         _gate.Dispose();
+    }
+
+    private async Task DisposeChildAsync(IClawHudProcessHandle child)
+    {
+        try { await child.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn(Category, "Managed child handle disposal failed.", exception); }
     }
 
     private async Task<ClawHudState> EnsureRunningCoreAsync(
@@ -391,6 +411,8 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
                 AppLog.Warn(Category, "Managed ClawHUD child exited unexpectedly.", null,
                     ("Event", "ManagedRuntimeUnavailable"), ("ExitCode", child.ExitCode), ("RuntimeVersion", runtimeVersion));
             }
+
+            await DisposeChildAsync(child).ConfigureAwait(false);
         }
     }
 

@@ -230,6 +230,47 @@ public sealed class ClawHudProcessControllerTests
 
         Assert.True(state.ActualState == ClawHudFeatureState.Unavailable, state.Failure);
         Assert.True(process.KillCalled);
+        Assert.True(process.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task Stop_DisposesProvenChildAfterGracefulShutdown()
+    {
+        var runtime = Runtime("1.0.1");
+        var process = new FakeProcess { ExitOnThirdWait = true };
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+            Snapshot = Snapshot(true),
+        };
+        var controller = new ClawHudProcessController(control, _ => process);
+        await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+
+        var state = await controller.StopAsync(false, CancellationToken.None);
+
+        Assert.Equal(ClawHudFeatureState.Disabled, state.ActualState);
+        Assert.False(process.KillCalled);
+        Assert.True(process.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task UnexpectedManagedChildExitDisposesProvenChildAfterRecordingUnavailableState()
+    {
+        var runtime = Runtime("1.0.1");
+        var process = new FakeProcess { ExitOnSecondWait = true, ExitCodeAfterWait = 123 };
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+            Snapshot = Snapshot(true),
+        };
+        var controller = new ClawHudProcessController(control, _ => process);
+
+        await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+        await process.DisposedTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(ClawHudFeatureState.Unavailable, controller.State.ActualState);
+        Assert.Equal("ManagedChildExited:123", controller.State.Failure);
+        Assert.True(process.DisposeCalled);
     }
 
     [Fact]
@@ -312,8 +353,12 @@ public sealed class ClawHudProcessControllerTests
         internal bool ExitOnFirstWait { get; init; }
         internal int ExitCodeAfterWait { get; init; }
         internal bool ExitOnSecondWait { get; init; }
+        internal bool ExitOnThirdWait { get; init; }
         internal bool KillCalled { get; private set; }
         internal bool DisposeCalled { get; private set; }
+        internal Task DisposedTask => _disposed.Task;
+
+        private readonly TaskCompletionSource<bool> _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         bool IClawHudProcessHandle.HasExited => HasExited;
         int IClawHudProcessHandle.ExitCode => ExitCode;
@@ -324,11 +369,13 @@ public sealed class ClawHudProcessControllerTests
             if (waitCall == 1 && ExitOnFirstWait)
                 CompleteExit(ExitCodeAfterWait);
             else if (waitCall == 2 && ExitOnSecondWait)
-                CompleteExit(0);
+                CompleteExit(ExitCodeAfterWait);
+            else if (waitCall == 3 && ExitOnThirdWait)
+                CompleteExit(ExitCodeAfterWait);
             return _exited.Task.WaitAsync(cancellationToken);
         }
         public void Kill(bool entireProcessTree) { KillCalled = true; HasExited = true; _exited.TrySetResult(true); }
-        public ValueTask DisposeAsync() { DisposeCalled = true; return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync() { DisposeCalled = true; _disposed.TrySetResult(true); return ValueTask.CompletedTask; }
 
         private void CompleteExit(int exitCode)
         {
