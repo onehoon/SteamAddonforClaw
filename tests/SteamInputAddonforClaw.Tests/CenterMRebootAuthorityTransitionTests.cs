@@ -583,6 +583,24 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.DoesNotContain("\"/r /f /t 0\"", method);
     }
 
+    [Fact]
+    public void Firmware_restart_seam_requests_elevation_without_changing_plain_restart()
+    {
+        var root = TestPaths.RepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/CenterMRebootAuthorityTransition.cs"));
+        var firmwareStart = source.IndexOf("public WindowsRestartRequestResult RequestFirmwareRestart()", StringComparison.Ordinal);
+        Assert.True(firmwareStart >= 0);
+
+        var plainRestart = source[..firmwareStart];
+        var firmwareRestart = source[firmwareStart..];
+
+        Assert.Contains("UseShellExecute = false", plainRestart);
+        Assert.DoesNotContain("Verb = \"runas\"", plainRestart);
+        Assert.Contains("UseShellExecute = true", firmwareRestart);
+        Assert.Contains("Verb = \"runas\"", firmwareRestart);
+        Assert.Contains("NativeErrorCode == ErrorCancelled", firmwareRestart);
+    }
+
     // ================= PR12: stock-safe uninstall preparation (work order section 22) =================
 
     [Fact] // 22.1 -- Disabled + active Full1902 ownership happy path: strict order, NO restart.

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
@@ -41,6 +42,8 @@ internal interface IWindowsRestartRequester
 
 internal sealed class WindowsRestartRequester : IWindowsRestartRequester
 {
+    private const int ErrorCancelled = 1223; // ERROR_CANCELLED -- the UAC consent prompt was dismissed.
+
     public WindowsRestartRequestResult RequestRestart()
     {
         try
@@ -81,8 +84,8 @@ internal sealed class WindowsRestartRequester : IWindowsRestartRequester
         {
             using var started = Process.Start(new ProcessStartInfo("shutdown.exe", "/r /fw /t 0")
             {
-                UseShellExecute = false,
-                CreateNoWindow = true,
+                UseShellExecute = true,
+                Verb = "runas",
             });
             if (started is null) return WindowsRestartRequestResult.Failed;
 
@@ -97,6 +100,12 @@ internal sealed class WindowsRestartRequester : IWindowsRestartRequester
                 return WindowsRestartRequestResult.Failed;
             }
             return WindowsRestartRequestResult.Requested;
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
+        {
+            AppLog.Warn("CenterM.Authority", "Windows firmware restart authorization was cancelled.", null,
+                ("ErrorCode", exception.NativeErrorCode));
+            return WindowsRestartRequestResult.Failed;
         }
         catch (Exception exception)
         {
