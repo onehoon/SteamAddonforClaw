@@ -39,6 +39,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
     private const int AlreadyRunningExitCode = (int)ClawHudManagedStartupExitCode.AlreadyRunning;
     private static readonly TimeSpan ReadinessBudget = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ReadinessRetryInterval = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan SingleInstanceSettleBudget = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ShutdownBudget = TimeSpan.FromSeconds(5);
 
     private readonly IClawHudControlClient _controlClient;
@@ -48,6 +49,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
     private IClawHudProcessHandle? _ownedChild;
     private int _stopping;
     private int _disposed;
+    private bool _managedClassified;
     private bool _managedReady;
 
     internal ClawHudProcessController(
@@ -111,7 +113,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
             var child = _ownedChild;
             var failure = (string?)null;
 
-            if (_managedReady)
+            if (_managedReady || _managedClassified)
             {
                 var shutdown = await _controlClient.RequestShutdownAsync(cancellationToken).ConfigureAwait(false);
                 if (!shutdown.Succeeded)
@@ -151,6 +153,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
             }
 
             _ownedChild = null;
+            _managedClassified = false;
             _managedReady = false;
             State = failure is null
                 ? new(desiredEnabled, ClawHudFeatureState.Disabled)
@@ -173,6 +176,8 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         var child = _ownedChild;
         _ownedChild = null;
+        _managedClassified = false;
+        _managedReady = false;
         if (child is not null)
         {
             try { await child.DisposeAsync().ConfigureAwait(false); }
@@ -204,11 +209,20 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
                 return new(true, ClawHudFeatureState.StandaloneConflict, "StandaloneConflict", runtime.RuntimeVersion, info.ApplicationVersion);
             }
 
+            _managedClassified = true;
+
             if (!string.Equals(info.ApplicationVersion, runtime.RuntimeVersion, StringComparison.Ordinal))
             {
                 await child.DisposeAsync().ConfigureAwait(false);
                 _ownedChild = null;
                 return await ReplaceMismatchedManagedRuntimeAsync(runtime, info, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (await LostSingleInstanceRaceAsync(child, cancellationToken).ConfigureAwait(false) || child.HasExited)
+            {
+                await child.DisposeAsync().ConfigureAwait(false);
+                _ownedChild = null;
+                return await ClassifyExistingInstanceAsync(runtime, cancellationToken).ConfigureAwait(false);
             }
 
             return await CompleteReadyAsync(runtime, info, child, cancellationToken).ConfigureAwait(false);
@@ -264,6 +278,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
     {
         if (info.LaunchMode == ClawHudWireLaunchMode.Standalone)
             return new(true, ClawHudFeatureState.StandaloneConflict, "StandaloneConflict", runtime.RuntimeVersion, info.ApplicationVersion);
+        _managedClassified = true;
         if (!IsProtocolCompatible(info) || info.RuntimeState != ClawHudWireRuntimeState.Ready)
             return Unavailable(runtime.RuntimeVersion, "ExistingManagedRuntimeNotReady", info.ApplicationVersion);
         if (!string.Equals(info.ApplicationVersion, runtime.RuntimeVersion, StringComparison.Ordinal))
@@ -281,6 +296,8 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
             return Unavailable(runtime.RuntimeVersion, $"ManagedVersionMismatchShutdown:{Describe(shutdown)}", info.ApplicationVersion);
         if (!await WaitForEndpointDisappearanceAsync(cancellationToken).ConfigureAwait(false))
             return Unavailable(runtime.RuntimeVersion, "ManagedVersionMismatchShutdownNotConfirmed", info.ApplicationVersion);
+        _managedClassified = false;
+        _managedReady = false;
         return await EnsureRunningCoreAsync(runtime, cancellationToken).ConfigureAwait(false);
     }
 
@@ -326,6 +343,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
         if (ReferenceEquals(_ownedChild, child))
         {
             _ownedChild = null;
+            _managedClassified = false;
             _managedReady = false;
             if (Volatile.Read(ref _stopping) == 0)
             {
@@ -334,6 +352,27 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
                     ("Event", "ManagedRuntimeUnavailable"), ("ExitCode", child.ExitCode), ("RuntimeVersion", runtimeVersion));
             }
         }
+    }
+
+    private static async Task<bool> LostSingleInstanceRaceAsync(
+        IClawHudProcessHandle child,
+        CancellationToken cancellationToken)
+    {
+        if (child.HasExited)
+            return child.ExitCode == AlreadyRunningExitCode;
+
+        using var settle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        settle.CancelAfter(SingleInstanceSettleBudget);
+        try
+        {
+            await child.WaitForExitAsync(settle.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return child.HasExited && child.ExitCode == AlreadyRunningExitCode;
     }
 
     private async Task<bool> WaitForEndpointDisappearanceAsync(CancellationToken cancellationToken)

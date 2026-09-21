@@ -35,6 +35,31 @@ public sealed class ClawHudProcessControllerTests
     }
 
     [Fact]
+    public async Task EnsureRunning_AdoptsSurvivorWhenTheLosingChildExitsDuringSingleInstanceSettle()
+    {
+        var runtime = Runtime("1.0.1");
+        var process = new FakeProcess
+        {
+            ExitOnFirstWait = true,
+            ExitCodeAfterWait = (int)ClawHudManagedStartupExitCode.AlreadyRunning,
+        };
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+            Snapshot = Snapshot(true),
+        };
+        var controller = new ClawHudProcessController(control, _ => process);
+
+        var state = await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+
+        Assert.Equal(ClawHudFeatureState.Ready, state.ActualState);
+        Assert.Equal(ClawHudFeatureState.Ready, controller.State.ActualState);
+        Assert.True(process.DisposeCalled);
+        Assert.False(process.KillCalled);
+        Assert.Equal(0, control.RequestShutdownCalls);
+    }
+
+    [Fact]
     public async Task EnsureRunning_AdoptsExactManagedSurvivorAfterAlreadyRunning()
     {
         var runtime = Runtime("1.0.1");
@@ -163,6 +188,27 @@ public sealed class ClawHudProcessControllerTests
         Assert.True(process.KillCalled);
     }
 
+    [Fact]
+    public async Task Stop_RequestsGracefulShutdownAfterManagedClassificationWhenReadinessFails()
+    {
+        var runtime = Runtime("1.0.1");
+        var process = new FakeProcess { ExitOnSecondWait = true };
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+            Snapshot = null,
+        };
+        var controller = new ClawHudProcessController(control, _ => process);
+
+        var startup = await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+        var stopped = await controller.StopAsync(false, CancellationToken.None);
+
+        Assert.Equal(ClawHudFeatureState.Unavailable, startup.ActualState);
+        Assert.Equal(1, control.RequestShutdownCalls);
+        Assert.Equal(ClawHudFeatureState.Disabled, stopped.ActualState);
+        Assert.False(process.KillCalled);
+    }
+
     private static ClawHudRuntimeAcquisitionResult Runtime(string version)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ClawHud.Tests", Guid.NewGuid().ToString("N"));
@@ -216,15 +262,35 @@ public sealed class ClawHudProcessControllerTests
     private sealed class FakeProcess : IClawHudProcessHandle
     {
         private readonly TaskCompletionSource<bool> _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _waitCalls;
         internal bool HasExited { get; set; }
         internal int ExitCode { get; set; }
+        internal bool ExitOnFirstWait { get; init; }
+        internal int ExitCodeAfterWait { get; init; }
+        internal bool ExitOnSecondWait { get; init; }
         internal bool KillCalled { get; private set; }
+        internal bool DisposeCalled { get; private set; }
 
         bool IClawHudProcessHandle.HasExited => HasExited;
         int IClawHudProcessHandle.ExitCode => ExitCode;
-        public Task WaitForExitAsync(CancellationToken cancellationToken = default) =>
-            HasExited ? Task.CompletedTask : _exited.Task.WaitAsync(cancellationToken);
+        public Task WaitForExitAsync(CancellationToken cancellationToken = default)
+        {
+            if (HasExited) return Task.CompletedTask;
+            var waitCall = Interlocked.Increment(ref _waitCalls);
+            if (waitCall == 1 && ExitOnFirstWait)
+                CompleteExit(ExitCodeAfterWait);
+            else if (waitCall == 2 && ExitOnSecondWait)
+                CompleteExit(0);
+            return _exited.Task.WaitAsync(cancellationToken);
+        }
         public void Kill(bool entireProcessTree) { KillCalled = true; HasExited = true; _exited.TrySetResult(true); }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public ValueTask DisposeAsync() { DisposeCalled = true; return ValueTask.CompletedTask; }
+
+        private void CompleteExit(int exitCode)
+        {
+            ExitCode = exitCode;
+            HasExited = true;
+            _exited.TrySetResult(true);
+        }
     }
 }
