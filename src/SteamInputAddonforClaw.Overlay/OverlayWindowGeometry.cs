@@ -2,37 +2,91 @@ namespace SteamInputAddonforClaw.Overlay;
 
 internal readonly record struct OverlayRect(int X, int Y, int Width, int Height);
 
+internal readonly record struct OverlayGeometryMetrics(
+    int MonitorWidth,
+    int MonitorHeight,
+    int WorkWidth,
+    int WorkHeight,
+    int ReservedEdgePx,
+    int ReferenceTaskbarPx,
+    int ExtraGapPx,
+    int OuterMarginPx);
+
 internal static class OverlayWindowGeometry
 {
-    internal const double PocPanelWidthDip = 400.0;
-
-    // OQ5 UI Polish A: a small floating-surface separation from the work-area edge. Applied on
-    // left/top/bottom only -- the panel is left-anchored and does not reach the work-area right
-    // edge, so no right inset is needed. ~4 DIP is about 6 physical px at the 150% reference scale.
-    internal const double PanelEdgeInsetDip = 4.0;
+    internal const double ReferenceTaskbarDip = 48.0;
+    internal const double FloatingGapDip = 12.0;
     private const uint DefaultDpi = 96;
 
     internal static OverlayRect Calculate(
+        int monitorLeft,
+        int monitorTop,
+        int monitorRight,
+        int monitorBottom,
         int workLeft,
         int workTop,
         int workRight,
         int workBottom,
-        uint dpi)
+        uint dpi) => Calculate(
+            monitorLeft,
+            monitorTop,
+            monitorRight,
+            monitorBottom,
+            workLeft,
+            workTop,
+            workRight,
+            workBottom,
+            dpi,
+            out _);
+
+    internal static OverlayRect Calculate(
+        int monitorLeft,
+        int monitorTop,
+        int monitorRight,
+        int monitorBottom,
+        int workLeft,
+        int workTop,
+        int workRight,
+        int workBottom,
+        uint dpi,
+        out OverlayGeometryMetrics metrics)
     {
+        var monitorWidth = Math.Max(0, monitorRight - monitorLeft);
+        var monitorHeight = Math.Max(0, monitorBottom - monitorTop);
         var workWidth = Math.Max(0, workRight - workLeft);
         var workHeight = Math.Max(0, workBottom - workTop);
         var effectiveDpi = dpi == 0 ? DefaultDpi : dpi;
 
-        var insetPx = (int)Math.Round(PanelEdgeInsetDip * effectiveDpi / DefaultDpi, MidpointRounding.AwayFromZero);
-        // Never inset more than half of the available space, so an unusually small work area still
-        // yields a non-negative width/height instead of an inverted/degenerate rectangle.
-        insetPx = Math.Max(0, Math.Min(insetPx, Math.Min(workWidth, workHeight) / 2));
+        var reservedLeft = Math.Max(0, workLeft - monitorLeft);
+        var reservedTop = Math.Max(0, workTop - monitorTop);
+        var reservedRight = Math.Max(0, monitorRight - workRight);
+        var reservedBottom = Math.Max(0, monitorBottom - workBottom);
+        var reservedEdgePx = Math.Max(Math.Max(reservedLeft, reservedTop), Math.Max(reservedRight, reservedBottom));
+        var referenceTaskbarPx = DipToPixels(ReferenceTaskbarDip, effectiveDpi);
+        var extraGapPx = DipToPixels(FloatingGapDip, effectiveDpi);
+        var requestedOuterMarginPx = Math.Max(reservedEdgePx, referenceTaskbarPx) + extraGapPx;
 
-        var availableWidth = Math.Max(0, workWidth - insetPx);
-        var width = (int)Math.Round(PocPanelWidthDip * effectiveDpi / DefaultDpi, MidpointRounding.AwayFromZero);
-        width = Math.Min(Math.Max(0, width), availableWidth);
-        var height = Math.Max(0, workHeight - 2 * insetPx);
+        // Keep one margin value on all four sides, but clamp it to the smallest monitor
+        // dimension so an unusually small display never produces an inverted rectangle.
+        var outerMarginPx = Math.Min(requestedOuterMarginPx, Math.Min(monitorWidth, monitorHeight) / 2);
+        outerMarginPx = Math.Max(0, outerMarginPx);
 
-        return new OverlayRect(workLeft + insetPx, workTop + insetPx, width, height);
+        var width = Math.Max(0, monitorWidth - 2 * outerMarginPx);
+        var height = Math.Max(0, monitorHeight - 2 * outerMarginPx);
+
+        metrics = new OverlayGeometryMetrics(
+            monitorWidth,
+            monitorHeight,
+            workWidth,
+            workHeight,
+            reservedEdgePx,
+            referenceTaskbarPx,
+            extraGapPx,
+            outerMarginPx);
+
+        return new OverlayRect(monitorLeft + outerMarginPx, monitorTop + outerMarginPx, width, height);
     }
+
+    private static int DipToPixels(double dip, uint dpi) =>
+        (int)Math.Round(dip * dpi / DefaultDpi, MidpointRounding.AwayFromZero);
 }
