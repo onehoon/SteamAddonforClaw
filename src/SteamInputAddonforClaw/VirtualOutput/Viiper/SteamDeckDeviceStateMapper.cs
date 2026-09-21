@@ -22,7 +22,7 @@ internal static class SteamDeckDeviceStateMapper
     // pins the exact conversion.
     internal const ushort MaxAnalogTrigger = (ushort)short.MaxValue;
 
-    internal static SteamDeckDeviceState Map(ControllerState state)
+    internal static SteamDeckDeviceState Map(ControllerState state, bool suppressM1 = false, bool suppressM2 = false)
     {
         var buttons = state.Buttons;
 
@@ -56,8 +56,8 @@ internal static class SteamDeckDeviceStateMapper
             Options = ToByte(buttons.Back),
 
             // M1 = right rear -> R4, M2 = left rear -> L4 (see AuxiliaryButtonSlot).
-            R4 = ToByte(state.Auxiliary[(int)AuxiliaryButtonSlot.RightRear]),
-            L4 = ToByte(state.Auxiliary[(int)AuxiliaryButtonSlot.LeftRear]),
+            R4 = ToByte(IsPressed(state.Auxiliary, AuxiliaryButtonSlot.RightRear) && !suppressM1),
+            L4 = ToByte(IsPressed(state.Auxiliary, AuxiliaryButtonSlot.LeftRear) && !suppressM2),
 
             LTrigger = ScaleTrigger(state.Triggers.Left),
             RTrigger = ScaleTrigger(state.Triggers.Right),
@@ -103,6 +103,12 @@ internal static class SteamDeckDeviceStateMapper
     }
 
     private static byte ToByte(bool value) => value ? (byte)1 : (byte)0;
+
+    private static bool IsPressed(AuxiliaryButtonState state, AuxiliaryButtonSlot slot)
+    {
+        var index = (int)slot;
+        return index >= 0 && index < state.Count && state[index];
+    }
 
     private static ushort ScaleTrigger(byte value) => (ushort)(value * MaxAnalogTrigger / byte.MaxValue);
 }

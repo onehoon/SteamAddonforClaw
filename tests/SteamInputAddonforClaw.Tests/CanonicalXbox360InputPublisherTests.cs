@@ -99,6 +99,29 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
+    public async Task Each_tick_uses_the_current_rear_suppression_decision_without_restarting()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var suppressM1 = true;
+        var publisher = new CanonicalXbox360InputPublisher(
+            source,
+            sink.SetState,
+            ticks,
+            backButtonMappingProvider: () => new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.Disabled),
+            rearButtonSuppressionProvider: (_, slot) => suppressM1 && slot == AuxiliaryButtonSlot.RightRear);
+
+        publisher.Start();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        suppressM1 = false;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await publisher.StopAsync();
+
+        Assert.Equal(0u, sink.States[0].Buttons);
+        Assert.Equal(Xbox360ButtonBits.A, sink.States[1].Buttons);
+    }
+
+    [Fact]
     public async Task Default_mapping_provider_keeps_rear_buttons_disabled()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));

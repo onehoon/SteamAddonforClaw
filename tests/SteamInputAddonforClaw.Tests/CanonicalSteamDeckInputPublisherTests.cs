@@ -48,6 +48,28 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Each_tick_uses_the_current_rear_suppression_decision_without_restarting()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var suppressM1 = true;
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            source,
+            sink,
+            ticks,
+            rearButtonSuppressionProvider: (_, slot) => suppressM1 && slot == AuxiliaryButtonSlot.RightRear);
+
+        publisher.Start();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        suppressM1 = false;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await publisher.StopAsync();
+
+        Assert.Equal((byte)0, sink.States[0].R4);
+        Assert.Equal((byte)1, sink.States[1].R4);
+    }
+
+    [Fact]
     public async Task Pulse_is_merged_between_mapper_and_sink_then_expires()
     {
         var time = new FakeTimeProvider();

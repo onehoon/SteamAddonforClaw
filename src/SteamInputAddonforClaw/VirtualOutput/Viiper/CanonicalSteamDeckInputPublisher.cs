@@ -56,6 +56,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private readonly IInputReportTickSource? _ticks;
     private readonly Action<Exception>? _fault;
     private readonly Func<long> _timestampProvider;
+    private readonly Func<ControllerState, AuxiliaryButtonSlot, bool> _rearButtonSuppressionProvider;
     private readonly SteamDeckSystemButtonOverlay _systemButtonOverlay;
     private CancellationTokenSource? _stop;
     private Task? _task;
@@ -105,7 +106,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
         IInputReportTickSource? ticks = null,
         Action<Exception>? fault = null,
         Func<long>? timestampProvider = null,
-        SteamDeckSystemButtonOverlay? systemButtonOverlay = null)
+        SteamDeckSystemButtonOverlay? systemButtonOverlay = null,
+        Func<ControllerState, AuxiliaryButtonSlot, bool>? rearButtonSuppressionProvider = null)
     {
         _snapshot = snapshot;
         _sink = sink;
@@ -113,6 +115,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _fault = fault;
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
         _systemButtonOverlay = systemButtonOverlay ?? new SteamDeckSystemButtonOverlay(timestampProvider: _timestampProvider);
+        _rearButtonSuppressionProvider = rearButtonSuppressionProvider ?? (static (_, _) => false);
     }
 
     internal bool IsRunning => _task is { IsCompleted: false } || _workerThread is { IsAlive: true };
@@ -392,7 +395,11 @@ internal sealed class CanonicalSteamDeckInputPublisher
     /// </summary>
     private bool PublishCurrentStateOnce()
     {
-        var mapped = SteamDeckDeviceStateMapper.Map(_snapshot.LatestState);
+        var rawState = _snapshot.LatestState;
+        var mapped = SteamDeckDeviceStateMapper.Map(
+            rawState,
+            _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.RightRear),
+            _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.LeftRear));
         var state = _systemButtonOverlay.Apply(mapped);
 
         var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);

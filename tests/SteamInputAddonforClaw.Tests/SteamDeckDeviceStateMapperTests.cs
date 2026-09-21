@@ -134,6 +134,18 @@ public sealed class SteamDeckDeviceStateMapperTests
     }
 
     [Fact]
+    public void Rear_suppression_affects_only_the_matching_Deck_rear_output()
+    {
+        var mapped = SteamDeckDeviceStateMapper.Map(
+            State(buttons: Button("A"), auxiliary: new AuxiliaryButtonState([true, true])),
+            suppressM1: true);
+
+        Assert.Equal((byte)1, mapped.A);
+        Assert.Equal((byte)1, mapped.L4);
+        Assert.Equal((byte)0, mapped.R4);
+    }
+
+    [Fact]
     public void Left_stick_maps_to_LStickXY_and_right_stick_maps_to_native_RStickXY()
     {
         var mapped = SteamDeckDeviceStateMapper.Map(State(leftStick: new StickState(111, -222), rightStick: new StickState(333, -444)));

@@ -44,6 +44,7 @@ internal sealed class CanonicalXbox360InputPublisher
     private readonly Action<Exception>? _fault;
     private readonly Func<long> _timestampProvider;
     private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
+    private readonly Func<ControllerState, AuxiliaryButtonSlot, bool> _rearButtonSuppressionProvider;
     private CancellationTokenSource? _stop;
     private Task? _task;
     private int _publishedStateCount;
@@ -65,7 +66,8 @@ internal sealed class CanonicalXbox360InputPublisher
         IInputReportTickSource? ticks = null,
         Action<Exception>? fault = null,
         Func<long>? timestampProvider = null,
-        Func<BackButtonMappingSettings>? backButtonMappingProvider = null)
+        Func<BackButtonMappingSettings>? backButtonMappingProvider = null,
+        Func<ControllerState, AuxiliaryButtonSlot, bool>? rearButtonSuppressionProvider = null)
     {
         _snapshot = snapshot;
         _setState = setState;
@@ -73,6 +75,7 @@ internal sealed class CanonicalXbox360InputPublisher
         _fault = fault;
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
         _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
+        _rearButtonSuppressionProvider = rearButtonSuppressionProvider ?? (static (_, _) => false);
     }
 
     internal bool IsRunning => _task is { IsCompleted: false } || _workerThread is { IsAlive: true };
@@ -292,7 +295,12 @@ internal sealed class CanonicalXbox360InputPublisher
     /// </summary>
     private bool PublishCurrentStateOnce()
     {
-        var mapped = Xbox360DeviceStateMapper.Map(_snapshot.LatestState, _backButtonMappingProvider());
+        var rawState = _snapshot.LatestState;
+        var mapped = Xbox360DeviceStateMapper.Map(
+            rawState,
+            _backButtonMappingProvider(),
+            _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.RightRear),
+            _rearButtonSuppressionProvider(rawState, AuxiliaryButtonSlot.LeftRear));
         if (!_setState(mapped))
         {
             ReportFault(new InvalidOperationException("Canonical VIIPER rejected a typed Xbox360 state."));

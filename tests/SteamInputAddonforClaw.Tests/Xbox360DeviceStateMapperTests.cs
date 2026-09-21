@@ -246,6 +246,40 @@ public sealed class Xbox360DeviceStateMapperTests
     }
 
     [Fact]
+    public void Suppressing_M1_removes_only_the_rear_contribution_and_preserves_physical_A()
+    {
+        var mapped = Xbox360DeviceStateMapper.Map(
+            State(buttons: Button("A"), auxiliary: new AuxiliaryButtonState([false, true])),
+            new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.Disabled),
+            suppressM1: true);
+
+        Assert.Equal(Xbox360ButtonBits.A, mapped.Buttons);
+    }
+
+    [Fact]
+    public void Suppression_is_independent_for_M1_and_M2()
+    {
+        var mapped = Xbox360DeviceStateMapper.Map(
+            State(auxiliary: new AuxiliaryButtonState([true, true])),
+            new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.RightBumper),
+            suppressM1: true);
+
+        Assert.Equal(Xbox360ButtonBits.RightShoulder, mapped.Buttons);
+    }
+
+    [Fact]
+    public void Suppressing_a_trigger_target_preserves_physical_analog_travel()
+    {
+        var mapped = Xbox360DeviceStateMapper.Map(
+            State(triggers: new TriggerState(91, 37), auxiliary: new AuxiliaryButtonState([false, true])),
+            new BackButtonMappingSettings(Xbox360BackButtonTarget.LeftTrigger, Xbox360BackButtonTarget.Disabled),
+            suppressM1: true);
+
+        Assert.Equal((byte)91, mapped.LT);
+        Assert.Equal((byte)37, mapped.RT);
+    }
+
+    [Fact]
     public void Default_controller_state_is_safe_with_a_non_default_mapping()
     {
         var mapped = Xbox360DeviceStateMapper.Map(
