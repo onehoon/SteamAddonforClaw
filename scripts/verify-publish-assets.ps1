@@ -15,13 +15,35 @@ $ErrorActionPreference = 'Stop'
 function Find-SdkTool([string]$name) {
     $command = Get-Command "$name.exe" -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
-    $roots = @(
+    $roots = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:WindowsSdkDir)) {
+        $roots += Join-Path $env:WindowsSdkDir 'bin'
+    }
+    $roots += @(
         (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'),
         (Join-Path $env:ProgramFiles 'Windows Kits\10\bin')
-    ) | Where-Object { $_ -and (Test-Path $_) }
-    $tool = Get-ChildItem -Path $roots -Recurse -Filter "$name.exe" -ErrorAction SilentlyContinue |
-        Sort-Object FullName -Descending | Select-Object -First 1
-    if ($tool) { return $tool.FullName }
+    )
+
+    foreach ($root in ($roots | Where-Object { $_ } | Select-Object -Unique) ) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+
+        $versionDirectories = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending)
+        foreach ($architecture in @('x64', 'x86', 'arm64')) {
+            $directCandidate = Join-Path $root "$architecture\$name.exe"
+            if (Test-Path -LiteralPath $directCandidate -PathType Leaf) {
+                return (Get-Item -LiteralPath $directCandidate).FullName
+            }
+
+            foreach ($versionDirectory in $versionDirectories) {
+                $candidate = Join-Path $versionDirectory.FullName "$architecture\$name.exe"
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    return (Get-Item -LiteralPath $candidate).FullName
+                }
+            }
+        }
+    }
+
     throw "$name.exe was not found in the Windows SDK."
 }
 

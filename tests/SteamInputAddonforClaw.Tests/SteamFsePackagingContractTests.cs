@@ -46,6 +46,12 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("CertificatePassword", package, StringComparison.Ordinal);
         Assert.Contains("signtool", verifier, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("CustomCapability.SCCD", verifier, StringComparison.Ordinal);
+        Assert.Contains("WindowsSdkDir", package, StringComparison.Ordinal);
+        Assert.Contains("WindowsSdkDir", verifier, StringComparison.Ordinal);
+        Assert.Contains("x64", package, StringComparison.Ordinal);
+        Assert.Contains("x64", verifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("-Path $roots -Recurse", package, StringComparison.Ordinal);
+        Assert.DoesNotContain("-Path $roots -Recurse", verifier, StringComparison.Ordinal);
     }
 
     [Fact]
