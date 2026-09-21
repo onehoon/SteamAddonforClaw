@@ -600,7 +600,11 @@ internal sealed class SteamBigPictureWatcher : IDisposable
             // Final revalidation immediately before commit, inside this same critical section: the
             // replacement candidate found by the scan may itself have been destroyed in the window between
             // producing that result and taking this lock.
-            var committed = scan.Found && IsStillValid_NoLock(scan.Hwnd, scan.ProcessId);
+            // A replacement scan must produce a different HWND. If the destroyed numeric handle is
+            // returned again, it may already refer to a newly created window after HWND reuse, but this
+            // scan cannot prove that identity transition. Failing closed lets the subsequent CREATE event
+            // authorize the new BPM session instead of keeping the old session active indefinitely.
+            var committed = scan.Found && scan.Hwnd != hwnd && IsStillValid_NoLock(scan.Hwnd, scan.ProcessId);
 
             if (committed)
             {
