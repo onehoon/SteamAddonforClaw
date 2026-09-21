@@ -353,7 +353,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             return _physicalOwnership is { } owner
                 ? firmwareRestart
-                    ? await owner.ReleaseForFirmwareRestartAsync(token).ConfigureAwait(false)
+                    ? await owner.PrepareForFirmwareBiosAsync(token).ConfigureAwait(false)
                     : await owner.ReleaseForCenterMEnableAsync(token).ConfigureAwait(false)
                 : SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
         }
@@ -375,7 +375,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // PR5/PR6: late-bound -- the owners are created after this transition owner, only for a
             // Disabled boot. PR6 section 17: the virtual presentation is retired and canonical VIIPER
             // is torn down BEFORE PR5 physical release; a virtual-release failure prevents everything
-            // downstream (DirectInput stop, PID1901 restore, HidHide clear, Center M roots, restart).
+            // downstream (DirectInput stop, firmware-mode handoff, HidHide clear, Center M roots, restart).
             token => ReleasePhysicalOwnershipAsync(token, firmwareRestart: false),
             // PR12 section 6/7: reuse the composition's existing StockCenterMStartupBaseline (the one
             // built from the shared MsiClawNativeStateManager). A machine with no MSI Claw fails
@@ -400,7 +400,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     ("Authority", "StockCenterM"), ("Event", "Full1902WinGSuppressionReleased"));
             },
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester(),
-            releasePhysicalOwnershipForFirmwareRestart: token => ReleasePhysicalOwnershipAsync(token, firmwareRestart: true));
+            preparePhysicalOwnershipForFirmwareBios: token => ReleasePhysicalOwnershipAsync(token, firmwareRestart: true));
         _centerMAuthorityTransition = centerMAuthorityTransition;
         // Full1902 Cleanup I: the Developer Test toggle is disconnected UI-only state. No controller /
         // presentation / Steam owner consumes it -- this standalone instance exists only so the
@@ -660,6 +660,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
 
         var controllerDevices = new Controllers.Detection.WindowsControllerDeviceEnumerator();
+        var gamepadModeClient = new Devices.MSI.Claw.MsiClawGamepadModeClient(
+            controllerDevices,
+            new Devices.MSI.Claw.MsiClawControlHidResolver(),
+            new Devices.MSI.Claw.WindowsMsiClawModeWriter());
         var directInputInputSource = new Devices.MSI.Claw.MsiClawInputSource(() => new Input.DirectInput.VorticeDirectInputDeviceEnumerator(IntPtr.Zero));
         // PR8 section 7: the one Full-1902 owned-input completion signal. MsiClawInputSource already
         // neutralizes LatestState and cleans up the dead session before raising this, so the callback
@@ -684,7 +688,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             directInputInputSource,
             targets => hidHideBaseline.ApplyDisabledModeBaseline(targets),
             () => hidHideBaseline.TryGetExistingOwnedTargets(
-                Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets));
+                Devices.MSI.Claw.MsiClawHardware.SelectPersistedOwnedPid1902HidHideTargets),
+            gamepadModeClient: gamepadModeClient);
     }
 
     /// <summary>PR8 section 7: decide whether an owned DirectInput session completion is an unexpected

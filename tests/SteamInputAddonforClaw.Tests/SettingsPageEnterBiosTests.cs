@@ -35,7 +35,7 @@ public sealed class SettingsPageEnterBiosTests
         Assert.Contains("PrimaryButtonText = \"Restart and Enter BIOS\"", handler, StringComparison.Ordinal);
         Assert.Contains("CloseButtonText = \"Cancel\"", handler, StringComparison.Ordinal);
         Assert.Contains("DefaultButton = ContentDialogButton.Close", handler, StringComparison.Ordinal);
-        Assert.Contains("The controller will temporarily switch to XInput", handler, StringComparison.Ordinal);
+        Assert.Contains("The controller will temporarily switch to MSI BIOS mode", handler, StringComparison.Ordinal);
 
         var confirmation = handler.IndexOf("await confirmation.ShowAsync()", StringComparison.Ordinal);
         var rpc = handler.IndexOf("RequestEnterBiosAsync", StringComparison.Ordinal);

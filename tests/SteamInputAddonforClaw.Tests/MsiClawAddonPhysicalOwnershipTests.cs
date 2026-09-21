@@ -356,7 +356,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         var result = await h.Build().AcquireAsync(default);
 
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
-        Assert.Contains("AuthorityChangedBeforeDirectInputAcquire", result.Reason);
+        Assert.Contains("AuthorityChangedBeforeGamepadModeQuery", result.Reason);
         Assert.False(h.InputSource.StartCalled);
         Assert.Empty(h.HidHideApplied);
     }
@@ -505,33 +505,77 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
-    public async Task Firmware_release_uses_the_same_verified_xinput_path_without_enabling_center_m()
+    public async Task Firmware_prepare_uses_gamepad_bios_mode_without_enabling_center_m()
     {
         var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
         var owner = h.Build();
         Assert.True((await owner.AcquireAsync(default)).IsOwned);
 
-        var release = await owner.ReleaseForFirmwareRestartAsync(default);
+        var release = await owner.PrepareForFirmwareBiosAsync(default);
 
         Assert.True(release.Succeeded);
-        Assert.Equal(new[] { MsiClawNativeMode.XInput }, h.SwitchTargets);
+        Assert.Equal(new[] { MsiClawGamepadMode.Bios }, h.GamepadMode.SwitchTargets);
+        Assert.Empty(h.SwitchTargets);
         Assert.Null(owner.LiveInputSource);
         var recovery = await owner.RecoverLostInputAsync(default);
         Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
-        Assert.Contains("ReleasedForFirmwareRestart", recovery.Reason);
+        Assert.Contains("PreparedForFirmwareBios", recovery.Reason);
     }
 
     [Fact]
-    public async Task Firmware_release_when_already_xinput_does_not_issue_a_native_mode_write()
+    public async Task Firmware_prepare_when_already_xinput_does_not_issue_a_native_pid_mode_write()
     {
         var h = new Harness { InitialMode = MsiClawNativeMode.XInput };
         var owner = h.Build();
 
-        var release = await owner.ReleaseForFirmwareRestartAsync(default);
+        var release = await owner.PrepareForFirmwareBiosAsync(default);
 
         Assert.True(release.Succeeded);
         Assert.Empty(h.SwitchTargets);
+        Assert.Equal(new[] { MsiClawGamepadMode.Bios }, h.GamepadMode.SwitchTargets);
         Assert.False(h.InputSource.StopCalled);
+    }
+
+    [Fact]
+    public async Task Disabled_boot_pid1902_mode5_is_reconciled_to_mode2_before_directinput_acquisition()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        h.GamepadMode.ObservedMode = MsiClawGamepadMode.Bios;
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.Equal([MsiClawGamepadMode.DirectInput], h.GamepadMode.SwitchTargets);
+        Assert.Empty(h.SwitchTargets);
+        Assert.True(h.InputSource.StartCalled);
+    }
+
+    [Fact]
+    public async Task Disabled_boot_mode5_reconcile_failure_stops_before_directinput_acquisition()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        h.GamepadMode.ObservedMode = MsiClawGamepadMode.Bios;
+        h.GamepadMode.SwitchSucceeds = false;
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, result.Outcome);
+        Assert.Contains("DisabledBootBiosModeRestoreFailed", result.Reason);
+        Assert.False(h.InputSource.StartCalled);
+        Assert.Empty(h.SwitchTargets);
+    }
+
+    [Fact]
+    public async Task Disabled_boot_query_unavailable_preserves_existing_pid1902_acquisition_path()
+    {
+        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+        h.GamepadMode.QuerySucceeds = false;
+
+        var result = await h.Build().AcquireAsync(default);
+
+        Assert.True(result.IsOwned);
+        Assert.Empty(h.GamepadMode.SwitchTargets);
+        Assert.True(h.InputSource.StartCalled);
     }
 
     // ================= PR8: owned DirectInput session recovery (work order section 21) =================
@@ -1345,6 +1389,7 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
 
         public int AuthorityReads { get; private set; }
         public bool SwitchFailsForRelease { get; set; }
+        public FakeGamepadModeClient GamepadMode { get; } = new();
 
         private string EffectivePnp => Recovering && RecoveryPnp is not null ? RecoveryPnp : DirectInputPnp;
 
@@ -1422,7 +1467,8 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
             () => ExistingOwnedTarget is null ? [] : [ExistingOwnedTarget],
             delay: (_, _) => Task.CompletedTask,
             directInputSettleWindow: TimeSpan.FromMilliseconds(200),
-            directInputSettleInterval: TimeSpan.FromMilliseconds(1));
+            directInputSettleInterval: TimeSpan.FromMilliseconds(1),
+            gamepadModeClient: GamepadMode);
         }
 
         private NativeStateCaptureResult Capture(MsiClawNativeMode mode, MsiClawIdentityConfidence confidence, string physKey)
@@ -1455,6 +1501,25 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
                 EnumeratorName: "HID", HardwareIds: [], CompatibleIds: [], ClassName: "HIDClass", ClassGuid: null, Service: "HidUsb",
                 VendorId: 0x0DB0, ProductId: 0x1902, Present: true, FriendlyName: "MSI Claw",
                 UsagePage: 0x0001, Usage: 0x0005);
+        }
+    }
+
+    private sealed class FakeGamepadModeClient : IMsiClawGamepadModeClient
+    {
+        public MsiClawGamepadMode ObservedMode { get; set; } = MsiClawGamepadMode.DirectInput;
+        public bool QuerySucceeds { get; set; } = true;
+        public bool SwitchSucceeds { get; set; } = true;
+        public List<MsiClawGamepadMode> SwitchTargets { get; } = [];
+
+        public Task<MsiClawGamepadModeQueryResult> QueryAsync(MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken) =>
+            Task.FromResult(QuerySucceeds
+                ? new MsiClawGamepadModeQueryResult(true, ObservedMode, "ok")
+                : MsiClawGamepadModeQueryResult.Unavailable("unavailable"));
+
+        public Task<MsiClawGamepadModeWriteResult> SwitchAndVerifyAsync(MsiClawPhysicalIdentity expectedIdentity, MsiClawGamepadMode targetMode, CancellationToken cancellationToken)
+        {
+            SwitchTargets.Add(targetMode);
+            return Task.FromResult(new MsiClawGamepadModeWriteResult(SwitchSucceeds, SwitchSucceeds ? targetMode : null, true, SwitchSucceeds, SwitchSucceeds ? "ok" : "failed"));
         }
     }
 

@@ -102,8 +102,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 35: Main UI can persist the shared Quick Settings current-power-source visibility
 // preference. A v34 peer must fail the handshake before settings responses or the new mutation
 // can be misinterpreted.
-// Version 36: Main UI can request a temporary verified XInput/PID1901 transition followed by a
-// firmware restart, and adds the Windows Gaming Full Screen Experience capture and mutation RPCs.
+// Version 36: Main UI can request a temporary verified MSI firmware BIOS-mode transition followed
+// by a firmware restart, and adds the Windows Gaming Full Screen Experience capture and mutation RPCs.
 // Version 37: both contracts are present in the current wire contract, so a v36 peer must fail
 // the handshake before either operation is used.
 // Version 38: Full1902 M1/M2 Xbox360 mapping adds BackButtonMapping to settings/bootstrap and

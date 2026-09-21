@@ -86,9 +86,9 @@ internal interface ICenterMRebootAuthorityTransition
     /// authority); <see langword="false"/> = Disable and Restart (switch authority to the Addon).</param>
     Task<FrontendCenterMStartupMutationResult> RequestAsync(bool centerMEnabled, CancellationToken cancellationToken);
 
-    /// <summary>Temporarily retires Addon controller ownership to verified PID1901/XInput and
-    /// requests the firmware UI on the next restart. This never mutates Center M startup roots,
-    /// persistent HidHide, Addon startup registration, or stock-authority policy.</summary>
+    /// <summary>Temporarily retires Addon controller ownership to verified MSI GamepadMode BIOS
+    /// mode 5 and requests the firmware UI on the next restart. This never mutates Center M startup
+    /// roots, persistent HidHide, Addon startup registration, or stock-authority policy.</summary>
     Task<FrontendEnterBiosResult> RequestEnterBiosAsync(CancellationToken cancellationToken);
 
     /// <summary>PR12: the Runtime-owned stock-restoration + startup-task removal that must complete
@@ -123,7 +123,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly Func<UserTerminationDecision> _lowerLevelRuntimeSafety;
     private readonly Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> _captureAdmission;
     private readonly Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> _releasePhysicalOwnership;
-    private readonly Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> _releasePhysicalOwnershipForFirmwareRestart;
+    private readonly Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> _preparePhysicalOwnershipForFirmwareBios;
     // PR12 section 6: independent current-world proof that the physical MSI Claw is PID1901/XInput --
     // NothingOwned from the process owner is NOT sufficient stock proof.
     private readonly Func<CancellationToken, Task<StockCenterMStartupBaselineResult>> _establishStockBaseline;
@@ -158,7 +158,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         Func<StartupRegistrationResult> removeStartupRegistration,
         Action onStockAuthorityRestored,
         IWindowsRestartRequester restartRequester,
-        Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>>? releasePhysicalOwnershipForFirmwareRestart = null)
+        Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> preparePhysicalOwnershipForFirmwareBios)
     {
         _centerMStartup = centerMStartup;
         _startupSettings = startupSettings;
@@ -166,7 +166,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _lowerLevelRuntimeSafety = lowerLevelRuntimeSafety;
         _captureAdmission = captureAdmission;
         _releasePhysicalOwnership = releasePhysicalOwnership;
-        _releasePhysicalOwnershipForFirmwareRestart = releasePhysicalOwnershipForFirmwareRestart ?? releasePhysicalOwnership;
+        _preparePhysicalOwnershipForFirmwareBios = preparePhysicalOwnershipForFirmwareBios;
         _establishStockBaseline = establishStockBaseline;
         _captureExistingOwnedHiddenTargets = captureExistingOwnedHiddenTargets;
         _removeStartupRegistration = removeStartupRegistration;
@@ -229,20 +229,12 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
 
             await using var firmwareSession = authorization.Session!;
 
-            var release = await _releasePhysicalOwnershipForFirmwareRestart(CancellationToken.None).ConfigureAwait(false);
-            AppLog.Info("CenterM.Authority", "Enter BIOS physical release completed.",
-                ("Event", release.Succeeded ? "EnterBiosPhysicalReleaseCompleted" : "EnterBiosPhysicalReleaseFailed"),
-                ("Succeeded", release.Succeeded), ("Reason", release.Reason));
-            if (!release.Succeeded)
-                return EnterBiosFailed("The controller could not be safely switched to XInput. BIOS restart was not requested. Try again.");
-
-            var stock = await _establishStockBaseline(CancellationToken.None).ConfigureAwait(false);
-            AppLog.Info("CenterM.Authority", "Enter BIOS PID1901/XInput proof completed.",
-                ("Event", stock.Succeeded ? "EnterBiosPid1901Verified" : "EnterBiosPid1901VerificationFailed"),
-                ("Succeeded", stock.Succeeded), ("ModeWriteIssued", stock.ModeWriteIssued),
-                ("Reason", stock.Reason));
-            if (!stock.Succeeded)
-                return EnterBiosFailed("The controller's XInput state could not be verified. BIOS restart was not requested.");
+            var prepare = await _preparePhysicalOwnershipForFirmwareBios(CancellationToken.None).ConfigureAwait(false);
+            AppLog.Info("CenterM.Authority", "Enter BIOS GamepadMode preparation completed.",
+                ("Event", prepare.Succeeded ? "EnterBiosGamepadModePrepareCompleted" : "EnterBiosGamepadModePrepareFailed"),
+                ("Succeeded", prepare.Succeeded), ("Reason", prepare.Reason));
+            if (!prepare.Succeeded)
+                return EnterBiosFailed("The controller could not be safely switched to MSI BIOS mode. BIOS restart was not requested. Try again.");
 
             var restart = await firmwareSession.RequestRestartAsync(CancellationToken.None).ConfigureAwait(false);
             if (restart == WindowsRestartRequestResult.Requested)
@@ -251,9 +243,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
                 return new FrontendEnterBiosResult(FrontendEnterBiosOutcome.RestartRequested, null);
             }
 
-            AppLog.Warn("CenterM.Authority", "Firmware restart request failed after XInput was verified.", null,
+            AppLog.Warn("CenterM.Authority", "Firmware restart request failed after MSI BIOS mode was verified.", null,
                 ("Event", "EnterBiosFirmwareRestartFailed"));
-            return EnterBiosFailed("BIOS restart could not be started. The controller is temporarily in XInput. Try Enter BIOS again or restart Windows.");
+            return EnterBiosFailed("BIOS restart could not be started. The controller is temporarily in MSI BIOS mode. Try Enter BIOS again or restart Windows.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

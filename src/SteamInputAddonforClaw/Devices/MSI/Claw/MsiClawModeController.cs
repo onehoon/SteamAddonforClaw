@@ -26,6 +26,20 @@ internal sealed class MsiClawControlHidResolver : IMsiClawControlHidResolver
             .Where(d => d.UsagePage == usagePage && d.Usage == usage).ToArray();
         return candidates.Length == 1 ? new(candidates[0], usagePage, usage, MsiClawPhysicalIdentity.From(candidates[0])) : null;
     }
+
+    internal MsiClawControlHidDevice? ResolveCommand(IReadOnlyList<ControllerDeviceInfo> devices, MsiClawPhysicalIdentity expectedIdentity)
+    {
+        var candidates = devices
+            .Where(d => d.Present
+                && MsiClawHardware.IsKnownController(d.VendorId, d.ProductId)
+                && MsiClawPhysicalIdentity.From(d).StronglyMatches(expectedIdentity)
+                && ((d.UsagePage == 0xFFA0 && d.Usage == 0x0001)
+                    || (d.UsagePage == MsiClawHardware.DirectInputControlUsagePage && d.Usage == MsiClawHardware.DirectInputControlUsage)))
+            .ToArray();
+        return candidates.Length == 1
+            ? new(candidates[0], candidates[0].UsagePage!.Value, candidates[0].Usage!.Value, MsiClawPhysicalIdentity.From(candidates[0]))
+            : null;
+    }
 }
 
 internal readonly record struct MsiClawModeTopology(ushort ProductId, ushort UsagePage, ushort Usage)

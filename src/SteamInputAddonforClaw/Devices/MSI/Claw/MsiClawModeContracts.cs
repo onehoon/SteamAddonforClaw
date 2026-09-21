@@ -4,6 +4,35 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal enum MsiClawModeTransitionStatus { Succeeded, WriteFailed, OldDeviceDidNotDisappear, TargetDeviceDidNotAppear, IdentityMismatch, AmbiguousDevice, UnsupportedDevice, Cancelled, StaleGeneration, TimedOut, RecoveryUnsafe }
 internal enum MsiClawIdentityConfidence { Strong, Weak, Indeterminate }
+internal enum MsiClawGamepadMode : byte
+{
+    Offline = 0,
+    XInput = 1,
+    DirectInput = 2,
+    Msi = 3,
+    Desktop = 4,
+    Bios = 5,
+    Testing = 6,
+}
+
+internal sealed record MsiClawGamepadModeQueryResult(bool Succeeded, MsiClawGamepadMode? Mode, string Reason)
+{
+    internal static MsiClawGamepadModeQueryResult Unavailable(string reason) => new(false, null, reason);
+}
+
+internal sealed record MsiClawGamepadModeWriteResult(
+    bool Succeeded,
+    MsiClawGamepadMode? Mode,
+    bool WriteIssued,
+    bool ReadbackVerified,
+    string Reason);
+
+internal interface IMsiClawGamepadModeClient
+{
+    Task<MsiClawGamepadModeQueryResult> QueryAsync(MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken);
+    Task<MsiClawGamepadModeWriteResult> SwitchAndVerifyAsync(MsiClawPhysicalIdentity expectedIdentity, MsiClawGamepadMode targetMode, CancellationToken cancellationToken);
+}
+
 internal sealed record MsiClawPhysicalRootResolution(string RawRootInstanceId, string PhysicalDeviceKey);
 internal static class MsiClawLogicalIdentity
 {

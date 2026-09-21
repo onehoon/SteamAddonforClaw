@@ -4,7 +4,7 @@ using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
+internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter, IMsiClawGamepadModeIo
 {
     private readonly IMsiClawHidDeviceInformationLookup _lookup;
     private readonly IMsiClawRawHidTransport _transport;
@@ -14,6 +14,14 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
         _transport = transport ?? new WindowsMsiClawRawHidTransport();
     }
     public async Task<bool> WriteAsync(MsiClawControlHidDevice device, MsiClawNativeMode mode, CancellationToken cancellationToken)
+        => await WriteGamepadModeAsync(device, mode switch
+        {
+            MsiClawNativeMode.XInput => MsiClawGamepadMode.XInput,
+            MsiClawNativeMode.DirectInput => MsiClawGamepadMode.DirectInput,
+            _ => throw new ArgumentOutOfRangeException(nameof(mode)),
+        }, cancellationToken).ConfigureAwait(false);
+
+    public async Task<bool> WriteGamepadModeAsync(MsiClawControlHidDevice device, MsiClawGamepadMode mode, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (device.VerifiedIdentity.Confidence != MsiClawIdentityConfidence.Strong || (string.IsNullOrWhiteSpace(device.VerifiedIdentity.PhysicalDeviceKey) && !IsUsable(device.VerifiedIdentity.ContainerId))) return false;
@@ -22,10 +30,25 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
         var infos = await _lookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
         var matching = SelectDeviceInformation(device, infos);
         if (matching is null) return false;
-        var bytes = MsiClawModeCommand.Build(mode);
+        var bytes = MsiClawModeCommand.BuildSwitch(mode);
         if (!await _transport.WriteAsync(matching.Id, bytes, cancellationToken).ConfigureAwait(false)) return false;
         AppLog.Debug("NativeMode", "MSI Claw mode command written.", ("PID", device.Device.ProductId), ("UsagePage", device.UsagePage), ("Usage", device.Usage), ("ReportLength", bytes.Length), ("Mode", mode));
         return true;
+    }
+
+    public async Task<byte[]?> ReadGamepadModeAsync(MsiClawControlHidDevice device, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (device.VerifiedIdentity.Confidence != MsiClawIdentityConfidence.Strong || (string.IsNullOrWhiteSpace(device.VerifiedIdentity.PhysicalDeviceKey) && !IsUsable(device.VerifiedIdentity.ContainerId))) return null;
+        if (!MsiClawPhysicalIdentity.From(device.Device).StronglyMatches(device.VerifiedIdentity)) return null;
+        var selector = HidDevice.GetDeviceSelector(device.UsagePage, device.Usage, MsiClawHardware.VendorId, device.Device.ProductId ?? 0);
+        var infos = await _lookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
+        var matching = SelectDeviceInformation(device, infos);
+        return matching is null
+            ? null
+            : !await _transport.WriteAsync(matching.Id, MsiClawModeCommand.BuildReadGamepadMode(), cancellationToken).ConfigureAwait(false)
+                ? null
+                : await _transport.ReadAsync(matching.Id, 64, timeout, cancellationToken).ConfigureAwait(false);
     }
 
     internal static MsiClawHidDeviceInformation? SelectDeviceInformation(MsiClawControlHidDevice expected, IReadOnlyList<MsiClawHidDeviceInformation> candidates)
@@ -40,6 +63,12 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
         return !IsUsable(expected.VerifiedIdentity.ContainerId) || info.ContainerId == expected.VerifiedIdentity.ContainerId;
     }
     private static bool IsUsable(Guid? value) => value is Guid guid && guid != Guid.Empty && guid != new Guid("00000000-0000-0000-ffff-ffffffffffff");
+}
+
+internal interface IMsiClawGamepadModeIo
+{
+    Task<bool> WriteGamepadModeAsync(MsiClawControlHidDevice device, MsiClawGamepadMode mode, CancellationToken cancellationToken);
+    Task<byte[]?> ReadGamepadModeAsync(MsiClawControlHidDevice device, TimeSpan timeout, CancellationToken cancellationToken);
 }
 
 internal sealed record MsiClawHidDeviceInformation(string Id, string? InstanceId, Guid? ContainerId);
