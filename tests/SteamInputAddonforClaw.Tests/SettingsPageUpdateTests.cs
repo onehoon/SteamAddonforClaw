@@ -46,6 +46,9 @@ public sealed class SettingsPageUpdateTests
     {
         var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
         var source = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml.cs");
+        var toggleMethodStart = source.IndexOf("private async void SteamFseToggleSwitch_Toggled", StringComparison.Ordinal);
+        var toggleMethodEnd = source.IndexOf("\n    }", toggleMethodStart, StringComparison.Ordinal);
+        var toggleMethod = source[toggleMethodStart..toggleMethodEnd];
 
         Assert.Equal(1, xaml.Split("x:Name=\"SteamFseToggleSwitch\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("Header=\"Steam Big Picture Full Screen Experience\"", xaml, StringComparison.Ordinal);
@@ -55,9 +58,10 @@ public sealed class SettingsPageUpdateTests
         Assert.Contains("_steamFseMutationInProgress", source, StringComparison.Ordinal);
         Assert.Contains("RenderSteamFse(result.Snapshot)", source, StringComparison.Ordinal);
         Assert.Contains("SteamFseToggleSwitch.IsEnabled = false", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("ContentDialog", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("SetGamingFullScreenExperience", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("Restart", source, StringComparison.OrdinalIgnoreCase);
+        Assert.True(toggleMethodStart >= 0 && toggleMethodEnd > toggleMethodStart);
+        Assert.DoesNotContain("ContentDialog", toggleMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetGamingFullScreenExperience", toggleMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("Restart", toggleMethod, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ReadSource(params string[] parts)
