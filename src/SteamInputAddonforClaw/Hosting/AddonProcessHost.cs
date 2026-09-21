@@ -19,6 +19,7 @@ using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.GameBar;
 using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Updates;
+using SteamInputAddonforClaw.ClawHud;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -103,6 +104,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private Task? _backgroundUpdateTask;
     private int _backgroundUpdateStarted;
     private Task? _overlayStartup;
+    private HttpClient? _clawHudHttpClient;
+    private ClawHudRuntimeAcquirer? _clawHudRuntimeAcquirer;
+    private ClawHudProcessController? _clawHudProcessController;
+    private readonly SemaphoreSlim _clawHudGate = new(1, 1);
+    private Task? _clawHudStartup;
+    private Task? _clawHudShutdown;
     // Full1902 Policy B review [BLOCKER]: the Disabled-mode controller acquisition + Win+G arm now
     // runs deferred (off the message-loop thread, after the hook is installed and the loop is
     // pumping). While it is still committing, an external "Enable Center M and Restart" must not race
@@ -174,6 +181,43 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal IAddonFrontendControl FrontendControl => _frontendControl ?? throw new InvalidOperationException("Frontend control has not been initialized.");
 
     internal void SetRestartRequest(Func<bool> requestRestart) => _requestRestart = requestRestart ?? throw new ArgumentNullException(nameof(requestRestart));
+
+    internal ClawHudState CaptureClawHudState()
+    {
+        if (_clawHudProcessController is not null)
+            return _clawHudProcessController.State;
+        var desired = _runtimeStartupSettings?.ClawHudEnabled == true;
+        return new(desired, desired ? ClawHudFeatureState.Starting : ClawHudFeatureState.Disabled);
+    }
+
+    /// <summary>CH-A3 consumption seam: persistence and Managed process convergence stay owned here.</summary>
+    internal async Task<ClawHudState> SetClawHudEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await _clawHudGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0)
+                return new(enabled, ClawHudFeatureState.Unavailable, "ProcessShutdownStarted");
+            var settings = _runtimeStartupSettings ?? throw new InvalidOperationException("Runtime has not been initialized.");
+            settings.ChangeClawHudEnabled(enabled);
+            if (!enabled)
+            {
+                if (_clawHudProcessController is null)
+                    return new(false, ClawHudFeatureState.Disabled);
+                return await _clawHudProcessController.StopAsync(false, cancellationToken).ConfigureAwait(false);
+            }
+
+            EnsureClawHudController();
+            var runtime = await _clawHudRuntimeAcquirer!.AcquireAsync(cancellationToken).ConfigureAwait(false);
+            if (!runtime.IsReady)
+                return _clawHudProcessController!.RecordAcquisitionFailure(runtime);
+            return await _clawHudProcessController!.EnsureRunningAsync(runtime, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _clawHudGate.Release();
+        }
+    }
 
     internal void TestOnly_SetStartupForInitialization(AddonStartupComposition composition, StartupResult result)
     {
@@ -1260,6 +1304,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (_runtimeHost is not null)
             await _runtimeHost.DisposeAsync().ConfigureAwait(false);
+        await ObserveClawHudShutdownAsync().ConfigureAwait(false);
     }
 
     internal void StartRuntimeEventWatchers()
@@ -1317,10 +1362,64 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 Volatile.Write(ref _disabledControllerStartupPending, 0);
             }
 
+            // CH-A2: optional ClawHUD work starts only after the Full1902 controller-critical
+            // attempt has completed and its admission barrier has been cleared.
+            StartClawHudStartup();
             StartPowerObservation();
             ReconcileDeviceProfileStartup();
             StartBackgroundUpdate();
         }, cancellationToken);
+    }
+
+    private void StartClawHudStartup()
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0
+            || _clawHudStartup is not null
+            || _runtimeStartupSettings?.ClawHudEnabled != true)
+            return;
+
+        var cancellationToken = _startupCancellationTokenSource.Token;
+        _clawHudStartup = Task.Run(() => ReconcileClawHudAsync(cancellationToken), CancellationToken.None);
+    }
+
+    private async Task ReconcileClawHudAsync(CancellationToken cancellationToken)
+    {
+        await _clawHudGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0
+                || _runtimeStartupSettings?.ClawHudEnabled != true)
+                return;
+
+            EnsureClawHudController();
+            var runtime = await _clawHudRuntimeAcquirer!.AcquireAsync(cancellationToken).ConfigureAwait(false);
+            if (!runtime.IsReady)
+            {
+                _clawHudProcessController!.RecordAcquisitionFailure(runtime);
+                return;
+            }
+            await _clawHudProcessController!.EnsureRunningAsync(runtime, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ClawHUD.Process", "Optional ClawHUD startup failed; Full1902 remains available.", exception);
+        }
+        finally
+        {
+            _clawHudGate.Release();
+        }
+    }
+
+    private void EnsureClawHudController()
+    {
+        if (_clawHudProcessController is not null) return;
+        _clawHudHttpClient = new HttpClient();
+        _clawHudHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("SteamInputAddonforClaw");
+        _clawHudRuntimeAcquirer = new ClawHudRuntimeAcquirer(_clawHudHttpClient);
+        _clawHudProcessController = new ClawHudProcessController();
     }
 
     private void StartBackgroundUpdate()
@@ -1483,6 +1582,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal void BeginProcessShutdown()
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
+        if (_clawHudProcessController is not null)
+            _clawHudShutdown = StopClawHudForProcessShutdownAsync();
         _frontendLauncher.StopAcceptingRequests();
         // SF-V2-02 section 21: no new Overlay Device refresh may be scheduled once shutdown admission
         // closes. _overlayCaptureActive is also cleared below, which independently blocks a mutation
@@ -1531,6 +1632,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
             catch (Exception exception) { AppLog.Error("Startup", "Deferred Runtime startup work failed.", exception); }
             _deferredRuntimeStartup = null;
+        }
+        if (_clawHudStartup is not null)
+        {
+            try { await _clawHudStartup.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+            catch (Exception exception) { AppLog.Warn("ClawHUD.Process", "Optional ClawHUD startup task failed during shutdown.", exception); }
+            _clawHudStartup = null;
         }
         if (_overlayStartup is not null)
         {
@@ -1594,6 +1702,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             await _runtimeHost.DisposeAsync().ConfigureAwait(false);
             _runtimeHost = null;
         }
+        await ObserveClawHudShutdownAsync().ConfigureAwait(false);
+        if (_clawHudProcessController is not null)
+        {
+            await _clawHudProcessController.DisposeAsync().ConfigureAwait(false);
+            _clawHudProcessController = null;
+        }
+        _clawHudRuntimeAcquirer = null;
+        _clawHudHttpClient?.Dispose();
+        _clawHudHttpClient = null;
         // The Win+G suppression hook lives for the whole process lifetime under Full1902 Policy B;
         // it is released here at process shutdown regardless of controller-authority state.
         _winGSuppressionGuard.Dispose();
@@ -1616,7 +1733,30 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // in-flight visible-surface coordination has already unwound and released the gate.
         try { _visibleSurfaceTransition.Dispose(); } catch (ObjectDisposedException) { }
         try { _quickAccessRequestGate.Dispose(); } catch (ObjectDisposedException) { }
+        try { _clawHudGate.Dispose(); } catch (ObjectDisposedException) { }
         _startupComposition = null;
+    }
+
+    private async Task StopClawHudForProcessShutdownAsync()
+    {
+        try
+        {
+            await _clawHudProcessController!.StopAsync(
+                desiredEnabled: _runtimeStartupSettings?.ClawHudEnabled == true,
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ClawHUD.Process", "Managed ClawHUD shutdown failed; controller teardown continues independently.", exception);
+        }
+    }
+
+    private async Task ObserveClawHudShutdownAsync()
+    {
+        if (_clawHudShutdown is null) return;
+        try { await _clawHudShutdown.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("ClawHUD.Process", "Managed ClawHUD shutdown observation failed.", exception); }
+        _clawHudShutdown = null;
     }
 
     private AddonRuntimeHost GetRuntimeHost() => _runtimeHost ?? throw new InvalidOperationException("Runtime has not been initialized.");
