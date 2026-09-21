@@ -387,6 +387,18 @@ public sealed class ClawHudProcessControllerTests
             return Task.FromResult(EnabledSnapshot is null ? ClawHudControlResult<ClawHudSettingsSnapshot>.Transport : ClawHudControlResult<ClawHudSettingsSnapshot>.Success(EnabledSnapshot));
         }
 
+        public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudVisibilityModeAsync(ClawHudWireVisibilityMode mode, CancellationToken cancellationToken = default) => SettingsResult();
+        public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudSizeOffsetAsync(int offset, CancellationToken cancellationToken = default) => SettingsResult();
+        public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudFontAsync(ClawHudWireFont font, CancellationToken cancellationToken = default) => SettingsResult();
+        public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudAlignmentAsync(ClawHudWireAlignment alignment, CancellationToken cancellationToken = default) => SettingsResult();
+        public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudBackgroundModeAsync(ClawHudWireBackgroundMode mode, CancellationToken cancellationToken = default) => SettingsResult();
+        public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> PreviewHudOpacityAsync(ushort opacityPercent, CancellationToken cancellationToken = default) => SettingsResult();
+        public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> CommitHudOpacityAsync(ushort opacityPercent, CancellationToken cancellationToken = default) => SettingsResult();
+        public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetIntelVrrRangeFixEnabledAsync(bool enabled, CancellationToken cancellationToken = default) => SettingsResult();
+
+        private Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SettingsResult() =>
+            Task.FromResult(Snapshot is null ? ClawHudControlResult<ClawHudSettingsSnapshot>.Transport : ClawHudControlResult<ClawHudSettingsSnapshot>.Success(Snapshot));
+
         public Task<ClawHudControlResult<ClawHudUnit>> RequestShutdownAsync(CancellationToken cancellationToken = default)
         {
             RequestShutdownCalls++;

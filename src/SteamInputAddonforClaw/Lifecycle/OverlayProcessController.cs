@@ -31,6 +31,9 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private Func<CancellationToken, Task<QuickSettingsPageSnapshot>>? _captureDeviceQuickSettingsPage;
     private Func<CancellationToken, Task<QuickSettingsPageSnapshot>>? _captureProfileQuickSettingsPage;
     private Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? _mutateQuickSettings;
+    private Func<CancellationToken, Task<FrontendClawHudSnapshot>>? _captureClawHud;
+    private Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
+    private Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
@@ -53,7 +56,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _startProcess = startProcess ?? Process.Start;
         // The default factory reads the bound authority at connection time (StartCoreAsync), which
         // always runs after AddonProcessHost has called BindTabOrderAuthority.
-        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _captureTabOrder, _moveTabOrder, _mutateQuickSettings));
+        _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _captureTabOrder, _moveTabOrder, _mutateQuickSettings,
+            _captureClawHud, _setClawHudEnabled, _mutateClawHudSetting));
     }
 
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
@@ -78,6 +82,16 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _captureDeviceQuickSettingsPage = captureDevicePage ?? throw new ArgumentNullException(nameof(captureDevicePage));
         _captureProfileQuickSettingsPage = captureProfilePage ?? throw new ArgumentNullException(nameof(captureProfilePage));
         _mutateQuickSettings = mutate ?? throw new ArgumentNullException(nameof(mutate));
+    }
+
+    internal void BindClawHudAuthority(
+        Func<CancellationToken, Task<FrontendClawHudSnapshot>> capture,
+        Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>> setEnabled,
+        Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>> mutate)
+    {
+        _captureClawHud = capture ?? throw new ArgumentNullException(nameof(capture));
+        _setClawHudEnabled = setEnabled ?? throw new ArgumentNullException(nameof(setEnabled));
+        _mutateClawHudSetting = mutate ?? throw new ArgumentNullException(nameof(mutate));
     }
 
     internal string ExecutablePath => _executablePath;
@@ -182,6 +196,24 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         }
         try { await server.SendTabOrderStateAsync(state).ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Warn("Overlay", "Overlay tab-order publish failed.", exception); }
+    }
+
+    internal async Task RefreshClawHudAsync()
+    {
+        NamedPipeOverlayServer? server;
+        var capture = _captureClawHud;
+        lock (_sync) server = _server;
+        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+
+        FrontendClawHudSnapshot state;
+        try { state = await capture(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Overlay ClawHUD capture failed.", exception);
+            state = FrontendClawHudSnapshot.Unavailable(false, "HUD settings are unavailable.");
+        }
+        try { await server.SendClawHudStateAsync(state).ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("Overlay", "Overlay ClawHUD publish failed.", exception); }
     }
 
     private static async Task PublishQuickSettingsPageAsync(

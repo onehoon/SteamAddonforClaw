@@ -108,6 +108,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private ClawHudRuntimeAcquirer? _clawHudRuntimeAcquirer;
     private ClawHudProcessController? _clawHudProcessController;
     private readonly SemaphoreSlim _clawHudGate = new(1, 1);
+    private int _clawHudFrontendOperationInFlight;
     private Task? _clawHudStartup;
     private Task? _clawHudShutdown;
     // Full1902 Policy B review [BLOCKER]: the Disabled-mode controller acquisition + Win+G arm now
@@ -217,6 +218,69 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             _clawHudGate.Release();
         }
+    }
+
+    internal async Task<FrontendClawHudSnapshot> CaptureClawHudFrontendAsync(CancellationToken cancellationToken = default)
+    {
+        var state = CaptureClawHudState();
+        if (state.ActualState != ClawHudFeatureState.Ready || _clawHudProcessController is null)
+            return ClawHudFrontendMapping.MapState(state);
+
+        var result = await _clawHudProcessController.CaptureSettingsSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded || result.Value is null || !ClawHudFrontendMapping.TryMapSettings(result.Value, out var settings))
+            return ClawHudFrontendMapping.MapState(state) with { StatusMessage = "HUD settings could not be read." };
+        return ClawHudFrontendMapping.MapState(state, settings);
+    }
+
+    internal async Task<FrontendClawHudSnapshot> SetClawHudFrontendAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        Interlocked.Exchange(ref _clawHudFrontendOperationInFlight, 1);
+        try
+        {
+            var state = await SetClawHudEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
+            if (state.ActualState != ClawHudFeatureState.Ready || _clawHudProcessController is null)
+                return ClawHudFrontendMapping.MapState(state);
+            return await CaptureClawHudFrontendAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { Volatile.Write(ref _clawHudFrontendOperationInFlight, 0); }
+    }
+
+    internal async Task<FrontendClawHudMutationResult> MutateClawHudFrontendAsync(
+        FrontendClawHudMutationIntent intent,
+        CancellationToken cancellationToken = default)
+    {
+        if (!ClawHudFrontendMapping.TryCreateRequest(intent, out var request, out var validationFailure))
+            return new(false, validationFailure, ClawHudFrontendMapping.MapState(CaptureClawHudState()));
+
+        var state = CaptureClawHudState();
+        if (state.ActualState != ClawHudFeatureState.Ready || _clawHudProcessController is null)
+            return new(false, "HUD settings are unavailable until ClawHUD is Ready.", ClawHudFrontendMapping.MapState(state));
+
+        await _clawHudGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var result = await _clawHudProcessController.MutateSettingsAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!result.Succeeded || result.Value is null || !ClawHudFrontendMapping.TryMapSettings(result.Value, out var settings))
+            {
+                var failure = result.Kind == ClawHudControlResultKind.ProtocolError && result.Status == ClawHudControlStatus.InvalidValue
+                    ? "ClawHUD rejected the setting value."
+                    : "HUD settings could not be changed.";
+                return new(false, failure, ClawHudFrontendMapping.MapState(CaptureClawHudState()));
+            }
+
+            return new(true, null, ClawHudFrontendMapping.MapState(CaptureClawHudState(), settings));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ClawHUD.UI", "ClawHUD setting mutation failed.", exception,
+                ("Operation", intent.Kind), ("Failure", exception.GetType().Name));
+            return new(false, "HUD settings could not be changed.", ClawHudFrontendMapping.MapState(CaptureClawHudState()));
+        }
+        finally { _clawHudGate.Release(); }
     }
 
     internal void TestOnly_SetStartupForInitialization(AddonStartupComposition composition, StartupResult result)
@@ -480,7 +544,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             centerMStartup: _centerMStartupControl,
             centerMAuthorityTransition: centerMAuthorityTransition,
             updateCoordinator: _updateCoordinator,
-            quickSettingsPowerSource: WindowsAcDcPowerSource.Read);
+            quickSettingsPowerSource: WindowsAcDcPowerSource.Read,
+            captureClawHud: CaptureClawHudFrontendAsync,
+            setClawHudEnabled: SetClawHudFrontendAsync,
+            mutateClawHudSetting: MutateClawHudFrontendAsync);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -541,6 +608,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, appId: null, token),
             captureProfilePage: token => CaptureOverlayProfileQuickSettingsPageAsync(token),
             mutate: (intent, token) => HandleOverlayQuickSettingsMutationAsync(intent, token));
+        _overlayController.BindClawHudAuthority(
+            capture: token => _frontendControl!.CaptureClawHudAsync(token),
+            setEnabled: (enabled, token) => _frontendControl!.SetClawHudEnabledAsync(enabled, token),
+            mutate: (intent, token) => _frontendControl!.MutateClawHudSettingAsync(intent, token));
         // SF-V2-02 section 17: refresh a currently visible/captured Overlay on ordinary Runtime
         // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
         // scheduled once shutdown admission closes.
@@ -1139,6 +1210,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // long this method (and the _visibleSurfaceTransition it holds) delays a concurrent Hide.
             _ = _overlayController.RefreshQuickSettingsAsync();
             _ = _overlayController.RefreshTabOrderAsync();
+            _ = _overlayController.RefreshClawHudAsync();
         }
         catch (Exception exception)
         {
@@ -1160,9 +1232,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // typed Succeeded=false + FailureMessage) with an older/less-complete page. Section 10's
         // finally-block backstop in HandleOverlayQuickSettingsMutationAsync covers the one case this
         // suppression could otherwise lose: the active game changing while a mutation is in flight.
-        if (Volatile.Read(ref _overlayQuickSettingsMutationInFlight) != 0) return;
+        if (Volatile.Read(ref _overlayQuickSettingsMutationInFlight) != 0)
+        {
+            _ = _overlayController.RefreshClawHudAsync();
+            return;
+        }
         _ = _overlayController.RefreshQuickSettingsAsync();
         _ = _overlayController.RefreshTabOrderAsync();
+        _ = _overlayController.RefreshClawHudAsync();
     }
 
     // SF-V2-02/06/09 section 15/16/11: the admission Runtime-side fact this class owns
@@ -1420,6 +1497,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _clawHudHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("SteamInputAddonforClaw");
         _clawHudRuntimeAcquirer = new ClawHudRuntimeAcquirer(_clawHudHttpClient);
         _clawHudProcessController = new ClawHudProcessController();
+        _clawHudProcessController.StateChanged += OnClawHudStateChanged;
+    }
+
+    private void OnClawHudStateChanged(object? sender, EventArgs args)
+    {
+        if (Volatile.Read(ref _clawHudFrontendOperationInFlight) != 0) return;
+        if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
+            control.NotifyStateInvalidated();
     }
 
     private void StartBackgroundUpdate()
@@ -1707,6 +1792,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         await ObserveClawHudShutdownAsync().ConfigureAwait(false);
         if (_clawHudProcessController is not null)
         {
+            _clawHudProcessController.StateChanged -= OnClawHudStateChanged;
             await _clawHudProcessController.DisposeAsync().ConfigureAwait(false);
             _clawHudProcessController = null;
         }

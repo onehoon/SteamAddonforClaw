@@ -88,7 +88,7 @@ public sealed partial class OverlayWindow
     // its OQ5-UI-01 placeholder with zero selectable rows.
     private FrameworkElement BuildPage(AddonQuickSettingsTabId id, List<OverlayRow> rows) => id switch
     {
-        AddonQuickSettingsTabId.Setting => BuildTabOrderEditorPage(rows),
+        AddonQuickSettingsTabId.Setting => BuildSettingPage(rows),
         AddonQuickSettingsTabId.Shortcut => BuildShortcutPage(),
         AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
         AddonQuickSettingsTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile),
@@ -249,8 +249,8 @@ public sealed partial class OverlayWindow
         // live reorder preserves the selected tab rather than the old numeric row slot.
         AddonQuickSettingsTabId? selectedEditorTab = null;
         var settingVisible = _tabState.SelectedTab == AddonQuickSettingsTabId.Setting;
-        if (settingVisible && _rowSelection.SelectedIndex is { } selected && selected >= 0 && selected < _tabState.Order.Count)
-            selectedEditorTab = _tabState.Order[selected];
+        if (settingVisible && _rowSelection.SelectedIndex is { } selected && selected >= _clawHudRows.Count && selected - _clawHudRows.Count < _tabState.Order.Count)
+            selectedEditorTab = _tabState.Order[selected - _clawHudRows.Count];
 
         if (!state.Available || state.Rows.Count != 5)
         {
@@ -290,9 +290,9 @@ public sealed partial class OverlayWindow
         // Rebuild the Setting page's ordered row list so CapabilitiesFor(Setting) / the selection
         // model see the authoritative order. The AddonQuickSettingsTabOrderRow instances are reused.
         if (_tabOrderRows.Count == applied.Count)
-            _pageRows[AddonQuickSettingsTabId.Setting] = applied
+            _pageRows[AddonQuickSettingsTabId.Setting] = _clawHudRows.Concat(applied
                 .Select(id => new OverlayRow(_tabOrderRows[id].Container, _tabOrderRows[id].Capabilities))
-                .ToArray();
+                .ToArray()).ToArray();
 
         ApplySelectedHeaderVisual();
 
@@ -304,7 +304,7 @@ public sealed partial class OverlayWindow
             int? preferredIndex = null;
             if (selectedEditorTab is { } tab)
                 for (var i = 0; i < applied.Count; i++)
-                    if (applied[i] == tab) { preferredIndex = i; break; }
+                    if (applied[i] == tab) { preferredIndex = _clawHudRows.Count + i; break; }
             _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
             ApplyRowSelectionVisual();
         }

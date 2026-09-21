@@ -8,7 +8,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-// SF-V2-06: .Overlay v8 carries the shared typed tab-order state/mutation wire alongside the
+// SF-V2-06: .Overlay v10 carries the shared typed tab-order and ClawHUD wires alongside the
 // QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult contract
 // already consumed by .Frontend/.Qam (SF-V2-04/05), inside narrow transport correlation wrappers.
 // OQ4/lifecycle regression coverage lives in OverlayTransportTests/AddonQuickSettingsTabOrderTransportTests and
@@ -33,12 +33,56 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     // ---- Protocol / handshake -----------------------------------------------------------------
 
     [Fact]
-    public void Protocol_is_v8_and_frontend_transport_is_current()
+    public void Protocol_is_v10_and_frontend_transport_is_current()
     {
-        Assert.Equal(9, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(10, OverlayTransportProtocol.CurrentVersion);
         // The desktop/QAM frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(38, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(39, FrontendTransportProtocol.CurrentVersion);
+    }
+
+    [Fact]
+    public async Task ClawHud_state_and_correlated_mutations_round_trip_over_overlay_transport()
+    {
+        var pipeName = Pipe();
+        var state = new FrontendClawHudSnapshot(true, FrontendClawHudRuntimeState.Ready, "Ready", "1.0.1", "1.0.1",
+            new(FrontendClawHudDisplayMode.Always, 0, FrontendClawHudFont.Unispace, FrontendClawHudAlignment.Left,
+                FrontendClawHudBackgroundMode.FullWidth, 100, false, null));
+        var stateReceived = new TaskCompletionSource<FrontendClawHudSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new NamedPipeOverlayServer(
+            pipeName,
+            captureClawHud: _ => Task.FromResult(state),
+            setClawHudEnabled: (enabled, _) => Task.FromResult(state with
+            {
+                DesiredEnabled = enabled,
+                RuntimeState = enabled ? FrontendClawHudRuntimeState.Ready : FrontendClawHudRuntimeState.Disabled,
+                StatusMessage = enabled ? "Ready" : "Off",
+            }),
+            mutateClawHudSetting: (intent, _) => Task.FromResult(new FrontendClawHudMutationResult(true, null, state)));
+        await server.StartAsync();
+
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, clawHudHandler: snapshot =>
+        {
+            stateReceived.TrySetResult(snapshot);
+            return Task.CompletedTask;
+        });
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        Assert.True(await server.SendClawHudStateAsync(state));
+        Assert.Equal(state, await stateReceived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        var disabled = await client.SendClawHudEnabledAsync(false);
+        Assert.False(disabled.Snapshot.DesiredEnabled);
+        Assert.Equal(FrontendClawHudRuntimeState.Disabled, disabled.Snapshot.RuntimeState);
+
+        var mutation = await client.SendClawHudMutationAsync(new(
+            FrontendClawHudMutationKind.HudSizeOffset, HudSizeOffset: 1));
+        Assert.True(mutation.Succeeded);
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

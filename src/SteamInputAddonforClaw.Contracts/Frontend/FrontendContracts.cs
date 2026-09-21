@@ -444,6 +444,14 @@ public interface IAddonFrontendControl
             FrontendSteamFseMutationOutcome.Unavailable,
             FrontendSteamFseSnapshot.Unavailable("Steam Big Picture Full Screen Experience is unavailable."),
             "Steam Big Picture Full Screen Experience is unavailable."));
+    Task<FrontendClawHudSnapshot> CaptureClawHudAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendClawHudSnapshot(false, FrontendClawHudRuntimeState.Disabled, "Off", null, null, null));
+    Task<FrontendClawHudSnapshot> SetClawHudEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendClawHudSnapshot(enabled, enabled ? FrontendClawHudRuntimeState.Unavailable : FrontendClawHudRuntimeState.Disabled,
+            enabled ? "HUD Runtime is unavailable." : "Off", null, null, null));
+    Task<FrontendClawHudMutationResult> MutateClawHudSettingAsync(FrontendClawHudMutationIntent intent, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendClawHudMutationResult(false, "HUD settings are unavailable.",
+            new FrontendClawHudSnapshot(true, FrontendClawHudRuntimeState.Unavailable, "HUD settings are unavailable.", null, null, null)));
     /// <summary>Persists the COMPLETE new front-button mapping (both buttons, both domains --
     /// four bindings). Whole-record, not per-binding: the cross-button same-domain uniqueness rule
     /// belongs to one whole mapping. An invalid candidate is rejected by the settings layer and the

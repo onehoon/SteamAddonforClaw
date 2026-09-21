@@ -51,6 +51,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
     private int _disposed;
     private bool _managedClassified;
     private bool _managedReady;
+    private ClawHudState _state;
 
     internal ClawHudProcessController(
         IClawHudControlClient? controlClient = null,
@@ -60,10 +61,61 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
         _controlClient = controlClient ?? new ClawHudControlClient();
         _launch = launch ?? LaunchProcess;
         _delay = delay ?? Task.Delay;
-        State = new(false, ClawHudFeatureState.Disabled);
+        _state = new(false, ClawHudFeatureState.Disabled);
     }
 
-    internal ClawHudState State { get; private set; }
+    internal event EventHandler? StateChanged;
+
+    internal ClawHudState State
+    {
+        get => _state;
+        private set
+        {
+            if (_state == value) return;
+            _state = value;
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    internal async Task<ClawHudControlResult<ClawHudSettingsSnapshot>> CaptureSettingsSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            if (!_managedReady || State.ActualState != ClawHudFeatureState.Ready)
+                return ClawHudControlResult<ClawHudSettingsSnapshot>.Protocol(ClawHudControlStatus.RuntimeUnavailable);
+            return await _controlClient.GetSettingsSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    internal async Task<ClawHudControlResult<ClawHudSettingsSnapshot>> MutateSettingsAsync(
+        ClawHudControlRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            if (!_managedReady || State.ActualState != ClawHudFeatureState.Ready)
+                return ClawHudControlResult<ClawHudSettingsSnapshot>.Protocol(ClawHudControlStatus.RuntimeUnavailable);
+
+            return request.Operation switch
+            {
+                ClawHudControlOperation.SetHudVisibilityMode when request.WireEnum is { } mode => await _controlClient.SetHudVisibilityModeAsync((ClawHudWireVisibilityMode)mode, cancellationToken).ConfigureAwait(false),
+                ClawHudControlOperation.SetHudSizeOffset when request.SizeOffset is { } size => await _controlClient.SetHudSizeOffsetAsync(size, cancellationToken).ConfigureAwait(false),
+                ClawHudControlOperation.SetHudFont when request.WireEnum is { } font => await _controlClient.SetHudFontAsync((ClawHudWireFont)font, cancellationToken).ConfigureAwait(false),
+                ClawHudControlOperation.SetHudAlignment when request.WireEnum is { } alignment => await _controlClient.SetHudAlignmentAsync((ClawHudWireAlignment)alignment, cancellationToken).ConfigureAwait(false),
+                ClawHudControlOperation.SetHudBackgroundMode when request.WireEnum is { } background => await _controlClient.SetHudBackgroundModeAsync((ClawHudWireBackgroundMode)background, cancellationToken).ConfigureAwait(false),
+                ClawHudControlOperation.PreviewHudOpacity when request.OpacityPercent is { } preview => await _controlClient.PreviewHudOpacityAsync(preview, cancellationToken).ConfigureAwait(false),
+                ClawHudControlOperation.CommitHudOpacity when request.OpacityPercent is { } commit => await _controlClient.CommitHudOpacityAsync(commit, cancellationToken).ConfigureAwait(false),
+                ClawHudControlOperation.SetIntelVrrRangeFixEnabled when request.Flag is { } vrr => await _controlClient.SetIntelVrrRangeFixEnabledAsync(vrr, cancellationToken).ConfigureAwait(false),
+                _ => ClawHudControlResult<ClawHudSettingsSnapshot>.Protocol(ClawHudControlStatus.InvalidValue),
+            };
+        }
+        finally { _gate.Release(); }
+    }
 
     internal async Task<ClawHudState> EnsureRunningAsync(
         ClawHudRuntimeAcquisitionResult runtime,

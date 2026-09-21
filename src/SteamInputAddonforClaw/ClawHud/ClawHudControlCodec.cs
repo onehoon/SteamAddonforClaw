@@ -222,7 +222,7 @@ internal static class ClawHudControlCodec
                     || !TryString(out var panel) || !TryString(out var before)
                     || !TryString(out var after) || !TryString(out var message) || !TryString(out var timestamp))
                     return false;
-                vrr = new(status, panel, before, after, message, timestamp);
+                vrr = new((ClawHudWireIntelVrrStatus)status, panel, before, after, message, timestamp);
             }
 
             snapshot = new(startWithWindows, hudEnabled, sizeOffset, (ClawHudWireFont)font,

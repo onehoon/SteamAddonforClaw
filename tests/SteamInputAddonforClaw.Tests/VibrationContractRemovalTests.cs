@@ -10,7 +10,7 @@ public sealed class VibrationContractRemovalTests
 {
     [Fact]
     public void Frontend_protocol_is_current()
-        => Assert.Equal(38, FrontendTransportProtocol.CurrentVersion);
+        => Assert.Equal(39, FrontendTransportProtocol.CurrentVersion);
 
     [Fact]
     public void No_vibration_test_rpc_methods_remain()
