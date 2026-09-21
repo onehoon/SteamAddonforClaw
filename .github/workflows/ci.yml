@@ -116,8 +116,13 @@ jobs:
             Write-Host 'Exporting ephemeral CI FSE signing certificate.'
             Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $certificatePassword | Out-Null
             Export-Certificate -Cert $certificate -FilePath $cerPath | Out-Null
-            Write-Host 'Importing ephemeral CI FSE certificate chain.'
-            Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+
+            # Do not import a disposable self-signed certificate into CurrentUser\Root.
+            # Windows can show a trust confirmation for root installation, which has no
+            # interactive answer on a GitHub-hosted runner and stalls the entire job.
+            # TrustedPeople is sufficient for Authenticode verification of this exact
+            # ephemeral signer without changing the runner's root trust anchors.
+            Write-Host 'Trusting the ephemeral CI FSE signer in CurrentUser TrustedPeople.'
             Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
 
             Write-Host 'Creating and signing the CI FSE MSIX package.'
@@ -139,7 +144,6 @@ jobs:
           finally {
             Remove-Item -LiteralPath $pfxPath, $cerPath -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath "Cert:\CurrentUser\TrustedPeople\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
           }
 
