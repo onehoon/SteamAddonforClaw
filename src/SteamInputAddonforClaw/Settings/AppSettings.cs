@@ -10,6 +10,9 @@ public sealed record AppSettings(
     AppLogPreference LogLevel = AppLogPreference.Off,
     bool SuppressDeveloperMenuWarning = false)
 {
+    /// <summary>Top-level desired state for the optional ClawHUD Managed Runtime.</summary>
+    public bool ClawHudEnabled { get; init; }
+
     public bool DeveloperMenuEnabled { get; init; }
 
     /// <summary>When enabled, compact Quick Settings surfaces show only the currently active AC/DC

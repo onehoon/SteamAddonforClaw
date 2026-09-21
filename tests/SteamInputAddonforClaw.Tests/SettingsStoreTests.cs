@@ -205,6 +205,70 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void ClawHudEnabled_DefaultsToFalse_WhenMissing()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LogLevel\":\"Debug\"}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.False(settings.ClawHudEnabled);
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+    }
+
+    [Fact]
+    public void ClawHudEnabled_RoundTripsTrueAndFalse()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+
+        store.Save(new AppSettings { ClawHudEnabled = true });
+        Assert.True(store.Load().ClawHudEnabled);
+
+        store.Save(new AppSettings { ClawHudEnabled = false });
+        Assert.False(store.Load().ClawHudEnabled);
+    }
+
+    [Fact]
+    public void ClawHudEnabled_MalformedValueDoesNotResetUnrelatedSettings()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LogLevel\":\"Info\",\"ClawHudEnabled\":\"true\"}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.False(settings.ClawHudEnabled);
+        Assert.Equal(AppLogPreference.Info, settings.LogLevel);
+    }
+
+    [Fact]
+    public void ChangeClawHudEnabled_SavesBeforePublishing()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        coordinator.ChangeClawHudEnabled(true);
+
+        Assert.True(coordinator.ClawHudEnabled);
+        Assert.True(store.Load().ClawHudEnabled);
+    }
+
+    [Fact]
+    public void ChangeClawHudEnabled_DoesNotPublishWhenSaveFails()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var blockingFile = Path.Combine(_testDirectory, "blocking-file");
+        File.WriteAllText(blockingFile, "block");
+        var store = new SettingsStore(Path.Combine(blockingFile, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        Assert.ThrowsAny<IOException>(() => coordinator.ChangeClawHudEnabled(true));
+        Assert.False(coordinator.ClawHudEnabled);
+    }
+
+    [Fact]
     public void CreateTaskConfiguration_UsesStableExecutablePath()
     {
         var configuration = WindowsTaskSchedulerStartupManager.CreateTaskConfiguration(@"C:\Custom Install\SteamInputAddonforClaw.exe", "DOMAIN\\User");

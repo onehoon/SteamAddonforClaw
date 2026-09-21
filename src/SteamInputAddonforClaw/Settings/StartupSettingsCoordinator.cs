@@ -20,6 +20,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public AppSettings Settings { get; private set; }
 
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
+    public bool ClawHudEnabled => Settings.ClawHudEnabled;
     public bool QuickSettingsCurrentPowerSourceOnly => Settings.QuickSettingsCurrentPowerSourceOnly;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
     public BackButtonMappingSettings BackButtonMapping => Settings.BackButtonMapping;
@@ -135,6 +136,15 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     {
         if (Settings.QuickSettingsCurrentPowerSourceOnly == enabled) return;
         var next = Settings with { QuickSettingsCurrentPowerSourceOnly = enabled };
+        _settingsStore.Save(next);
+        Settings = next;
+    }
+
+    /// <summary>Persists the ClawHUD top-level desired state before publishing it.</summary>
+    public void ChangeClawHudEnabled(bool enabled)
+    {
+        if (Settings.ClawHudEnabled == enabled) return;
+        var next = Settings with { ClawHudEnabled = enabled };
         _settingsStore.Save(next);
         Settings = next;
     }
