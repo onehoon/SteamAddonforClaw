@@ -14,6 +14,7 @@
             <StackPanel x:Name="MappingContent" Spacing="12">
                 <TextBlock Text="Button Mapping" FontSize="18" FontWeight="SemiBold" />
 
+                <StackPanel x:Name="FrontButtonMappingContent" Spacing="12">
                 <ctcontrols:SettingsExpander Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="True">
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Normal">
@@ -44,6 +45,28 @@
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="CenterMSteamConfigCard" ContentAlignment="Vertical">
                             <StackPanel x:Name="CenterMSteamConfigPanel" Spacing="8" />
+                        </ctcontrols:SettingsCard>
+                    </ctcontrols:SettingsExpander.Items>
+                </ctcontrols:SettingsExpander>
+                </StackPanel>
+
+                <ctcontrols:SettingsExpander
+                    x:Name="BackButtonMappingExpander"
+                    Header="M1 / M2"
+                    Description="Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4."
+                    IsExpanded="True">
+                    <ctcontrols:SettingsExpander.Items>
+                        <ctcontrols:SettingsCard Header="M1">
+                            <ComboBox
+                                x:Name="M1TargetComboBox"
+                                MinWidth="220"
+                                SelectionChanged="BackButtonTargetComboBox_SelectionChanged" />
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard Header="M2">
+                            <ComboBox
+                                x:Name="M2TargetComboBox"
+                                MinWidth="220"
+                                SelectionChanged="BackButtonTargetComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                     </ctcontrols:SettingsExpander.Items>
                 </ctcontrols:SettingsExpander>

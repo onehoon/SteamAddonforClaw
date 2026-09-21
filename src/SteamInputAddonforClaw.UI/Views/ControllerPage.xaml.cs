@@ -2,6 +2,7 @@ using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Windows.Storage.Pickers;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
@@ -23,7 +24,9 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class ControllerPage : UserControl
 {
     private FrontButtonMappingSettings _mapping = FrontButtonMappingSettings.Default;
+    private BackButtonMappingSettings _backButtonMapping = BackButtonMappingSettings.Default;
     private bool _available;
+    private bool _backButtonAvailable;
     private BindingEditor[] _editors = [];
     /// <summary>Suppresses change handlers while the page writes persisted state INTO the controls,
     /// so restoring the UI never looks like a user edit and re-saves.</summary>
@@ -32,12 +35,16 @@ public sealed partial class ControllerPage : UserControl
     public ControllerPage() => InitializeComponent();
 
     internal event EventHandler<FrontButtonMappingSettings>? MappingEditRequested;
+    internal event EventHandler<BackButtonMappingSettings>? BackButtonMappingEditRequested;
 
     internal void Initialize(FrontendBootstrapSnapshot bootstrap, Func<nint> windowHandleProvider)
     {
         _available = bootstrap.FrontButtonMappingAvailable;
-        MappingContent.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
-        MappingUnavailableText.Visibility = _available ? Visibility.Collapsed : Visibility.Visible;
+        _backButtonAvailable = bootstrap.BackButtonMappingAvailable;
+        FrontButtonMappingContent.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
+        BackButtonMappingExpander.Visibility = _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
+        MappingContent.Visibility = _available || _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
+        MappingUnavailableText.Visibility = _available || _backButtonAvailable ? Visibility.Collapsed : Visibility.Visible;
 
         _editors =
         [
@@ -48,6 +55,12 @@ public sealed partial class ControllerPage : UserControl
         ];
 
         ApplyFrontButtonMapping(bootstrap.Settings.FrontButtonMapping);
+        _backButtonMapping = bootstrap.Settings.BackButtonMapping;
+        if (_backButtonAvailable)
+        {
+            PopulateBackButtonTargets();
+            ApplyBackButtonMapping(_backButtonMapping);
+        }
     }
 
     /// <summary>Writes a persisted mapping into every control. Never tears the editors down.</summary>
@@ -75,6 +88,83 @@ public sealed partial class ControllerPage : UserControl
             return;
         }
     }
+
+    /// <summary>Writes the Runtime-owned Xbox360 rear-button mapping into both selectors.</summary>
+    internal void ApplyBackButtonMapping(BackButtonMappingSettings mapping)
+    {
+        _isLoading = true;
+        try
+        {
+            _backButtonMapping = mapping;
+            SelectBackButtonTarget(M1TargetComboBox, mapping.M1);
+            SelectBackButtonTarget(M2TargetComboBox, mapping.M2);
+        }
+        finally { _isLoading = false; }
+    }
+
+    private void PopulateBackButtonTargets()
+    {
+        foreach (var target in Enum.GetValues<Xbox360BackButtonTarget>())
+        {
+            M1TargetComboBox.Items.Add(new ComboBoxItem { Content = DescribeBackButtonTarget(target), Tag = target });
+            M2TargetComboBox.Items.Add(new ComboBoxItem { Content = DescribeBackButtonTarget(target), Tag = target });
+        }
+    }
+
+    private void BackButtonTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_isLoading || !_backButtonAvailable) return;
+
+        var target = (sender as ComboBox)?.SelectedItem is ComboBoxItem { Tag: Xbox360BackButtonTarget value }
+            ? value
+            : (Xbox360BackButtonTarget?)null;
+        if (target is null) return;
+
+        if (ReferenceEquals(sender, M1TargetComboBox))
+            _backButtonMapping = new BackButtonMappingSettings(target.Value, _backButtonMapping.M2);
+        else if (ReferenceEquals(sender, M2TargetComboBox))
+            _backButtonMapping = new BackButtonMappingSettings(_backButtonMapping.M1, target.Value);
+        else
+            return;
+
+        BackButtonMappingEditRequested?.Invoke(this, _backButtonMapping);
+    }
+
+    private static void SelectBackButtonTarget(ComboBox comboBox, Xbox360BackButtonTarget target)
+    {
+        comboBox.SelectedItem = null;
+        foreach (var item in comboBox.Items)
+        {
+            if (item is ComboBoxItem { Tag: Xbox360BackButtonTarget candidate } && candidate == target)
+            {
+                comboBox.SelectedItem = item;
+                return;
+            }
+        }
+    }
+
+    private static string DescribeBackButtonTarget(Xbox360BackButtonTarget target) => target switch
+    {
+        Xbox360BackButtonTarget.Disabled => "Disabled",
+        Xbox360BackButtonTarget.A => "A",
+        Xbox360BackButtonTarget.B => "B",
+        Xbox360BackButtonTarget.X => "X",
+        Xbox360BackButtonTarget.Y => "Y",
+        Xbox360BackButtonTarget.DPadUp => "D-Pad Up",
+        Xbox360BackButtonTarget.DPadRight => "D-Pad Right",
+        Xbox360BackButtonTarget.DPadDown => "D-Pad Down",
+        Xbox360BackButtonTarget.DPadLeft => "D-Pad Left",
+        Xbox360BackButtonTarget.LeftBumper => "Left Bumper (LB)",
+        Xbox360BackButtonTarget.RightBumper => "Right Bumper (RB)",
+        Xbox360BackButtonTarget.LeftTrigger => "Left Trigger (LT)",
+        Xbox360BackButtonTarget.RightTrigger => "Right Trigger (RT)",
+        Xbox360BackButtonTarget.LeftStickClick => "Left Stick Click (L3)",
+        Xbox360BackButtonTarget.RightStickClick => "Right Stick Click (R3)",
+        Xbox360BackButtonTarget.View => "View",
+        Xbox360BackButtonTarget.Menu => "Menu",
+        Xbox360BackButtonTarget.XboxGuide => "Xbox Guide",
+        _ => throw new ArgumentOutOfRangeException(nameof(target), target, null)
+    };
 
     private void OnEditorConfigurationChanged(BindingEditor editor)
     {
