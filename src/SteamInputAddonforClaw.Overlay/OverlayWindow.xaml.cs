@@ -23,11 +23,6 @@ public sealed partial class OverlayWindow : Window
             Application.Current.Resources.TryGetValue("SubtleFillColorSecondaryBrush", out var subtleFill) && subtleFill is Brush subtleBrush
                 ? subtleBrush
                 : new SolidColorBrush(Colors.Gray) { Opacity = 0.25 };
-        _tabSelectedBackgroundBrush = _rowSelectedBrush;
-        _tabSelectedForegroundBrush =
-            Application.Current.Resources.TryGetValue("TextOnAccentFillColorPrimaryBrush", out var onAccent) && onAccent is Brush onAccentBrush
-                ? onAccentBrush
-                : new SolidColorBrush(Colors.White);
         BuildShell();
         Closed += (_, _) =>
         {

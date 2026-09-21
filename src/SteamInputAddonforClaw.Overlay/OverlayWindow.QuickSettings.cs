@@ -70,7 +70,7 @@ public sealed partial class OverlayWindow
     {
         var failureText = CreateQuickSettingsMessageText(string.Empty, "CaptionTextBlockStyle");
         failureText.Visibility = Visibility.Collapsed;
-        var content = new StackPanel { Spacing = 4 };
+        var content = new StackPanel { Spacing = 16 };
         var root = new StackPanel { Spacing = 4 };
         root.Children.Add(failureText);
         root.Children.Add(content);
@@ -197,17 +197,24 @@ public sealed partial class OverlayWindow
             {
                 var visibleRows = section.Rows.Where(row => row.Visible).ToArray();
                 if (visibleRows.Length == 0) continue;
-                if (!string.IsNullOrEmpty(section.Label))
-                    surface.Content.Children.Add(CreateQuickSettingsMessageText(section.Label, "BodyStrongTextBlockStyle"));
-                if (!string.IsNullOrEmpty(section.Message))
-                    surface.Content.Children.Add(CreateQuickSettingsMessageText(section.Message, "CaptionTextBlockStyle"));
 
+                var sectionPanel = new StackPanel { Spacing = 5 };
+                if (!string.IsNullOrEmpty(section.Label))
+                    sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Label, "BodyStrongTextBlockStyle"));
+                if (!string.IsNullOrEmpty(section.Message))
+                    sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Message, "CaptionTextBlockStyle"));
+
+                var rowStack = new StackPanel { Spacing = 4 };
                 foreach (var row in visibleRows)
                 {
                     if (!TryCreateQuickSettingsRow(surface, row, out var overlayRow)) continue;
                     rows.Add(overlayRow);
-                    surface.Content.Children.Add(overlayRow.Container);
+                    RegisterRowPointerSelection(overlayRow.Container);
+                    rowStack.Children.Add(overlayRow.Container);
                 }
+
+                sectionPanel.Children.Add(rowStack);
+                surface.Content.Children.Add(sectionPanel);
             }
 
             surface.RowShape = page.Sections.SelectMany(s => s.Rows).Select(QuickSettingsRowShapeOf).ToArray();

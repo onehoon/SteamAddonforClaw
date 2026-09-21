@@ -102,7 +102,31 @@ public sealed partial class OverlayWindow
         if (!_pageRows.TryGetValue(_tabState.SelectedTab, out var rows)) return;
         var selectedIndex = _rowSelection.SelectedIndex;
         for (var i = 0; i < rows.Count; i++)
-            rows[i].Container.Background = i == selectedIndex ? _rowSelectedFillBrush : RowUnselectedFillBrush;
+        {
+            var selected = i == selectedIndex;
+            rows[i].Container.Background = selected ? _rowSelectedFillBrush : RowUnselectedFillBrush;
+            rows[i].Container.BorderBrush = selected ? _rowSelectedBrush : RowUnselectedBrush;
+        }
+    }
+
+    // Resolve against the current page order at interaction time. Setting rows can be reordered
+    // authoritatively while their Border instances remain alive, so a cached numeric index would
+    // select the wrong logical row after a reorder.
+    private void RegisterRowPointerSelection(Border container)
+    {
+        container.PointerPressed += (_, _) => SelectRenderedRow(container);
+        container.Tapped += (_, _) => SelectRenderedRow(container);
+    }
+
+    private void SelectRenderedRow(Border container)
+    {
+        if (!_pageRows.TryGetValue(_tabState.SelectedTab, out var rows)) return;
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (!ReferenceEquals(rows[index].Container, container)) continue;
+            if (_rowSelection.TrySelect(index)) ApplyRowSelectionVisual();
+            return;
+        }
     }
 
     private void BringSelectedRowIntoView()

@@ -1,4 +1,3 @@
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -86,14 +85,7 @@ internal sealed class OverlayToggleRow
         grid.Children.Add(text);
         grid.Children.Add(_toggle);
 
-        Container = new Border
-        {
-            Child = grid,
-            Padding = new Thickness(12, 6, 12, 6),
-            CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(2),
-            BorderBrush = new SolidColorBrush(Colors.Transparent),
-        };
+        Container = OverlayRowChrome.Create(grid);
 
         Capabilities = new OverlayRowCapabilities(
             IsSelectable: () => _model.IsAvailable,
