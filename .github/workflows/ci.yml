@@ -112,6 +112,7 @@ jobs:
           $certificatePassword = ConvertTo-SecureString 'ci-only-fse-package-test' -AsPlainText -Force
           $pfxPath = Join-Path $env:RUNNER_TEMP 'SteamInputAddonforClaw-FseHome-ci.pfx'
           $cerPath = Join-Path $env:RUNNER_TEMP 'SteamInputAddonforClaw-FseHome-ci.cer'
+          $fsePackageVersion = '0.1.0.0'
           try {
             Write-Host 'Exporting ephemeral CI FSE signing certificate.'
             Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $certificatePassword | Out-Null
@@ -131,14 +132,14 @@ jobs:
               -OutputPath artifacts/publish/fse/SteamInputAddonforClaw.FseHome.msix `
               -CertificatePath $pfxPath `
               -CertificatePassword $certificatePassword `
-              -ExpectedVersion 0.1.0
+              -ExpectedVersion $fsePackageVersion
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
             Write-Host 'Verifying the signed CI FSE MSIX package.'
             & ./scripts/verify-publish-assets.ps1 `
               -PublishDirectory artifacts/publish `
               -RequireFsePackage `
-              -ExpectedFsePackageVersion 0.1.0
+              -ExpectedFsePackageVersion $fsePackageVersion
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           finally {
