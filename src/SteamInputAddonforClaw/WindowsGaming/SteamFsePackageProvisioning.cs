@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Xml.Linq;
 using SteamInputAddonforClaw.Diagnostics;
 using Windows.Management.Deployment;
@@ -141,7 +142,16 @@ internal sealed class SteamFsePackageProvisioner : ISteamFsePackageProvisioner
 
         try
         {
-            var document = XDocument.Load(packagePath);
+            using var archive = ZipFile.OpenRead(packagePath);
+            var manifestEntry = archive.GetEntry("AppxManifest.xml");
+            if (manifestEntry is null)
+            {
+                failure = "Bundled FSE MSIX has no AppxManifest.xml.";
+                return false;
+            }
+
+            using var manifestStream = manifestEntry.Open();
+            var document = XDocument.Load(manifestStream);
             var identity = document.Root?.Element(ManifestNamespace + "Identity");
             if (identity is null)
             {

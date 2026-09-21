@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.WindowsGaming;
 using Xunit;
@@ -139,12 +140,15 @@ public sealed class SteamFsePackageProvisionerTests
     {
         var path = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw-FseTests", Guid.NewGuid().ToString("N"), "SteamInputAddonforClaw.FseHome.msix");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, $"""
+        var manifest = $"""
             <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
               <Identity Name="{WindowsSteamFsePackageProbe.PackageIdentityName}" Publisher="CN=SteamInputAddonforClaw" Version="{version}" ProcessorArchitecture="x64" />
               <Applications><Application Id="App" /></Applications>
             </Package>
-            """);
+            """;
+        using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
+        using (var writer = new StreamWriter(archive.CreateEntry("AppxManifest.xml").Open()))
+            writer.Write(manifest);
 
         return new SteamFsePackageProvisioner(
             new FakeOsProbe(supported), packages, deployment, () => path);
