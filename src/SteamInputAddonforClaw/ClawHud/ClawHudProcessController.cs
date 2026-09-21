@@ -115,6 +115,38 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
 
             if (_managedReady || _managedClassified)
             {
+                if (child is null)
+                {
+                    var current = await _controlClient.GetRuntimeInfoAsync(cancellationToken).ConfigureAwait(false);
+                    if (!current.Succeeded || current.Value is null)
+                    {
+                        _managedClassified = false;
+                        _managedReady = false;
+                        State = new(desiredEnabled, ClawHudFeatureState.Unavailable,
+                            $"ManagedShutdownReclassify:{Describe(current)}", State.RuntimeVersion);
+                        return State;
+                    }
+
+                    if (current.Value.LaunchMode == ClawHudWireLaunchMode.Standalone)
+                    {
+                        _managedClassified = false;
+                        _managedReady = false;
+                        State = new(desiredEnabled, ClawHudFeatureState.StandaloneConflict,
+                            "StandaloneConflict", State.RuntimeVersion, current.Value.ApplicationVersion);
+                        return State;
+                    }
+
+                    if (current.Value.LaunchMode != ClawHudWireLaunchMode.Managed
+                        || !IsProtocolCompatible(current.Value))
+                    {
+                        _managedClassified = false;
+                        _managedReady = false;
+                        State = new(desiredEnabled, ClawHudFeatureState.Unavailable,
+                            "ManagedShutdownUnclassified", State.RuntimeVersion, current.Value.ApplicationVersion);
+                        return State;
+                    }
+                }
+
                 var shutdown = await _controlClient.RequestShutdownAsync(cancellationToken).ConfigureAwait(false);
                 if (!shutdown.Succeeded)
                 {
@@ -230,7 +262,15 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
 
         var exitCode = child.HasExited ? child.ExitCode : (int?)null;
         if (exitCode != AlreadyRunningExitCode)
+        {
+            if (child.HasExited)
+            {
+                await child.DisposeAsync().ConfigureAwait(false);
+                if (ReferenceEquals(_ownedChild, child))
+                    _ownedChild = null;
+            }
             return Unavailable(runtime.RuntimeVersion, exitCode is { } code ? DescribeStartupExit(code) : "ControlIpcUnavailable");
+        }
 
         await child.DisposeAsync().ConfigureAwait(false);
         _ownedChild = null;

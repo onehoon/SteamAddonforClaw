@@ -79,6 +79,30 @@ public sealed class ClawHudProcessControllerTests
     }
 
     [Fact]
+    public async Task Stop_DoesNotShutdownStandaloneThatReplacedAnAdoptedManagedRuntime()
+    {
+        var runtime = Runtime("1.0.1");
+        var process = new FakeProcess { HasExited = true, ExitCode = (int)ClawHudManagedStartupExitCode.AlreadyRunning };
+        var control = new FakeControl
+        {
+            RuntimeInfos = new Queue<ClawHudRuntimeInfo?>([
+                new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+                new("9.9.9", 1, 1, ClawHudWireLaunchMode.Standalone, ClawHudWireRuntimeState.Ready),
+            ]),
+            Snapshot = Snapshot(true),
+        };
+        var controller = new ClawHudProcessController(control, _ => process);
+
+        var ready = await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+        var stopped = await controller.StopAsync(false, CancellationToken.None);
+
+        Assert.Equal(ClawHudFeatureState.Ready, ready.ActualState);
+        Assert.Equal(ClawHudFeatureState.StandaloneConflict, stopped.ActualState);
+        Assert.Equal(0, control.RequestShutdownCalls);
+        Assert.False(process.KillCalled);
+    }
+
+    [Fact]
     public async Task EnsureRunning_DoesNotTouchStandaloneConflict()
     {
         var runtime = Runtime("1.0.1");
@@ -145,6 +169,26 @@ public sealed class ClawHudProcessControllerTests
         Assert.True(state.DesiredEnabled);
         Assert.Equal(expectedFailure, state.Failure);
         Assert.Equal(0, control.RequestShutdownCalls);
+        Assert.False(process.KillCalled);
+    }
+
+    [Fact]
+    public async Task EnsureRunning_DisposesExitedStartupChildBeforeReturningFailure()
+    {
+        var process = new FakeProcess
+        {
+            HasExited = true,
+            ExitCode = (int)ClawHudManagedStartupExitCode.PresentMonElevationCancelled,
+        };
+        var controller = new ClawHudProcessController(new FakeControl(), _ => process);
+
+        var state = await controller.EnsureRunningAsync(Runtime("1.0.1"), CancellationToken.None);
+        var stopped = await controller.StopAsync(false, CancellationToken.None);
+
+        Assert.Equal(ClawHudFeatureState.Unavailable, state.ActualState);
+        Assert.Equal("StartupExit:PresentMonElevationCancelled", state.Failure);
+        Assert.True(process.DisposeCalled);
+        Assert.Equal(ClawHudFeatureState.Disabled, stopped.ActualState);
         Assert.False(process.KillCalled);
     }
 
