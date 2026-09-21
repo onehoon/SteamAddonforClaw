@@ -52,10 +52,11 @@ public sealed partial class OverlayWindow : Window
         internal (QuickSettingsSectionId Id, string? Label, string? Message)[]? RenderedSections { get; set; }
     }
 
-    private const double ContentSlideDistanceDip = 32.0;
+    private const float HiddenScale = 0.98f;
+    private const float HiddenTranslateYDip = 8.0f;
     private const double HiddenOpacity = 0.90;
     private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(180);
-    private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(140);
     private uint _lastConfiguredDpi;
 
     private readonly OverlayTabState _tabState = new();
@@ -166,7 +167,7 @@ public sealed partial class OverlayWindow : Window
         var initialStatePrepared = true;
         try
         {
-            SetVisualState(-ContentSlideDistanceDip, HiddenOpacity);
+            SetVisualState(HiddenScale, HiddenTranslateYDip, HiddenOpacity);
         }
         catch (Exception exception)
         {
@@ -185,11 +186,13 @@ public sealed partial class OverlayWindow : Window
         var stopwatch = Stopwatch.StartNew();
         OverlayLog.Info("Animation", "Show animation started",
             ("DurationMs", ShowDuration.TotalMilliseconds),
+            ("StartScale", HiddenScale), ("EndScale", 1.0),
+            ("StartTranslateYDip", HiddenTranslateYDip), ("EndTranslateYDip", 0.0),
             ("StartOpacity", HiddenOpacity), ("EndOpacity", 1.0),
-            ("ContentSlideDistanceDip", ContentSlideDistanceDip));
+            ("AnimationTranslateYPhysical", HiddenTranslateYDip * AnimationRasterizationScale()));
         try
         {
-            await AnimateAsync(-ContentSlideDistanceDip, 0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
+            await AnimateAsync(HiddenScale, 1.0f, HiddenTranslateYDip, 0.0, HiddenOpacity, 1.0, ShowDuration, easeIn: false);
             TrySetVisibleVisualState();
             LogSurfaceBounds("Show.Visible");
             OverlayLog.Info("Animation", "Show animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
@@ -214,11 +217,12 @@ public sealed partial class OverlayWindow : Window
             var stopwatch = Stopwatch.StartNew();
             OverlayLog.Info("Animation", "Hide animation started",
                 ("DurationMs", HideDuration.TotalMilliseconds),
-                ("StartOpacity", 1.0), ("EndOpacity", HiddenOpacity),
-                ("ContentSlideDistanceDip", ContentSlideDistanceDip));
+                ("StartScale", 1.0), ("EndScale", HiddenScale),
+                ("StartTranslateYDip", 0.0), ("EndTranslateYDip", HiddenTranslateYDip),
+                ("StartOpacity", 1.0), ("EndOpacity", HiddenOpacity));
             try
             {
-                await AnimateAsync(0, -ContentSlideDistanceDip, 1.0, HiddenOpacity, HideDuration, easeIn: true);
+                await AnimateAsync(1.0f, HiddenScale, 0.0, HiddenTranslateYDip, 1.0, HiddenOpacity, HideDuration, easeIn: true);
                 OverlayLog.Info("Animation", "Hide animation completed", ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
             }
             catch (Exception exception)
@@ -937,11 +941,10 @@ public sealed partial class OverlayWindow : Window
         var scale = _lastConfiguredDpi / 96.0;
         OverlayLog.Info("Geometry", "Overlay window configured",
             ("Monitor", monitorText),
-            ("WorkAreaX", rect.X), ("WorkAreaY", rect.Y),
-            ("WorkAreaWidth", rect.Width), ("WorkAreaHeight", rect.Height),
+            ("OverlayX", rect.X), ("OverlayY", rect.Y),
             ("Dpi", _lastConfiguredDpi), ("Scale", scale),
-            ("PanelWidthDip", OverlayWindowGeometry.PocPanelWidthDip),
-            ("PanelWidthPhysical", rect.Width));
+            ("OverlayWidthPx", rect.Width),
+            ("OverlayHeightPx", rect.Height));
     }
 
     private void LogSurfaceBounds(string reason)
@@ -971,10 +974,14 @@ public sealed partial class OverlayWindow : Window
                 ("AnimationViewportHeightDip", AnimationViewport.ActualHeight),
                 ("AnimationViewportWidthPhysical", AnimationViewport.ActualWidth * scale),
                 ("AnimationViewportHeightPhysical", AnimationViewport.ActualHeight * scale),
-                ("OpaquePanelWidthDip", OpaquePanel.ActualWidth),
-                ("OpaquePanelHeightDip", OpaquePanel.ActualHeight),
-                ("OpaquePanelWidthPhysical", OpaquePanel.ActualWidth * scale),
-                ("OpaquePanelHeightPhysical", OpaquePanel.ActualHeight * scale));
+                ("AnimatedContentWidthDip", AnimatedContent.ActualWidth),
+                ("AnimatedContentHeightDip", AnimatedContent.ActualHeight),
+                ("AnimatedContentWidthPhysical", AnimatedContent.ActualWidth * scale),
+                ("AnimatedContentHeightPhysical", AnimatedContent.ActualHeight * scale),
+                ("SurfaceWidthDip", OpaquePanel.ActualWidth),
+                ("SurfaceHeightDip", OpaquePanel.ActualHeight),
+                ("SurfaceWidthPhysical", OpaquePanel.ActualWidth * scale),
+                ("SurfaceHeightPhysical", OpaquePanel.ActualHeight * scale));
         }
         catch (Exception exception)
         {
@@ -983,9 +990,9 @@ public sealed partial class OverlayWindow : Window
         }
     }
 
-    private void SetVisibleVisualState() => SetVisualState(0, 1.0);
+    private void SetVisibleVisualState() => SetVisualState(1.0f, 0.0, 1.0);
 
-    private void SetHiddenVisualState() => SetVisualState(0, 1.0);
+    private void SetHiddenVisualState() => SetVisualState(HiddenScale, HiddenTranslateYDip, HiddenOpacity);
 
     private void TrySetVisibleVisualState()
     {
@@ -999,30 +1006,39 @@ public sealed partial class OverlayWindow : Window
         }
     }
 
-    private void SetVisualState(double translationX, double opacity)
+    private void SetVisualState(float scale, double translationY, double opacity)
     {
         var visual = ElementCompositionPreview.GetElementVisual(AnimatedContent);
-        visual.Offset = new Vector3((float)translationX, 0, 0);
+        SetAnimationCenterPoint(visual);
+        visual.Scale = new Vector3(scale, scale, 1.0f);
+        visual.Offset = new Vector3(0, (float)translationY, 0);
         visual.Opacity = (float)opacity;
     }
 
     private async Task AnimateAsync(
-        double startTranslationX,
-        double endTranslationX,
+        float startScale,
+        float endScale,
+        double startTranslationY,
+        double endTranslationY,
         double startOpacity,
         double endOpacity,
         TimeSpan duration,
         bool easeIn)
     {
         var visual = ElementCompositionPreview.GetElementVisual(AnimatedContent);
+        SetAnimationCenterPoint(visual);
         var compositor = visual.Compositor;
         var easing = compositor.CreateCubicBezierEasingFunction(
             easeIn ? new Vector2(0.42f, 0.0f) : new Vector2(0.0f, 0.0f),
             easeIn ? new Vector2(1.0f, 1.0f) : new Vector2(0.58f, 1.0f));
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.Duration = duration;
+        scale.InsertKeyFrame(0.0f, new Vector3(startScale, startScale, 1.0f));
+        scale.InsertKeyFrame(1.0f, new Vector3(endScale, endScale, 1.0f), easing);
         var offset = compositor.CreateVector3KeyFrameAnimation();
         offset.Duration = duration;
-        offset.InsertKeyFrame(0.0f, new Vector3((float)startTranslationX, 0, 0));
-        offset.InsertKeyFrame(1.0f, new Vector3((float)endTranslationX, 0, 0), easing);
+        offset.InsertKeyFrame(0.0f, new Vector3(0, (float)startTranslationY, 0));
+        offset.InsertKeyFrame(1.0f, new Vector3(0, (float)endTranslationY, 0), easing);
         var opacity = compositor.CreateScalarKeyFrameAnimation();
         opacity.Duration = duration;
         opacity.InsertKeyFrame(0.0f, (float)startOpacity);
@@ -1031,12 +1047,35 @@ public sealed partial class OverlayWindow : Window
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
         batch.Completed += (_, _) => completion.TrySetResult();
+        visual.StartAnimation(nameof(visual.Scale), scale);
         visual.StartAnimation(nameof(visual.Offset), offset);
         visual.StartAnimation(nameof(visual.Opacity), opacity);
         batch.End();
         await completion.Task;
+        visual.StopAnimation(nameof(visual.Scale));
         visual.StopAnimation(nameof(visual.Offset));
         visual.StopAnimation(nameof(visual.Opacity));
+    }
+
+    private void SetAnimationCenterPoint(Visual visual)
+    {
+        var width = AnimatedContent.ActualWidth;
+        var height = AnimatedContent.ActualHeight;
+        if (width <= 0 || height <= 0)
+        {
+            width = visual.Size.X;
+            height = visual.Size.Y;
+        }
+
+        visual.CenterPoint = new Vector3((float)(width / 2.0), (float)(height / 2.0), 0);
+    }
+
+    private double AnimationRasterizationScale()
+    {
+        var xamlRoot = AnimationViewport.XamlRoot;
+        return xamlRoot is not null && xamlRoot.RasterizationScale > 0
+            ? xamlRoot.RasterizationScale
+            : 1.0;
     }
 
     private static bool AnimationsEnabled()

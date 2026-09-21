@@ -39,6 +39,8 @@ internal static class WindowInterop
     private const uint SwpShowWindow = 0x0040;
     private const uint SwpHideWindow = 0x0080;
     private const uint SwpFrameChanged = 0x0020;
+    private const uint DwmwaWindowCornerPreference = 33;
+    private const int DwmcpRound = 2;
     private const uint WmNcCalcSize = 0x0083;
     private const uint WmMouseActivate = 0x0021;
     private const uint WmActivate = 0x0006;
@@ -61,6 +63,7 @@ internal static class WindowInterop
     private static nint _outsideClickHook;
     private static Action<OverlayOutsideClick>? _outsideClickCallback;
     private static int _dismissSignaled;
+    private static int _roundedCornerWarningLogged;
 
     internal static nint GetWindowHandle(OverlayWindow window) => WindowNative.GetWindowHandle(window);
 
@@ -135,16 +138,15 @@ internal static class WindowInterop
             throw exception;
         }
 
-        var workWidth = Math.Max(0, info.rcWork.Right - info.rcWork.Left);
-        var workHeight = Math.Max(0, info.rcWork.Bottom - info.rcWork.Top);
-        var provisionalWidth = Math.Min((int)OverlayWindowGeometry.PocPanelWidthDip, workWidth);
+        var monitorWidth = Math.Max(0, info.rcMonitor.Right - info.rcMonitor.Left);
+        var monitorHeight = Math.Max(0, info.rcMonitor.Bottom - info.rcMonitor.Top);
         if (!SetWindowPos(
                 hwnd,
                 IntPtr.Zero,
-                info.rcWork.Left,
-                info.rcWork.Top,
-                provisionalWidth,
-                workHeight,
+                info.rcMonitor.Left,
+                info.rcMonitor.Top,
+                monitorWidth,
+                monitorHeight,
                 SwpNoActivate | SwpNoSendChanging | SwpNoZOrder))
         {
             var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window on the target monitor.");
@@ -161,11 +163,16 @@ internal static class WindowInterop
         }
 
         rect = OverlayWindowGeometry.Calculate(
+            info.rcMonitor.Left,
+            info.rcMonitor.Top,
+            info.rcMonitor.Right,
+            info.rcMonitor.Bottom,
             info.rcWork.Left,
             info.rcWork.Top,
             info.rcWork.Right,
             info.rcWork.Bottom,
-            dpi);
+            dpi,
+            out var geometry);
         monitorText = $"Monitor: {info.rcMonitor.Left},{info.rcMonitor.Top} - {info.rcMonitor.Right},{info.rcMonitor.Bottom}";
 
         var exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
@@ -182,6 +189,8 @@ internal static class WindowInterop
             presenter.IsAlwaysOnTop = true;
         }
 
+        ApplyRoundedCorners(hwnd);
+
         if (!SetWindowPos(hwnd, HwndTopmost, rect.X, rect.Y, rect.Width, rect.Height, SwpNoActivate | SwpNoSendChanging | SwpFrameChanged))
         {
             var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window.");
@@ -196,8 +205,13 @@ internal static class WindowInterop
             ("WorkLeft", info.rcWork.Left), ("WorkTop", info.rcWork.Top),
             ("WorkRight", info.rcWork.Right), ("WorkBottom", info.rcWork.Bottom),
             ("Dpi", dpi), ("Scale", dpi / 96.0),
-            ("PanelWidthDip", OverlayWindowGeometry.PocPanelWidthDip),
-            ("PanelWidthPx", rect.Width), ("PanelHeightPx", rect.Height));
+            ("MonitorWidth", geometry.MonitorWidth), ("MonitorHeight", geometry.MonitorHeight),
+            ("WorkWidth", geometry.WorkWidth), ("WorkHeight", geometry.WorkHeight),
+            ("ReservedEdgePx", geometry.ReservedEdgePx),
+            ("ReferenceTaskbarPx", geometry.ReferenceTaskbarPx),
+            ("ExtraGapPx", geometry.ExtraGapPx),
+            ("OuterMarginPx", geometry.OuterMarginPx),
+            ("OverlayWidthPx", rect.Width), ("OverlayHeightPx", rect.Height));
     }
 
     internal static void ShowWithoutActivation(OverlayWindow window)
@@ -259,6 +273,24 @@ internal static class WindowInterop
     {
         var exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
         return (exStyle & WsExTopmost) != 0;
+    }
+
+    private static void ApplyRoundedCorners(nint hwnd)
+    {
+        var preference = DwmcpRound;
+        var result = DwmSetWindowAttribute(
+            hwnd,
+            DwmwaWindowCornerPreference,
+            ref preference,
+            (uint)Marshal.SizeOf<int>());
+        if (result == 0 || Interlocked.Exchange(ref _roundedCornerWarningLogged, 1) != 0) return;
+
+        OverlayLog.Warn("Window", "Could not apply rounded Overlay window corners; continuing with the usable square surface.",
+            null,
+            ("Operation", "DwmSetWindowAttribute"),
+            ("Attribute", DwmwaWindowCornerPreference),
+            ("HResult", $"0x{result:X8}"),
+            ("OverlayHwnd", hwnd));
     }
 
     internal static void ArmOutsideClickDismissal(OverlayWindow window, Action<OverlayOutsideClick> callback)
@@ -425,6 +457,9 @@ internal static class WindowInterop
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(nint hwnd, uint attribute, ref int value, uint valueSize);
 
     private delegate nint LowLevelMouseProc(int code, nint wParam, nint lParam);
 

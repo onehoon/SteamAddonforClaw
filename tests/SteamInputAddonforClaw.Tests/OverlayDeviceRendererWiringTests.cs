@@ -85,6 +85,42 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void WindowInterop_requests_windows_11_round_corners_without_making_them_show_fatal()
+    {
+        var source = ReadWindowInteropSource();
+
+        Assert.Contains("private const uint DwmwaWindowCornerPreference = 33;", source);
+        Assert.Contains("private const int DwmcpRound = 2;", source);
+        Assert.Contains("ApplyRoundedCorners(hwnd);", source);
+        Assert.Contains("DwmSetWindowAttribute", source);
+        Assert.Contains("continuing with the usable square surface.", source);
+        Assert.Contains("Interlocked.Exchange(ref _roundedCornerWarningLogged, 1)", source);
+    }
+
+    [Fact]
+    public void Large_overlay_uses_the_neutral_surface_and_centered_scale_fade_contract()
+    {
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
+        var source = ReadOverlayWindowSource();
+
+        Assert.Contains("RequestedTheme=\"Light\"", xaml);
+        Assert.Contains("x:Key=\"OverlaySurfaceBrush\" Color=\"#FFE7E7E7\"", xaml);
+        Assert.Contains("Background=\"{StaticResource OverlaySurfaceBrush}\"", xaml);
+        Assert.DoesNotContain("#FFF3F3F3", xaml);
+
+        Assert.Contains("private const float HiddenScale = 0.98f;", source);
+        Assert.Contains("private const float HiddenTranslateYDip = 8.0f;", source);
+        Assert.Contains("private static readonly TimeSpan HideDuration = TimeSpan.FromMilliseconds(140);", source);
+        Assert.Contains("ElementCompositionPreview.GetElementVisual(AnimatedContent)", source);
+        Assert.Contains("AnimatedContent.ActualWidth", source);
+        Assert.Contains("AnimatedContent.ActualHeight", source);
+        Assert.Contains("visual.CenterPoint", source);
+        Assert.Contains("visual.StartAnimation(nameof(visual.Scale), scale);", source);
+        Assert.Contains("AnimationTranslateYPhysical", source);
+        Assert.DoesNotContain("ContentSlideDistanceDip", source);
+    }
+
+    [Fact]
     public void OverlayQuickSettingsPageBinding_takes_a_narrow_mutation_delegate_not_the_client()
     {
         var constructor = typeof(OverlayQuickSettingsPageBinding).GetConstructors(AnyInstance).Single();

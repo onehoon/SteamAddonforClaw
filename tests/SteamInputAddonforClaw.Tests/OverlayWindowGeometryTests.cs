@@ -5,67 +5,95 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class OverlayWindowGeometryTests
 {
-    // OQ5 UI Polish A: every DPI still converts the 400-DIP width and the small edge inset using
-    // the same DPI-scale rule; expected values below already fold in that inset.
+    [Fact]
+    public void UsesTaskbarReferenceAndGapForTheReferenceDisplay()
+    {
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            0, 0, 1920, 1128,
+            144,
+            out var metrics);
+
+        Assert.Equal(new OverlayRect(90, 90, 1740, 1020), result);
+        Assert.Equal(72, metrics.ReservedEdgePx);
+        Assert.Equal(72, metrics.ReferenceTaskbarPx);
+        Assert.Equal(18, metrics.ExtraGapPx);
+        Assert.Equal(90, metrics.OuterMarginPx);
+    }
+
     [Theory]
-    [InlineData(96, 400, 4)]
-    [InlineData(120, 500, 5)]
-    [InlineData(144, 600, 6)]
-    [InlineData(168, 700, 7)]
-    [InlineData(192, 800, 8)]
-    public void ConvertsDipWidthAndInsetUsingDpi(uint dpi, int expectedWidth, int expectedInset)
+    [InlineData(96, 60)]
+    [InlineData(120, 75)]
+    [InlineData(144, 90)]
+    [InlineData(168, 105)]
+    [InlineData(192, 120)]
+    public void ScalesReferenceMarginWithDpiWhenWorkAreaHasNoReservedEdge(uint dpi, int expectedMargin)
     {
-        var result = OverlayWindowGeometry.Calculate(0, 0, 1920, 1120, dpi);
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            0, 0, 1920, 1200,
+            dpi);
 
-        Assert.Equal(new OverlayRect(expectedInset, expectedInset, expectedWidth, 1120 - 2 * expectedInset), result);
+        Assert.Equal(new OverlayRect(expectedMargin, expectedMargin, 1920 - 2 * expectedMargin, 1200 - 2 * expectedMargin), result);
     }
 
     [Fact]
-    public void PreservesNonZeroWorkAreaOrigin()
+    public void PreservesNonZeroMonitorOrigin()
     {
-        var result = OverlayWindowGeometry.Calculate(100, 40, 2020, 1160, 144);
+        var result = OverlayWindowGeometry.Calculate(
+            100, 40, 2020, 1240,
+            100, 40, 2020, 1168,
+            144);
 
-        Assert.Equal(106, result.X);
-        Assert.Equal(46, result.Y);
-        Assert.Equal(600, result.Width);
-        Assert.Equal(1108, result.Height);
+        Assert.Equal(190, result.X);
+        Assert.Equal(130, result.Y);
+        Assert.Equal(1740, result.Width);
+        Assert.Equal(1020, result.Height);
     }
 
     [Fact]
-    public void ClampsWidthToWorkAreaAfterTheEdgeInset()
+    public void LargerReservedEdgeWinsBeforeTheAdditionalGap()
     {
-        var result = OverlayWindowGeometry.Calculate(0, 0, 500, 800, 192);
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            80, 60, 1840, 1120,
+            96);
 
-        // insetPx = 8 at 192 DPI; available width is 500 - 8, not the full 500.
-        Assert.Equal(492, result.Width);
-        Assert.Equal(8, result.X);
+        Assert.Equal(new OverlayRect(92, 92, 1736, 1016), result);
     }
 
     [Fact]
-    public void Uses96DpiWhenDpiIsZero()
+    public void UsesReferenceMarginWhenWorkAreaHasNoReservedEdge()
     {
-        var result = OverlayWindowGeometry.Calculate(0, 0, 1920, 1120, 0);
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            0, 0, 1920, 1200,
+            0);
 
-        Assert.Equal(400, result.Width);
-        Assert.Equal(4, result.X);
-        Assert.Equal(4, result.Y);
+        Assert.Equal(new OverlayRect(60, 60, 1800, 1080), result);
     }
 
     [Fact]
-    public void ClampsTheInsetAndDimensionsForAnUnusuallySmallWorkArea()
+    public void ClampsMarginAndDimensionsForAnUnusuallySmallMonitor()
     {
-        var result = OverlayWindowGeometry.Calculate(0, 0, 10, 10, 96);
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 10, 10,
+            0, 0, 10, 10,
+            192);
 
         Assert.True(result.Width >= 0);
         Assert.True(result.Height >= 0);
-        Assert.True(result.X >= 0 && result.X <= 10);
-        Assert.True(result.Y >= 0 && result.Y <= 10);
+        Assert.True(result.X >= 0 && result.X <= result.X + result.Width && result.X + result.Width <= 10);
+        Assert.True(result.Y >= 0 && result.Y <= result.Y + result.Height && result.Y + result.Height <= 10);
     }
 
     [Fact]
-    public void NeverProducesNegativeDimensionsForAZeroSizedWorkArea()
+    public void NeverProducesNegativeDimensionsForAZeroSizedMonitor()
     {
-        var result = OverlayWindowGeometry.Calculate(0, 0, 0, 0, 96);
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            96);
 
         Assert.Equal(0, result.Width);
         Assert.Equal(0, result.Height);
