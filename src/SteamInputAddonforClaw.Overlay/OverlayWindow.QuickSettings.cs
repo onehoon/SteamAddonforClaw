@@ -23,7 +23,7 @@ public sealed partial class OverlayWindow
         internal required TextBlock FailureText { get; init; }
         internal OverlayQuickSettingsPageBinding? Binding { get; set; }
         internal Dictionary<QuickSettingsRowId, OverlayToggleRow> ToggleRows { get; } = new();
-        internal Dictionary<QuickSettingsRowId, OverlaySliderRow> SliderRows { get; } = new();
+        internal Dictionary<QuickSettingsRowId, OverlayValueRow> ValueRows { get; } = new();
         internal QuickSettingsRowShape[]? RowShape { get; set; }
         // The row shape alone does not capture Profile game identity, which renders from section
         // Label/Message text. The fast path must fail closed when AppId or section text changes.
@@ -85,7 +85,7 @@ public sealed partial class OverlayWindow
     }
 
     // Render the binder's current effective page. A same-shape page only refreshes values in place,
-    // preserving an in-progress Slider drag, selection, and scroll.
+    // preserving local value previews, selection, pointer interaction, and scroll.
     private void RenderQuickSettingsPage(QuickSettingsSurface surface)
     {
         if (surface.Binding is null) return;
@@ -136,8 +136,8 @@ public sealed partial class OverlayWindow
         {
             if (surface.ToggleRows.TryGetValue(row.RowId, out var toggle))
                 ApplyQuickSettingsToggleState(toggle, row);
-            else if (surface.SliderRows.TryGetValue(row.RowId, out var slider))
-                ApplyQuickSettingsSliderState(slider, row);
+            else if (surface.ValueRows.TryGetValue(row.RowId, out var valueRow))
+                ApplyQuickSettingsValueState(valueRow, row);
         }
     }
 
@@ -148,7 +148,7 @@ public sealed partial class OverlayWindow
         toggle.ApplyState(isAvailable, isOn);
     }
 
-    private static void ApplyQuickSettingsSliderState(OverlaySliderRow slider, QuickSettingsRow row)
+    private static void ApplyQuickSettingsValueState(OverlayValueRow valueRow, QuickSettingsRow row)
     {
         if (row.SliderSpec is not { } spec) return;
         if (spec.Kind == QuickSettingsSliderKind.Numeric)
@@ -156,7 +156,7 @@ public sealed partial class OverlayWindow
             var hasValue = row.Value is { Kind: QuickSettingsValueKind.Integer, IntegerValue: not null };
             var value = hasValue ? row.Value!.IntegerValue!.Value : spec.Minimum;
             var available = row.Visible && row.Available && row.Writable && hasValue;
-            slider.ApplyState(available, spec.Minimum, spec.Maximum, spec.Step, value);
+            valueRow.ApplyState(available, spec.Minimum, spec.Maximum, spec.Step, value);
         }
         else
         {
@@ -165,7 +165,7 @@ public sealed partial class OverlayWindow
                 ? QuickSettingsRowRendering.FindDiscreteIndex(options, iv)
                 : -1;
             var available = row.Visible && row.Available && row.Writable && index >= 0;
-            slider.ApplyState(available, 0, Math.Max(0, options.Count - 1), 1, Math.Max(0, index));
+            valueRow.ApplyState(available, 0, Math.Max(0, options.Count - 1), 1, Math.Max(0, index));
         }
     }
 
@@ -182,7 +182,7 @@ public sealed partial class OverlayWindow
         }
 
         surface.ToggleRows.Clear();
-        surface.SliderRows.Clear();
+        surface.ValueRows.Clear();
         surface.Content.Children.Clear();
         var rows = new List<OverlayRow>();
 
@@ -253,7 +253,7 @@ public sealed partial class OverlayWindow
 
         overlayRow = row.ControlKind == QuickSettingsControlKind.Toggle
             ? CreateQuickSettingsToggleRow(surface, row)
-            : CreateQuickSettingsSliderRow(surface, row);
+            : CreateQuickSettingsValueRow(surface, row);
         return true;
     }
 
@@ -273,22 +273,22 @@ public sealed partial class OverlayWindow
         RenderQuickSettingsPage(surface);
     }
 
-    private OverlayRow CreateQuickSettingsSliderRow(QuickSettingsSurface surface, QuickSettingsRow row)
+    private OverlayRow CreateQuickSettingsValueRow(QuickSettingsSurface surface, QuickSettingsRow row)
     {
         var rowId = row.RowId;
         var spec = row.SliderSpec!;
-        OverlaySliderRow sliderRow;
+        OverlayValueRow valueRow;
         if (spec.Kind == QuickSettingsSliderKind.Numeric)
         {
             var suffix = spec.Suffix ?? string.Empty;
-            sliderRow = new OverlaySliderRow(row.Label,
-                value => OverlaySliderRow.FormatInteger(value) + suffix,
+            valueRow = new OverlayValueRow(row.Label,
+                value => OverlayValueRow.FormatInteger(value) + suffix,
                 desired => ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer((int)Math.Round(desired))));
         }
         else
         {
             var options = spec.Options!;
-            sliderRow = new OverlaySliderRow(row.Label,
+            valueRow = new OverlayValueRow(row.Label,
                 index => FormatDiscreteLabel(options, index),
                 desired =>
                 {
@@ -298,9 +298,9 @@ public sealed partial class OverlayWindow
                 });
         }
 
-        ApplyQuickSettingsSliderState(sliderRow, row);
-        surface.SliderRows[rowId] = sliderRow;
-        return new OverlayRow(sliderRow.Container, sliderRow.Capabilities, rowId);
+        ApplyQuickSettingsValueState(valueRow, row);
+        surface.ValueRows[rowId] = valueRow;
+        return new OverlayRow(valueRow.Container, valueRow.Capabilities, rowId);
     }
 
     private void ScheduleQuickSettingsSlider(QuickSettingsSurface surface, QuickSettingsRowId rowId, QuickSettingsValue desired)

@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.Overlay;
 // SF-V2-07 section 18/48: pure, WinUI-free helpers over the shared page payload. The renderer
 // treats RowId/SectionId/CommitGroupId as opaque stable identities; it never reconstructs Device
 // labels/order/options and never inspects known TDP limit tuples. Kept free of WinUI so it is
-// unit-testable without a XAML host, mirroring the OverlayToggleModel/OverlaySliderModel split.
+// unit-testable without a XAML host, mirroring the OverlayToggleModel/OverlayValueModel split.
 internal static class QuickSettingsRowRendering
 {
     internal static bool IsWellFormed(QuickSettingsRow row) => row.ControlKind switch

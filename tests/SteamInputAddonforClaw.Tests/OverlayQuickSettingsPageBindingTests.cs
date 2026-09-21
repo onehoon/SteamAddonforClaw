@@ -12,7 +12,7 @@ namespace SteamInputAddonforClaw.Tests;
 // construction, linked-constraint application, pending-over-authoritative effective value,
 // immediate Toggle submission, and authoritative/typed/operation-failure settlement handling).
 // OverlayWindow's WinUI row wiring around this binder is validated on hardware (work order s.51/54)
-// since OverlayToggleRow/OverlaySliderRow need a XAML host unavailable in this test project.
+// since OverlayToggleRow/OverlayValueRow need a XAML host unavailable in this test project.
 public sealed class OverlayQuickSettingsPageBindingTests
 {
     private static readonly IReadOnlyList<QuickSettingsDiscreteOption> NonContiguousOptions =

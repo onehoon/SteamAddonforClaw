@@ -3,18 +3,18 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-// Covers the pure OverlaySliderModel. The WinUI OverlaySliderRow wrapper (Slider +
-// event-suppression) needs a XAML host and is validated on hardware per the work order.
-public sealed class OverlaySliderRowTests
+// Covers the pure OverlayValueModel. The WinUI OverlayValueRow wrapper (arrow Buttons +
+// event wiring) needs a XAML host and is validated on hardware per the work order.
+public sealed class OverlayValueRowTests
 {
-    private static OverlaySliderModel Model(out List<double> requests)
+    private static OverlayValueModel Model(out List<double> requests)
     {
         var captured = new List<double>();
         requests = captured;
-        return new OverlaySliderModel(captured.Add);
+        return new OverlayValueModel(captured.Add);
     }
 
-    private static OverlaySliderModel Available(out List<double> requests, double value = 50)
+    private static OverlayValueModel Available(out List<double> requests, double value = 50)
     {
         var model = Model(out requests);
         model.ApplyState(isAvailable: true, minimum: 0, maximum: 100, step: 5, value: value);
@@ -31,6 +31,8 @@ public sealed class OverlaySliderRowTests
         Assert.True(model.IsAvailable);
         Assert.True(model.ConstraintsValid);
         Assert.Equal(50, model.PreviewValue);
+        Assert.True(model.CanDecrease);
+        Assert.True(model.CanIncrease);
         Assert.Empty(requests);
     }
 
@@ -42,6 +44,8 @@ public sealed class OverlaySliderRowTests
         model.ApplyState(isAvailable: true, minimum: 0, maximum: 100, step: 5, value: 250);
 
         Assert.Equal(100, model.PreviewValue);
+        Assert.True(model.CanDecrease);
+        Assert.False(model.CanIncrease);
     }
 
     [Theory]
@@ -57,26 +61,30 @@ public sealed class OverlaySliderRowTests
 
         Assert.False(model.IsAvailable);
         Assert.False(model.ConstraintsValid);
+        Assert.False(model.CanDecrease);
+        Assert.False(model.CanIncrease);
 
         model.RequestAdjust(1);
-        model.RequestSet(20);
+
         Assert.Empty(requests);
     }
 
     [Fact]
-    public void UnavailableRowRejectsControllerAndPointerEdits()
+    public void UnavailableRowRejectsAdjustments()
     {
         var model = Model(out var requests);
         model.ApplyState(isAvailable: false, minimum: 0, maximum: 100, step: 5, value: 50);
 
         model.RequestAdjust(1);
-        model.RequestSet(75);
+        model.RequestAdjust(-1);
 
         Assert.Empty(requests);
+        Assert.False(model.CanDecrease);
+        Assert.False(model.CanIncrease);
     }
 
     [Fact]
-    public void ControllerStepRaisesAndLowersExactlyOneStepAndContinuesFromPreview()
+    public void ControllerAndArrowStepRaisesAndLowersExactlyOneStepFromPreview()
     {
         var model = Available(out var requests);
 
@@ -89,30 +97,36 @@ public sealed class OverlaySliderRowTests
     }
 
     [Fact]
-    public void ControllerStepClampsAtBothBoundariesWithoutDuplicateCallbacks()
+    public void AdjustmentsClampAtBothBoundariesWithoutDuplicateCallbacks()
     {
         var model = Available(out var requests, value: 95);
 
         model.RequestAdjust(+1);  // 100
         model.RequestAdjust(+1);  // clamp, no callback
         Assert.Equal(new[] { 100.0 }, requests);
+        Assert.False(model.CanIncrease);
+        Assert.True(model.CanDecrease);
 
         var low = Available(out var lowRequests, value: 5);
         low.RequestAdjust(-1);    // 0
         low.RequestAdjust(-1);    // clamp, no callback
         Assert.Equal(new[] { 0.0 }, lowRequests);
+        Assert.False(low.CanDecrease);
+        Assert.True(low.CanIncrease);
     }
 
     [Fact]
-    public void PointerValueIsClampedAndSnappedToStep()
+    public void NextArrowDisablesAtTheLastReachableStepWhenMaximumIsNotStepAligned()
     {
-        var model = Available(out var requests);
+        var model = Model(out var requests);
+        model.ApplyState(isAvailable: true, minimum: 0, maximum: 1, step: 0.3, value: 1);
 
-        model.RequestSet(97);   // clamp within range, snap to 95
-        model.RequestSet(-40);  // clamp to 0
+        Assert.Equal(0.9, model.PreviewValue);
+        Assert.False(model.CanIncrease);
 
-        Assert.Equal(new[] { 95.0, 0.0 }, requests);
-        Assert.Equal(0, model.PreviewValue);
+        model.RequestAdjust(+1);
+
+        Assert.Empty(requests);
     }
 
     [Fact]
@@ -120,25 +134,22 @@ public sealed class OverlaySliderRowTests
     {
         var model = Available(out var requests); // preview 50
 
-        model.RequestSet(51);   // snaps back to 50 -> no change
-        model.RequestSet(50);
+        model.RequestAdjust(0);
 
         Assert.Empty(requests);
     }
 
     [Fact]
-    public void PointerAndControllerProduceTheSameNormalizedValue()
+    public void RepeatedAdjustmentsContinueFromLocalPreviewWithoutReadback()
     {
-        var pointer = Available(out var pointerRequests);
-        var controller = Available(out _);
+        var model = Available(out var requests);
 
-        pointer.RequestSet(58);       // -> snap to 60
-        controller.RequestAdjust(+1); // 50 -> 55
-        controller.RequestAdjust(+1); // 55 -> 60
+        model.RequestAdjust(+1);
+        model.RequestAdjust(+1);
+        model.RequestAdjust(+1);
 
-        Assert.Equal(60.0, pointerRequests[^1]);
-        Assert.Equal(60, pointer.PreviewValue);
-        Assert.Equal(controller.PreviewValue, pointer.PreviewValue);
+        Assert.Equal(new[] { 55.0, 60.0, 65.0 }, requests);
+        Assert.Equal(65, model.PreviewValue);
     }
 
     [Fact]
