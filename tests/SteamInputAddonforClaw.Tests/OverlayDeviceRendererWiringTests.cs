@@ -10,7 +10,7 @@ namespace SteamInputAddonforClaw.Tests;
 
 // SF-V2-07/09 section 52/32: OverlayWindow/App's actual WinUI wiring can't be exercised directly in
 // this test project -- constructing OverlayWindow needs a XAML host, the same limitation
-// OverlayToggleRowTests/OverlaySliderRowTests already accept for the row primitives (validated on
+// OverlayToggleRowTests/OverlayValueRowTests already accept for the row primitives (validated on
 // hardware per section 54/34). These are focused reflection/composition regressions over the
 // compiled shape instead, mirroring the SF-V2-06 precedent (the removed-v6-dispatch-authority
 // regression). SF-V2-09 extends this file's coverage from the Device-only generic renderer to the
@@ -201,6 +201,48 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("_profileBinding", source);
         Assert.DoesNotContain("_deviceToggleRows", source);
         Assert.DoesNotContain("_deviceSliderRows", source);
+    }
+
+    [Fact]
+    public void Overlay_value_renderer_uses_one_value_row_for_numeric_and_discrete_shared_slider_contracts()
+    {
+        var source = ReadOverlayWindowSource();
+        var contracts = ReadSource("src", "SteamInputAddonforClaw.Contracts", "Frontend", "QuickSettingsContracts.cs");
+
+        Assert.Contains("Dictionary<QuickSettingsRowId, OverlayValueRow> ValueRows", source);
+        Assert.Contains("CreateQuickSettingsValueRow", source);
+        Assert.Contains("ApplyQuickSettingsValueState", source);
+        Assert.Contains("QuickSettingsSliderKind.Numeric", source);
+        Assert.Contains("var options = spec.Options!", source);
+        Assert.Contains("FormatDiscreteLabel(options, index)", source);
+        Assert.Contains("QuickSettingsValue.Integer(options[i].Value)", source);
+        Assert.Contains("new OverlayValueRow", source);
+        Assert.Contains("ScheduleQuickSettingsSlider", source);
+        Assert.DoesNotContain("OverlaySliderRow", source);
+        Assert.DoesNotContain("SliderRows", source);
+
+        Assert.Contains("public enum QuickSettingsControlKind { Toggle, Slider }", contracts);
+        Assert.Contains("QuickSettingsSliderKind.Numeric", contracts);
+        Assert.Contains("QuickSettingsSliderKind.Discrete", contracts);
+    }
+
+    [Fact]
+    public void Overlay_value_row_uses_touchable_arrow_buttons_and_the_same_adjustment_seam()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs");
+
+        Assert.Contains("internal sealed class OverlayValueModel", source);
+        Assert.Contains("internal sealed class OverlayValueRow", source);
+        Assert.Contains("MinWidth = 40", source);
+        Assert.Contains("MinHeight = 40", source);
+        Assert.Contains("button.Click += click", source);
+        Assert.Contains("_model.RequestAdjust(-1)", source);
+        Assert.Contains("_model.RequestAdjust(+1)", source);
+        Assert.Contains("Adjust: OnControllerAdjust", source);
+        Assert.Contains("Activate: null", source);
+        Assert.DoesNotContain("Slider", source);
+        Assert.DoesNotContain("ComboBox", source);
+        Assert.DoesNotContain("RequestSet", source);
     }
 
     // SF-V2-09 section 32/6/20/37: no Profile-specific product table/policy may be duplicated into
