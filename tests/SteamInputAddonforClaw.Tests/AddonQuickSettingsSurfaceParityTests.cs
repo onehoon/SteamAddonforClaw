@@ -114,7 +114,7 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.DoesNotContain(Enum.GetNames<QuickSettingsPageId>(), name => name == "Controller");
 
         var qam = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var overlay = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+        var overlay = ReadOverlayWindowSources();
         Assert.Contains("case AQS_TAB_CONTROLLER:", qam);
         Assert.Contains("This page is not available in QAM yet.", qam);
         Assert.Contains("_ => CreatePlaceholderPage(id)", overlay);
@@ -128,7 +128,7 @@ public sealed class AddonQuickSettingsSurfaceParityTests
     {
         var qam = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
-        var overlay = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");
+        var overlay = ReadOverlayWindowSources();
         var frontendWire = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "FrontendWire.cs");
         var overlayWire = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "OverlayWire.cs");
 
@@ -156,4 +156,12 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.NotNull(directory);
         return File.ReadAllText(Path.Combine([directory!.FullName, .. parts])).ReplaceLineEndings("\n");
     }
+
+    private static string ReadOverlayWindowSources() => string.Join(
+        Environment.NewLine,
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
 }
