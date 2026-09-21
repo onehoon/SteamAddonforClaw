@@ -46,6 +46,21 @@ public sealed class ClawHudLifecycleContractTests
         Assert.Contains("_clawHudShutdown = StopClawHudForProcessShutdownAsync();", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ClawHud_shutdown_has_a_backstop_after_optional_startup_drains()
+    {
+        var source = HostSource();
+        var dispose = Method(source, "public async ValueTask DisposeAsync()");
+        var startupCleared = dispose.IndexOf("_clawHudStartup = null;", StringComparison.Ordinal);
+        var backstop = dispose.IndexOf("if (_clawHudProcessController is not null && _clawHudShutdown is null)", startupCleared, StringComparison.Ordinal);
+        var shutdownObserved = dispose.IndexOf("await ObserveClawHudShutdownAsync()", backstop, StringComparison.Ordinal);
+
+        Assert.True(startupCleared >= 0);
+        Assert.True(backstop > startupCleared);
+        Assert.True(shutdownObserved > backstop);
+        Assert.Contains("_clawHudShutdown = StopClawHudForProcessShutdownAsync();", dispose[backstop..], StringComparison.Ordinal);
+    }
+
     private static string HostSource()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

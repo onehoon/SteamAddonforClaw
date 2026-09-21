@@ -73,6 +73,17 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
         try
         {
             ThrowIfDisposed();
+            if (runtime.IsReady
+                && runtime.RuntimeDirectory is not null
+                && runtime.ExecutablePath is not null
+                && _managedReady
+                && State.ActualState == ClawHudFeatureState.Ready
+                && string.Equals(State.RuntimeVersion, runtime.RuntimeVersion, StringComparison.Ordinal)
+                && _ownedChild is { HasExited: false })
+            {
+                return State;
+            }
+
             Volatile.Write(ref _stopping, 0);
             State = new(true, ClawHudFeatureState.Starting, RuntimeVersion: runtime.RuntimeVersion);
             if (!runtime.IsReady || runtime.RuntimeDirectory is null || runtime.ExecutablePath is null)
@@ -400,6 +411,9 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
             AppLog.Warn(Category, "Managed child exit observation failed.", exception);
             return;
         }
+        if (Volatile.Read(ref _stopping) != 0)
+            return;
+
         if (ReferenceEquals(_ownedChild, child))
         {
             _ownedChild = null;

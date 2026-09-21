@@ -1640,6 +1640,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception) { AppLog.Warn("ClawHUD.Process", "Optional ClawHUD startup task failed during shutdown.", exception); }
             _clawHudStartup = null;
         }
+        if (_clawHudProcessController is not null && _clawHudShutdown is null)
+            _clawHudShutdown = StopClawHudForProcessShutdownAsync();
         if (_overlayStartup is not null)
         {
             try { await _overlayStartup.ConfigureAwait(false); }

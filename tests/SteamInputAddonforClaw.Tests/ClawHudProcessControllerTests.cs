@@ -79,6 +79,35 @@ public sealed class ClawHudProcessControllerTests
     }
 
     [Fact]
+    public async Task EnsureRunning_IsIdempotentForAnAlreadyReadyProvenChild()
+    {
+        var runtime = Runtime("1.0.1");
+        var process = new FakeProcess();
+        var launches = 0;
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+            Snapshot = Snapshot(true),
+            OnRequestShutdown = process.CompleteExitForTest,
+        };
+        var controller = new ClawHudProcessController(control, _ =>
+        {
+            launches++;
+            return process;
+        });
+
+        var first = await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+        var second = await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+        var stopped = await controller.StopAsync(false, CancellationToken.None);
+
+        Assert.Equal(ClawHudFeatureState.Ready, first.ActualState);
+        Assert.Equal(ClawHudFeatureState.Ready, second.ActualState);
+        Assert.Equal(1, launches);
+        Assert.Equal(ClawHudFeatureState.Disabled, stopped.ActualState);
+        Assert.Equal(1, process.DisposeCalls);
+    }
+
+    [Fact]
     public async Task Stop_DoesNotShutdownStandaloneThatReplacedAnAdoptedManagedRuntime()
     {
         var runtime = Runtime("1.0.1");
@@ -254,6 +283,26 @@ public sealed class ClawHudProcessControllerTests
     }
 
     [Fact]
+    public async Task Stop_OwnsRetirementWhenShutdownCausesObservedChildExit()
+    {
+        var runtime = Runtime("1.0.1");
+        var process = new FakeProcess();
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+            Snapshot = Snapshot(true),
+            OnRequestShutdown = process.CompleteExitForTest,
+        };
+        var controller = new ClawHudProcessController(control, _ => process);
+        await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+
+        var state = await controller.StopAsync(false, CancellationToken.None);
+
+        Assert.Equal(ClawHudFeatureState.Disabled, state.ActualState);
+        Assert.Equal(1, process.DisposeCalls);
+    }
+
+    [Fact]
     public async Task UnexpectedManagedChildExitDisposesProvenChildAfterRecordingUnavailableState()
     {
         var runtime = Runtime("1.0.1");
@@ -311,6 +360,7 @@ public sealed class ClawHudProcessControllerTests
         internal ClawHudSettingsSnapshot? Snapshot { get; init; }
         internal ClawHudSettingsSnapshot? EnabledSnapshot { get; init; }
         internal ClawHudControlResult<ClawHudUnit> ShutdownResult { get; init; } = ClawHudControlResult<ClawHudUnit>.Success(new());
+        internal Action? OnRequestShutdown { get; init; }
         internal int RequestShutdownCalls { get; private set; }
         internal bool SetHudEnabledCalled { get; private set; }
 
@@ -340,6 +390,7 @@ public sealed class ClawHudProcessControllerTests
         public Task<ClawHudControlResult<ClawHudUnit>> RequestShutdownAsync(CancellationToken cancellationToken = default)
         {
             RequestShutdownCalls++;
+            OnRequestShutdown?.Invoke();
             return Task.FromResult(ShutdownResult);
         }
     }
@@ -356,6 +407,7 @@ public sealed class ClawHudProcessControllerTests
         internal bool ExitOnThirdWait { get; init; }
         internal bool KillCalled { get; private set; }
         internal bool DisposeCalled { get; private set; }
+        internal int DisposeCalls { get; private set; }
         internal Task DisposedTask => _disposed.Task;
 
         private readonly TaskCompletionSource<bool> _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -374,8 +426,10 @@ public sealed class ClawHudProcessControllerTests
                 CompleteExit(ExitCodeAfterWait);
             return _exited.Task.WaitAsync(cancellationToken);
         }
-        public void Kill(bool entireProcessTree) { KillCalled = true; HasExited = true; _exited.TrySetResult(true); }
-        public ValueTask DisposeAsync() { DisposeCalled = true; _disposed.TrySetResult(true); return ValueTask.CompletedTask; }
+        public void Kill(bool entireProcessTree) { KillCalled = true; CompleteExit(0); }
+        public ValueTask DisposeAsync() { DisposeCalled = true; DisposeCalls++; _disposed.TrySetResult(true); return ValueTask.CompletedTask; }
+
+        internal void CompleteExitForTest() => CompleteExit(0);
 
         private void CompleteExit(int exitCode)
         {
