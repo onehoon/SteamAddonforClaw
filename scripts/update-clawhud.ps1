@@ -135,7 +135,8 @@ try {
         $segments = $normalized.Split('/', [StringSplitOptions]::RemoveEmptyEntries)
         $unsafeSegments = @($segments | Where-Object { $_ -in @('.', '..') })
         if ($segments.Count -eq 1 -and $segments[0] -ceq 'clawhud' -and $normalized.EndsWith('/')) { continue }
-        if ($segments.Count -lt 2 -or $segments[0] -cne 'clawhud' -or $unsafeSegments.Count -gt 0) {
+        if ($normalized.StartsWith('/') -or $normalized.Contains(':') -or
+            $segments.Count -lt 2 -or $segments[0] -cne 'clawhud' -or $unsafeSegments.Count -gt 0) {
             throw "Runtime ZIP contains an unsafe or non-clawhud entry: $($entry.FullName)"
         }
     }

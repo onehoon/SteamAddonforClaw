@@ -108,6 +108,7 @@ jobs:
           $branch = "automation/clawhud-runtime-$($env:TARGET_TAG)"
           $prJson = gh pr list --head $branch --state all --json number,isDraft,state
           $prExit = $LASTEXITCODE
+          if ($prExit -ne 0) { throw "Could not query existing ClawHUD Runtime PRs for '$branch'." }
           $existingPrsParsed = if ($prExit -eq 0) { $prJson | ConvertFrom-Json } else { @() }
           $prs = @($existingPrsParsed)
           $refs = @(git ls-remote --heads origin "refs/heads/$branch")
