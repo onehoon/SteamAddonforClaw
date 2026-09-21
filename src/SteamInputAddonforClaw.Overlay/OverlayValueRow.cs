@@ -1,5 +1,4 @@
 using System.Globalization;
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -146,14 +145,7 @@ internal sealed class OverlayValueRow
         grid.Children.Add(labelText);
         grid.Children.Add(valueControls);
 
-        Container = new Border
-        {
-            Child = grid,
-            Padding = new Thickness(12, 6, 12, 6),
-            CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(2),
-            BorderBrush = new SolidColorBrush(Colors.Transparent),
-        };
+        Container = OverlayRowChrome.Create(grid);
 
         Capabilities = new OverlayRowCapabilities(
             IsSelectable: () => _model.IsAvailable,

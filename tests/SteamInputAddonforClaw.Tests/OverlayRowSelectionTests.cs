@@ -54,6 +54,44 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
+    public void TrySelectMovesOnlyToAValidSelectableRow()
+    {
+        var selection = new OverlayRowSelection();
+        selection.SetRows([Row(), Row(selectable: false), Row(), Row()]);
+
+        Assert.True(selection.TrySelect(2));
+        Assert.Equal(2, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void TrySelectRejectsAlreadySelectedInvalidAndUnavailableRows()
+    {
+        var selection = new OverlayRowSelection();
+        selection.SetRows([Row(), Row(selectable: false), Row()]);
+
+        Assert.False(selection.TrySelect(0));
+        Assert.False(selection.TrySelect(-1));
+        Assert.False(selection.TrySelect(3));
+        Assert.False(selection.TrySelect(1));
+        Assert.Equal(0, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void TrySelectDoesNotActivateOrAdjustTheSelectedRow()
+    {
+        var activations = 0;
+        var adjustments = new List<int>();
+        var selection = new OverlayRowSelection();
+        selection.SetRows([Row(), Row(activate: () => activations++, adjust: adjustments.Add)]);
+
+        Assert.True(selection.TrySelect(1));
+
+        Assert.Equal(0, activations);
+        Assert.Empty(adjustments);
+        Assert.Equal(1, selection.SelectedIndex);
+    }
+
+    [Fact]
     public void MoveNextAndPreviousStepThroughSelectableRows()
     {
         var selection = new OverlayRowSelection();

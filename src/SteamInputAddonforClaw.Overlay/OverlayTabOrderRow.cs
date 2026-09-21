@@ -1,8 +1,6 @@
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Overlay;
@@ -63,14 +61,7 @@ internal sealed class AddonQuickSettingsTabOrderRow
         grid.Children.Add(_label);
         grid.Children.Add(buttons);
 
-        Container = new Border
-        {
-            Child = grid,
-            Padding = new Thickness(12, 6, 12, 6),
-            CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(2),
-            BorderBrush = new SolidColorBrush(Colors.Transparent),
-        };
+        Container = OverlayRowChrome.Create(grid);
 
         // Always selectable; Left/Right adjusts, A does nothing (no reorder mode).
         Capabilities = new OverlayRowCapabilities(

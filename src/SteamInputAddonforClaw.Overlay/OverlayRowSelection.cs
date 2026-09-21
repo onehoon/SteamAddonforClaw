@@ -33,6 +33,17 @@ internal sealed class OverlayRowSelection
                 : FirstSelectableFrom(0, 1);
     }
 
+    // Pointer/touch selection is deliberately separate from activation and adjustment. It only
+    // changes the logical controller target after validating the current row capability.
+    internal bool TrySelect(int index)
+    {
+        if (index < 0 || index >= _rows.Count || !_rows[index].IsSelectable() || _selectedIndex == index)
+            return false;
+
+        _selectedIndex = index;
+        return true;
+    }
+
     internal bool MovePrevious() => Move(-1);
 
     internal bool MoveNext() => Move(1);

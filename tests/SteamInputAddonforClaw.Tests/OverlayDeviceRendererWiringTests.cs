@@ -285,6 +285,50 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Quick_settings_use_single_column_sections_and_pointer_selection_without_mutation_on_empty_row_tap()
+    {
+        var source = ReadOverlayWindowSource();
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
+
+        Assert.Contains("var sectionPanel = new StackPanel", quickSettings);
+        Assert.Contains("var content = new StackPanel { Spacing = 16 }", quickSettings);
+        Assert.Contains("var rowStack = new StackPanel", quickSettings);
+        Assert.Contains("sectionPanel.Children.Add(rowStack);", quickSettings);
+        Assert.Contains("RegisterRowPointerSelection(overlayRow.Container);", quickSettings);
+        Assert.Contains("RegisterRowPointerSelection(row.Container);", source);
+        Assert.Contains("_rowSelection.TrySelect(index)", navigation);
+        Assert.Contains("container.AddHandler(", navigation);
+        Assert.Contains("UIElement.PointerPressedEvent", navigation);
+        Assert.Contains("new PointerEventHandler", navigation);
+        Assert.Contains("handledEventsToo: true", navigation);
+        Assert.DoesNotContain("overlayRow.Container.Tapped +=", quickSettings);
+        Assert.DoesNotContain("sectionPanel.ColumnDefinitions", quickSettings);
+        Assert.DoesNotContain("rowStack.ColumnDefinitions", quickSettings);
+    }
+
+    [Fact]
+    public void Ordinary_rows_share_the_left_accent_chrome_and_selected_tabs_use_an_indicator()
+    {
+        var chrome = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs");
+        var source = ReadOverlayWindowSource();
+
+        Assert.Contains("SelectionAccentWidth = 3", chrome);
+        Assert.Contains("MinHeight = 52", chrome);
+        Assert.Contains("new Thickness(SelectionAccentWidth, 0, 0, 0)", chrome);
+        Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
+        Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
+        Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
+        Assert.Contains("_tabIndicators", source);
+        Assert.Contains("_tabHosts", source);
+        Assert.Contains("Grid.SetColumn(tabHost, position)", source);
+        Assert.DoesNotContain("Grid.SetColumn(button, position)", source);
+        Assert.Contains("indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed", source);
+        Assert.DoesNotContain("button.Background = _tabSelectedBackgroundBrush", source);
+        Assert.DoesNotContain("button.Foreground = _tabSelectedForegroundBrush", source);
+    }
+
+    [Fact]
     public void OverlayWindow_code_behind_is_only_the_composition_root()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs");

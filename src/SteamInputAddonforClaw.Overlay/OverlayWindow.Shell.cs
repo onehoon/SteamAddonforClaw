@@ -1,5 +1,4 @@
 using System.Linq;
-using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -13,10 +12,10 @@ public sealed partial class OverlayWindow
 {
     private readonly OverlayTabState _tabState = new();
     private readonly Dictionary<AddonQuickSettingsTabId, Button> _tabButtons = new();
+    private readonly Dictionary<AddonQuickSettingsTabId, Grid> _tabHosts = new();
+    private readonly Dictionary<AddonQuickSettingsTabId, Border> _tabIndicators = new();
     private readonly Dictionary<AddonQuickSettingsTabId, FrameworkElement> _tabPages = new();
     private readonly Dictionary<AddonQuickSettingsTabId, AddonQuickSettingsTabOrderRow> _tabOrderRows = new();
-    private readonly Brush _tabSelectedBackgroundBrush;
-    private readonly Brush _tabSelectedForegroundBrush;
 
     // PR3: the Setting page emits only the shared one-position move intent. OverlayWindow never owns
     // the transport client or constructs a replacement whole order.
@@ -38,16 +37,40 @@ public sealed partial class OverlayWindow
                 Tag = id,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
-                Padding = new Thickness(6, 6, 6, 6),
+                Padding = new Thickness(6, 6, 6, 8),
                 MinWidth = 0,
                 MinHeight = 34,
-                CornerRadius = new CornerRadius(8),
+                CornerRadius = new CornerRadius(0),
                 FontSize = 13,
             };
             button.Click += OnTabHeaderClick;
-            Grid.SetColumn(button, column);
-            TabStrip.Children.Add(button);
+
+            var tabHost = new Grid
+            {
+                RowDefinitions =
+                {
+                    new RowDefinition { Height = GridLength.Auto },
+                    new RowDefinition { Height = GridLength.Auto },
+                },
+            };
+            Grid.SetRow(button, 0);
+            tabHost.Children.Add(button);
+
+            var indicator = new Border
+            {
+                Height = 3,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Background = _rowSelectedBrush,
+                Visibility = Visibility.Collapsed,
+            };
+            Grid.SetRow(indicator, 1);
+            tabHost.Children.Add(indicator);
+
+            Grid.SetColumn(tabHost, column);
+            TabStrip.Children.Add(tabHost);
             _tabButtons[id] = button;
+            _tabHosts[id] = tabHost;
+            _tabIndicators[id] = indicator;
 
             var rows = new List<OverlayRow>();
             var page = BuildPage(id, rows);
@@ -76,7 +99,7 @@ public sealed partial class OverlayWindow
     // AddonQuickSettingsTabId. ApplyTabOrder repositions them via Grid.SetRow -- instances are never recreated.
     private FrameworkElement BuildTabOrderEditorPage(List<OverlayRow> rows)
     {
-        var section = new StackPanel { Spacing = 8 };
+        var section = new StackPanel { Spacing = 5 };
 
         var heading = new TextBlock { Text = "Tab Order" };
         if (Application.Current.Resources.TryGetValue("BodyStrongTextBlockStyle", out var style) && style is Style headingStyle)
@@ -95,6 +118,7 @@ public sealed partial class OverlayWindow
             grid.Children.Add(row.Container);
             _tabOrderRows[id] = row;
             rows.Add(new OverlayRow(row.Container, row.Capabilities));
+            RegisterRowPointerSelection(row.Container);
         }
 
         section.Children.Add(grid);
@@ -251,8 +275,8 @@ public sealed partial class OverlayWindow
         var applied = _tabState.Order;
         for (var position = 0; position < applied.Count; position++)
         {
-            if (_tabButtons.TryGetValue(applied[position], out var button))
-                Grid.SetColumn(button, position);
+            if (_tabHosts.TryGetValue(applied[position], out var tabHost))
+                Grid.SetColumn(tabHost, position);
             if (_tabOrderRows.TryGetValue(applied[position], out var editorRow))
             {
                 Grid.SetRow(editorRow.Container, position);
@@ -295,18 +319,11 @@ public sealed partial class OverlayWindow
         {
             var isSelected = id == selected;
             button.FontWeight = isSelected ? FontWeights.SemiBold : FontWeights.Normal;
-            if (isSelected)
-            {
-                button.Background = _tabSelectedBackgroundBrush;
-                button.Foreground = _tabSelectedForegroundBrush;
-            }
-            else
-            {
-                // Restore the standard WinUI Button chrome/foreground for the low-chrome inactive
-                // state instead of hardcoding a second product color.
-                button.ClearValue(Control.BackgroundProperty);
-                button.ClearValue(Control.ForegroundProperty);
-            }
+            // Keep the native Button interaction states, but never use a permanent selected fill.
+            button.ClearValue(Control.BackgroundProperty);
+            button.ClearValue(Control.ForegroundProperty);
+            if (_tabIndicators.TryGetValue(id, out var indicator))
+                indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
