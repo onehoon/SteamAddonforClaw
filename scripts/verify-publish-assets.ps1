@@ -12,6 +12,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'invoke-sdk-tool.ps1')
+
 function Find-SdkTool([string]$name) {
     $command = Get-Command "$name.exe" -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
@@ -166,11 +168,11 @@ if ($RequireFsePackage) {
     $unpackDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("SteamInputAddonforClaw-fse-verify-" + [Guid]::NewGuid().ToString('N'))
     try {
         New-Item -ItemType Directory -Path $unpackDirectory -Force | Out-Null
-        & $makeAppx unpack /p $fsePackagePath /d $unpackDirectory /o
-        if ($LASTEXITCODE -ne 0) { throw "Unable to unpack final FSE Home package with exit code $LASTEXITCODE." }
+        Write-Host "Unpacking final FSE MSIX package: $fsePackagePath"
+        Invoke-SdkTool -FilePath $makeAppx -Arguments @('unpack', '/p', $fsePackagePath, '/d', $unpackDirectory, '/o') -TimeoutSeconds 60 -Operation 'makeappx unpack'
 
-        & $signTool verify /pa /all /v $fsePackagePath
-        if ($LASTEXITCODE -ne 0) { throw "Final FSE Home package signature verification failed with exit code $LASTEXITCODE." }
+        Write-Host "Verifying final FSE MSIX signature: $fsePackagePath"
+        Invoke-SdkTool -FilePath $signTool -Arguments @('verify', '/pa', '/all', '/v', $fsePackagePath) -TimeoutSeconds 60 -Operation 'signtool verify'
 
         $finalManifestPath = Join-Path $unpackDirectory 'AppxManifest.xml'
         $finalManifest = Get-Content -LiteralPath $finalManifestPath -Raw

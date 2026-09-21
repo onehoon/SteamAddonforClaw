@@ -38,6 +38,7 @@ public sealed class SteamFsePackagingContractTests
         var pack = ReadSource("scripts", "pack.ps1");
         var package = ReadSource("scripts", "package-fse-home.ps1");
         var verifier = ReadSource("scripts", "verify-publish-assets.ps1");
+        var sdkTool = ReadSource("scripts", "invoke-sdk-tool.ps1");
 
         Assert.Contains("package-fse-home.ps1", pack, StringComparison.Ordinal);
         Assert.Contains("-RequireFsePackage", pack, StringComparison.Ordinal);
@@ -52,6 +53,15 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("x64", verifier, StringComparison.Ordinal);
         Assert.DoesNotContain("-Path $roots -Recurse", package, StringComparison.Ordinal);
         Assert.DoesNotContain("-Path $roots -Recurse", verifier, StringComparison.Ordinal);
+        Assert.Contains("ProcessStartInfo", sdkTool, StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = $false", sdkTool, StringComparison.Ordinal);
+        Assert.Contains("WaitForExit", sdkTool, StringComparison.Ordinal);
+        Assert.Contains("ReadToEndAsync", sdkTool, StringComparison.Ordinal);
+        Assert.Contains("RedirectStandardOutput", sdkTool, StringComparison.Ordinal);
+        Assert.Contains("RedirectStandardError", sdkTool, StringComparison.Ordinal);
+        Assert.Contains(".Kill()", sdkTool, StringComparison.Ordinal);
+        Assert.Contains("Invoke-SdkTool", package, StringComparison.Ordinal);
+        Assert.Contains("Invoke-SdkTool", verifier, StringComparison.Ordinal);
     }
 
     [Fact]

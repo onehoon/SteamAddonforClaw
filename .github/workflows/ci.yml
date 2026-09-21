@@ -104,6 +104,7 @@ jobs:
       - name: Build and verify CI FSE package
         shell: pwsh
         run: |
+          Write-Host 'Creating ephemeral CI FSE signing certificate.'
           $certificate = New-SelfSignedCertificate `
             -Type CodeSigningCert `
             -Subject 'CN=SteamInputAddonforClaw' `
@@ -112,11 +113,14 @@ jobs:
           $pfxPath = Join-Path $env:RUNNER_TEMP 'SteamInputAddonforClaw-FseHome-ci.pfx'
           $cerPath = Join-Path $env:RUNNER_TEMP 'SteamInputAddonforClaw-FseHome-ci.cer'
           try {
+            Write-Host 'Exporting ephemeral CI FSE signing certificate.'
             Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $certificatePassword | Out-Null
             Export-Certificate -Cert $certificate -FilePath $cerPath | Out-Null
+            Write-Host 'Importing ephemeral CI FSE certificate chain.'
             Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
             Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
 
+            Write-Host 'Creating and signing the CI FSE MSIX package.'
             & ./scripts/package-fse-home.ps1 `
               -PublishDirectory artifacts/publish `
               -OutputPath artifacts/publish/fse/SteamInputAddonforClaw.FseHome.msix `
@@ -125,6 +129,7 @@ jobs:
               -ExpectedVersion 0.1.0
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+            Write-Host 'Verifying the signed CI FSE MSIX package.'
             & ./scripts/verify-publish-assets.ps1 `
               -PublishDirectory artifacts/publish `
               -RequireFsePackage `

@@ -10,6 +10,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'invoke-sdk-tool.ps1')
+
 if (-not (Test-Path -LiteralPath (Join-Path $PublishDirectory 'fse\Package\AppxManifest.xml') -PathType Leaf)) {
     throw 'FSE Home publish assets are missing. Run publish-layout.ps1 first.'
 }
@@ -94,14 +96,14 @@ if (-not (Get-Content -LiteralPath $manifestPath -Raw | Select-String -SimpleMat
 New-Item -ItemType Directory -Path (Split-Path -Parent $output) -Force | Out-Null
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }
 
-& $makeAppx pack /d $packageSource /p $output /overwrite
-if ($LASTEXITCODE -ne 0) { throw "makeappx failed with exit code $LASTEXITCODE." }
+Write-Host "Creating FSE MSIX package: $output"
+Invoke-SdkTool -FilePath $makeAppx -Arguments @('pack', '/d', $packageSource, '/p', $output, '/overwrite') -TimeoutSeconds 60 -Operation 'makeappx pack'
 
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($CertificatePassword)
 try {
     $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    & $signTool sign /fd SHA256 /f $CertificatePath /p $password $output
-    if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE." }
+    Write-Host "Signing FSE MSIX package: $output"
+    Invoke-SdkTool -FilePath $signTool -Arguments @('sign', '/fd', 'SHA256', '/f', $CertificatePath, '/p', $password, $output) -TimeoutSeconds 60 -Operation 'signtool sign'
 }
 finally {
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
