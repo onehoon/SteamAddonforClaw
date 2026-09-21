@@ -1,0 +1,234 @@
+name: ClawHUD Dependency Update
+
+# The dispatch payload is only a request. The verification script rediscovers
+# the exact immutable ClawHUD release and rejects any identity disagreement
+# before the lock file can be changed.
+on:
+  repository_dispatch:
+    types: [clawhud-runtime-ready]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Exact ClawHUD Runtime tag (steamaddon-runtime-vMAJOR.MINOR.PATCH)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clawhud-dependency-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Resolve exact Runtime tag
+        id: target
+        shell: pwsh
+        env:
+          DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          MANUAL_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          $tag = if (-not [string]::IsNullOrWhiteSpace($env:MANUAL_TAG)) { $env:MANUAL_TAG } else { $env:DISPATCH_TAG }
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw 'No exact Runtime tag was provided by repository_dispatch.client_payload.tag or workflow_dispatch.inputs.tag.'
+          }
+          if ($tag -notmatch '^steamaddon-runtime-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw "Runtime tag must be exactly steamaddon-runtime-vMAJOR.MINOR.PATCH. Got: '$tag'."
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Generate GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VIIPER_ADDON_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.VIIPER_ADDON_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            SteamAddonforClaw
+          permission-actions: read
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout current Addon main
+        uses: actions/checkout@v5
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+          ref: refs/heads/main
+
+      - name: Capture adoption base SHA
+        id: adoption-base
+        shell: pwsh
+        run: |
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to fetch current Addon main.' }
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $main = (git rev-parse origin/main).Trim().ToLowerInvariant()
+          if ($head -ne $main) { throw "Checkout is not current Addon main: HEAD=$head origin/main=$main." }
+          "sha=$head" >> $env:GITHUB_OUTPUT
+
+      - name: Independently verify exact release and classify adoption
+        id: verify
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_TAG: ${{ steps.target.outputs.tag }}
+          DISPATCH_RUNTIME_VERSION: ${{ github.event.client_payload.runtime_version }}
+          DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          DISPATCH_SOURCE_COMMIT: ${{ github.event.client_payload.source_commit }}
+          DISPATCH_ASSET: ${{ github.event.client_payload.asset }}
+          DISPATCH_SHA256: ${{ github.event.client_payload.sha256 }}
+        run: |
+          & ./scripts/update-clawhud.ps1 `
+            -Tag $env:TARGET_TAG `
+            -LockPath 'src/SteamInputAddonforClaw/Dependencies/ClawHUD/clawhud.lock.json' `
+            -StagingDirectory "$env:RUNNER_TEMP\clawhud-runtime-$env:TARGET_TAG" `
+            -DispatchRuntimeVersion $env:DISPATCH_RUNTIME_VERSION `
+            -DispatchTag $env:DISPATCH_TAG `
+            -DispatchSourceCommit $env:DISPATCH_SOURCE_COMMIT `
+            -DispatchAsset $env:DISPATCH_ASSET `
+            -DispatchSha256 $env:DISPATCH_SHA256
+          if ($LASTEXITCODE -ne 0) { throw "ClawHUD Runtime verification failed with exit code $LASTEXITCODE." }
+
+      - name: Check for an existing automation branch or PR
+        id: existing
+        if: steps.verify.outputs.eligibility == 'Eligible'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_TAG: ${{ steps.verify.outputs.tag }}
+        run: |
+          $branch = "automation/clawhud-runtime-$($env:TARGET_TAG)"
+          $prJson = gh pr list --head $branch --state all --json number,isDraft,state
+          $prExit = $LASTEXITCODE
+          $prs = if ($prExit -eq 0) { @($prJson | ConvertFrom-Json) } else { @() }
+          $refs = @(git ls-remote --heads origin "refs/heads/$branch")
+          if ($LASTEXITCODE -ne 0) { throw "Could not query remote branch '$branch'." }
+          if ($prs.Count -gt 0) {
+            "exists=true" >> $env:GITHUB_OUTPUT
+            "branch=$branch" >> $env:GITHUB_OUTPUT
+            Write-Host "Existing ClawHUD Runtime automation PR: #$($prs[0].number). No duplicate will be created."
+          }
+          elseif ($refs.Count -gt 0) {
+            throw "Automation branch '$branch' already exists without a recorded PR. Refusing to overwrite it."
+          }
+          else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+            "branch=$branch" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Adopt only clawhud.lock.json
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          RUNTIME_VERSION: ${{ steps.verify.outputs.runtime_version }}
+          RUNTIME_TAG: ${{ steps.verify.outputs.tag }}
+          SOURCE_COMMIT: ${{ steps.verify.outputs.source_commit }}
+          ASSET: ${{ steps.verify.outputs.asset }}
+          SHA256: ${{ steps.verify.outputs.sha256 }}
+        run: |
+          $lock = [ordered]@{
+            schema_version = 1
+            runtime_version = $env:RUNTIME_VERSION
+            tag = $env:RUNTIME_TAG
+            asset = $env:ASSET
+            source_commit = $env:SOURCE_COMMIT
+            sha256 = $env:SHA256
+          }
+          $lock | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath 'src/SteamInputAddonforClaw/Dependencies/ClawHUD/clawhud.lock.json' -Encoding utf8
+
+      - name: Setup .NET
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        run: dotnet restore SteamInputAddonforClaw.slnx
+
+      - name: Build
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        run: dotnet build SteamInputAddonforClaw.slnx -c Release --no-restore
+
+      - name: Test
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        run: dotnet test SteamInputAddonforClaw.slnx -c Release --no-build
+
+      - name: Validate publish contract
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          ./scripts/publish-layout.ps1 -Version '0.0.0' -Configuration Release -PublishDirectory "$env:RUNNER_TEMP\clawhud-publish" -NoRestore
+          if ($LASTEXITCODE -ne 0) { throw "Publish layout failed with exit code $LASTEXITCODE." }
+          ./scripts/verify-publish-assets.ps1 -PublishDirectory "$env:RUNNER_TEMP\clawhud-publish"
+          if ($LASTEXITCODE -ne 0) { throw "Publish contract verification failed with exit code $LASTEXITCODE." }
+
+      - name: Verify only the lock file changed
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          git diff --check
+          $changed = @(git diff --name-only)
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'src/SteamInputAddonforClaw/Dependencies/ClawHUD/clawhud.lock.json') {
+            throw "Dependency automation changed files outside clawhud.lock.json: $($changed -join ', ')"
+          }
+
+      - name: Re-check Addon main before push
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          ADOPTION_BASE_SHA: ${{ steps.adoption-base.outputs.sha }}
+        run: |
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to refresh Addon main before push.' }
+          $latest = (git rev-parse origin/main).Trim().ToLowerInvariant()
+          if ($latest -ne $env:ADOPTION_BASE_SHA) {
+            throw "Addon main advanced during dependency validation: base=$env:ADOPTION_BASE_SHA current=$latest. Aborting before push."
+          }
+
+      - name: Commit, push, and open Draft PR
+        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ steps.existing.outputs.branch }}
+          RUNTIME_VERSION: ${{ steps.verify.outputs.runtime_version }}
+          RUNTIME_TAG: ${{ steps.verify.outputs.tag }}
+          SOURCE_COMMIT: ${{ steps.verify.outputs.source_commit }}
+          SHA256: ${{ steps.verify.outputs.sha256 }}
+          ADOPTION_BASE_SHA: ${{ steps.adoption-base.outputs.sha }}
+        run: |
+          git config user.name 'clawhud-dependency-bot[bot]'
+          git config user.email 'clawhud-dependency-bot[bot]@users.noreply.github.com'
+          git checkout -b $env:BRANCH
+          git add -- src/SteamInputAddonforClaw/Dependencies/ClawHUD/clawhud.lock.json
+          git commit -m "deps: update ClawHUD Runtime to v$($env:RUNTIME_VERSION)"
+
+          git fetch origin main
+          $latest = (git rev-parse origin/main).Trim().ToLowerInvariant()
+          if ($latest -ne $env:ADOPTION_BASE_SHA) {
+            throw "Addon main advanced immediately before push: base=$env:ADOPTION_BASE_SHA current=$latest. Aborting before push."
+          }
+          git push -u origin $env:BRANCH
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to push the ClawHUD dependency automation branch.' }
+
+          $body = @"
+          ## Automated ClawHUD Runtime dependency update
+
+          - Previous Runtime pin: checked from current `main` lock
+          - New Runtime version: `$($env:RUNTIME_VERSION)`
+          - New Runtime tag: `$($env:RUNTIME_TAG)`
+          - Source commit: `$($env:SOURCE_COMMIT)`
+          - ZIP SHA-256: `$($env:SHA256)`
+          - Release: https://github.com/onehoon/ClawHUD/releases/tag/$($env:RUNTIME_TAG)
+
+          The release, external manifest, sidecar, ZIP hash, and embedded manifest were independently verified before this lock-only change. Restore/build/test and the Addon publish contract validation passed. This Draft PR does not auto-merge.
+          "@
+          gh pr create --draft --title "deps: update ClawHUD Runtime to v$($env:RUNTIME_VERSION)" --body $body --head $env:BRANCH --base main
