@@ -34,8 +34,8 @@ internal struct Xbox360DeviceState
 }
 
 // Bit values from the generated header's XBOX360_BUTTON_* defines. The lower 16 bits are used;
-// higher bits are reserved by the native ABI. Guide (0x0400) is intentionally never set by the
-// mapper -- the Addon does not expose a Guide-equivalent control.
+// higher bits are reserved by the native ABI. Guide (0x0400) is available for the explicit
+// XboxGuide back-button mapping target.
 internal static class Xbox360ButtonBits
 {
     internal const uint DPadUp = 0x0001u;

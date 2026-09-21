@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
@@ -50,6 +51,67 @@ public sealed class CanonicalXbox360InputPublisherTests
 
         Assert.Equal(Xbox360ButtonBits.A, sink.States[0].Buttons);
         Assert.Equal(Xbox360ButtonBits.X, sink.States[1].Buttons);
+    }
+
+    [Fact]
+    public async Task Each_tick_uses_the_current_back_button_mapping_without_restarting_the_publisher()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.Disabled);
+        var publisher = new CanonicalXbox360InputPublisher(
+            source,
+            sink.SetState,
+            ticks,
+            backButtonMappingProvider: () => mapping);
+
+        publisher.Start();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        mapping = mapping with { M1 = Xbox360BackButtonTarget.B };
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await publisher.StopAsync();
+
+        Assert.Equal(Xbox360ButtonBits.A, sink.States[0].Buttons);
+        Assert.Equal(Xbox360ButtonBits.B, sink.States[1].Buttons);
+    }
+
+    [Fact]
+    public async Task Each_tick_uses_current_raw_rear_state_and_current_mapping_together()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.Disabled);
+        var publisher = new CanonicalXbox360InputPublisher(
+            source,
+            sink.SetState,
+            ticks,
+            backButtonMappingProvider: () => mapping);
+
+        publisher.Start();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        source.Value = new ControllerState(new AuxiliaryButtonState([false, false]));
+        mapping = mapping with { M1 = Xbox360BackButtonTarget.B };
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await publisher.StopAsync();
+
+        Assert.Equal(Xbox360ButtonBits.A, sink.States[0].Buttons);
+        Assert.Equal(0u, sink.States[1].Buttons);
+    }
+
+    [Fact]
+    public async Task Default_mapping_provider_keeps_rear_buttons_disabled()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var publisher = new CanonicalXbox360InputPublisher(source, sink.SetState, ticks);
+
+        publisher.Start();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        await publisher.StopAsync();
+
+        Assert.Equal(0u, sink.States[0].Buttons);
+        Assert.Equal((byte)0, sink.States[0].LT);
+        Assert.Equal((byte)0, sink.States[0].RT);
     }
 
     [Fact]

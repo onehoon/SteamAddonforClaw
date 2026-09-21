@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -251,6 +252,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly Func<CanonicalViiperRuntime, ICanonicalSteamDeckSession> _deckSessionFactory;
     private readonly Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher> _xbox360PublisherFactory;
     private readonly Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher> _deckPublisherFactory;
+    private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
 
     /// <summary>Full1902 production rumble: the one shared physical MSI writer, bound to the same
     /// process-owned PID1902 physical session that feeds this presentation. Null in unit tests and on
@@ -285,13 +287,19 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         IPhysicalRumbleSink? rumbleSink = null,
         Func<CanonicalViiperRuntime, ICanonicalSteamDeckSession>? deckSessionFactory = null,
         Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher>? xbox360PublisherFactory = null,
-        Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? deckPublisherFactory = null)
+        Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? deckPublisherFactory = null,
+        Func<BackButtonMappingSettings>? backButtonMappingProvider = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
+        _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
         _xbox360PublisherFactory = xbox360PublisherFactory
-            ?? ((source, setState, fault) => new PublisherAdapter(new CanonicalXbox360InputPublisher(source, setState, fault: fault)));
+            ?? ((source, setState, fault) => new PublisherAdapter(new CanonicalXbox360InputPublisher(
+                source,
+                setState,
+                fault: fault,
+                backButtonMappingProvider: _backButtonMappingProvider)));
         _deckPublisherFactory = deckPublisherFactory
             ?? ((source, sink, overlay, fault) => new PublisherAdapter(new CanonicalSteamDeckInputPublisher(source, sink, fault: fault, systemButtonOverlay: overlay)));
     }
