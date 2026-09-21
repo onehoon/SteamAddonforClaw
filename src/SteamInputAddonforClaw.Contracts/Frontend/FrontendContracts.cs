@@ -401,6 +401,21 @@ public sealed record FrontendUpdateInstallResult(
     public bool Succeeded => Outcome == FrontendUpdateInstallOutcome.Scheduled;
 }
 
+public sealed record FrontendSteamFseSnapshot(bool Available, bool Enabled, string? UnavailableReason)
+{
+    public static FrontendSteamFseSnapshot Unavailable(string reason) => new(false, false, reason);
+}
+
+public enum FrontendSteamFseMutationOutcome { Succeeded, Failed, Unavailable }
+
+public sealed record FrontendSteamFseMutationResult(
+    FrontendSteamFseMutationOutcome Outcome,
+    FrontendSteamFseSnapshot Snapshot,
+    string? FailureMessage)
+{
+    public bool Succeeded => Outcome == FrontendSteamFseMutationOutcome.Succeeded;
+}
+
 public interface IAddonFrontendControl
 {
     event EventHandler? StateInvalidated;
@@ -415,6 +430,13 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendUpdateSnapshot.Unavailable);
     Task<FrontendUpdateInstallResult> InstallAppUpdateAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendUpdateInstallResult(FrontendUpdateInstallOutcome.Unavailable, FrontendUpdateSnapshot.Unavailable, "Updates are unavailable in this installation."));
+    Task<FrontendSteamFseSnapshot> CaptureSteamFseAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendSteamFseSnapshot.Unavailable("Steam Big Picture Full Screen Experience is unavailable."));
+    Task<FrontendSteamFseMutationResult> SetSteamFseEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendSteamFseMutationResult(
+            FrontendSteamFseMutationOutcome.Unavailable,
+            FrontendSteamFseSnapshot.Unavailable("Steam Big Picture Full Screen Experience is unavailable."),
+            "Steam Big Picture Full Screen Experience is unavailable."));
     /// <summary>Persists the COMPLETE new front-button mapping (both buttons, both domains --
     /// four bindings). Whole-record, not per-binding: the cross-button same-domain uniqueness rule
     /// belongs to one whole mapping. An invalid candidate is rejected by the settings layer and the

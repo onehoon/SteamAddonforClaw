@@ -15,6 +15,16 @@
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsCard
+                x:Name="SteamFseCard"
+                Description="Start Windows directly in Steam Big Picture."
+                Header="Steam Big Picture Full Screen Experience">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Repair" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch x:Name="SteamFseToggleSwitch" Toggled="SteamFseToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsCard
                 x:Name="QuickSettingsPowerSourceCard"
                 Description="Show only the controls for the currently connected power source in QAM and Overlay."
                 Header="Show only current power source">

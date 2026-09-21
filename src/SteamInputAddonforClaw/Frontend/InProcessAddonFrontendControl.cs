@@ -17,6 +17,7 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Updates;
+using SteamInputAddonforClaw.WindowsGaming;
 using System.Diagnostics;
 using Microsoft.Win32;
 
@@ -77,6 +78,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
     private readonly FrontendUpdateCoordinator? _updateCoordinator;
     private readonly Func<AcDcPowerSource?> _quickSettingsPowerSource;
+    private readonly WindowsGamingHomeConfiguration _steamFse;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -87,7 +89,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _centerMStartup = centerMStartup;
@@ -105,6 +107,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _batteryChargeLimitRuntime = batteryChargeLimitRuntime;
         _batteryChargeLimitHardware = batteryChargeLimitHardware ?? (fanProbeTransport is null ? null : new MsiClawBatteryChargeLimitHardware(fanProbeTransport));
         _quickSettingsPowerSource = quickSettingsPowerSource ?? WindowsAcDcPowerSource.Read;
+        _steamFse = steamFse ?? new WindowsGamingHomeConfiguration();
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -345,6 +348,20 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         ThrowIfShuttingDown();
         return _updateCoordinator?.InstallAsync(cancellationToken)
             ?? Task.FromResult(new FrontendUpdateInstallResult(FrontendUpdateInstallOutcome.Unavailable, FrontendUpdateSnapshot.Unavailable, "Updates are unavailable in this installation."));
+    }
+
+    public Task<FrontendSteamFseSnapshot> CaptureSteamFseAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_steamFse.Capture());
+    }
+
+    public Task<FrontendSteamFseMutationResult> SetSteamFseEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var result = _steamFse.SetEnabled(enabled);
+        if (result.Succeeded) StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(result);
     }
 
     public async Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default)

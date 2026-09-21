@@ -12,6 +12,9 @@ public sealed partial class SettingsPage : UserControl
     private FrontendUpdateSnapshot _updateSnapshot = FrontendUpdateSnapshot.Unavailable;
     private int _updateOperationInProgress;
     private int _enterBiosOperationInProgress;
+    private FrontendSteamFseSnapshot _steamFseSnapshot = FrontendSteamFseSnapshot.Unavailable("Steam Big Picture Full Screen Experience is unavailable.");
+    private int _steamFseMutationInProgress;
+    private bool _applyingSteamFseState;
     private bool _applyingQuickSettingsPowerSourcePreference;
     private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
     public event EventHandler? DeveloperMenuRequested;
@@ -28,9 +31,11 @@ public sealed partial class SettingsPage : UserControl
         _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
         SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
         _ = RefreshAppUpdateAsync();
+        _ = RefreshSteamFseAsync();
     }
 
     internal void RequestAppUpdateRefresh() => _ = RefreshAppUpdateAsync();
+    internal void RequestSteamFseRefresh() => _ = RefreshSteamFseAsync();
 
     private async Task RefreshAppUpdateAsync()
     {
@@ -98,6 +103,58 @@ public sealed partial class SettingsPage : UserControl
 
     internal static bool TryBeginEnterBiosOperation(ref int operationInProgress) =>
         Interlocked.Exchange(ref operationInProgress, 1) == 0;
+
+    private async Task RefreshSteamFseAsync()
+    {
+        if (_frontend is null || Volatile.Read(ref _steamFseMutationInProgress) != 0) return;
+        try { RenderSteamFse(await _frontend.CaptureSteamFseAsync().ConfigureAwait(true)); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("SteamFSE", "Main UI SteamFSE state refresh failed.", exception);
+            RenderSteamFse(FrontendSteamFseSnapshot.Unavailable("Steam Big Picture Full Screen Experience could not be verified."));
+        }
+    }
+
+    private void RenderSteamFse(FrontendSteamFseSnapshot snapshot)
+    {
+        _steamFseSnapshot = snapshot;
+        _applyingSteamFseState = true;
+        try { SteamFseToggleSwitch.IsOn = snapshot.Enabled; }
+        finally { _applyingSteamFseState = false; }
+        SteamFseCard.Description = snapshot.Available
+            ? "Start Windows directly in Steam Big Picture."
+            : snapshot.UnavailableReason ?? "Steam Big Picture Full Screen Experience is unavailable.";
+        SteamFseToggleSwitch.IsEnabled = snapshot.Available && Volatile.Read(ref _steamFseMutationInProgress) == 0;
+    }
+
+    private async void SteamFseToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_applyingSteamFseState || _frontend is null || Interlocked.Exchange(ref _steamFseMutationInProgress, 1) != 0) return;
+        SteamFseToggleSwitch.IsEnabled = false;
+        try
+        {
+            var result = await _frontend.SetSteamFseEnabledAsync(SteamFseToggleSwitch.IsOn).ConfigureAwait(true);
+            RenderSteamFse(result.Snapshot);
+            if (!result.Succeeded && result.FailureMessage is not null)
+                SteamFseCard.Description = result.FailureMessage;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("SteamFSE", "Main UI SteamFSE mutation failed.", exception);
+            try { RenderSteamFse(await _frontend.CaptureSteamFseAsync().ConfigureAwait(true)); }
+            catch (Exception refreshException)
+            {
+                AppLog.Warn("SteamFSE", "Main UI SteamFSE rollback refresh failed.", refreshException);
+                RenderSteamFse(_steamFseSnapshot);
+                SteamFseCard.Description = "The Steam Big Picture Full Screen Experience setting could not be changed.";
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _steamFseMutationInProgress, 0);
+            SteamFseToggleSwitch.IsEnabled = _steamFseSnapshot.Available;
+        }
+    }
 
     private async void UpdateButton_Click(object sender, RoutedEventArgs args)
     {

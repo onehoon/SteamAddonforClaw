@@ -93,6 +93,7 @@ public sealed partial class MainWindow : Window
     {
         RequestStatusRefresh();
         SettingsContent.RequestAppUpdateRefresh();
+        SettingsContent.RequestSteamFseRefresh();
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args) => _frontend.StateInvalidated -= OnFrontendStateInvalidated;

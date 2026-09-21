@@ -35,7 +35,13 @@ $requiredAssets = @(
     'overlay\SteamInputAddonforClaw.Overlay.exe',
     'overlay\SteamInputAddonforClaw.Overlay.pri',
     'overlay\App.xbf',
-    'overlay\OverlayWindow.xbf'
+    'overlay\OverlayWindow.xbf',
+    'fse\SteamInputAddonforClaw.FseHome.exe',
+    'fse\SteamInputAddonforClaw.FseHome.dll',
+    'fse\Package\AppxManifest.xml',
+    'fse\Package\CustomCapability.SCCD',
+    'fse\Package\Assets\AppIcon.ico',
+    'fse\Package\Public\README.txt'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
@@ -74,11 +80,22 @@ if (Test-Path -LiteralPath $qamSdkProjection -PathType Leaf) {
 }
 
 $runtimePayloadNames = @('System.Private.CoreLib.dll', 'coreclr.dll', 'hostpolicy.dll')
-foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), (Join-Path $PublishDirectory 'qam'), (Join-Path $PublishDirectory 'overlay'))) {
+foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), (Join-Path $PublishDirectory 'qam'), (Join-Path $PublishDirectory 'overlay'), (Join-Path $PublishDirectory 'fse'))) {
     $runtimePayload = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Name -in $runtimePayloadNames })
     if ($runtimePayload.Count -gt 0) {
         throw "Framework-dependent publish contains runtime payload in '$directory': $($runtimePayload.Name -join ', ')"
     }
+}
+
+$fseManifest = Get-Content -LiteralPath (Join-Path $PublishDirectory 'fse\Package\AppxManifest.xml') -Raw
+foreach ($requiredText in @('windows.gamingApp', 'Microsoft.appCategory.gamingHome_8wekyb3d8bbwe', 'SteamInputAddonforClaw.FseHome', 'Id="App"')) {
+    if ($fseManifest -notmatch [regex]::Escape($requiredText)) {
+        throw "FSE Home package manifest is missing required content: $requiredText"
+    }
+}
+$sccd = Get-Content -LiteralPath (Join-Path $PublishDirectory 'fse\Package\CustomCapability.SCCD') -Raw
+if ($sccd -notmatch 'Microsoft\.appCategory\.gamingHome_8wekyb3d8bbwe') {
+    throw 'FSE Home package SCCD is missing the Gaming Home custom capability.'
 }
 
 $uiDirectory = Join-Path $PublishDirectory 'ui'
