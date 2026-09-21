@@ -230,6 +230,29 @@ public sealed class SteamBigPictureWatcherTests
     }
 
     [Fact]
+    public void TrackedActiveHwndDestroyed_ReplacementScanReturnsSameHwnd_EndsSession()
+    {
+        var probe = new FakeProbe();
+        var hook = new FakeHook();
+        var scheduler = new ManualScheduler();
+        using var watcher = new SteamBigPictureWatcher(probe, hook, scheduler.Schedule);
+        var transitions = 0;
+        watcher.StateChanged += (_, _) => transitions++;
+        watcher.Start();
+
+        probe.AddCandidate(Hwnd1);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd1);
+        scheduler.FireLast();
+
+        // The destroyed numeric HWND is still returned by the replacement scan, matching the observed
+        // same-HWND replacement path. It must not keep the old session active.
+        hook.Raise(BigPictureWinEventType.Destroy, Hwnd1);
+
+        Assert.False(watcher.IsActive);
+        Assert.Equal(2, transitions);
+    }
+
+    [Fact]
     public void TrackedActiveHwndDestroyed_NoReplacement_ExactlyOneActiveToInactiveTransition()
     {
         var probe = new FakeProbe();
