@@ -153,6 +153,46 @@ This is a visual baseline, not a hard-coded screen-size contract.
 
 The implementation remains DPI-aware and monitor-relative.
 
+### 4.1 Coordinate-system contract — do not mix DIP/effective pixels with native physical pixels
+
+This PR crosses two coordinate systems and must keep them explicit:
+
+```text
+WinUI XAML layout / FrameworkElement ActualWidth / ActualHeight
+→ effective pixels (DIP-like XAML units)
+→ automatically scales with Windows display scaling
+
+AppWindow / HWND / SetWindowPos / MONITORINFO
+→ physical device pixels
+→ explicit DPI conversion required
+```
+
+Microsoft references:
+
+- https://learn.microsoft.com/windows/apps/develop/ui/windowing-overview
+- https://learn.microsoft.com/windows/apps/develop/composition/xaml-comp-interop
+
+The implementation must not assume that a numeric value has the same meaning in both layers.
+
+Examples at the 150% reference scale:
+
+```text
+1 XAML effective px / DIP ≈ 1.5 physical px
+
+48 DIP taskbar reference
+→ 72 physical px
+
+12 DIP additional geometry gap
+→ 18 physical px
+
+8 DIP animation Y offset
+→ visually ≈ 12 physical px
+```
+
+Do not add 100/125/150/175/200% branches.
+
+Use the current target-window DPI / XAML rasterization scale instead.
+
 ---
 
 ## 5. New large floating geometry
@@ -230,7 +270,7 @@ This corresponds to approximately 72 physical px at 150%.
 Conceptually:
 
 ```text
-referenceTaskbarPx = round(48 DIP × dpi / 96)
+referenceTaskbarPx = round(48 DIP × effectiveDpi / 96)
 
 baseFloatingMarginPx =
     max(reservedEdgePx, referenceTaskbarPx)
@@ -259,7 +299,7 @@ This directly matches the requested additional approximately 10–20 physical px
 Conceptually:
 
 ```text
-extraGapPx = round(12 × dpi / 96)
+extraGapPx = round(12 × effectiveDpi / 96)
 
 outerMarginPx =
     baseFloatingMarginPx + extraGapPx
@@ -572,7 +612,71 @@ Do not turn this into a zoom-heavy modal animation.
 
 Do not drop opacity to 0.
 
-### 9.3 Scale from the visual center
+### 9.3 DPI / Windows scaling contract for the animation
+
+The animation values are UI presentation values and must remain stable across Windows display scaling.
+
+Use XAML/effective-pixel semantics for the visual motion:
+
+```text
+HiddenTranslateYDip = 8
+```
+
+means:
+
+```text
+100% / RasterizationScale 1.0
+→ ~8 physical px
+
+150% / RasterizationScale 1.5
+→ ~12 physical px
+
+200% / RasterizationScale 2.0
+→ ~16 physical px
+```
+
+Do **not** hard-code `12 px` for the 150% reference device.
+
+Do **not** multiply an already-XAML/effective-pixel translation by DPI a second time.
+
+The scale animation:
+
+```text
+0.98 → 1.00
+```
+
+is unitless and therefore does not need DPI conversion.
+
+The animation implementation should stay attached to the XAML element/visual that backs `AnimatedContent`. XAML layout dimensions such as `ActualWidth` / `ActualHeight` are effective-pixel values. Microsoft documents XAML layout in effective pixels while native AppWindow/window coordinates use physical device pixels.
+
+The current code already exposes:
+
+```text
+XamlRoot.RasterizationScale
+```
+
+for diagnostics. Keep using it to verify the effective-to-physical relationship, not as a second geometry authority.
+
+For one Show diagnostic, it is useful to record conceptually:
+
+```text
+RasterizationScale=1.5
+AnimationTranslateYDip=8
+AnimationTranslateYPhysical≈12
+HiddenScale=0.98
+```
+
+No continuous animation logging.
+
+If implementation changes from the current XAML-backed composition path to an API whose coordinates are explicitly raw physical pixels, perform exactly one conversion at that boundary:
+
+```text
+physicalPx = effectivePx × XamlRoot.RasterizationScale
+```
+
+Do not blindly multiply all Composition values by DPI. Keep each value in the coordinate system expected by the API actually being used.
+
+### 9.4 Scale from the visual center
 
 The scale origin must be the center of the animated surface.
 
@@ -589,7 +693,7 @@ Top-left scale would make the large window appear to grow diagonally from one co
 
 Use the existing Composition visual path rather than introducing another animation framework.
 
-### 9.4 Animate content/composition only — never HWND geometry
+### 9.5 Animate content/composition only — never HWND geometry
 
 The native Overlay HWND must already be at its final rectangle before the visual reveal.
 
@@ -619,7 +723,7 @@ This avoids disturbing:
 - foreground ownership;
 - BPM/game composition behavior.
 
-### 9.5 Reuse the existing animation lifecycle
+### 9.6 Reuse the existing animation lifecycle
 
 Keep the current `ShowForPocAsync()` / `HideForPocAsync()` lifecycle and fallback behavior.
 
@@ -643,7 +747,7 @@ Do not create:
 
 The existing "animations disabled" / failure fallback behavior must continue to leave the Overlay in a valid visible/hidden state.
 
-### 9.6 Replace obsolete constants
+### 9.7 Replace obsolete constants
 
 Remove or replace narrow-panel-only constants such as:
 
@@ -668,7 +772,7 @@ HideDuration ≈ 140 ms
 
 Do not expose animation values as user settings.
 
-### 9.7 Rounded-corner interaction
+### 9.8 Rounded-corner interaction
 
 The scale/fade effect must visually remain inside the rounded large surface.
 
@@ -841,9 +945,11 @@ result = X 90
 
 Verify monitor placement still works for a monitor whose origin is not `0,0`.
 
-### 15.3 Different DPI
+### 15.3 Different DPI / Windows display scale
 
-Verify the 48-DIP reference and 12-DIP gap scale using the existing DPI rule.
+Verify both native window geometry and XAML-scale assumptions across representative Windows display scaling.
+
+The native geometry tests must verify the 48-DIP reference and 12-DIP gap scale using the existing DPI rule.
 
 Representative:
 
@@ -855,7 +961,19 @@ Representative:
 192 DPI
 ```
 
+Expected scale relationship:
+
+```text
+96 DPI  → RasterizationScale conceptually 1.00
+120 DPI → 1.25
+144 DPI → 1.50
+168 DPI → 1.75
+192 DPI → 2.00
+```
+
 Do not assert a hard-coded 1920×1200 rectangle for all DPI cases.
+
+For hardware/manual validation, also change Windows Scale while the app is running and Show the Overlay again. The next Show must recompute target monitor/DPI geometry and the XAML surface must remain visually proportional.
 
 ### 15.4 Larger-than-reference reserved edge
 
@@ -976,6 +1094,9 @@ Verify:
 - Show uses centered scale/fade rather than the old left slide;
 - Hide uses the matching restrained reverse scale/fade;
 - no visible top-left-origin scaling;
+- animation Y travel remains visually proportional when Windows scaling changes;
+- at 150%, the 8-DIP Y motion is approximately 12 physical px rather than a hard-coded 8 px;
+- no double-DPI scaling of XAML animation values;
 - no HWND resize/move animation;
 - no animation failure or visible stuck intermediate state;
 - no controller leak after close.
@@ -1002,9 +1123,11 @@ Merge only when all are true:
 14. Show uses a centered ~0.98→1.00 scale, small +Y→0 movement, and subtle fade.
 15. Hide uses the restrained reverse effect.
 16. HWND geometry is not animated.
-17. Animation failure/disabled paths still converge to correct visible/hidden state.
-18. QAM is untouched.
-19. No new manager, state machine, polling loop, window watchdog, input reader, animation framework, or generalized layout abstraction is introduced.
+17. Native geometry uses physical pixels with explicit target-window DPI conversion, while XAML layout/animation values remain in effective-pixel semantics.
+18. Windows display scaling changes do not alter the intended relative margin, corner, content, or animation feel.
+19. Animation failure/disabled paths still converge to correct visible/hidden state.
+20. QAM is untouched.
+21. No new manager, state machine, polling loop, window watchdog, input reader, animation framework, or generalized layout abstraction is introduced.
 
 ---
 
