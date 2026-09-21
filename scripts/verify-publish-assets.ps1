@@ -21,6 +21,7 @@ $requiredAssets = @(
     'Dependencies\Viiper\PROVENANCE.md',
     'Dependencies\Viiper\libVIIPER.h',
     'Dependencies\Viiper\LICENSE.txt',
+    'Dependencies\ClawHUD\clawhud.lock.json',
     'ui\SteamInputAddonforClaw.UI.exe',
     'ui\SteamInputAddonforClaw.UI.dll',
     'ui\SteamInputAddonforClaw.UI.pri',
@@ -72,6 +73,22 @@ if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expec
 
 if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
+}
+
+$clawHudLockPath = Join-Path $PublishDirectory 'Dependencies\ClawHUD\clawhud.lock.json'
+$clawHudLock = Get-Content -LiteralPath $clawHudLockPath -Raw | ConvertFrom-Json
+if ($clawHudLock.schema_version -ne 1) { throw 'Published ClawHUD lock schema must be 1.' }
+if ([string]$clawHudLock.runtime_version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Published ClawHUD lock runtime_version is invalid.' }
+if ([string]$clawHudLock.tag -ne "steamaddon-runtime-v$($clawHudLock.runtime_version)") { throw 'Published ClawHUD lock tag does not match runtime_version.' }
+if ([string]$clawHudLock.asset -ne 'ClawHUDRuntime.zip') { throw 'Published ClawHUD lock asset is invalid.' }
+if ([string]$clawHudLock.source_commit -notmatch '^[0-9a-fA-F]{40}$') { throw 'Published ClawHUD lock source_commit is invalid.' }
+if ([string]$clawHudLock.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Published ClawHUD lock sha256 is invalid.' }
+
+$clawHudDirectory = Join-Path $PublishDirectory 'Dependencies\ClawHUD'
+foreach ($forbiddenClawHudAsset in @('ClawHUDRuntime.zip', 'ClawHUD.exe')) {
+    if (Test-Path -LiteralPath (Join-Path $clawHudDirectory $forbiddenClawHudAsset) -PathType Leaf) {
+        throw "Published output must not bundle ClawHUD Runtime payload: $forbiddenClawHudAsset"
+    }
 }
 
 $qamSdkProjection = Join-Path $PublishDirectory 'qam\Microsoft.Windows.SDK.NET.dll'

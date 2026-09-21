@@ -57,6 +57,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Dependencies\ClawHUD\clawhud.lock.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
     <Manifest Include="$(ApplicationManifest)" />
     <Content Include="Dependencies\HidHide\HidHide_1.5.230_x64.exe">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
