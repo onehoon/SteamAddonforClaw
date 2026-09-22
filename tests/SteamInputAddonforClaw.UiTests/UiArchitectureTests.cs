@@ -72,7 +72,7 @@ public sealed class UiArchitectureTests
             Assert.Contains("<SelfContained>false</SelfContained>", project, StringComparison.Ordinal);
             Assert.Contains("<WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>", project, StringComparison.Ordinal);
             Assert.Contains("<RuntimeIdentifier>win-x64</RuntimeIdentifier>", project, StringComparison.Ordinal);
-            Assert.Contains("<PackageReference Include=\"Microsoft.WindowsAppSDK\" Version=\"2.3.1\"", project, StringComparison.Ordinal);
+            Assert.Contains("<PackageReference Include=\"Microsoft.WindowsAppSDK\" Version=\"2.5.1\"", project, StringComparison.Ordinal);
             Assert.DoesNotContain("Bootstrap.Initialize", project, StringComparison.Ordinal);
         }
     }

@@ -1248,7 +1248,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         AppLog.Warn("UiSurface", $"{surface} open blocked because Windows App Runtime is unavailable; Runtime remains active.", null,
             ("Surface", surface), ("Action", "KeepRuntimeAlive"));
-        NativeStartupWarning.Show("Windows App Runtime 2.3.1 or newer is required to open this surface. The controller Runtime remains active.");
+        NativeStartupWarning.Show("Windows App Runtime 2.5.1 or newer is required to open this surface. The controller Runtime remains active.");
         return false;
     }
 
