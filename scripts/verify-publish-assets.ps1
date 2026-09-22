@@ -38,8 +38,6 @@ $requiredAssets = @(
     'overlay\SteamInputAddonforClaw.Overlay.pri',
     'overlay\App.xbf',
     'overlay\OverlayWindow.xbf',
-    'fse\SteamInputAddonforClaw.FseHome.exe',
-    'fse\SteamInputAddonforClaw.FseHome.dll',
     'fse\SteamInputAddonforClaw.FseHome.msix',
     'fse\SteamInputAddonforClaw.FseHome.cer'
 )
@@ -53,6 +51,23 @@ $missingAssets = foreach ($asset in $requiredAssets) {
 
 if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
+}
+
+$fseDirectory = [System.IO.Path]::GetFullPath((Join-Path $PublishDirectory 'fse'))
+$allowedFseFiles = @(
+    'SteamInputAddonforClaw.FseHome.msix',
+    'SteamInputAddonforClaw.FseHome.cer'
+)
+$unexpectedFseFiles = @(
+    Get-ChildItem -LiteralPath $fseDirectory -Recurse -File |
+    Where-Object {
+        $relativePath = $_.FullName.Substring($fseDirectory.Length)
+        $relativePath = $relativePath.TrimStart([char[]]@('\', '/')).Replace('\', '/')
+        $relativePath -notin $allowedFseFiles
+    }
+)
+if ($unexpectedFseFiles.Count -gt 0) {
+    throw "FSE publish directory contains redundant loose payload: $($unexpectedFseFiles.Name -join ', ')"
 }
 
 foreach ($forbiddenPrerequisiteInstaller in @{

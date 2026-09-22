@@ -43,8 +43,6 @@ function New-Fixture {
         'overlay\SteamInputAddonforClaw.Overlay.pri' = 'overlay application pri'
         'overlay\App.xbf' = 'overlay app xbf'
         'overlay\OverlayWindow.xbf' = 'overlay window xbf'
-        'fse\SteamInputAddonforClaw.FseHome.exe' = 'fse executable'
-        'fse\SteamInputAddonforClaw.FseHome.dll' = 'fse managed payload'
         'fse\SteamInputAddonforClaw.FseHome.msix' = (Join-Path $repoRoot 'src\SteamInputAddonforClaw.FseHome\Packaging\Distribution\SteamInputAddonforClaw.FseHome.msix')
         'fse\SteamInputAddonforClaw.FseHome.cer' = (Join-Path $repoRoot 'src\SteamInputAddonforClaw.FseHome\Packaging\Distribution\SteamInputAddonforClaw.FseHome.cer')
     }
@@ -96,6 +94,14 @@ try {
     $validRoot = New-Fixture
     $fixturesToClean += $validRoot
     Assert-Success -Result (Invoke-Verify -PublishDirectory $validRoot) -Case 'complete application asset set'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'fse\SteamInputAddonforClaw.FseHome.exe') -Value 'redundant loose FSE payload'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'redundant loose payload') {
+        throw 'Expected an unexpected loose FSE payload to be rejected.'
+    }
 
     $root = New-Fixture
     $fixturesToClean += $root
