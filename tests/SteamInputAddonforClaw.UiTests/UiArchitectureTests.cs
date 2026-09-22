@@ -444,17 +444,20 @@ public sealed class UiArchitectureTests
     public void Overlay_opacity_commit_coalesces_rapid_keyboard_adjustments_into_a_follow_up_commit()
     {
         var queued = 0;
-        var pending = false;
+        int? pending = null;
 
-        Assert.True(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending));
-        Assert.False(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending));
-        Assert.True(pending);
+        Assert.True(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending, 55));
+        Assert.False(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending, 60));
+        Assert.Equal(60, pending);
 
-        // Completing the first commit releases the claim and reports that the latest slider
-        // value needs one follow-up commit rather than leaving it preview-only.
-        Assert.True(OverlayPage.CompleteOpacityCommit(ref queued, ref pending));
-        Assert.False(pending);
-        Assert.True(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending));
+        // The first response may re-render the authoritative value (55), so the follow-up must
+        // use the captured latest request (60) rather than reading the slider again.
+        Assert.Equal(60, OverlayPage.CompleteOpacityCommit(ref queued, ref pending));
+        Assert.Null(pending);
+
+        // The follow-up owns the claim until it completes; after that, a new commit can start.
+        Assert.Null(OverlayPage.CompleteOpacityCommit(ref queued, ref pending));
+        Assert.True(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending, 65));
     }
 
     [Fact]

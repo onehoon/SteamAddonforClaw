@@ -17,7 +17,7 @@ public sealed partial class OverlayPage : UserControl
     private Task _opacityPreviewTail = Task.CompletedTask;
     private readonly object _opacityPreviewGate = new();
     private int _opacityCommitQueued;
-    private bool _opacityCommitPending;
+    private int? _pendingOpacityCommitValue;
 
     public OverlayPage()
     {
@@ -261,28 +261,29 @@ public sealed partial class OverlayPage : UserControl
     {
         if (_applyingClawHudState || _frontend is null || _clawHudSnapshot.RuntimeState != FrontendClawHudRuntimeState.Ready || _clawHudSnapshot.Settings is null)
             return;
-        if (!TryClaimOpacityCommit(ref _opacityCommitQueued, ref _opacityCommitPending)) return;
-        _ = CommitClawHudOpacityAsync((int)Math.Round(ClawHudOpacitySlider.Value));
+        var value = (int)Math.Round(ClawHudOpacitySlider.Value);
+        if (!TryClaimOpacityCommit(ref _opacityCommitQueued, ref _pendingOpacityCommitValue, value)) return;
+        _ = CommitClawHudOpacityAsync(value);
     }
 
-    internal static bool TryClaimOpacityCommit(ref int queued, ref bool pending)
+    internal static bool TryClaimOpacityCommit(ref int queued, ref int? pending, int value)
     {
         if (Interlocked.Exchange(ref queued, 1) != 0)
         {
-            pending = true;
+            pending = value;
             return false;
         }
 
         return true;
     }
 
-    internal static bool CompleteOpacityCommit(ref int queued, ref bool pending)
+    internal static int? CompleteOpacityCommit(ref int queued, ref int? pending)
     {
-        Volatile.Write(ref queued, 0);
-        if (!pending) return false;
-
-        pending = false;
-        return true;
+        var pendingValue = pending;
+        pending = null;
+        if (pendingValue is null)
+            Volatile.Write(ref queued, 0);
+        return pendingValue;
     }
 
     private async Task SendClawHudOpacityPreviewAsync(int value)
@@ -322,8 +323,8 @@ public sealed partial class OverlayPage : UserControl
         }
         finally
         {
-            if (CompleteOpacityCommit(ref _opacityCommitQueued, ref _opacityCommitPending))
-                QueueClawHudOpacityCommit();
+            if (CompleteOpacityCommit(ref _opacityCommitQueued, ref _pendingOpacityCommitValue) is { } pendingValue)
+                _ = CommitClawHudOpacityAsync(pendingValue);
         }
     }
 
