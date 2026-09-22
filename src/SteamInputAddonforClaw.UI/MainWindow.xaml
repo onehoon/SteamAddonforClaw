@@ -34,6 +34,11 @@
                     <SymbolIcon Symbol="Contact" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="Overlay" Tag="Overlay">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="View" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem Content="How to Use" Tag="HowToUse">
                 <NavigationViewItem.Icon>
                     <SymbolIcon Symbol="Help" />
@@ -49,6 +54,8 @@
             <views:HowToUsePage x:Name="HowToUseContent" Visibility="Collapsed" />
 
             <views:ControllerPage x:Name="ControllerContent" Visibility="Collapsed" />
+
+            <views:OverlayPage x:Name="OverlayContent" Visibility="Collapsed" />
 
             <views:SettingsPage x:Name="SettingsContent" Visibility="Collapsed" />
 

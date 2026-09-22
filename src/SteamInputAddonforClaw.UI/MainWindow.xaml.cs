@@ -70,6 +70,7 @@ public sealed partial class MainWindow : Window
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
         ControllerContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
+        OverlayContent.Initialize(_frontend);
         // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
         // leaving the detail page mid-save and immediately toggling on the Controller page had no
         // ordering relationship between the two pages' independent RPCs, so either could land last
@@ -103,7 +104,7 @@ public sealed partial class MainWindow : Window
         RequestStatusRefresh();
         SettingsContent.RequestAppUpdateRefresh();
         SettingsContent.RequestSteamFseRefresh();
-        SettingsContent.RequestClawHudRefresh();
+        OverlayContent.RequestClawHudRefresh();
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args) => _frontend.StateInvalidated -= OnFrontendStateInvalidated;
@@ -228,6 +229,7 @@ public sealed partial class MainWindow : Window
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
         ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
+        OverlayContent.Visibility = page == MainNavigationPage.Overlay ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
@@ -245,6 +247,7 @@ public sealed partial class MainWindow : Window
         else if (wasDevice) DeviceContent.Deactivate();
         if (page == MainNavigationPage.Profile) ProfileContent.Activate();
         else if (wasProfile) ProfileContent.Deactivate();
+        if (page == MainNavigationPage.Overlay) OverlayContent.Activate();
         if (page == MainNavigationPage.ClawSensorProbe) ClawSensorProbeContent.Activate();
         else if (wasClawSensorProbe) ClawSensorProbeContent.Deactivate();
         if (page == MainNavigationPage.FanHardwareProbe) FanHardwareProbeContent.Activate();

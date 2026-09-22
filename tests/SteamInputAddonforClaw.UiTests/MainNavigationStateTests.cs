@@ -134,6 +134,16 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void Overlay_navigation_tag_opens_overlay_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.Overlay, navigation.SelectNavigationItem(false, "Overlay"));
+        Assert.Equal(MainNavigationPage.Overlay, navigation.CurrentPage);
+        Assert.Null(navigation.GetMouseBackDestination());
+    }
+
+    [Fact]
     public void Device_and_Profile_are_top_level_pages_with_no_mouse_back_destination()
     {
         // Work order PR277 section 14: Device/Profile are independent top-level pages, not child
