@@ -105,6 +105,19 @@ internal enum ClawHudWireBackgroundMode : byte
     ContentWidth = 2,
 }
 
+internal enum ClawHudWireIntelVrrStatus : byte
+{
+    Disabled = 1,
+    Unavailable = 2,
+    UnsupportedPanel = 3,
+    AmbiguousDisplay = 4,
+    AlreadyCorrect = 5,
+    SkippedUserProfile = 6,
+    Applied = 7,
+    ApplyFailed = 8,
+    VerificationFailed = 9,
+}
+
 internal sealed record ClawHudControlRequest(
     ClawHudControlOperation Operation,
     uint RequestId,
@@ -133,7 +146,7 @@ internal sealed record ClawHudSettingsSnapshot(
     ClawHudIntelVrrResult? IntelVrrLastResult);
 
 internal sealed record ClawHudIntelVrrResult(
-    byte Status,
+    ClawHudWireIntelVrrStatus Status,
     string PanelName,
     string RangeBefore,
     string RangeAfter,

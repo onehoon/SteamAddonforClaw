@@ -45,6 +45,40 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
     }
 
     [Fact]
+    public void AuthoritativeRefreshKeepsTheSelectedClawHudRow()
+    {
+        var state = new OverlayTabState();
+        const int clawHudRowCount = 3;
+        const int alignmentRowIndex = 1;
+        var rows = Enumerable.Range(0, clawHudRowCount + state.Order.Count)
+            .Select(_ => Selectable())
+            .ToArray();
+        var selection = new OverlayRowSelection();
+        selection.SetRows(rows, preferredIndex: alignmentRowIndex);
+
+        var previousOrder = state.Order.ToArray();
+        IReadOnlyList<AddonQuickSettingsTabId> proposed =
+        [
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
+        ];
+
+        Assert.True(state.TryApplyOrder(proposed));
+
+        var preferredIndex = OverlayWindow.ResolvePreferredSettingRowIndex(
+            selection.SelectedIndex,
+            clawHudRowCount,
+            previousOrder,
+            state.Order);
+        selection.SetRows(rows, preferredIndex);
+
+        Assert.Equal(alignmentRowIndex, selection.SelectedIndex);
+    }
+
+    [Fact]
     public void NextShowStillSelectsTheNewFirstAuthoritativeTab()
     {
         var state = new OverlayTabState();

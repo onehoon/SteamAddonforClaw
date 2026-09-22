@@ -32,11 +32,13 @@ internal static class OverlayTransportProtocol
     // fail the handshake rather than send complete-order requests to the new Runtime seam.
     // Version 9: shared Quick Settings rows carry renderer-only Visible metadata for current
     // AC/DC projection. Hidden rows remain in the authoritative page and grouped drafts.
-    internal const int CurrentVersion = 9;
+    // Version 10 (CH-A3): adds Runtime-owned ClawHUD snapshot publication and correlated
+    // top-level/nested ClawHUD mutations. A v9 peer must fail the handshake; no compatibility shim.
+    internal const int CurrentVersion = 10;
     internal const int MaxFrameBytes = 64 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult }
 internal enum OverlayCommand { Show, Hide, Shutdown }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
@@ -53,6 +55,9 @@ internal sealed record OverlayQuickSettingsMutationRequest(long RequestId, Quick
 /// of <see cref="QuickSettingsMutationResult"/>'s own Succeeded/FailureMessage shape.</summary>
 internal sealed record OverlayQuickSettingsMutationResponse(long RequestId, QuickSettingsMutationResult? Result = null, string? Error = null);
 
+internal sealed record OverlayClawHudMutationRequest(long RequestId, bool? Enabled = null, FrontendClawHudMutationIntent? Intent = null);
+internal sealed record OverlayClawHudMutationResponse(long RequestId, FrontendClawHudMutationResult? Result = null, string? Error = null);
+
 internal sealed record OverlayWireMessage(
     int ProtocolVersion,
     OverlayWireMessageKind Kind,
@@ -65,7 +70,10 @@ internal sealed record OverlayWireMessage(
     AddonQuickSettingsTabOrderMutationResult? TabOrderMutationResult = null,
     QuickSettingsPageSnapshot? QuickSettingsPage = null,
     OverlayQuickSettingsMutationRequest? QuickSettingsMutationRequest = null,
-    OverlayQuickSettingsMutationResponse? QuickSettingsMutationResponse = null);
+    OverlayQuickSettingsMutationResponse? QuickSettingsMutationResponse = null,
+    FrontendClawHudSnapshot? ClawHudState = null,
+    OverlayClawHudMutationRequest? ClawHudMutationRequest = null,
+    OverlayClawHudMutationResponse? ClawHudMutationResponse = null);
 
 /// <summary>SF-V2-06 section 10/11: the Overlay transport's own job is only wire-structural safety --
 /// "is this a closed Quick Settings message that can be handed to the shared adapter without a
@@ -192,6 +200,9 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     // admitted" and invokes zero Runtime operations. The delegate itself owns admission
     // (_overlayCaptureActive/shutdown/page-scope) -- this class only adds its own Ready/Visible check.
     private readonly Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? _mutateQuickSettings;
+    private readonly Func<CancellationToken, Task<FrontendClawHudSnapshot>> _captureClawHud;
+    private readonly Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
+    private readonly Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _commandGate = new(1, 1);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -211,18 +222,25 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     internal NamedPipeOverlayServer(string pipeName,
         Func<CancellationToken, Task<AddonQuickSettingsTabOrderSnapshot>>? captureTabOrder = null,
         Func<AddonQuickSettingsTabOrderMoveIntent, CancellationToken, Task<AddonQuickSettingsTabOrderMutationResult>>? moveTabOrder = null,
-        Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? mutateQuickSettings = null)
+        Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? mutateQuickSettings = null,
+        Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null,
+        Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null,
+        Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null)
         : this(pipeName, () => new NamedPipeServerStream(
             pipeName,
             PipeDirection.InOut,
             1,
             PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly), captureTabOrder, moveTabOrder, mutateQuickSettings) { }
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly), captureTabOrder, moveTabOrder, mutateQuickSettings,
+            captureClawHud, setClawHudEnabled, mutateClawHudSetting) { }
 
     internal NamedPipeOverlayServer(string pipeName, Func<NamedPipeServerStream> pipeFactory,
         Func<CancellationToken, Task<AddonQuickSettingsTabOrderSnapshot>>? captureTabOrder = null,
         Func<AddonQuickSettingsTabOrderMoveIntent, CancellationToken, Task<AddonQuickSettingsTabOrderMutationResult>>? moveTabOrder = null,
-        Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? mutateQuickSettings = null)
+        Func<QuickSettingsMutationIntent, CancellationToken, Task<QuickSettingsMutationResult>>? mutateQuickSettings = null,
+        Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null,
+        Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null,
+        Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null)
     {
         _pipeName = pipeName;
         _pipeFactory = pipeFactory;
@@ -230,6 +248,9 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         _moveTabOrder = moveTabOrder ?? ((_, _) => Task.FromResult(new AddonQuickSettingsTabOrderMutationResult(
             false, "Tab order is unavailable.", AddonQuickSettingsTabOrderSnapshot.Unavailable())));
         _mutateQuickSettings = mutateQuickSettings;
+        _captureClawHud = captureClawHud ?? (_ => Task.FromResult(FrontendClawHudSnapshot.Unavailable(false, "HUD settings are unavailable.")));
+        _setClawHudEnabled = setClawHudEnabled;
+        _mutateClawHudSetting = mutateClawHudSetting;
     }
 
     internal bool IsReady { get { lock (_sync) return _readyState; } }
@@ -331,6 +352,29 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
             await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.QuickSettingsPageState, QuickSettingsPage: page), _writeGate, linked.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
+        {
+            return false;
+        }
+    }
+
+    internal async Task<bool> SendClawHudStateAsync(FrontendClawHudSnapshot state, CancellationToken token = default)
+    {
+        NamedPipeServerStream? pipe;
+        lock (_sync)
+        {
+            if (!_readyState || _state != OverlayState.Visible) return false;
+            pipe = _activePipe;
+        }
+        if (pipe is null) return false;
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ClawHudState, ClawHudState: state),
+                _writeGate, linked.Token).ConfigureAwait(false);
             return true;
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
@@ -442,7 +486,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
             if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                 throw new FrontendProtocolException("Invalid Overlay state message.");
 
-            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null)
+            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null)
             {
                 DismissRequested?.Invoke(this);
                 continue;
@@ -450,7 +494,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             if (message.Kind == OverlayWireMessageKind.TabOrderMoveRequest)
             {
-                if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderMove) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null)
+                if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderMove) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null)
                     throw new FrontendProtocolException("Invalid Overlay tab-order move message.");
                 _ = HandleTabOrderMoveRequestAsync(pipe, message.TabOrderMove!, connection.Token);
                 continue;
@@ -458,7 +502,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             if (message.Kind == OverlayWireMessageKind.QuickSettingsMutationRequest)
             {
-                if (message.QuickSettingsMutationRequest is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationResponse is not null)
+                if (message.QuickSettingsMutationRequest is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null)
                     throw new FrontendProtocolException("Invalid Overlay Quick Settings mutation request.");
                 var request = message.QuickSettingsMutationRequest;
                 if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(request))
@@ -470,6 +514,14 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 // operation and resume reading immediately; the response is written later through the
                 // shared _writeGate.
                 _ = HandleQuickSettingsMutationRequestAsync(pipe, request, connection.Token);
+                continue;
+            }
+
+            if (message.Kind == OverlayWireMessageKind.ClawHudMutationRequest)
+            {
+                if (message.ClawHudMutationRequest is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationResponse is not null)
+                    throw new FrontendProtocolException("Invalid Overlay ClawHUD mutation request.");
+                _ = HandleClawHudMutationRequestAsync(pipe, message.ClawHudMutationRequest, connection.Token);
                 continue;
             }
 
@@ -547,6 +599,49 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         catch { /* connection torn down or disposed while this ran -- there is nothing left to notify */ }
     }
 
+    private async Task HandleClawHudMutationRequestAsync(Stream pipe, OverlayClawHudMutationRequest request, CancellationToken token)
+    {
+        try
+        {
+            bool admitted;
+            lock (_sync) admitted = _readyState && _state == OverlayState.Visible;
+            var hasEnabled = request.Enabled is not null;
+            var hasIntent = request.Intent is not null;
+            FrontendClawHudMutationResult result;
+            if (request.RequestId > 0 && hasEnabled ^ hasIntent && admitted)
+            {
+                try
+                {
+                    result = hasEnabled
+                        ? _setClawHudEnabled is null
+                            ? FrontendClawHudMutationResult.Failed(await CaptureClawHudSafelyAsync(token).ConfigureAwait(false), "ClawHUD enablement is unavailable.")
+                            : new(true, null, await _setClawHudEnabled(request.Enabled!.Value, token).ConfigureAwait(false))
+                        : _mutateClawHudSetting is null
+                            ? FrontendClawHudMutationResult.Failed(await CaptureClawHudSafelyAsync(token).ConfigureAwait(false), "ClawHUD settings are unavailable.")
+                            : await _mutateClawHudSetting(request.Intent!, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+                catch { result = FrontendClawHudMutationResult.Failed(await CaptureClawHudSafelyAsync(token).ConfigureAwait(false), "ClawHUD update failed."); }
+            }
+            else
+            {
+                result = FrontendClawHudMutationResult.Failed(await CaptureClawHudSafelyAsync(token).ConfigureAwait(false), admitted ? "Invalid ClawHUD mutation request." : "The Overlay is not visible.");
+            }
+
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ClawHudMutationResult,
+                    ClawHudMutationResponse: new OverlayClawHudMutationResponse(request.RequestId, Result: result)),
+                _writeGate, token).ConfigureAwait(false);
+        }
+        catch { }
+    }
+
+    private async Task<FrontendClawHudSnapshot> CaptureClawHudSafelyAsync(CancellationToken token)
+    {
+        try { return await _captureClawHud(token).ConfigureAwait(false); }
+        catch { return FrontendClawHudSnapshot.Unavailable(false, "HUD settings are unavailable."); }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
@@ -576,6 +671,11 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     private long _quickSettingsRequestSequence;
     private long _pendingQuickSettingsRequestId;
     private TaskCompletionSource<OverlayQuickSettingsMutationResponse>? _pendingQuickSettingsMutation;
+    private readonly SemaphoreSlim _clawHudMutationGate = new(1, 1);
+    private readonly object _clawHudMutationSync = new();
+    private long _clawHudRequestSequence;
+    private long _pendingClawHudRequestId;
+    private TaskCompletionSource<OverlayClawHudMutationResponse>? _pendingClawHudMutation;
     private readonly SemaphoreSlim _tabOrderMoveGate = new(1, 1);
     private readonly object _tabOrderMoveSync = new();
     private TaskCompletionSource<AddonQuickSettingsTabOrderMutationResult>? _pendingTabOrderMove;
@@ -595,13 +695,22 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         Func<OverlayNavigationAction, Task>? navigationHandler,
         Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
         CancellationToken token = default)
-        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, null, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(
         Func<OverlayCommand, Task> commandHandler,
         Func<OverlayNavigationAction, Task>? navigationHandler,
         Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
         Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
+        CancellationToken token = default)
+        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, quickSettingsPageHandler, null, token).ConfigureAwait(false);
+
+    internal async Task RunAsync(
+        Func<OverlayCommand, Task> commandHandler,
+        Func<OverlayNavigationAction, Task>? navigationHandler,
+        Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
+        Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
+        Func<FrontendClawHudSnapshot, Task>? clawHudHandler,
         CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -654,7 +763,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
             }
             if (message.Kind == OverlayWireMessageKind.QuickSettingsPageState)
             {
-                if (message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null)
+                if (message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null)
                     throw new FrontendProtocolException("Invalid Overlay Quick Settings page message.");
                 // Section 11: fail closed on a malformed outbound page frame rather than pass null
                 // collections into the future SF-V2-07 renderer.
@@ -664,9 +773,17 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     await quickSettingsPageHandler(message.QuickSettingsPage!).ConfigureAwait(false);
                 continue;
             }
+            if (message.Kind == OverlayWireMessageKind.ClawHudState)
+            {
+                if (message.ClawHudState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || !IsStructurallyValid(message.ClawHudState))
+                    throw new FrontendProtocolException("Invalid Overlay ClawHUD state message.");
+                if (clawHudHandler is not null)
+                    await clawHudHandler(message.ClawHudState).ConfigureAwait(false);
+                continue;
+            }
             if (message.Kind == OverlayWireMessageKind.QuickSettingsMutationResult)
             {
-                if (message.QuickSettingsMutationResponse is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null)
+                if (message.QuickSettingsMutationResponse is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null)
                     throw new FrontendProtocolException("Invalid Overlay Quick Settings mutation result.");
                 // Section 23.9: only complete the CURRENT pending request. A late result whose id was
                 // superseded by a newer send must never complete that newer request.
@@ -674,6 +791,16 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 lock (_quickSettingsMutationSync)
                     pending = message.QuickSettingsMutationResponse.RequestId == _pendingQuickSettingsRequestId ? _pendingQuickSettingsMutation : null;
                 pending?.TrySetResult(message.QuickSettingsMutationResponse);
+                continue;
+            }
+            if (message.Kind == OverlayWireMessageKind.ClawHudMutationResult)
+            {
+                if (!ValidateClawHudMutationResult(message))
+                    throw new FrontendProtocolException("Invalid Overlay ClawHUD mutation result.");
+                TaskCompletionSource<OverlayClawHudMutationResponse>? pending;
+                lock (_clawHudMutationSync)
+                    pending = message.ClawHudMutationResponse!.RequestId == _pendingClawHudRequestId ? _pendingClawHudMutation : null;
+                pending?.TrySetResult(message.ClawHudMutationResponse);
                 continue;
             }
             if (message.Kind != OverlayWireMessageKind.Command || message.Command is null || message.Navigation is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null)
@@ -705,6 +832,40 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         if (message.TabOrderMutationResult is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null)
             return false;
         return OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderMutationResult.State);
+    }
+
+    private static bool IsStructurallyValid(FrontendClawHudSnapshot snapshot)
+    {
+        if (!Enum.IsDefined(snapshot.RuntimeState)) return false;
+        var settings = snapshot.Settings;
+        if (settings is null) return true;
+        return Enum.IsDefined(settings.DisplayMode)
+            && settings.HudSizeOffset is >= -2 and <= 2
+            && Enum.IsDefined(settings.Font)
+            && Enum.IsDefined(settings.Alignment)
+            && Enum.IsDefined(settings.BackgroundMode)
+            && settings.BackgroundOpacityPercent is >= 50 and <= 100
+            && settings.BackgroundOpacityPercent % 5 == 0
+            && (!settings.IntelVrrRangeFixEnabled || settings.IntelVrrLastResult is null || Enum.IsDefined(settings.IntelVrrLastResult.Status));
+    }
+
+    private static bool ValidateClawHudMutationResult(OverlayWireMessage message)
+    {
+        var response = message.ClawHudMutationResponse;
+        return response is { RequestId: > 0, Result: { Snapshot: { } snapshot } }
+            && message.Command is null
+            && message.Navigation is null
+            && message.State is null
+            && message.Error is null
+            && message.TabOrderState is null
+            && message.TabOrderMove is null
+            && message.TabOrderMutationResult is null
+            && message.QuickSettingsPage is null
+            && message.QuickSettingsMutationRequest is null
+            && message.QuickSettingsMutationResponse is null
+            && message.ClawHudState is null
+            && message.ClawHudMutationRequest is null
+            && IsStructurallyValid(snapshot);
     }
 
     // PR3: one typed move at a time; the Runtime result contains the authoritative readback.
@@ -763,6 +924,41 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         }
     }
 
+    internal Task<FrontendClawHudMutationResult> SendClawHudEnabledAsync(bool enabled, CancellationToken token = default) =>
+        SendClawHudMutationCoreAsync(new OverlayClawHudMutationRequest(0, Enabled: enabled), token);
+
+    internal Task<FrontendClawHudMutationResult> SendClawHudMutationAsync(FrontendClawHudMutationIntent intent, CancellationToken token = default)
+    {
+        if (!intent.TryValidate(out var failureMessage))
+            throw new FrontendProtocolException(failureMessage ?? "Invalid ClawHUD setting mutation.");
+        return SendClawHudMutationCoreAsync(new OverlayClawHudMutationRequest(0, Intent: intent), token);
+    }
+
+    private async Task<FrontendClawHudMutationResult> SendClawHudMutationCoreAsync(OverlayClawHudMutationRequest request, CancellationToken token)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
+        await _clawHudMutationGate.WaitAsync(token).ConfigureAwait(false);
+        var requestId = Interlocked.Increment(ref _clawHudRequestSequence);
+        try
+        {
+            var correlated = request with { RequestId = requestId };
+            var tcs = new TaskCompletionSource<OverlayClawHudMutationResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_clawHudMutationSync) { _pendingClawHudRequestId = requestId; _pendingClawHudMutation = tcs; }
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ClawHudMutationRequest, ClawHudMutationRequest: correlated),
+                _writeGate, linked.Token).ConfigureAwait(false);
+            var response = await tcs.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+            return response.Result ?? throw new FrontendProtocolException(response.Error ?? "Overlay ClawHUD mutation failed.");
+        }
+        finally
+        {
+            lock (_clawHudMutationSync) { if (_pendingClawHudRequestId == requestId) _pendingClawHudMutation = null; }
+            _clawHudMutationGate.Release();
+        }
+    }
+
     internal async Task SendDismissRequestedAsync(CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -778,6 +974,8 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
             _lifetime.Cancel();
             _pipe?.Dispose();
             _writeGate.Dispose();
+            _quickSettingsMutationGate.Dispose();
+            _clawHudMutationGate.Dispose();
             _tabOrderMoveGate.Dispose();
             _lifetime.Dispose();
         }

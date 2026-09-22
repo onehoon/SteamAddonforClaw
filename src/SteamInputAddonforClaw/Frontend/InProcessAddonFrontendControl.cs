@@ -80,6 +80,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly FrontendUpdateCoordinator? _updateCoordinator;
     private readonly Func<AcDcPowerSource?> _quickSettingsPowerSource;
     private readonly WindowsGamingHomeConfiguration _steamFse;
+    private readonly Func<CancellationToken, Task<FrontendClawHudSnapshot>>? _captureClawHud;
+    private readonly Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
+    private readonly Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -90,7 +93,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null, Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null, Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null, Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _centerMStartup = centerMStartup;
@@ -109,6 +112,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _batteryChargeLimitHardware = batteryChargeLimitHardware ?? (fanProbeTransport is null ? null : new MsiClawBatteryChargeLimitHardware(fanProbeTransport));
         _quickSettingsPowerSource = quickSettingsPowerSource ?? WindowsAcDcPowerSource.Read;
         _steamFse = steamFse ?? new WindowsGamingHomeConfiguration();
+        _captureClawHud = captureClawHud;
+        _setClawHudEnabled = setClawHudEnabled;
+        _mutateClawHudSetting = mutateClawHudSetting;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -126,6 +132,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     public event EventHandler? StateInvalidated;
+
+    internal void NotifyStateInvalidated() => StateInvalidated?.Invoke(this, EventArgs.Empty);
 
     public async Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default)
     {
@@ -363,6 +371,37 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var result = _steamFse.SetEnabled(enabled);
         if (result.Succeeded) StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(result);
+    }
+
+    public async Task<FrontendClawHudSnapshot> CaptureClawHudAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return _captureClawHud is null
+            ? new FrontendClawHudSnapshot(false, FrontendClawHudRuntimeState.Disabled, "HUD is unavailable.", null, null, null)
+            : await _captureClawHud(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<FrontendClawHudSnapshot> SetClawHudEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var snapshot = _setClawHudEnabled is null
+            ? new FrontendClawHudSnapshot(enabled, enabled ? FrontendClawHudRuntimeState.Unavailable : FrontendClawHudRuntimeState.Disabled,
+                enabled ? "HUD is unavailable." : "Off", null, null, null)
+            : await _setClawHudEnabled(enabled, cancellationToken).ConfigureAwait(false);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return snapshot;
+    }
+
+    public async Task<FrontendClawHudMutationResult> MutateClawHudSettingAsync(FrontendClawHudMutationIntent intent, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var result = _mutateClawHudSetting is null
+            ? new FrontendClawHudMutationResult(false, "HUD settings are unavailable.",
+                new FrontendClawHudSnapshot(true, FrontendClawHudRuntimeState.Unavailable, "HUD settings are unavailable.", null, null, null))
+            : await _mutateClawHudSetting(intent, cancellationToken).ConfigureAwait(false);
+        if (result.Succeeded && intent.Kind != FrontendClawHudMutationKind.PreviewOpacity)
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return result;
     }
 
     public async Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default)

@@ -22,6 +22,8 @@ public partial class App : Application
         _window = new OverlayWindow();
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
         _window.TabOrderMoveRequested += OnTabOrderMoveRequested;
+        _window.ClawHudEnabledRequested += OnClawHudEnabledRequested;
+        _window.ClawHudSettingMutationRequested += OnClawHudSettingMutationRequested;
         OverlayLog.Info("App", "OverlayWindow constructed.", ("Hwnd", _window.HandleForDiagnostics));
         _window.Closed += (_, _) => { OverlayLog.Info("Window", "Closed received."); Exit(); };
         OverlayLog.Info("Window", "Initial hidden preparation started.");
@@ -66,7 +68,7 @@ public partial class App : Application
             // Profile bindings receive only this narrow mutation delegate, never the client itself.
             _window?.ConfigureQuickSettings(intent => _client.SendQuickSettingsMutationAsync(intent));
             OverlayLog.Info("Transport", "Overlay command loop starting.");
-            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleQuickSettingsPageAsync).ConfigureAwait(false);
+            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleQuickSettingsPageAsync, HandleClawHudAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -134,8 +136,71 @@ public partial class App : Application
         return completion.Task;
     }
 
+    private Task HandleClawHudAsync(FrontendClawHudSnapshot snapshot)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                _window?.ApplyClawHudSnapshot(snapshot);
+                completion.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                OverlayLog.Error("ClawHUD", "Applying the ClawHUD state failed.", exception);
+                completion.TrySetException(exception);
+            }
+        }))
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for ClawHUD state application."));
+        return completion.Task;
+    }
+
     // PR3: forward the typed move and apply only the authoritative mutation result.
     private void OnTabOrderMoveRequested(AddonQuickSettingsTabOrderMoveIntent intent) => _ = SendTabOrderMoveAsync(intent);
+
+    private void OnClawHudEnabledRequested(bool enabled) => _ = SendClawHudEnabledAsync(enabled);
+
+    private void OnClawHudSettingMutationRequested(FrontendClawHudMutationIntent intent) => _ = SendClawHudSettingAsync(intent);
+
+    private async Task SendClawHudEnabledAsync(bool enabled)
+    {
+        try
+        {
+            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+            var result = await _client.SendClawHudEnabledAsync(enabled).ConfigureAwait(false);
+            ApplyClawHudMutationResult(result);
+        }
+        catch (Exception exception) { ApplyClawHudFailure(exception.Message); }
+    }
+
+    private async Task SendClawHudSettingAsync(FrontendClawHudMutationIntent intent)
+    {
+        try
+        {
+            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+            var result = await _client.SendClawHudMutationAsync(intent).ConfigureAwait(false);
+            ApplyClawHudMutationResult(result);
+        }
+        catch (Exception exception) { ApplyClawHudFailure(exception.Message); }
+    }
+
+    private void ApplyClawHudMutationResult(FrontendClawHudMutationResult result)
+    {
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            _window?.ApplyClawHudSnapshot(result.Snapshot);
+            if (!result.Succeeded)
+                _window?.ApplyClawHudFailure(result.FailureMessage ?? "ClawHUD update failed.");
+        }))
+            OverlayLog.Warn("ClawHUD", "Could not enqueue authoritative ClawHUD mutation result.");
+    }
+
+    private void ApplyClawHudFailure(string message)
+    {
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() => _window?.ApplyClawHudFailure(message)))
+            OverlayLog.Warn("ClawHUD", "Could not enqueue ClawHUD failure state.");
+    }
 
     private async Task SendTabOrderMoveAsync(AddonQuickSettingsTabOrderMoveIntent intent)
     {

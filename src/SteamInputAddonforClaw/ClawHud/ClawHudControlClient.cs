@@ -9,6 +9,14 @@ internal interface IClawHudControlClient
     Task<ClawHudControlResult<ClawHudRuntimeInfo>> GetRuntimeInfoAsync(CancellationToken cancellationToken = default);
     Task<ClawHudControlResult<ClawHudSettingsSnapshot>> GetSettingsSnapshotAsync(CancellationToken cancellationToken = default);
     Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudVisibilityModeAsync(ClawHudWireVisibilityMode mode, CancellationToken cancellationToken = default);
+    Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudSizeOffsetAsync(int offset, CancellationToken cancellationToken = default);
+    Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudFontAsync(ClawHudWireFont font, CancellationToken cancellationToken = default);
+    Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudAlignmentAsync(ClawHudWireAlignment alignment, CancellationToken cancellationToken = default);
+    Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudBackgroundModeAsync(ClawHudWireBackgroundMode mode, CancellationToken cancellationToken = default);
+    Task<ClawHudControlResult<ClawHudSettingsSnapshot>> PreviewHudOpacityAsync(ushort opacityPercent, CancellationToken cancellationToken = default);
+    Task<ClawHudControlResult<ClawHudSettingsSnapshot>> CommitHudOpacityAsync(ushort opacityPercent, CancellationToken cancellationToken = default);
+    Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetIntelVrrRangeFixEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<ClawHudControlResult<ClawHudUnit>> RequestShutdownAsync(CancellationToken cancellationToken = default);
 }
 
@@ -33,6 +41,30 @@ internal sealed class ClawHudControlClient : IClawHudControlClient
 
     public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         ExecuteAsync(ClawHudControlOperation.SetHudEnabled, id => new(ClawHudControlOperation.SetHudEnabled, id, Flag: enabled), r => r.Snapshot, cancellationToken);
+
+    public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudVisibilityModeAsync(ClawHudWireVisibilityMode mode, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(ClawHudControlOperation.SetHudVisibilityMode, id => new(ClawHudControlOperation.SetHudVisibilityMode, id, WireEnum: (byte)mode), r => r.Snapshot, cancellationToken);
+
+    public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudSizeOffsetAsync(int offset, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(ClawHudControlOperation.SetHudSizeOffset, id => new(ClawHudControlOperation.SetHudSizeOffset, id, SizeOffset: offset), r => r.Snapshot, cancellationToken);
+
+    public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudFontAsync(ClawHudWireFont font, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(ClawHudControlOperation.SetHudFont, id => new(ClawHudControlOperation.SetHudFont, id, WireEnum: (byte)font), r => r.Snapshot, cancellationToken);
+
+    public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudAlignmentAsync(ClawHudWireAlignment alignment, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(ClawHudControlOperation.SetHudAlignment, id => new(ClawHudControlOperation.SetHudAlignment, id, WireEnum: (byte)alignment), r => r.Snapshot, cancellationToken);
+
+    public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetHudBackgroundModeAsync(ClawHudWireBackgroundMode mode, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(ClawHudControlOperation.SetHudBackgroundMode, id => new(ClawHudControlOperation.SetHudBackgroundMode, id, WireEnum: (byte)mode), r => r.Snapshot, cancellationToken);
+
+    public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> PreviewHudOpacityAsync(ushort opacityPercent, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(ClawHudControlOperation.PreviewHudOpacity, id => new(ClawHudControlOperation.PreviewHudOpacity, id, OpacityPercent: opacityPercent), r => r.Snapshot, cancellationToken);
+
+    public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> CommitHudOpacityAsync(ushort opacityPercent, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(ClawHudControlOperation.CommitHudOpacity, id => new(ClawHudControlOperation.CommitHudOpacity, id, OpacityPercent: opacityPercent), r => r.Snapshot, cancellationToken);
+
+    public Task<ClawHudControlResult<ClawHudSettingsSnapshot>> SetIntelVrrRangeFixEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(ClawHudControlOperation.SetIntelVrrRangeFixEnabled, id => new(ClawHudControlOperation.SetIntelVrrRangeFixEnabled, id, Flag: enabled), r => r.Snapshot, cancellationToken);
 
     public Task<ClawHudControlResult<ClawHudUnit>> RequestShutdownAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync(ClawHudControlOperation.RequestShutdown, id => new(ClawHudControlOperation.RequestShutdown, id), r => r.EmptySuccess ? new ClawHudUnit() : null, cancellationToken);

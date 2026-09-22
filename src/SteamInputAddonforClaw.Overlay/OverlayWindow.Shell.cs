@@ -88,7 +88,7 @@ public sealed partial class OverlayWindow
     // its OQ5-UI-01 placeholder with zero selectable rows.
     private FrameworkElement BuildPage(AddonQuickSettingsTabId id, List<OverlayRow> rows) => id switch
     {
-        AddonQuickSettingsTabId.Setting => BuildTabOrderEditorPage(rows),
+        AddonQuickSettingsTabId.Setting => BuildSettingPage(rows),
         AddonQuickSettingsTabId.Shortcut => BuildShortcutPage(),
         AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
         AddonQuickSettingsTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile),
@@ -247,10 +247,9 @@ public sealed partial class OverlayWindow
     {
         // Capture the Setting-editor row identity selected right now (before the order changes) so a
         // live reorder preserves the selected tab rather than the old numeric row slot.
-        AddonQuickSettingsTabId? selectedEditorTab = null;
         var settingVisible = _tabState.SelectedTab == AddonQuickSettingsTabId.Setting;
-        if (settingVisible && _rowSelection.SelectedIndex is { } selected && selected >= 0 && selected < _tabState.Order.Count)
-            selectedEditorTab = _tabState.Order[selected];
+        var selectedSettingIndex = settingVisible ? _rowSelection.SelectedIndex : null;
+        var previousOrder = _tabState.Order;
 
         if (!state.Available || state.Rows.Count != 5)
         {
@@ -290,9 +289,9 @@ public sealed partial class OverlayWindow
         // Rebuild the Setting page's ordered row list so CapabilitiesFor(Setting) / the selection
         // model see the authoritative order. The AddonQuickSettingsTabOrderRow instances are reused.
         if (_tabOrderRows.Count == applied.Count)
-            _pageRows[AddonQuickSettingsTabId.Setting] = applied
+            _pageRows[AddonQuickSettingsTabId.Setting] = _clawHudRows.Concat(applied
                 .Select(id => new OverlayRow(_tabOrderRows[id].Container, _tabOrderRows[id].Capabilities))
-                .ToArray();
+                .ToArray()).ToArray();
 
         ApplySelectedHeaderVisual();
 
@@ -301,15 +300,53 @@ public sealed partial class OverlayWindow
         // (which would reset body scroll and selection).
         if (settingVisible)
         {
-            int? preferredIndex = null;
-            if (selectedEditorTab is { } tab)
-                for (var i = 0; i < applied.Count; i++)
-                    if (applied[i] == tab) { preferredIndex = i; break; }
+            var preferredIndex = ResolvePreferredSettingRowIndex(
+                selectedSettingIndex,
+                _clawHudRows.Count,
+                previousOrder,
+                applied);
             _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
             ApplyRowSelectionVisual();
         }
 
         OverlayLog.Info("Shell", "Authoritative Overlay tab order applied.", ("SelectedTab", _tabState.SelectedTab));
+    }
+
+    // Keep the ClawHUD rows anchored by their local index and remap only tab-order rows by identity.
+    // This is a pure calculation so the selection contract can be regression-tested without a XAML
+    // host. A selected ClawHUD row must not be treated as an invalid tab-order index.
+    internal static int? ResolvePreferredSettingRowIndex(
+        int? selectedSettingIndex,
+        int clawHudRowCount,
+        IReadOnlyList<AddonQuickSettingsTabId> previousOrder,
+        IReadOnlyList<AddonQuickSettingsTabId> appliedOrder)
+    {
+        AddonQuickSettingsTabId? selectedEditorTab = null;
+        if (selectedSettingIndex is { } selected &&
+            selected >= clawHudRowCount &&
+            selected - clawHudRowCount < previousOrder.Count)
+        {
+            selectedEditorTab = previousOrder[selected - clawHudRowCount];
+        }
+
+        int? preferredIndex =
+            selectedSettingIndex is { } index && index >= 0 && index < clawHudRowCount
+                ? index
+                : null;
+
+        if (selectedEditorTab is { } tab)
+        {
+            for (var i = 0; i < appliedOrder.Count; i++)
+            {
+                if (appliedOrder[i] == tab)
+                {
+                    preferredIndex = clawHudRowCount + i;
+                    break;
+                }
+            }
+        }
+
+        return preferredIndex;
     }
 
     private void ApplySelectedHeaderVisual()

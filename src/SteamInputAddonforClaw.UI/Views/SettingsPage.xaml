@@ -34,6 +34,47 @@
                 <ToggleSwitch x:Name="QuickSettingsPowerSourceToggleSwitch" Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsExpander x:Name="ClawHudExpander" Header="ClawHUD">
+                <ctcontrols:SettingsExpander.HeaderIcon>
+                    <SymbolIcon Symbol="Setting" />
+                </ctcontrols:SettingsExpander.HeaderIcon>
+                <StackPanel Spacing="10" Padding="12,4,12,12">
+                    <TextBlock x:Name="ClawHudStatusText" TextWrapping="Wrap" />
+                    <ToggleSwitch x:Name="ClawHudEnabledToggleSwitch" Header="Enable HUD" Toggled="ClawHudEnabledToggleSwitch_Toggled" />
+                    <Button x:Name="ClawHudRetryButton" Content="Retry" Click="ClawHudRetryButton_Click" />
+                    <ComboBox x:Name="ClawHudDisplayModeComboBox" Header="Display Mode" SelectionChanged="ClawHudDisplayModeComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Always" />
+                        <ComboBoxItem Content="In game only" />
+                    </ComboBox>
+                    <ComboBox x:Name="ClawHudSizeComboBox" Header="HUD Size" SelectionChanged="ClawHudSizeComboBox_SelectionChanged">
+                        <ComboBoxItem Content="-2" />
+                        <ComboBoxItem Content="-1" />
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="+1" />
+                        <ComboBoxItem Content="+2" />
+                    </ComboBox>
+                    <ComboBox x:Name="ClawHudFontComboBox" Header="Font" SelectionChanged="ClawHudFontComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Unispace" />
+                        <ComboBoxItem Content="Segoe UI Variable" />
+                    </ComboBox>
+                    <ComboBox x:Name="ClawHudAlignmentComboBox" Header="Alignment" SelectionChanged="ClawHudAlignmentComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Left" />
+                        <ComboBoxItem Content="Center" />
+                        <ComboBoxItem Content="Right" />
+                    </ComboBox>
+                    <ComboBox x:Name="ClawHudBackgroundComboBox" Header="Background" SelectionChanged="ClawHudBackgroundComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Full width" />
+                        <ComboBoxItem Content="Content width" />
+                    </ComboBox>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Background Opacity" />
+                        <Slider x:Name="ClawHudOpacitySlider" Minimum="50" Maximum="100" StepFrequency="5" ValueChanged="ClawHudOpacitySlider_ValueChanged" PointerReleased="ClawHudOpacitySlider_PointerReleased" PointerCaptureLost="ClawHudOpacitySlider_PointerCaptureLost" />
+                    </StackPanel>
+                    <ToggleSwitch x:Name="ClawHudIntelVrrToggleSwitch" Header="Intel VRR Range Fix" Toggled="ClawHudIntelVrrToggleSwitch_Toggled" />
+                    <TextBlock x:Name="ClawHudVrrResultText" TextWrapping="Wrap" Opacity="0.75" />
+                </StackPanel>
+            </ctcontrols:SettingsExpander>
+
             <ctcontrols:SettingsCard
                 x:Name="EnterBiosCard"
                 Description="Restart the device and open BIOS settings."
