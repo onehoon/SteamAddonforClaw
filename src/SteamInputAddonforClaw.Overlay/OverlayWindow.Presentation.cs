@@ -10,6 +10,8 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow
 {
+    private const double SurfaceMaxWidthDip = 960.0;
+    private const double SurfaceHorizontalInsetDip = 32.0;
     private const float HiddenScale = 0.98f;
     private const float HiddenTranslateYDip = 8.0f;
     private const double HiddenOpacity = 0.90;
@@ -18,6 +20,12 @@ public sealed partial class OverlayWindow
     private uint _lastConfiguredDpi;
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
+
+    private void OnSurfaceHostSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        var availableWidth = Math.Max(0.0, args.NewSize.Width - SurfaceHorizontalInsetDip);
+        OpaquePanel.Width = Math.Min(SurfaceMaxWidthDip, availableWidth);
+    }
 
     internal void PrepareHidden() => ConfigureWindow();
 

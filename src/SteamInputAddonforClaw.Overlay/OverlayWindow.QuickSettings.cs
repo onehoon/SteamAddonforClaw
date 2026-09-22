@@ -7,6 +7,23 @@ using SteamInputAddonforClaw.Overlay.Diagnostics;
 
 namespace SteamInputAddonforClaw.Overlay;
 
+internal static class OverlayQuickSettingsSectionRendering
+{
+    internal static bool TryGetFeatureHeaderToggle(QuickSettingsSection section, out QuickSettingsRow toggleRow)
+    {
+        toggleRow = null!;
+        if (string.IsNullOrWhiteSpace(section.Label)) return false;
+
+        var firstVisibleRow = section.Rows.FirstOrDefault(row => row.Visible);
+        if (firstVisibleRow is null || firstVisibleRow.ControlKind != QuickSettingsControlKind.Toggle ||
+            !QuickSettingsRowRendering.IsWellFormed(firstVisibleRow))
+            return false;
+
+        toggleRow = firstVisibleRow;
+        return true;
+    }
+}
+
 public sealed partial class OverlayWindow
 {
     // The flattened structural/rendering identity of a last-rendered Quick Settings page. Equal
@@ -253,19 +270,33 @@ public sealed partial class OverlayWindow
                 if (visibleRows.Length == 0) continue;
 
                 var sectionPanel = new StackPanel { Spacing = 5 };
-                if (!string.IsNullOrEmpty(section.Label))
+                var usesFeatureHeader = OverlayQuickSettingsSectionRendering.TryGetFeatureHeaderToggle(section, out var featureHeaderToggle);
+                if (!usesFeatureHeader && !string.IsNullOrEmpty(section.Label))
                     sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Label, "BodyStrongTextBlockStyle"));
                 if (!string.IsNullOrEmpty(section.Message))
                     sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Message, "CaptionTextBlockStyle"));
 
                 var rowStack = new StackPanel { Spacing = 4 };
-                foreach (var row in visibleRows)
+                if (usesFeatureHeader && TryCreateQuickSettingsRow(surface, featureHeaderToggle, out var headerRow, section.Label))
+                {
+                    rows.Add(headerRow);
+                    RegisterRowPointerSelection(headerRow.Container);
+                    rowStack.Children.Add(headerRow.Container);
+                }
+
+                var detailStack = usesFeatureHeader
+                    ? new StackPanel { Spacing = 4, Margin = new Thickness(16, 0, 0, 0) }
+                    : rowStack;
+                foreach (var row in usesFeatureHeader ? visibleRows.Skip(1) : visibleRows)
                 {
                     if (!TryCreateQuickSettingsRow(surface, row, out var overlayRow)) continue;
                     rows.Add(overlayRow);
                     RegisterRowPointerSelection(overlayRow.Container);
-                    rowStack.Children.Add(overlayRow.Container);
+                    detailStack.Children.Add(overlayRow.Container);
                 }
+
+                if (usesFeatureHeader && detailStack.Children.Count > 0)
+                    rowStack.Children.Add(detailStack);
 
                 sectionPanel.Children.Add(rowStack);
                 surface.Content.Children.Add(sectionPanel);
@@ -302,7 +333,11 @@ public sealed partial class OverlayWindow
 
     // Malformed/unsupported rows are skipped entirely: they are never registered for selection and
     // can never emit a mutation.
-    private bool TryCreateQuickSettingsRow(QuickSettingsSurface surface, QuickSettingsRow row, out OverlayRow overlayRow)
+    private bool TryCreateQuickSettingsRow(
+        QuickSettingsSurface surface,
+        QuickSettingsRow row,
+        out OverlayRow overlayRow,
+        string? displayLabelOverride = null)
     {
         if (!QuickSettingsRowRendering.IsWellFormed(row))
         {
@@ -313,15 +348,20 @@ public sealed partial class OverlayWindow
         }
 
         overlayRow = row.ControlKind == QuickSettingsControlKind.Toggle
-            ? CreateQuickSettingsToggleRow(surface, row)
+            ? CreateQuickSettingsToggleRow(surface, row, displayLabelOverride)
             : CreateQuickSettingsValueRow(surface, row);
         return true;
     }
 
-    private OverlayRow CreateQuickSettingsToggleRow(QuickSettingsSurface surface, QuickSettingsRow row)
+    private OverlayRow CreateQuickSettingsToggleRow(
+        QuickSettingsSurface surface,
+        QuickSettingsRow row,
+        string? displayLabelOverride = null)
     {
         var rowId = row.RowId;
-        var toggleRow = new OverlayToggleRow(row.Label, desired => _ = SubmitQuickSettingsToggleAsync(surface, rowId, desired));
+        var toggleRow = new OverlayToggleRow(
+            displayLabelOverride ?? row.Label,
+            desired => _ = SubmitQuickSettingsToggleAsync(surface, rowId, desired));
         ApplyQuickSettingsToggleState(toggleRow, row);
         surface.ToggleRows[rowId] = toggleRow;
         return new OverlayRow(toggleRow.Container, toggleRow.Capabilities, rowId);
@@ -344,7 +384,8 @@ public sealed partial class OverlayWindow
             var suffix = spec.Suffix ?? string.Empty;
             valueRow = new OverlayValueRow(row.Label,
                 value => OverlayValueRow.FormatInteger(value) + suffix,
-                desired => ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer((int)Math.Round(desired))));
+                desired => ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer((int)Math.Round(desired))),
+                OverlayValueButtonKind.NumericStepper);
         }
         else
         {
@@ -356,7 +397,8 @@ public sealed partial class OverlayWindow
                     var i = (int)Math.Round(desired);
                     if (i < 0 || i >= options.Count) return;
                     ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer(options[i].Value));
-                });
+                },
+                OverlayValueButtonKind.DiscreteChoice);
         }
 
         ApplyQuickSettingsValueState(valueRow, row);

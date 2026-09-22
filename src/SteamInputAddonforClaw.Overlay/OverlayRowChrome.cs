@@ -14,9 +14,9 @@ internal static class OverlayRowChrome
     internal static Border Create(UIElement child) => new()
     {
         Child = child,
-        Padding = new Thickness(12, 6, 12, 6),
-        MinHeight = 52,
-        CornerRadius = new CornerRadius(4),
+        Padding = new Thickness(14, 7, 14, 7),
+        MinHeight = 54,
+        CornerRadius = new CornerRadius(8),
         BorderThickness = new Thickness(SelectionAccentWidth, 0, 0, 0),
         BorderBrush = new SolidColorBrush(Colors.Transparent),
         Background = new SolidColorBrush(Colors.Transparent),

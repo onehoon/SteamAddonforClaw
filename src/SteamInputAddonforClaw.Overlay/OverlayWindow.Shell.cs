@@ -1,4 +1,5 @@
 using System.Linq;
+using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -40,7 +41,10 @@ public sealed partial class OverlayWindow
                 Padding = new Thickness(6, 6, 6, 8),
                 MinWidth = 0,
                 MinHeight = 34,
-                CornerRadius = new CornerRadius(0),
+                CornerRadius = new CornerRadius(8),
+                BorderThickness = new Thickness(0),
+                Background = RowUnselectedFillBrush,
+                Foreground = TabUnselectedForegroundBrush,
                 FontSize = 13,
             };
             button.Click += OnTabHeaderClick;
@@ -196,6 +200,8 @@ public sealed partial class OverlayWindow
     }
 
     private static string LabelFor(AddonQuickSettingsTabId id) => AddonQuickSettingsShellContract.LabelFor(id);
+
+    private static readonly Brush TabUnselectedForegroundBrush = new SolidColorBrush(Colors.DimGray);
 
     private static FrameworkElement CreatePlaceholderPage(AddonQuickSettingsTabId id)
     {
@@ -356,12 +362,29 @@ public sealed partial class OverlayWindow
         {
             var isSelected = id == selected;
             button.FontWeight = isSelected ? FontWeights.SemiBold : FontWeights.Normal;
-            // Keep the native Button interaction states, but never use a permanent selected fill.
-            button.ClearValue(Control.BackgroundProperty);
-            button.ClearValue(Control.ForegroundProperty);
+            button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;
+            button.Foreground = isSelected ? _rowSelectedBrush : TabUnselectedForegroundBrush;
             if (_tabIndicators.TryGetValue(id, out var indicator))
                 indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed;
         }
+
+        ApplyTabNavigationHintVisual();
+    }
+
+    private void ApplyTabNavigationHintVisual()
+    {
+        var selectedIndex = -1;
+        for (var index = 0; index < _tabState.Order.Count; index++)
+        {
+            if (_tabState.Order[index] == _tabState.SelectedTab)
+            {
+                selectedIndex = index;
+                break;
+            }
+        }
+
+        PreviousTabHint.Opacity = selectedIndex > 0 ? 1.0 : 0.35;
+        NextTabHint.Opacity = selectedIndex >= 0 && selectedIndex < _tabState.Order.Count - 1 ? 1.0 : 0.35;
     }
 
     // s.12: deterministic tab-change ordering -- tab visuals, then show the page and reset the

@@ -6,37 +6,97 @@
         <Grid.Resources>
             <SolidColorBrush x:Key="OverlaySurfaceBrush" Color="#FFE7E7E7" />
         </Grid.Resources>
-        <Grid x:Name="OpaquePanel" Background="{StaticResource OverlaySurfaceBrush}">
-            <Grid x:Name="AnimatedContent">
-                <Grid Margin="24,24,24,16" RowSpacing="12">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+        <Grid x:Name="SurfaceHost" SizeChanged="OnSurfaceHostSizeChanged">
+            <Border
+                x:Name="OpaquePanel"
+                MaxWidth="960"
+                HorizontalAlignment="Center"
+                Background="{StaticResource OverlaySurfaceBrush}"
+                CornerRadius="18">
+                <Grid x:Name="AnimatedContent">
+                    <Grid Margin="24,24,24,16" RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-                    <Grid x:Name="TabStrip" Grid.Row="0" ColumnSpacing="4">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
+                        <Grid x:Name="TabStripFrame" Grid.Row="0" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border
+                                x:Name="PreviousTabHint"
+                                Grid.Column="0"
+                                Width="42"
+                                Height="34"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="#FFD6D6D6"
+                                CornerRadius="8"
+                                IsHitTestVisible="False"
+                                Opacity="0.35">
+                                <FontIcon
+                                    Glyph="&#xE76B;"
+                                    FontSize="16"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Foreground="#FF555555" />
+                            </Border>
+
+                            <Border
+                                x:Name="TabRail"
+                                Grid.Column="1"
+                                Padding="4"
+                                Background="#FFD6D6D6"
+                                CornerRadius="12">
+                                <Grid x:Name="TabStrip" ColumnSpacing="4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                </Grid>
+                            </Border>
+
+                            <Border
+                                x:Name="NextTabHint"
+                                Grid.Column="2"
+                                Width="42"
+                                Height="34"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="#FFD6D6D6"
+                                CornerRadius="8"
+                                IsHitTestVisible="False"
+                                Opacity="1">
+                                <FontIcon
+                                    Glyph="&#xE76C;"
+                                    FontSize="16"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Foreground="#FF555555" />
+                            </Border>
+                        </Grid>
+
+                        <ScrollViewer
+                            x:Name="BodyScroll"
+                            Grid.Row="1"
+                            VerticalScrollBarVisibility="Hidden"
+                            HorizontalScrollBarVisibility="Disabled"
+                            HorizontalContentAlignment="Stretch">
+                            <Grid
+                                x:Name="TabBody"
+                                HorizontalAlignment="Stretch"
+                                Width="{Binding ElementName=BodyScroll, Path=ViewportWidth}" />
+                        </ScrollViewer>
                     </Grid>
-
-                    <ScrollViewer
-                        x:Name="BodyScroll"
-                        Grid.Row="1"
-                        VerticalScrollBarVisibility="Hidden"
-                        HorizontalScrollBarVisibility="Disabled"
-                        HorizontalContentAlignment="Stretch">
-                        <Grid
-                            x:Name="TabBody"
-                            HorizontalAlignment="Stretch"
-                            Width="{Binding ElementName=BodyScroll, Path=ViewportWidth}" />
-                    </ScrollViewer>
                 </Grid>
-            </Grid>
+            </Border>
         </Grid>
     </Grid>
 </Window>
