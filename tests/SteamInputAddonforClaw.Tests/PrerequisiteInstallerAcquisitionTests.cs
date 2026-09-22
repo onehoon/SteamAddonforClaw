@@ -86,6 +86,25 @@ public sealed class PrerequisiteInstallerAcquisitionTests
     }
 
     [Fact]
+    public async Task BodyReadTimeoutIsBoundedAfterResponseHeaders()
+    {
+        var root = CreateDirectory();
+        var descriptor = Descriptor("body never completes"u8.ToArray());
+        using var client = new HttpClient(new BlockingBodyHandler());
+        try
+        {
+            using var acquisition = new PrerequisiteInstallerAcquisition(client, TimeSpan.FromMilliseconds(50));
+            var result = await acquisition.AcquireAsync(descriptor, root, CancellationToken.None);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal("InstallerDownloadTimedOut", result.Reason);
+            Assert.Null(result.InstallerPath);
+            Assert.False(File.Exists(Path.Combine(root, descriptor.InstallerFileName)));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task StagingWriteFailureDoesNotReturnExecutablePath()
     {
         var root = Path.Combine(Path.GetTempPath(), "prerequisite-staging-file-" + Guid.NewGuid().ToString("N"));
@@ -175,5 +194,37 @@ public sealed class PrerequisiteInstallerAcquisitionTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(statusCode) { Content = new ByteArrayContent(payload) });
+    }
+
+    private sealed class BlockingBodyHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new BlockingReadStream()) });
+    }
+
+    private sealed class BlockingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(Span<byte> buffer) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Write(ReadOnlySpan<byte> buffer) => throw new NotSupportedException();
     }
 }

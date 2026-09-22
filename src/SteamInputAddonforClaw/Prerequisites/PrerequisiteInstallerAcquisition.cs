@@ -25,11 +25,14 @@ internal sealed class PrerequisiteInstallerAcquisition : IDisposable
     internal static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(2);
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly TimeSpan _downloadTimeout;
 
-    public PrerequisiteInstallerAcquisition(HttpClient? httpClient = null)
+    public PrerequisiteInstallerAcquisition(HttpClient? httpClient = null, TimeSpan? downloadTimeout = null)
     {
         _ownsHttpClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient { Timeout = DefaultTimeout };
+        _downloadTimeout = downloadTimeout ?? DefaultTimeout;
+        if (_downloadTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(downloadTimeout));
         if (_ownsHttpClient)
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("SteamInputAddonforClaw-prerequisite-setup");
     }
@@ -41,6 +44,9 @@ internal sealed class PrerequisiteInstallerAcquisition : IDisposable
     {
         var stagingPath = Path.Combine(stagingDirectory, descriptor.InstallerFileName);
         var temporaryPath = stagingPath + ".download-" + Guid.NewGuid().ToString("N");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_downloadTimeout);
+        var acquisitionToken = timeout.Token;
 
         try
         {
@@ -57,7 +63,7 @@ internal sealed class PrerequisiteInstallerAcquisition : IDisposable
             using var response = await _httpClient.GetAsync(
                 descriptor.DownloadUri,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+                acquisitionToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 AppLog.Warn("PrerequisiteSetup", "Pinned prerequisite installer download returned an unsuccessful HTTP status.", null,
@@ -68,11 +74,11 @@ internal sealed class PrerequisiteInstallerAcquisition : IDisposable
                 return InstallerAcquisitionResult.Failure("InstallerDownloadHttpFailure");
             }
 
-            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
+            await using (var source = await response.Content.ReadAsStreamAsync(acquisitionToken).ConfigureAwait(false))
             await using (var destination = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan))
             {
-                await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
-                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await source.CopyToAsync(destination, acquisitionToken).ConfigureAwait(false);
+                await destination.FlushAsync(acquisitionToken).ConfigureAwait(false);
                 destination.Flush(true);
             }
 
