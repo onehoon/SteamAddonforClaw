@@ -10,7 +10,7 @@
             <Border
                 x:Name="OpaquePanel"
                 MaxWidth="960"
-                HorizontalAlignment="Center"
+                HorizontalAlignment="Stretch"
                 Background="{StaticResource OverlaySurfaceBrush}"
                 CornerRadius="18">
                 <Grid x:Name="AnimatedContent">

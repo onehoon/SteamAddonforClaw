@@ -16,6 +16,7 @@ internal static class OverlayWindowGeometry
 {
     internal const double ReferenceTaskbarDip = 48.0;
     internal const double FloatingGapDip = 12.0;
+    internal const double MaxSurfaceWidthDip = 960.0;
     private const uint DefaultDpi = 96;
 
     internal static OverlayRect Calculate(
@@ -71,7 +72,9 @@ internal static class OverlayWindowGeometry
         var outerMarginPx = Math.Min(requestedOuterMarginPx, Math.Min(monitorWidth, monitorHeight) / 2);
         outerMarginPx = Math.Max(0, outerMarginPx);
 
-        var width = Math.Max(0, monitorWidth - 2 * outerMarginPx);
+        var requestedWidth = Math.Max(0, monitorWidth - 2 * outerMarginPx);
+        var maxSurfaceWidthPx = DipToPixels(MaxSurfaceWidthDip, effectiveDpi);
+        var width = Math.Min(requestedWidth, maxSurfaceWidthPx);
         var height = Math.Max(0, monitorHeight - 2 * outerMarginPx);
 
         metrics = new OverlayGeometryMetrics(
@@ -84,7 +87,8 @@ internal static class OverlayWindowGeometry
             extraGapPx,
             outerMarginPx);
 
-        return new OverlayRect(monitorLeft + outerMarginPx, monitorTop + outerMarginPx, width, height);
+        var x = monitorLeft + Math.Max(0, (monitorWidth - width) / 2);
+        return new OverlayRect(x, monitorTop + outerMarginPx, width, height);
     }
 
     private static int DipToPixels(double dip, uint dpi) =>

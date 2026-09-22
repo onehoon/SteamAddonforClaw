@@ -398,8 +398,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("x:Name=\"PreviousTabHint\"", xaml);
         Assert.Contains("x:Name=\"NextTabHint\"", xaml);
         Assert.Contains("FontIcon", xaml);
-        Assert.Contains("SurfaceMaxWidthDip = 960.0", presentation);
-        Assert.Contains("OpaquePanel.Width = Math.Min(SurfaceMaxWidthDip, availableWidth);", presentation);
+        Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
         Assert.Contains("OverlayTabState", shell);
         Assert.Contains("ApplyTabNavigationHintVisual", shell);
         Assert.Contains("PreviousTabHint.Opacity = selectedIndex > 0 ? 1.0 : 0.35;", shell);
