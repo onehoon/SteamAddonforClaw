@@ -52,6 +52,10 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("TrustedPeople", registration, StringComparison.Ordinal);
         Assert.Contains("AllowDevelopmentWithoutDevLicense", registration, StringComparison.Ordinal);
         Assert.Contains("SetEnabledAsync", configuration, StringComparison.Ordinal);
+        Assert.Contains("cancellationToken.ThrowIfCancellationRequested();", registration, StringComparison.Ordinal);
+        Assert.Contains("WaitForExitAsync(CancellationToken.None)", registration, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryTerminate", registration, StringComparison.Ordinal);
+        Assert.DoesNotContain("Kill(entireProcessTree", registration, StringComparison.Ordinal);
     }
 
     [Fact]

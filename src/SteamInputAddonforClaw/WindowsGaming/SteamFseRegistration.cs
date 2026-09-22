@@ -34,6 +34,7 @@ internal sealed class SteamFseRegistrationClient : ISteamFseRegistrationClient
         Process? process = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             process = Process.Start(new ProcessStartInfo
             {
                 FileName = processPath,
@@ -45,19 +46,22 @@ internal sealed class SteamFseRegistrationClient : ISteamFseRegistrationClient
             if (process is null)
                 return new(false, "Windows did not start the elevated Gaming Home registration.");
 
-            await process.WaitForExitAsync(cancellationToken).WaitAsync(RegistrationTimeout, CancellationToken.None).ConfigureAwait(false);
+            // The elevated child owns temporary Developer Mode and certificate cleanup.
+            // Once it has started, do not let request cancellation terminate it before its finally runs.
+            await process.WaitForExitAsync(CancellationToken.None)
+                .WaitAsync(RegistrationTimeout, CancellationToken.None)
+                .ConfigureAwait(false);
             return process.ExitCode == 0
                 ? new(true, null)
                 : new(false, $"Gaming Home registration exited with code {process.ExitCode}.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            TryTerminate(process);
             return new(false, "The Gaming Home registration was cancelled.");
         }
         catch (TimeoutException)
         {
-            TryTerminate(process);
+            AppLog.Warn("SteamFSE", "Elevated Gaming Home registration timed out; the child was left running for self-cleanup.");
             return new(false, "The Gaming Home registration timed out.");
         }
         catch (Exception exception)
@@ -68,19 +72,6 @@ internal sealed class SteamFseRegistrationClient : ISteamFseRegistrationClient
         finally
         {
             process?.Dispose();
-        }
-    }
-
-    private static void TryTerminate(Process? process)
-    {
-        try
-        {
-            if (process is { HasExited: false })
-                process.Kill(entireProcessTree: true);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Debug("SteamFSE", "Timed-out elevated registration process could not be terminated.", ("Exception", exception.Message));
         }
     }
 }
