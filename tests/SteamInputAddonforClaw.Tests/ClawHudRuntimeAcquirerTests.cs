@@ -73,7 +73,7 @@ public sealed class ClawHudRuntimeAcquirerTests
         Assert.True(File.Exists(Path.Combine(runtimeRoot, "1.0.1", "ClawHUD.exe")));
         Assert.True(File.Exists(Path.Combine(previousVersion, "sentinel.txt")));
         Assert.False(Directory.Exists(olderVersion));
-        Assert.True(Directory.Exists(newerVersion));
+        Assert.False(Directory.Exists(newerVersion));
         Assert.True(Directory.Exists(unknownDirectory));
         Assert.False(Directory.Exists(stagingDirectory));
     }

@@ -238,16 +238,15 @@ internal sealed class ClawHudRuntimeAcquirer
             return;
         }
 
-        List<(string Path, Version Version)> olderVersions;
+        List<(string Path, Version Version)> versionDirectories;
         try
         {
-            olderVersions = Directory.EnumerateDirectories(runtimeRoot)
+            versionDirectories = Directory.EnumerateDirectories(runtimeRoot)
                 .Select(path => (Path: path, Name: Path.GetFileName(path)))
                 .Where(item => !string.Equals(item.Name, runtimeLock.RuntimeVersion, StringComparison.Ordinal))
                 .Select(item => TryParseRuntimeVersion(item.Name, out var version) ? (item.Path, Version: version) : (item.Path, Version: null))
-                .Where(item => item.Version is not null && item.Version < currentVersion)
+                .Where(item => item.Version is not null)
                 .Select(item => (item.Path, item.Version!))
-                .OrderByDescending(item => item.Item2)
                 .ToList();
         }
         catch (Exception exception)
@@ -256,9 +255,13 @@ internal sealed class ClawHudRuntimeAcquirer
             return;
         }
 
-        var previousVersionPath = olderVersions.FirstOrDefault().Path;
+        var previousVersionPath = versionDirectories
+            .Where(item => item.Version < currentVersion)
+            .OrderByDescending(item => item.Version)
+            .Select(item => item.Path)
+            .FirstOrDefault();
         var removedCount = 0;
-        foreach (var (path, _) in olderVersions.Skip(1))
+        foreach (var (path, _) in versionDirectories.Where(item => !string.Equals(item.Path, previousVersionPath, StringComparison.OrdinalIgnoreCase)))
         {
             try
             {
