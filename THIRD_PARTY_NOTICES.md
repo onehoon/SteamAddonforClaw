@@ -26,7 +26,7 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 
 ### Velopack
 
-- Version: 1.2.0
+- Version: 1.2.158
 - License: MIT
 - Upstream: https://github.com/velopack/velopack
 
