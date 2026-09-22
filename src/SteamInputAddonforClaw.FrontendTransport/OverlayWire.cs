@@ -209,10 +209,14 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private readonly object _sync = new();
     private readonly TaskCompletionSource _serverReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource _ready = NewSignal();
+    private TaskCompletionSource _disconnected = NewSignal();
     private TaskCompletionSource? _acknowledgement;
     private NamedPipeServerStream? _activePipe;
     private Task? _acceptLoop;
     private bool _readyState;
+    private long _nextConnectionGeneration;
+    private long _readyGeneration;
+    private long _lastDisconnectedGeneration;
     private OverlayState _state = OverlayState.Hidden;
     private int _started;
     private int _disposed;
@@ -254,6 +258,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     }
 
     internal bool IsReady { get { lock (_sync) return _readyState; } }
+    internal long? ReadyGeneration { get { lock (_sync) return _readyState ? _readyGeneration : null; } }
     internal OverlayState State { get { lock (_sync) return _state; } }
 
     internal async Task StartAsync(CancellationToken token = default)
@@ -269,6 +274,24 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         try
         {
             await _ready.Task.WaitAsync(timeout, token).ConfigureAwait(false);
+            return true;
+        }
+        catch (TimeoutException) { return false; }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { return false; }
+    }
+
+    internal async Task<bool> WaitForDisconnectedAsync(long generation, TimeSpan timeout, CancellationToken token = default)
+    {
+        Task disconnected;
+        lock (_sync)
+        {
+            if (_lastDisconnectedGeneration >= generation) return true;
+            disconnected = _disconnected.Task;
+        }
+
+        try
+        {
+            await disconnected.WaitAsync(timeout, token).ConfigureAwait(false);
             return true;
         }
         catch (TimeoutException) { return false; }
@@ -427,10 +450,12 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         while (!_lifetime.IsCancellationRequested)
         {
             NamedPipeServerStream pipe;
+            var connectionGeneration = Interlocked.Increment(ref _nextConnectionGeneration);
             try
             {
                 pipe = _pipeFactory();
                 _serverReady.TrySetResult();
+                lock (_sync) _readyGeneration = connectionGeneration;
             }
             catch (Exception exception)
             {
@@ -453,6 +478,10 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 {
                     _readyState = false;
                     _ready = NewSignal();
+                    _lastDisconnectedGeneration = connectionGeneration;
+                    _disconnected.TrySetResult();
+                    _disconnected = NewSignal();
+                    _readyGeneration = 0;
                     _acknowledgement?.TrySetCanceled();
                     _acknowledgement = null;
                 }

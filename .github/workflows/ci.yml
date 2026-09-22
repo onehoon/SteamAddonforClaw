@@ -48,8 +48,14 @@ jobs:
       - name: Restore
         run: dotnet restore SteamInputAddonforClaw.slnx
 
+      - name: Restore UI and Overlay tests
+        run: dotnet restore tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj
+
       - name: Build
         run: dotnet build SteamInputAddonforClaw.slnx -c Release --no-restore
+
+      - name: Build UI and Overlay tests
+        run: dotnet build tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj -c Release --no-restore
 
       - name: Test
         shell: pwsh
