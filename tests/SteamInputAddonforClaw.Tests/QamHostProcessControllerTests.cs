@@ -129,7 +129,7 @@ public sealed class QamHostProcessControllerTests
     {
         using var scope = new QamHostTestScope();
         var starts = 0;
-        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        await using var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
         {
             var ordinal = Interlocked.Increment(ref starts);
             return ordinal == 1
@@ -144,8 +144,7 @@ public sealed class QamHostProcessControllerTests
             await Task.Delay(10);
 
         Assert.Equal(2, Volatile.Read(ref starts));
-        Assert.True(controller.HasTrackedProcess);
-        await controller.DisposeAsync();
+        await WaitForTrackedProcessAsync(controller);
     }
 
     [Fact]
