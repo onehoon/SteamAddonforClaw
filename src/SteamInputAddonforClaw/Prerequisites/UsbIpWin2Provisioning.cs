@@ -1,5 +1,4 @@
 using Microsoft.Win32;
-using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace SteamInputAddonforClaw.Prerequisites;
@@ -9,8 +8,8 @@ internal static class UsbIpWin2PackageMetadata
     public static readonly Version BundledVersion = new(0, 9, 8, 0);
     public const string InstallerFileName = "USBip-0.9.8.0-x64.exe";
     public const string InstallerSha256 = "81F426741F7EE2ED991FEBE24A22DACA8400B6AE2F171054E3FB404897E15D39";
-    public static string InstallerPath => Path.Combine(AppContext.BaseDirectory, "Dependencies", "UsbIpWin2", InstallerFileName);
-    public static bool VerifyInstaller() => File.Exists(InstallerPath) && string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(InstallerPath))), InstallerSha256, StringComparison.OrdinalIgnoreCase);
+    public static readonly Uri InstallerDownloadUri = new("https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.8.0/USBip-0.9.8.0-x64.exe");
+    internal static PrerequisiteInstallerDescriptor InstallerDescriptor => new("usbip-win2", BundledVersion, InstallerFileName, InstallerDownloadUri, InstallerSha256);
 }
 
 internal sealed record UsbIpWin2PackageState(bool Installed, string? Version, bool InspectionSucceeded, bool PackageEntryPresent);

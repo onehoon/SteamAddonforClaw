@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Win32;
 using SteamInputAddonforClaw.Controllers.Detection;
@@ -16,7 +15,8 @@ internal static class HidHidePackageMetadata
     public static readonly Version BundledVersion = new(1, 5, 230, 0);
     public const string InstallerFileName = "HidHide_1.5.230_x64.exe";
     public const string InstallerSha256 = "F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6";
-    public static string InstallerPath => Path.Combine(AppContext.BaseDirectory, "Dependencies", "HidHide", InstallerFileName);
+    public static readonly Uri InstallerDownloadUri = new("https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe");
+    internal static PrerequisiteInstallerDescriptor InstallerDescriptor => new("HidHide", BundledVersion, InstallerFileName, InstallerDownloadUri, InstallerSha256);
 }
 
 internal sealed record HidHidePackageState(bool Installed, string? Version, bool InspectionSucceeded);
@@ -326,12 +326,12 @@ internal sealed class HidHideProvisioner(
     IHidHidePackageProbe packageProbe,
     IHidHideProvisioningReceiptStore receiptStore,
     IElevatedProcessRunner processRunner,
-    Func<string>? installerPathProvider,
+    Func<string> installerPathProvider,
     Func<string, bool>? installerIntegrityValidator,
     IHidHideProvisioningSafetyStateProvider safetyStateProvider) : IHidHideProvisioner
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly Func<string> _installerPathProvider = installerPathProvider ?? (() => HidHidePackageMetadata.InstallerPath);
+    private readonly Func<string> _installerPathProvider = installerPathProvider ?? throw new ArgumentNullException(nameof(installerPathProvider));
     private readonly Func<string, bool> _installerIntegrityValidator = installerIntegrityValidator ?? VerifyInstaller;
     private readonly IHidHideProvisioningSafetyStateProvider _safetyStateProvider = safetyStateProvider ?? throw new ArgumentNullException(nameof(safetyStateProvider));
 
@@ -445,8 +445,7 @@ internal sealed class HidHideProvisioner(
     private static bool AllowsInstall(HidHideProvisioningContext context) => context.SetupAllowed
         && !context.Steam.IsActive
         && context.HidHide.Status == PrerequisiteStatus.Missing;
-    private static bool VerifyInstaller(string path) => File.Exists(path)
-        && string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))), HidHidePackageMetadata.InstallerSha256, StringComparison.OrdinalIgnoreCase);
+    private static bool VerifyInstaller(string path) => PrerequisiteInstallerAcquisition.HasExpectedSha256(path, HidHidePackageMetadata.InstallerSha256);
     private static HidHideProvisioningReceipt NewReceipt(HidHideProvisioningReceiptState state) => new(HidHideProvisioningReceipt.CurrentSchemaVersion, state, Guid.NewGuid(), HidHidePackageMetadata.BundledVersion.ToString(), HidHidePackageMetadata.InstallerSha256, PrerequisiteStatus.Missing, DateTimeOffset.UtcNow, null, null);
     private void SaveTransition(HidHideProvisioningReceipt receipt, HidHideProvisioningReceiptState state, string? observedVersion) => receiptStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = observedVersion, FailureReason = state == HidHideProvisioningReceiptState.Provisioned ? null : receipt.FailureReason });
 }

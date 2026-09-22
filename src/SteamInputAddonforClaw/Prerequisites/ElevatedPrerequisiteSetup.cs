@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Controllers.Detection;
@@ -62,6 +61,7 @@ internal static class ElevatedPrerequisiteSetup
                 return 1;
             var hidStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
             var usbStore = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath);
+            using var installerAcquisition = new PrerequisiteInstallerAcquisition();
             if (!LogAndAllowSafetyGate("Initial")) return 1;
             var restartRequired = false;
             var hidHide = new WindowsHidHidePackageProbe().Inspect();
@@ -79,7 +79,7 @@ internal static class ElevatedPrerequisiteSetup
             }
             var hidReceipt = hidStore.Load().Receipt;
             if (hidReceipt?.State == HidHideProvisioningReceiptState.InstalledPendingReboot) restartRequired = true;
-            if (hidInstallation.Status == ComponentInstallationStatus.Missing)
+            if (ShouldAcquireHidHide(hidInstallation.Status))
             {
                 var shortcutCleanup = new HidHideDesktopShortcutCleanup();
                 var shortcutsBeforeInstall = shortcutCleanup.Snapshot();
@@ -88,26 +88,39 @@ internal static class ElevatedPrerequisiteSetup
                     AppLog.Warn("PrerequisiteSetup", "HidHide installation was blocked by an untrusted legacy receipt.", null, ("Reason", "LegacyHidHideReceiptPresent"));
                     return 1;
                 }
-                var receipt = new HidHideProvisioningReceipt(1, HidHideProvisioningReceiptState.InstallStarted, Guid.NewGuid(), HidHidePackageMetadata.BundledVersion.ToString(), HidHidePackageMetadata.InstallerSha256, PrerequisiteStatus.Missing, DateTimeOffset.UtcNow, null, null);
-                hidStore.Save(receipt);
-                AppLog.Info("PrerequisiteSetup", "HidHide installation receipt persisted.", ("AttemptId", receipt.AttemptId), ("State", receipt.State), ("Version", receipt.InstallerVersion));
-                if (!LogAndAllowSafetyGate("BeforeHidHideInstall"))
+                var acquisition = installerAcquisition.AcquireAsync(HidHidePackageMetadata.InstallerDescriptor, VelopackAppPaths.ProvisioningStateDirectory, CancellationToken.None).GetAwaiter().GetResult();
+                if (!acquisition.Succeeded || acquisition.InstallerPath is null)
                 {
-                    hidStore.Save(receipt with { State = HidHideProvisioningReceiptState.AttemptCancelled, CompletedAtUtc = DateTimeOffset.UtcNow, FailureReason = "SafetyGateBlockedBeforeHidHideInstall" });
+                    AppLog.Warn("PrerequisiteSetup", "HidHide installer acquisition failed.", null, ("Reason", acquisition.Reason));
                     return 1;
                 }
-                var code = RunChild("HidHide", HidHidePackageMetadata.InstallerPath, "/exenoui /qn /norestart", HidHidePackageMetadata.InstallerSha256);
-                var (after, afterPrerequisite) = code is 0 or 3010
-                    ? WaitForHidHidePostInstallEvidence(receipt.InstallerVersion, code)
-                    : (new WindowsHidHidePackageProbe().Inspect(), new HidHidePrerequisiteInspector(new HidHideDriverClient()).Inspect());
-                var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
-                var state = outcome.IsProvisioned ? HidHideProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? HidHideProvisioningReceiptState.InstalledPendingReboot : HidHideProvisioningReceiptState.AttemptFailed;
-                hidStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
-                var exactPackageEstablished = HidHideDesktopShortcutCleanup.IsExactPackageEstablished(after, receipt.InstallerVersion);
-                if (exactPackageEstablished) shortcutCleanup.RemoveInstallerCreated(shortcutsBeforeInstall);
-                AppLog.Info("PrerequisiteSetup", "HidHide installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status));
-                if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
-                restartRequired |= code == 3010;
+                try
+                {
+                    var receipt = new HidHideProvisioningReceipt(1, HidHideProvisioningReceiptState.InstallStarted, Guid.NewGuid(), HidHidePackageMetadata.BundledVersion.ToString(), HidHidePackageMetadata.InstallerSha256, PrerequisiteStatus.Missing, DateTimeOffset.UtcNow, null, null);
+                    hidStore.Save(receipt);
+                    AppLog.Info("PrerequisiteSetup", "HidHide installation receipt persisted.", ("AttemptId", receipt.AttemptId), ("State", receipt.State), ("Version", receipt.InstallerVersion));
+                    if (!LogAndAllowSafetyGate("BeforeHidHideInstall"))
+                    {
+                        hidStore.Save(receipt with { State = HidHideProvisioningReceiptState.AttemptCancelled, CompletedAtUtc = DateTimeOffset.UtcNow, FailureReason = "SafetyGateBlockedBeforeHidHideInstall" });
+                        return 1;
+                    }
+                    var code = RunChild("HidHide", acquisition.InstallerPath, "/exenoui /qn /norestart", HidHidePackageMetadata.InstallerSha256);
+                    var (after, afterPrerequisite) = code is 0 or 3010
+                        ? WaitForHidHidePostInstallEvidence(receipt.InstallerVersion, code)
+                        : (new WindowsHidHidePackageProbe().Inspect(), new HidHidePrerequisiteInspector(new HidHideDriverClient()).Inspect());
+                    var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
+                    var state = outcome.IsProvisioned ? HidHideProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? HidHideProvisioningReceiptState.InstalledPendingReboot : HidHideProvisioningReceiptState.AttemptFailed;
+                    hidStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
+                    var exactPackageEstablished = HidHideDesktopShortcutCleanup.IsExactPackageEstablished(after, receipt.InstallerVersion);
+                    if (exactPackageEstablished) shortcutCleanup.RemoveInstallerCreated(shortcutsBeforeInstall);
+                    AppLog.Info("PrerequisiteSetup", "HidHide installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status));
+                    if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
+                    restartRequired |= code == 3010;
+                }
+                finally
+                {
+                    PrerequisiteInstallerAcquisition.TryDeleteStagedInstaller(acquisition.InstallerPath);
+                }
             }
             var usbPackageProbe = new WindowsUsbIpWin2PackageProbe();
             var usbIp = usbPackageProbe.Inspect();
@@ -127,35 +140,48 @@ internal static class ElevatedPrerequisiteSetup
             if (usbReceipt?.State == UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot) restartRequired = true;
             if (ShouldInstallUsbIp(usbInstallation.Status))
             {
-                var receipt = new UsbIpWin2ProvisioningReceipt(
-                    1,
-                    UsbIpWin2ProvisioningReceiptState.InstallStarted,
-                    Guid.NewGuid(),
-                    UsbIpWin2PackageMetadata.BundledVersion.ToString(),
-                    UsbIpWin2PackageMetadata.InstallerSha256,
-                    usbPrerequisite.Status,
-                    DateTimeOffset.UtcNow,
-                    null,
-                    null,
-                    PreInstallationStatus: usbInstallation.Status,
-                    PreviousInstalledVersion: usbInstallation.Status == ComponentInstallationStatus.UpdateRequired ? usbIp.Version : null);
-                usbStore.Save(receipt);
-                AppLog.Info("PrerequisiteSetup", "usbip-win2 installation receipt persisted.", ("AttemptId", receipt.AttemptId), ("State", receipt.State), ("Version", receipt.InstallerVersion), ("PreInstallationStatus", receipt.PreInstallationStatus), ("PreviousInstalledVersion", receipt.PreviousInstalledVersion));
-                if (!LogAndAllowSafetyGate("BeforeUsbIpInstall"))
+                var acquisition = installerAcquisition.AcquireAsync(UsbIpWin2PackageMetadata.InstallerDescriptor, VelopackAppPaths.ProvisioningStateDirectory, CancellationToken.None).GetAwaiter().GetResult();
+                if (!acquisition.Succeeded || acquisition.InstallerPath is null)
                 {
-                    usbStore.Save(receipt with { State = UsbIpWin2ProvisioningReceiptState.AttemptCancelled, CompletedAtUtc = DateTimeOffset.UtcNow, FailureReason = "SafetyGateBlockedBeforeUsbIpInstall" });
+                    AppLog.Warn("PrerequisiteSetup", "usbip-win2 installer acquisition failed.", null, ("Reason", acquisition.Reason));
                     return 1;
                 }
-                var code = RunChild("usbip-win2", UsbIpWin2PackageMetadata.InstallerPath, "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /TYPE=compact /NOICONS", UsbIpWin2PackageMetadata.InstallerSha256);
-                var (after, afterPrerequisite) = code is 0 or 3010
-                    ? WaitForUsbIpPostInstallEvidence(receipt.InstallerVersion, code)
-                    : InspectUsbIpRuntime();
-                var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
-                var state = outcome.IsProvisioned ? UsbIpWin2ProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot : UsbIpWin2ProvisioningReceiptState.AttemptFailed;
-                usbStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
-                AppLog.Info("PrerequisiteSetup", "usbip-win2 installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status), ("PreInstallationStatus", receipt.PreInstallationStatus), ("PreviousInstalledVersion", receipt.PreviousInstalledVersion));
-                if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
-                restartRequired |= code == 3010;
+                try
+                {
+                    var receipt = new UsbIpWin2ProvisioningReceipt(
+                        1,
+                        UsbIpWin2ProvisioningReceiptState.InstallStarted,
+                        Guid.NewGuid(),
+                        UsbIpWin2PackageMetadata.BundledVersion.ToString(),
+                        UsbIpWin2PackageMetadata.InstallerSha256,
+                        usbPrerequisite.Status,
+                        DateTimeOffset.UtcNow,
+                        null,
+                        null,
+                        PreInstallationStatus: usbInstallation.Status,
+                        PreviousInstalledVersion: usbInstallation.Status == ComponentInstallationStatus.UpdateRequired ? usbIp.Version : null);
+                    usbStore.Save(receipt);
+                    AppLog.Info("PrerequisiteSetup", "usbip-win2 installation receipt persisted.", ("AttemptId", receipt.AttemptId), ("State", receipt.State), ("Version", receipt.InstallerVersion), ("PreInstallationStatus", receipt.PreInstallationStatus), ("PreviousInstalledVersion", receipt.PreviousInstalledVersion));
+                    if (!LogAndAllowSafetyGate("BeforeUsbIpInstall"))
+                    {
+                        usbStore.Save(receipt with { State = UsbIpWin2ProvisioningReceiptState.AttemptCancelled, CompletedAtUtc = DateTimeOffset.UtcNow, FailureReason = "SafetyGateBlockedBeforeUsbIpInstall" });
+                        return 1;
+                    }
+                    var code = RunChild("usbip-win2", acquisition.InstallerPath, "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /TYPE=compact /NOICONS", UsbIpWin2PackageMetadata.InstallerSha256);
+                    var (after, afterPrerequisite) = code is 0 or 3010
+                        ? WaitForUsbIpPostInstallEvidence(receipt.InstallerVersion, code)
+                        : InspectUsbIpRuntime();
+                    var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
+                    var state = outcome.IsProvisioned ? UsbIpWin2ProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot : UsbIpWin2ProvisioningReceiptState.AttemptFailed;
+                    usbStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
+                    AppLog.Info("PrerequisiteSetup", "usbip-win2 installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status), ("PreInstallationStatus", receipt.PreInstallationStatus), ("PreviousInstalledVersion", receipt.PreviousInstalledVersion));
+                    if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
+                    restartRequired |= code == 3010;
+                }
+                finally
+                {
+                    PrerequisiteInstallerAcquisition.TryDeleteStagedInstaller(acquisition.InstallerPath);
+                }
             }
             var result = restartRequired ? 3010 : 0;
             AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup completed.", ("ExitCode", result), ("RestartRequired", restartRequired));
@@ -227,6 +253,7 @@ internal static class ElevatedPrerequisiteSetup
         return (package, prerequisite);
     }
 
+    internal static bool ShouldAcquireHidHide(ComponentInstallationStatus status) => status == ComponentInstallationStatus.Missing;
     internal static bool ShouldInstallUsbIp(ComponentInstallationStatus status) => status is ComponentInstallationStatus.Missing or ComponentInstallationStatus.UpdateRequired;
 
     internal static (UsbIpWin2PackageState Package, PrerequisiteAssessment Prerequisite) WaitForUsbIpPostInstallEvidence(
@@ -266,12 +293,12 @@ internal static class ElevatedPrerequisiteSetup
     {
         if (!File.Exists(path))
         {
-            AppLog.Error("PrerequisiteSetup", "Bundled prerequisite installer was not found.", new FileNotFoundException(path), ("Component", component), ("Reason", "InstallerMissing"));
+            AppLog.Error("PrerequisiteSetup", "Prerequisite installer was not found.", new FileNotFoundException(path), ("Component", component), ("Reason", "InstallerMissing"));
             return -1;
         }
-        if (!string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))), expectedHash, StringComparison.OrdinalIgnoreCase))
+        if (!PrerequisiteInstallerAcquisition.HasExpectedSha256(path, expectedHash))
         {
-            AppLog.Error("PrerequisiteSetup", "Bundled prerequisite installer hash validation failed.", new InvalidDataException("Installer hash mismatch."), ("Component", component), ("Reason", "InstallerHashMismatch"));
+            AppLog.Error("PrerequisiteSetup", "Prerequisite installer hash validation failed.", new InvalidDataException("Installer hash mismatch."), ("Component", component), ("Reason", "InstallerHashMismatch"));
             return -1;
         }
         AppLog.Info("PrerequisiteSetup", "Prerequisite installer launch started.", ("Component", component), ("InstallerPath", path));

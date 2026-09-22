@@ -17,8 +17,6 @@ if (-not (Test-Path -LiteralPath $PublishDirectory -PathType Container)) {
 $requiredAssets = @(
     'SteamInputAddonforClaw.exe',
     'SteamInputAddonforClaw.TdpHelper.exe',
-    'Dependencies\HidHide\HidHide_1.5.230_x64.exe',
-    'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe',
     'Dependencies\Viiper\libVIIPER.dll',
     'Dependencies\Viiper\PROVENANCE.md',
     'Dependencies\Viiper\libVIIPER.h',
@@ -56,16 +54,13 @@ if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
 }
 
-$hidHideInstaller = Join-Path $PublishDirectory 'Dependencies\HidHide\HidHide_1.5.230_x64.exe'
-$expectedHidHideSha256 = 'F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6'
-if ((Get-FileHash -LiteralPath $hidHideInstaller -Algorithm SHA256).Hash -ne $expectedHidHideSha256) {
-    throw 'Published HidHide installer SHA-256 does not match the bundled metadata.'
-}
-
-$usbIpInstaller = Join-Path $PublishDirectory 'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe'
-$expectedUsbIpSha256 = '81F426741F7EE2ED991FEBE24A22DACA8400B6AE2F171054E3FB404897E15D39'
-if ((Get-FileHash -LiteralPath $usbIpInstaller -Algorithm SHA256).Hash -ne $expectedUsbIpSha256) {
-    throw 'Published USB/IP installer SHA-256 does not match the bundled metadata.'
+foreach ($forbiddenPrerequisiteInstaller in @{
+    'Dependencies\HidHide\HidHide_1.5.230_x64.exe' = 'HidHide'
+    'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe' = 'usbip-win2'
+}.GetEnumerator()) {
+    if (Test-Path -LiteralPath (Join-Path $PublishDirectory $forbiddenPrerequisiteInstaller.Key) -PathType Leaf) {
+        throw "Published output must not bundle the $($forbiddenPrerequisiteInstaller.Value) prerequisite installer."
+    }
 }
 
 $viiperPayload = Join-Path $PublishDirectory 'Dependencies\Viiper\libVIIPER.dll'

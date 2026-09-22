@@ -3,7 +3,6 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.HidHide;
-using System.Security.Cryptography;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
@@ -13,11 +12,12 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class FirstTimeSetupPolicyTests
 {
     [Fact]
-    public void BundledUsbIpInstaller_HashMatchesRuntimeMetadata()
+    public void UsbIpMetadata_UsesPinnedOfficialReleaseAsset()
     {
-        var installer = Path.Combine(AppContext.BaseDirectory, "Dependencies", "UsbIpWin2", UsbIpWin2PackageMetadata.InstallerFileName);
-        Assert.True(File.Exists(installer));
-        Assert.Equal(UsbIpWin2PackageMetadata.InstallerSha256, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(installer))));
+        Assert.Equal(new Version(0, 9, 8, 0), UsbIpWin2PackageMetadata.BundledVersion);
+        Assert.Equal("USBip-0.9.8.0-x64.exe", UsbIpWin2PackageMetadata.InstallerFileName);
+        Assert.Equal("81F426741F7EE2ED991FEBE24A22DACA8400B6AE2F171054E3FB404897E15D39", UsbIpWin2PackageMetadata.InstallerSha256);
+        Assert.Equal(new Uri("https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.8.0/USBip-0.9.8.0-x64.exe"), UsbIpWin2PackageMetadata.InstallerDownloadUri);
     }
 
     [Fact]
@@ -377,6 +377,15 @@ public sealed class FirstTimeSetupPolicyTests
     [InlineData((int)ComponentInstallationStatus.Indeterminate, false)]
     public void ExistingUsbIpInstallerPath_IsSelectedOnlyForMissingOrUpdateRequired(int statusValue, bool expected)
         => Assert.Equal(expected, ElevatedPrerequisiteSetup.ShouldInstallUsbIp((ComponentInstallationStatus)statusValue));
+
+    [Theory]
+    [InlineData((int)ComponentInstallationStatus.Missing, true)]
+    [InlineData((int)ComponentInstallationStatus.Installed, false)]
+    [InlineData((int)ComponentInstallationStatus.ExistingUnverified, false)]
+    [InlineData((int)ComponentInstallationStatus.Incompatible, false)]
+    [InlineData((int)ComponentInstallationStatus.Indeterminate, false)]
+    public void HidHideAcquisition_IsSelectedOnlyForMissingPackage(int statusValue, bool expected)
+        => Assert.Equal(expected, ElevatedPrerequisiteSetup.ShouldAcquireHidHide((ComponentInstallationStatus)statusValue));
 
     [Fact]
     public void InstallStartedWithExactPackage_DoesNotBlockMissingComponentSetup()
