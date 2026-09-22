@@ -11,7 +11,7 @@
   <Identity
     Name="SteamInputAddonforClaw.FseHome"
     Publisher="CN=SteamInputAddonforClaw"
-    Version="__PACKAGE_VERSION__"
+    Version="1.0.0.0"
     ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>Steam Big Picture</DisplayName>

@@ -2,52 +2,13 @@
 param(
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
-    [string]$PublishDirectory,
-
-    [switch]$RequireFsePackage,
-
-    [string]$ExpectedFsePackageVersion
+    [string]$PublishDirectory
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-. (Join-Path $PSScriptRoot 'invoke-sdk-tool.ps1')
-
-function Find-SdkTool([string]$name) {
-    $command = Get-Command "$name.exe" -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
-    $roots = @()
-    if (-not [string]::IsNullOrWhiteSpace($env:WindowsSdkDir)) {
-        $roots += Join-Path $env:WindowsSdkDir 'bin'
-    }
-    $roots += @(
-        (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'),
-        (Join-Path $env:ProgramFiles 'Windows Kits\10\bin')
-    )
-
-    foreach ($root in ($roots | Where-Object { $_ } | Select-Object -Unique) ) {
-        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
-
-        $versionDirectories = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending)
-        foreach ($architecture in @('x64', 'x86', 'arm64')) {
-            $directCandidate = Join-Path $root "$architecture\$name.exe"
-            if (Test-Path -LiteralPath $directCandidate -PathType Leaf) {
-                return (Get-Item -LiteralPath $directCandidate).FullName
-            }
-
-            foreach ($versionDirectory in $versionDirectories) {
-                $candidate = Join-Path $versionDirectory.FullName "$architecture\$name.exe"
-                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                    return (Get-Item -LiteralPath $candidate).FullName
-                }
-            }
-        }
-    }
-
-    throw "$name.exe was not found in the Windows SDK."
-}
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.Xml.Linq
 
 if (-not (Test-Path -LiteralPath $PublishDirectory -PathType Container)) {
     throw "Publish directory was not found: $PublishDirectory"
@@ -81,10 +42,7 @@ $requiredAssets = @(
     'fse\SteamInputAddonforClaw.FseHome.exe',
     'fse\SteamInputAddonforClaw.FseHome.dll',
     'fse\SteamInputAddonforClaw.FseHome.msix',
-    'fse\Package\AppxManifest.xml',
-    'fse\Package\CustomCapability.SCCD',
-    'fse\Package\Assets\AppIcon.png',
-    'fse\Package\Public\README.txt'
+    'fse\SteamInputAddonforClaw.FseHome.cer'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
@@ -92,6 +50,10 @@ $missingAssets = foreach ($asset in $requiredAssets) {
     if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
         $asset
     }
+}
+
+if ($missingAssets) {
+    throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
 }
 
 $hidHideInstaller = Join-Path $PublishDirectory 'Dependencies\HidHide\HidHide_1.5.230_x64.exe'
@@ -111,10 +73,6 @@ $viiperPayload = Join-Path $PublishDirectory 'Dependencies\Viiper\libVIIPER.dll'
 $expectedViiperSha256 = '5F2CE963B8ADA1FDE78BF4A1C25BF063503D761E3D42DA6BB418FE735CE1F948'
 if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expectedViiperSha256) {
     throw 'Published VIIPER payload SHA-256 does not match its recorded provenance.'
-}
-
-if ($missingAssets) {
-    throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
 }
 
 $clawHudLockPath = Join-Path $PublishDirectory 'Dependencies\ClawHUD\clawhud.lock.json'
@@ -146,71 +104,67 @@ foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), 
     }
 }
 
-$fseManifest = Get-Content -LiteralPath (Join-Path $PublishDirectory 'fse\Package\AppxManifest.xml') -Raw
-foreach ($requiredText in @('windows.gamingApp', 'Microsoft.appCategory.gamingHome_8wekyb3d8bbwe', 'SteamInputAddonforClaw.FseHome', 'Id="App"')) {
-    if ($fseManifest -notmatch [regex]::Escape($requiredText)) {
-        throw "FSE Home package manifest is missing required content: $requiredText"
+$fsePackagePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.msix'
+$fseCertificatePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.cer'
+$expectedFsePackageSha256 = '9D4C46ABCC1324803AE5AB031B11EC8EF39057D77C9C04FCB243D80BC122F86B'
+$expectedFseCertificateSha256 = '663053482DA50F9017CC902CA5DF6E9BBFD5A6F06624B8608266318F54687390'
+if ((Get-FileHash -LiteralPath $fsePackagePath -Algorithm SHA256).Hash -ne $expectedFsePackageSha256) {
+    throw 'Published FSE MSIX SHA-256 does not match the fixed distribution artifact.'
+}
+if ((Get-FileHash -LiteralPath $fseCertificatePath -Algorithm SHA256).Hash -ne $expectedFseCertificateSha256) {
+    throw 'Published FSE public certificate SHA-256 does not match the fixed distribution artifact.'
+}
+
+$certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($fseCertificatePath)
+if ($certificate.Subject -ne 'CN=SteamInputAddonforClaw') {
+    throw "Published FSE certificate subject '$($certificate.Subject)' does not match the package publisher."
+}
+
+$archive = [System.IO.Compression.ZipFile]::OpenRead($fsePackagePath)
+try {
+    $manifestEntry = $archive.GetEntry('AppxManifest.xml')
+    $sccdEntry = $archive.GetEntry('CustomCapability.SCCD')
+    if ($null -eq $manifestEntry) { throw 'Fixed FSE MSIX does not contain AppxManifest.xml.' }
+    if ($null -eq $sccdEntry) { throw 'Fixed FSE MSIX does not contain CustomCapability.SCCD.' }
+
+    $manifestReader = [System.IO.StreamReader]::new($manifestEntry.Open())
+    try { $fseManifest = $manifestReader.ReadToEnd() }
+    finally { $manifestReader.Dispose() }
+    $sccdReader = [System.IO.StreamReader]::new($sccdEntry.Open())
+    try { $sccd = $sccdReader.ReadToEnd() }
+    finally { $sccdReader.Dispose() }
+
+    $manifestXml = [System.Xml.Linq.XDocument]::Parse($fseManifest)
+    $identity = $manifestXml.Root.Elements() | Where-Object { $_.Name.LocalName -eq 'Identity' } | Select-Object -First 1
+    if ($null -eq $identity) { throw 'Fixed FSE MSIX manifest has no Identity element.' }
+    $identityValues = @{
+        Name = $identity.Attribute('Name').Value
+        Publisher = $identity.Attribute('Publisher').Value
+        Version = $identity.Attribute('Version').Value
+        ProcessorArchitecture = $identity.Attribute('ProcessorArchitecture').Value
+    }
+    if ($identityValues.Name -ne 'SteamInputAddonforClaw.FseHome' -or
+        $identityValues.Publisher -ne 'CN=SteamInputAddonforClaw' -or
+        $identityValues.Version -ne '1.0.0.0' -or
+        $identityValues.ProcessorArchitecture -ne 'x64') {
+        throw 'Fixed FSE MSIX manifest identity does not match the pinned package contract.'
+    }
+    $application = $manifestXml.Descendants() | Where-Object {
+        $_.Name.LocalName -eq 'Application' -and $null -ne $_.Attribute('Id') -and $_.Attribute('Id').Value -eq 'App'
+    } | Select-Object -First 1
+    if ($null -eq $application) { throw 'Fixed FSE MSIX manifest is missing Application Id App.' }
+    foreach ($requiredText in @('windows.gamingApp', 'Microsoft.appCategory.gamingHome_8wekyb3d8bbwe')) {
+        if ($fseManifest -notmatch [regex]::Escape($requiredText)) {
+            throw "Fixed FSE MSIX manifest is missing required content: $requiredText"
+        }
+    }
+    if ($sccd -notmatch 'Microsoft\.appCategory\.gamingHome_8wekyb3d8bbwe') {
+        throw 'Fixed FSE MSIX SCCD is missing the Gaming Home custom capability.'
     }
 }
-$sccd = Get-Content -LiteralPath (Join-Path $PublishDirectory 'fse\Package\CustomCapability.SCCD') -Raw
-if ($sccd -notmatch 'Microsoft\.appCategory\.gamingHome_8wekyb3d8bbwe') {
-    throw 'FSE Home package SCCD is missing the Gaming Home custom capability.'
-}
-
-if ($RequireFsePackage) {
-    $fsePackagePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.msix'
-    if (-not (Test-Path -LiteralPath $fsePackagePath -PathType Leaf)) {
-        throw "Final signed FSE Home package is missing: $fsePackagePath"
-    }
-
-    $makeAppx = Find-SdkTool 'makeappx'
-    $signTool = Find-SdkTool 'signtool'
-    $unpackDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("SteamInputAddonforClaw-fse-verify-" + [Guid]::NewGuid().ToString('N'))
-    try {
-        New-Item -ItemType Directory -Path $unpackDirectory -Force | Out-Null
-        Write-Host "Unpacking final FSE MSIX package: $fsePackagePath"
-        Invoke-SdkTool -FilePath $makeAppx -Arguments @('unpack', '/p', $fsePackagePath, '/d', $unpackDirectory, '/o') -TimeoutSeconds 60 -Operation 'makeappx unpack'
-
-        Write-Host "Verifying final FSE MSIX signature: $fsePackagePath"
-        Invoke-SdkTool -FilePath $signTool -Arguments @('verify', '/pa', '/all', '/v', $fsePackagePath) -TimeoutSeconds 60 -Operation 'signtool verify'
-
-        $finalManifestPath = Join-Path $unpackDirectory 'AppxManifest.xml'
-        $finalManifest = Get-Content -LiteralPath $finalManifestPath -Raw
-        $sourceManifest = Get-Content -LiteralPath (Join-Path $PublishDirectory 'fse\Package\AppxManifest.xml') -Raw
-        foreach ($requiredText in @('Name="SteamInputAddonforClaw.FseHome"', 'Id="App"', 'windows.gamingApp', 'Microsoft.appCategory.gamingHome_8wekyb3d8bbwe')) {
-            if ($finalManifest -notmatch [regex]::Escape($requiredText)) {
-                throw "Final FSE Home package manifest is missing required content: $requiredText"
-            }
-        }
-
-        $sourceXml = [System.Xml.Linq.XDocument]::Parse($sourceManifest)
-        $finalXml = [System.Xml.Linq.XDocument]::Parse($finalManifest)
-        $sourceIdentity = $sourceXml.Root.Elements() | Where-Object { $_.Name.LocalName -eq 'Identity' } | Select-Object -First 1
-        $finalIdentity = $finalXml.Root.Elements() | Where-Object { $_.Name.LocalName -eq 'Identity' } | Select-Object -First 1
-        if ($null -eq $sourceIdentity -or $null -eq $finalIdentity) { throw 'FSE Home package identity could not be parsed.' }
-        foreach ($attribute in @('Name', 'Publisher', 'ProcessorArchitecture')) {
-            $sourceAttribute = $sourceIdentity.Attribute($attribute)
-            $finalAttribute = $finalIdentity.Attribute($attribute)
-            $sourceValue = if ($null -eq $sourceAttribute) { $null } else { $sourceAttribute.Value }
-            $finalValue = if ($null -eq $finalAttribute) { $null } else { $finalAttribute.Value }
-            if ($sourceValue -ne $finalValue) {
-                throw "Final FSE Home package identity attribute '$attribute' does not match the source manifest."
-            }
-        }
-        $finalVersionAttribute = $finalIdentity.Attribute('Version')
-        $finalVersion = if ($null -eq $finalVersionAttribute) { $null } else { $finalVersionAttribute.Value }
-        if ($ExpectedFsePackageVersion -and $finalVersion -ne $ExpectedFsePackageVersion) {
-            throw "Final FSE Home package version '$finalVersion' does not match expected version '$ExpectedFsePackageVersion'."
-        }
-        if (-not (Test-Path -LiteralPath (Join-Path $unpackDirectory 'CustomCapability.SCCD') -PathType Leaf)) {
-            throw 'Final FSE Home package does not contain CustomCapability.SCCD.'
-        }
-    }
-    finally {
-        if (Test-Path -LiteralPath $unpackDirectory) {
-            Remove-Item -LiteralPath $unpackDirectory -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
+finally {
+    $archive.Dispose()
+    $certificate.Dispose()
 }
 
 $uiDirectory = Join-Path $PublishDirectory 'ui'

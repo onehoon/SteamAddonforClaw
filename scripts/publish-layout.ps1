@@ -14,6 +14,7 @@ $uiProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.UI\SteamInpu
 $qamProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.QamHost\SteamInputAddonforClaw.QamHost.csproj'
 $overlayProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.Overlay\SteamInputAddonforClaw.Overlay.csproj'
 $fseProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\SteamInputAddonforClaw.FseHome.csproj'
+$fseDistribution = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\Distribution'
 $runtimeOutput = [System.IO.Path]::GetFullPath($PublishDirectory)
 $uiOutput = Join-Path $runtimeOutput 'ui'
 $qamOutput = Join-Path $runtimeOutput 'qam'
@@ -51,20 +52,17 @@ if ($LASTEXITCODE -ne 0) { throw "QamHost publish failed with exit code $LASTEXI
 dotnet publish $overlayProject @commonArguments '--output' $overlayOutput
 if ($LASTEXITCODE -ne 0) { throw "Overlay publish failed with exit code $LASTEXITCODE." }
 
-dotnet publish $fseProject @commonArguments '--output' $fseOutput
+$fseArguments = @('--configuration', $Configuration, '--runtime', 'win-x64', '--self-contained', 'false', '/p:Version=1.0.0')
+if ($NoRestore) { $fseArguments += '--no-restore' }
+dotnet publish $fseProject @fseArguments '--output' $fseOutput
 if ($LASTEXITCODE -ne 0) { throw "FSE Home publish failed with exit code $LASTEXITCODE." }
 
-$packageOutput = Join-Path $fseOutput 'Package'
-$packagePublicOutput = Join-Path $packageOutput 'Public'
-$packageAssetsOutput = Join-Path $packageOutput 'Assets'
-New-Item -ItemType Directory -Path $packagePublicOutput, $packageAssetsOutput -Force | Out-Null
-Get-ChildItem -LiteralPath $fseOutput -File | Copy-Item -Destination $packageOutput -Force
-$packageVersion = (($Version -split '-')[0] + '.0')
-$manifest = Get-Content (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\AppxManifest.xml') -Raw
-$manifest = $manifest.Replace('__PACKAGE_VERSION__', $packageVersion)
-Set-Content -LiteralPath (Join-Path $packageOutput 'AppxManifest.xml') -Value $manifest -Encoding UTF8
-Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\CustomCapability.SCCD') (Join-Path $packageOutput 'CustomCapability.SCCD') -Force
-Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\Public\README.txt') (Join-Path $packagePublicOutput 'README.txt') -Force
-Copy-Item (Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw\Assets\AppIcon.png') (Join-Path $packageAssetsOutput 'AppIcon.png') -Force
+foreach ($fseArtifact in @('SteamInputAddonforClaw.FseHome.msix', 'SteamInputAddonforClaw.FseHome.cer')) {
+    $source = Join-Path $fseDistribution $fseArtifact
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Fixed FSE distribution artifact was not found: $source"
+    }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $fseOutput $fseArtifact) -Force
+}
 
 Write-Host "Published Runtime, external UI, QAM, Overlay, and FSE Home layout at $runtimeOutput with version $Version."
