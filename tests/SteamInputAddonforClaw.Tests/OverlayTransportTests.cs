@@ -685,21 +685,26 @@ public sealed class OverlayTransportTests
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
         await using var server = new NamedPipeOverlayServer(pipeName);
         await server.StartAsync();
+        long? firstGeneration;
 
         await using (var first = new NamedPipeOverlayClient(pipeName))
         {
             var run = first.RunAsync(_ => Task.CompletedTask);
             Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+            firstGeneration = server.ReadyGeneration;
+            Assert.NotNull(firstGeneration);
             Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
             await first.DisposeAsync();
             try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+            Assert.True(await server.WaitForDisconnectedAsync(firstGeneration.Value, TimeSpan.FromSeconds(5)));
         }
 
         await using var second = new NamedPipeOverlayClient(pipeName);
         var secondRun = second.RunAsync(_ => Task.CompletedTask);
         Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.NotEqual(firstGeneration, server.ReadyGeneration);
         Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
-        await server.SendCommandAsync(OverlayCommand.Shutdown);
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
         await secondRun.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
