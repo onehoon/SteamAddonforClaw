@@ -15,7 +15,9 @@ public sealed class FrontendProcessLauncherTests
         launcher.RequestOpen(FrontendOpenReason.InitialManualLaunch);
         launcher.RequestOpen(FrontendOpenReason.Tray);
         Assert.Empty(starts);
-        launcher.MarkRuntimeReady();
+        var reason = launcher.MarkRuntimeReady();
+        Assert.Equal(FrontendOpenReason.Tray, reason);
+        launcher.Launch(reason!.Value);
         Assert.Single(starts);
     }
 
@@ -25,7 +27,9 @@ public sealed class FrontendProcessLauncherTests
         var starts = new List<ProcessStartInfo>();
         var launcher = new FrontendProcessLauncher("C:\\runtime", "C:\\logs", info => { starts.Add(info); return null; });
         launcher.MarkRuntimeReady();
-        launcher.RequestOpen(FrontendOpenReason.Tray);
+        var reason = launcher.RequestOpen(FrontendOpenReason.Tray);
+        Assert.Equal(FrontendOpenReason.Tray, reason);
+        launcher.Launch(reason!.Value);
         Assert.Single(starts);
     }
 
@@ -36,7 +40,7 @@ public sealed class FrontendProcessLauncherTests
         var launcher = new FrontendProcessLauncher("C:\\runtime", "C:\\logs", info => { starts.Add(info); return null; });
         launcher.RequestOpen(FrontendOpenReason.Tray);
         launcher.StopAcceptingRequests();
-        launcher.MarkRuntimeReady();
+        Assert.Null(launcher.MarkRuntimeReady());
         launcher.RequestOpen(FrontendOpenReason.RuntimeActivation);
         Assert.Empty(starts);
     }
@@ -52,8 +56,8 @@ public sealed class FrontendProcessLauncherTests
             return null;
         });
         launcher.MarkRuntimeReady();
-        launcher.RequestOpen(FrontendOpenReason.Tray);
-        launcher.RequestOpen(FrontendOpenReason.Tray);
+        launcher.Launch(launcher.RequestOpen(FrontendOpenReason.Tray)!.Value);
+        launcher.Launch(launcher.RequestOpen(FrontendOpenReason.Tray)!.Value);
         Assert.Equal(2, attempts);
     }
 
@@ -71,7 +75,7 @@ public sealed class FrontendProcessLauncherTests
         var logDirectory = @"C:\Users\Test User\Addon Data\logs";
         var launcher = new FrontendProcessLauncher("C:\\runtime", logDirectory, info => { starts.Add(info); return null; });
         launcher.MarkRuntimeReady();
-        launcher.RequestOpen(FrontendOpenReason.InitialManualLaunch);
+        launcher.Launch(launcher.RequestOpen(FrontendOpenReason.InitialManualLaunch)!.Value);
 
         Assert.Single(starts);
         Assert.Equal([FrontendLaunchArguments.LogDirectoryOption, logDirectory], starts[0].ArgumentList);

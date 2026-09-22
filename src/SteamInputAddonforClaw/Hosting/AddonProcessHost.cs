@@ -20,6 +20,7 @@ using SteamInputAddonforClaw.GameBar;
 using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Updates;
 using SteamInputAddonforClaw.ClawHud;
+using SteamInputAddonforClaw.Prerequisites;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -55,6 +56,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private NamedPipeAddonFrontendServer? _frontendServer;
     private NamedPipeAddonFrontendServer? _qamFrontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher;
+    private readonly IWindowsAppRuntimePrerequisite _windowsAppRuntimePrerequisite;
     private readonly QamHostProcessController _qamHostController;
     private readonly OverlayProcessController _overlayController;
     private FrontendUpdateCoordinator? _updateCoordinator;
@@ -153,7 +155,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal AddonProcessHost(Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
         string? testOnlyDataRoot = null,
         Func<string>? testFrontendPipeNameFactory = null,
-        Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null)
+        Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null,
+        IWindowsAppRuntimePrerequisite? testWindowsAppRuntimePrerequisite = null)
     {
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
         _frontendPipeNameFactory = testFrontendPipeNameFactory;
@@ -172,6 +175,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var fpsLimiter = testIntelFrameLimiterFactory?.Invoke(fpsMarker) ?? (testOnlyDataRoot is null ? new IntelFrameLimiter(fpsMarker) : new UnavailableIntelFrameLimiter());
         _intelFpsRuntime = new(_profileStore, _profileMutationGate, fpsLimiter, marker: fpsMarker);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
+        _windowsAppRuntimePrerequisite = testWindowsAppRuntimePrerequisite ?? new WindowsAppRuntimePrerequisite();
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
         _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
         _overlayController.OverlayDismissRequested += () => _ = HandleOverlayCloseReasonAsync("OutsideClick", surfaceAlreadyGone: false);
@@ -567,8 +571,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Debug("FrontendTransport", "Frontend named-pipe server starting.", ("PipeName", pipeName));
             await _frontendServer.StartAsync().ConfigureAwait(false);
-            _frontendLauncher.MarkRuntimeReady();
+            var pendingFrontendOpen = _frontendLauncher.MarkRuntimeReady();
             AppLog.Info("FrontendTransport", "Frontend named-pipe server ready.", ("PipeName", pipeName));
+            if (pendingFrontendOpen is { } reason)
+                _ = CoordinateFrontendOpenAsync(reason);
         }
         catch (Exception exception)
         {
@@ -1016,6 +1022,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         try
         {
+            var availability = _windowsAppRuntimePrerequisite.Probe();
+            if (availability != WindowsAppRuntimeAvailability.Ready)
+            {
+                AppLog.Info("Overlay", "Overlay warm start skipped because Windows App Runtime is not ready.",
+                    ("Availability", availability), ("Action", "NoSetupNoUac"));
+                return;
+            }
             await _overlayController.StartAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
@@ -1087,6 +1100,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private async Task CoordinateFrontendOpenAsync(FrontendOpenReason reason)
     {
+        var launchReason = _frontendLauncher.RequestOpen(reason);
+        if (launchReason is not { } readyReason)
+            return;
+        if (!await EnsureWindowsAppRuntimeForSurfaceAsync("Main UI").ConfigureAwait(false))
+            return;
+
         await _visibleSurfaceTransition.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -1116,7 +1135,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         finally { _visibleSurfaceTransition.Release(); }
 
-        _frontendLauncher.RequestOpen(reason);
+        _frontendLauncher.Launch(readyReason);
     }
 
     private async Task CoordinateOverlayToggleAsync()
@@ -1131,6 +1150,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 await RetireOverlayCaptureUnderTransitionAsync("ToggleOff", surfaceAlreadyGone: false).ConfigureAwait(false);
                 return;
             }
+
+            if (!await EnsureWindowsAppRuntimeForSurfaceAsync("Overlay").ConfigureAwait(false))
+                return;
 
             // OQ3-A: retire the Main UI through the existing .Frontend CloseRequested path first.
             var server = _frontendServer;
@@ -1217,6 +1239,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Warn("UiSurface", "Overlay visible-surface coordination failed.", exception);
         }
         finally { _visibleSurfaceTransition.Release(); }
+    }
+
+    private async Task<bool> EnsureWindowsAppRuntimeForSurfaceAsync(string surface)
+    {
+        var ready = await _windowsAppRuntimePrerequisite.EnsureAvailableAsync(CancellationToken.None).ConfigureAwait(false);
+        if (ready) return true;
+
+        AppLog.Warn("UiSurface", $"{surface} open blocked because Windows App Runtime is unavailable; Runtime remains active.", null,
+            ("Surface", surface), ("Action", "KeepRuntimeAlive"));
+        NativeStartupWarning.Show("Windows App Runtime 2.3.1 or newer is required to open this surface. The controller Runtime remains active.");
+        return false;
     }
 
     // SF-V2-02 section 17: refresh only while the Overlay is both currently captured (OQ4 authority)

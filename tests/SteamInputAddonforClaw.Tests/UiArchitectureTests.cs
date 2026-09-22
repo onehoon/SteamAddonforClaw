@@ -57,6 +57,51 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void UI_and_overlay_use_framework_dependent_windows_app_runtime_contract()
+    {
+        var root = FindRepositoryRoot();
+        foreach (var relativePath in new[]
+        {
+            "src/SteamInputAddonforClaw.UI/SteamInputAddonforClaw.UI.csproj",
+            "src/SteamInputAddonforClaw.Overlay/SteamInputAddonforClaw.Overlay.csproj",
+        })
+        {
+            var project = File.ReadAllText(Path.Combine(root, relativePath));
+            Assert.Contains("<WindowsPackageType>None</WindowsPackageType>", project, StringComparison.Ordinal);
+            Assert.Contains("<UseWinUI>true</UseWinUI>", project, StringComparison.Ordinal);
+            Assert.Contains("<SelfContained>false</SelfContained>", project, StringComparison.Ordinal);
+            Assert.Contains("<WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>", project, StringComparison.Ordinal);
+            Assert.Contains("<RuntimeIdentifier>win-x64</RuntimeIdentifier>", project, StringComparison.Ordinal);
+            Assert.Contains("<PackageReference Include=\"Microsoft.WindowsAppSDK\" Version=\"2.3.1\"", project, StringComparison.Ordinal);
+            Assert.DoesNotContain("Bootstrap.Initialize", project, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Surface_prerequisite_is_checked_before_any_visible_surface_mutation()
+    {
+        var root = FindRepositoryRoot();
+        var host = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
+
+        var warmup = ExtractMethod(host, "private async Task StartOverlayWarmupAsync");
+        Assert.Contains("_windowsAppRuntimePrerequisite.Probe()", warmup, StringComparison.Ordinal);
+        Assert.Contains("(\"Action\", \"NoSetupNoUac\")", warmup, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnsureAvailableAsync", warmup, StringComparison.Ordinal);
+
+        var mainOpen = ExtractMethod(host, "private async Task CoordinateFrontendOpenAsync");
+        Assert.True(mainOpen.IndexOf("RequestOpen", StringComparison.Ordinal)
+            < mainOpen.IndexOf("EnsureWindowsAppRuntimeForSurfaceAsync", StringComparison.Ordinal));
+        Assert.True(mainOpen.IndexOf("EnsureWindowsAppRuntimeForSurfaceAsync", StringComparison.Ordinal)
+            < mainOpen.IndexOf("_frontendLauncher.Launch", StringComparison.Ordinal));
+
+        var overlayOpen = ExtractMethod(host, "private async Task CoordinateOverlayToggleAsync");
+        Assert.True(overlayOpen.IndexOf("EnsureWindowsAppRuntimeForSurfaceAsync(\"Overlay\")", StringComparison.Ordinal)
+            < overlayOpen.IndexOf("RequestClientCloseAsync", StringComparison.Ordinal));
+        Assert.True(overlayOpen.IndexOf("RequestClientCloseAsync", StringComparison.Ordinal)
+            < overlayOpen.IndexOf("_overlayController.ShowAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void External_ui_app_registers_required_winui_control_resources()
     {
         var root = FindRepositoryRoot();
@@ -539,6 +584,21 @@ public sealed class UiArchitectureTests
             .Descendants("ProjectReference")
             .Select(element => Path.GetFileName((string?)element.Attribute("Include") ?? string.Empty))
             .ToArray();
+    }
+
+    private static string ExtractMethod(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Method signature not found: {signature}");
+        var openBrace = source.IndexOf('{', start);
+        var depth = 0;
+        var index = openBrace;
+        for (; index < source.Length; index++)
+        {
+            if (source[index] == '{') depth++;
+            else if (source[index] == '}' && --depth == 0) break;
+        }
+        return source[start..(index + 1)];
     }
 
     private static string FindRepositoryRoot()

@@ -36,8 +36,6 @@ function New-Fixture {
         'ui\Views\ControllerPage.xbf' = 'controller xbf'
         'ui\Views\SettingsPage.xbf' = 'settings xbf'
         'ui\Views\DeveloperPage.xbf' = 'developer xbf'
-        'ui\Microsoft.WindowsAppRuntime.1.8.pri' = 'dependency pri'
-        'ui\Microsoft.UI.Xaml.winmd' = 'winmd payload'
         'qam\SteamInputAddonforClaw.QamHost.exe' = 'qam executable'
         'qam\Frontend\qam.js' = 'qam frontend'
         'overlay\SteamInputAddonforClaw.Overlay.exe' = 'overlay executable'
@@ -45,7 +43,6 @@ function New-Fixture {
         'overlay\SteamInputAddonforClaw.Overlay.pri' = 'overlay application pri'
         'overlay\App.xbf' = 'overlay app xbf'
         'overlay\OverlayWindow.xbf' = 'overlay window xbf'
-        'overlay\Microsoft.UI.Xaml.winmd' = 'overlay winmd payload'
         'fse\SteamInputAddonforClaw.FseHome.exe' = 'fse executable'
         'fse\SteamInputAddonforClaw.FseHome.dll' = 'fse managed payload'
         'fse\SteamInputAddonforClaw.FseHome.msix' = (Join-Path $repoRoot 'src\SteamInputAddonforClaw.FseHome\Packaging\Distribution\SteamInputAddonforClaw.FseHome.msix')
@@ -159,6 +156,14 @@ try {
     $result = Invoke-Verify -PublishDirectory $root
     if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'Microsoft.Windows.SDK.NET.dll') {
         throw 'Expected the QAM Windows SDK projection payload to be rejected.'
+    }
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'ui\Microsoft.WindowsAppRuntime.dll') -Value 'forbidden self-contained Windows App SDK payload'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'self-contained Windows App SDK payload') {
+        throw 'Expected a self-contained Windows App SDK payload to be rejected.'
     }
 
     $root = New-Fixture
