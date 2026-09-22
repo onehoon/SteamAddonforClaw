@@ -367,10 +367,13 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("StatusContent", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("MainNavigationPage.Status", navigationState, StringComparison.Ordinal);
 
-        // Top-level menu order is Device < Controller < Profile < HowToUse.
+        // Top-level menu order is Device < Controller < Profile < Overlay < HowToUse.
         Assert.True(xaml.IndexOf("Tag=\"Device\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Controller\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Tag=\"Controller\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
+        Assert.Contains("MainNavigationPage.Overlay", navigationState, StringComparison.Ordinal);
+        Assert.Contains("OverlayContent", mainWindow, StringComparison.Ordinal);
 
         // Device is the default page in both the shell and the navigation state.
         Assert.Contains("MainNavigationView.SelectedItem = DeviceNavigationItem;", mainWindow, StringComparison.Ordinal);
@@ -397,6 +400,44 @@ public sealed class UiArchitectureTests
 
         // The removed "Check Status" wording no longer points users at a page that does not exist.
         Assert.DoesNotContain("Check Status", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Overlay_page_owns_the_main_ui_clawhud_surface_and_settings_page_does_not()
+    {
+        var root = FindRepositoryRoot();
+        var overlayXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/OverlayPage.xaml"));
+        var overlayCodeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/OverlayPage.xaml.cs"));
+        var settingsXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml"));
+        var settingsCodeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml.cs"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+
+        Assert.Contains("SettingsCard", overlayXaml, StringComparison.Ordinal);
+        foreach (var required in new[]
+        {
+            "Enable HUD",
+            "Display mode",
+            "HUD size",
+            "Header=\"Font\"",
+            "Header=\"Alignment\"",
+            "Background width",
+            "HUD opacity",
+            "Intel VRR Range Fix",
+        })
+            Assert.Contains(required, overlayXaml, StringComparison.Ordinal);
+
+        Assert.Contains("FrontendClawHudSnapshot", overlayCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("CaptureClawHudAsync", overlayCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("PreviewOpacity", overlayCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("CommitOpacity", overlayCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("ClawHudOpacitySlider_KeyUp", overlayXaml, StringComparison.Ordinal);
+        Assert.Contains("ClawHudRetryButton", overlayXaml, StringComparison.Ordinal);
+        Assert.Contains("SetClawHudEnabledAsync(true)", overlayCodeBehind, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("ClawHud", settingsXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClawHud", settingsCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("OverlayContent.RequestClawHudRefresh()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("OverlayContent.Initialize(_frontend)", mainWindow, StringComparison.Ordinal);
     }
 
     [Fact]

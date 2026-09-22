@@ -1,0 +1,96 @@
+<UserControl
+    x:Class="SteamInputAddonforClaw.Views.OverlayPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
+    <ScrollViewer Padding="32">
+        <StackPanel Spacing="16">
+            <StackPanel Spacing="4">
+                <TextBlock FontSize="24" FontWeight="SemiBold" Text="Overlay" />
+                <TextBlock Opacity="0.7" Text="Configure the performance overlay and display behavior." TextWrapping="Wrap" />
+            </StackPanel>
+
+            <InfoBar
+                x:Name="ClawHudInfoBar"
+                IsClosable="False"
+                IsOpen="False"
+                Visibility="Collapsed"
+                Severity="Warning">
+                <InfoBar.ActionButton>
+                    <Button x:Name="ClawHudRetryButton" Content="Retry" Click="ClawHudRetryButton_Click" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+
+            <TextBlock FontSize="18" FontWeight="SemiBold" Text="ClawHUD" />
+            <ctcontrols:SettingsCard x:Name="ClawHudEnabledCard" Header="Enable HUD">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Setting" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ctcontrols:SettingsCard.Description>
+                    <TextBlock x:Name="ClawHudStatusText" TextWrapping="Wrap" />
+                </ctcontrols:SettingsCard.Description>
+                <ToggleSwitch x:Name="ClawHudEnabledToggleSwitch" Toggled="ClawHudEnabledToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
+
+            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Display" />
+            <ctcontrols:SettingsCard Header="Display mode" Description="Choose when the HUD is visible.">
+                <ComboBox x:Name="ClawHudDisplayModeComboBox" MinWidth="220" SelectionChanged="ClawHudDisplayModeComboBox_SelectionChanged">
+                    <ComboBoxItem Content="In game only" />
+                    <ComboBoxItem Content="Always" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+            <ctcontrols:SettingsCard Header="HUD size" Description="Adjust the overall HUD scale.">
+                <ComboBox x:Name="ClawHudSizeComboBox" MinWidth="220" SelectionChanged="ClawHudSizeComboBox_SelectionChanged">
+                    <ComboBoxItem Content="-2" />
+                    <ComboBoxItem Content="-1" />
+                    <ComboBoxItem Content="Default" />
+                    <ComboBoxItem Content="+1" />
+                    <ComboBoxItem Content="+2" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+            <ctcontrols:SettingsCard Header="Font" Description="Font used by the performance HUD.">
+                <ComboBox x:Name="ClawHudFontComboBox" MinWidth="220" SelectionChanged="ClawHudFontComboBox_SelectionChanged">
+                    <ComboBoxItem Content="Unispace" />
+                    <ComboBoxItem Content="Segoe UI Variable" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+            <ctcontrols:SettingsCard Header="Alignment" Description="Horizontal alignment of HUD content.">
+                <ComboBox x:Name="ClawHudAlignmentComboBox" MinWidth="220" SelectionChanged="ClawHudAlignmentComboBox_SelectionChanged">
+                    <ComboBoxItem Content="Left" />
+                    <ComboBoxItem Content="Center" />
+                    <ComboBoxItem Content="Right" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+
+            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Appearance" />
+            <ctcontrols:SettingsCard Header="Background width" Description="Choose how far the HUD background extends.">
+                <ComboBox x:Name="ClawHudBackgroundComboBox" MinWidth="220" SelectionChanged="ClawHudBackgroundComboBox_SelectionChanged">
+                    <ComboBoxItem Content="Full width" />
+                    <ComboBoxItem Content="Content width" />
+                </ComboBox>
+            </ctcontrols:SettingsCard>
+            <ctcontrols:SettingsCard x:Name="ClawHudOpacityCard" Header="HUD opacity">
+                <ctcontrols:SettingsCard.Description>
+                    <TextBlock x:Name="ClawHudOpacityValueText" Text="—" />
+                </ctcontrols:SettingsCard.Description>
+                <Slider
+                    x:Name="ClawHudOpacitySlider"
+                    Minimum="50"
+                    Maximum="100"
+                    StepFrequency="5"
+                    ValueChanged="ClawHudOpacitySlider_ValueChanged"
+                    PointerReleased="ClawHudOpacitySlider_PointerReleased"
+                    PointerCaptureLost="ClawHudOpacitySlider_PointerCaptureLost"
+                    KeyUp="ClawHudOpacitySlider_KeyUp" />
+            </ctcontrols:SettingsCard>
+
+            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Display compatibility" />
+            <ctcontrols:SettingsCard Header="Intel VRR Range Fix" Description="Restore the supported VRR range on affected Intel panels.">
+                <StackPanel Spacing="4">
+                    <ToggleSwitch x:Name="ClawHudIntelVrrToggleSwitch" Toggled="ClawHudIntelVrrToggleSwitch_Toggled" />
+                    <TextBlock x:Name="ClawHudVrrResultText" Opacity="0.7" TextWrapping="Wrap" />
+                </StackPanel>
+            </ctcontrols:SettingsCard>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
