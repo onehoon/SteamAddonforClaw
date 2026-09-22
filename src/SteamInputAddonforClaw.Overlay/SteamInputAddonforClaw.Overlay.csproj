@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SteamInputAddonforClaw.Tests" />
+    <InternalsVisibleTo Include="SteamInputAddonforClaw.UiTests" />
   </ItemGroup>
 
   <Target Name="CopyMissingWinUIPublishAssets" AfterTargets="Publish">
