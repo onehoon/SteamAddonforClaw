@@ -12,7 +12,7 @@ namespace SteamInputAddonforClaw.Tests;
 /// <summary>PR3: the frontend delegates the reboot-bound authority transition straight to the
 /// Runtime-owned transition owner and returns its authoritative result verbatim. It must NOT raise a
 /// global <see cref="IAddonFrontendControl.StateInvalidated"/> -- that would queue
-/// <c>DevicePage.RefreshAsync()</c> and race the just-returned snapshot; the feature has no QAM
+/// <c>DevicePage.RefreshAsync()</c> and race the just-returned snapshot; the feature has no Steam Quick Access
 /// surface and a successful transition restarts Windows anyway (PR #430 review, carried forward).</summary>
 [Collection("AppLog")]
 public sealed class CenterMStartupFrontendTests : IDisposable

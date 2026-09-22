@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Overlay;
 internal sealed record QuickSettingsCommitSettlement(QuickSettingsMutationResult? Result, string? OperationFailureMessage);
 
 // OQ5-UI-07 mechanics, refined for the real shared Quick Settings payload (SF-V2-07 section 21):
-// QAM-equivalent trailing debounce for one logical slider/group setting. One instance owns at most
+// Shared frontend trailing debounce for one logical slider/group setting. One instance owns at most
 // one current draft and is NOT a global scheduler, a mutation-key dictionary, or a feature
 // authority -- OverlayQuickSettingsPageBinding creates one instance per pending row/group key. The
 // OQ5-UI-06 preview stays immediate; this only paces the request that follows the preview. The

@@ -54,21 +54,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // stock-restoration operation.
     private SteamInputAddonforClaw.CenterMStartup.ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
     private NamedPipeAddonFrontendServer? _frontendServer;
-    private NamedPipeAddonFrontendServer? _qamFrontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly IWindowsAppRuntimePrerequisite _windowsAppRuntimePrerequisite;
-    private readonly QamHostProcessController _qamHostController;
     private readonly OverlayProcessController _overlayController;
     private FrontendUpdateCoordinator? _updateCoordinator;
     private Func<bool>? _requestRestart;
     // OQ3-A: one narrow cross-surface ordering gate so a normal user request cannot run the two
     // opposite Main UI <-> Overlay visibility transitions at the same time. Not a surface manager.
     private readonly SemaphoreSlim _visibleSurfaceTransition = new(1, 1);
-    // QAM fresh-open selection: serialize only the causal intent + native pulse pair. This is not a
-    // general front-button scheduler; it prevents two adjacent Quick Access actions from swapping
-    // their notification/pulse order while keeping pipe I/O off the input callback thread.
-    private readonly SemaphoreSlim _quickAccessRequestGate = new(1, 1);
-    private Task _quickAccessCoordination = Task.CompletedTask;
     private static readonly TimeSpan MainUiCloseTimeout = TimeSpan.FromSeconds(6);
     // OQ4 section 4: one in-memory Overlay-capture fact + the one active semantic input router.
     // Not another controller authority. Never persisted, never restored across process restart.
@@ -176,7 +169,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _intelFpsRuntime = new(_profileStore, _profileMutationGate, fpsLimiter, marker: fpsMarker);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _windowsAppRuntimePrerequisite = testWindowsAppRuntimePrerequisite ?? new WindowsAppRuntimePrerequisite();
-        _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
         _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
         _overlayController.OverlayDismissRequested += () => _ = HandleOverlayCloseReasonAsync("OutsideClick", surfaceAlreadyGone: false);
         _overlayController.VisibleSessionLost += () => _ = HandleOverlayCloseReasonAsync("VisibleSessionLost", surfaceAlreadyGone: true);
@@ -351,12 +343,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             _startupOutcome = AddonProcessStartupOutcome.RuntimeReady;
 
-            // QamHost itself remains GamepadUI-session scoped. Prepare only Steam's persistent CEF bootstrap
-            // marker here so a normal future Steam/steamwebhelper launch exposes the loopback CDP
-            // endpoint without requiring the user to add launch flags manually. Failure is
-            // feature-local: controller/routing Runtime startup must continue normally.
+            // Retire only legacy CEF marker state that this Addon previously owned. New startup
+            // never creates or ensures the marker, and cleanup remains feature-local.
             if (startupResult.ShouldStartRuntime)
-                _ = SteamCefDebugBootstrap.Ensure();
+                _ = SteamCefLegacyMarkerCleanup.RemoveOwnedMarker();
 
             return _startupOutcome.Value;
         }
@@ -399,7 +389,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 // PID1901 resume baseline. Derived directly from the sole startup authority fact --
                 // Disabled / Partial / Unavailable all resolve to false.
                 stockCenterMAuthority: startupResult.CenterMStartupState == Contracts.Frontend.FrontendCenterMStartupState.Enabled,
-                // PR7: forward the raw BPM bool to QAM unchanged, then request a Full-1902 runtime
+                // PR7: forward the raw BPM bool, then request a Full-1902 runtime
                 // presentation reconcile (BPM is half of the X360 <-> SteamDeck policy).
                 bigPictureStateChanged: OnBigPictureStateChanged,
                 // Full1902 0903 cleanup (section 4): read-only override for the final Addon operational
@@ -417,7 +407,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _intelFpsRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
         _runtimeHost.PowerResumeObserved += OnPowerResumeObserved;
-        _qamHostController.OnActualRunningAppIdChanged(_runtimeHost.ActualRunningAppId);
         // TDP / game-profile support is a supported-hardware/model capability, not a controller
         // authority state -- it applies in both Center M Enabled and Disabled boots.
         if (startupResult.HardwareDeviceModel is { } tdpModel
@@ -555,7 +544,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
-        var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
 
         // Full1902 Policy B review [BLOCKER]: the whole Disabled-mode controller startup sequence
         // (VIIPER init -> PR5 physical acquire -> Win+G arm+prove -> first presentation attach) now
@@ -583,22 +571,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ("HResult", $"0x{exception.HResult:X8}"));
             throw;
         }
-        try
-        {
-            _qamFrontendServer = new NamedPipeAddonFrontendServer(qamPipeName, _frontendControl);
-            AppLog.Debug("FrontendTransport", "QAM frontend named-pipe server starting.", ("PipeName", qamPipeName));
-            await _qamFrontendServer.StartAsync().ConfigureAwait(false);
-            AppLog.Info("FrontendTransport", "QAM frontend named-pipe server ready.", ("PipeName", qamPipeName));
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("FrontendTransport", "QAM frontend named-pipe server unavailable; continuing without QAM bridge.", exception,
-                ("PipeName", qamPipeName), ("ExceptionType", exception.GetType().FullName ?? exception.GetType().Name));
-            if (_qamFrontendServer is not null)
-                await _qamFrontendServer.DisposeAsync().ConfigureAwait(false);
-            _qamFrontendServer = null;
-        }
-        // PR3: give the Overlay transport the same typed Setting capture/move seam used by QAM before
+        // PR3: give the Overlay transport the same typed Setting capture/move seam used by the Main UI before
         // warm startup. The Overlay never reaches StartupSettingsCoordinator directly.
         _overlayController.BindTabOrderAuthority(
             capture: token => _frontendControl!.CaptureAddonQuickSettingsTabOrderAsync(token),
@@ -629,7 +602,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     // SF-V2-09 section 7.3/7.4: Profile capture for the Overlay uses the current Runtime active-game
-    // authority, exactly like QAM's Profile page selection. AppId 0 (no active Steam game) is
+    // authority. AppId 0 (no active Steam game) is
     // resolved locally to an explicit Unavailable page without ever calling into the frontend
     // control -- the Profile tab stays visible with a deliberate "No active game." message rather
     // than a fake AppId-0 profile or a hidden tab.
@@ -1048,54 +1021,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // owner of visible-surface ordering and controller capture.
     internal void RequestOverlayToggle() => _ = CoordinateOverlayToggleAsync();
 
-    // QAM fresh-open selection: the native SteamDeck Quick Access pulse remains the sole open/close
-    // authority. The optional QamHost intent is attempted first, and the input callback returns
-    // immediately while the pair is coordinated off-thread.
+    // Steam native Quick Access remains owned by the existing SteamDeck presentation pulse.
     private bool RequestSteamQuickAccess()
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return false;
-        var task = CoordinateSteamQuickAccessAsync();
-        Volatile.Write(ref _quickAccessCoordination, task);
-        return true;
-    }
-
-    private async Task CoordinateSteamQuickAccessAsync()
-    {
-        var gateAcquired = false;
-        try
-        {
-            await _quickAccessRequestGate.WaitAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
-            gateAcquired = true;
-            try
-            {
-                var delivered = false;
-                if (_qamFrontendServer is { } server)
-                    delivered = await server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromSeconds(1), _startupCancellationTokenSource.Token).ConfigureAwait(false);
-
-                AppLog.Debug("QAM", delivered
-                    ? "QAM Addon first-tab intent delivered."
-                    : "QAM Addon first-tab intent unavailable; native Quick Access pulse continues.");
-            }
-            catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception exception)
-            {
-                AppLog.Debug("QAM", "QAM Addon first-tab intent unavailable; native Quick Access pulse continues.",
-                    ("ExceptionType", exception.GetType().Name));
-            }
-            finally
-            {
-                if (!_startupCancellationTokenSource.IsCancellationRequested)
-                    _presentationOwnership?.TryRequestQuickAccessPulse();
-            }
-        }
-        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
-        finally
-        {
-            if (gateAcquired) _quickAccessRequestGate.Release();
-        }
+        return _presentationOwnership?.TryRequestQuickAccessPulse() == true;
     }
 
     private async Task CoordinateFrontendOpenAsync(FrontendOpenReason reason)
@@ -1278,7 +1208,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // SF-V2-02/06/09 section 15/16/11: the admission Runtime-side fact this class owns
     // (_overlayCaptureActive + process shutdown). NamedPipeOverlayServer separately checks its own
     // Ready/Visible fact before ever calling this delegate. Dispatches onto the SAME shared
-    // MutateQuickSettingAsync seam Main UI/QAM already use through IAddonFrontendControl -- no direct
+    // MutateQuickSettingAsync seam Main UI and Overlay already use through IAddonFrontendControl -- no direct
     // ProfileStore/hardware/registry access, and no second Device/Profile row/group dispatch
     // authority. SF-V2-09 removes the historical Device-only restriction (section 11): Profile
     // AppId/target/writability validation and dispatch are already fully owned by the shared
@@ -1717,7 +1647,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         overlayRouter?.StopAcceptingNavigation();
         overlayRouter?.Dispose();
         _overlayController.BeginShutdown();
-        _qamHostController.BeginShutdown();
         _tdpRuntime?.BeginShutdown();
         _tdpCenterMRegistryWatcher?.Dispose();
         _tdpCenterMRegistryWatcher = null;
@@ -1775,8 +1704,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // the token; drain the last in-flight one before tearing down the presentation owner.
         try { await _presentationReconcile.ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Warn("ControllerPresentation", "Runtime presentation reconcile failed during shutdown.", exception); }
-        try { await Volatile.Read(ref _quickAccessCoordination).ConfigureAwait(false); }
-        catch (Exception exception) { AppLog.Warn("QAM", "Quick Access coordination failed during shutdown.", exception); }
         if (_frontButtonRuntime is not null)
         {
             // Full1902 A2 section 14: stop accepting front-button events and drop pulse callbacks into
@@ -1806,11 +1733,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
             _frontendServer = null;
-        }
-        if (_qamFrontendServer is not null)
-        {
-            await _qamFrontendServer.DisposeAsync().ConfigureAwait(false);
-            _qamFrontendServer = null;
         }
         PrepareRuntimeForShutdown();
         _systemTrayIcon?.Dispose();
@@ -1849,11 +1771,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _tdpTransport = null;
         }
         _intelFpsRuntime.Dispose();
-        await _qamHostController.DisposeAsync().ConfigureAwait(false);
         // OQ3-A: disposed last, after the frontend server and Overlay controller are gone, so any
         // in-flight visible-surface coordination has already unwound and released the gate.
         try { _visibleSurfaceTransition.Dispose(); } catch (ObjectDisposedException) { }
-        try { _quickAccessRequestGate.Dispose(); } catch (ObjectDisposedException) { }
         try { _clawHudGate.Dispose(); } catch (ObjectDisposedException) { }
         _startupComposition = null;
     }
@@ -1898,8 +1818,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnActualRunningAppIdChanged(uint appId)
     {
-        _qamHostController.OnActualRunningAppIdChanged(appId);
-
         // PR7 section 8: request the Full-1902 X360 <-> SteamDeck reconcile up front, so it does not
         // wait behind the unrelated CPU Boost / Power Mode / Resolution / TDP / FPS profile work
         // below. The switch itself runs asynchronously, serialized by the presentation owner's gate.
@@ -1942,7 +1860,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnBigPictureStateChanged(bool active)
     {
-        _qamHostController.OnBigPictureStateChanged(active);
         RequestControllerPresentationReconcile("BigPictureChanged");
     }
 

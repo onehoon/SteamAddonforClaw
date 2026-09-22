@@ -3,7 +3,7 @@ namespace SteamInputAddonforClaw.Contracts.Frontend;
 /// <summary>Shared Quick Settings product contract (Shared Frontend V2, SF-V2-03/SF-V2-08): one
 /// closed, stateless, typed definition of what Device and Profile Quick Settings rows exist, their
 /// order/labels/control kind/value/range/options, and which mutation intent each row represents.
-/// Steam QAM renders both pages through the SAME <see cref="QuickSettingsPageSnapshot"/> shape (the
+/// The Main UI and Overlay render both pages through the SAME <see cref="QuickSettingsPageSnapshot"/> shape (the
 /// Addon Overlay will later do the same for Profile) -- this contract carries the shared product
 /// semantics, never a renderer or a lifecycle/admission authority (work order sections 1/31).</summary>
 public enum QuickSettingsPageId

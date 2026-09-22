@@ -11,12 +11,10 @@ $ErrorActionPreference = 'Stop'
 
 $runtimeProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw\SteamInputAddonforClaw.csproj'
 $uiProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.UI\SteamInputAddonforClaw.UI.csproj'
-$qamProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.QamHost\SteamInputAddonforClaw.QamHost.csproj'
 $overlayProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.Overlay\SteamInputAddonforClaw.Overlay.csproj'
 $fseDistribution = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\Distribution'
 $runtimeOutput = [System.IO.Path]::GetFullPath($PublishDirectory)
 $uiOutput = Join-Path $runtimeOutput 'ui'
-$qamOutput = Join-Path $runtimeOutput 'qam'
 $overlayOutput = Join-Path $runtimeOutput 'overlay'
 $fseOutput = Join-Path $runtimeOutput 'fse'
 
@@ -25,7 +23,6 @@ if (Test-Path -LiteralPath $runtimeOutput) {
 }
 New-Item -ItemType Directory -Path $runtimeOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $uiOutput -Force | Out-Null
-New-Item -ItemType Directory -Path $qamOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $overlayOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $fseOutput -Force | Out-Null
 
@@ -45,9 +42,6 @@ if ($NoRestore) { $uiArguments += '--no-restore' }
 dotnet publish $uiProject @uiArguments '--output' $uiOutput
 if ($LASTEXITCODE -ne 0) { throw "UI publish failed with exit code $LASTEXITCODE." }
 
-dotnet publish $qamProject @commonArguments '--output' $qamOutput
-if ($LASTEXITCODE -ne 0) { throw "QamHost publish failed with exit code $LASTEXITCODE." }
-
 dotnet publish $overlayProject @commonArguments '--output' $overlayOutput
 if ($LASTEXITCODE -ne 0) { throw "Overlay publish failed with exit code $LASTEXITCODE." }
 
@@ -59,4 +53,4 @@ foreach ($fseArtifact in @('SteamInputAddonforClaw.FseHome.msix', 'SteamInputAdd
     Copy-Item -LiteralPath $source -Destination (Join-Path $fseOutput $fseArtifact) -Force
 }
 
-Write-Host "Published Runtime, external UI, QAM, Overlay, and FSE Home layout at $runtimeOutput with version $Version."
+Write-Host "Published Runtime, external UI, Overlay, and FSE Home layout at $runtimeOutput with version $Version."

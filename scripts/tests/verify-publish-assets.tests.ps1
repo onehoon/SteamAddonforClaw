@@ -13,7 +13,6 @@ function New-Fixture {
         (Join-Path $root 'Dependencies\Viiper'),
         (Join-Path $root 'Dependencies\ClawHUD'),
         (Join-Path $root 'ui\Views'),
-        (Join-Path $root 'qam\Frontend'),
         (Join-Path $root 'overlay'),
         (Join-Path $root 'fse')
     )
@@ -36,8 +35,6 @@ function New-Fixture {
         'ui\Views\ControllerPage.xbf' = 'controller xbf'
         'ui\Views\SettingsPage.xbf' = 'settings xbf'
         'ui\Views\DeveloperPage.xbf' = 'developer xbf'
-        'qam\SteamInputAddonforClaw.QamHost.exe' = 'qam executable'
-        'qam\Frontend\qam.js' = 'qam frontend'
         'overlay\SteamInputAddonforClaw.Overlay.exe' = 'overlay executable'
         'overlay\SteamInputAddonforClaw.Overlay.dll' = 'overlay managed payload'
         'overlay\SteamInputAddonforClaw.Overlay.pri' = 'overlay application pri'
@@ -97,6 +94,15 @@ try {
 
     $root = New-Fixture
     $fixturesToClean += $root
+    New-Item -ItemType Directory -Force -Path (Join-Path $root 'qam') | Out-Null
+    Set-Content -LiteralPath (Join-Path $root 'qam\retired.txt') -Value 'retired QAM output'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'retired QAM directory') {
+        throw 'Expected a retired QAM publish directory to be rejected.'
+    }
+
+    $root = New-Fixture
+    $fixturesToClean += $root
     Set-Content -LiteralPath (Join-Path $root 'fse\SteamInputAddonforClaw.FseHome.exe') -Value 'redundant loose FSE payload'
     $result = Invoke-Verify -PublishDirectory $root
     if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'redundant loose payload') {
@@ -146,22 +152,6 @@ try {
     $result = Invoke-Verify -PublishDirectory $root
     if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'runtime payload') {
         throw 'Expected a root self-contained runtime payload to be rejected.'
-    }
-
-    $root = New-Fixture
-    $fixturesToClean += $root
-    Set-Content -LiteralPath (Join-Path $root 'qam\hostpolicy.dll') -Value 'forbidden runtime payload'
-    $result = Invoke-Verify -PublishDirectory $root
-    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'runtime payload') {
-        throw 'Expected a QAM self-contained runtime payload to be rejected.'
-    }
-
-    $root = New-Fixture
-    $fixturesToClean += $root
-    Set-Content -LiteralPath (Join-Path $root 'qam\Microsoft.Windows.SDK.NET.dll') -Value 'forbidden Windows SDK projection'
-    $result = Invoke-Verify -PublishDirectory $root
-    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'Microsoft.Windows.SDK.NET.dll') {
-        throw 'Expected the QAM Windows SDK projection payload to be rejected.'
     }
 
     $root = New-Fixture

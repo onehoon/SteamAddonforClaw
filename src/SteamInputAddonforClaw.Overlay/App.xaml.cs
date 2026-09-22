@@ -110,7 +110,7 @@ public partial class App : Application
     }
 
     // SF-V2-07/09 section 10.1/12.2: marshal a shared QuickSettingsPageSnapshot (Device or Profile --
-    // the same product contract QAM renders, SF-V2-05/08) to the UI thread and complete only after
+    // the same shared product contract, SF-V2-05/08) to the UI thread and complete only after
     // the Window/binder has applied it. No WinUI row creation ever runs on the pipe read thread.
     private Task HandleQuickSettingsPageAsync(QuickSettingsPageSnapshot page)
     {

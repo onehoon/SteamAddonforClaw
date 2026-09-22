@@ -7,7 +7,7 @@ namespace SteamInputAddonforClaw.Profiles;
 /// Root of the persisted Device/Profile document (<c>profiles.json</c>). This is a separate
 /// storage domain from the existing operational <c>settings.json</c> (routing/OEM1/startup/log
 /// level) -- see docs on <see cref="ProfileStore"/>. Runtime-owned: this type and its store carry
-/// no dependency on WinUI, QamHost, or any frontend connection, so Device/Profile persistence
+/// no dependency on WinUI or any frontend connection, so Device/Profile persistence
 /// works whether or not a UI ever starts.
 /// </summary>
 public sealed record ProfileDocument

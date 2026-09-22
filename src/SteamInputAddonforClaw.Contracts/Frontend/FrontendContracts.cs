@@ -109,7 +109,7 @@ public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcom
 }
 
 /// <summary>Shared Device Quick Settings read projection (Shared Frontend V2, SF-V2-01) used by
-/// Main UI and Steam QAM to read CPU Boost/TDP/Power Mode in one round trip. Each child is captured
+    /// Main UI and Overlay to read CPU Boost/TDP/Power Mode in one round trip. Each child is captured
 /// independently, so one child being <see cref="FrontendCpuBoostSnapshot.Unavailable"/>/<see
 /// cref="FrontendTdpSnapshot.Unavailable"/>/<see cref="FrontendPowerModeSnapshot.Unavailable"/> must
 /// not imply the others are unavailable. This is a UI projection convenience only -- it is not a new
@@ -516,7 +516,7 @@ public interface IAddonFrontendControl
     Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
     /// <summary>Shared Device Quick Settings aggregate read (Shared Frontend V2, SF-V2-01): captures
-    /// CPU Boost/TDP/Power Mode in one round trip for Main UI/QAM Device refresh. A UI projection
+    /// CPU Boost/TDP/Power Mode in one round trip for Main UI / Overlay Device refresh. A UI projection
     /// convenience over <see cref="CaptureCpuBoostAsync"/>/<see cref="CaptureTdpAsync"/>/<see
     /// cref="CapturePowerModeAsync"/> -- it must not replace those focused methods, must not persist
     /// or mutate anything, and one child capture failing must not discard healthy siblings.</summary>

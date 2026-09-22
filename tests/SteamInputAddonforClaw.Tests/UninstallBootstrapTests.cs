@@ -22,17 +22,17 @@ public sealed class UninstallBootstrapTests
         Directory.CreateDirectory(root);
         var evidencePath = Path.Combine(root, "steam-cef-marker.json");
         File.WriteAllText(evidencePath, "owned-evidence");
-        var previousOwnershipPathProvider = SteamCefDebugBootstrap.OwnershipPathProvider;
+        var previousOwnershipPathProvider = SteamCefLegacyMarkerCleanup.OwnershipPathProvider;
 
         try
         {
-            SteamCefDebugBootstrap.OwnershipPathProvider = () => evidencePath;
+            SteamCefLegacyMarkerCleanup.OwnershipPathProvider = () => evidencePath;
             UninstallBootstrap.RunBoundedLocalCleanup(runtimeReleased: false);
             Assert.True(File.Exists(evidencePath));
         }
         finally
         {
-            SteamCefDebugBootstrap.OwnershipPathProvider = previousOwnershipPathProvider;
+            SteamCefLegacyMarkerCleanup.OwnershipPathProvider = previousOwnershipPathProvider;
             Directory.Delete(root, recursive: true);
         }
     }

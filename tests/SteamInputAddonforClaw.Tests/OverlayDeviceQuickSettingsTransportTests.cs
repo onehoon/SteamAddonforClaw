@@ -10,7 +10,7 @@ namespace SteamInputAddonforClaw.Tests;
 
 // SF-V2-06: .Overlay v10 carries the shared typed tab-order and ClawHUD wires alongside the
 // QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult contract
-// already consumed by .Frontend/.Qam (SF-V2-04/05), inside narrow transport correlation wrappers.
+// already consumed by the Main UI / Overlay (SF-V2-04/05), inside narrow transport correlation wrappers.
 // OQ4/lifecycle regression coverage lives in OverlayTransportTests/AddonQuickSettingsTabOrderTransportTests and
 // is unaffected by this migration (verified green alongside this file).
 public sealed class OverlayDeviceQuickSettingsTransportTests
@@ -36,9 +36,9 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     public void Protocol_is_v10_and_frontend_transport_is_current()
     {
         Assert.Equal(10, OverlayTransportProtocol.CurrentVersion);
-        // The desktop/QAM frontend protocol is independent of
+        // The desktop frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(39, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(40, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]

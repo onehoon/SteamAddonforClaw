@@ -31,18 +31,6 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public void Qam_endpoint_is_stable_and_distinct_from_desktop_endpoint()
-    {
-        var desktop = FrontendPipeEndpoint.CreateForCurrentUser();
-        var first = FrontendPipeEndpoint.CreateQamForCurrentUser();
-        var second = FrontendPipeEndpoint.CreateQamForCurrentUser();
-
-        Assert.Equal(first, second);
-        Assert.NotEqual(desktop, first);
-        Assert.EndsWith(".Qam", first, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task Every_frontend_operation_round_trips_typed_values_and_arguments()
     {
         var fake = new RecordingFrontendControl();
@@ -72,7 +60,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(39, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(40, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -86,7 +74,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(39, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(40, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -702,72 +690,6 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task Select_addon_on_next_quick_access_open_notification_reaches_the_client_once()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-        var notification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var count = 0;
-        client.SelectAddonOnNextQuickAccessOpenRequested += (_, _) =>
-        {
-            if (Interlocked.Increment(ref count) == 1) notification.TrySetResult();
-        };
-
-        var preparation = server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromSeconds(1));
-        await notification.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var acknowledgement = client.AcknowledgeQamSelectAddonOnNextOpenPreparedAsync();
-        Assert.True(await preparation);
-        Assert.True(await acknowledgement);
-        Assert.Equal(1, count);
-        Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
-    }
-
-    [Fact]
-    public async Task Select_addon_on_next_quick_access_open_returns_false_without_a_client()
-    {
-        var (server, _) = await StartServerAsync(new RecordingFrontendControl());
-        await using var serverLifetime = server;
-
-        Assert.False(await server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromMilliseconds(50)));
-    }
-
-    [Fact]
-    public async Task Select_addon_on_next_quick_access_open_waits_for_preparation_acknowledgement()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-        var notification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        client.SelectAddonOnNextQuickAccessOpenRequested += (_, _) => notification.TrySetResult();
-
-        var preparation = server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromSeconds(1));
-        await notification.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.False(preparation.IsCompleted);
-
-        Assert.True(await client.AcknowledgeQamSelectAddonOnNextOpenPreparedAsync());
-        Assert.True(await preparation);
-    }
-
-    [Fact]
-    public async Task Select_addon_on_next_quick_access_open_times_out_without_acknowledgement()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-        var notification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        client.SelectAddonOnNextQuickAccessOpenRequested += (_, _) => notification.TrySetResult();
-
-        var preparation = server.RequestSelectAddonOnNextQuickAccessOpenAsync(TimeSpan.FromMilliseconds(50));
-        await notification.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.False(await preparation);
-    }
-
-    [Fact]
     public async Task Invalidation_raised_while_notification_is_completing_is_not_lost()
     {
         var fake = new RecordingFrontendControl();
@@ -1343,9 +1265,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":39,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":39,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":39,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":40,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":40,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":40,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();

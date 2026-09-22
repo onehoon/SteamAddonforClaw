@@ -90,8 +90,8 @@ internal static class QuickSettingsPresentation
     }
 
     /// <summary>Shared Quick Settings Profile page projection (SF-V2-08 section 6): the exact current
-    /// visible QAM Profile product (General/TDP/CPU Boost/optional Power Mode), frozen from the
-    /// pre-migration qam.js policy. Called only for a valid active target -- an unavailable/stale
+    /// visible Overlay Profile product (General/TDP/CPU Boost/optional Power Mode), frozen from the
+    /// pre-migration shared frontend policy. Called only for a valid active target -- an unavailable/stale
     /// Profile context is represented separately via <see cref="QuickSettingsPageSnapshot.Unavailable"/>,
     /// never fabricated here.</summary>
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot)

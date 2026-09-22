@@ -775,7 +775,7 @@ public sealed class MsiClawAddonPresentationTests
         // Event-driven only: raw RunningAppID + BPM callbacks request the reconcile; no timer/poll.
         Assert.Contains("RequestControllerPresentationReconcile(\"RunningAppIdChanged\")", host, StringComparison.Ordinal);
         Assert.Contains("bigPictureStateChanged: OnBigPictureStateChanged", host, StringComparison.Ordinal);
-        Assert.Contains("_qamHostController.OnBigPictureStateChanged(active)", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("QamHost", host, StringComparison.Ordinal);
         Assert.DoesNotContain("new Timer(", host, StringComparison.Ordinal);
 
         // The reconcile is drained before the presentation owner is torn down (section 19.1).

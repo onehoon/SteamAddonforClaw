@@ -88,15 +88,8 @@ public sealed class AddonQuickSettingsSurfaceParityTests
             Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce2000, row.CommitPolicy));
         Assert.Single(page.LinkedSliderConstraints);
 
-        var qam = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var overlay = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayQuickSettingsPageBinding.cs");
-        Assert.Contains("label: row.label", qam);
-        Assert.Contains("row.controlKind", qam);
-        Assert.Contains("row.sliderSpec", qam);
-        Assert.Contains("row.commitPolicy.delayMilliseconds", qam);
         Assert.Contains("policy.DelayMilliseconds", overlay);
-        Assert.DoesNotContain("QAM_SLIDER_COMMIT_DELAY_MS", qam);
-        Assert.DoesNotContain("PROFILE_SLIDER_COMMIT_DELAY_MS", qam);
         Assert.DoesNotContain("ProductionDelay", overlay);
     }
 
@@ -113,35 +106,24 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.Contains(shell.Tabs, tab => tab.TabId == AddonQuickSettingsTabId.Controller);
         Assert.DoesNotContain(Enum.GetNames<QuickSettingsPageId>(), name => name == "Controller");
 
-        var qam = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
         var overlay = ReadOverlayWindowSources();
-        Assert.Contains("case AQS_TAB_CONTROLLER:", qam);
-        Assert.Contains("This page is not available in QAM yet.", qam);
         Assert.Contains("_ => CreatePlaceholderPage(id)", overlay);
         Assert.Contains("AddonQuickSettingsShortcutContract.Create()", overlay);
-        Assert.DoesNotContain("AssignShortcut", qam);
-        Assert.DoesNotContain("ExecuteShortcut", qam);
     }
 
     [Fact]
-    public void Both_renderers_consume_shared_shell_and_special_page_contracts_without_new_wire_or_polling()
+    public void Overlay_consumes_shared_shell_and_special_page_contracts_without_new_wire_or_polling()
     {
-        var qam = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
-        var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
         var overlay = ReadOverlayWindowSources();
         var frontendWire = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "FrontendWire.cs");
         var overlayWire = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "OverlayWire.cs");
 
-        Assert.Contains("captureQuickSettingsShell", qam);
-        Assert.Contains("captureQuickSettingsTabOrder", qam);
-        Assert.Contains("captureQuickSettingsShortcut", qam);
-        Assert.Contains("captureQuickSettingsShortcut", bridge);
         Assert.Contains("AddonQuickSettingsShellContract.LabelFor(id)", overlay);
         Assert.Contains("AddonQuickSettingsTabOrderContract", overlay);
         Assert.Contains("index / 2", overlay);
         Assert.Contains("index % 2", overlay);
-        Assert.DoesNotContain("setInterval", qam);
-        Assert.Contains("CurrentVersion = 39", frontendWire);
+        Assert.DoesNotContain("setInterval", overlay);
+        Assert.Contains("CurrentVersion = 40", frontendWire);
         Assert.Contains("CurrentVersion = 10", overlayWire);
         Assert.DoesNotContain("CurrentVersion = 35", frontendWire);
         Assert.DoesNotContain("CurrentVersion = 8", overlayWire);

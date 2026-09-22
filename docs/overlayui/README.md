@@ -1,5 +1,7 @@
 # Overlay UI Documentation Index
 
+> **Current architecture (2026-09-22):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. There is no Addon QAM tab, QamHost, CDP, or CEF patching integration. Any older QAM references in this folder are historical context only.
+
 > **Canonical folder:** `docs/overlayui/`
 > **Date:** 2026-09-02
 

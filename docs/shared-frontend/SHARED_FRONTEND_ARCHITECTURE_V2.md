@@ -1,5 +1,7 @@
 # Steam Addon for Claw — Shared Frontend Architecture V2
 
+> **Current architecture override (2026-09-22):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. The retired Addon QAM/QamHost renderer, CDP, and CEF integration are historical references only and are not active surfaces.
+
 > **Date:** 2026-09-05  
 > **Status:** Current design authority for shared Runtime/frontend projection and shared Quick Settings product semantics  
 > **Baseline reviewed:** `main` at `8c333b1ee4af63e4e7a9f50dd3a4b73a8944c682` after PR #530; current-state sections refreshed by PR5
