@@ -47,7 +47,7 @@ if (-not (Test-Path -LiteralPath $iconPath)) {
 & (Join-Path $PSScriptRoot 'report-publish-size.ps1') -PublishDirectory $publishDirectory
 
 $vpkArguments = @(
-    'vpk', '--version', '1.2.0', 'pack',
+    'vpk', '--version', '1.2.158', 'pack',
     '--packId', 'SteamInputAddonforClaw',
     '--packTitle', 'Steam Addon for Claw',
     '--packVersion', $Version,
@@ -55,6 +55,7 @@ $vpkArguments = @(
     '--mainExe', 'SteamInputAddonforClaw.exe',
     '--icon', $iconPath,
     '--outputDir', $releasesDirectory,
+    '--runtime', 'win-x64',
     '--framework', 'net10.0-x64-runtime'
 )
 
