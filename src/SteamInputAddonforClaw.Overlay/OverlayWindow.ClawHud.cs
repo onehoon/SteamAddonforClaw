@@ -51,7 +51,8 @@ public sealed partial class OverlayWindow
         AddClawHudRow(rows, _clawHudDisplayModeRow);
 
         _clawHudSizeRow = new OverlayValueRow("HUD Size", OverlayValueRow.FormatInteger,
-            value => RequestClawHudSetting(new(FrontendClawHudMutationKind.HudSizeOffset, HudSizeOffset: (int)Math.Round(value))));
+            value => RequestClawHudSetting(new(FrontendClawHudMutationKind.HudSizeOffset, HudSizeOffset: (int)Math.Round(value))),
+            OverlayValueButtonKind.NumericStepper);
         AddClawHudRow(rows, _clawHudSizeRow);
 
         _clawHudFontRow = CreateClawHudValueRow("Font", ["Unispace", "Segoe UI Variable"], value =>
@@ -67,7 +68,8 @@ public sealed partial class OverlayWindow
         AddClawHudRow(rows, _clawHudBackgroundRow);
 
         _clawHudOpacityRow = new OverlayValueRow("Opacity", value => $"{value:0}%",
-            value => RequestClawHudSetting(new(FrontendClawHudMutationKind.CommitOpacity, OpacityPercent: (int)Math.Round(value))));
+            value => RequestClawHudSetting(new(FrontendClawHudMutationKind.CommitOpacity, OpacityPercent: (int)Math.Round(value))),
+            OverlayValueButtonKind.NumericStepper);
         AddClawHudRow(rows, _clawHudOpacityRow);
 
         _clawHudVrrRow = new OverlayToggleRow("Intel VRR Range Fix", desired =>
@@ -87,7 +89,7 @@ public sealed partial class OverlayWindow
         {
             var index = (int)Math.Round(value);
             return index >= 0 && index < values.Count ? values[index] : "--";
-        }, request);
+        }, request, OverlayValueButtonKind.DiscreteChoice);
     }
 
     private void AddClawHudRow(List<OverlayRow> rows, OverlayToggleRow row)

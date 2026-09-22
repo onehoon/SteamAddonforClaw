@@ -264,9 +264,11 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("CreateQuickSettingsValueRow", source);
         Assert.Contains("ApplyQuickSettingsValueState", source);
         Assert.Contains("QuickSettingsSliderKind.Numeric", source);
+        Assert.Contains("OverlayValueButtonKind.NumericStepper", source);
         Assert.Contains("var options = spec.Options!", source);
         Assert.Contains("FormatDiscreteLabel(options, index)", source);
         Assert.Contains("QuickSettingsValue.Integer(options[i].Value)", source);
+        Assert.Contains("OverlayValueButtonKind.DiscreteChoice", source);
         Assert.Contains("new OverlayValueRow", source);
         Assert.Contains("ScheduleQuickSettingsSlider", source);
         Assert.DoesNotContain("OverlaySliderRow", source);
@@ -278,19 +280,28 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Overlay_value_row_uses_touchable_arrow_buttons_and_the_same_adjustment_seam()
+    public void Overlay_value_row_uses_touchable_icon_buttons_and_the_same_adjustment_seam()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs");
 
         Assert.Contains("internal sealed class OverlayValueModel", source);
         Assert.Contains("internal sealed class OverlayValueRow", source);
+        Assert.Contains("internal enum OverlayValueButtonKind", source);
+        Assert.Contains("NumericStepper", source);
+        Assert.Contains("DiscreteChoice", source);
+        Assert.Contains("FontIcon", source);
+        Assert.Contains("CreateIconButton", source);
         Assert.Contains("MinWidth = 40", source);
         Assert.Contains("MinHeight = 40", source);
+        Assert.Contains("CornerRadius = new CornerRadius(6)", source);
         Assert.Contains("button.Click += click", source);
         Assert.Contains("_model.RequestAdjust(-1)", source);
         Assert.Contains("_model.RequestAdjust(+1)", source);
         Assert.Contains("Adjust: OnControllerAdjust", source);
         Assert.Contains("Activate: null", source);
+        Assert.DoesNotContain("CreateArrowButton", source);
+        Assert.DoesNotContain("‹", source);
+        Assert.DoesNotContain("›", source);
         Assert.DoesNotContain("Slider", source);
         Assert.DoesNotContain("ComboBox", source);
         Assert.DoesNotContain("RequestSet", source);
@@ -360,13 +371,54 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Quick_settings_feature_sections_render_their_first_toggle_as_the_header_row()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+
+        Assert.Contains("TryGetFeatureHeaderToggle", quickSettings);
+        Assert.Contains("displayLabelOverride ?? row.Label", quickSettings);
+        Assert.Contains("visibleRows.Skip(1)", quickSettings);
+        Assert.Contains("Margin = new Thickness(16, 0, 0, 0)", quickSettings);
+        Assert.DoesNotContain("section.Label.Contains", quickSettings);
+        Assert.DoesNotContain("section.Label == \"TDP\"", quickSettings);
+        Assert.DoesNotContain("section.Label == \"CPU Boost\"", quickSettings);
+    }
+
+    [Fact]
+    public void Overlay_shell_uses_a_constrained_surface_and_visual_bumper_hints()
+    {
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+
+        Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
+        Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
+        Assert.Contains("MaxWidth=\"960\"", xaml);
+        Assert.Contains("x:Name=\"TabStripFrame\"", xaml);
+        Assert.Contains("x:Name=\"PreviousTabHint\"", xaml);
+        Assert.Contains("x:Name=\"NextTabHint\"", xaml);
+        Assert.Contains("<Path", xaml);
+        Assert.Contains("Data=\"M3,16 C4,9", xaml);
+        Assert.Contains("Data=\"M27,16 C26,9", xaml);
+        Assert.Contains("StrokeThickness=\"1.8\"", xaml);
+        Assert.Contains("Width=\"30\"", xaml);
+        Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
+        Assert.Contains("OverlayTabState", shell);
+        Assert.Contains("ApplyTabNavigationHintVisual", shell);
+        Assert.Contains("PreviousTabHint.Opacity = selectedIndex > 0 ? 1.0 : 0.35;", shell);
+        Assert.Contains("NextTabHint.Opacity = selectedIndex >= 0 && selectedIndex < _tabState.Order.Count - 1 ? 1.0 : 0.35;", shell);
+        Assert.Contains("button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;", shell);
+    }
+
+    [Fact]
     public void Ordinary_rows_share_the_left_accent_chrome_and_selected_tabs_use_an_indicator()
     {
         var chrome = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs");
         var source = ReadOverlayWindowSource();
 
         Assert.Contains("SelectionAccentWidth = 3", chrome);
-        Assert.Contains("MinHeight = 52", chrome);
+        Assert.Contains("MinHeight = 54", chrome);
+        Assert.Contains("CornerRadius = new CornerRadius(8)", chrome);
         Assert.Contains("new Thickness(SelectionAccentWidth, 0, 0, 0)", chrome);
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
@@ -376,8 +428,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("Grid.SetColumn(tabHost, position)", source);
         Assert.DoesNotContain("Grid.SetColumn(button, position)", source);
         Assert.Contains("indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed", source);
-        Assert.DoesNotContain("button.Background = _tabSelectedBackgroundBrush", source);
-        Assert.DoesNotContain("button.Foreground = _tabSelectedForegroundBrush", source);
+        Assert.Contains("button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;", source);
+        Assert.Contains("button.Foreground = isSelected ? _rowSelectedBrush : TabUnselectedForegroundBrush;", source);
     }
 
     [Fact]

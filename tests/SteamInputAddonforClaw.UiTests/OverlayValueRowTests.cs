@@ -3,7 +3,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-// Covers the pure OverlayValueModel. The WinUI OverlayValueRow wrapper (arrow Buttons +
+// Covers the pure OverlayValueModel. The WinUI OverlayValueRow wrapper (icon buttons +
 // event wiring) needs a XAML host and is validated on hardware per the work order.
 public sealed class OverlayValueRowTests
 {

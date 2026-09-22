@@ -81,6 +81,12 @@ internal sealed class OverlayValueModel
 // A compact controller-first ordered-value row. Left/Right adjusts one semantic step without an
 // edit mode; A/Accept is intentionally a no-op because Activate is null. Authoritative state
 // arrives via ApplyState and user intent leaves via the requestChange callback.
+internal enum OverlayValueButtonKind
+{
+    NumericStepper,
+    DiscreteChoice,
+}
+
 internal sealed class OverlayValueRow
 {
     private readonly OverlayValueModel _model;
@@ -92,7 +98,11 @@ internal sealed class OverlayValueRow
     internal Border Container { get; }
     internal OverlayRowCapabilities Capabilities { get; }
 
-    internal OverlayValueRow(string label, Func<double, string> formatValue, Action<double> requestChange)
+    internal OverlayValueRow(
+        string label,
+        Func<double, string> formatValue,
+        Action<double> requestChange,
+        OverlayValueButtonKind buttonKind = OverlayValueButtonKind.DiscreteChoice)
     {
         _model = new OverlayValueModel(requestChange);
         _formatValue = formatValue;
@@ -107,7 +117,7 @@ internal sealed class OverlayValueRow
         {
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            MinWidth = 72,
+            MinWidth = 88,
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.NoWrap,
         };
@@ -119,13 +129,13 @@ internal sealed class OverlayValueRow
             _valueText.Style = bodyStyle;
         }
 
-        _previousButton = CreateArrowButton("‹", "Previous value", OnPreviousClicked);
-        _nextButton = CreateArrowButton("›", "Next value", OnNextClicked);
+        _previousButton = CreateIconButton(buttonKind, increase: false, "Previous value", OnPreviousClicked);
+        _nextButton = CreateIconButton(buttonKind, increase: true, "Next value", OnNextClicked);
 
         var valueControls = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 4,
+            Spacing = 8,
             VerticalAlignment = VerticalAlignment.Center,
         };
         valueControls.Children.Add(_previousButton);
@@ -159,15 +169,28 @@ internal sealed class OverlayValueRow
         Render();
     }
 
-    private static Button CreateArrowButton(string glyph, string automationName, RoutedEventHandler click)
+    private static Button CreateIconButton(
+        OverlayValueButtonKind buttonKind,
+        bool increase,
+        string automationName,
+        RoutedEventHandler click)
     {
+        var glyph = buttonKind == OverlayValueButtonKind.NumericStepper
+            ? increase ? "\uE710" : "\uE738"
+            : increase ? "\uE76C" : "\uE76B";
+        var icon = new FontIcon
+        {
+            Glyph = glyph,
+            FontSize = 16,
+        };
         var button = new Button
         {
-            Content = glyph,
-            FontSize = 22,
+            Content = icon,
             MinWidth = 40,
             MinHeight = 40,
             Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(0),
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,

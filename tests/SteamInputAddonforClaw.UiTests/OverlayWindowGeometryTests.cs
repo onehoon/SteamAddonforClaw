@@ -14,7 +14,7 @@ public sealed class OverlayWindowGeometryTests
             144,
             out var metrics);
 
-        Assert.Equal(new OverlayRect(90, 90, 1740, 1020), result);
+        Assert.Equal(new OverlayRect(240, 90, 1440, 1020), result);
         Assert.Equal(72, metrics.ReservedEdgePx);
         Assert.Equal(72, metrics.ReferenceTaskbarPx);
         Assert.Equal(18, metrics.ExtraGapPx);
@@ -22,19 +22,19 @@ public sealed class OverlayWindowGeometryTests
     }
 
     [Theory]
-    [InlineData(96, 60)]
-    [InlineData(120, 75)]
-    [InlineData(144, 90)]
-    [InlineData(168, 105)]
-    [InlineData(192, 120)]
-    public void ScalesReferenceMarginWithDpiWhenWorkAreaHasNoReservedEdge(uint dpi, int expectedMargin)
+    [InlineData(96, 60, 480, 960)]
+    [InlineData(120, 75, 360, 1200)]
+    [InlineData(144, 90, 240, 1440)]
+    [InlineData(168, 105, 120, 1680)]
+    [InlineData(192, 120, 120, 1680)]
+    public void ScalesReferenceMarginAndSurfaceWidthWithDpiWhenWorkAreaHasNoReservedEdge(uint dpi, int expectedMargin, int expectedX, int expectedWidth)
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 1920, 1200,
             0, 0, 1920, 1200,
             dpi);
 
-        Assert.Equal(new OverlayRect(expectedMargin, expectedMargin, 1920 - 2 * expectedMargin, 1200 - 2 * expectedMargin), result);
+        Assert.Equal(new OverlayRect(expectedX, expectedMargin, expectedWidth, 1200 - 2 * expectedMargin), result);
     }
 
     [Fact]
@@ -45,9 +45,9 @@ public sealed class OverlayWindowGeometryTests
             100, 40, 2020, 1168,
             144);
 
-        Assert.Equal(190, result.X);
+        Assert.Equal(340, result.X);
         Assert.Equal(130, result.Y);
-        Assert.Equal(1740, result.Width);
+        Assert.Equal(1440, result.Width);
         Assert.Equal(1020, result.Height);
     }
 
@@ -59,7 +59,7 @@ public sealed class OverlayWindowGeometryTests
             80, 60, 1840, 1120,
             96);
 
-        Assert.Equal(new OverlayRect(92, 92, 1736, 1016), result);
+        Assert.Equal(new OverlayRect(480, 92, 960, 1016), result);
     }
 
     [Fact]
@@ -70,7 +70,22 @@ public sealed class OverlayWindowGeometryTests
             0, 0, 1920, 1200,
             0);
 
-        Assert.Equal(new OverlayRect(60, 60, 1800, 1080), result);
+        Assert.Equal(new OverlayRect(480, 60, 960, 1080), result);
+    }
+
+    [Fact]
+    public void AdjacentPointsFallOutsideTheCappedWindowRectangle()
+    {
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            0, 0, 1920, 1128,
+            144);
+
+        Assert.Equal(1440, result.Width);
+        Assert.False(Contains(result, result.X - 1, result.Y + result.Height / 2));
+        Assert.False(Contains(result, result.X + result.Width, result.Y + result.Height / 2));
+        Assert.True(Contains(result, result.X, result.Y + result.Height / 2));
+        Assert.True(Contains(result, result.X + result.Width - 1, result.Y + result.Height / 2));
     }
 
     [Fact]
@@ -98,4 +113,7 @@ public sealed class OverlayWindowGeometryTests
         Assert.Equal(0, result.Width);
         Assert.Equal(0, result.Height);
     }
+
+    private static bool Contains(OverlayRect rect, int x, int y) =>
+        x >= rect.X && x < rect.X + rect.Width && y >= rect.Y && y < rect.Y + rect.Height;
 }

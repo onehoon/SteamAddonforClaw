@@ -47,6 +47,59 @@ public sealed class ClawHudRuntimeAcquirerTests
     }
 
     [Fact]
+    public async Task SuccessfulAcquisitionRetainsCurrentAndPreviousRuntimeVersions()
+    {
+        using var fixture = new Fixture();
+        var runtimeRoot = AddonDataPaths.ResolveClawHudRuntimeRoot(fixture.InstallRoot);
+        var previousVersion = Path.Combine(runtimeRoot, "1.0.0");
+        var olderVersion = Path.Combine(runtimeRoot, "0.9.9");
+        var newerVersion = Path.Combine(runtimeRoot, "1.0.2");
+        var unknownDirectory = Path.Combine(runtimeRoot, "notes");
+        var stagingDirectory = Path.Combine(runtimeRoot, "1.0.1.staging");
+        foreach (var path in new[] { previousVersion, olderVersion, newerVersion, unknownDirectory, stagingDirectory })
+        {
+            Directory.CreateDirectory(path);
+            File.WriteAllText(Path.Combine(path, "sentinel.txt"), "keep or remove");
+        }
+
+        var zip = CreateZip(includeForbidden: false);
+        var handler = new RecordingHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(zip),
+        }));
+        var result = await fixture.CreateAcquirer(handler, zip).AcquireAsync(CancellationToken.None);
+
+        Assert.True(result.IsReady);
+        Assert.True(File.Exists(Path.Combine(runtimeRoot, "1.0.1", "ClawHUD.exe")));
+        Assert.True(File.Exists(Path.Combine(previousVersion, "sentinel.txt")));
+        Assert.False(Directory.Exists(olderVersion));
+        Assert.False(Directory.Exists(newerVersion));
+        Assert.True(Directory.Exists(unknownDirectory));
+        Assert.False(Directory.Exists(stagingDirectory));
+    }
+
+    [Fact]
+    public async Task FastPathAlsoCleansVersionsOlderThanCurrentAndPrevious()
+    {
+        using var fixture = new Fixture();
+        var runtimeRoot = AddonDataPaths.ResolveClawHudRuntimeRoot(fixture.InstallRoot);
+        var currentVersion = AddonDataPaths.ResolveClawHudRuntimeVersionDirectory(fixture.InstallRoot, RuntimeVersion);
+        var previousVersion = Path.Combine(runtimeRoot, "1.0.0");
+        var olderVersion = Path.Combine(runtimeRoot, "0.9.9");
+        CreatePayload(currentVersion, includeForbidden: false);
+        Directory.CreateDirectory(previousVersion);
+        Directory.CreateDirectory(olderVersion);
+
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException("HTTP must not be called."));
+        var result = await fixture.CreateAcquirer(handler).AcquireAsync(CancellationToken.None);
+
+        Assert.True(result.IsReady);
+        Assert.True(Directory.Exists(previousVersion));
+        Assert.False(Directory.Exists(olderVersion));
+        Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Fact]
     public async Task HashMismatch_IsFeatureLocal_AndLeavesOtherVersionUntouched()
     {
         using var fixture = new Fixture();

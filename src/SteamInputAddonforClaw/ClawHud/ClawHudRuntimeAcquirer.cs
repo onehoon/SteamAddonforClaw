@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Install;
 
@@ -40,6 +41,9 @@ internal sealed class ClawHudRuntimeAcquirer
     private const string LockRelativePath = "Dependencies/ClawHUD/clawhud.lock.json";
     private const string PayloadRootName = "clawhud";
     private const string Category = "ClawHUD.Runtime";
+    private static readonly Regex RuntimeVersionPattern = new(
+        "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
     private static readonly SemaphoreSlim AcquisitionGate = new(1, 1);
     private static readonly string[] RequiredPayloadFiles =
     [
@@ -101,7 +105,7 @@ internal sealed class ClawHudRuntimeAcquirer
         if (TryValidateInstalledRuntime(runtimeLock, runtimeDirectory, out _))
         {
             AppLog.Info(Category, "Runtime fast path validated.", ("RuntimeVersion", runtimeLock.RuntimeVersion), ("Path", runtimeDirectory));
-            return ClawHudRuntimeAcquisitionResult.Ready(runtimeLock, runtimeDirectory);
+            return CreateReadyResult(runtimeLock, runtimeDirectory);
         }
 
         try
@@ -117,7 +121,7 @@ internal sealed class ClawHudRuntimeAcquirer
             if (TryValidateInstalledRuntime(runtimeLock, runtimeDirectory, out _))
             {
                 AppLog.Info(Category, "Runtime fast path validated after acquisition serialization.", ("RuntimeVersion", runtimeLock.RuntimeVersion), ("Path", runtimeDirectory));
-                return ClawHudRuntimeAcquisitionResult.Ready(runtimeLock, runtimeDirectory);
+                return CreateReadyResult(runtimeLock, runtimeDirectory);
             }
 
             return await AcquireUnderGateAsync(runtimeLock, runtimeDirectory, cancellationToken).ConfigureAwait(false);
@@ -170,7 +174,7 @@ internal sealed class ClawHudRuntimeAcquirer
             if (Directory.Exists(runtimeDirectory)) Directory.Delete(runtimeDirectory, recursive: true);
             Directory.Move(payloadRoot, runtimeDirectory);
             AppLog.Info(Category, "Runtime adopted.", ("RuntimeVersion", runtimeLock.RuntimeVersion), ("Path", runtimeDirectory), ("ElapsedMs", stopwatch.Elapsed.TotalMilliseconds));
-            return ClawHudRuntimeAcquisitionResult.Ready(runtimeLock, runtimeDirectory);
+            return CreateReadyResult(runtimeLock, runtimeDirectory);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -216,6 +220,76 @@ internal sealed class ClawHudRuntimeAcquirer
         fields.CopyTo(logFields, 3);
         AppLog.Warn(Category, "Runtime acquisition failed.", null, logFields);
         return ClawHudRuntimeAcquisitionResult.Failed(runtimeLock.RuntimeVersion, failure, message);
+    }
+
+    private ClawHudRuntimeAcquisitionResult CreateReadyResult(ClawHudRuntimeLock runtimeLock, string runtimeDirectory)
+    {
+        var result = ClawHudRuntimeAcquisitionResult.Ready(runtimeLock, runtimeDirectory);
+        TryRetainCurrentAndPreviousRuntimeVersions(runtimeLock);
+        return result;
+    }
+
+    private void TryRetainCurrentAndPreviousRuntimeVersions(ClawHudRuntimeLock runtimeLock)
+    {
+        var runtimeRoot = AddonDataPaths.ResolveClawHudRuntimeRoot(_rootAppDirectory);
+        if (!TryParseRuntimeVersion(runtimeLock.RuntimeVersion, out var currentVersion))
+        {
+            AppLog.Warn(Category, "Runtime retention cleanup skipped because the current version could not be parsed.", null, ("RuntimeVersion", runtimeLock.RuntimeVersion));
+            return;
+        }
+
+        List<(string Path, Version Version)> versionDirectories;
+        try
+        {
+            versionDirectories = Directory.EnumerateDirectories(runtimeRoot)
+                .Select(path => (Path: path, Name: Path.GetFileName(path)))
+                .Where(item => !string.Equals(item.Name, runtimeLock.RuntimeVersion, StringComparison.Ordinal))
+                .Select(item => TryParseRuntimeVersion(item.Name, out var version) ? (item.Path, Version: version) : (item.Path, Version: null))
+                .Where(item => item.Version is not null)
+                .Select(item => (item.Path, item.Version!))
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn(Category, "Runtime retention cleanup could not enumerate version directories.", exception, ("Path", runtimeRoot));
+            return;
+        }
+
+        var previousVersionPath = versionDirectories
+            .Where(item => item.Version < currentVersion)
+            .OrderByDescending(item => item.Version)
+            .Select(item => item.Path)
+            .FirstOrDefault();
+        var removedCount = 0;
+        foreach (var (path, _) in versionDirectories.Where(item => !string.Equals(item.Path, previousVersionPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+                removedCount++;
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn(Category, "Runtime retention cleanup failed for an old version; continuing.", exception, ("Path", path));
+            }
+        }
+
+        AppLog.Info(Category, "Runtime retention cleanup completed.",
+            ("RuntimeVersion", runtimeLock.RuntimeVersion),
+            ("RetainedPreviousPath", previousVersionPath ?? "none"),
+            ("RemovedCount", removedCount));
+    }
+
+    private static bool TryParseRuntimeVersion(string value, out Version version)
+    {
+        version = new Version();
+        if (!RuntimeVersionPattern.IsMatch(value) || !Version.TryParse(value, out var parsed) || parsed.Build < 0 || parsed.Revision >= 0)
+        {
+            return false;
+        }
+
+        version = parsed;
+        return true;
     }
 
     private static bool TryValidateInstalledRuntime(ClawHudRuntimeLock runtimeLock, string runtimeDirectory, out string? failure)

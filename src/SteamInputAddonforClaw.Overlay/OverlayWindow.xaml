@@ -6,37 +6,123 @@
         <Grid.Resources>
             <SolidColorBrush x:Key="OverlaySurfaceBrush" Color="#FFE7E7E7" />
         </Grid.Resources>
-        <Grid x:Name="OpaquePanel" Background="{StaticResource OverlaySurfaceBrush}">
-            <Grid x:Name="AnimatedContent">
-                <Grid Margin="24,24,24,16" RowSpacing="12">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+        <Grid x:Name="SurfaceHost" SizeChanged="OnSurfaceHostSizeChanged">
+            <Border
+                x:Name="OpaquePanel"
+                MaxWidth="960"
+                HorizontalAlignment="Stretch"
+                Background="{StaticResource OverlaySurfaceBrush}"
+                CornerRadius="18">
+                <Grid x:Name="AnimatedContent">
+                    <Grid Margin="24,24,24,16" RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-                    <Grid x:Name="TabStrip" Grid.Row="0" ColumnSpacing="4">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
+                        <Grid x:Name="TabStripFrame" Grid.Row="0" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border
+                                x:Name="PreviousTabHint"
+                                Grid.Column="0"
+                                Width="42"
+                                Height="34"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="#FFD6D6D6"
+                                CornerRadius="8"
+                                IsHitTestVisible="False"
+                                Opacity="0.35">
+                                <Grid
+                                    Width="30"
+                                    Height="20"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    IsHitTestVisible="False">
+                                    <Path
+                                        Data="M3,16 C4,9 9,5 16,5 H25 C27.2,5 29,6.8 29,9 V16 H8 C5.8,16 4.2,16 3,16 Z"
+                                        Fill="Transparent"
+                                        Stroke="#FF555555"
+                                        StrokeThickness="1.8"
+                                        StrokeLineJoin="Round" />
+                                    <FontIcon
+                                        Glyph="&#xE76B;"
+                                        FontSize="9"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Foreground="#FF555555" />
+                                </Grid>
+                            </Border>
+
+                            <Border
+                                x:Name="TabRail"
+                                Grid.Column="1"
+                                Padding="4"
+                                Background="#FFD6D6D6"
+                                CornerRadius="12">
+                                <Grid x:Name="TabStrip" ColumnSpacing="4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                </Grid>
+                            </Border>
+
+                            <Border
+                                x:Name="NextTabHint"
+                                Grid.Column="2"
+                                Width="42"
+                                Height="34"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="#FFD6D6D6"
+                                CornerRadius="8"
+                                IsHitTestVisible="False"
+                                Opacity="1">
+                                <Grid
+                                    Width="30"
+                                    Height="20"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    IsHitTestVisible="False">
+                                    <Path
+                                        Data="M27,16 C26,9 21,5 14,5 H5 C2.8,5 1,6.8 1,9 V16 H22 C24.2,16 25.8,16 27,16 Z"
+                                        Fill="Transparent"
+                                        Stroke="#FF555555"
+                                        StrokeThickness="1.8"
+                                        StrokeLineJoin="Round" />
+                                    <FontIcon
+                                        Glyph="&#xE76C;"
+                                        FontSize="9"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Foreground="#FF555555" />
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <ScrollViewer
+                            x:Name="BodyScroll"
+                            Grid.Row="1"
+                            VerticalScrollBarVisibility="Hidden"
+                            HorizontalScrollBarVisibility="Disabled"
+                            HorizontalContentAlignment="Stretch">
+                            <Grid
+                                x:Name="TabBody"
+                                HorizontalAlignment="Stretch"
+                                Width="{Binding ElementName=BodyScroll, Path=ViewportWidth}" />
+                        </ScrollViewer>
                     </Grid>
-
-                    <ScrollViewer
-                        x:Name="BodyScroll"
-                        Grid.Row="1"
-                        VerticalScrollBarVisibility="Hidden"
-                        HorizontalScrollBarVisibility="Disabled"
-                        HorizontalContentAlignment="Stretch">
-                        <Grid
-                            x:Name="TabBody"
-                            HorizontalAlignment="Stretch"
-                            Width="{Binding ElementName=BodyScroll, Path=ViewportWidth}" />
-                    </ScrollViewer>
                 </Grid>
-            </Grid>
+            </Border>
         </Grid>
     </Grid>
 </Window>

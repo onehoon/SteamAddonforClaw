@@ -19,6 +19,11 @@ public sealed partial class OverlayWindow
 
     internal nint HandleForDiagnostics => WindowInterop.GetWindowHandle(this);
 
+    private void OnSurfaceHostSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);
+    }
+
     internal void PrepareHidden() => ConfigureWindow();
 
     internal async Task ShowForPocAsync()
