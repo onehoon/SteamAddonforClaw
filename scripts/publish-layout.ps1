@@ -13,7 +13,6 @@ $runtimeProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw\SteamIn
 $uiProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.UI\SteamInputAddonforClaw.UI.csproj'
 $qamProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.QamHost\SteamInputAddonforClaw.QamHost.csproj'
 $overlayProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.Overlay\SteamInputAddonforClaw.Overlay.csproj'
-$fseProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\SteamInputAddonforClaw.FseHome.csproj'
 $fseDistribution = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.FseHome\Packaging\Distribution'
 $runtimeOutput = [System.IO.Path]::GetFullPath($PublishDirectory)
 $uiOutput = Join-Path $runtimeOutput 'ui'
@@ -51,11 +50,6 @@ if ($LASTEXITCODE -ne 0) { throw "QamHost publish failed with exit code $LASTEXI
 
 dotnet publish $overlayProject @commonArguments '--output' $overlayOutput
 if ($LASTEXITCODE -ne 0) { throw "Overlay publish failed with exit code $LASTEXITCODE." }
-
-$fseArguments = @('--configuration', $Configuration, '--runtime', 'win-x64', '--self-contained', 'false', '/p:Version=1.0.0')
-if ($NoRestore) { $fseArguments += '--no-restore' }
-dotnet publish $fseProject @fseArguments '--output' $fseOutput
-if ($LASTEXITCODE -ne 0) { throw "FSE Home publish failed with exit code $LASTEXITCODE." }
 
 foreach ($fseArtifact in @('SteamInputAddonforClaw.FseHome.msix', 'SteamInputAddonforClaw.FseHome.cer')) {
     $source = Join-Path $fseDistribution $fseArtifact

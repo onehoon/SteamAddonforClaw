@@ -71,7 +71,10 @@ public sealed class SteamFsePackagingContractTests
         Assert.DoesNotContain("FseCertificatePath", pack, StringComparison.Ordinal);
         Assert.DoesNotContain("FseCertificatePassword", pack, StringComparison.Ordinal);
         Assert.Contains("Packaging\\Distribution", layout, StringComparison.Ordinal);
+        Assert.Contains("SteamInputAddonforClaw.FseHome.msix", layout, StringComparison.Ordinal);
         Assert.Contains("SteamInputAddonforClaw.FseHome.cer", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("$fseProject", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("FSE Home publish failed", layout, StringComparison.Ordinal);
         Assert.Contains("ZipFile]::OpenRead", verifier, StringComparison.Ordinal);
         Assert.Contains("9D4C46ABCC1324803AE5AB031B11EC8EF39057D77C9C04FCB243D80BC122F86B", verifier, StringComparison.Ordinal);
         Assert.Contains("663053482DA50F9017CC902CA5DF6E9BBFD5A6F06624B8608266318F54687390", verifier, StringComparison.Ordinal);
