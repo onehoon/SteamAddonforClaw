@@ -14,7 +14,7 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 
 ### Microsoft.WindowsAppSDK
 
-- Version: 2.3.1
+- Version: 2.5.1
 - License: Microsoft Software License Terms (the package's `license.txt`)
 - Upstream: https://github.com/microsoft/WindowsAppSDK
 

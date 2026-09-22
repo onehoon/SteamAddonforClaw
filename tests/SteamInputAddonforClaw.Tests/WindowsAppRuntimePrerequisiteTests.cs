@@ -9,12 +9,13 @@ public sealed class WindowsAppRuntimePrerequisiteTests
     private const string Family = WindowsAppRuntimeMetadata.FrameworkPackageFamilyName;
 
     [Fact]
-    public void Package_probe_classifies_the_pinned_and_newer_x64_versions()
+    public void Package_probe_classifies_old_pinned_and_newer_x64_versions()
     {
-        Assert.Equal(WindowsAppRuntimeAvailability.UpdateRequired, Probe(Package("2.3.0.0", "X64")).Inspect());
-        Assert.Equal(WindowsAppRuntimeAvailability.Ready, Probe(Package("2.3.1.0", "X64")).Inspect());
-        Assert.Equal(WindowsAppRuntimeAvailability.Ready, Probe(Package("2.4.0.0", "X64")).Inspect());
+        Assert.Equal(WindowsAppRuntimeAvailability.UpdateRequired, Probe(Package("2.3.1.0", "X64")).Inspect());
+        Assert.Equal(WindowsAppRuntimeAvailability.UpdateRequired, Probe(Package("2.4.0.0", "X64")).Inspect());
+        Assert.Equal(WindowsAppRuntimeAvailability.UpdateRequired, Probe(Package("2.5.0.0", "X64")).Inspect());
         Assert.Equal(WindowsAppRuntimeAvailability.Ready, Probe(Package("2.5.1.0", "X64")).Inspect());
+        Assert.Equal(WindowsAppRuntimeAvailability.Ready, Probe(Package("2.6.0.0", "X64")).Inspect());
     }
 
     [Fact]

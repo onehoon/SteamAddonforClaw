@@ -16,11 +16,11 @@ internal enum WindowsAppRuntimeAvailability
 
 internal static class WindowsAppRuntimeMetadata
 {
-    internal static readonly Version MinimumFrameworkVersion = new(2, 3, 1, 0);
+    internal static readonly Version MinimumFrameworkVersion = new(2, 5, 1, 0);
     internal const string FrameworkPackageFamilyName = "Microsoft.WindowsAppRuntime.2_8wekyb3d8bbwe";
     internal const string InstallerFileName = "WindowsAppRuntimeInstall-x64.exe";
-    internal static readonly Uri InstallerDownloadUri = new("https://aka.ms/windowsappsdk/2.3/2.3.1/windowsappruntimeinstall-x64.exe");
-    internal const string InstallerSha256 = "4011748DDF472B7E856D909FDFB4E9B19C3D23FCD8121039AC91F99D5FFA65DB";
+    internal static readonly Uri InstallerDownloadUri = new("https://aka.ms/windowsappsdk/2.5/2.5.1/windowsappruntimeinstall-x64.exe");
+    internal const string InstallerSha256 = "931A421E8DC3E6E67724806CB67FECDBB88DFE323F0170842EB4A4B4B149F1E2";
     internal const string SilentInstallerArguments = "--quiet";
 
     internal static PrerequisiteInstallerDescriptor InstallerDescriptor => new(
