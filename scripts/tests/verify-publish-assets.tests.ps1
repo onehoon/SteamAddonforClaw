@@ -22,8 +22,6 @@ function New-Fixture {
     $files = @{
         'SteamInputAddonforClaw.exe' = 'runtime'
         'SteamInputAddonforClaw.TdpHelper.exe' = 'tdp helper'
-        'Dependencies\HidHide\HidHide_1.5.230_x64.exe' = (Join-Path $dependencyRoot 'HidHide\HidHide_1.5.230_x64.exe')
-        'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe' = (Join-Path $dependencyRoot 'UsbIpWin2\USBip-0.9.8.0-x64.exe')
         'Dependencies\Viiper\libVIIPER.dll' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.dll')
         'Dependencies\Viiper\PROVENANCE.md' = (Join-Path $dependencyRoot 'Viiper\PROVENANCE.md')
         'Dependencies\Viiper\libVIIPER.h' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.h')
@@ -101,6 +99,22 @@ try {
     $validRoot = New-Fixture
     $fixturesToClean += $validRoot
     Assert-Success -Result (Invoke-Verify -PublishDirectory $validRoot) -Case 'complete application asset set'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'Dependencies\HidHide\HidHide_1.5.230_x64.exe') -Value 'forbidden HidHide installer'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'HidHide prerequisite installer') {
+        throw 'Expected a bundled HidHide prerequisite installer to be rejected.'
+    }
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe') -Value 'forbidden usbip installer'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'usbip-win2 prerequisite installer') {
+        throw 'Expected a bundled usbip-win2 prerequisite installer to be rejected.'
+    }
 
     $root = New-Fixture
     $fixturesToClean += $root

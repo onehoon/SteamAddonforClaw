@@ -4,7 +4,6 @@ using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
-using System.Security.Cryptography;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -12,11 +11,12 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class HidHideProvisionerTests
 {
     [Fact]
-    public void BundledInstaller_HashMatchesRuntimeMetadata()
+    public void HidHideMetadata_UsesPinnedOfficialReleaseAsset()
     {
-        var installer = Path.Combine(AppContext.BaseDirectory, "Dependencies", "HidHide", HidHidePackageMetadata.InstallerFileName);
-        Assert.True(File.Exists(installer));
-        Assert.Equal(HidHidePackageMetadata.InstallerSha256, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(installer))));
+        Assert.Equal(new Version(1, 5, 230, 0), HidHidePackageMetadata.BundledVersion);
+        Assert.Equal("HidHide_1.5.230_x64.exe", HidHidePackageMetadata.InstallerFileName);
+        Assert.Equal("F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6", HidHidePackageMetadata.InstallerSha256);
+        Assert.Equal(new Uri("https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe"), HidHidePackageMetadata.InstallerDownloadUri);
     }
 
     [Fact]

@@ -41,7 +41,7 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 - Version: 1.5.230
 - License: MIT
 - Upstream: https://github.com/nefarius/HidHide
-- Distribution: Official unmodified `HidHide_1.5.230_x64.exe` installer bundled for explicit first-time provisioning.
+- Distribution: The application pins the official upstream release installer version and SHA-256. When explicit prerequisite provisioning is required, the installer is downloaded from the pinned official GitHub release asset, verified before execution, and is not included in the application package.
 
 ### VIIPER
 
@@ -88,4 +88,4 @@ ClawTweaks is a compatibility and technical reference only. It is not a runtime 
 - Version: 0.9.8.0
 - License: BSD-2-Clause
 - Upstream: https://github.com/vadimgrn/usbip-win2
-- Distribution: official unmodified x64 GitHub release installer
+- Distribution: The application pins the official upstream x64 release installer version and SHA-256. When explicit prerequisite provisioning is required, the installer is downloaded from the pinned official GitHub release asset, verified before execution, and is not included in the application package.
