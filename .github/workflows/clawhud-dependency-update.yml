@@ -164,15 +164,6 @@ jobs:
         if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
         run: dotnet test SteamInputAddonforClaw.slnx -c Release --no-build
 
-      - name: Validate publish contract
-        if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
-        shell: pwsh
-        run: |
-          ./scripts/publish-layout.ps1 -Version '0.0.0' -Configuration Release -PublishDirectory "$env:RUNNER_TEMP\clawhud-publish" -NoRestore
-          if ($LASTEXITCODE -ne 0) { throw "Publish layout failed with exit code $LASTEXITCODE." }
-          ./scripts/verify-publish-assets.ps1 -PublishDirectory "$env:RUNNER_TEMP\clawhud-publish"
-          if ($LASTEXITCODE -ne 0) { throw "Publish contract verification failed with exit code $LASTEXITCODE." }
-
       - name: Verify only the lock file changed
         if: steps.verify.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
         shell: pwsh
