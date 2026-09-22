@@ -9,7 +9,7 @@
 
             <ctcontrols:SettingsCard x:Name="UpdateCard" Header="Application updates">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Repair" />
+                    <SymbolIcon Symbol="Rotate" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <Button x:Name="UpdateButton" Content="Check" Click="UpdateButton_Click" />
             </ctcontrols:SettingsCard>
@@ -19,9 +19,9 @@
                 Description="Start Windows directly in Steam Big Picture."
                 Header="Steam Big Picture Full Screen Experience">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Repair" />
+                    <SymbolIcon Symbol="FullScreen" />
                 </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch x:Name="SteamFseToggleSwitch" Toggled="SteamFseToggleSwitch_Toggled" />
+                <ToggleSwitch x:Name="SteamFseToggleSwitch" OffContent="" OnContent="" Toggled="SteamFseToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsCard
@@ -29,9 +29,9 @@
                 Description="Show only the controls for the currently connected power source in the Main UI and Overlay."
                 Header="Show only current power source">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Repair" />
+                    <SymbolIcon Symbol="View" />
                 </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch x:Name="QuickSettingsPowerSourceToggleSwitch" Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
+                <ToggleSwitch x:Name="QuickSettingsPowerSourceToggleSwitch" OffContent="" OnContent="" Toggled="QuickSettingsPowerSourceToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsCard

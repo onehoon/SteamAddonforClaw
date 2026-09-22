@@ -26,11 +26,14 @@ public sealed partial class ProfilePage : UserControl
         InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; SetEditorsEnabled(false);
 }
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
-    internal void Activate() { _active = true; if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated; if (_selectedGame is not null) _ = CaptureSelectedAsync(_selectedGame.AppId); }
+    internal void Activate() { _active = true; if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated; _ = RefreshGamesAsync(); }
     internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; }
     private void OnStateInvalidated(object? sender, EventArgs e) { if (_active && _selectedGame is not null) DispatcherQueue.TryEnqueue(() => _ = CaptureSelectedAsync(_selectedGame.AppId)); }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
+        => await RefreshGamesAsync();
+
+    private async Task RefreshGamesAsync()
     {
         if (_frontend is null) return;
         try
