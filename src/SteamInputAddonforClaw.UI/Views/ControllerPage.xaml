@@ -18,15 +18,19 @@
                 <ctcontrols:SettingsExpander Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="True">
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Normal">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Contact" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox x:Name="GamebarNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="GamebarNormalConfigCard" ContentAlignment="Vertical">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Setting" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel x:Name="GamebarNormalConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="Steam Game / Big Picture">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="View" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox x:Name="GamebarSteamActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="GamebarSteamConfigCard" ContentAlignment="Vertical">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Edit" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel x:Name="GamebarSteamConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
                     </ctcontrols:SettingsExpander.Items>
@@ -35,15 +39,19 @@
                 <ctcontrols:SettingsExpander Header="Center M Button" Description="The action for the Center M button, per runtime presentation domain." IsExpanded="True">
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Normal">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Help" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox x:Name="CenterMNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="CenterMNormalConfigCard" ContentAlignment="Vertical">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel x:Name="CenterMNormalConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="Steam Game / Big Picture">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="AllApps" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox x:Name="CenterMSteamActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="CenterMSteamConfigCard" ContentAlignment="Vertical">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Find" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel x:Name="CenterMSteamConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
                     </ctcontrols:SettingsExpander.Items>
@@ -57,12 +65,14 @@
                     IsExpanded="True">
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="M1">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Rotate" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox
                                 x:Name="M1TargetComboBox"
                                 MinWidth="220"
                                 SelectionChanged="BackButtonTargetComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="M2">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="List" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox
                                 x:Name="M2TargetComboBox"
                                 MinWidth="220"

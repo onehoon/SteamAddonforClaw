@@ -433,11 +433,98 @@ public sealed class UiArchitectureTests
         Assert.Contains("ClawHudOpacitySlider_KeyUp", overlayXaml, StringComparison.Ordinal);
         Assert.Contains("ClawHudRetryButton", overlayXaml, StringComparison.Ordinal);
         Assert.Contains("SetClawHudEnabledAsync(true)", overlayCodeBehind, StringComparison.Ordinal);
+        foreach (var sectionHeading in new[] { "ClawHUD", "Display", "Appearance", "Display compatibility" })
+            Assert.DoesNotContain($"Text=\"{sectionHeading}\"", overlayXaml, StringComparison.Ordinal);
+
+        foreach (var icon in new[]
+        {
+            "<SymbolIcon Symbol=\"Setting\" />",
+            "<SymbolIcon Symbol=\"View\" />",
+            "<SymbolIcon Symbol=\"FontSize\" />",
+            "<SymbolIcon Symbol=\"Font\" />",
+            "<SymbolIcon Symbol=\"AlignCenter\" />",
+            "<SymbolIcon Symbol=\"FullScreen\" />",
+            "<SymbolIcon Symbol=\"FontColor\" />",
+            "<SymbolIcon Symbol=\"Repair\" />",
+        })
+            Assert.Contains(icon, overlayXaml, StringComparison.Ordinal);
+
+        var vrrCardStart = overlayXaml.IndexOf("<ctcontrols:SettingsCard Header=\"Intel VRR Range Fix\"", StringComparison.Ordinal);
+        var vrrCardEnd = overlayXaml.IndexOf("</ctcontrols:SettingsCard>", vrrCardStart, StringComparison.Ordinal);
+        Assert.True(vrrCardStart >= 0 && vrrCardEnd > vrrCardStart);
+        var vrrCard = overlayXaml[vrrCardStart..(vrrCardEnd + "</ctcontrols:SettingsCard>".Length)];
+        Assert.DoesNotContain("Description=\"Restore the supported VRR range", vrrCard, StringComparison.Ordinal);
+        Assert.Contains("<ctcontrols:SettingsCard.Description>", vrrCard, StringComparison.Ordinal);
+        Assert.Contains("ClawHudVrrResultText", vrrCard, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Right\"", vrrCard, StringComparison.Ordinal);
+        Assert.Contains("OffContent=\"\"", vrrCard, StringComparison.Ordinal);
+        Assert.Contains("OnContent=\"\"", vrrCard, StringComparison.Ordinal);
+        Assert.DoesNotContain("<StackPanel", vrrCard, StringComparison.Ordinal);
 
         Assert.DoesNotContain("ClawHud", settingsXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ClawHud", settingsCodeBehind, StringComparison.Ordinal);
         Assert.Contains("OverlayContent.RequestClawHudRefresh()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("OverlayContent.Initialize(_frontend)", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Every_main_ui_toggle_switch_hides_on_and_off_content()
+    {
+        var root = FindRepositoryRoot();
+        var uiRoot = Path.Combine(root, "src/SteamInputAddonforClaw.UI");
+
+        foreach (var path in Directory.EnumerateFiles(uiRoot, "*.xaml", SearchOption.AllDirectories))
+        {
+            var document = XDocument.Load(path);
+            foreach (var toggle in document.Descendants().Where(element => element.Name.LocalName == "ToggleSwitch"))
+            {
+                Assert.True(toggle.Attribute("OffContent") is { Value: "" },
+                    $"{Path.GetRelativePath(root, path)} has a ToggleSwitch with visible Off content.");
+                Assert.True(toggle.Attribute("OnContent") is { Value: "" },
+                    $"{Path.GetRelativePath(root, path)} has a ToggleSwitch with visible On content.");
+            }
+        }
+    }
+
+    [Fact]
+    public void Profile_tab_activation_refreshes_the_catalog_only_when_selected()
+    {
+        var root = FindRepositoryRoot();
+        var profileCodeBehind = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+
+        Assert.Contains("internal void Activate()", profileCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("_ = RefreshGamesAsync();", profileCodeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("if (_selectedGame is not null) _ = CaptureSelectedAsync(_selectedGame.AppId);", profileCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("private async Task RefreshGamesAsync()", profileCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("_catalog = await _frontend.ScanProfileGamesAsync();", profileCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("_frontend?.StateInvalidated -= OnStateInvalidated;", profileCodeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Controller_option_cards_have_header_icons()
+    {
+        var root = FindRepositoryRoot();
+        var controllerXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
+        var cards = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
+        var icons = cards.Select(card => card.Elements().SingleOrDefault(element => element.Name.LocalName == "SettingsCard.HeaderIcon"))
+            .ToArray();
+
+        Assert.Equal(10, cards.Length);
+        Assert.All(icons, icon => Assert.NotNull(icon));
+    }
+
+    [Fact]
+    public void Settings_header_icons_are_unique()
+    {
+        var root = FindRepositoryRoot();
+        var settingsXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/SettingsPage.xaml"));
+        var symbols = settingsXaml.Descendants()
+            .Where(element => element.Name.LocalName == "SymbolIcon")
+            .Select(element => (string?)element.Attribute("Symbol"))
+            .Where(symbol => symbol is not null)
+            .ToArray();
+
+        Assert.Equal(symbols.Length, symbols.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]
