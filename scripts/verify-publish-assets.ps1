@@ -34,6 +34,7 @@ $requiredAssets = @(
     'qam\SteamInputAddonforClaw.QamHost.exe',
     'qam\Frontend\qam.js',
     'overlay\SteamInputAddonforClaw.Overlay.exe',
+    'overlay\SteamInputAddonforClaw.Overlay.dll',
     'overlay\SteamInputAddonforClaw.Overlay.pri',
     'overlay\App.xbf',
     'overlay\OverlayWindow.xbf',
@@ -89,6 +90,27 @@ foreach ($forbiddenClawHudAsset in @('ClawHUDRuntime.zip', 'ClawHUD.exe')) {
 $qamSdkProjection = Join-Path $PublishDirectory 'qam\Microsoft.Windows.SDK.NET.dll'
 if (Test-Path -LiteralPath $qamSdkProjection -PathType Leaf) {
     throw 'QAM publish output must not contain Microsoft.Windows.SDK.NET.dll.'
+}
+
+$forbiddenSelfContainedWindowsAppSdkPayloadNames = @(
+    'Microsoft.WindowsAppRuntime.dll',
+    'Microsoft.WindowsAppRuntime.pri',
+    'Microsoft.UI.dll',
+    'Microsoft.UI.pri',
+    'Microsoft.UI.Xaml.winmd',
+    'Microsoft.UI.Xaml.Controls.dll',
+    'Microsoft.UI.Xaml.Controls.pri',
+    'Microsoft.ui.xaml.dll',
+    'Microsoft.ui.xaml.resources.19h1.dll',
+    'Microsoft.ui.xaml.resources.common.dll'
+)
+$legacyWindowsAppSdkPayload = @(
+    Get-ChildItem -LiteralPath (Join-Path $PublishDirectory 'ui') -Recurse -File
+    Get-ChildItem -LiteralPath (Join-Path $PublishDirectory 'overlay') -Recurse -File
+) | Where-Object { $_.Name -in $forbiddenSelfContainedWindowsAppSdkPayloadNames }
+$legacyWindowsAppSdkPayload = @($legacyWindowsAppSdkPayload)
+if ($legacyWindowsAppSdkPayload.Count -gt 0) {
+    throw "Framework-dependent UI publish contains self-contained Windows App SDK payload: $($legacyWindowsAppSdkPayload.Name -join ', ')"
 }
 
 $runtimePayloadNames = @('System.Private.CoreLib.dll', 'coreclr.dll', 'hostpolicy.dll')
@@ -165,9 +187,8 @@ finally {
 $uiDirectory = Join-Path $PublishDirectory 'ui'
 $uiManagedPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.dll')
 $uiPriPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.pri')
-$uiWinmdPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.winmd')
-if ($uiManagedPayload.Count -eq 0 -or $uiPriPayload.Count -eq 0 -or $uiWinmdPayload.Count -eq 0) {
-    throw 'UI publish output is missing its framework-dependent managed or WinUI/Windows App SDK payload.'
+if ($uiManagedPayload.Count -eq 0 -or $uiPriPayload.Count -eq 0) {
+    throw 'UI publish output is missing its framework-dependent managed or application PRI payload.'
 }
 
 $applicationPri = Join-Path $uiDirectory 'SteamInputAddonforClaw.UI.pri'
@@ -178,9 +199,8 @@ if (-not (Test-Path -LiteralPath $applicationPri -PathType Leaf)) {
 $overlayDirectory = Join-Path $PublishDirectory 'overlay'
 $overlayManagedPayload = @(Get-ChildItem -LiteralPath $overlayDirectory -Recurse -File -Filter '*.dll')
 $overlayPriPayload = @(Get-ChildItem -LiteralPath $overlayDirectory -Recurse -File -Filter '*.pri')
-$overlayWinmdPayload = @(Get-ChildItem -LiteralPath $overlayDirectory -Recurse -File -Filter '*.winmd')
-if ($overlayManagedPayload.Count -eq 0 -or $overlayPriPayload.Count -eq 0 -or $overlayWinmdPayload.Count -eq 0) {
-    throw 'Overlay publish output is missing its framework-dependent managed or WinUI/Windows App SDK payload.'
+if ($overlayManagedPayload.Count -eq 0 -or $overlayPriPayload.Count -eq 0) {
+    throw 'Overlay publish output is missing its framework-dependent managed or application PRI payload.'
 }
 
 $runtimeRootXaml = @(Get-ChildItem -LiteralPath $PublishDirectory -File | Where-Object { $_.Extension -in @('.xbf', '.pri') })

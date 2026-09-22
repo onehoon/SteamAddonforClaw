@@ -42,6 +42,11 @@ public static class Program
                 Environment.ExitCode = ElevatedPrerequisiteSetup.Run();
                 return;
             }
+            if (args.Contains(ElevatedWindowsAppRuntimeSetup.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = ElevatedWindowsAppRuntimeSetup.Run();
+                return;
+            }
             if (args.Contains(ElevatedStartupTaskSetup.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = ElevatedStartupTaskSetup.Run(args);

@@ -28,37 +28,47 @@ internal sealed class FrontendProcessLauncher
 
     internal string ExecutablePath => _executablePath;
 
-    internal void RequestOpen(FrontendOpenReason reason)
+    internal FrontendOpenReason? RequestOpen(FrontendOpenReason reason)
     {
         lock (_sync)
         {
-            if (_stopping) return;
+            if (_stopping) return null;
             AppLog.Info("Frontend", "Frontend open requested.", ("Reason", reason));
             if (!_runtimeReady)
             {
                 _pendingOpen = true;
                 _pendingReason = reason;
                 AppLog.Info("Frontend", "Frontend open queued until Runtime readiness.");
-                return;
+                return null;
             }
-            LaunchLocked(reason);
+            return reason;
         }
     }
 
-    internal void MarkRuntimeReady()
+    internal FrontendOpenReason? MarkRuntimeReady()
     {
         lock (_sync)
         {
-            if (_stopping || _runtimeReady) return;
+            if (_stopping || _runtimeReady) return null;
             _runtimeReady = true;
             if (_pendingOpen)
             {
                 _pendingOpen = false;
                 var reason = _pendingReason ?? FrontendOpenReason.InitialManualLaunch;
                 _pendingReason = null;
-                AppLog.Info("Frontend", "Queued frontend open released.");
-                LaunchLocked(reason);
+                AppLog.Info("Frontend", "Queued frontend open released for Runtime coordination.");
+                return reason;
             }
+            return null;
+        }
+    }
+
+    internal void Launch(FrontendOpenReason reason)
+    {
+        lock (_sync)
+        {
+            if (_stopping || !_runtimeReady) return;
+            LaunchLocked(reason);
         }
     }
 
