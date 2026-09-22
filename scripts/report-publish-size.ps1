@@ -14,7 +14,6 @@ function Get-Component([string]$Path) {
     $path = $Path.ToLowerInvariant()
     if ($path.StartsWith('ui/')) { return 'UI' }
     if ($path.StartsWith('overlay/')) { return 'Overlay' }
-    if ($path.StartsWith('qam/')) { return 'QAM Host' }
     if ($path.StartsWith('fse/')) { return 'FSE Home' }
     if ($path.StartsWith('dependencies/hidhide/')) { return 'HidHide' }
     if ($path.StartsWith('dependencies/usbipwin2/')) { return 'USBip-win2' }
@@ -29,7 +28,7 @@ function Format-MiB([long]$Bytes) { return '{0:N2}' -f ($Bytes / 1MB) }
 $files = @(Get-ChildItem -LiteralPath $root -Recurse -File)
 $totalBytes = [long](($files | Measure-Object -Property Length -Sum).Sum)
 $componentBytes = [ordered]@{
-    'Runtime' = [long]0; 'UI' = [long]0; 'Overlay' = [long]0; 'QAM Host' = [long]0; 'FSE Home' = [long]0; 'TDP Helper' = [long]0;
+    'Runtime' = [long]0; 'UI' = [long]0; 'Overlay' = [long]0; 'FSE Home' = [long]0; 'TDP Helper' = [long]0;
     'HidHide' = [long]0; 'USBip-win2' = [long]0; 'VIIPER' = [long]0;
     'Other / Unclassified' = [long]0
 }

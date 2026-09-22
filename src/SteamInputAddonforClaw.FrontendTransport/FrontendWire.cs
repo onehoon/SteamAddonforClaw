@@ -75,7 +75,7 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // fail every settings/bootstrap deserialization on the changed members -- failing the handshake up
 // front is the honest outcome. Pre-release: no compatibility shim.
 // Version 26: Shared Frontend V2 adds CaptureDeviceQuickSettings and the typed
-// FrontendDeviceQuickSettingsSnapshot aggregate used by Main UI/QAM Device refresh.
+// FrontendDeviceQuickSettingsSnapshot aggregate used by Main UI / Overlay Device refresh.
 // Version 27: SD6A PR B adds Claw Sensor Probe capture modes (Live Sanity / Axis Characterization /
 // Stationary Bias). StartClawSensorProbe changes from a no-payload RPC to one requiring
 // StartClawSensorProbeRequest (FrontendClawSensorProbeMode); the probe candidate/snapshot contracts
@@ -83,7 +83,7 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // invalid (missing-mode) Start request or fail deserializing the extended snapshot -- failing the
 // handshake up front is the honest outcome. Pre-release: no compatibility shim.
 // Version 28: Shared Frontend V2 SF-V2-04 exposes the closed shared Quick Settings product seam
-// through .Frontend/.Qam via CaptureQuickSettingsPage and MutateQuickSetting. The new RPC methods
+// through the Main UI / Overlay transports via CaptureQuickSettingsPage and MutateQuickSetting. The new RPC methods
 // carry QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult. A v27
 // peer does not implement this wire contract, so fail the handshake up front. Pre-release: no
 // compatibility shim.
@@ -96,9 +96,9 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 32: shared Setting tab-order capture and one-position move RPCs are added. A v31 peer
 // must fail the handshake before either surface can use the new typed contract.
 // Version 33: the Main UI-only application update card adds typed capture/check-download/install
-// RPCs. QAM and Overlay do not use these methods. A v32 peer must fail the handshake up front.
-// Version 34: the Runtime can send a causal one-shot Addon-first Quick Access intent to QamHost.
-// A v33 peer must fail the handshake before the new notification can be misinterpreted.
+// RPCs. A v32 peer must fail the handshake up front.
+// Version 34: the Runtime could send a causal one-shot Addon-first Quick Access intent to the
+// retired custom Quick Access integration.
 // Version 35: Main UI can persist the shared Quick Settings current-power-source visibility
 // preference. A v34 peer must fail the handshake before settings responses or the new mutation
 // can be misinterpreted.
@@ -112,7 +112,10 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 39: CH-A3 adds the Runtime-owned ClawHUD snapshot, top-level enable mutation, and
 // closed nested setting mutation RPCs. A v38 peer must fail the handshake before either surface
 // can render or mutate ClawHUD state. Pre-release: no compatibility shim.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 39; }
+// Version 40: retirement of the custom QAM integration removes its frontend pipe notification/acknowledgement
+// contract. Shared Main UI / Overlay Quick Settings RPCs remain. A v39 peer must fail the
+// handshake before the removed contract can be invoked. Pre-release: no compatibility shim.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 40; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -124,12 +127,6 @@ public static class FrontendPipeEndpoint
         var sid = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException("The current Windows user SID is unavailable.");
         var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(sid));
         return $"SteamInputAddonforClaw.Frontend.{Convert.ToHexString(hash.AsSpan(0, 8))}";
-    }
-
-    public static string CreateQamForCurrentUser()
-    {
-        var desktop = CreateForCurrentUser();
-        return $"{desktop}.Qam";
     }
 
     public static string CreateOverlayForCurrentUser()
@@ -144,8 +141,8 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, CaptureAppUpdate, CheckAndDownloadAppUpdate, InstallAppUpdate, SetFrontButtonMapping, SetBackButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, RequestEnterBios, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder, MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled, SetDeviceBatteryChargeLimitPercent, AcknowledgeQamSelectAddonOnNextOpenPrepared, SetQuickSettingsCurrentPowerSourceOnly, CaptureSteamFse, SetSteamFseEnabled, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting }
-internal enum FrontendNotificationKind { StateInvalidated, CloseRequested, SelectAddonOnNextQuickAccessOpenRequested }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, CaptureAppUpdate, CheckAndDownloadAppUpdate, InstallAppUpdate, SetFrontButtonMapping, SetBackButtonMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, RequestEnterBios, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder, MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled, SetDeviceBatteryChargeLimitPercent, SetQuickSettingsCurrentPowerSourceOnly, CaptureSteamFse, SetSteamFseEnabled, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting }
+internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
 internal sealed record FrontendWireEnvelope(int ProtocolVersion, FrontendWireMessageKind Kind, long? RequestId = null, FrontendRpcMethod? Method = null, FrontendNotificationKind? Notification = null, JsonElement? Payload = null, FrontendWireError? Error = null);

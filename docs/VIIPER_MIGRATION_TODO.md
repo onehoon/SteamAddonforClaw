@@ -1,5 +1,7 @@
 # Steam Deck Runtime Roadmap
 
+> **Current frontend architecture (2026-09-22):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse; Addon QAM/QamHost/CDP/CEF integration is retired.
+
 > **Superseded internals (Full1902 Cleanup A + B).** Cleanup A deleted the legacy
 > Steam-session routing authority — `AddonRoutingRuntime`,
 > `RoutingPipelineRuntimeCoordinator`, the `RoutingPipeline*` graph,

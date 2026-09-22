@@ -135,7 +135,7 @@ internal sealed class Oem1EventGestureBridge : IDisposable
     // serialized against SetCustomAuthority()/Dispose() using the SAME _recognizerOperationGate those
     // two already hold for their entire duration -- otherwise a gesture that passes the check just
     // before a concurrent revoke/dispose returns could still deliver PolicyRequested afterward,
-    // starting the BPM/QAM replacement action after custom authority was already revoked or the
+    // starting the BPM/Steam Quick Access replacement action after custom authority was already revoked or the
     // bridge was already disposed. _recognizerOperationGate (a plain Monitor lock) is re-entrant, so
     // a production PolicyRequested subscriber may still synchronously call
     // SetCustomAuthority(false)/Dispose() from within this same call without deadlocking.

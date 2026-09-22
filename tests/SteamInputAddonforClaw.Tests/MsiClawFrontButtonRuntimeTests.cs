@@ -214,19 +214,13 @@ public sealed class MsiClawFrontButtonRuntimeTests
     }
 
     [Fact]
-    public void Host_causally_delivers_the_qam_intent_before_the_native_quick_access_pulse()
+    public void Host_routes_steam_quick_access_directly_to_the_native_pulse()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
         var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
 
-        Assert.Contains("RequestSelectAddonOnNextQuickAccessOpenAsync", host, StringComparison.Ordinal);
-        Assert.Contains("TimeSpan.FromSeconds(1)", host, StringComparison.Ordinal);
-        Assert.Contains("_quickAccessRequestGate", host, StringComparison.Ordinal);
-        var intentIndex = host.IndexOf("RequestSelectAddonOnNextQuickAccessOpenAsync", StringComparison.Ordinal);
-        var pulseIndex = host.IndexOf("_presentationOwnership?.TryRequestQuickAccessPulse()", intentIndex, StringComparison.Ordinal);
-        Assert.True(intentIndex >= 0 && pulseIndex > intentIndex);
-        Assert.Contains("QAM Addon first-tab intent unavailable; native Quick Access pulse continues.", host, StringComparison.Ordinal);
+        Assert.Contains("return _presentationOwnership?.TryRequestQuickAccessPulse() == true;", host, StringComparison.Ordinal);
     }
 
     [Fact]

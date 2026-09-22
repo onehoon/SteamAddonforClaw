@@ -310,7 +310,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
     }
 
     // Section 26/27: metadata-driven lower/upper gap correction only -- no label parsing, no known
-    // TDP limit tuples. Mirrors the QAM applyDeviceQuickSettingsLinkedConstraints reference exactly
+    // TDP limit tuples. Mirrors the shared frontend linked-slider constraint policy exactly
     // so the pending draft's companion value (and therefore its rendered preview) corrects
     // immediately, before Runtime settlement.
     private void ApplyLinkedConstraints(Dictionary<QuickSettingsRowId, QuickSettingsValue> values, QuickSettingsRowId editedRowId)

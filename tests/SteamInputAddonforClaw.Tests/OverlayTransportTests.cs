@@ -12,15 +12,12 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayTransportTests
 {
     [Fact]
-    public void Overlay_endpoint_is_distinct_from_frontend_and_qam_endpoints()
+    public void Overlay_endpoint_is_distinct_from_the_main_frontend_endpoint()
     {
         var frontend = FrontendPipeEndpoint.CreateForCurrentUser();
-        var qam = FrontendPipeEndpoint.CreateQamForCurrentUser();
         var overlay = FrontendPipeEndpoint.CreateOverlayForCurrentUser();
 
-        Assert.NotEqual(frontend, qam);
         Assert.NotEqual(frontend, overlay);
-        Assert.NotEqual(qam, overlay);
         Assert.EndsWith(".Overlay", overlay, StringComparison.Ordinal);
     }
 

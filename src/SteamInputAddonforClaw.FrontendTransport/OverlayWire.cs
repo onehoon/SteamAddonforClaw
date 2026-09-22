@@ -24,7 +24,7 @@ internal static class OverlayTransportProtocol
     // wire (DeviceQuickSettingsState / DeviceMutationRequest / DeviceMutationResult,
     // OverlayDeviceMutationKind/Request/Response, OverlayDeviceMutationDispatch) with the shared
     // QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult contract
-    // already consumed by .Frontend/.Qam (SF-V2-04/05), inside narrow transport correlation wrappers.
+    // already consumed by the Main UI / Overlay (SF-V2-04/05), inside narrow transport correlation wrappers.
     // A v6 peer must fail the handshake rather than silently misinterpret the replaced frames.
     // Pre-release: no compatibility shim.
     // Version 8 (shared-surface PR3): replaces raw whole-order Setting state/mutation with the typed
@@ -45,8 +45,8 @@ internal enum OverlayState { Ready, Visible, Hidden }
 
 /// <summary>Overlay -> Runtime shared Quick Settings mutation request (SF-V2-06 section 9.2).
 /// Correlation is transport-specific and deliberately not part of the shared product contract --
-/// <see cref="Intent"/> is the exact same closed <see cref="QuickSettingsMutationIntent"/> QAM sends
-/// over `.Qam`.</summary>
+/// <see cref="Intent"/> is the exact same closed <see cref="QuickSettingsMutationIntent"/> shared by
+/// the Main UI and Overlay transports.</summary>
 internal sealed record OverlayQuickSettingsMutationRequest(long RequestId, QuickSettingsMutationIntent Intent);
 
 /// <summary>Runtime -> Overlay reply to one <see cref="OverlayQuickSettingsMutationRequest"/>. A
@@ -923,7 +923,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     }
 
     // SF-V2-06: one narrow shared-product method carrying the exact closed QuickSettingsMutationIntent
-    // contract QAM already sends over `.Qam`. A typed feature failure (Succeeded=false) is a normal
+    // shared Quick Settings contract. A typed feature failure (Succeeded=false) is a normal
     // result here, not an exception. Serialized through _quickSettingsMutationGate (section 19.3); the
     // request id/pending-TCS pair still governs correctness if a wait is abandoned mid-flight.
     internal async Task<QuickSettingsMutationResult> SendQuickSettingsMutationAsync(QuickSettingsMutationIntent intent, CancellationToken token = default)

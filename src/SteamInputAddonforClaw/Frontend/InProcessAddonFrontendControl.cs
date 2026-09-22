@@ -1404,7 +1404,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable.");
 
         // Deliberately NO StateInvalidated broadcast (PR #430 review): the returned result already
-        // carries the authoritative read-back snapshot, this feature has no QAM surface, and a
+        // carries the authoritative read-back snapshot, this feature has no Steam Quick Access surface, and a
         // successful transition restarts Windows immediately anyway.
         return await _centerMAuthorityTransition.RequestAsync(centerMEnabled, cancellationToken).ConfigureAwait(false);
     }
@@ -1415,7 +1415,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (_centerMAuthorityTransition is null)
             return new FrontendEnterBiosResult(FrontendEnterBiosOutcome.Unavailable, "Enter BIOS is unavailable.");
 
-        // Enter BIOS deliberately does not broadcast StateInvalidated: it has no QAM/Overlay
+        // Enter BIOS deliberately does not broadcast StateInvalidated: it has no Steam Quick Access/Overlay
         // surface and a successful request is expected to leave Windows immediately.
         return await _centerMAuthorityTransition.RequestEnterBiosAsync(cancellationToken).ConfigureAwait(false);
     }

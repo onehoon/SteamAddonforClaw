@@ -146,7 +146,7 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     // OverlayWindow itself cannot be constructed/exercised here (WinUI needs a XAML host), so this
-    // is a source/composition regression -- mirroring QamFrontendContractTests' qam.js text
+    // is a source/composition regression -- mirroring the retired frontend contract checks
     // assertions -- proving RenderQuickSettingsPage() actually consumes and clears the binder's local
     // failure fact in BOTH the fast (value-only) path and the structural-rebuild path, per the PR
     // #508 review that flagged a mutation failure being retained in the binder but never surfaced.

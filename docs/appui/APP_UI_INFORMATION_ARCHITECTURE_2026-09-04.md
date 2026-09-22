@@ -1,5 +1,7 @@
 # Steam Addon for Claw — App UI Information Architecture
 
+> **Current architecture note (2026-09-22):** Addon-owned Quick Settings are provided only by the WinUI3 Overlay. Steam's native Quick Access Menu remains Steam-owned and is invoked through the existing Steam Deck Quick Access system-button pulse; there is no Addon QAM tab or QamHost/CDP/CEF integration.
+
 > **Date:** 2026-09-04  
 > **Status:** Design authority for the next app navigation/UI cleanup  
 > **Scope:** Main navigation, page ownership, Status removal, Settings cleanup, controller/device responsibility split, and placement rules for planned features

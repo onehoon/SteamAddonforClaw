@@ -51,7 +51,7 @@ public sealed record ProfileLoadResult(ProfileDocument Document, ProfileLoadStat
 /// <see cref="SteamInputAddonforClaw.Install.AddonDataPaths"/>) -- this store does not rediscover
 /// or invent its own storage root; the caller supplies the exact path.
 ///
-/// Runtime-owned, UI-independent: this type has no dependency on WinUI, QamHost, or any frontend
+/// Runtime-owned, UI-independent: this type has no dependency on WinUI or any frontend
 /// connection. It is plain .NET code usable the moment the Addon Runtime starts, whether or not a
 /// UI ever attaches.
 /// </summary>

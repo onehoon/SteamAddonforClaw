@@ -7,7 +7,7 @@ public sealed record AddonQuickSettingsTabOrderRow(
     bool CanMoveEarlier,
     bool CanMoveLater);
 
-/// <summary>The Runtime-owned tab-order projection consumed by QAM and Overlay.</summary>
+/// <summary>The Runtime-owned tab-order projection consumed by the Main UI and Overlay.</summary>
 public sealed record AddonQuickSettingsTabOrderSnapshot(
     bool Available,
     IReadOnlyList<AddonQuickSettingsTabOrderRow> Rows)

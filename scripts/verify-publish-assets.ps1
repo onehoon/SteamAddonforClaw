@@ -31,8 +31,6 @@ $requiredAssets = @(
     'ui\Views\ControllerPage.xbf',
     'ui\Views\SettingsPage.xbf',
     'ui\Views\DeveloperPage.xbf',
-    'qam\SteamInputAddonforClaw.QamHost.exe',
-    'qam\Frontend\qam.js',
     'overlay\SteamInputAddonforClaw.Overlay.exe',
     'overlay\SteamInputAddonforClaw.Overlay.dll',
     'overlay\SteamInputAddonforClaw.Overlay.pri',
@@ -51,6 +49,18 @@ $missingAssets = foreach ($asset in $requiredAssets) {
 
 if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
+}
+
+$retiredQamDirectory = Join-Path $PublishDirectory 'qam'
+if (Test-Path -LiteralPath $retiredQamDirectory) {
+    throw 'Published output must not contain the retired QAM directory.'
+}
+
+$retiredQamExecutableName = 'SteamInputAddonforClaw.' + 'QamHost.exe'
+$retiredQamAssets = @(Get-ChildItem -LiteralPath $PublishDirectory -Recurse -File |
+    Where-Object { $_.Name -ieq $retiredQamExecutableName -or $_.Name -ieq 'qam.js' })
+if ($retiredQamAssets.Count -gt 0) {
+    throw "Published output contains retired QAM assets: $($retiredQamAssets.Name -join ', ')"
 }
 
 $fseDirectory = [System.IO.Path]::GetFullPath((Join-Path $PublishDirectory 'fse'))
@@ -102,11 +112,6 @@ foreach ($forbiddenClawHudAsset in @('ClawHUDRuntime.zip', 'ClawHUD.exe')) {
     }
 }
 
-$qamSdkProjection = Join-Path $PublishDirectory 'qam\Microsoft.Windows.SDK.NET.dll'
-if (Test-Path -LiteralPath $qamSdkProjection -PathType Leaf) {
-    throw 'QAM publish output must not contain Microsoft.Windows.SDK.NET.dll.'
-}
-
 $forbiddenSelfContainedWindowsAppSdkPayloadNames = @(
     'Microsoft.WindowsAppRuntime.dll',
     'Microsoft.WindowsAppRuntime.pri',
@@ -129,7 +134,7 @@ if ($legacyWindowsAppSdkPayload.Count -gt 0) {
 }
 
 $runtimePayloadNames = @('System.Private.CoreLib.dll', 'coreclr.dll', 'hostpolicy.dll')
-foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), (Join-Path $PublishDirectory 'qam'), (Join-Path $PublishDirectory 'overlay'), (Join-Path $PublishDirectory 'fse'))) {
+foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), (Join-Path $PublishDirectory 'overlay'), (Join-Path $PublishDirectory 'fse'))) {
     $runtimePayload = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Name -in $runtimePayloadNames })
     if ($runtimePayload.Count -gt 0) {
         throw "Framework-dependent publish contains runtime payload in '$directory': $($runtimePayload.Name -join ', ')"

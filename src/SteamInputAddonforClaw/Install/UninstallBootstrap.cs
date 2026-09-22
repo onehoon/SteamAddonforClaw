@@ -37,7 +37,7 @@ internal static class UninstallBootstrap
     {
         if (!runtimeReleased)
             return;
-        var cefCleaned = Steam.SteamCefDebugBootstrap.RemoveOwnedMarker();
+        var cefCleaned = Steam.SteamCefLegacyMarkerCleanup.RemoveOwnedMarker();
         var fpsCleaned = TryCleanupOwnedIntelFpsForUninstall();
         var steamFseCleaned = new WindowsGamingHomeConfiguration().TryCleanupForUninstall();
         TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);

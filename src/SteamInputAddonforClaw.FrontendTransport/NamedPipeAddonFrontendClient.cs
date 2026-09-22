@@ -24,7 +24,6 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     // OQ3-A: the Runtime asks the connected Main UI to run its normal close path before the Addon
     // Overlay is shown. Narrow notification only -- not a general command bus.
     public event EventHandler? CloseRequested;
-    public event EventHandler? SelectAddonOnNextQuickAccessOpenRequested;
     public NamedPipeAddonFrontendClient(string pipeName) : this(pipeName, FrontendTransportProtocol.CurrentVersion) { }
     internal NamedPipeAddonFrontendClient(string pipeName, int version) { _pipeName = pipeName; _version = version; }
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -66,7 +65,7 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     public Task<FrontendTdpMutationResult> SetDeviceTdpAsync(FrontendTdpConfiguration configuration, CancellationToken t = default) => SendAsync<FrontendTdpMutationResult>(FrontendRpcMethod.SetDeviceTdp, FrontendWireCodec.Payload(new SetDeviceTdpRequest(configuration)), t);
     public Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken t = default) => SendAsync<FrontendTdpMutationResult>(FrontendRpcMethod.SetDeviceTdpEnabled, FrontendWireCodec.Payload(new SetDeviceTdpEnabledRequest(enabled)), t);
     public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) => SendAsync<FrontendDeviceQuickSettingsSnapshot>(FrontendRpcMethod.CaptureDeviceQuickSettings, null, t);
-    // SF-V2-04: concrete .Frontend/.Qam implementations of the shared Quick Settings seam, so the
+    // SF-V2-04: concrete Main UI / Overlay implementations of the shared Quick Settings seam, so the
     // pipe carries the SF-V2-03 typed contract instead of falling back to the fail-closed interface
     // default. Product validation/dispatch stays in QuickSettingsMutationAdapter on the server side.
     public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken t = default) => SendAsync<QuickSettingsPageSnapshot>(FrontendRpcMethod.CaptureQuickSettingsPage, FrontendWireCodec.Payload(new CaptureQuickSettingsPageRequest(pageId, appId)), t);
@@ -111,7 +110,6 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken t = default) => SendAsync<FrontendBatteryChargeLimitMutationResult>(FrontendRpcMethod.SetDeviceBatteryChargeLimitPercent, FrontendWireCodec.Payload(new SetDeviceBatteryChargeLimitPercentRequest(percent)), t);
     public Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken t = default) => SendAsync<FrontendPrerequisiteSetupResult>(FrontendRpcMethod.RunPrerequisiteSetup, null, t);
     public Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken t = default) => SendAsync<FrontendEnvironmentReportResult>(FrontendRpcMethod.GenerateEnvironmentReport, null, t);
-    public Task<bool> AcknowledgeQamSelectAddonOnNextOpenPreparedAsync(CancellationToken t = default) => SendAsync<bool>(FrontendRpcMethod.AcknowledgeQamSelectAddonOnNextOpenPrepared, null, t);
     private async Task<T> SendAsync<T>(FrontendRpcMethod method, JsonElement? payload, CancellationToken token)
     {
         token.ThrowIfCancellationRequested(); var pipe = _pipe ?? throw new FrontendTransportException("Client is not connected.", _disconnectReason); var id = Interlocked.Increment(ref _nextRequestId); var tcs = new TaskCompletionSource<FrontendWireEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously); if (!_pending.TryAdd(id, tcs)) throw new FrontendTransportException("Duplicate request id.");
@@ -166,11 +164,6 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
                 if (message.Kind == FrontendWireMessageKind.Notification && message.Notification == FrontendNotificationKind.CloseRequested)
                 {
                     CloseRequested?.Invoke(this, EventArgs.Empty);
-                    continue;
-                }
-                if (message.Kind == FrontendWireMessageKind.Notification && message.Notification == FrontendNotificationKind.SelectAddonOnNextQuickAccessOpenRequested)
-                {
-                    SelectAddonOnNextQuickAccessOpenRequested?.Invoke(this, EventArgs.Empty);
                     continue;
                 }
                 if (message.Kind != FrontendWireMessageKind.Response || message.RequestId is not > 0)
