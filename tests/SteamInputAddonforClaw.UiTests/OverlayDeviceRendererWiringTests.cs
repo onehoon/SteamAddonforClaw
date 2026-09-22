@@ -397,7 +397,11 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("x:Name=\"TabStripFrame\"", xaml);
         Assert.Contains("x:Name=\"PreviousTabHint\"", xaml);
         Assert.Contains("x:Name=\"NextTabHint\"", xaml);
-        Assert.Contains("FontIcon", xaml);
+        Assert.Contains("<Path", xaml);
+        Assert.Contains("Data=\"M3,16 C4,9", xaml);
+        Assert.Contains("Data=\"M27,16 C26,9", xaml);
+        Assert.Contains("StrokeThickness=\"1.8\"", xaml);
+        Assert.Contains("Width=\"30\"", xaml);
         Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
         Assert.Contains("OverlayTabState", shell);
         Assert.Contains("ApplyTabNavigationHintVisual", shell);
