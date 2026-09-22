@@ -17,6 +17,7 @@ public sealed partial class OverlayPage : UserControl
     private Task _opacityPreviewTail = Task.CompletedTask;
     private readonly object _opacityPreviewGate = new();
     private int _opacityCommitQueued;
+    private bool _opacityCommitPending;
 
     public OverlayPage()
     {
@@ -260,8 +261,28 @@ public sealed partial class OverlayPage : UserControl
     {
         if (_applyingClawHudState || _frontend is null || _clawHudSnapshot.RuntimeState != FrontendClawHudRuntimeState.Ready || _clawHudSnapshot.Settings is null)
             return;
-        if (Interlocked.Exchange(ref _opacityCommitQueued, 1) != 0) return;
+        if (!TryClaimOpacityCommit(ref _opacityCommitQueued, ref _opacityCommitPending)) return;
         _ = CommitClawHudOpacityAsync((int)Math.Round(ClawHudOpacitySlider.Value));
+    }
+
+    internal static bool TryClaimOpacityCommit(ref int queued, ref bool pending)
+    {
+        if (Interlocked.Exchange(ref queued, 1) != 0)
+        {
+            pending = true;
+            return false;
+        }
+
+        return true;
+    }
+
+    internal static bool CompleteOpacityCommit(ref int queued, ref bool pending)
+    {
+        Volatile.Write(ref queued, 0);
+        if (!pending) return false;
+
+        pending = false;
+        return true;
     }
 
     private async Task SendClawHudOpacityPreviewAsync(int value)
@@ -301,7 +322,8 @@ public sealed partial class OverlayPage : UserControl
         }
         finally
         {
-            Volatile.Write(ref _opacityCommitQueued, 0);
+            if (CompleteOpacityCommit(ref _opacityCommitQueued, ref _opacityCommitPending))
+                QueueClawHudOpacityCommit();
         }
     }
 

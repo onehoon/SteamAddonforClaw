@@ -441,6 +441,23 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Overlay_opacity_commit_coalesces_rapid_keyboard_adjustments_into_a_follow_up_commit()
+    {
+        var queued = 0;
+        var pending = false;
+
+        Assert.True(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending));
+        Assert.False(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending));
+        Assert.True(pending);
+
+        // Completing the first commit releases the claim and reports that the latest slider
+        // value needs one follow-up commit rather than leaving it preview-only.
+        Assert.True(OverlayPage.CompleteOpacityCommit(ref queued, ref pending));
+        Assert.False(pending);
+        Assert.True(OverlayPage.TryClaimOpacityCommit(ref queued, ref pending));
+    }
+
+    [Fact]
     public void Settings_page_shows_read_only_required_components_and_no_launch_at_startup_toggle()
     {
         var root = FindRepositoryRoot();
