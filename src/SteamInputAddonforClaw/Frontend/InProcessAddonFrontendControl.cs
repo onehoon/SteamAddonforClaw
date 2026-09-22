@@ -365,12 +365,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(_steamFse.Capture());
     }
 
-    public Task<FrontendSteamFseMutationResult> SetSteamFseEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    public async Task<FrontendSteamFseMutationResult> SetSteamFseEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        var result = _steamFse.SetEnabled(enabled);
+        var result = await _steamFse.SetEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
         if (result.Succeeded) StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return Task.FromResult(result);
+        return result;
     }
 
     public async Task<FrontendClawHudSnapshot> CaptureClawHudAsync(CancellationToken cancellationToken = default)

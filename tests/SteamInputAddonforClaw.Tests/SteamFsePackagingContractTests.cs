@@ -16,16 +16,17 @@ public sealed class SteamFsePackagingContractTests
     }
 
     [Fact]
-    public void Fse_package_keeps_a_stable_identity_and_gaming_home_capability()
+    public void Fse_package_keeps_a_fixed_identity_version_and_gaming_home_capability()
     {
         var manifest = ReadSource("src", "SteamInputAddonforClaw.FseHome", "Packaging", "AppxManifest.xml");
         var sccd = ReadSource("src", "SteamInputAddonforClaw.FseHome", "Packaging", "CustomCapability.SCCD");
         var project = ReadSource("src", "SteamInputAddonforClaw.FseHome", "SteamInputAddonforClaw.FseHome.csproj");
 
         Assert.Contains("Name=\"SteamInputAddonforClaw.FseHome\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("Publisher=\"CN=SteamInputAddonforClaw\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("Version=\"1.0.0.0\"", manifest, StringComparison.Ordinal);
         Assert.Contains("Name=\"windows.gamingApp\"", manifest, StringComparison.Ordinal);
         Assert.Contains("Name=\"Microsoft.appCategory.gamingHome_8wekyb3d8bbwe\"", manifest, StringComparison.Ordinal);
-        Assert.Contains("Version=\"__PACKAGE_VERSION__\"", manifest, StringComparison.Ordinal);
         Assert.Contains("Logo>Assets\\AppIcon.png", manifest, StringComparison.Ordinal);
         Assert.Contains("Square150x150Logo=\"Assets\\AppIcon.png\"", manifest, StringComparison.Ordinal);
         Assert.Contains("Square44x44Logo=\"Assets\\AppIcon.png\"", manifest, StringComparison.Ordinal);
@@ -36,46 +37,47 @@ public sealed class SteamFsePackagingContractTests
     }
 
     [Fact]
-    public void Release_packaging_requires_a_signed_final_msix_and_keeps_identity_versioned_from_release()
+    public void Runtime_does_not_provision_fse_and_first_enable_uses_the_fixed_elevated_entrypoint()
     {
-        var pack = ReadSource("scripts", "pack.ps1");
-        var package = ReadSource("scripts", "package-fse-home.ps1");
-        var verifier = ReadSource("scripts", "verify-publish-assets.ps1");
-        var sdkTool = ReadSource("scripts", "invoke-sdk-tool.ps1");
+        var host = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var program = ReadSource("src", "SteamInputAddonforClaw", "Program.cs");
+        var configuration = ReadSource("src", "SteamInputAddonforClaw", "WindowsGaming", "SteamFseConfiguration.cs");
+        var registration = ReadSource("src", "SteamInputAddonforClaw", "WindowsGaming", "SteamFseRegistration.cs");
 
-        Assert.Contains("package-fse-home.ps1", pack, StringComparison.Ordinal);
-        Assert.Contains("-RequireFsePackage", pack, StringComparison.Ordinal);
-        Assert.Contains("SteamInputAddonforClaw.FseHome.msix", pack, StringComparison.Ordinal);
-        Assert.Contains("CertificatePath", package, StringComparison.Ordinal);
-        Assert.Contains("CertificatePassword", package, StringComparison.Ordinal);
-        Assert.Contains("signtool", verifier, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("CustomCapability.SCCD", verifier, StringComparison.Ordinal);
-        Assert.Contains("WindowsSdkDir", package, StringComparison.Ordinal);
-        Assert.Contains("WindowsSdkDir", verifier, StringComparison.Ordinal);
-        Assert.Contains("x64", package, StringComparison.Ordinal);
-        Assert.Contains("x64", verifier, StringComparison.Ordinal);
-        Assert.DoesNotContain("-Path $roots -Recurse", package, StringComparison.Ordinal);
-        Assert.DoesNotContain("-Path $roots -Recurse", verifier, StringComparison.Ordinal);
-        Assert.Contains("ProcessStartInfo", sdkTool, StringComparison.Ordinal);
-        Assert.Contains("UseShellExecute = $false", sdkTool, StringComparison.Ordinal);
-        Assert.Contains("WaitForExit", sdkTool, StringComparison.Ordinal);
-        Assert.Contains("ReadToEndAsync", sdkTool, StringComparison.Ordinal);
-        Assert.Contains("RedirectStandardOutput", sdkTool, StringComparison.Ordinal);
-        Assert.Contains("RedirectStandardError", sdkTool, StringComparison.Ordinal);
-        Assert.Contains(".Kill()", sdkTool, StringComparison.Ordinal);
-        Assert.Contains("Invoke-SdkTool", package, StringComparison.Ordinal);
-        Assert.Contains("Invoke-SdkTool", verifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnsureProvisioned", host, StringComparison.Ordinal);
+        Assert.Contains("SteamFseElevatedRegistration.Argument", program, StringComparison.Ordinal);
+        Assert.Contains("--register-fse-home", registration, StringComparison.Ordinal);
+        Assert.Contains("PackageRelativePath", registration, StringComparison.Ordinal);
+        Assert.Contains("SteamInputAddonforClaw.FseHome.msix", configuration, StringComparison.Ordinal);
+        Assert.Contains("TrustedPeople", registration, StringComparison.Ordinal);
+        Assert.Contains("AllowDevelopmentWithoutDevLicense", registration, StringComparison.Ordinal);
+        Assert.Contains("SetEnabledAsync", configuration, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Registration_script_reports_the_actual_registered_family_name_and_aumid()
+    public void Release_and_pr_ci_use_fixed_public_artifacts_without_fse_signing_material()
     {
-        var script = ReadSource("scripts", "register-fse-home.ps1");
+        var pack = ReadSource("scripts", "pack.ps1");
+        var layout = ReadSource("scripts", "publish-layout.ps1");
+        var verifier = ReadSource("scripts", "verify-publish-assets.ps1");
+        var package = ReadSource("scripts", "package-fse-home.ps1");
+        var ci = ReadSource(".github", "workflows", "ci.yml");
+        var release = ReadSource(".github", "workflows", "release.yml");
 
-        Assert.Contains("Get-AppxPackage -Name 'SteamInputAddonforClaw.FseHome'", script, StringComparison.Ordinal);
-        Assert.Contains("PackageFamilyName", script, StringComparison.Ordinal);
-        Assert.Contains("$($package[0].PackageFamilyName)!App", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("GamingHomeApp", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("FseCertificatePath", pack, StringComparison.Ordinal);
+        Assert.DoesNotContain("FseCertificatePassword", pack, StringComparison.Ordinal);
+        Assert.Contains("Packaging\\Distribution", layout, StringComparison.Ordinal);
+        Assert.Contains("SteamInputAddonforClaw.FseHome.cer", layout, StringComparison.Ordinal);
+        Assert.Contains("ZipFile]::OpenRead", verifier, StringComparison.Ordinal);
+        Assert.Contains("9D4C46ABCC1324803AE5AB031B11EC8EF39057D77C9C04FCB243D80BC122F86B", verifier, StringComparison.Ordinal);
+        Assert.Contains("663053482DA50F9017CC902CA5DF6E9BBFD5A6F06624B8608266318F54687390", verifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("makeappx", verifier, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("signtool", verifier, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CertificatePath", package, StringComparison.Ordinal);
+        Assert.Contains("FseVersion", package, StringComparison.Ordinal);
+        Assert.DoesNotContain("New-SelfSignedCertificate", ci, StringComparison.Ordinal);
+        Assert.DoesNotContain("FSE_SIGNING_CERTIFICATE", release, StringComparison.Ordinal);
+        Assert.DoesNotContain("FseCertificate", release, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] parts)

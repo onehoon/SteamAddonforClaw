@@ -34,6 +34,8 @@ Package.StoreAssociation.xml
 *.pfx
 *.cer
 *.p12
+!src/SteamInputAddonforClaw.FseHome/Packaging/Distribution/
+!src/SteamInputAddonforClaw.FseHome/Packaging/Distribution/*.cer
 
 # Local configuration, secrets, and diagnostics
 appsettings.Local.json

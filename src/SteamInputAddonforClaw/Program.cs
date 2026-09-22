@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Updates;
+using SteamInputAddonforClaw.WindowsGaming;
 
 namespace SteamInputAddonforClaw;
 
@@ -31,6 +32,11 @@ public static class Program
             AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(persistedLogLevel);
             AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
             AppLog.Debug("Velopack", "Velopack bootstrap completed.");
+            if (args.Contains(SteamFseElevatedRegistration.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = SteamFseElevatedRegistration.Run();
+                return;
+            }
             if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = ElevatedPrerequisiteSetup.Run();
