@@ -101,16 +101,22 @@ internal static class QuickSettingsMutationAdapter
         if (intent.AppId is not (> 0)) return new QuickSettingsMutationResult(false, "A Profile Quick Settings intent must carry a game context.", QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, intent.AppId));
         var appId = intent.AppId.Value;
 
-        // Section 8.1 steps 2-3: the current active Profile target is the only validity authority --
-        // a mismatch (including no active game) fails closed without any typed mutation.
+        // Section 8.1 steps 2-3: an active Profile target remains the validity authority. When no
+        // game is active, the explicit AppId is the selected offline target; a different active game
+        // still fails closed without any typed mutation.
         var active = await control.CaptureActiveGameProfileAsync(cancellationToken).ConfigureAwait(false);
-        if (active.AppId != appId)
+        if (active.AppId > 0 && active.AppId != appId)
             return new QuickSettingsMutationResult(false, "The active game changed; this Profile is no longer current.", QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId));
+        var target = active.AppId == appId
+            ? active
+            : await control.CaptureGameProfileAsync(appId, cancellationToken).ConfigureAwait(false);
+        if (target.AppId != appId || (!target.Exists && !target.PersistenceWritable))
+            return new QuickSettingsMutationResult(false, "The selected game Profile is unavailable.", QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId));
 
         // Section 8.2: require the intent's edited row to be currently Available/Writable in a fresh
         // projection -- this is what fails a stale child draft closed once the Profile (or one of its
         // features) was disabled after the draft was seeded.
-        var currentPage = QuickSettingsPresentation.BuildProfile(active);
+        var currentPage = QuickSettingsPresentation.BuildProfile(target);
         var editedRow = currentPage.Sections.SelectMany(s => s.Rows).FirstOrDefault(r => r.RowId == intent.EditedRowId);
         if (editedRow is not { Available: true, Writable: true })
             return new QuickSettingsMutationResult(false, "This row is not editable.", currentPage);
@@ -123,7 +129,7 @@ internal static class QuickSettingsMutationAdapter
                     return new QuickSettingsMutationResult(false, "Malformed Profile toggle intent.", currentPage);
                 // Section 8.4: the display name comes from the already-validated active snapshot --
                 // the generic intent deliberately carries no duplicated display-name field.
-                var result = await control.SetGameProfileEnabledAsync(appId, enabled, active.DisplayName, cancellationToken).ConfigureAwait(false);
+                var result = await control.SetGameProfileEnabledAsync(appId, enabled, target.DisplayName, cancellationToken).ConfigureAwait(false);
                 return FinishProfile(result);
             }
             case QuickSettingsRowId.ProfileTdpEnabled:
@@ -185,6 +191,39 @@ internal static class QuickSettingsMutationAdapter
                 var result = await control.SetGameProfilePowerModeDcAsync(appId, mode, cancellationToken).ConfigureAwait(false);
                 return FinishProfile(result);
             }
+            case QuickSettingsRowId.ProfileFpsLimitEnabled:
+            {
+                if (!TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileFpsLimitEnabled, out var enabled))
+                    return new QuickSettingsMutationResult(false, "Malformed Intel FPS Limit toggle intent.", currentPage);
+                var result = await control.SetGameProfileFpsLimitEnabledAsync(appId, enabled, cancellationToken).ConfigureAwait(false);
+                return FinishProfile(result);
+            }
+            case QuickSettingsRowId.ProfileFpsLimitAc:
+            case QuickSettingsRowId.ProfileFpsLimitDc:
+            {
+                if (!TryGetSingleIntegerInRange(intent, intent.EditedRowId, 40, 120, out var fps))
+                    return new QuickSettingsMutationResult(false, "Malformed Intel FPS Limit value.", currentPage);
+                var result = intent.EditedRowId == QuickSettingsRowId.ProfileFpsLimitAc
+                    ? await control.SetGameProfileFpsLimitAcAsync(appId, fps, cancellationToken).ConfigureAwait(false)
+                    : await control.SetGameProfileFpsLimitDcAsync(appId, fps, cancellationToken).ConfigureAwait(false);
+                return FinishProfile(result);
+            }
+            case QuickSettingsRowId.ProfileResolution:
+            {
+                if (!TryGetSingleIntegerInRange(intent, QuickSettingsRowId.ProfileResolution, 0, 4, out var option))
+                    return new QuickSettingsMutationResult(false, "Malformed Profile resolution value.", currentPage);
+                var resolution = option switch
+                {
+                    0 => null,
+                    1 => new FrontendGameResolution(1920, 1200),
+                    2 => new FrontendGameResolution(1920, 1080),
+                    3 => new FrontendGameResolution(1680, 1050),
+                    4 => new FrontendGameResolution(1440, 900),
+                    _ => null,
+                };
+                var result = await control.SetGameProfileResolutionAsync(appId, resolution, target.DisplayName, cancellationToken).ConfigureAwait(false);
+                return FinishProfile(result);
+            }
             default:
                 return new QuickSettingsMutationResult(false, "This row is not editable.", currentPage);
         }
@@ -203,6 +242,15 @@ internal static class QuickSettingsMutationAdapter
         if (entry.RowId != rowId || entry.Value.Kind != QuickSettingsValueKind.Boolean || !entry.Value.IsStructurallyValid) return false;
         value = entry.Value.BooleanValue!.Value;
         return true;
+    }
+
+    private static bool TryGetSingleIntegerInRange(QuickSettingsMutationIntent intent, QuickSettingsRowId rowId, int minimum, int maximum, out int value)
+    {
+        value = 0;
+        if (intent.EditedRowId != rowId || intent.Values.Count != 1) return false;
+        var entry = intent.Values[0];
+        if (entry.RowId != rowId || !TryGetInteger(entry.Value, out value)) return false;
+        return value >= minimum && value <= maximum;
     }
 
     private static bool TryGetSingleEnum<TEnum>(QuickSettingsMutationIntent intent, QuickSettingsRowId rowId, out TEnum value) where TEnum : struct, Enum

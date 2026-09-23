@@ -82,6 +82,11 @@ public sealed partial class OverlayWindow
     // Called on the UI thread by App whenever the Runtime republishes a Device or Profile page.
     internal void ApplyQuickSettingsPage(QuickSettingsPageSnapshot page)
     {
+        if (page.PageId == QuickSettingsPageId.Profile)
+        {
+            ApplyActiveProfilePage(page);
+            return;
+        }
         if (!_quickSettingsSurfaces.TryGetValue(page.PageId, out var surface))
         {
             OverlayLog.Warn("QuickSettings", "Ignoring a Quick Settings page for an unconfigured surface.", exception: null, ("PageId", page.PageId));

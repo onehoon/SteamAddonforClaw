@@ -40,11 +40,13 @@ internal static class QuickSettingsPresentation
             or QuickSettingsRowId.DeviceCpuBoostAc or QuickSettingsRowId.DevicePowerModeAc
             or QuickSettingsRowId.ProfileTdpAcPl1 or QuickSettingsRowId.ProfileTdpAcPl2
             or QuickSettingsRowId.ProfileCpuBoostAc or QuickSettingsRowId.ProfilePowerModeAc
+            or QuickSettingsRowId.ProfileFpsLimitAc
             => source == AcDcPowerSource.AC,
         QuickSettingsRowId.DeviceTdpDcPl1 or QuickSettingsRowId.DeviceTdpDcPl2
             or QuickSettingsRowId.DeviceCpuBoostDc or QuickSettingsRowId.DevicePowerModeDc
             or QuickSettingsRowId.ProfileTdpDcPl1 or QuickSettingsRowId.ProfileTdpDcPl2
             or QuickSettingsRowId.ProfileCpuBoostDc or QuickSettingsRowId.ProfilePowerModeDc
+            or QuickSettingsRowId.ProfileFpsLimitDc
             => source == AcDcPowerSource.DC,
         _ => true,
     };
@@ -69,6 +71,15 @@ internal static class QuickSettingsPresentation
         (WindowsPowerMode.BestPerformance, "Best performance"),
     ];
 
+    internal static readonly IReadOnlyList<QuickSettingsDiscreteOption> ProfileResolutionOptions =
+    [
+        new(0, "Do not change"),
+        new(1, "1920 × 1200"),
+        new(2, "1920 × 1080"),
+        new(3, "1680 × 1050"),
+        new(4, "1440 × 900"),
+    ];
+
     internal static readonly IReadOnlyList<QuickSettingsDiscreteOption> CpuBoostDiscreteOptions =
         [.. CpuBoostOptions.Select(o => new QuickSettingsDiscreteOption((int)o.Mode, o.Label))];
 
@@ -90,16 +101,17 @@ internal static class QuickSettingsPresentation
     }
 
     /// <summary>Shared Quick Settings Profile page projection (SF-V2-08 section 6): the exact current
-    /// visible Overlay Profile product (General/TDP/CPU Boost/optional Power Mode), frozen from the
-    /// pre-migration shared frontend policy. Called only for a valid active target -- an unavailable/stale
-    /// Profile context is represented separately via <see cref="QuickSettingsPageSnapshot.Unavailable"/>,
-    /// never fabricated here.</summary>
+    /// visible Overlay Profile product. Called only for a valid target -- an unavailable/stale Profile
+    /// context is represented separately via <see cref="QuickSettingsPageSnapshot.Unavailable"/>, never
+    /// fabricated here.</summary>
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot)
     {
         var sections = new List<QuickSettingsSection> { BuildProfileGeneralSection(snapshot) };
         if (snapshot.Limits is not null) sections.Add(BuildProfileTdpSection(snapshot));
+        if (snapshot.FpsLimit is not null) sections.Add(BuildProfileFpsLimitSection(snapshot));
         sections.Add(BuildProfileCpuBoostSection(snapshot));
         if (snapshot.PowerMode is not null) sections.Add(BuildProfilePowerModeSection(snapshot));
+        sections.Add(BuildProfileResolutionSection(snapshot));
 
         var linkedConstraints = snapshot.Limits is { } limits ? BuildProfileTdpLinkedConstraints(limits) : [];
         return new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, snapshot.AppId, Available: true, Message: null, sections, linkedConstraints);
@@ -139,7 +151,7 @@ internal static class QuickSettingsPresentation
             rows.Add(BuildProfileTdpSlider(QuickSettingsRowId.ProfileTdpDcPl2, "On battery · PL2", snapshot.Tdp.Dc.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, writable));
         }
 
-        return new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, null, rows);
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP Control", rows);
     }
 
     // Section 6.3: unlike Device, the Profile slider keeps a null/empty suffix for parity with the
@@ -172,7 +184,7 @@ internal static class QuickSettingsPresentation
             rows.Add(BuildProfileCpuBoostSlider(QuickSettingsRowId.ProfileCpuBoostDc, "On battery", snapshot.CpuBoost.Dc, writable));
         }
 
-        return new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, null, rows);
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileCpuBoost, "CPU Boost", rows);
     }
 
     private static QuickSettingsRow BuildProfileCpuBoostSlider(QuickSettingsRowId rowId, string label, CpuBoostMode mode, bool writable) =>
@@ -203,7 +215,7 @@ internal static class QuickSettingsPresentation
             rows.Add(BuildProfilePowerModeSlider(QuickSettingsRowId.ProfilePowerModeDc, "On battery", powerMode.Dc, writable));
         }
 
-        return new QuickSettingsSection(QuickSettingsSectionId.ProfilePowerMode, null, rows);
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfilePowerMode, "Windows Power Mode", rows);
     }
 
     private static QuickSettingsRow BuildProfilePowerModeSlider(QuickSettingsRowId rowId, string label, WindowsPowerMode mode, bool writable) =>
@@ -213,6 +225,70 @@ internal static class QuickSettingsPresentation
             Value: QuickSettingsValue.Integer((int)mode),
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: PowerModeDiscreteOptions),
             CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
+
+    private static QuickSettingsSection BuildProfileFpsLimitSection(FrontendGameProfileSnapshot snapshot)
+    {
+        var fps = snapshot.FpsLimit!;
+        if (!fps.Available)
+        {
+            return new QuickSettingsSection(
+                QuickSettingsSectionId.ProfileFpsLimit,
+                "Intel FPS Limit",
+                [new QuickSettingsRow(QuickSettingsRowId.ProfileFpsLimitEnabled, "Enabled", QuickSettingsControlKind.Toggle,
+                    Available: false, Writable: false, Value: null, SliderSpec: null, CommitPolicy: QuickSettingsCommitPolicy.Immediate)],
+                fps.UnavailableReason ?? "Intel FPS Limit is unavailable.");
+        }
+
+        var writable = snapshot.PersistenceWritable && snapshot.Enabled;
+        var rows = new List<QuickSettingsRow>
+        {
+            new(QuickSettingsRowId.ProfileFpsLimitEnabled, "Enabled", QuickSettingsControlKind.Toggle,
+                Available: true, Writable: writable, Value: QuickSettingsValue.Boolean(fps.Enabled), SliderSpec: null,
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+        };
+
+        if (fps.Enabled)
+        {
+            rows.Add(BuildProfileFpsLimitSlider(QuickSettingsRowId.ProfileFpsLimitAc, "Plugged in", fps.AcFps, writable));
+            rows.Add(BuildProfileFpsLimitSlider(QuickSettingsRowId.ProfileFpsLimitDc, "On battery", fps.DcFps, writable));
+        }
+
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileFpsLimit, "Intel FPS Limit", rows);
+    }
+
+    private static QuickSettingsRow BuildProfileFpsLimitSlider(QuickSettingsRowId rowId, string label, int fps, bool writable) =>
+        new(rowId, label, QuickSettingsControlKind.Slider,
+            Available: true, Writable: writable, Value: QuickSettingsValue.Integer(fps),
+            SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 40, Maximum: 120, Step: 1, Suffix: " FPS"),
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
+
+    private static QuickSettingsSection BuildProfileResolutionSection(FrontendGameProfileSnapshot snapshot)
+    {
+        var current = snapshot.Resolution switch
+        {
+            null => 0,
+            { Width: 1920, Height: 1200 } => 1,
+            { Width: 1920, Height: 1080 } => 2,
+            { Width: 1680, Height: 1050 } => 3,
+            { Width: 1440, Height: 900 } => 4,
+            _ => -1,
+        };
+        if (current < 0)
+        {
+            return new QuickSettingsSection(QuickSettingsSectionId.ProfileResolution, "Resolution",
+                [new QuickSettingsRow(QuickSettingsRowId.ProfileResolution, "Resolution", QuickSettingsControlKind.Slider,
+                    Available: false, Writable: false, Value: null,
+                    SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: ProfileResolutionOptions),
+                    CommitPolicy: QuickSettingsCommitPolicy.Immediate)],
+                "The saved display resolution is not supported by this UI.");
+        }
+
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileResolution, "Resolution",
+            [new QuickSettingsRow(QuickSettingsRowId.ProfileResolution, "Resolution", QuickSettingsControlKind.Slider,
+                Available: true, Writable: snapshot.PersistenceWritable, Value: QuickSettingsValue.Integer(current),
+                SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: ProfileResolutionOptions),
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate)]);
+    }
 
     private static QuickSettingsSection BuildTdpSection(FrontendTdpSnapshot tdp)
     {

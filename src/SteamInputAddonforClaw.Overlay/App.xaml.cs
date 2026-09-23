@@ -22,6 +22,8 @@ public partial class App : Application
         _window = new OverlayWindow();
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
         _window.TabOrderMoveRequested += OnTabOrderMoveRequested;
+        _window.ProfileCatalogRequestRequested += OnProfileCatalogRequestRequested;
+        _window.ProfilePageRequestRequested += OnProfilePageRequestRequested;
         _window.ClawHudEnabledRequested += OnClawHudEnabledRequested;
         _window.ClawHudSettingMutationRequested += OnClawHudSettingMutationRequested;
         OverlayLog.Info("App", "OverlayWindow constructed.", ("Hwnd", _window.HandleForDiagnostics));
@@ -68,7 +70,7 @@ public partial class App : Application
             // Profile bindings receive only this narrow mutation delegate, never the client itself.
             _window?.ConfigureQuickSettings(intent => _client.SendQuickSettingsMutationAsync(intent));
             OverlayLog.Info("Transport", "Overlay command loop starting.");
-            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleQuickSettingsPageAsync, HandleClawHudAsync).ConfigureAwait(false);
+            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleQuickSettingsPageAsync, HandleClawHudAsync, HandleProfileCatalogAsync, HandleProfilePageAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -133,6 +135,30 @@ public partial class App : Application
         {
             completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Quick Settings page application."));
         }
+        return completion.Task;
+    }
+
+    private Task HandleProfileCatalogAsync(OverlayProfileCatalogState state)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try { _window?.ApplyProfileCatalogState(state); completion.TrySetResult(); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+        }))
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Profile catalog application."));
+        return completion.Task;
+    }
+
+    private Task HandleProfilePageAsync(OverlayProfilePageResponse response)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try { _window?.ApplyProfilePageResult(response); completion.TrySetResult(); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+        }))
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Profile page application."));
         return completion.Task;
     }
 
@@ -236,7 +262,8 @@ public partial class App : Application
                 switch (action)
                 {
                     case OverlayNavigationAction.Back:
-                        _ = SendBackDismissAsync();
+                        if (_window?.TryHandleBack() != true)
+                            _ = SendBackDismissAsync();
                         break;
                     case OverlayNavigationAction.PreviousTab:
                         _window?.SelectPreviousTab();
@@ -284,6 +311,21 @@ public partial class App : Application
         {
             OverlayLog.Error("Transport", "Back dismissal request failed; Overlay remains Runtime-owned.", exception);
         }
+    }
+
+    private void OnProfileCatalogRequestRequested() => _ = SendProfileCatalogRequestAsync();
+    private void OnProfilePageRequestRequested(uint appId) => _ = SendProfilePageRequestAsync(appId);
+
+    private async Task SendProfileCatalogRequestAsync()
+    {
+        try { if (_client is not null) await _client.SendProfileCatalogRequestAsync().ConfigureAwait(false); }
+        catch (Exception exception) { OverlayLog.Error("Profile", "Profile catalog request failed.", exception); }
+    }
+
+    private async Task SendProfilePageRequestAsync(uint appId)
+    {
+        try { if (_client is not null) await _client.SendProfilePageRequestAsync(appId).ConfigureAwait(false); }
+        catch (Exception exception) { OverlayLog.Error("Profile", "Profile page request failed.", exception, ("AppId", appId)); }
     }
 
     private Task HandleCommandAsync(OverlayCommand command)

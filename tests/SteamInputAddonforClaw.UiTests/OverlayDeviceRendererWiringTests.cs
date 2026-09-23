@@ -234,9 +234,32 @@ public sealed class OverlayDeviceRendererWiringTests
         var source = ReadOverlayWindowSource();
 
         Assert.Contains("AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device)", source);
-        Assert.Contains("AddonQuickSettingsTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile)", source);
+        Assert.Contains("AddonQuickSettingsTabId.Profile => BuildProfilePage()", source);
         Assert.DoesNotContain("CreatePlaceholderPage(AddonQuickSettingsTabId.Profile)", source);
         Assert.DoesNotContain("CreatePlaceholderPage(id: AddonQuickSettingsTabId.Profile)", source);
+    }
+
+    [Fact]
+    public void Profile_catalog_navigation_keeps_the_selected_card_in_view()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+
+        Assert.Contains("private void RefreshProfileCatalogSelectionAfterMove()", source);
+        Assert.Contains("_profileCatalogCards[index].StartBringIntoView(", source);
+        Assert.Contains("Could not bring the selected Profile card into view.", source);
+        Assert.Equal(4, CountOccurrences(source, "RefreshProfileCatalogSelectionAfterMove();"));
+    }
+
+    [Fact]
+    public void Unavailable_active_publication_refreshes_selected_offline_detail_in_place()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var applyActivePage = source[source.IndexOf("internal void ApplyActiveProfilePage", StringComparison.Ordinal)..];
+
+        Assert.Contains("if (_profileMode == ProfilePresentationMode.SelectedDetail && _selectedCatalogAppId is { } selectedAppId)", applyActivePage);
+        Assert.Contains("ProfilePageRequestRequested?.Invoke(selectedAppId);", applyActivePage);
+        Assert.Contains("_profileMode = ProfilePresentationMode.ActiveDetail;", applyActivePage);
+        Assert.Contains("_profileMode = ProfilePresentationMode.Catalog;", applyActivePage);
     }
 
     // SF-V2-09 section 32/13.1: exactly one page-local surface type/dictionary backs both pages --
@@ -485,7 +508,8 @@ public sealed class OverlayDeviceRendererWiringTests
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"),
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"),
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"),
-        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
 
     private static string ReadWindowInteropSource() => ReadSource("src", "SteamInputAddonforClaw.Overlay", "WindowInterop.cs");
 

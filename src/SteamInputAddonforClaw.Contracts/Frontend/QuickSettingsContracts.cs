@@ -22,6 +22,8 @@ public enum QuickSettingsSectionId
     ProfileTdp,
     ProfileCpuBoost,
     ProfilePowerMode,
+    ProfileFpsLimit,
+    ProfileResolution,
 }
 
 public enum QuickSettingsRowId
@@ -55,6 +57,11 @@ public enum QuickSettingsRowId
     ProfilePowerModeEnabled,
     ProfilePowerModeAc,
     ProfilePowerModeDc,
+
+    ProfileFpsLimitEnabled,
+    ProfileFpsLimitAc,
+    ProfileFpsLimitDc,
+    ProfileResolution,
 }
 
 public enum QuickSettingsControlKind { Toggle, Slider }

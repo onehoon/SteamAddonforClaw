@@ -34,6 +34,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private Func<CancellationToken, Task<FrontendClawHudSnapshot>>? _captureClawHud;
     private Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
     private Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
+    private Func<CancellationToken, Task<IReadOnlyList<FrontendProfileGameCatalogEntry>>>? _scanProfileGames;
+    private Func<uint, CancellationToken, Task<QuickSettingsPageSnapshot>>? _captureSelectedProfilePage;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
@@ -57,7 +59,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         // The default factory reads the bound authority at connection time (StartCoreAsync), which
         // always runs after AddonProcessHost has called BindTabOrderAuthority.
         _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _captureTabOrder, _moveTabOrder, _mutateQuickSettings,
-            _captureClawHud, _setClawHudEnabled, _mutateClawHudSetting));
+            _captureClawHud, _setClawHudEnabled, _mutateClawHudSetting, _scanProfileGames, _captureSelectedProfilePage));
     }
 
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
@@ -92,6 +94,14 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _captureClawHud = capture ?? throw new ArgumentNullException(nameof(capture));
         _setClawHudEnabled = setEnabled ?? throw new ArgumentNullException(nameof(setEnabled));
         _mutateClawHudSetting = mutate ?? throw new ArgumentNullException(nameof(mutate));
+    }
+
+    internal void BindProfileCatalogAuthority(
+        Func<CancellationToken, Task<IReadOnlyList<FrontendProfileGameCatalogEntry>>> scan,
+        Func<uint, CancellationToken, Task<QuickSettingsPageSnapshot>> captureSelectedProfilePage)
+    {
+        _scanProfileGames = scan ?? throw new ArgumentNullException(nameof(scan));
+        _captureSelectedProfilePage = captureSelectedProfilePage ?? throw new ArgumentNullException(nameof(captureSelectedProfilePage));
     }
 
     internal string ExecutablePath => _executablePath;

@@ -95,7 +95,7 @@ public sealed partial class OverlayWindow
         AddonQuickSettingsTabId.Setting => BuildSettingPage(rows),
         AddonQuickSettingsTabId.Shortcut => BuildShortcutPage(),
         AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
-        AddonQuickSettingsTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile),
+        AddonQuickSettingsTabId.Profile => BuildProfilePage(),
         _ => CreatePlaceholderPage(id),
     };
 
@@ -417,5 +417,7 @@ public sealed partial class OverlayWindow
             _shortcutSelection.Reset();
             ApplyShortcutSelectionVisual();
         }
+
+        OnProfileTabSelectionChanged(selected == AddonQuickSettingsTabId.Profile);
     }
 }
