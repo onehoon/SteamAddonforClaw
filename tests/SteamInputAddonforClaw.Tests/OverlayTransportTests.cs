@@ -34,6 +34,76 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Profile_catalog_codec_supports_a_bounded_large_catalog()
+    {
+        Assert.Equal(512 * 1024, OverlayTransportProtocol.MaxFrameBytes);
+        var entries = Enumerable.Range(1, 2500)
+            .Select(appId => new FrontendProfileGameCatalogEntry((uint)appId, $"Game {appId:D4} with a representative catalog name", FrontendProfileGameSource.Steam, appId % 7 == 0))
+            .ToArray();
+
+        await using var stream = new MemoryStream();
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await OverlayWireCodec.WriteAsync(stream,
+            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProfileCatalogState,
+                ProfileCatalogState: new OverlayProfileCatalogState(entries)), writeGate, CancellationToken.None);
+        stream.Position = 0;
+
+        var message = await OverlayWireCodec.ReadAsync(stream, CancellationToken.None);
+        Assert.Equal(OverlayWireMessageKind.ProfileCatalogState, message.Kind);
+        Assert.NotNull(message.ProfileCatalogState);
+        Assert.Equal(entries.Length, message.ProfileCatalogState!.Entries.Count);
+        Assert.Equal(entries[^1], message.ProfileCatalogState.Entries[^1]);
+    }
+
+    [Fact]
+    public async Task Profile_catalog_and_page_requests_are_served_by_the_existing_overlay_session()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var catalogReceived = new TaskCompletionSource<OverlayProfileCatalogState>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pageReceived = new TaskCompletionSource<OverlayProfilePageResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entries = (IReadOnlyList<FrontendProfileGameCatalogEntry>)[new(123, "Test Game", FrontendProfileGameSource.Steam, true)];
+        var page = new QuickSettingsPageSnapshot(
+            QuickSettingsPageId.Profile,
+            123,
+            true,
+            null,
+            [new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, "Test Game",
+                [new QuickSettingsRow(QuickSettingsRowId.ProfileEnabled, "Profile", QuickSettingsControlKind.Toggle,
+                    true, true, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate)])],
+            []);
+
+        await using var server = new NamedPipeOverlayServer(
+            pipeName,
+            scanProfileGames: _ => Task.FromResult(entries),
+            captureProfilePage: (appId, _) => Task.FromResult(page with { AppId = appId }));
+        await server.StartAsync();
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var run = client.RunAsync(
+            _ => Task.CompletedTask,
+            null,
+            null,
+            null,
+            null,
+            state => { catalogReceived.TrySetResult(state); return Task.CompletedTask; },
+            response => { pageReceived.TrySetResult(response); return Task.CompletedTask; });
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        await client.SendProfileCatalogRequestAsync();
+        var catalog = await catalogReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(entries, catalog.Entries);
+
+        await client.SendProfilePageRequestAsync(123);
+        var response = await pageReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal((uint)123, response.AppId);
+        Assert.Equal(QuickSettingsPageId.Profile, response.Page.PageId);
+        Assert.Equal((uint)123, response.Page.AppId);
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Version_mismatch_is_rejected_by_the_overlay_server()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";

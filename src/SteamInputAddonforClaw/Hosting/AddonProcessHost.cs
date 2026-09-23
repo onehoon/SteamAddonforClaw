@@ -579,14 +579,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // SF-V2-02/06/09 section 14/14.2/7.2/7.3: bind the Overlay shared Quick Settings transport
         // onto the SAME _frontendControl at the same stage as BindTabOrderAuthority, before the first
         // warm Overlay connection. Both Device and Profile are captured/exposed to the Overlay as of
-        // SF-V2-09. Profile capture reuses the existing generic CaptureQuickSettingsPageAsync seam
-        // (its own current-target revalidation/display-name enrichment stays authoritative) against
-        // the current Runtime active-game AppId -- never ProfileStore/hardware directly, and no local
-        // FrontendGameProfileSnapshot construction here.
+        // Profile catalog/detail requests reuse the existing generic frontend seams (their own
+        // current-target revalidation/display-name enrichment stays authoritative) -- never
+        // ProfileStore/hardware directly, and no local FrontendGameProfileSnapshot construction here.
         _overlayController.BindQuickSettingsAuthority(
             captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, appId: null, token),
             captureProfilePage: token => CaptureOverlayProfileQuickSettingsPageAsync(token),
             mutate: (intent, token) => HandleOverlayQuickSettingsMutationAsync(intent, token));
+        _overlayController.BindProfileCatalogAuthority(
+            scan: token => _frontendControl!.ScanProfileGamesAsync(token),
+            captureSelectedProfilePage: (appId, token) => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId, token));
         _overlayController.BindClawHudAuthority(
             capture: token => _frontendControl!.CaptureClawHudAsync(token),
             setEnabled: (enabled, token) => _frontendControl!.SetClawHudEnabledAsync(enabled, token),
@@ -601,11 +603,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // Disabled-mode controller startup can reuse it off the message-loop thread.
     }
 
-    // SF-V2-09 section 7.3/7.4: Profile capture for the Overlay uses the current Runtime active-game
-    // authority. AppId 0 (no active Steam game) is
-    // resolved locally to an explicit Unavailable page without ever calling into the frontend
-    // control -- the Profile tab stays visible with a deliberate "No active game." message rather
-    // than a fake AppId-0 profile or a hidden tab.
+    // SF-V2-09 active publication remains tied to the current Runtime active-game authority. AppId 0
+    // (no active Steam game) is resolved locally to an explicit Unavailable page without ever calling
+    // into the frontend control; the Overlay catalog uses the separate selected-AppId request seam.
     private Task<QuickSettingsPageSnapshot> CaptureOverlayProfileQuickSettingsPageAsync(CancellationToken token)
     {
         var appId = _runtimeHost?.ActualRunningAppId ?? 0;

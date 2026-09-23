@@ -234,7 +234,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var source = ReadOverlayWindowSource();
 
         Assert.Contains("AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device)", source);
-        Assert.Contains("AddonQuickSettingsTabId.Profile => BuildQuickSettingsPage(id, QuickSettingsPageId.Profile)", source);
+        Assert.Contains("AddonQuickSettingsTabId.Profile => BuildProfilePage()", source);
         Assert.DoesNotContain("CreatePlaceholderPage(AddonQuickSettingsTabId.Profile)", source);
         Assert.DoesNotContain("CreatePlaceholderPage(id: AddonQuickSettingsTabId.Profile)", source);
     }
