@@ -417,6 +417,71 @@ public sealed class QuickSettingsMutationAdapterTests
     }
 
     [Fact]
+    public async Task Profile_fps_limit_ac_dispatches_the_typed_value()
+    {
+        var control = new RecordingFrontendControl
+        {
+            ActiveProfile = ProfileSnapshot(appId: 111, enabled: true) with
+            {
+                FpsLimit = new FrontendGameFpsLimitConfiguration(true, 60, 60, Available: true),
+            },
+        };
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileFpsLimitAc,
+            [new(QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsValue.Integer(120))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Equal(["ProfileFpsLimitAc:111:120"], control.ProfileCalls);
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Profile_fps_limit_out_of_range_invokes_zero_typed_mutations()
+    {
+        var control = new RecordingFrontendControl
+        {
+            ActiveProfile = ProfileSnapshot(appId: 111, enabled: true) with
+            {
+                FpsLimit = new FrontendGameFpsLimitConfiguration(true, 60, 60, Available: true),
+            },
+        };
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileFpsLimitAc,
+            [new(QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsValue.Integer(121))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.ProfileCalls);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Profile_resolution_maps_the_closed_option_to_the_typed_mutation()
+    {
+        var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true) };
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileResolution,
+            [new(QuickSettingsRowId.ProfileResolution, QuickSettingsValue.Integer(2))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Equal(["ProfileResolution:111:1920x1080"], control.ProfileCalls);
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Profile_offline_target_is_mutable_when_no_game_is_active()
+    {
+        var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(0, enabled: false) };
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 222, QuickSettingsRowId.ProfileEnabled,
+            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Equal(["ProfileEnabled:222:True:Offline Game"], control.ProfileCalls);
+        Assert.True(result.Succeeded);
+        Assert.Equal(222u, result.Page.AppId);
+    }
+
+    [Fact]
     public async Task Profile_complete_tdp_group_constructs_exactly_one_configuration_and_calls_set_tdp_once()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true, tdpEnabled: true) };
@@ -556,10 +621,12 @@ public sealed class QuickSettingsMutationAdapterTests
         public FrontendGameProfileMutationOutcome NextProfileMutationOutcome { get; set; } = FrontendGameProfileMutationOutcome.Succeeded;
         public string? NextProfileMutationFailure { get; set; }
         public FrontendGameTdpConfiguration? LastProfileTdpConfiguration { get; private set; }
+        public FrontendGameProfileSnapshot OfflineProfile { get; set; } = ProfileSnapshot(222, "Offline Game", enabled: true);
 
         public Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken t = default) => Task.FromResult(ActiveProfile);
+        public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken t = default) => Task.FromResult(OfflineProfile with { AppId = appId });
 
-        private FrontendGameProfileMutationResult ProfileResult() => new(NextProfileMutationOutcome, NextProfileMutationFailure, ActiveProfile);
+        private FrontendGameProfileMutationResult ProfileResult() => new(NextProfileMutationOutcome, NextProfileMutationFailure, ActiveProfile.AppId > 0 ? ActiveProfile : OfflineProfile);
 
         public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken t = default)
         { ProfileCalls.Add($"ProfileEnabled:{appId}:{enabled}:{displayName}"); return Task.FromResult(ProfileResult()); }
@@ -587,6 +654,18 @@ public sealed class QuickSettingsMutationAdapterTests
 
         public Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeDcAsync(uint appId, WindowsPowerMode mode, CancellationToken t = default)
         { ProfileCalls.Add($"ProfilePowerModeDc:{appId}:{mode}"); return Task.FromResult(ProfileResult()); }
+
+        public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitEnabledAsync(uint appId, bool enabled, CancellationToken t = default)
+        { ProfileCalls.Add($"ProfileFpsLimitEnabled:{appId}:{enabled}"); return Task.FromResult(ProfileResult()); }
+
+        public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitAcAsync(uint appId, int fps, CancellationToken t = default)
+        { ProfileCalls.Add($"ProfileFpsLimitAc:{appId}:{fps}"); return Task.FromResult(ProfileResult()); }
+
+        public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitDcAsync(uint appId, int fps, CancellationToken t = default)
+        { ProfileCalls.Add($"ProfileFpsLimitDc:{appId}:{fps}"); return Task.FromResult(ProfileResult()); }
+
+        public Task<FrontendGameProfileMutationResult> SetGameProfileResolutionAsync(uint appId, FrontendGameResolution? resolution, string? displayName, CancellationToken t = default)
+        { ProfileCalls.Add($"ProfileResolution:{appId}:{(resolution is null ? "null" : $"{resolution.Width}x{resolution.Height}")}"); return Task.FromResult(ProfileResult()); }
 
         private static FrontendGameProfileSnapshot ProfileSnapshot(uint appId, string displayName = "Game", bool enabled = true, bool cpuBoostEnabled = false, bool tdpEnabled = false, bool powerModeEnabled = false) => new(
             appId, displayName, Exists: true, Enabled: enabled,

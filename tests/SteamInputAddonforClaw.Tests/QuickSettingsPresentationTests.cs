@@ -333,16 +333,22 @@ public sealed class QuickSettingsPresentationTests
         Assert.Collection(page.Sections,
             s => Assert.Equal(QuickSettingsSectionId.ProfileGeneral, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId));
+            s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileResolution, s.SectionId));
 
         Assert.Equal([QuickSettingsRowId.ProfileEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2],
             page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfileFpsLimitEnabled, QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsRowId.ProfileFpsLimitDc],
+            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileFpsLimit).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc],
             page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileCpuBoost).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.ProfilePowerModeEnabled, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc],
             page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfileResolution],
+            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileResolution).Rows.Select(r => r.RowId).ToArray());
 
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
         Assert.Equal(4200u, page.AppId);
@@ -368,6 +374,7 @@ public sealed class QuickSettingsPresentationTests
         Assert.False(FindRow(page, QuickSettingsRowId.ProfileTdpEnabled).Writable);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfileCpuBoostEnabled).Writable);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfilePowerModeEnabled).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileFpsLimitEnabled).Writable);
         // Saved child feature toggles remain visible per their own saved enable state.
         Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2],
             page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).ToArray());
@@ -381,6 +388,7 @@ public sealed class QuickSettingsPresentationTests
         var snapshot = EnabledProfileSnapshot() with
         {
             Tdp = EnabledProfileSnapshot().Tdp with { Enabled = false },
+            FpsLimit = EnabledProfileSnapshot().FpsLimit! with { Enabled = false },
             CpuBoost = EnabledProfileSnapshot().CpuBoost with { Enabled = false },
             PowerMode = EnabledProfileSnapshot().PowerMode! with { Enabled = false },
         };
@@ -390,6 +398,7 @@ public sealed class QuickSettingsPresentationTests
         Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.ProfileCpuBoostEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileCpuBoost).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.ProfilePowerModeEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfileFpsLimitEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileFpsLimit).Rows.Select(r => r.RowId).ToArray());
     }
 
     [Fact]
@@ -407,6 +416,7 @@ public sealed class QuickSettingsPresentationTests
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { PowerMode = null });
 
         Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode);
+        Assert.Contains(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfileResolution);
     }
 
     [Fact]
@@ -469,10 +479,10 @@ public sealed class QuickSettingsPresentationTests
     {
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
 
-        foreach (var toggleId in new[] { QuickSettingsRowId.ProfileEnabled, QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsRowId.ProfilePowerModeEnabled })
+        foreach (var toggleId in new[] { QuickSettingsRowId.ProfileEnabled, QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileFpsLimitEnabled, QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsRowId.ProfilePowerModeEnabled })
             Assert.Equal(QuickSettingsCommitPolicy.Immediate, FindRow(page, toggleId).CommitPolicy);
 
-        foreach (var sliderId in new[] { QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc })
+        foreach (var sliderId in new[] { QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsRowId.ProfileFpsLimitDc, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc })
             Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce2000, FindRow(page, sliderId).CommitPolicy);
     }
 
@@ -490,13 +500,18 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
-    public void Profile_page_never_exposes_fps_or_resolution_rows()
+    public void Profile_fps_and_resolution_rows_use_closed_product_options()
     {
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
 
-        var allLabels = page.Sections.SelectMany(s => s.Rows).Select(r => r.Label).ToArray();
-        Assert.DoesNotContain(allLabels, l => l.Contains("FPS", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(allLabels, l => l.Contains("Resolution", StringComparison.OrdinalIgnoreCase));
+        var fps = FindRow(page, QuickSettingsRowId.ProfileFpsLimitAc);
+        Assert.Equal((40, 120, 1), (fps.SliderSpec!.Minimum, fps.SliderSpec.Maximum, fps.SliderSpec.Step));
+        Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce2000, fps.CommitPolicy);
+
+        var resolution = FindRow(page, QuickSettingsRowId.ProfileResolution);
+        Assert.Equal([(0, "Do not change"), (1, "1920 × 1200"), (2, "1920 × 1080"), (3, "1680 × 1050"), (4, "1440 × 900")],
+            resolution.SliderSpec!.Options!.Select(option => (option.Value, option.Label)).ToArray());
+        Assert.Equal(0, resolution.Value!.IntegerValue);
     }
 
     private static FrontendGameProfileSnapshot EnabledProfileSnapshot() => new(
@@ -509,7 +524,8 @@ public sealed class QuickSettingsPresentationTests
         PersistenceWritable: true,
         Limits: GapOneLimits,
         Resolution: null,
-        PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.BestPerformance, WindowsPowerMode.Balanced));
+        PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.BestPerformance, WindowsPowerMode.Balanced),
+        FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, Available: true));
 
     private static QuickSettingsRow FindRow(QuickSettingsPageSnapshot page, QuickSettingsRowId rowId) =>
         page.Sections.SelectMany(s => s.Rows).Single(r => r.RowId == rowId);

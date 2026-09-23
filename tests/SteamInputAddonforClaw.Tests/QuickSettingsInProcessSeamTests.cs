@@ -16,8 +16,9 @@ namespace SteamInputAddonforClaw.Tests;
 /// cref="IAddonFrontendControl.CaptureQuickSettingsPageAsync"/>/<see
 /// cref="IAddonFrontendControl.MutateQuickSettingAsync"/> seam on <see
 /// cref="InProcessAddonFrontendControl"/> must stay read-only for capture, project the Profile page
-/// only for the current active game (fail closed for a stale/wrong AppId or no active game, with zero
-/// side effects), and preserve the existing shutdown/cancellation conventions.</summary>
+/// for the current active game or an explicit existing offline target (fail closed for a stale/wrong
+/// AppId, missing target, or invalid context, with zero side effects), and preserve the existing
+/// shutdown/cancellation conventions.</summary>
 [Collection("AppLog")]
 public sealed class QuickSettingsInProcessSeamTests : IDisposable
 {
@@ -115,6 +116,21 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
         Assert.Equal(4000u, page.AppId);
         Assert.Empty(page.Sections);
+    }
+
+    [Fact]
+    public async Task Capture_profile_page_projects_an_existing_offline_target()
+    {
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
+        mutations.SetEnabled(4000u, true, "Offline Game");
+        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 0u);
+
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 4000u);
+
+        Assert.True(page.Available);
+        Assert.Equal(4000u, page.AppId);
+        Assert.Equal("Offline Game", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
     }
 
     [Fact]

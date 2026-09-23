@@ -148,14 +148,24 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MutateGame(appId, outcome, cpu: false, tdp: false));
     }
 
-    public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(CaptureGameProfile(appId));
+    public async Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var snapshot = CaptureGameProfile(appId);
+        return await EnrichProfileDisplayNameAsync(snapshot, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default)
     {
         var appId = _actualRunningAppIdSource();
         if (appId == 0) return UnavailableGameProfile(0);
-        var snapshot = CaptureGameProfile(appId);
-        if (!string.IsNullOrWhiteSpace(snapshot.DisplayName)) return snapshot;
-        var game = (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).FirstOrDefault(x => x.AppId == appId);
+        return await CaptureGameProfileAsync(appId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<FrontendGameProfileSnapshot> EnrichProfileDisplayNameAsync(FrontendGameProfileSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        if (snapshot.AppId == 0 || !string.IsNullOrWhiteSpace(snapshot.DisplayName)) return snapshot;
+        var game = (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).FirstOrDefault(x => x.AppId == snapshot.AppId);
         return game is null ? snapshot : snapshot with { DisplayName = game.Name };
     }
 
@@ -1267,9 +1277,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     /// <summary>Shared Quick Settings product seam (Shared Frontend V2, SF-V2-03 section 22/23,
     /// SF-V2-08 section 7): Device is projected from <see cref="CaptureDeviceQuickSettingsAsync"/>;
-    /// Profile is projected from the current active game's <see cref="FrontendGameProfileSnapshot"/>,
-    /// requiring the requested AppId to match the current active game so a stale/wrong-game request
-    /// can never leak a different game's Profile projection.</summary>
+    /// Profile is projected from the requested <see cref="FrontendGameProfileSnapshot"/> only when
+    /// it is still the actual active game, or when no game is active and the request is an explicit
+    /// offline target. A different active game always wins and rejects the request.</summary>
     public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -1289,17 +1299,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildDevice(snapshot));
     }
 
-    /// <summary>Section 7.1-7.3: a Profile page is only ever the current active game's own product --
-    /// reuses <see cref="CaptureActiveGameProfileAsync"/> (preserving its display-name catalog
-    /// enrichment, section 7.2) rather than adding a second scanner/cache, then re-validates its
-    /// AppId against the requested context before projecting.</summary>
     private async Task<QuickSettingsPageSnapshot> CaptureProfileQuickSettingsPageAsync(uint appId, CancellationToken cancellationToken)
     {
-        var snapshot = await CaptureActiveGameProfileAsync(cancellationToken).ConfigureAwait(false);
-        if (snapshot.AppId == 0)
-            return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, "No active game.");
-        if (snapshot.AppId != appId)
+        var actualAppId = _actualRunningAppIdSource();
+        if (actualAppId > 0 && actualAppId != appId)
             return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, "The requested game is not currently active.");
+
+        var snapshot = actualAppId == appId
+            ? await CaptureActiveGameProfileAsync(cancellationToken).ConfigureAwait(false)
+            : await CaptureGameProfileAsync(appId, cancellationToken).ConfigureAwait(false);
+        if (snapshot.AppId != appId || (!snapshot.Exists && !snapshot.PersistenceWritable))
+            return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, actualAppId == 0 ? "The selected game Profile is unavailable." : "The requested game is not currently active.");
 
         return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildProfile(snapshot));
     }
