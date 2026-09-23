@@ -214,10 +214,27 @@ public sealed partial class OverlayWindow
 
     private bool OnProfileSelectedDetailPage() => _tabState.SelectedTab == AddonQuickSettingsTabId.Profile && _profileMode == ProfilePresentationMode.SelectedDetail;
 
-    internal void NavigateProfileCatalogUp() { if (_profileCatalogSelection.MoveUp()) ApplyProfileCatalogSelectionVisual(); }
-    internal void NavigateProfileCatalogDown() { if (_profileCatalogSelection.MoveDown()) ApplyProfileCatalogSelectionVisual(); }
-    internal void NavigateProfileCatalogLeft() { if (_profileCatalogSelection.MoveLeft()) ApplyProfileCatalogSelectionVisual(); }
-    internal void NavigateProfileCatalogRight() { if (_profileCatalogSelection.MoveRight()) ApplyProfileCatalogSelectionVisual(); }
+    private void RefreshProfileCatalogSelectionAfterMove()
+    {
+        ApplyProfileCatalogSelectionVisual();
+        var index = _profileCatalogSelection.SelectedIndex;
+        if (index < 0 || index >= _profileCatalogCards.Count) return;
+
+        try
+        {
+            _profileCatalogCards[index].StartBringIntoView(
+                new BringIntoViewOptions { AnimationDesired = false });
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Profile", "Could not bring the selected Profile card into view.", exception);
+        }
+    }
+
+    internal void NavigateProfileCatalogUp() { if (_profileCatalogSelection.MoveUp()) RefreshProfileCatalogSelectionAfterMove(); }
+    internal void NavigateProfileCatalogDown() { if (_profileCatalogSelection.MoveDown()) RefreshProfileCatalogSelectionAfterMove(); }
+    internal void NavigateProfileCatalogLeft() { if (_profileCatalogSelection.MoveLeft()) RefreshProfileCatalogSelectionAfterMove(); }
+    internal void NavigateProfileCatalogRight() { if (_profileCatalogSelection.MoveRight()) RefreshProfileCatalogSelectionAfterMove(); }
 
     internal void ActivateProfileCatalogSelection() => OpenSelectedProfile();
 
@@ -236,6 +253,13 @@ public sealed partial class OverlayWindow
         else
         {
             _activeProfileAppId = null;
+
+            if (_profileMode == ProfilePresentationMode.SelectedDetail && _selectedCatalogAppId is { } selectedAppId)
+            {
+                ProfilePageRequestRequested?.Invoke(selectedAppId);
+                return;
+            }
+
             _selectedCatalogAppId = null;
             _profileMode = ProfilePresentationMode.Catalog;
             if (_profileTabSelected)
