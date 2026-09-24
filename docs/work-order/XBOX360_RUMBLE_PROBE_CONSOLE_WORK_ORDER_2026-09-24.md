@@ -290,9 +290,78 @@ on:
 
 - normal completion;
 - Ctrl+C;
-- handled exception.
+- handled exception;
+- any non-success `XInputSetState` result encountered during the requested test sequence.
 
-The `deadman` command intentionally waits without sending a STOP during its observation window, but its `finally` path must still send a final STOP before process exit.
+## 8.1 Ctrl+C must defer process termination until cleanup runs
+
+Do not rely on a plain `finally` block alone for Ctrl+C.
+
+Register `Console.CancelKeyPress` before a command can send non-zero rumble.
+
+The handler must:
+
+```text
+Console.CancelKeyPress
+-> set e.Cancel = true
+-> request cancellation on the command's CancellationTokenSource
+-> return promptly
+```
+
+The command loop must observe cancellation, leave the active sequence, and enter its single cleanup/finally path.
+
+That cleanup path must attempt exactly one final best-effort:
+
+```text
+XInputSetState(selectedSlot, 0, 0)
+```
+
+before the process returns.
+
+After cleanup completes, exit normally with a cancellation/non-success process code. Do not call `Environment.Exit`, `FailFast`, or another immediate termination path from the Ctrl+C handler.
+
+The handler itself must not perform the XInput write. Keep the physical STOP in the normal serialized command cleanup path so Ctrl+C cannot race a still-running pulse write.
+
+Unregister the handler when the command finishes.
+
+## 8.2 XInputSetState return-code policy
+
+`XInputSetState` reports ordinary failures by Win32 return code, not only by exceptions.
+
+Treat:
+
+```text
+ERROR_SUCCESS (0)
+```
+
+as the only successful result.
+
+A non-success return, including:
+
+```text
+ERROR_DEVICE_NOT_CONNECTED (1167)
+```
+
+means the requested test sequence did not complete successfully.
+
+Required behavior:
+
+```text
+send requested state
+-> record the exact return code
+-> if result != ERROR_SUCCESS:
+       stop the current iteration/sequence immediately
+       enter the single cleanup path
+       attempt final 0/0 once
+       record the cleanup STOP return code
+       exit non-zero
+```
+
+Do not continue issuing later test pulses after a failed XInput call.
+
+A failed cleanup STOP must also be logged explicitly. It must not cause a retry loop.
+
+The `deadman` command intentionally waits without sending a STOP during its observation window, but its cleanup path must still send a final STOP before process exit.
 
 Do not add an option that intentionally exits while leaving a non-zero motor state.
 
@@ -318,6 +387,26 @@ If that creates an undesirable project dependency, use a small local equivalent 
 
 Do not reference or instantiate `AppLog` from the console tool.
 
+The probe log is part of the measurement contract, not optional decoration.
+
+Before the first non-zero `XInputSetState` call, the tool must:
+
+```text
+resolve/create the RumbleProbe log directory
+-> create the per-run log file
+-> write the session header
+-> flush the header successfully
+-> only then allow a non-zero vibration command
+```
+
+If directory creation, file creation, header write, or flush fails:
+
+- print a clear error to stderr;
+- do not issue any non-zero vibration command;
+- exit non-zero.
+
+Do not run an unlogged reproduction session.
+
 Each command must log:
 
 ```text
@@ -340,6 +429,8 @@ Example:
 ```
 
 Flush each line. The test rate is intentionally low enough that a simple StreamWriter is sufficient.
+
+For every `XInputSetState` call, including the final cleanup STOP, log the exact Win32 return code before applying the success/failure policy from section 8.2.
 
 ---
 
@@ -510,8 +601,39 @@ Abstract only the one XInput call boundary enough to test:
 - sequence command ordering;
 - exactly one STOP after each non-zero pulse;
 - final cleanup STOP on completion;
-- final cleanup STOP after a simulated failure;
+- final cleanup STOP after a simulated exception;
+- a non-success `XInputSetState` return code stops the active sequence immediately, attempts one final cleanup STOP, and produces a non-zero command result;
+- `ERROR_DEVICE_NOT_CONNECTED` follows the same non-success path;
+- a failed cleanup STOP is logged/classified and does not create a retry loop;
+- Ctrl+C cancellation leaves the command loop through the normal cleanup path and produces one final cleanup STOP;
 - deadman emits no STOP during its observation window but always emits final cleanup STOP.
+
+Add slot-selection tests with a fake XInput boundary:
+
+```text
+0 connected slots + no --slot
+-> fail clearly
+
+exactly 1 connected slot + no --slot
+-> auto-select that slot
+
+2+ connected slots + no --slot
+-> fail clearly and require --slot
+
+explicit --slot outside 0..3
+-> reject before any XInput mutation
+
+explicit valid slot
+-> use exactly that slot
+```
+
+Also test the log preflight boundary:
+
+```text
+log open/header/flush failure
+-> no non-zero XInputSetState call is made
+-> command fails non-zero
+```
 
 Do not add a general controller abstraction framework.
 
@@ -545,6 +667,27 @@ Do not modify Center M authority, HidHide, PID1901/PID1902 ownership, Steam/BPM 
 
 # 16. Validation
 
+## 16.1 Runtime logging prerequisite for hardware measurement
+
+The Addon Runtime correlation events in section 10 are Debug-only.
+
+Before a hardware reproduction session:
+
+```text
+set the Addon log level to Debug
+restart/reload the Runtime if required for that setting to take effect
+verify a current SteamInputAddonforClaw Runtime log is being written
+verify libVIIPER.log is being written by the diagnostic VIIPER build
+verify RumbleProbe can create and flush its own session log
+only then start the non-zero probe sequence
+```
+
+The normal `AppLog` default is `Off`; therefore a run performed without enabling Debug is not sufficient evidence for cross-layer correlation.
+
+Record the effective Addon log level in the validation notes.
+
+## 16.2 Build/test validation
+
 Before completing the PR:
 
 ```text
@@ -559,9 +702,13 @@ Hardware validation, when available, should record:
 
 - Addon build commit;
 - VIIPER diagnostic commit;
+- effective Addon Runtime log level (`Debug`);
 - selected XInput slot;
 - exact probe command;
-- all three log files;
+- RumbleProbe session log path;
+- `libVIIPER.log` path;
+- exact SteamInputAddonforClaw Runtime log path;
+- whether any `XInputSetState` call returned non-success;
 - whether physical stuck vibration was observed.
 
 Do not claim the missing-STOP root cause until those logs identify the exact disappearing boundary.
