@@ -1,25 +1,26 @@
-using SteamInputAddonforClaw.Contracts.Frontend;
-
 namespace SteamInputAddonforClaw.Overlay;
 
-// OQ5-UI-11: pure selection state for the fixed 2x2 Shortcut grid. Not a navigation-graph framework
-// -- the geometry is small and fixed, so it is expressed directly. Bounded / no-wrap; each move
-// returns whether the selection actually changed so the caller can skip a redundant redraw.
+// OQ5-UI-11: pure selection state for the temporary fixed 2x2 Shortcut POC. Not a navigation-graph
+// framework -- the geometry is small and fixed, so it is expressed directly. Bounded / no-wrap;
+// each move returns whether the selection actually changed so the caller can skip a redundant redraw.
 //
-//   Slot1 (0,0)  Slot2 (0,1)
-//   Slot3 (1,0)  Slot4 (1,1)
+//   index 0 (0,0)  index 1 (0,1)
+//   index 2 (1,0)  index 3 (1,1)
 internal sealed class OverlayShortcutSelection
 {
-    internal AddonQuickSettingsShortcutSlotId SelectedSlot { get; private set; } = AddonQuickSettingsShortcutSlotId.Slot1;
+    private const int TileCount = 4;
+    private const int ColumnCount = 2;
 
-    // Entering the Shortcut tab always starts on Slot 1 (matches "entering a page selects its first item").
-    internal void Reset() => SelectedSlot = AddonQuickSettingsShortcutSlotId.Slot1;
+    internal int SelectedIndex { get; private set; }
 
-    internal bool Select(AddonQuickSettingsShortcutSlotId slot)
+    // Entering the Shortcut tab always starts on the first temporary tile.
+    internal void Reset() => SelectedIndex = 0;
+
+    internal bool Select(int index)
     {
-        if (slot == SelectedSlot)
+        if (index is < 0 or >= TileCount || index == SelectedIndex)
             return false;
-        SelectedSlot = slot;
+        SelectedIndex = index;
         return true;
     }
 
@@ -33,30 +34,17 @@ internal sealed class OverlayShortcutSelection
 
     private bool TryMove(int deltaRow, int deltaColumn)
     {
-        var (row, column) = PositionOf(SelectedSlot);
+        var (row, column) = PositionOf(SelectedIndex);
         var nextRow = row + deltaRow;
         var nextColumn = column + deltaColumn;
         if (nextRow is < 0 or > 1 || nextColumn is < 0 or > 1)
             return false; // bounded, no wrap
 
-        SelectedSlot = SlotAt(nextRow, nextColumn);
+        SelectedIndex = SlotAt(nextRow, nextColumn);
         return true;
     }
 
-    private static (int Row, int Column) PositionOf(AddonQuickSettingsShortcutSlotId slot) => slot switch
-    {
-        AddonQuickSettingsShortcutSlotId.Slot1 => (0, 0),
-        AddonQuickSettingsShortcutSlotId.Slot2 => (0, 1),
-        AddonQuickSettingsShortcutSlotId.Slot3 => (1, 0),
-        AddonQuickSettingsShortcutSlotId.Slot4 => (1, 1),
-        _ => (0, 0),
-    };
+    private static (int Row, int Column) PositionOf(int index) => (index / ColumnCount, index % ColumnCount);
 
-    private static AddonQuickSettingsShortcutSlotId SlotAt(int row, int column) => (row, column) switch
-    {
-        (0, 0) => AddonQuickSettingsShortcutSlotId.Slot1,
-        (0, 1) => AddonQuickSettingsShortcutSlotId.Slot2,
-        (1, 0) => AddonQuickSettingsShortcutSlotId.Slot3,
-        _ => AddonQuickSettingsShortcutSlotId.Slot4,
-    };
+    private static int SlotAt(int row, int column) => row * ColumnCount + column;
 }

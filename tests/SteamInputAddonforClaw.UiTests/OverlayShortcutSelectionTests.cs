@@ -1,89 +1,90 @@
 using SteamInputAddonforClaw.Overlay;
-using SteamInputAddonforClaw.Contracts.Frontend;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class OverlayShortcutSelectionTests
 {
-    private static OverlayShortcutSelection At(AddonQuickSettingsShortcutSlotId slot)
+    private static OverlayShortcutSelection At(int index)
     {
         var selection = new OverlayShortcutSelection();
-        selection.Select(slot);
+        selection.Select(index);
         return selection;
     }
 
     [Fact]
-    public void StartsOnSlot1()
+    public void StartsOnFirstTemporaryTile()
     {
-        Assert.Equal(AddonQuickSettingsShortcutSlotId.Slot1, new OverlayShortcutSelection().SelectedSlot);
+        Assert.Equal(0, new OverlayShortcutSelection().SelectedIndex);
     }
 
     [Fact]
-    public void DirectionalMovesFollowThe2x2Geometry()
+    public void DirectionalMovesFollowTheTemporary2x2Geometry()
     {
-        (AddonQuickSettingsShortcutSlotId From, string Direction, AddonQuickSettingsShortcutSlotId Expected)[] cases =
+        (int From, string Direction, int Expected)[] cases =
         [
-            (AddonQuickSettingsShortcutSlotId.Slot1, "Right", AddonQuickSettingsShortcutSlotId.Slot2),
-            (AddonQuickSettingsShortcutSlotId.Slot1, "Down", AddonQuickSettingsShortcutSlotId.Slot3),
-            (AddonQuickSettingsShortcutSlotId.Slot2, "Left", AddonQuickSettingsShortcutSlotId.Slot1),
-            (AddonQuickSettingsShortcutSlotId.Slot2, "Down", AddonQuickSettingsShortcutSlotId.Slot4),
-            (AddonQuickSettingsShortcutSlotId.Slot3, "Up", AddonQuickSettingsShortcutSlotId.Slot1),
-            (AddonQuickSettingsShortcutSlotId.Slot3, "Right", AddonQuickSettingsShortcutSlotId.Slot4),
-            (AddonQuickSettingsShortcutSlotId.Slot4, "Up", AddonQuickSettingsShortcutSlotId.Slot2),
-            (AddonQuickSettingsShortcutSlotId.Slot4, "Left", AddonQuickSettingsShortcutSlotId.Slot3),
+            (0, "Right", 1),
+            (0, "Down", 2),
+            (1, "Left", 0),
+            (1, "Down", 3),
+            (2, "Up", 0),
+            (2, "Right", 3),
+            (3, "Up", 1),
+            (3, "Left", 2),
         ];
 
         foreach (var (from, direction, expected) in cases)
         {
             var selection = At(from);
             Assert.True(Move(selection, direction), $"{from} {direction}");
-            Assert.Equal(expected, selection.SelectedSlot);
+            Assert.Equal(expected, selection.SelectedIndex);
         }
     }
 
     [Fact]
     public void OuterEdgesAreBoundedNoOps()
     {
-        (AddonQuickSettingsShortcutSlotId From, string Direction)[] cases =
+        (int From, string Direction)[] cases =
         [
-            (AddonQuickSettingsShortcutSlotId.Slot1, "Left"),
-            (AddonQuickSettingsShortcutSlotId.Slot1, "Up"),
-            (AddonQuickSettingsShortcutSlotId.Slot2, "Right"),
-            (AddonQuickSettingsShortcutSlotId.Slot2, "Up"),
-            (AddonQuickSettingsShortcutSlotId.Slot3, "Left"),
-            (AddonQuickSettingsShortcutSlotId.Slot3, "Down"),
-            (AddonQuickSettingsShortcutSlotId.Slot4, "Right"),
-            (AddonQuickSettingsShortcutSlotId.Slot4, "Down"),
+            (0, "Left"),
+            (0, "Up"),
+            (1, "Right"),
+            (1, "Up"),
+            (2, "Left"),
+            (2, "Down"),
+            (3, "Right"),
+            (3, "Down"),
         ];
 
         foreach (var (from, direction) in cases)
         {
             var selection = At(from);
             Assert.False(Move(selection, direction), $"{from} {direction}");
-            Assert.Equal(from, selection.SelectedSlot);
+            Assert.Equal(from, selection.SelectedIndex);
         }
     }
 
     [Fact]
-    public void ResetReturnsToSlot1()
+    public void ResetReturnsToFirstTemporaryTile()
     {
-        var selection = At(AddonQuickSettingsShortcutSlotId.Slot4);
+        var selection = At(3);
 
         selection.Reset();
 
-        Assert.Equal(AddonQuickSettingsShortcutSlotId.Slot1, selection.SelectedSlot);
+        Assert.Equal(0, selection.SelectedIndex);
     }
 
     [Fact]
-    public void SelectChangesTheIdentityAndReportsWhetherItMoved()
+    public void SelectChangesTheIndexAndRejectsInvalidIndexes()
     {
         var selection = new OverlayShortcutSelection();
 
-        Assert.True(selection.Select(AddonQuickSettingsShortcutSlotId.Slot3));
-        Assert.Equal(AddonQuickSettingsShortcutSlotId.Slot3, selection.SelectedSlot);
-
-        Assert.False(selection.Select(AddonQuickSettingsShortcutSlotId.Slot3)); // already there
+        Assert.True(selection.Select(2));
+        Assert.Equal(2, selection.SelectedIndex);
+        Assert.False(selection.Select(2));
+        Assert.False(selection.Select(-1));
+        Assert.False(selection.Select(4));
+        Assert.Equal(2, selection.SelectedIndex);
     }
 
     private static bool Move(OverlayShortcutSelection selection, string direction) => direction switch
