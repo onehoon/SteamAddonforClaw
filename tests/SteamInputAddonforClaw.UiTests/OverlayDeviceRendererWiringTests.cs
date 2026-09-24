@@ -420,9 +420,42 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("displayLabelOverride ?? row.Label", quickSettings);
         Assert.Contains("visibleRows.Skip(1)", quickSettings);
         Assert.Contains("Margin = new Thickness(16, 0, 0, 0)", quickSettings);
+        Assert.Contains("strongLabel: true", quickSettings);
         Assert.DoesNotContain("section.Label.Contains", quickSettings);
         Assert.DoesNotContain("section.Label == \"TDP\"", quickSettings);
         Assert.DoesNotContain("section.Label == \"CPU Boost\"", quickSettings);
+    }
+
+    [Fact]
+    public void Overlay_sections_use_one_shared_card_without_changing_row_selection_ownership()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var valueRow = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+
+        Assert.Contains("CreateOverlaySectionCard(sectionPanel)", quickSettings);
+        Assert.Contains("CardBackgroundFillColorDefaultBrush", quickSettings);
+        Assert.Contains("Padding = new Thickness(8)", quickSettings);
+        Assert.Contains("CornerRadius = new CornerRadius(8)", quickSettings);
+        Assert.Contains("CreateOverlaySectionCard(BuildClawHudPage(rows))", clawHud);
+        Assert.Contains("CreateOverlaySectionCard(BuildTabOrderEditorPage(rows))", clawHud);
+        Assert.Contains("RegisterRowPointerSelection(overlayRow.Container);", quickSettings);
+        Assert.Contains("OverlayRowChrome.Create(grid)", valueRow);
+        Assert.DoesNotContain("CreateOverlaySectionCard(BuildShortcutPage())", shell);
+        Assert.DoesNotContain("CreateOverlaySectionCard(BuildProfilePage())", shell);
+    }
+
+    [Fact]
+    public void Feature_header_toggles_can_use_shared_strong_body_typography()
+    {
+        var toggle = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs");
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+
+        Assert.Contains("bool strongLabel = false", toggle);
+        Assert.Contains("BodyStrongTextBlockStyle", toggle);
+        Assert.Contains("displayLabelOverride ?? row.Label", quickSettings);
+        Assert.Contains("strongLabel)", quickSettings);
     }
 
     [Fact]

@@ -50,7 +50,7 @@ internal sealed class OverlayToggleRow
     internal Border Container { get; }
     internal OverlayRowCapabilities Capabilities { get; }
 
-    internal OverlayToggleRow(string label, Action<bool> requestChange)
+    internal OverlayToggleRow(string label, Action<bool> requestChange, bool strongLabel = false)
     {
         _model = new OverlayToggleModel(requestChange);
 
@@ -60,8 +60,9 @@ internal sealed class OverlayToggleRow
             VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
         };
-        if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
-            text.Style = bodyStyle;
+        var textStyleKey = strongLabel ? "BodyStrongTextBlockStyle" : "BodyTextBlockStyle";
+        if (Application.Current.Resources.TryGetValue(textStyleKey, out var style) && style is Style labelStyle)
+            text.Style = labelStyle;
         Grid.SetColumn(text, 0);
 
         _toggle = new ToggleSwitch
