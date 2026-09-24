@@ -123,7 +123,7 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.Contains("index / 2", overlay);
         Assert.Contains("index % 2", overlay);
         Assert.DoesNotContain("setInterval", overlay);
-        Assert.Contains("CurrentVersion = 40", frontendWire);
+        Assert.Contains("CurrentVersion = 41", frontendWire);
         Assert.Contains("CurrentVersion = 11", overlayWire);
         Assert.DoesNotContain("CurrentVersion = 35", frontendWire);
         Assert.DoesNotContain("CurrentVersion = 8", overlayWire);

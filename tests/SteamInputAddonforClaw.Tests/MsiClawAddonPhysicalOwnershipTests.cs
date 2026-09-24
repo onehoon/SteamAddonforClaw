@@ -505,38 +505,6 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     }
 
     [Fact]
-    public async Task Firmware_prepare_uses_gamepad_bios_mode_without_enabling_center_m()
-    {
-        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
-        var owner = h.Build();
-        Assert.True((await owner.AcquireAsync(default)).IsOwned);
-
-        var release = await owner.PrepareForFirmwareBiosAsync(default);
-
-        Assert.True(release.Succeeded);
-        Assert.Equal(new[] { MsiClawGamepadMode.Bios }, h.GamepadMode.SwitchTargets);
-        Assert.Empty(h.SwitchTargets);
-        Assert.Null(owner.LiveInputSource);
-        var recovery = await owner.RecoverLostInputAsync(default);
-        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
-        Assert.Contains("PreparedForFirmwareBios", recovery.Reason);
-    }
-
-    [Fact]
-    public async Task Firmware_prepare_when_already_xinput_does_not_issue_a_native_pid_mode_write()
-    {
-        var h = new Harness { InitialMode = MsiClawNativeMode.XInput };
-        var owner = h.Build();
-
-        var release = await owner.PrepareForFirmwareBiosAsync(default);
-
-        Assert.True(release.Succeeded);
-        Assert.Empty(h.SwitchTargets);
-        Assert.Equal(new[] { MsiClawGamepadMode.Bios }, h.GamepadMode.SwitchTargets);
-        Assert.False(h.InputSource.StopCalled);
-    }
-
-    [Fact]
     public async Task Disabled_boot_pid1902_mode5_is_reconciled_to_mode2_before_directinput_acquisition()
     {
         var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };

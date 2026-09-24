@@ -808,7 +808,6 @@ This also naturally clears gate state for:
 
 - publisher-fault retirement;
 - Center M Enable release;
-- Enter BIOS release;
 - process teardown;
 - successful fail-close retirement.
 

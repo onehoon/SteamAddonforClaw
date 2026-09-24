@@ -60,11 +60,6 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
     /// enable Center M roots -- the authority transition does that next with the returned target.</summary>
     Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken);
 
-    /// <summary>Enter BIOS handoff: retire process-owned DirectInput and switch the MSI firmware
-    /// GamepadMode to BIOS (mode 5), with mandatory readback, without clearing HidHide, changing
-    /// Center M roots, or releasing Addon authority policy.</summary>
-    Task<PhysicalOwnershipReleaseResult> PrepareForFirmwareBiosAsync(CancellationToken cancellationToken);
-
     /// <summary>PR8: reacquire an unexpectedly lost owned DirectInput session on the SAME input source
     /// object, only when the same strongly-identified MSI Claw is still PID1902 with the same exact
     /// persistent HidHide target. Runs through the same owner gate. Verifies/repairs the persistent
@@ -117,7 +112,6 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     // Enable-and-Restart release still needs it as ownership evidence.
     private MsiClawPhysicalIdentity? _ownedPhysicalIdentity;
     private bool _releasedForEnable;
-    private bool _preparedForFirmwareBios;
     private int _disposed;
 
     private sealed record GamepadModeNormalizationResult(
@@ -192,7 +186,6 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         {
             if (Volatile.Read(ref _disposed) != 0) return Fail("OwnerDisposed", false);
             if (_releasedForEnable) return Fail("ReleasedForCenterMEnable", false);
-            if (_preparedForFirmwareBios) return Fail("PreparedForFirmwareBios", false);
             if (_ownsInputSource) return new(MsiClawPhysicalOwnershipOutcome.Owned, "AlreadyOwned", false, _ownedHiddenTargets);
             return await AcquireCoreAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -422,60 +415,6 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     public Task<PhysicalOwnershipReleaseResult> ReleaseForCenterMEnableAsync(CancellationToken cancellationToken) =>
         ReleaseToXInputAsync(cancellationToken, "CenterMEnable");
 
-    public async Task<PhysicalOwnershipReleaseResult> PrepareForFirmwareBiosAsync(CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (Volatile.Read(ref _disposed) != 0)
-                return new(false, "OwnerDisposed", []);
-            if (_preparedForFirmwareBios)
-                return new(true, "AlreadyPreparedForFirmwareBios", _ownedHiddenTargets);
-            if (_gamepadModeClient is null)
-                return new(false, "GamepadModeClientUnavailable", _ownedHiddenTargets);
-
-            var targets = _ownedHiddenTargets.Count != 0
-                ? _ownedHiddenTargets
-                : _captureExistingOwnedHiddenTargets();
-            AppLog.Info("ControllerOwnership", "Enter BIOS GamepadMode preparation started.",
-                ("Event", "EnterBiosGamepadModePrepareStarted"),
-                ("Owned", _ownsInputSource), ("HiddenTargetCount", targets.Count));
-
-            if (_ownsInputSource)
-            {
-                await _inputSource.StopAsync().ConfigureAwait(false);
-                if (_inputSource.IsRunning)
-                    return new(false, "DirectInputStillRunning", targets);
-                _ownsInputSource = false;
-                ClearLivePhysicalSession();
-            }
-
-            var current = await _captureStableNativeState(cancellationToken).ConfigureAwait(false);
-            if (!TryReadIdentity(current, out _, out var identity, out var reason))
-                return new(false, "EnterBiosNativeState:" + reason, targets);
-            if (_captureCenterMStartupState() != FrontendCenterMStartupState.Disabled)
-                return new(false, "AuthorityChangedBeforeBiosModeWrite", targets);
-
-            var prepared = await _gamepadModeClient.SwitchAndVerifyAsync(
-                identity, MsiClawGamepadMode.Bios, cancellationToken).ConfigureAwait(false);
-            AppLog.Info("ControllerOwnership", "Enter BIOS BIOS-mode write completed.",
-                ("Event", "EnterBiosBiosModeWriteCompleted"), ("Succeeded", prepared.WriteIssued),
-                ("TargetMode", MsiClawGamepadMode.Bios), ("Reason", prepared.Reason));
-            AppLog.Info("ControllerOwnership", "Enter BIOS BIOS-mode verification completed.",
-                ("Event", "EnterBiosBiosModeVerified"), ("Succeeded", prepared.ReadbackVerified),
-                ("ObservedMode", prepared.Mode), ("TargetMode", MsiClawGamepadMode.Bios));
-            if (!prepared.Succeeded)
-                return new(false, "BiosGamepadModeNotVerified:" + prepared.Reason, targets);
-
-            _preparedForFirmwareBios = true;
-            AppLog.Info("ControllerOwnership", "Enter BIOS GamepadMode preparation completed.",
-                ("Event", "EnterBiosGamepadModePrepareCompleted"), ("Mode", prepared.Mode),
-                ("ReadbackVerified", prepared.ReadbackVerified), ("HiddenTargetCount", targets.Count));
-            return new(true, "PreparedForFirmwareBios", targets);
-        }
-        finally { _gate.Release(); }
-    }
-
     private async Task<PhysicalOwnershipReleaseResult> ReleaseToXInputAsync(
         CancellationToken cancellationToken,
         string releaseReason)
@@ -542,7 +481,6 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         {
             if (Volatile.Read(ref _disposed) != 0) return RecoveryFail("OwnerDisposed");
             if (_releasedForEnable) return RecoveryFail("ReleasedForCenterMEnable");
-            if (_preparedForFirmwareBios) return RecoveryFail("PreparedForFirmwareBios");
             return await RecoverLostInputCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }

@@ -57,12 +57,6 @@ public static class Program
                 Environment.ExitCode = ElevatedStartupTaskSetup.RunRemove(args);
                 return;
             }
-            if (FirmwareRestartHelper.TryRun(args, out var helperExitCode))
-            {
-                Environment.ExitCode = helperExitCode;
-                return;
-            }
-
             var restartDeadline = DateTimeOffset.UtcNow.AddSeconds(10);
             var restartAttempt = 0;
             SingleInstanceGate singleInstanceGate;

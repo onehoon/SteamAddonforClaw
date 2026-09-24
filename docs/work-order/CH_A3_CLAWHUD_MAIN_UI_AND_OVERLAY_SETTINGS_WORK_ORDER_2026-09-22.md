@@ -991,7 +991,6 @@ Recommended placement:
     Steam Big Picture Full Screen Experience
     Show only current power source
     ClawHUD
-    Enter BIOS
     Required Components
     Developer Menu
 

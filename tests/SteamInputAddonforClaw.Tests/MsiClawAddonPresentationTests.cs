@@ -470,9 +470,8 @@ public sealed class MsiClawAddonPresentationTests
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
         var host = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
 
-        // Enable-and-Restart and Enter BIOS both retire presentation before physical ownership.
+        // Enable-and-Restart retires presentation before physical ownership.
         Assert.Contains("ReleaseForCenterMEnableAsync", host);
-        Assert.Contains("ReleaseForFirmwareRestartAsync", host);
         Assert.Contains("\"VirtualPresentationReleaseFailed\"", host);
         Assert.True(
             host.IndexOf("presentation.ReleaseForCenterMEnableAsync", StringComparison.Ordinal)
