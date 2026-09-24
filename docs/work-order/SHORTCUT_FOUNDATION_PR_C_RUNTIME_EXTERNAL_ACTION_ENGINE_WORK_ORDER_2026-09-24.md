@@ -5,7 +5,7 @@
 **Status:** Ready for implementation  
 **Target repository:** onehoon/SteamAddonforClaw  
 **Target branch:** main  
-**Reviewed main baseline:** 3e0d568ade38bcbdaa686e9ce50923d7f5be1735  
+**Reviewed main baseline:** 969afc4f804104a7163d5c065af363b0b96daf28  
 **Depends on:** PR #593 and PR #594  
 **Scope:** live Runtime owner + first real actions; no editor/UI/transport yet
 
@@ -218,7 +218,13 @@ For unsafe load statuses:
 - preserve the original file;
 - Capture returns an unavailable dashboard;
 - Execute refuses all actions;
-- do not replace the document.
+- do not replace the document;
+- do NOT throw out of ShortcutRuntime construction solely because ShortcutStore returned Malformed, UnsupportedSchemaVersion, or ReadFailure;
+- do NOT fail AddonProcessHost startup because Shortcut persistence is unavailable.
+
+Shortcut is an optional sibling Runtime capability. A bad shortcuts.json must disable only Shortcut functionality while the rest of the Addon Runtime, including Full1902 controller ownership, continues normally.
+
+Only failures that represent a real programming/composition error outside the documented Shortcut load-status model may fail Host construction.
 
 No watcher, retry loop, or periodic reload is required.
 
@@ -348,10 +354,23 @@ Validation:
 
 Execution should use Windows PowerShell without temporary script files.
 
-Recommended command:
+Use the deterministic Windows PowerShell 5.1 executable path:
 
 ~~~text
-powershell.exe
+%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe
+~~~
+
+Resolve it from Environment.GetFolderPath(Environment.SpecialFolder.Windows) or the equivalent existing repository convention, then append:
+
+~~~text
+System32\WindowsPowerShell\v1.0\powershell.exe
+~~~
+
+Do not rely on PATH lookup for powershell.exe in PR-C.
+
+Recommended arguments:
+
+~~~text
 -NoLogo
 -NoProfile
 -NonInteractive
@@ -397,8 +416,11 @@ Parameters:
 Validation:
 
 - URL required;
-- absolute URI only;
-- only http and https schemes;
+- Uri.TryCreate(value, UriKind.Absolute, out uri) must succeed;
+- uri.Host must be non-empty;
+- scheme comparison is case-insensitive;
+- only http and https schemes are accepted;
+- both http and https are valid;
 - SchemaVersion must equal 1.
 
 Execution:
@@ -606,14 +628,25 @@ internal sealed record ShortcutExecutionResult(
 
 Do not create subclasses.
 
-Semantics:
+Semantics are fixed as follows:
 
 - Succeeded: launch request succeeded.
 - NotFound: TileId is absent from authoritative document.
 - Unsupported: unknown TypeId or unsupported action SchemaVersion.
 - InvalidConfiguration: known action with invalid action-specific parameters.
-- Unavailable: Shortcut Runtime or external target currently unavailable.
-- Failed: Process.Start failed or returned null.
+- Unavailable:
+  - ShortcutRuntime itself is unavailable because persistence load was unsafe;
+  - executable target is missing immediately before launch;
+  - Process.Start throws FileNotFoundException;
+  - Process.Start throws DirectoryNotFoundException.
+- Failed:
+  - Process.Start returns null;
+  - Process.Start throws UnauthorizedAccessException;
+  - Process.Start throws another Win32Exception;
+  - Process.Start throws InvalidOperationException;
+  - another ordinary launch exception not explicitly classified above.
+
+Do not leave these mappings to caller/implementation discretion.
 
 If Process.Start returns a Process handle, dispose the local handle after a successful fire-and-forget start where appropriate.
 
@@ -638,36 +671,44 @@ ShortcutRuntime does not own child process lifetime.
 
 ## 19. Launch failure handling
 
-Handle realistic launch failures without crashing the Runtime.
+Handle realistic launch failures without crashing the Runtime, using the fixed outcome mapping from section 17.
 
-Examples include:
+Logging and returned failure text must be payload-safe.
 
-~~~text
-Win32Exception
-FileNotFoundException
-DirectoryNotFoundException
-InvalidOperationException
-UnauthorizedAccessException
-~~~
-
-Return Failed or Unavailable as appropriate.
-
-Log only safe metadata:
+Allowed log metadata:
 
 ~~~text
 TileId
 TypeId
 Outcome
-exception type/message
+exception type
+fixed generic error text
 ~~~
 
-Never log:
+Do NOT log or return raw exception.Message because Windows/process exceptions may contain:
+
+- executable paths;
+- working directories;
+- command-line content;
+- environment-specific filesystem details.
+
+Never log or return:
 
 - full Parameters JSON;
 - PowerShell source;
-- executable arguments.
+- executable arguments;
+- raw URL;
+- raw exception message.
 
-Do not need to log the full URL.
+ShortcutExecutionResult.FailureMessage, when non-null, must be a short fixed/general user-safe message such as:
+
+~~~text
+"Shortcut target is unavailable."
+"Shortcut could not be launched."
+"Shortcut configuration is invalid."
+~~~
+
+Do not derive FailureMessage directly from exception.Message.
 
 ---
 
@@ -676,6 +717,12 @@ Do not need to log the full URL.
 PR-B intentionally did not add an unused ShortcutStore owner.
 
 PR-C now has real live behavior, so wire it.
+
+The Host composition rule is strict:
+
+> Shortcut load failure must not block AddonProcessHost construction or Runtime startup.
+
+Malformed, unsupported-newer, or unreadable shortcuts.json must produce an unavailable ShortcutRuntime capability, not a failed application startup.
 
 Add fields equivalent to:
 
@@ -853,12 +900,16 @@ Cover:
 executable blank path
 executable relative path
 executable non-.exe path
+executable path value with non-string JSON type
+executable arguments value with non-string JSON type
 PowerShell blank script
+PowerShell script value with non-string JSON type
 URL relative
 URL non-http/non-https
+URL value with non-string JSON type
 ~~~
 
-Each remains visible but disabled.
+Each remains visible but disabled with InvalidConfiguration.
 
 No launch delegate call.
 
@@ -888,7 +939,7 @@ Exactly one launch.
 
 Re-check file existence at execution.
 
-If fileExists becomes false:
+If fileExists becomes false immediately before launch:
 
 ~~~text
 Execute -> Unavailable
@@ -897,6 +948,8 @@ no Process.Start
 
 This is ordinary filesystem drift and does not require epoch/state machinery.
 
+Also inject FileNotFoundException and DirectoryNotFoundException from the process-start delegate and assert Unavailable.
+
 ### PowerShell encoding
 
 Use a script containing spaces, quotes, and Unicode.
@@ -904,7 +957,7 @@ Use a script containing spaces, quotes, and Unicode.
 Assert:
 
 ~~~text
-FileName = powershell.exe
+FileName = deterministic %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe path
 UseShellExecute = false
 CreateNoWindow = true
 ArgumentList contains:
@@ -922,12 +975,21 @@ Do not spawn PowerShell.
 
 ### URL launch
 
-For a valid HTTPS URL:
+Test both:
+
+~~~text
+http://example.com
+https://example.com
+~~~
+
+For each valid URL:
 
 ~~~text
 UseShellExecute true
 FileName exact URL
 ~~~
+
+Also prove scheme matching is case-insensitive and host must be non-empty.
 
 ### URL rejection
 
@@ -941,17 +1003,35 @@ steam://
 relative URL
 ~~~
 
-### Launch failure
+### Launch failure and fixed outcome mapping
 
-Injected process starter:
+Injected process starter must cover:
 
 ~~~text
-returns null
-throws Win32Exception
-throws InvalidOperationException
+returns null                  -> Failed
+throws FileNotFoundException -> Unavailable
+throws DirectoryNotFoundException -> Unavailable
+throws UnauthorizedAccessException -> Failed
+throws Win32Exception        -> Failed
+throws InvalidOperationException -> Failed
 ~~~
 
-Execution returns Failed and ShortcutRuntime remains usable.
+ShortcutRuntime remains usable after every failure.
+
+Assert FailureMessage is generic and does not contain raw exception.Message, executable path, arguments, script content, or URL.
+
+### Cancellation before launch
+
+Pass an already-cancelled CancellationToken.
+
+Assert:
+
+~~~text
+no file/process launch delegate call
+operation follows the repository cancellation convention
+~~~
+
+Do not add child-process cancellation ownership.
 
 ### TileId resolution
 
@@ -972,7 +1052,10 @@ Add focused coverage proving:
 
 - production composition uses AddonDataPaths.ShortcutsPath;
 - testOnlyDataRoot gets isolated shortcuts.json;
-- ShortcutRuntime is constructed independently from controller routing composition.
+- ShortcutRuntime is constructed independently from controller routing composition;
+- malformed shortcuts.json does NOT prevent AddonProcessHost construction/startup;
+- unsupported-newer shortcuts.json does NOT prevent Host startup;
+- Shortcut capability becomes unavailable while unrelated Runtime capabilities remain constructible.
 
 Use existing repository test/source-shape patterns.
 
@@ -1104,6 +1187,7 @@ Future TDP support does not require a plugin framework today.
 - [ ] ShortcutRuntime owns one loaded ShortcutDocument.
 - [ ] Loaded and NotFound are usable.
 - [ ] Malformed/Unsupported/ReadFailure disable Shortcut Runtime only.
+- [ ] Shortcut persistence failure never blocks AddonProcessHost construction/startup.
 - [ ] ShortcutRuntime is wired into AddonProcessHost.
 - [ ] testOnlyDataRoot gets isolated shortcuts.json.
 - [ ] no controller owner is changed.
@@ -1130,7 +1214,9 @@ Future TDP support does not require a plugin framework today.
 ### PowerShell
 
 - [ ] inline script.
-- [ ] blank script rejected.
+- [ ] blank/non-string script rejected.
+- [ ] deterministic Windows PowerShell 5.1 path under %SystemRoot%\System32\WindowsPowerShell\v1.0.
+- [ ] no PATH lookup dependency.
 - [ ] UTF-16LE EncodedCommand.
 - [ ] NoLogo/NoProfile/NonInteractive.
 - [ ] ExecutionPolicy Bypass.
@@ -1142,9 +1228,21 @@ Future TDP support does not require a plugin framework today.
 
 ### URL
 
-- [ ] absolute http/https only.
+- [ ] Uri.TryCreate absolute validation.
+- [ ] host must be non-empty.
+- [ ] scheme comparison is case-insensitive.
+- [ ] both http and https accepted.
 - [ ] UseShellExecute true.
 - [ ] custom/local schemes rejected.
+- [ ] non-string URL rejected as InvalidConfiguration.
+
+### Outcome and privacy
+
+- [ ] missing executable and FileNotFoundException/DirectoryNotFoundException map to Unavailable.
+- [ ] UnauthorizedAccessException/Win32Exception/InvalidOperationException map to Failed.
+- [ ] Process.Start null maps to Failed.
+- [ ] raw exception.Message is never logged or returned.
+- [ ] payload/path/script/arguments/URL are not leaked through failure logging.
 
 ### Projection
 
