@@ -22,6 +22,10 @@ $requiredAssets = @(
     'Dependencies\Viiper\libVIIPER.h',
     'Dependencies\Viiper\LICENSE.txt',
     'Dependencies\ClawHUD\clawhud.lock.json',
+    'Dependencies\NirCmd\PROVENANCE.md',
+    'Dependencies\NirCmd\NirCmd.chm',
+    'Dependencies\NirCmd\nircmd.exe',
+    'Dependencies\NirCmd\nircmdc.exe',
     'ui\SteamInputAddonforClaw.UI.exe',
     'ui\SteamInputAddonforClaw.UI.dll',
     'ui\SteamInputAddonforClaw.UI.pri',
@@ -94,6 +98,12 @@ $viiperPayload = Join-Path $PublishDirectory 'Dependencies\Viiper\libVIIPER.dll'
 $expectedViiperSha256 = '5F2CE963B8ADA1FDE78BF4A1C25BF063503D761E3D42DA6BB418FE735CE1F948'
 if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expectedViiperSha256) {
     throw 'Published VIIPER payload SHA-256 does not match its recorded provenance.'
+}
+
+$nircmdConsolePayload = Join-Path $PublishDirectory 'Dependencies\NirCmd\nircmdc.exe'
+$expectedNirCmdConsoleSha256 = 'C3E28C6E201D5C0206D941BED96C1C6219397DA9B563771D856DA1B6CC390554'
+if ((Get-FileHash -LiteralPath $nircmdConsolePayload -Algorithm SHA256).Hash -ne $expectedNirCmdConsoleSha256) {
+    throw 'Published NirCmd console executable SHA-256 does not match its pinned provenance.'
 }
 
 $clawHudLockPath = Join-Path $PublishDirectory 'Dependencies\ClawHUD\clawhud.lock.json'

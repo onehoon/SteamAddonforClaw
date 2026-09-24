@@ -22,6 +22,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public bool ClawHudEnabled => Settings.ClawHudEnabled;
     public bool QuickSettingsCurrentPowerSourceOnly => Settings.QuickSettingsCurrentPowerSourceOnly;
+    public string? ScreenshotSaveFolder => Settings.ScreenshotSaveFolder;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
     public BackButtonMappingSettings BackButtonMapping => Settings.BackButtonMapping;
     public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
@@ -138,6 +139,25 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
         var next = Settings with { QuickSettingsCurrentPowerSourceOnly = enabled };
         _settingsStore.Save(next);
         Settings = next;
+    }
+
+    /// <summary>Persists the optional Screenshot folder before publishing it to Runtime consumers.</summary>
+    public bool ChangeScreenshotSaveFolder(string? folder)
+    {
+        var normalized = string.IsNullOrWhiteSpace(folder) ? null : folder;
+        if (normalized is not null && !SettingsStore.IsValidScreenshotSaveFolder(normalized))
+        {
+            SteamInputAddonforClaw.Diagnostics.AppLog.Warn("Settings", "Rejected an invalid Screenshot save folder.", null,
+                ("Reason", "PathMustBeFullyQualified"));
+            return false;
+        }
+
+        if (string.Equals(Settings.ScreenshotSaveFolder, normalized, StringComparison.Ordinal)) return true;
+
+        var next = Settings with { ScreenshotSaveFolder = normalized };
+        _settingsStore.Save(next);
+        Settings = next;
+        return true;
     }
 
     /// <summary>Persists the ClawHUD top-level desired state before publishing it.</summary>

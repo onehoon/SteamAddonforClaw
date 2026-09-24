@@ -32,7 +32,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     [Theory]
     [InlineData("{ not valid json")]
     [InlineData("{\"schemaVersion\":2,\"dashboard\":{\"tiles\":[]}}")]
-    public void Unsafe_persistence_disables_only_the_shortcut_runtime(string json)
+    public async Task Unsafe_persistence_disables_only_the_shortcut_runtime(string json)
     {
         Directory.CreateDirectory(_testDirectory);
         File.WriteAllText(ShortcutsPath, json);
@@ -41,8 +41,8 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = new ShortcutRuntime(new ShortcutStore(ShortcutsPath));
 
         Assert.False(runtime.Capture().Available);
-        Assert.Equal(ShortcutExecutionOutcome.Unavailable, runtime.Execute(tileId).Outcome);
-        Assert.Equal("Shortcut storage is unavailable.", runtime.Execute(tileId).FailureMessage);
+        Assert.Equal(ShortcutExecutionOutcome.Unavailable, (await runtime.ExecuteAsync(tileId)).Outcome);
+        Assert.Equal("Shortcut storage is unavailable.", (await runtime.ExecuteAsync(tileId)).FailureMessage);
         Assert.Equal(json, File.ReadAllText(ShortcutsPath));
     }
 
@@ -64,7 +64,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void Unknown_action_is_preserved_but_unavailable_and_not_executable()
+    public async Task Unknown_action_is_preserved_but_unavailable_and_not_executable()
     {
         var tile = Tile("Future", "future.vendor.action", new { value = 30 });
         Save([tile]);
@@ -72,7 +72,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); });
 
         var projected = Assert.Single(runtime.Capture().Tiles);
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.False(projected.Enabled);
         Assert.Equal(FrontendShortcutTileState.Unavailable, projected.State);
@@ -82,14 +82,14 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void Unknown_tile_id_returns_not_found_without_launch()
+    public async Task Unknown_tile_id_returns_not_found_without_launch()
     {
         var tile = Tile("Tool", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" });
         Save([tile]);
         var launchCount = 0;
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); }, _ => true);
 
-        var result = runtime.Execute(Guid.NewGuid());
+        var result = await runtime.ExecuteAsync(Guid.NewGuid());
 
         Assert.Equal(ShortcutExecutionOutcome.NotFound, result.Outcome);
         Assert.Equal("Shortcut tile was not found.", result.FailureMessage);
@@ -97,7 +97,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void Known_action_with_unsupported_schema_is_preserved_but_not_executable()
+    public async Task Known_action_with_unsupported_schema_is_preserved_but_not_executable()
     {
         var tile = Tile("Future schema", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" }, schemaVersion: 2);
         Save([tile]);
@@ -105,7 +105,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); }, _ => true);
 
         var projected = Assert.Single(runtime.Capture().Tiles);
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.False(projected.Enabled);
         Assert.Equal("Unsupported", projected.StatusText);
@@ -125,7 +125,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     [InlineData("system.url", "{\"url\":\"file://example.com/a\"}")]
     [InlineData("system.url", "{\"url\":\"https:///missing-host\"}")]
     [InlineData("system.url", "{\"url\":42}")]
-    public void Invalid_known_parameters_remain_visible_but_disabled(string typeId, string parametersJson)
+    public async Task Invalid_known_parameters_remain_visible_but_disabled(string typeId, string parametersJson)
     {
         var tile = Tile("Invalid", typeId, Parameters(parametersJson));
         Save([tile]);
@@ -133,7 +133,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); }, _ => true);
 
         var projected = Assert.Single(runtime.Capture().Tiles);
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.True(runtime.Capture().Available);
         Assert.False(projected.Enabled);
@@ -144,7 +144,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void Executable_launch_preserves_arguments_and_uses_executable_directory()
+    public async Task Executable_launch_preserves_arguments_and_uses_executable_directory()
     {
         var tile = Tile("Tool", ShortcutActionTypeIds.Executable, new
         {
@@ -161,7 +161,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
             return new Process();
         }, _ => true);
 
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
         Assert.Equal(1, launchCount);
@@ -173,7 +173,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void Executable_null_arguments_are_treated_as_empty_and_launch_successfully()
+    public async Task Executable_null_arguments_are_treated_as_empty_and_launch_successfully()
     {
         var tile = Tile(
             "Tool without arguments",
@@ -188,7 +188,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         }, _ => true);
 
         var projected = Assert.Single(runtime.Capture().Tiles);
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.True(projected.Enabled);
         Assert.Equal(FrontendShortcutTileState.Neutral, projected.State);
@@ -198,7 +198,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void Executable_missing_at_projection_is_unavailable_without_launch()
+    public async Task Executable_missing_at_projection_is_unavailable_without_launch()
     {
         var tile = Tile("Missing", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" });
         Save([tile]);
@@ -206,7 +206,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); }, _ => false);
 
         var projected = Assert.Single(runtime.Capture().Tiles);
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.False(projected.Enabled);
         Assert.Equal("Not found", projected.StatusText);
@@ -215,7 +215,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void Executable_is_rechecked_when_it_disappears_before_launch()
+    public async Task Executable_is_rechecked_when_it_disappears_before_launch()
     {
         var tile = Tile("Drifting tool", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" });
         Save([tile]);
@@ -224,7 +224,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); }, _ => ++fileExistsCalls == 1);
 
         Assert.True(Assert.Single(runtime.Capture().Tiles).Enabled);
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.Equal(ShortcutExecutionOutcome.Unavailable, result.Outcome);
         Assert.Equal(2, fileExistsCalls);
@@ -232,7 +232,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void PowerShell_uses_deterministic_windows_path_and_utf16le_encoded_script()
+    public async Task PowerShell_uses_deterministic_windows_path_and_utf16le_encoded_script()
     {
         const string script = "Write-Output \"한글 \\\"quoted\\\"\"";
         var tile = Tile("PowerShell", ShortcutActionTypeIds.PowerShell, new { script });
@@ -244,7 +244,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
             return new Process();
         });
 
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
         Assert.NotNull(captured);
@@ -263,7 +263,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     [InlineData("http://example.com")]
     [InlineData("https://example.com/path?q=1")]
     [InlineData("HTTPS://example.com")]
-    public void Http_and_https_urls_use_shell_resolution(string url)
+    public async Task Http_and_https_urls_use_shell_resolution(string url)
     {
         var tile = Tile("Web", ShortcutActionTypeIds.Url, new { url });
         Save([tile]);
@@ -274,7 +274,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
             return new Process();
         });
 
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
         Assert.NotNull(captured);
@@ -289,7 +289,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     [InlineData("steam://open/mainmenu")]
     [InlineData("relative/path")]
     [InlineData("https:///missing-host")]
-    public void Non_http_urls_are_rejected_without_launch(string url)
+    public async Task Non_http_urls_are_rejected_without_launch(string url)
     {
         var tile = Tile("Web", ShortcutActionTypeIds.Url, new { url });
         Save([tile]);
@@ -297,7 +297,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var runtime = CreateRuntime(_ => { launchCount++; return new Process(); });
 
         var projected = Assert.Single(runtime.Capture().Tiles);
-        var result = runtime.Execute(tile.TileId);
+        var result = await runtime.ExecuteAsync(tile.TileId);
 
         Assert.False(projected.Enabled);
         Assert.Equal("Invalid configuration", projected.StatusText);
@@ -306,7 +306,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void Launch_failures_use_fixed_outcomes_and_safe_messages()
+    public async Task Launch_failures_use_fixed_outcomes_and_safe_messages()
     {
         var exceptions = new (Exception Exception, ShortcutExecutionOutcome Outcome)[]
         {
@@ -324,7 +324,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
             Save([tile]);
             var runtime = CreateRuntime(_ => throw exception, _ => true);
 
-            var result = runtime.Execute(tile.TileId);
+            var result = await runtime.ExecuteAsync(tile.TileId);
 
             Assert.Equal(expectedOutcome, result.Outcome);
             Assert.DoesNotContain("secret", result.FailureMessage, StringComparison.OrdinalIgnoreCase);
@@ -334,13 +334,13 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var nullTile = Tile("Null", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" });
         Save([nullTile]);
         var nullRuntime = CreateRuntime(_ => null, _ => true);
-        var nullResult = nullRuntime.Execute(nullTile.TileId);
+        var nullResult = await nullRuntime.ExecuteAsync(nullTile.TileId);
         Assert.Equal(ShortcutExecutionOutcome.Failed, nullResult.Outcome);
         Assert.Equal("Shortcut could not be launched.", nullResult.FailureMessage);
     }
 
     [Fact]
-    public void Already_cancelled_execution_does_not_invoke_launch_delegate()
+    public async Task Already_cancelled_execution_does_not_invoke_launch_delegate()
     {
         var tile = Tile("Tool", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" });
         Save([tile]);
@@ -349,7 +349,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
-        Assert.Throws<OperationCanceledException>(() => runtime.Execute(tile.TileId, cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runtime.ExecuteAsync(tile.TileId, cancellation.Token));
         Assert.Equal(0, launchCount);
     }
 
@@ -362,15 +362,116 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Contains("private readonly ShortcutRuntime _shortcutRuntime", source, StringComparison.Ordinal);
         Assert.Contains("AddonDataPaths.ShortcutsPath", source, StringComparison.Ordinal);
         Assert.Contains("Path.Combine(testOnlyDataRoot, \"shortcuts.json\")", source, StringComparison.Ordinal);
-        Assert.Contains("_shortcutRuntime = new(_shortcutStore);", source, StringComparison.Ordinal);
-        Assert.True(source.IndexOf("_shortcutRuntime = new(_shortcutStore);", StringComparison.Ordinal)
+        Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);", source, StringComparison.Ordinal);
+        Assert.True(source.IndexOf("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);", StringComparison.Ordinal)
             < source.IndexOf("AddonRuntimeCompositionFactory.Create(", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Screenshot_projection_and_execution_use_the_async_callback_once()
+    {
+        var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{}"));
+        Save([tile]);
+        var callbackCount = 0;
+        var callbackResult = new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded);
+        var runtime = CreateRuntime(screenshotAction: _ =>
+        {
+            callbackCount++;
+            return Task.FromResult(callbackResult);
+        });
+
+        var projected = Assert.Single(runtime.Capture().Tiles);
+        var result = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.True(projected.Enabled);
+        Assert.Equal(FrontendShortcutTileState.Neutral, projected.State);
+        Assert.Null(projected.StatusText);
+        Assert.Equal(1, callbackCount);
+        Assert.Same(callbackResult, result);
+    }
+
+    [Fact]
+    public async Task Screenshot_schema_one_rejects_any_parameter_property_without_callback()
+    {
+        var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{\"folder\":\"C:\\\\Temp\"}"));
+        Save([tile]);
+        var callbackCount = 0;
+        var runtime = CreateRuntime(screenshotAction: _ =>
+        {
+            callbackCount++;
+            return Task.FromResult(new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded));
+        });
+
+        var projected = Assert.Single(runtime.Capture().Tiles);
+        var result = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.False(projected.Enabled);
+        Assert.Equal("Invalid configuration", projected.StatusText);
+        Assert.Equal(ShortcutExecutionOutcome.InvalidConfiguration, result.Outcome);
+        Assert.Equal(0, callbackCount);
+    }
+
+    [Fact]
+    public async Task Screenshot_unsupported_schema_and_missing_callback_are_unavailable()
+    {
+        var unsupported = Tile("Future screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{}"), schemaVersion: 2);
+        var withoutCallback = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{}"));
+        Save([unsupported, withoutCallback]);
+        var runtime = CreateRuntime();
+
+        var projected = runtime.Capture().Tiles;
+        var unsupportedResult = await runtime.ExecuteAsync(unsupported.TileId);
+        var unavailableResult = await runtime.ExecuteAsync(withoutCallback.TileId);
+
+        Assert.Equal("Unsupported", projected[0].StatusText);
+        Assert.Equal(ShortcutExecutionOutcome.Unsupported, unsupportedResult.Outcome);
+        Assert.False(projected[1].Enabled);
+        Assert.Equal("Unavailable", projected[1].StatusText);
+        Assert.Equal(ShortcutExecutionOutcome.Unavailable, unavailableResult.Outcome);
+    }
+
+    [Fact]
+    public async Task Already_cancelled_screenshot_does_not_invoke_callback()
+    {
+        var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{}"));
+        Save([tile]);
+        var callbackCount = 0;
+        var runtime = CreateRuntime(screenshotAction: _ =>
+        {
+            callbackCount++;
+            return Task.FromResult(new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded));
+        });
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runtime.ExecuteAsync(tile.TileId, cancellation.Token));
+        Assert.Equal(0, callbackCount);
+    }
+
+    [Fact]
+    public async Task Screenshot_failure_does_not_poison_later_external_actions()
+    {
+        var screenshot = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{}"));
+        var executable = Tile("Tool", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" });
+        var url = Tile("Web", ShortcutActionTypeIds.Url, new { url = "https://example.com" });
+        Save([screenshot, executable, url]);
+        var launchCount = 0;
+        var runtime = CreateRuntime(
+            _ => { launchCount++; return new Process(); },
+            _ => true,
+            _ => Task.FromResult(new ShortcutExecutionResult(ShortcutExecutionOutcome.Failed, "Screenshot could not be saved.")));
+
+        Assert.Equal(ShortcutExecutionOutcome.Failed, (await runtime.ExecuteAsync(screenshot.TileId)).Outcome);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, (await runtime.ExecuteAsync(executable.TileId)).Outcome);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, (await runtime.ExecuteAsync(url.TileId)).Outcome);
+        Assert.Equal(2, launchCount);
     }
 
     private ShortcutRuntime CreateRuntime(
         Func<ProcessStartInfo, Process?>? startProcess = null,
-        Func<string, bool>? fileExists = null) =>
-        new(new ShortcutStore(ShortcutsPath), startProcess, fileExists);
+        Func<string, bool>? fileExists = null,
+        Func<CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null) =>
+        new(new ShortcutStore(ShortcutsPath), startProcess, fileExists, screenshotAction);
 
     private void Save(IReadOnlyList<ShortcutTileDefinition> tiles) =>
         new ShortcutStore(ShortcutsPath).Save(new ShortcutDocument

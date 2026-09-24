@@ -51,6 +51,7 @@ public sealed class SettingsStore
                 ClawHudEnabled = clawHudEnabled,
                 DeveloperMenuEnabled = developerMenuEnabled,
                 QuickSettingsCurrentPowerSourceOnly = quickSettingsCurrentPowerSourceOnly,
+                ScreenshotSaveFolder = ReadScreenshotSaveFolder(root),
                 FrontButtonMapping = ReadFrontButtonMapping(root),
                 BackButtonMapping = ReadBackButtonMapping(root),
                 AddonQuickSettingsTabOrder = ReadAddonQuickSettingsTabOrder(root)
@@ -67,6 +68,36 @@ public sealed class SettingsStore
         {
             AppLog.Warn("Settings", "Settings read failed. Using defaults.", exception, ("Action", "Defaults"));
             return new AppSettings();
+        }
+    }
+
+    /// <summary>
+    /// Reads the Screenshot destination independently so malformed optional folder data cannot
+    /// reset unrelated settings.
+    /// </summary>
+    private static string? ReadScreenshotSaveFolder(JsonElement root)
+    {
+        if (!root.TryGetProperty("ScreenshotSaveFolder", out var property)
+            || property.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var folder = property.GetString();
+        return IsValidScreenshotSaveFolder(folder) ? folder : null;
+    }
+
+    internal static bool IsValidScreenshotSaveFolder(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return false;
+
+        try
+        {
+            return Path.IsPathFullyQualified(folder);
+        }
+        catch (ArgumentException)
+        {
+            return false;
         }
     }
 
@@ -207,7 +238,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.FrontButtonMapping, settings.BackButtonMapping, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.ScreenshotSaveFolder, settings.FrontButtonMapping, settings.BackButtonMapping, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

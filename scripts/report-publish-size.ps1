@@ -18,6 +18,7 @@ function Get-Component([string]$Path) {
     if ($path.StartsWith('dependencies/hidhide/')) { return 'HidHide' }
     if ($path.StartsWith('dependencies/usbipwin2/')) { return 'USBip-win2' }
     if ($path.StartsWith('dependencies/viiper/')) { return 'VIIPER' }
+    if ($path.StartsWith('dependencies/nircmd/')) { return 'NirCmd' }
     if ($path -eq 'steaminputaddonforclaw.tdphelper.exe' -or $path -match '^steaminputaddonforclaw\.tdphelper\.') { return 'TDP Helper' }
     if ($path -notmatch '/') { return 'Runtime' }
     return 'Other / Unclassified'
@@ -29,7 +30,7 @@ $files = @(Get-ChildItem -LiteralPath $root -Recurse -File)
 $totalBytes = [long](($files | Measure-Object -Property Length -Sum).Sum)
 $componentBytes = [ordered]@{
     'Runtime' = [long]0; 'UI' = [long]0; 'Overlay' = [long]0; 'FSE Home' = [long]0; 'TDP Helper' = [long]0;
-    'HidHide' = [long]0; 'USBip-win2' = [long]0; 'VIIPER' = [long]0;
+    'HidHide' = [long]0; 'USBip-win2' = [long]0; 'VIIPER' = [long]0; 'NirCmd' = [long]0;
     'Other / Unclassified' = [long]0
 }
 $fileComponents = foreach ($file in $files) {
@@ -45,7 +46,7 @@ if ($totalBytes - $classifiedBytes -ne $unclassifiedBytes) { throw "Publish size
 $rows = foreach ($entry in $componentBytes.GetEnumerator()) {
     [pscustomobject][ordered]@{ Name = $entry.Key; Bytes = [long]$entry.Value; MiB = [double]($entry.Value / 1MB); Percent = if ($totalBytes) { [double]($entry.Value * 100 / $totalBytes) } else { 0.0 } }
 }
-$thirdPartyBytes = [long]($componentBytes['HidHide'] + $componentBytes['USBip-win2'] + $componentBytes['VIIPER'])
+$thirdPartyBytes = [long]($componentBytes['HidHide'] + $componentBytes['USBip-win2'] + $componentBytes['VIIPER'] + $componentBytes['NirCmd'])
 $largestFiles = @($fileComponents | Sort-Object Bytes -Descending | Select-Object -First $TopCount | ForEach-Object {
     [pscustomobject][ordered]@{ Path = $_.Path; Bytes = $_.Bytes; MiB = [double]($_.Bytes / 1MB); Component = $_.Component }
 })

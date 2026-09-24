@@ -55,6 +55,14 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 
 The project does not redistribute Handheld Companion's bundled `libVIIPER.dll` and does not claim byte-for-byte identity with that artifact. HHC is a behavior reference only.
 
+### NirCmd
+
+- Version: 2.87 (x64)
+- Copyright: Copyright (c) 2003–2024 Nir Sofer
+- License: Freeware; redistribution is permitted without charge when the complete distribution package is included without modification
+- Upstream: https://www.nirsoft.net/utils/nircmd.html
+- Distribution: The complete official x64 ZIP contents are included under `src/SteamInputAddonforClaw/Dependencies/NirCmd/`. The Addon invokes `nircmdc.exe`; upstream archive details, file list, retrieval date, and SHA-256 values are recorded in the adjacent `PROVENANCE.md`.
+
 ## References
 
 ### Handheld Companion

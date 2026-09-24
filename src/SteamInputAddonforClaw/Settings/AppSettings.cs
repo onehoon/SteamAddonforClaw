@@ -19,6 +19,9 @@ public sealed record AppSettings(
     /// side. The complete saved configuration is always retained.</summary>
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
 
+    /// <summary>Optional global destination for Screenshot Shortcuts. Null uses Pictures\Screenshots.</summary>
+    public string? ScreenshotSaveFolder { get; init; }
+
     /// <summary>
     /// The one atomic front-button mapping (Gamebar Button and Center M Button, each with a Normal
     /// and a Steam Game / Big Picture action), persisted through this same settings file rather than
