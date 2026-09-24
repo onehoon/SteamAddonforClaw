@@ -69,12 +69,13 @@ internal sealed class NirCmdScreenshotCapture
             var processResult = await _runProcess(startInfo, cancellationToken).ConfigureAwait(false);
             exitCode = processResult.ExitCode;
 
-            if (!processResult.Started || processResult.TimedOut || processResult.ExitCode != 0)
+            if (!processResult.Started || processResult.TimedOut || !processResult.ExitCode.HasValue)
             {
                 result = new(ShortcutExecutionOutcome.Failed, "Screenshot could not be saved.");
                 return LogResult(result, usedDefaultFolder, collisionSuffixUsed, stopwatch, exitCode);
             }
 
+            // A completed NirCmd process can return a nonzero diagnostic code after producing the requested file.
             var outputExists = File.Exists(outputPath);
             var outputHasContent = outputExists && new FileInfo(outputPath).Length > 0;
             captureSucceeded = outputHasContent;
