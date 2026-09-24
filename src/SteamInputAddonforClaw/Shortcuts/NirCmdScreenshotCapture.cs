@@ -34,7 +34,6 @@ internal sealed class NirCmdScreenshotCapture
         var stopwatch = Stopwatch.StartNew();
         var usedDefaultFolder = string.IsNullOrWhiteSpace(saveFolder);
         string? outputPath = null;
-        var processStarted = false;
         var captureSucceeded = false;
         int? exitCode = null;
         var collisionSuffixUsed = false;
@@ -68,7 +67,6 @@ internal sealed class NirCmdScreenshotCapture
 
             var startInfo = CreateStartInfo(executablePath, outputPath);
             var processResult = await _runProcess(startInfo, cancellationToken).ConfigureAwait(false);
-            processStarted = processResult.Started;
             exitCode = processResult.ExitCode;
 
             if (!processResult.Started || processResult.TimedOut || processResult.ExitCode != 0)
@@ -105,7 +103,7 @@ internal sealed class NirCmdScreenshotCapture
         }
         finally
         {
-            if (processStarted && !captureSucceeded && outputPath is not null)
+            if (!captureSucceeded && outputPath is not null)
                 TryDeletePartialOutput(outputPath);
         }
     }
@@ -114,7 +112,10 @@ internal sealed class NirCmdScreenshotCapture
     {
         if (!string.IsNullOrWhiteSpace(saveFolder)) return saveFolder;
 
-        var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        var pictures = Environment.GetFolderPath(
+            Environment.SpecialFolder.MyPictures,
+            Environment.SpecialFolderOption.DoNotVerify);
+        if (string.IsNullOrWhiteSpace(pictures)) return string.Empty;
         return Path.Combine(pictures, "Screenshots");
     }
 
@@ -158,19 +159,49 @@ internal sealed class NirCmdScreenshotCapture
         using var process = Process.Start(startInfo);
         if (process is null) return new(false, false, null);
 
+        return await WaitForOwnedProcessAsync(
+            token => process.WaitForExitAsync(token),
+            () => process.ExitCode,
+            () => TryKill(process),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<NirCmdProcessResult> WaitForOwnedProcessAsync(
+        Func<CancellationToken, Task> waitForExit,
+        Func<int> readExitCode,
+        Action killOwnedProcess,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(waitForExit);
+        ArgumentNullException.ThrowIfNull(readExitCode);
+        ArgumentNullException.ThrowIfNull(killOwnedProcess);
+
+        void TryStopOwnedProcess()
+        {
+            try { killOwnedProcess(); }
+            catch { /* Best-effort stop; preserve the original cancellation or process result. */ }
+        }
+
         try
         {
-            await process.WaitForExitAsync().WaitAsync(ProcessTimeout).ConfigureAwait(false);
-            return new(true, false, process.ExitCode);
+            await waitForExit(cancellationToken)
+                .WaitAsync(ProcessTimeout, cancellationToken)
+                .ConfigureAwait(false);
+            return new(true, false, readExitCode());
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            TryStopOwnedProcess();
+            throw;
         }
         catch (TimeoutException)
         {
-            TryKill(process);
+            TryStopOwnedProcess();
             return new(true, true, null);
         }
         catch
         {
-            TryKill(process);
+            TryStopOwnedProcess();
             return new(true, false, null);
         }
     }

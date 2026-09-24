@@ -203,6 +203,59 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task Persisted_oversized_executable_is_preserved_repairable_and_never_launched()
+    {
+        var tile = Tile("Large executable", ShortcutActionTypeIds.Executable, new
+        {
+            path = @"C:\Tools\Tool.exe",
+            arguments = new string('x', 30_100)
+        });
+        Save([tile]);
+        var before = File.ReadAllText(ShortcutsPath);
+        var launchCount = 0;
+        var runtime = CreateRuntime(_ => { launchCount++; return new Process(); }, _ => true);
+
+        var dashboardTile = Assert.Single(runtime.Capture().Tiles);
+        var editorAction = Assert.Single(runtime.CaptureEditor(
+            new FrontendScreenshotFolderSnapshot(true, @"C:\Users\Test\Pictures\Screenshots", null)).Tiles).Action;
+        var execution = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.True(runtime.Capture().Available);
+        Assert.False(dashboardTile.Enabled);
+        Assert.Equal("Invalid configuration", dashboardTile.StatusText);
+        Assert.True(editorAction.Editable);
+        Assert.False(editorAction.ConfigurationValid);
+        Assert.Equal(ShortcutExecutionOutcome.InvalidConfiguration, execution.Outcome);
+        Assert.Equal(0, launchCount);
+        Assert.Equal(before, File.ReadAllText(ShortcutsPath));
+    }
+
+    [Fact]
+    public async Task Persisted_oversized_powershell_is_preserved_repairable_and_never_launched()
+    {
+        var tile = Tile("Large PowerShell", ShortcutActionTypeIds.PowerShell,
+            new { script = new string('x', 20_000) });
+        Save([tile]);
+        var before = File.ReadAllText(ShortcutsPath);
+        var launchCount = 0;
+        var runtime = CreateRuntime(_ => { launchCount++; return new Process(); });
+
+        var dashboardTile = Assert.Single(runtime.Capture().Tiles);
+        var editorAction = Assert.Single(runtime.CaptureEditor(
+            new FrontendScreenshotFolderSnapshot(true, @"C:\Users\Test\Pictures\Screenshots", null)).Tiles).Action;
+        var execution = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.True(runtime.Capture().Available);
+        Assert.False(dashboardTile.Enabled);
+        Assert.Equal("Invalid configuration", dashboardTile.StatusText);
+        Assert.True(editorAction.Editable);
+        Assert.False(editorAction.ConfigurationValid);
+        Assert.Equal(ShortcutExecutionOutcome.InvalidConfiguration, execution.Outcome);
+        Assert.Equal(0, launchCount);
+        Assert.Equal(before, File.ReadAllText(ShortcutsPath));
+    }
+
+    [Fact]
     public async Task Executable_missing_at_projection_is_unavailable_without_launch()
     {
         var tile = Tile("Missing", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" });
