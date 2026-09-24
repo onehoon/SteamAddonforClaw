@@ -60,10 +60,69 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(41, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(42, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
+    }
+
+    [Fact]
+    public async Task Shortcut_editor_operations_round_trip_through_the_named_pipe()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var intent = new FrontendShortcutMutationIntent(FrontendShortcutMutationKind.Update, Guid.NewGuid(), "Power",
+            new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.PowerShell, PowerShellScript: "Write-Output 'hello'"));
+
+        Assert.Equivalent(fake.ShortcutEditorSnapshot, await client.CaptureShortcutEditorAsync(), strict: true);
+        Assert.Equivalent(fake.ShortcutMutationResult, await client.MutateShortcutAsync(intent), strict: true);
+        Assert.Equal(intent, fake.LastShortcutMutation);
+        Assert.Equivalent(fake.ScreenshotFolderResult, await client.SetScreenshotSaveFolderAsync(@"C:\Captures"), strict: true);
+        Assert.Equal(@"C:\Captures", fake.LastScreenshotFolder);
+        Assert.Equivalent(fake.ScreenshotFolderResult, await client.SetScreenshotSaveFolderAsync(null), strict: true);
+        Assert.Null(fake.LastScreenshotFolder);
+    }
+
+    [Fact]
+    public async Task Shortcut_editor_capture_rejects_an_unexpected_payload()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Request, 1,
+            FrontendRpcMethod.CaptureShortcutEditor, Payload: FrontendWireCodec.Payload(new { unexpected = true })), writeGate, CancellationToken.None);
+
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.ShortcutEditorCaptureCount);
+    }
+
+    [Fact]
+    public async Task Malformed_shortcut_mutation_payload_is_rejected_before_frontend_mutation()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Request, 1,
+            FrontendRpcMethod.MutateShortcut, Payload: FrontendWireCodec.Payload(new { Kind = 99 })), writeGate, CancellationToken.None);
+
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.ShortcutMutationCount);
     }
 
     [Fact]
@@ -74,7 +133,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(41, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(42, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -1247,13 +1306,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 41 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 42 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":41,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":41,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":41,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":42,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":42,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":42,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1535,6 +1594,18 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendSteamFseSnapshot SteamFseSnapshot { get; } = new(true, false, null);
         public FrontendSteamFseMutationResult SteamFseMutationResult { get; } = new(
             FrontendSteamFseMutationOutcome.Succeeded, new(true, true, null), null);
+        public FrontendShortcutEditorSnapshot ShortcutEditorSnapshot { get; } = new(true,
+            [new FrontendShortcutEditorTile(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Web", "example.com",
+                new(FrontendShortcutEditorActionKind.Url, "system.url", 1, true, Url: "https://example.com"))],
+            new(true, @"C:\Users\Test\Pictures\Screenshots", null));
+        public FrontendShortcutMutationResult ShortcutMutationResult { get; } = new(true, true, null,
+            new(true, [], new(true, @"C:\Users\Test\Pictures\Screenshots", null)));
+        public FrontendScreenshotFolderMutationResult ScreenshotFolderResult { get; } = new(true, null,
+            new(false, @"C:\Captures", @"C:\Captures"));
+        public FrontendShortcutMutationIntent? LastShortcutMutation { get; private set; }
+        public string? LastScreenshotFolder { get; private set; }
+        public int ShortcutEditorCaptureCount { get; private set; }
+        public int ShortcutMutationCount { get; private set; }
         public bool LastSteamFseEnabled { get; private set; }
         public int TotalCalls { get; private set; }
         public FrontendLogLevel LastLogLevel { get; private set; }
@@ -1547,6 +1618,9 @@ public sealed class FrontendNamedPipeTransportTests
         public TaskCompletionSource PrerequisiteSetupStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource PrerequisiteSetupCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void RaiseStateInvalidated() => StateInvalidated?.Invoke(this, EventArgs.Empty);
+        public Task<FrontendShortcutEditorSnapshot> CaptureShortcutEditorAsync(CancellationToken t = default) { TotalCalls++; ShortcutEditorCaptureCount++; return Task.FromResult(ShortcutEditorSnapshot); }
+        public Task<FrontendShortcutMutationResult> MutateShortcutAsync(FrontendShortcutMutationIntent intent, CancellationToken t = default) { TotalCalls++; ShortcutMutationCount++; LastShortcutMutation = intent; return Task.FromResult(ShortcutMutationResult); }
+        public Task<FrontendScreenshotFolderMutationResult> SetScreenshotSaveFolderAsync(string? folder, CancellationToken t = default) { TotalCalls++; LastScreenshotFolder = folder; return Task.FromResult(ScreenshotFolderResult); }
         public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) { TotalCalls++; if (ThrowOperationCanceledWithoutToken) throw new OperationCanceledException(); return Task.FromResult(Bootstrap); }
         public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(Status); }
         public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) { TotalCalls++; LastLogLevel = level; return Task.FromResult(Settings); }

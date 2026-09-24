@@ -160,7 +160,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureSteamFse or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureSteamFse or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.CaptureShortcutEditor or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
@@ -204,6 +204,12 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetClawHudEnabledAsync(FrontendWireCodec.Decode<SetClawHudEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.MutateClawHudSetting
         ? FrontendWireCodec.Payload(await _inner.MutateClawHudSettingAsync(FrontendWireCodec.Decode<FrontendClawHudMutationIntent>(p), t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureShortcutEditor
+        ? FrontendWireCodec.Payload(await _inner.CaptureShortcutEditorAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.MutateShortcut
+        ? FrontendWireCodec.Payload(await _inner.MutateShortcutAsync(FrontendWireCodec.Decode<FrontendShortcutMutationIntent>(p), t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetScreenshotSaveFolder
+        ? FrontendWireCodec.Payload(await _inner.SetScreenshotSaveFolderAsync(FrontendWireCodec.Decode<SetScreenshotSaveFolderRequest>(p).Folder, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetSteamFseEnabled
         ? FrontendWireCodec.Payload(await _inner.SetSteamFseEnabledAsync(FrontendWireCodec.Decode<SetSteamFseEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetQuickSettingsCurrentPowerSourceOnly

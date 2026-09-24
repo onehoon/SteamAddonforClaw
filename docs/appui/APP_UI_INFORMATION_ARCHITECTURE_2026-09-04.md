@@ -1,6 +1,6 @@
 # Steam Addon for Claw — App UI Information Architecture
 
-> **Current architecture note (2026-09-22):** Addon-owned Quick Settings are provided only by the WinUI3 Overlay. Steam's native Quick Access Menu remains Steam-owned and is invoked through the existing Steam Deck Quick Access system-button pulse; there is no Addon QAM tab or QamHost/CDP/CEF integration.
+> **Current architecture note (2026-09-24):** Addon-owned Quick Settings are provided only by the WinUI3 Overlay. The Main App's `Shortcut` page is a separate editor for Runtime-owned user Shortcut definitions and Screenshot folder preference; it is not the Main App `Overlay` settings page or the WinUI3 Overlay Shortcut grid. Steam's native Quick Access Menu remains Steam-owned and is invoked through the existing Steam Deck Quick Access system-button pulse; there is no Addon QAM tab or QamHost/CDP/CEF integration.
 
 > **Date:** 2026-09-04  
 > **Status:** Design authority for the next app navigation/UI cleanup  
@@ -35,8 +35,10 @@ The UI should now be organized around what the user is actually trying to config
 1. the handheld device;
 2. the controller and its buttons/behavior;
 3. per-game overrides;
-4. help;
-5. advanced component diagnostics and developer tools.
+4. performance HUD behavior;
+5. user-created Shortcut actions;
+6. help;
+7. advanced component diagnostics and developer tools.
 
 The target is not to create more pages. The target is to give every user-facing function one obvious home.
 
@@ -44,12 +46,14 @@ The target is not to create more pages. The target is to give every user-facing 
 
 ## 2. Final Navigation Order
 
-The main NavigationView order should become:
+The current main NavigationView order is:
 
 ```text
 Device
 Controller
 Profile
+Overlay
+Shortcut
 How to Use
 
 ----------------
@@ -620,6 +624,8 @@ The navigation state should converge toward the following normal user pages:
 Device
 Controller
 Profile
+Overlay
+Shortcut
 HowToUse
 Settings
 ```
@@ -706,6 +712,13 @@ Controller
 Profile
  └ Per-game overrides
 
+Overlay
+ └ ClawHUD / performance overlay settings
+
+Shortcut
+ ├ Runtime-owned user Shortcut definitions
+ └ Screenshot Shortcut save-folder preference
+
 How to Use
 
 Settings
@@ -791,7 +804,7 @@ This design can be implemented incrementally.
 A focused first PR can perform:
 
 ```text
-1. Reorder main navigation to Device → Controller → Profile → How to Use
+1. Reorder main navigation to Device → Controller → Profile → Overlay → Shortcut → How to Use
 2. Make Device the default page
 3. Remove Status navigation/page wiring
 4. Move device identity/support summary to Device
@@ -821,6 +834,12 @@ Controller
 
 Profile
 → What should change for this specific game?
+
+Overlay
+→ How should the performance HUD behave?
+
+Shortcut
+→ Which user-defined actions should be available in the Shortcut overlay grid?
 
 How to Use
 → How do I use the Addon?

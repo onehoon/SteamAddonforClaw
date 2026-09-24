@@ -367,18 +367,50 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("StatusContent", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("MainNavigationPage.Status", navigationState, StringComparison.Ordinal);
 
-        // Top-level menu order is Device < Controller < Profile < Overlay < HowToUse.
+        // Top-level menu order is Device < Controller < Profile < Overlay < Shortcut < HowToUse.
         Assert.True(xaml.IndexOf("Tag=\"Device\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Controller\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Tag=\"Controller\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Tag=\"Profile\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Shortcut\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Tag=\"Shortcut\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
         Assert.Contains("MainNavigationPage.Overlay", navigationState, StringComparison.Ordinal);
         Assert.Contains("OverlayContent", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("MainNavigationPage.Shortcut", navigationState, StringComparison.Ordinal);
+        Assert.Contains("\"Shortcut\" => MainNavigationPage.Shortcut", navigationState, StringComparison.Ordinal);
+        Assert.Contains("ShortcutContent", xaml, StringComparison.Ordinal);
+        Assert.Contains("if (page == MainNavigationPage.Shortcut) ShortcutContent.Activate();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("else if (wasShortcut) ShortcutContent.Deactivate();", mainWindow, StringComparison.Ordinal);
 
         // Device is the default page in both the shell and the navigation state.
         Assert.Contains("MainNavigationView.SelectedItem = DeviceNavigationItem;", mainWindow, StringComparison.Ordinal);
         Assert.Contains("CurrentPage { get; private set; } = MainNavigationPage.Device;", navigationState, StringComparison.Ordinal);
         Assert.Contains("_ => MainNavigationPage.Device", navigationState, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Main_app_shortcut_editor_is_separate_from_the_overlay_settings_page()
+    {
+        var root = FindRepositoryRoot();
+        var shortcutXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml"));
+        var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
+        var overlayXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/OverlayPage.xaml"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+
+        Assert.Contains("Add Shortcut", shortcutXaml, StringComparison.Ordinal);
+        Assert.Contains("CanReorderItems=\"True\"", shortcutXaml, StringComparison.Ordinal);
+        Assert.Contains("Screenshot", shortcutXaml, StringComparison.Ordinal);
+        Assert.Contains("FolderPicker(windowId)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("MutateShortcutAsync", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("SetScreenshotSaveFolderAsync", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ShortcutContent.RequestRefresh()", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShortcutStore", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShortcutsPath", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("ExecuteAsync", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddShortcutButton", overlayXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScreenshotFolder", overlayXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Slot1", shortcutXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Slot2", shortcutXaml, StringComparison.Ordinal);
     }
 
     [Fact]

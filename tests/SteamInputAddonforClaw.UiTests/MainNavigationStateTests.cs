@@ -144,6 +144,16 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void Shortcut_navigation_tag_opens_its_own_top_level_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.Shortcut, navigation.SelectNavigationItem(false, "Shortcut"));
+        Assert.Equal(MainNavigationPage.Shortcut, navigation.CurrentPage);
+        Assert.Null(navigation.GetMouseBackDestination());
+    }
+
+    [Fact]
     public void Device_and_Profile_are_top_level_pages_with_no_mouse_back_destination()
     {
         // Work order PR277 section 14: Device/Profile are independent top-level pages, not child
