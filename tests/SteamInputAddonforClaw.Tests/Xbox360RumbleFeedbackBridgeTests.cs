@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
@@ -72,6 +73,81 @@ public sealed class Xbox360RumbleFeedbackBridgeTests
         await Task.Delay(250);
 
         Assert.Single(sink.Writes);
+    }
+
+    [Fact]
+    public void Debug_correlation_logging_preserves_callback_translation_and_explicit_stop()
+    {
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousLevel = AppLog.MinimumLevelOverride;
+        var logDirectory = Path.Combine(Path.GetTempPath(), $"RumbleBridge-{Guid.NewGuid():N}");
+        AppLog.DrainForTests();
+        try
+        {
+            AppLog.DirectoryOverride = logDirectory;
+            AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+            var sink = new RecordingSink();
+            var (bridge, drive) = Arm(sink, TimeSpan.FromMinutes(1));
+            using (bridge)
+            {
+                drive(3, 6);
+                drive(0, 0);
+            }
+
+            var logPath = AppLog.CurrentLogFilePath;
+            var content = AppLog.ReadAllTextForTests(logPath);
+
+            Assert.Equal([new TwoMotorRumble(771, 1542), TwoMotorRumble.Stopped], sink.Writes);
+            Assert.Contains("Event=ProductionXbox360RumbleRx", content);
+            Assert.Contains("RumbleSeq=1 Left8=3 Right8=6 IsStop=False", content);
+            Assert.Contains("RumbleSeq=2 Left8=0 Right8=0 IsStop=True", content);
+            Assert.Contains("Event=ProductionXbox360RumblePhysicalWrite", content);
+            Assert.Contains("Large8=3 Small8=6 Status=Succeeded Reason=OK", content);
+        }
+        finally
+        {
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousLevel;
+            if (Directory.Exists(logDirectory))
+                Directory.Delete(logDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Debug_correlation_logging_records_the_source_of_the_safety_stop()
+    {
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousLevel = AppLog.MinimumLevelOverride;
+        var logDirectory = Path.Combine(Path.GetTempPath(), $"RumbleSafety-{Guid.NewGuid():N}");
+        AppLog.DrainForTests();
+        try
+        {
+            AppLog.DirectoryOverride = logDirectory;
+            AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+            var sink = new RecordingSink();
+            var (bridge, drive) = Arm(sink, TimeSpan.FromMilliseconds(40));
+            using (bridge)
+            {
+                drive(3, 6);
+                await sink.WaitForWriteCountAsync(2, TimeSpan.FromSeconds(2));
+            }
+
+            var content = AppLog.ReadAllTextForTests(AppLog.CurrentLogFilePath);
+
+            Assert.Equal([new TwoMotorRumble(771, 1542), TwoMotorRumble.Stopped], sink.Writes);
+            Assert.Contains("Event=ProductionXbox360RumbleSafetyStop", content);
+            Assert.Contains("SourceRumbleSeq=1", content);
+            Assert.Contains("RumbleSeq=1 WriteKind=SafetyStop Large8=0 Small8=0 Status=Succeeded Reason=OK", content);
+        }
+        finally
+        {
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousLevel;
+            if (Directory.Exists(logDirectory))
+                Directory.Delete(logDirectory, recursive: true);
+        }
     }
 
     private static (Xbox360RumbleFeedbackBridge Bridge, Action<byte, byte> Drive) Arm(

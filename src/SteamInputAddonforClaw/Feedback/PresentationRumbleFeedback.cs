@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
@@ -29,6 +31,7 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
     private readonly object _safetyGate = new();
     private CancellationTokenSource? _safetyStop;
     private long _feedbackSequence;
+    private long _diagnosticRumbleSequence;
     private int _disposed;
 
     private Xbox360RumbleFeedbackBridge(
@@ -71,20 +74,29 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
         try
         {
             if (Volatile.Read(ref _disposed) != 0) return;
+            var diagnosticEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
+            var rumbleSequence = diagnosticEnabled ? Interlocked.Increment(ref _diagnosticRumbleSequence) : 0;
             var rumble = new TwoMotorRumble(Expand(leftMotor), Expand(rightMotor));
             lock (_callbackWriteGate)
             {
                 if (Volatile.Read(ref _disposed) != 0) return;
+                if (diagnosticEnabled)
+                    AppLog.Debug("Rumble", "Production Xbox360 rumble callback received.",
+                        ("Event", "ProductionXbox360RumbleRx"), ("Presentation", "Xbox360"),
+                        ("RumbleSeq", rumbleSequence), ("Left8", leftMotor), ("Right8", rightMotor),
+                        ("IsStop", rumble.Equals(TwoMotorRumble.Stopped)));
                 try
                 {
                     var result = _sink.SetRumble(rumble);
+                    if (diagnosticEnabled)
+                        LogXbox360PhysicalWrite(rumbleSequence, rumble, result);
                     if (result.Status == PhysicalRumbleWriteStatus.Failed)
                         AppLog.Debug("Rumble", "Production rumble write failed.",
                             ("Event", "ProductionRumbleWriteFailed"), ("Presentation", "Xbox360"), ("Reason", result.Reason));
                 }
                 finally
                 {
-                    ScheduleSafetyStop(rumble);
+                    ScheduleSafetyStop(rumble, diagnosticEnabled ? rumbleSequence : null);
                 }
             }
         }
@@ -94,7 +106,7 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
         }
     }
 
-    private void ScheduleSafetyStop(TwoMotorRumble rumble)
+    private void ScheduleSafetyStop(TwoMotorRumble rumble, long? sourceRumbleSequence)
     {
         CancellationToken token;
         long sequence;
@@ -113,10 +125,10 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
             token = _safetyStop.Token;
         }
 
-        _ = StopAfterDelayAsync(sequence, token);
+        _ = StopAfterDelayAsync(sequence, sourceRumbleSequence, token);
     }
 
-    private async Task StopAfterDelayAsync(long sequence, CancellationToken token)
+    private async Task StopAfterDelayAsync(long sequence, long? sourceRumbleSequence, CancellationToken token)
     {
         try
         {
@@ -129,7 +141,14 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
             lock (_callbackWriteGate)
             {
                 if (Volatile.Read(ref _disposed) != 0) return;
-                _sink.SetRumble(TwoMotorRumble.Stopped);
+                var diagnosticEnabled = AppLog.IsEnabled(AppLogLevel.Debug);
+                if (diagnosticEnabled)
+                    AppLog.Debug("Rumble", "Production Xbox360 rumble safety stop fired.",
+                        ("Event", "ProductionXbox360RumbleSafetyStop"), ("Presentation", "Xbox360"),
+                        ("SourceRumbleSeq", sourceRumbleSequence?.ToString(CultureInfo.InvariantCulture) ?? "NotAvailable"));
+                var result = _sink.SetRumble(TwoMotorRumble.Stopped);
+                if (diagnosticEnabled)
+                    LogXbox360PhysicalWrite(sourceRumbleSequence, TwoMotorRumble.Stopped, result, isSafetyStop: true);
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -140,6 +159,21 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
             AppLog.Debug("Rumble", "Production rumble safety stop was contained.",
                 ("Event", "ProductionRumbleStopFailed"), ("Presentation", "Xbox360"), ("Reason", exception.GetType().Name));
         }
+    }
+
+    private static void LogXbox360PhysicalWrite(
+        long? rumbleSequence,
+        TwoMotorRumble rumble,
+        PhysicalRumbleWriteResult result,
+        bool isSafetyStop = false)
+    {
+        AppLog.Debug("Rumble", "Production Xbox360 physical rumble write completed.",
+            ("Event", "ProductionXbox360RumblePhysicalWrite"), ("Presentation", "Xbox360"),
+            ("RumbleSeq", rumbleSequence?.ToString(CultureInfo.InvariantCulture) ?? "NotAvailable"),
+            ("WriteKind", isSafetyStop ? "SafetyStop" : "Callback"),
+            ("Large8", MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.LargeMotor)),
+            ("Small8", MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.SmallMotor)),
+            ("Status", result.Status), ("Reason", result.Reason));
     }
 
     public void Dispose()
