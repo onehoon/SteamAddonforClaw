@@ -1,6 +1,6 @@
 # Addon Quick Settings Overlay Architecture
 
-> **Current architecture override (2026-09-22):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. Addon QAM tabs, QamHost, GamepadUI/CDP patching, and CEF debugging are retired. QAM-specific material below is historical and must not be used as an active implementation requirement.
+> **Current architecture override (2026-09-24):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. The Main App `Shortcut` page is a separate editor for Runtime-owned Shortcut definitions and the global Screenshot folder; it is not the Main App `Overlay` settings page or the WinUI3 Overlay Shortcut grid. The WinUI3 Overlay consumes the definitions through its own surface in the later Shortcut-grid phase. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. Addon QAM tabs, QamHost, GamepadUI/CDP patching, and CEF debugging are retired. QAM-specific material below is historical and must not be used as an active implementation requirement.
 
 > **Status:** Current design baseline / implementation planning document  
 > **Date:** 2026-09-01  

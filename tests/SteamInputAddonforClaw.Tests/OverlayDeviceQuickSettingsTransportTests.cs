@@ -38,7 +38,7 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         Assert.Equal(11, OverlayTransportProtocol.CurrentVersion);
         // The desktop frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(41, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(42, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]

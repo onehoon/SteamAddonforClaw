@@ -24,20 +24,24 @@ internal sealed record ShortcutExecutionResult(
 
 /// <summary>
 /// Runtime owner for the persisted Shortcut document and its currently supported external actions.
-/// The document is loaded once; callers execute by TileId so action payloads never become a frontend
-/// authority or a second persistence source.
+/// Frontends edit through typed intents; callers execute by TileId so action payloads never become
+/// execution authority or a second persistence source.
 /// </summary>
 internal sealed class ShortcutRuntime
 {
     private const int SupportedActionSchemaVersion = 1;
     private const string ShortcutUnavailableMessage = "Shortcut storage is unavailable.";
+    private const string EditorTooLargeMessage = "Shortcut configuration is too large to edit in this version.";
+    private const string SaveFailedMessage = "Failed to save Shortcut changes.";
     private const string TargetUnavailableMessage = "Shortcut target is unavailable.";
     private const string UnsupportedMessage = "Shortcut action is unsupported.";
     private const string InvalidConfigurationMessage = "Shortcut configuration is invalid.";
     private const string LaunchFailedMessage = "Shortcut could not be launched.";
     private const string TileNotFoundMessage = "Shortcut tile was not found.";
 
-    private readonly ShortcutDocument _document;
+    private readonly ShortcutStore _store;
+    private readonly Action<ShortcutDocument>? _saveDocument;
+    private ShortcutDocument _document;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private readonly Func<string, bool> _fileExists;
     private readonly Func<CancellationToken, Task<ShortcutExecutionResult>>? _screenshotAction;
@@ -47,13 +51,16 @@ internal sealed class ShortcutRuntime
         ShortcutStore store,
         Func<ProcessStartInfo, Process?>? startProcess = null,
         Func<string, bool>? fileExists = null,
-        Func<CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null)
+        Func<CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null,
+        Action<ShortcutDocument>? saveDocument = null)
     {
         ArgumentNullException.ThrowIfNull(store);
 
         _startProcess = startProcess ?? Process.Start;
         _fileExists = fileExists ?? File.Exists;
         _screenshotAction = screenshotAction;
+        _store = store;
+        _saveDocument = saveDocument;
 
         var load = store.Load();
         _available = load.Status is ShortcutLoadStatus.Loaded or ShortcutLoadStatus.NotFound;
@@ -84,6 +91,326 @@ internal sealed class ShortcutRuntime
         }
 
         return new FrontendShortcutDashboardSnapshot(true, tiles);
+    }
+
+    internal FrontendShortcutEditorSnapshot CaptureEditor(FrontendScreenshotFolderSnapshot screenshotFolder)
+    {
+        ArgumentNullException.ThrowIfNull(screenshotFolder);
+        if (!_available)
+            return FrontendShortcutEditorSnapshot.Unavailable(screenshotFolder, ShortcutUnavailableMessage);
+
+        var snapshot = ProjectEditorSnapshot(_document, screenshotFolder);
+        return FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(snapshot)
+            ? snapshot
+            : FrontendShortcutEditorSnapshot.Unavailable(screenshotFolder, EditorTooLargeMessage);
+    }
+
+    internal FrontendShortcutMutationResult MutateEditor(
+        FrontendShortcutMutationIntent? intent,
+        FrontendScreenshotFolderSnapshot screenshotFolder)
+    {
+        ArgumentNullException.ThrowIfNull(screenshotFolder);
+        if (!FrontendShortcutEditorPayloadPolicy.IsMutationWithinLimit(intent))
+            return MutationFailure("Shortcut edit is too large or invalid.", screenshotFolder);
+        if (!_available)
+            return MutationFailure(ShortcutUnavailableMessage, screenshotFolder);
+        if (!FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(ProjectEditorSnapshot(_document, screenshotFolder)))
+            return MutationFailure(EditorTooLargeMessage, screenshotFolder);
+
+        if (!TryBuildMutation(intent!, screenshotFolder, out var candidate, out var changed, out var failureMessage))
+            return MutationFailure(failureMessage!, screenshotFolder);
+
+        if (!changed)
+            return CreateMutationResult(true, false, null, CaptureEditor(screenshotFolder));
+
+        var candidateSnapshot = ProjectEditorSnapshot(candidate!, screenshotFolder);
+        var candidateResult = new FrontendShortcutMutationResult(true, true, null, candidateSnapshot);
+        if (!FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(candidateSnapshot)
+            || !FrontendShortcutEditorPayloadPolicy.IsMutationResultWithinLimit(candidateResult))
+        {
+            return MutationFailure(EditorTooLargeMessage, screenshotFolder);
+        }
+
+        try
+        {
+            if (_saveDocument is { } saveDocument) saveDocument(candidate!);
+            else _store.Save(candidate!);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Shortcuts", "Shortcut document save failed.", null,
+                ("Mutation", intent!.Kind),
+                ("FailureCategory", exception.GetType().Name));
+            return MutationFailure(SaveFailedMessage, screenshotFolder);
+        }
+
+        _document = candidate!;
+        AppLog.Info("Shortcuts", "Shortcut document changed.",
+            ("Mutation", intent!.Kind),
+            ("TileCount", _document.Dashboard.Tiles.Count));
+        return candidateResult;
+    }
+
+    private bool TryBuildMutation(
+        FrontendShortcutMutationIntent intent,
+        FrontendScreenshotFolderSnapshot screenshotFolder,
+        out ShortcutDocument? candidate,
+        out bool changed,
+        out string? failureMessage)
+    {
+        candidate = null;
+        changed = false;
+        failureMessage = null;
+        var tiles = _document.Dashboard.Tiles.ToList();
+
+        switch (intent.Kind)
+        {
+            case FrontendShortcutMutationKind.Create:
+            {
+                if (intent.TileId is not null || intent.Title is null || intent.Action is null || intent.TargetIndex is not null)
+                    return Fail("Shortcut create request is invalid.", out failureMessage);
+                if (!IsValidTitle(intent.Title))
+                    return Fail("Enter a valid Shortcut title.", out failureMessage);
+                if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
+                tiles.Add(new ShortcutTileDefinition(Guid.NewGuid(), intent.Title, action!));
+                changed = true;
+                break;
+            }
+            case FrontendShortcutMutationKind.Update:
+            {
+                if (intent.TileId is not { } tileId || tileId == Guid.Empty || intent.Title is null
+                    || intent.Action is null || intent.TargetIndex is not null)
+                    return Fail("Shortcut update request is invalid.", out failureMessage);
+                if (!IsValidTitle(intent.Title))
+                    return Fail("Enter a valid Shortcut title.", out failureMessage);
+                var index = tiles.FindIndex(tile => tile.TileId == tileId);
+                if (index < 0) return Fail("Shortcut tile was not found.", out failureMessage);
+                if (!ProjectEditorAction(tiles[index].Action).Editable)
+                    return Fail("This Shortcut action cannot be edited in this version.", out failureMessage);
+                if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
+                tiles[index] = tiles[index] with { Title = intent.Title, Action = action! };
+                changed = true;
+                break;
+            }
+            case FrontendShortcutMutationKind.Delete:
+            {
+                if (intent.TileId is not { } tileId || tileId == Guid.Empty || intent.Title is not null
+                    || intent.Action is not null || intent.TargetIndex is not null)
+                    return Fail("Shortcut delete request is invalid.", out failureMessage);
+                var index = tiles.FindIndex(tile => tile.TileId == tileId);
+                if (index < 0) return Fail("Shortcut tile was not found.", out failureMessage);
+                tiles.RemoveAt(index);
+                changed = true;
+                break;
+            }
+            case FrontendShortcutMutationKind.Move:
+            {
+                if (intent.TileId is not { } tileId || tileId == Guid.Empty || intent.Title is not null
+                    || intent.Action is not null || intent.TargetIndex is not { } targetIndex)
+                    return Fail("Shortcut move request is invalid.", out failureMessage);
+                var currentIndex = tiles.FindIndex(tile => tile.TileId == tileId);
+                if (currentIndex < 0) return Fail("Shortcut tile was not found.", out failureMessage);
+                if (targetIndex < 0 || targetIndex >= tiles.Count)
+                    return Fail("Shortcut order is invalid.", out failureMessage);
+                if (currentIndex == targetIndex) return true;
+                var tile = tiles[currentIndex];
+                tiles.RemoveAt(currentIndex);
+                tiles.Insert(targetIndex, tile);
+                changed = true;
+                break;
+            }
+            default:
+                return Fail("Shortcut edit request is invalid.", out failureMessage);
+        }
+
+        var dashboard = new ShortcutDashboardDefinition(tiles);
+        if (ShortcutDefinitionValidation.Validate(dashboard) is not null)
+            return Fail("Shortcut definition is invalid.", out failureMessage);
+
+        candidate = _document with { Dashboard = dashboard };
+        if (!FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(ProjectEditorSnapshot(candidate, screenshotFolder)))
+            return Fail(EditorTooLargeMessage, out failureMessage);
+        return true;
+    }
+
+    private static FrontendShortcutEditorSnapshot ProjectEditorSnapshot(
+        ShortcutDocument document,
+        FrontendScreenshotFolderSnapshot screenshotFolder) =>
+        new(true, document.Dashboard.Tiles.Select(tile => new FrontendShortcutEditorTile(
+            tile.TileId,
+            tile.Title,
+            GetEditorTargetSummary(tile.Action),
+            ProjectEditorAction(tile.Action))).ToArray(), screenshotFolder);
+
+    private static FrontendShortcutEditorAction ProjectEditorAction(ShortcutActionSpec action)
+    {
+        var kind = GetEditorActionKind(action.TypeId);
+        if (kind is null || action.SchemaVersion != SupportedActionSchemaVersion)
+            return new(FrontendShortcutEditorActionKind.Unsupported, action.TypeId, action.SchemaVersion, false,
+                ConfigurationValid: false, ValidationMessage: "Unsupported in this version.");
+
+        var executablePath = ReadStringOrEmpty(action.Parameters, "path");
+        var executableArguments = ReadStringOrEmpty(action.Parameters, "arguments");
+        var script = ReadStringOrEmpty(action.Parameters, "script");
+        var url = ReadStringOrEmpty(action.Parameters, "url");
+        var valid = kind.Value switch
+        {
+            FrontendShortcutEditorActionKind.Executable => TryReadExecutableParameters(action.Parameters, out _, out _),
+            FrontendShortcutEditorActionKind.PowerShell => TryReadPowerShellParameters(action.Parameters, out _),
+            FrontendShortcutEditorActionKind.Url => TryReadUrlParameters(action.Parameters, out _),
+            FrontendShortcutEditorActionKind.ScreenshotFullscreen => HasEmptyObjectParameters(action.Parameters),
+            _ => false
+        };
+
+        return new(kind.Value, action.TypeId, action.SchemaVersion, true,
+            kind == FrontendShortcutEditorActionKind.Executable ? executablePath : null,
+            kind == FrontendShortcutEditorActionKind.Executable ? executableArguments : null,
+            kind == FrontendShortcutEditorActionKind.PowerShell ? script : null,
+            kind == FrontendShortcutEditorActionKind.Url ? url : null,
+            valid,
+            valid ? null : "Needs attention. Review this action's configuration.");
+    }
+
+    private static FrontendShortcutEditorActionKind? GetEditorActionKind(string typeId) => typeId switch
+    {
+        ShortcutActionTypeIds.Executable => FrontendShortcutEditorActionKind.Executable,
+        ShortcutActionTypeIds.PowerShell => FrontendShortcutEditorActionKind.PowerShell,
+        ShortcutActionTypeIds.Url => FrontendShortcutEditorActionKind.Url,
+        ShortcutActionTypeIds.ScreenshotFullscreen => FrontendShortcutEditorActionKind.ScreenshotFullscreen,
+        _ => null
+    };
+
+    private static string GetEditorTargetSummary(ShortcutActionSpec action)
+    {
+        var kind = GetEditorActionKind(action.TypeId);
+        if (kind is null || action.SchemaVersion != SupportedActionSchemaVersion)
+            return $"Unsupported in this version · {action.TypeId}";
+
+        return kind.Value switch
+        {
+            FrontendShortcutEditorActionKind.Executable =>
+                SafeExecutableName(ReadStringOrEmpty(action.Parameters, "path")),
+            FrontendShortcutEditorActionKind.PowerShell => "PowerShell",
+            FrontendShortcutEditorActionKind.Url => Uri.TryCreate(ReadStringOrEmpty(action.Parameters, "url"), UriKind.Absolute, out var uri)
+                ? uri.Host : "Website",
+            FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Fullscreen screenshot",
+            _ => "Unsupported in this version"
+        };
+    }
+
+    private static string SafeExecutableName(string path)
+    {
+        try { return Path.GetFileName(path) is { Length: > 0 } name ? name : "Application"; }
+        catch (ArgumentException) { return "Application"; }
+    }
+
+    private static string ReadStringOrEmpty(JsonElement parameters, string propertyName) =>
+        parameters.ValueKind == JsonValueKind.Object
+        && parameters.TryGetProperty(propertyName, out var value)
+        && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
+
+    private static bool IsValidTitle(string title) =>
+        !string.IsNullOrWhiteSpace(title) && FrontendShortcutEditorPayloadPolicy.IsFieldWithinLimit(title);
+
+    private static bool TryBuildAction(
+        FrontendShortcutActionInput input,
+        out ShortcutActionSpec? action,
+        out string? failureMessage)
+    {
+        action = null;
+        failureMessage = null;
+        if (input.Kind == FrontendShortcutEditorActionKind.Executable
+            && input.PowerShellScript is null && input.Url is null
+            && !string.IsNullOrWhiteSpace(input.ExecutablePath)
+            && IsValidExecutablePath(input.ExecutablePath))
+        {
+            action = new(ShortcutActionTypeIds.Executable, SupportedActionSchemaVersion,
+                JsonSerializer.SerializeToElement(new { path = input.ExecutablePath, arguments = input.ExecutableArguments }));
+            return true;
+        }
+
+        if (input.Kind == FrontendShortcutEditorActionKind.PowerShell
+            && input.ExecutablePath is null && input.ExecutableArguments is null && input.Url is null
+            && !string.IsNullOrWhiteSpace(input.PowerShellScript))
+        {
+            action = new(ShortcutActionTypeIds.PowerShell, SupportedActionSchemaVersion,
+                JsonSerializer.SerializeToElement(new { script = input.PowerShellScript }));
+            return true;
+        }
+
+        if (input.Kind == FrontendShortcutEditorActionKind.Url
+            && input.ExecutablePath is null && input.ExecutableArguments is null && input.PowerShellScript is null
+            && TryReadUrlInput(input.Url, out var uri))
+        {
+            action = new(ShortcutActionTypeIds.Url, SupportedActionSchemaVersion,
+                JsonSerializer.SerializeToElement(new { url = uri!.AbsoluteUri }));
+            return true;
+        }
+
+        if (input.Kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen
+            && input.ExecutablePath is null && input.ExecutableArguments is null
+            && input.PowerShellScript is null && input.Url is null)
+        {
+            action = new(ShortcutActionTypeIds.ScreenshotFullscreen, SupportedActionSchemaVersion,
+                JsonSerializer.SerializeToElement(new { }));
+            return true;
+        }
+
+        failureMessage = input.Kind switch
+        {
+            FrontendShortcutEditorActionKind.Executable => "Enter a fully qualified .exe path.",
+            FrontendShortcutEditorActionKind.PowerShell => "Enter a PowerShell script.",
+            FrontendShortcutEditorActionKind.Url => "Enter an absolute http or https URL.",
+            FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Screenshot action input is invalid.",
+            _ => "Unsupported Shortcut action."
+        };
+        return false;
+    }
+
+    private static bool TryReadUrlInput(string? value, out Uri? uri)
+    {
+        uri = null;
+        return !string.IsNullOrWhiteSpace(value)
+            && Uri.TryCreate(value, UriKind.Absolute, out uri)
+            && !string.IsNullOrWhiteSpace(uri.Host)
+            && (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsValidExecutablePath(string path)
+    {
+        try
+        {
+            return Path.IsPathFullyQualified(path)
+                && string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private FrontendShortcutMutationResult MutationFailure(string message, FrontendScreenshotFolderSnapshot screenshotFolder) =>
+        CreateMutationResult(false, false, message, CaptureEditor(screenshotFolder));
+
+    private static FrontendShortcutMutationResult CreateMutationResult(
+        bool succeeded,
+        bool changed,
+        string? failureMessage,
+        FrontendShortcutEditorSnapshot snapshot)
+    {
+        var result = new FrontendShortcutMutationResult(succeeded, changed, failureMessage, snapshot);
+        if (FrontendShortcutEditorPayloadPolicy.IsMutationResultWithinLimit(result)) return result;
+        var unavailable = FrontendShortcutEditorSnapshot.Unavailable(snapshot.ScreenshotFolder, EditorTooLargeMessage);
+        return new(false, false, EditorTooLargeMessage, unavailable);
+    }
+
+    private static bool Fail(string message, out string? failureMessage)
+    {
+        failureMessage = message;
+        return false;
     }
 
     internal async Task<ShortcutExecutionResult> ExecuteAsync(Guid tileId, CancellationToken cancellationToken = default)
@@ -320,8 +647,7 @@ internal sealed class ShortcutRuntime
         arguments = string.Empty;
 
         if (!TryReadRequiredString(parameters, "path", out path)
-            || !Path.IsPathFullyQualified(path)
-            || !string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase))
+            || !IsValidExecutablePath(path))
         {
             return false;
         }

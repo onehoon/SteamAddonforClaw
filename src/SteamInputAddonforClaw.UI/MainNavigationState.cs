@@ -6,6 +6,7 @@ internal enum MainNavigationPage
     Profile,
     Controller,
     Overlay,
+    Shortcut,
     HowToUse,
     Settings,
     DeveloperMenu,
@@ -30,6 +31,7 @@ internal sealed class MainNavigationState
                 "Profile" => MainNavigationPage.Profile,
                 "Controller" => MainNavigationPage.Controller,
                 "Overlay" => MainNavigationPage.Overlay,
+                "Shortcut" => MainNavigationPage.Shortcut,
                 "HowToUse" => MainNavigationPage.HowToUse,
                 _ => MainNavigationPage.Device
             };

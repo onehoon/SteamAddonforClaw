@@ -16,6 +16,7 @@ using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Shortcuts;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Updates;
 using SteamInputAddonforClaw.WindowsGaming;
@@ -83,6 +84,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendClawHudSnapshot>>? _captureClawHud;
     private readonly Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
     private readonly Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
+    private readonly ShortcutRuntime? _shortcutRuntime;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -93,7 +95,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null, Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null, Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null, Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null, Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null, Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null, Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null, ShortcutRuntime? shortcutRuntime = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _centerMStartup = centerMStartup;
@@ -115,6 +117,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _captureClawHud = captureClawHud;
         _setClawHudEnabled = setClawHudEnabled;
         _mutateClawHudSetting = mutateClawHudSetting;
+        _shortcutRuntime = shortcutRuntime;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -132,6 +135,81 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     public event EventHandler? StateInvalidated;
+
+    public Task<FrontendShortcutEditorSnapshot> CaptureShortcutEditorAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var folder = CaptureScreenshotFolderSnapshot();
+        return Task.FromResult(_shortcutRuntime?.CaptureEditor(folder)
+            ?? FrontendShortcutEditorSnapshot.Unavailable(folder, "Shortcut editing is unavailable."));
+    }
+
+    public Task<FrontendShortcutMutationResult> MutateShortcutAsync(
+        FrontendShortcutMutationIntent intent,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var folder = CaptureScreenshotFolderSnapshot();
+        if (_shortcutRuntime is null)
+        {
+            var unavailable = FrontendShortcutEditorSnapshot.Unavailable(folder, "Shortcut editing is unavailable.");
+            return Task.FromResult(new FrontendShortcutMutationResult(false, false, unavailable.FailureMessage, unavailable));
+        }
+
+        var result = _shortcutRuntime.MutateEditor(intent, folder);
+        if (result.Succeeded && result.Changed)
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(result);
+    }
+
+    public Task<FrontendScreenshotFolderMutationResult> SetScreenshotSaveFolderAsync(
+        string? folder,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var previousFolder = _settings.ScreenshotSaveFolder;
+        if (!FrontendShortcutEditorPayloadPolicy.IsScreenshotFolderRequestWithinLimit(folder))
+        {
+            return Task.FromResult(new FrontendScreenshotFolderMutationResult(false,
+                "Screenshot folder path is too large.", CaptureScreenshotFolderSnapshot()));
+        }
+
+        try
+        {
+            if (!_settings.ChangeScreenshotSaveFolder(folder))
+                return Task.FromResult(new FrontendScreenshotFolderMutationResult(false,
+                    "Choose a fully qualified folder path.", CaptureScreenshotFolderSnapshot()));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Shortcuts", "Screenshot folder preference could not be saved.", null,
+                ("FailureCategory", exception.GetType().Name));
+            return Task.FromResult(new FrontendScreenshotFolderMutationResult(false,
+                "Failed to save the Screenshot folder.", CaptureScreenshotFolderSnapshot()));
+        }
+
+        var changed = !string.Equals(previousFolder, _settings.ScreenshotSaveFolder, StringComparison.Ordinal);
+        if (changed)
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        var snapshot = CaptureScreenshotFolderSnapshot();
+        var result = new FrontendScreenshotFolderMutationResult(true, null, snapshot);
+        if (!FrontendShortcutEditorPayloadPolicy.IsScreenshotFolderResultWithinLimit(result))
+            return Task.FromResult(new FrontendScreenshotFolderMutationResult(false,
+                "Screenshot folder settings are too large to display.", CaptureScreenshotFolderSnapshot()));
+        return Task.FromResult(result);
+    }
+
+    private FrontendScreenshotFolderSnapshot CaptureScreenshotFolderSnapshot()
+    {
+        var configuredFolder = _settings.ScreenshotSaveFolder;
+        return new FrontendScreenshotFolderSnapshot(
+            string.IsNullOrWhiteSpace(configuredFolder),
+            NirCmdScreenshotCapture.ResolveFolder(configuredFolder),
+            configuredFolder);
+    }
 
     internal void NotifyStateInvalidated() => StateInvalidated?.Invoke(this, EventArgs.Empty);
 

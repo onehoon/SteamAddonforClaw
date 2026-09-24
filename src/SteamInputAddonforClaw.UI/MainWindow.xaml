@@ -39,6 +39,11 @@
                     <SymbolIcon Symbol="View" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="Shortcut" Tag="Shortcut">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="Link" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem Content="How to Use" Tag="HowToUse">
                 <NavigationViewItem.Icon>
                     <SymbolIcon Symbol="Help" />
@@ -56,6 +61,8 @@
             <views:ControllerPage x:Name="ControllerContent" Visibility="Collapsed" />
 
             <views:OverlayPage x:Name="OverlayContent" Visibility="Collapsed" />
+
+            <views:ShortcutPage x:Name="ShortcutContent" Visibility="Collapsed" />
 
             <views:SettingsPage x:Name="SettingsContent" Visibility="Collapsed" />
 

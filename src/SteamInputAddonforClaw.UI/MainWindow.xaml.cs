@@ -71,6 +71,7 @@ public sealed partial class MainWindow : Window
         ProfileContent.Initialize(_frontend);
         ControllerContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
         OverlayContent.Initialize(_frontend);
+        ShortcutContent.Initialize(_frontend, () => WindowNative.GetWindowHandle(this));
         // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
         // leaving the detail page mid-save and immediately toggling on the Controller page had no
         // ordering relationship between the two pages' independent RPCs, so either could land last
@@ -105,6 +106,7 @@ public sealed partial class MainWindow : Window
         SettingsContent.RequestAppUpdateRefresh();
         SettingsContent.RequestSteamFseRefresh();
         OverlayContent.RequestClawHudRefresh();
+        ShortcutContent.RequestRefresh();
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args) => _frontend.StateInvalidated -= OnFrontendStateInvalidated;
@@ -223,6 +225,7 @@ public sealed partial class MainWindow : Window
         var wasVibrationTest = VibrationTestContent.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
         var wasProfile = ProfileContent.Visibility == Visibility.Visible;
+        var wasShortcut = ShortcutContent.Visibility == Visibility.Visible;
         var wasClawSensorProbe = ClawSensorProbeContent.Visibility == Visibility.Visible;
         var wasFanHardwareProbe = FanHardwareProbeContent.Visibility == Visibility.Visible;
         var wasBatteryChargeLimitTest = BatteryChargeLimitTestContent.Visibility == Visibility.Visible;
@@ -230,6 +233,7 @@ public sealed partial class MainWindow : Window
         ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
         OverlayContent.Visibility = page == MainNavigationPage.Overlay ? Visibility.Visible : Visibility.Collapsed;
+        ShortcutContent.Visibility = page == MainNavigationPage.Shortcut ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
@@ -248,6 +252,8 @@ public sealed partial class MainWindow : Window
         if (page == MainNavigationPage.Profile) ProfileContent.Activate();
         else if (wasProfile) ProfileContent.Deactivate();
         if (page == MainNavigationPage.Overlay) OverlayContent.Activate();
+        if (page == MainNavigationPage.Shortcut) ShortcutContent.Activate();
+        else if (wasShortcut) ShortcutContent.Deactivate();
         if (page == MainNavigationPage.ClawSensorProbe) ClawSensorProbeContent.Activate();
         else if (wasClawSensorProbe) ClawSensorProbeContent.Deactivate();
         if (page == MainNavigationPage.FanHardwareProbe) FanHardwareProbeContent.Activate();

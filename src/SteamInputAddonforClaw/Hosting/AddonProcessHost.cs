@@ -538,7 +538,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             quickSettingsPowerSource: WindowsAcDcPowerSource.Read,
             captureClawHud: CaptureClawHudFrontendAsync,
             setClawHudEnabled: SetClawHudFrontendAsync,
-            mutateClawHudSetting: MutateClawHudFrontendAsync);
+            mutateClawHudSetting: MutateClawHudFrontendAsync,
+            shortcutRuntime: _shortcutRuntime);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);

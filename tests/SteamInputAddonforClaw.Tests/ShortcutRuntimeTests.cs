@@ -43,6 +43,11 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.False(runtime.Capture().Available);
         Assert.Equal(ShortcutExecutionOutcome.Unavailable, (await runtime.ExecuteAsync(tileId)).Outcome);
         Assert.Equal("Shortcut storage is unavailable.", (await runtime.ExecuteAsync(tileId)).FailureMessage);
+        var edit = runtime.MutateEditor(
+            new FrontendShortcutMutationIntent(FrontendShortcutMutationKind.Create, Title: "New",
+                Action: new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.Url, Url: "https://example.com")),
+            new FrontendScreenshotFolderSnapshot(true, @"C:\Users\Test\Pictures\Screenshots", null));
+        Assert.False(edit.Succeeded);
         Assert.Equal(json, File.ReadAllText(ShortcutsPath));
     }
 
