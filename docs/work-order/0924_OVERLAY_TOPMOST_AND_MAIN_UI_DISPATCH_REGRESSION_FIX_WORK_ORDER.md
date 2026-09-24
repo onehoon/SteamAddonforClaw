@@ -265,6 +265,19 @@ SetWindowPos(HWND_TOPMOST) returned success
 → Show still reported success
 ```
 
+This evidence **confirms the failed Topmost postcondition**, but it does **not** by itself prove that raw Win32 visibility calls conflicting with WinUI/AppWindow state are the root cause.
+
+Treat the visibility-owner mismatch described below as the current implementation hypothesis to test:
+
+```text
+current mixed visibility/presenter path
+→ plausible contributor
+→ replace with one clearer visibility owner
+→ hardware validation decides whether the hypothesis is correct
+```
+
+Do not describe the root cause as proven until reference-device validation shows the new path consistently preserves `TopmostStyle=True`.
+
 The next fix should simplify ownership rather than add another retry/watchdog.
 
 ## 4.2 Use AppWindow as the visibility owner
@@ -525,9 +538,39 @@ TopmostStyle=False
 → do not arm/use the Overlay as if it were valid
 ```
 
-The existing Runtime/Overlay command acknowledgement and capture rollback path must remain the owner of Show failure handling.
+Preserve the existing Runtime ordering exactly.
 
-Do not add a second rollback path inside the Overlay process.
+Current Host order is:
+
+```text
+_overlayController.ShowAsync()
+→ require positive Visible acknowledgement
+→ presentation.PauseForOverlayAsync(...)
+→ require neutral/pause success
+→ start OverlayControllerInputRouter
+→ _overlayCaptureActive = true
+→ capture committed
+```
+
+If Show does **not** acknowledge successfully:
+
+```text
+OverlayProcessController
+→ retires the failed current Overlay session
+
+AddonProcessHost
+→ returns immediately
+→ does NOT call PauseForOverlayAsync
+→ does NOT start OverlayControllerInputRouter
+→ does NOT set _overlayCaptureActive
+→ current presentation stays live
+```
+
+Therefore this is **not a capture rollback path** for a Show failure. Capture/pause has not started yet.
+
+Do not add any new presentation resume/rollback operation for this branch.
+
+Do not add a second failure-recovery path inside the Overlay process.
 
 ## 4.7 Do not add retries or foreground stealing
 
@@ -615,14 +658,33 @@ Do not add individual dispatcher wrappers to every page.
 
 Do not make `NamedPipeAddonFrontendClient` depend on WinUI.
 
-The one correct boundary is:
+For the refresh group owned by `MainWindow.OnFrontendStateInvalidated`, the correct boundary is:
 
 ```text
 NamedPipe frontend notification
 → MainWindow.OnFrontendStateInvalidated
 → MainWindow.DispatcherQueue
-→ page refresh requests
+→ MainWindow-owned Settings / SteamFSE / ClawHUD / Shortcut / status refresh requests
 ```
+
+This statement is intentionally limited to the `MainWindow` subscription path.
+
+`DevicePage` and `ProfilePage` also subscribe directly to `StateInvalidated`, but they already marshal their own callbacks through their existing `DispatcherQueue.TryEnqueue(...)` paths.
+
+Required scope:
+
+```text
+MainWindow StateInvalidated subscription
+→ fix in this commit
+
+DevicePage direct StateInvalidated subscription
+→ keep existing dispatcher path unchanged
+
+ProfilePage direct StateInvalidated subscription
+→ keep existing dispatcher path unchanged
+```
+
+Do not reroute Device/Profile notifications through MainWindow and do not remove their existing page-local dispatch.
 
 Recommended shape:
 
@@ -658,10 +720,11 @@ Equivalent naming is fine.
 
 The important invariants are:
 
-1. every refresh initiated by `StateInvalidated` crosses the MainWindow dispatcher first;
-2. only one central dispatch boundary is added;
-3. transport remains UI-agnostic;
-4. page render methods remain ordinary UI-thread methods.
+1. every refresh in the **MainWindow-initiated invalidation group** crosses the MainWindow dispatcher before Settings / SteamFSE / ClawHUD / Shortcut/status UI work starts;
+2. DevicePage/ProfilePage keep their existing independent dispatcher-owned invalidation paths;
+3. only one new central dispatch boundary is added for the MainWindow group;
+4. transport remains UI-agnostic;
+5. page render methods remain ordinary UI-thread methods.
 
 ## 5.3 Avoid the unnecessary double-dispatch for status
 
@@ -697,13 +760,16 @@ merely for this event path.
 
 `ShortcutPage.RequestRefresh()` already owns its own dispatcher because of its page-local implementation. That is not a reason to duplicate the same pattern everywhere.
 
-The intended architecture is:
+The intended architecture for this specific subscription is:
 
 ```text
 cross-thread frontend event
+→ MainWindow subscription
 → marshal once at MainWindow
-→ ordinary Main UI calls
+→ ordinary MainWindow-owned Main UI calls
 ```
+
+This does not replace the already-correct DevicePage/ProfilePage direct-subscription dispatcher paths.
 
 ## 5.5 Do not add refresh epochs / cancellation / coalescing
 
@@ -756,6 +822,19 @@ no SetForegroundWindow()
 
 Remove assertions that require raw `SWP_SHOWWINDOW` / `SWP_HIDEWINDOW` if those APIs are intentionally retired.
 
+Also preserve the Runtime capture-order contract with a focused test in `tests/SteamInputAddonforClaw.Tests` (add one if no existing test proves the full branch):
+
+```text
+Overlay Show failure / no positive Visible acknowledgement
+→ Overlay session retirement remains OverlayProcessController-owned
+→ AddonProcessHost returns before PauseForOverlayAsync
+→ no OverlayControllerInputRouter start
+→ _overlayCaptureActive is never set true
+→ presentation remains live
+```
+
+This should be a deterministic contract/source-order test. Do not manufacture scheduler timing.
+
 Do not introduce a generalized HWND mock framework solely for this.
 
 ## 6.2 Commit 2 tests
@@ -766,19 +845,21 @@ Add a focused architecture/source test in:
 tests/SteamInputAddonforClaw.UiTests/UiArchitectureTests.cs
 ```
 
-Verify that the `StateInvalidated` path is marshaled through the MainWindow `DispatcherQueue` before the affected page refresh requests are invoked.
+Verify that the **MainWindow-owned** `StateInvalidated` path is marshaled through the MainWindow `DispatcherQueue` before its affected refresh requests are invoked.
 
 The test should cover the intended relationship:
 
 ```text
-OnFrontendStateInvalidated
-→ DispatcherQueue
+MainWindow.OnFrontendStateInvalidated
+→ MainWindow DispatcherQueue
 → RefreshSystemStatusAsync
 → RequestAppUpdateRefresh
 → RequestSteamFseRefresh
 → RequestClawHudRefresh
 → Shortcut RequestRefresh
 ```
+
+Also assert or otherwise preserve that the existing `DevicePage` and `ProfilePage` direct `StateInvalidated` handlers continue to use their own dispatcher enqueue paths and are not rerouted through MainWindow.
 
 Do not test the bug by manufacturing arbitrary thread timing.
 
@@ -788,9 +869,34 @@ This is a deterministic ownership/thread-affinity test.
 
 # 7. Required validation
 
-Run the normal full repository build/test suite.
+Run the normal repository build/test validation required by CI.
 
-Then hardware/manual validation on the MSI Claw reference device.
+**Do not rely on `SteamInputAddonforClaw.slnx` alone for this work order.**
+
+Current `SteamInputAddonforClaw.slnx` includes:
+
+```text
+tests/SteamInputAddonforClaw.Tests/SteamInputAddonforClaw.Tests.csproj
+```
+
+but does **not** include:
+
+```text
+tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj
+```
+
+Therefore explicitly rebuild and run the UI test project in both configurations:
+
+```powershell
+dotnet test tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj -c Debug
+dotnet test tests/SteamInputAddonforClaw.UiTests/SteamInputAddonforClaw.UiTests.csproj -c Release
+```
+
+Do not use `--no-build` for these required UI-test runs. The project must be rebuilt so stale UI/Overlay test outputs cannot mask the new source-wiring assertions.
+
+Also run the normal core test project / solution validation so the new Show-failure-before-capture contract test is executed.
+
+Then perform hardware/manual validation on the MSI Claw reference device.
 
 ## 7.1 Topmost validation
 
@@ -914,8 +1020,9 @@ Merge only when all are true.
 ## Commit 2
 
 - `NamedPipeAddonFrontendClient` remains UI-agnostic.
-- `MainWindow.OnFrontendStateInvalidated` marshals the refresh batch to the Main UI dispatcher.
-- Update / SteamFSE / ClawHUD rendering no longer runs from the named-pipe read-loop thread.
+- `MainWindow.OnFrontendStateInvalidated` marshals only its MainWindow-owned refresh batch to the Main UI dispatcher.
+- Update / SteamFSE / ClawHUD rendering no longer runs from the named-pipe read-loop thread through the MainWindow subscription.
+- DevicePage/ProfilePage retain their existing direct subscription + dispatcher behavior unchanged.
 - Existing page-local feature ownership remains unchanged.
 - No new refresh manager, lock, epoch, debounce, or cancellation architecture is added.
 - Hardware/UI logs no longer contain the reproduced `RPC_E_WRONG_THREAD (0x8001010E)` refresh failures.
