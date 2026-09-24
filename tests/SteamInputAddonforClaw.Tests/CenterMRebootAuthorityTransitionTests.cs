@@ -408,163 +408,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Contains("cleared", result.FailureMessage!, StringComparison.OrdinalIgnoreCase);
     }
 
-    // ---- Enter BIOS firmware restart ----
-
-    [Fact]
-    public async Task Enter_bios_disabled_path_prepares_mode5_without_mutating_authority_state()
-    {
-        var h = new Harness(this)
-        {
-            StartEnabled = false,
-            PhysicalRelease = new(true, "Released", ["owned-target"]),
-        };
-        h.Hid.Active = true;
-        h.Hid.Whitelist.Add(AddonExe);
-        h.Hid.Hidden.Add("owned-target");
-        var restart = new FakeRestart();
-
-        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
-
-        Assert.Equal(FrontendEnterBiosOutcome.RestartRequested, result.Outcome);
-        Assert.Equal(new[] { "firmware-authorization", "bios-mode-prepare", "firmware-restart" }, h.Order);
-        Assert.Equal(1, restart.FirmwareAuthorizationCalls);
-        Assert.Equal(1, restart.FirmwareCalls);
-        Assert.Equal(0, restart.Calls);
-        Assert.True(restart.FirmwareSessionDisposed);
-        Assert.Equal(FrontendCenterMStartupState.Disabled, h.Roots.Classify());
-        Assert.True(h.Hid.Active);
-        Assert.Contains(AddonExe, h.Hid.Whitelist);
-        Assert.Contains("owned-target", h.Hid.Hidden);
-        Assert.Equal(0, h.StockAuthorityRestoredCalls);
-    }
-
-    [Fact]
-    public async Task Enter_bios_enabled_path_prepares_mode5_without_creating_addon_authority()
-    {
-        var h = new Harness(this) { StartEnabled = true };
-        h.Hid.Active = true;
-        h.Hid.Whitelist.Add(AddonExe);
-        var restart = new FakeRestart();
-
-        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
-
-        Assert.Equal(FrontendEnterBiosOutcome.RestartRequested, result.Outcome);
-        Assert.Equal(new[] { "firmware-authorization", "bios-mode-prepare", "firmware-restart" }, h.Order);
-        Assert.Equal(1, restart.FirmwareAuthorizationCalls);
-        Assert.Equal(FrontendCenterMStartupState.Enabled, h.Roots.Classify());
-        Assert.True(h.Hid.Active);
-        Assert.Contains(AddonExe, h.Hid.Whitelist);
-        Assert.Equal(0, restart.Calls);
-        Assert.True(restart.FirmwareSessionDisposed);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Enter_bios_fails_closed_for_ambiguous_or_unavailable_center_m_state(bool partial)
-    {
-        var h = partial
-            ? new Harness(this) { StartPartial = true }
-            : new Harness(this) { CenterMAvailable = false };
-        var restart = new FakeRestart();
-
-        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
-
-        Assert.Equal(partial ? FrontendEnterBiosOutcome.Blocked : FrontendEnterBiosOutcome.Unavailable, result.Outcome);
-        Assert.Empty(h.Order);
-        Assert.Equal(0, restart.FirmwareCalls);
-    }
-
-    [Fact]
-    public async Task Enter_bios_stops_before_restart_when_presentation_or_physical_release_fails()
-    {
-        var h = new Harness(this)
-        {
-            StartEnabled = false,
-            PhysicalRelease = new(false, "VirtualPresentationReleaseFailed", []),
-        };
-        var restart = new FakeRestart();
-
-        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
-
-        Assert.Equal(FrontendEnterBiosOutcome.Failed, result.Outcome);
-        Assert.Equal(["firmware-authorization", "bios-mode-prepare"], h.Order);
-        Assert.Equal(0, h.StockBaselineCalls);
-        Assert.Equal(0, restart.FirmwareCalls);
-        Assert.True(restart.FirmwareSessionDisposed);
-    }
-
-    [Fact]
-    public async Task Enter_bios_stops_before_restart_when_bios_mode_preparation_fails()
-    {
-        var h = new Harness(this)
-        {
-            StartEnabled = false,
-            PhysicalRelease = new(false, "BiosGamepadModeNotVerified", []),
-        };
-        var restart = new FakeRestart();
-
-        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
-
-        Assert.Equal(FrontendEnterBiosOutcome.Failed, result.Outcome);
-        Assert.Equal(["firmware-authorization", "bios-mode-prepare"], h.Order);
-        Assert.Equal(0, restart.FirmwareCalls);
-        Assert.True(restart.FirmwareSessionDisposed);
-    }
-
-    [Fact]
-    public async Task Enter_bios_uac_cancellation_does_not_mutate_controller_state()
-    {
-        var h = new Harness(this) { StartEnabled = false };
-        var restart = new FakeRestart { FirmwareAuthorization = FirmwareRestartAuthorizationOutcome.Cancelled };
-
-        var result = await h.Build(restart).RequestEnterBiosAsync(CancellationToken.None);
-
-        Assert.Equal(FrontendEnterBiosOutcome.Blocked, result.Outcome);
-        Assert.Equal(["firmware-authorization"], h.Order);
-        Assert.Equal(1, restart.FirmwareAuthorizationCalls);
-        Assert.Equal(0, restart.FirmwareCalls);
-        Assert.False(restart.FirmwareSessionDisposed);
-        Assert.Equal(FrontendCenterMStartupState.Disabled, h.Roots.Classify());
-    }
-
-    [Fact]
-    public async Task Firmware_restart_failure_leaves_verified_temporary_bios_mode_and_allows_retry()
-    {
-        var h = new Harness(this) { StartEnabled = false };
-        var restart = new FakeRestart { FirmwareResult = WindowsRestartRequestResult.Failed };
-        var transition = h.Build(restart);
-
-        var failed = await transition.RequestEnterBiosAsync(CancellationToken.None);
-
-        Assert.Equal(FrontendEnterBiosOutcome.Failed, failed.Outcome);
-        Assert.Equal("BIOS restart could not be started. Restart Windows, then try Enter BIOS again.", failed.FailureMessage);
-        Assert.Equal(1, restart.FirmwareAuthorizationCalls);
-        Assert.Equal(1, restart.FirmwareCalls);
-        Assert.True(restart.FirmwareSessionDisposed);
-        Assert.Equal(FrontendCenterMStartupState.Disabled, h.Roots.Classify());
-
-        restart.FirmwareResult = WindowsRestartRequestResult.Requested;
-        var retried = await transition.RequestEnterBiosAsync(CancellationToken.None);
-
-        Assert.Equal(FrontendEnterBiosOutcome.RestartRequested, retried.Outcome);
-        Assert.Equal(2, restart.FirmwareAuthorizationCalls);
-        Assert.Equal(2, restart.FirmwareCalls);
-    }
-
-    [Fact]
-    public async Task Enter_bios_honors_cancellation_before_any_controller_mutation()
-    {
-        var h = new Harness(this) { StartEnabled = false };
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-
-        var result = await h.Build().RequestEnterBiosAsync(cancellation.Token);
-
-        Assert.Equal(FrontendEnterBiosOutcome.Blocked, result.Outcome);
-        Assert.Empty(h.Order);
-    }
-
     // ---- Architecture guards ----
 
     [Fact]
@@ -595,56 +438,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         // A started process is not an accepted restart: the seam must verify the command result.
         Assert.Contains("WaitForExit", source);
         Assert.Contains("ExitCode", source);
-    }
-
-    [Fact]
-    public void Production_firmware_restart_seam_uses_exact_fw_arguments_and_bounded_result_checks()
-    {
-        var root = TestPaths.RepositoryRoot();
-        var transition = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/CenterMRebootAuthorityTransition.cs"));
-        var client = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/FirmwareRestartHelperClient.cs"));
-        var helper = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/FirmwareRestartHelper.cs"));
-
-        Assert.Contains("PrepareFirmwareRestartAsync", transition);
-        Assert.Contains("FirmwareRestartHelperClient", transition);
-        Assert.DoesNotContain("\"/r /fw /t 0\"", transition);
-        Assert.Contains("UseShellExecute = true", client);
-        Assert.Contains("Verb = \"runas\"", client);
-        Assert.Contains("FirmwareRestartHelper.Argument", client);
-        Assert.Contains("Status", client);
-        Assert.Contains("\"/r /fw /t 0\"", helper);
-        Assert.Contains("UseShellExecute = false", helper);
-        Assert.Contains("WaitForExit", helper);
-        Assert.Contains("ParentCommandTimeout", helper);
-        Assert.DoesNotContain("\"/r /f /t 0\"", helper);
-    }
-
-    [Fact]
-    public void Firmware_helper_authorization_is_separate_from_plain_restart()
-    {
-        var root = TestPaths.RepositoryRoot();
-        var source = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/CenterMRebootAuthorityTransition.cs"));
-        var client = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/FirmwareRestartHelperClient.cs"));
-
-        Assert.Contains("UseShellExecute = false", source);
-        Assert.DoesNotContain("Verb = \"runas\"", source);
-        Assert.Contains("UseShellExecute = true", client);
-        Assert.Contains("Verb = \"runas\"", client);
-        Assert.Contains("ErrorCancelled", client);
-    }
-
-    [Fact]
-    public void Firmware_helper_entrypoint_is_handled_before_single_instance_runtime_startup()
-    {
-        var root = TestPaths.RepositoryRoot();
-        var source = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Program.cs"));
-        var helper = source.IndexOf("FirmwareRestartHelper.TryRun", StringComparison.Ordinal);
-        var singleInstance = source.IndexOf("SingleInstanceGate.CreateForCurrentUser", StringComparison.Ordinal);
-
-        Assert.True(helper >= 0);
-        Assert.True(singleInstance >= 0);
-        Assert.True(helper < singleInstance);
-        Assert.Contains("--firmware-restart-helper", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/CenterMStartup/FirmwareRestartHelper.cs")));
     }
 
     // ================= PR12: stock-safe uninstall preparation (work order section 22) =================
@@ -1047,13 +840,7 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                 // Full1902 Policy B: the verified stock-authority-restored boundary callback. Counted
                 // rather than added to Order so the existing ordering assertions stay unchanged.
                 () => { StockAuthorityRestoredCalls++; StockAuthorityRestoredAtOrderIndex = Order.Count; },
-                r,
-                preparePhysicalOwnershipForFirmwareBios: token =>
-                {
-                    Assert.False(token.CanBeCanceled);
-                    Order.Add("bios-mode-prepare");
-                    return Task.FromResult(PhysicalRelease);
-                });
+                r);
         }
 
         private sealed class FakeInvoker(Harness h) : ICenterMStartupHelperInvoker
@@ -1093,13 +880,8 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     private sealed class FakeRestart : IWindowsRestartRequester
     {
         public WindowsRestartRequestResult Result { get; set; } = WindowsRestartRequestResult.Requested;
-        public WindowsRestartRequestResult FirmwareResult { get; set; } = WindowsRestartRequestResult.Requested;
-        public FirmwareRestartAuthorizationOutcome FirmwareAuthorization { get; set; } = FirmwareRestartAuthorizationOutcome.Ready;
         public List<string>? Order { get; set; }
         public int Calls { get; private set; }
-        public int FirmwareAuthorizationCalls { get; private set; }
-        public int FirmwareCalls { get; private set; }
-        public bool FirmwareSessionDisposed { get; private set; }
 
         public WindowsRestartRequestResult RequestRestart()
         {
@@ -1108,32 +890,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
             return Result;
         }
 
-        public Task<FirmwareRestartAuthorizationResult> PrepareFirmwareRestartAsync(CancellationToken cancellationToken)
-        {
-            FirmwareAuthorizationCalls++;
-            Order?.Add("firmware-authorization");
-            if (FirmwareAuthorization != FirmwareRestartAuthorizationOutcome.Ready)
-                return Task.FromResult(new FirmwareRestartAuthorizationResult(FirmwareAuthorization, null, "authorization failed"));
-
-            return Task.FromResult(new FirmwareRestartAuthorizationResult(
-                FirmwareRestartAuthorizationOutcome.Ready, new FakeFirmwareSession(this), null));
-        }
-
-        private sealed class FakeFirmwareSession(FakeRestart owner) : IFirmwareRestartSession
-        {
-            public Task<WindowsRestartRequestResult> RequestRestartAsync(CancellationToken cancellationToken)
-            {
-                owner.FirmwareCalls++;
-                if (owner.FirmwareResult == WindowsRestartRequestResult.Requested) owner.Order?.Add("firmware-restart");
-                return Task.FromResult(owner.FirmwareResult);
-            }
-
-            public ValueTask DisposeAsync()
-            {
-                owner.FirmwareSessionDisposed = true;
-                return ValueTask.CompletedTask;
-            }
-        }
     }
 
     private sealed class FakeHid : IHidHideClient

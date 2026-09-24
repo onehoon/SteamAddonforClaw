@@ -1,7 +1,7 @@
 # Work Order — Full1902 PID1902 GamepadMode 2 Invariant Normalization
 
 > Date: 2026-09-22  
-> Status: Implementation work order  
+> Status: Active Mode2 reference; the app-owned Enter BIOS path is superseded and removed
 > Baseline: `main` at `f1747dab271fe7bd021eba6121f3ff840de4b653`  
 > Scope: Full1902 physical controller ownership only  
 > Out of scope: Enter-BIOS mode selector UI, RB+RT BIOS-entry RE, CTW integration, new controller modes exposed to users
@@ -18,7 +18,6 @@ Before implementation, read and preserve the current Full1902 authority/lifecycl
 - `docs/work-order/PR5_PID1902_DIRECTINPUT_PHYSICAL_OWNERSHIP_WORK_ORDER.md`
 - `docs/work-order/PR9_OWNED_PID1901_DRIFT_RECLAIM_WORK_ORDER.md`
 - `docs/work-order/PR10_PHYSICAL_DEVICE_LOSS_PNP_RETURN_RECOVERY_WORK_ORDER.md`
-- `docs/work-order/FULL1902_ENTER_BIOS_MODE5_HANDOFF_AND_MODE2_BOOT_RECONCILE_WORK_ORDER.md`
 
 Also inspect current production/tests:
 
@@ -677,24 +676,14 @@ There is no need to remember how the controller reached another mode.
 
 ---
 
-## 16. Do not change Enter BIOS in this PR
+## 16. Enter BIOS is firmware-owned, not an Addon feature
 
-The existing Enter-BIOS Mode5 experiment remains separate.
+The Main UI Enter BIOS card, named-pipe RPC, firmware-restart helper, and Addon-owned
+Mode5 handoff have been removed. BIOS entry remains the physical firmware RB+RT path and
+is outside this Mode2 normalization work order.
 
-Do not include the planned diagnostic dropdown in this PR.
-
-Do not:
-
-- add frontend mode selection;
-- bump the frontend named-pipe protocol;
-- change `RequestEnterBiosAsync`;
-- change the firmware-restart helper;
-- change RB+RT research behavior;
-- change the `PrepareForFirmwareBiosAsync` target.
-
-This PR first fixes the general Windows/Full1902 invariant.
-
-A following diagnostic PR can make the Enter-BIOS target selectable once normal Windows convergence to Mode2 is reliable for every tested result.
+Do not add a frontend mode selector or reintroduce an Addon BIOS restart path. This document
+continues to define only the normal Windows/Full1902 convergence to verified DirectInput / Mode2.
 
 ---
 
@@ -1168,7 +1157,6 @@ MsiClawModeController.cs
 frontend contracts
 named-pipe protocol
 Settings UI
-FirmwareRestartHelper
 VIIPER/presentation policy
 HidHide policy
 ```

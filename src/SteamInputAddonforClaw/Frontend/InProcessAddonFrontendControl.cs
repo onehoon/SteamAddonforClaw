@@ -1419,17 +1419,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return await _centerMAuthorityTransition.RequestAsync(centerMEnabled, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<FrontendEnterBiosResult> RequestEnterBiosAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        if (_centerMAuthorityTransition is null)
-            return new FrontendEnterBiosResult(FrontendEnterBiosOutcome.Unavailable, "Enter BIOS is unavailable.");
-
-        // Enter BIOS deliberately does not broadcast StateInvalidated: it has no Steam Quick Access/Overlay
-        // surface and a successful request is expected to leave Windows immediately.
-        return await _centerMAuthorityTransition.RequestEnterBiosAsync(cancellationToken).ConfigureAwait(false);
-    }
-
     private static FrontendTdpSnapshot MapTdpSnapshot(TdpRuntimeSnapshot snapshot) => new(
         snapshot.Available,
         snapshot.PersistenceWritable,

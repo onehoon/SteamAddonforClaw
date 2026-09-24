@@ -32,12 +32,10 @@ internal sealed record StockRestorationResult(bool Succeeded, string Reason, Fro
 
 /// <summary>The one Runtime-owned Windows-restart seam for the reboot-bound authority transition
 /// (work order PR3 section 10). Production issues a normal local interactive-user restart
-/// (<c>shutdown.exe /r /t 0</c>) and uses the narrow Enter BIOS helper handshake for the
-/// firmware restart.</summary>
+/// (<c>shutdown.exe /r /t 0</c>).</summary>
 internal interface IWindowsRestartRequester
 {
     WindowsRestartRequestResult RequestRestart();
-    Task<FirmwareRestartAuthorizationResult> PrepareFirmwareRestartAsync(CancellationToken cancellationToken);
 }
 
 internal sealed class WindowsRestartRequester : IWindowsRestartRequester
@@ -76,8 +74,6 @@ internal sealed class WindowsRestartRequester : IWindowsRestartRequester
         }
     }
 
-    public Task<FirmwareRestartAuthorizationResult> PrepareFirmwareRestartAsync(CancellationToken cancellationToken) =>
-        new FirmwareRestartHelperClient().PrepareAsync(cancellationToken);
 }
 
 internal interface ICenterMRebootAuthorityTransition
@@ -85,11 +81,6 @@ internal interface ICenterMRebootAuthorityTransition
     /// <param name="centerMEnabled"><see langword="true"/> = Enable and Restart (restore MSI/stock
     /// authority); <see langword="false"/> = Disable and Restart (switch authority to the Addon).</param>
     Task<FrontendCenterMStartupMutationResult> RequestAsync(bool centerMEnabled, CancellationToken cancellationToken);
-
-    /// <summary>Temporarily retires Addon controller ownership to verified MSI GamepadMode BIOS
-    /// mode 5 and requests the firmware UI on the next restart. This never mutates Center M startup
-    /// roots, persistent HidHide, Addon startup registration, or stock-authority policy.</summary>
-    Task<FrontendEnterBiosResult> RequestEnterBiosAsync(CancellationToken cancellationToken);
 
     /// <summary>PR12: the Runtime-owned stock-restoration + startup-task removal that must complete
     /// before the Addon may be removed from the machine. Shares the <c>Enable Center M</c> stock
@@ -123,7 +114,6 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private readonly Func<UserTerminationDecision> _lowerLevelRuntimeSafety;
     private readonly Func<CancellationToken, Task<(RuntimePrerequisiteAssessment Prerequisites, bool RecoverySafe)>> _captureAdmission;
     private readonly Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> _releasePhysicalOwnership;
-    private readonly Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> _preparePhysicalOwnershipForFirmwareBios;
     // PR12 section 6: independent current-world proof that the physical MSI Claw is PID1901/XInput --
     // NothingOwned from the process owner is NOT sufficient stock proof.
     private readonly Func<CancellationToken, Task<StockCenterMStartupBaselineResult>> _establishStockBaseline;
@@ -157,8 +147,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         Func<IReadOnlyList<string>> captureExistingOwnedHiddenTargets,
         Func<StartupRegistrationResult> removeStartupRegistration,
         Action onStockAuthorityRestored,
-        IWindowsRestartRequester restartRequester,
-        Func<CancellationToken, Task<SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult>> preparePhysicalOwnershipForFirmwareBios)
+        IWindowsRestartRequester restartRequester)
     {
         _centerMStartup = centerMStartup;
         _startupSettings = startupSettings;
@@ -166,7 +155,6 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _lowerLevelRuntimeSafety = lowerLevelRuntimeSafety;
         _captureAdmission = captureAdmission;
         _releasePhysicalOwnership = releasePhysicalOwnership;
-        _preparePhysicalOwnershipForFirmwareBios = preparePhysicalOwnershipForFirmwareBios;
         _establishStockBaseline = establishStockBaseline;
         _captureExistingOwnedHiddenTargets = captureExistingOwnedHiddenTargets;
         _removeStartupRegistration = removeStartupRegistration;
@@ -194,68 +182,6 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return Cancel(_centerMStartup.Capture(), "The MSI Center M authority transition was cancelled before any change was made.");
-        }
-        finally
-        {
-            Volatile.Write(ref _inProgress, 0);
-        }
-    }
-
-    public async Task<FrontendEnterBiosResult> RequestEnterBiosAsync(CancellationToken cancellationToken)
-    {
-        if (Interlocked.Exchange(ref _inProgress, 1) != 0)
-            return EnterBiosBlocked("Another MSI Center M authority or BIOS transition is already in progress.");
-
-        try
-        {
-            var snapshot = _centerMStartup.Capture();
-            AppLog.Info("CenterM.Authority", "Enter BIOS requested.",
-                ("Event", "EnterBiosRequested"), ("CenterMState", snapshot.State));
-            if (snapshot.State == FrontendCenterMStartupState.Unavailable)
-                return EnterBiosUnavailable(snapshot.FailureMessage ?? "MSI Center M startup state is unavailable.");
-            if (snapshot.State == FrontendCenterMStartupState.Partial)
-                return EnterBiosBlocked("MSI Center M startup state is partial. Enter BIOS was not started.");
-            if (!_lowerLevelRuntimeSafety().CanTerminate)
-                return EnterBiosBlocked("The controller is busy with a routing, native-mode, or recovery operation. Try again once it finishes.");
-
-            // Cancellation is honored only before the confirmed Runtime-owned mutation begins.
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var authorization = await _restartRequester.PrepareFirmwareRestartAsync(cancellationToken).ConfigureAwait(false);
-            if (authorization.Outcome == FirmwareRestartAuthorizationOutcome.Cancelled)
-                return EnterBiosBlocked(authorization.FailureMessage ?? "Enter BIOS was cancelled before the controller transition began.");
-            if (!authorization.Succeeded)
-                return EnterBiosFailed(authorization.FailureMessage ?? "The elevated firmware restart helper could not be authorized.");
-
-            await using var firmwareSession = authorization.Session!;
-
-            var prepare = await _preparePhysicalOwnershipForFirmwareBios(CancellationToken.None).ConfigureAwait(false);
-            AppLog.Info("CenterM.Authority", "Enter BIOS GamepadMode preparation completed.",
-                ("Event", prepare.Succeeded ? "EnterBiosGamepadModePrepareCompleted" : "EnterBiosGamepadModePrepareFailed"),
-                ("Succeeded", prepare.Succeeded), ("Reason", prepare.Reason));
-            if (!prepare.Succeeded)
-                return EnterBiosFailed("The controller could not be prepared for BIOS. BIOS restart was not requested. Try again.");
-
-            var restart = await firmwareSession.RequestRestartAsync(CancellationToken.None).ConfigureAwait(false);
-            if (restart == WindowsRestartRequestResult.Requested)
-            {
-                AppLog.Info("CenterM.Authority", "Firmware restart requested.", ("Event", "EnterBiosFirmwareRestartRequested"));
-                return new FrontendEnterBiosResult(FrontendEnterBiosOutcome.RestartRequested, null);
-            }
-
-            AppLog.Warn("CenterM.Authority", "Firmware restart request failed after BIOS mode was verified.", null,
-                ("Event", "EnterBiosFirmwareRestartFailed"));
-            return EnterBiosFailed("BIOS restart could not be started. Restart Windows, then try Enter BIOS again.");
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return EnterBiosBlocked("Enter BIOS was cancelled before the controller transition began.");
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("CenterM.Authority", "Enter BIOS operation failed.", exception,
-                ("Event", "EnterBiosFailed"));
-            return EnterBiosFailed("Enter BIOS could not be started. Try again.");
         }
         finally
         {
@@ -507,12 +433,4 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         new(FrontendCenterMStartupMutationOutcome.Unavailable, snapshot,
             snapshot.FailureMessage ?? "MSI Center M controller authority control is unavailable on this device.");
 
-    private static FrontendEnterBiosResult EnterBiosBlocked(string message) =>
-        new(FrontendEnterBiosOutcome.Blocked, message);
-
-    private static FrontendEnterBiosResult EnterBiosFailed(string message) =>
-        new(FrontendEnterBiosOutcome.Failed, message);
-
-    private static FrontendEnterBiosResult EnterBiosUnavailable(string message) =>
-        new(FrontendEnterBiosOutcome.Unavailable, message);
 }

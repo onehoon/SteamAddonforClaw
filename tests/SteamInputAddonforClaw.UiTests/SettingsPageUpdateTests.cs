@@ -64,6 +64,17 @@ public sealed class SettingsPageUpdateTests
         Assert.DoesNotContain("Restart", toggleMethod, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Settings_no_longer_exposes_the_app_owned_enter_bios_action()
+    {
+        var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
+        var code = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml.cs");
+
+        Assert.DoesNotContain("EnterBios", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Enter BIOS", xaml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("RequestEnterBios", code, StringComparison.Ordinal);
+    }
+
     private static string ReadSource(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

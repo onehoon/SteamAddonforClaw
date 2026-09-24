@@ -60,7 +60,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(40, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(41, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -74,7 +74,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(40, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(41, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -83,20 +83,6 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(fake.ProductionBatterySnapshot, await client.CaptureBatteryChargeLimitAsync());
         Assert.Equal(fake.ProductionBatteryMutationResult, await client.SetDeviceBatteryChargeLimitEnabledAsync(false));
         Assert.Equal(fake.ProductionBatteryMutationResult, await client.SetDeviceBatteryChargeLimitPercentAsync(90));
-    }
-
-    [Fact]
-    public async Task Enter_bios_request_round_trips_as_a_narrow_v36_main_ui_rpc()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-
-        var result = await client.RequestEnterBiosAsync();
-
-        Assert.Equal(fake.EnterBiosResult, result);
-        Assert.Equal(1, fake.EnterBiosCalls);
     }
 
     [Fact]
@@ -1261,13 +1247,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 39 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 41 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":40,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":40,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":40,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":41,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":41,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":41,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1699,9 +1685,6 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatterySnapshot); }
         public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
         public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
-        public FrontendEnterBiosResult EnterBiosResult { get; } = new(FrontendEnterBiosOutcome.RestartRequested, null);
-        public int EnterBiosCalls { get; private set; }
-        public Task<FrontendEnterBiosResult> RequestEnterBiosAsync(CancellationToken t = default) { TotalCalls++; EnterBiosCalls++; return Task.FromResult(EnterBiosResult); }
     }
 
     private sealed class PartialReadStream : MemoryStream

@@ -721,7 +721,6 @@ Settings should remain focused on application/system configuration such as the c
 Application updates
 Steam Big Picture Full Screen Experience
 Show only current power source
-Enter BIOS
 Required Components
 Developer Menu
 ```
