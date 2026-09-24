@@ -173,6 +173,31 @@ public sealed class ShortcutRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void Executable_null_arguments_are_treated_as_empty_and_launch_successfully()
+    {
+        var tile = Tile(
+            "Tool without arguments",
+            ShortcutActionTypeIds.Executable,
+            Parameters("{\"path\":\"C:\\\\Tools\\\\Tool.exe\",\"arguments\":null}"));
+        Save([tile]);
+        ProcessStartInfo? captured = null;
+        var runtime = CreateRuntime(info =>
+        {
+            captured = info;
+            return new Process();
+        }, _ => true);
+
+        var projected = Assert.Single(runtime.Capture().Tiles);
+        var result = runtime.Execute(tile.TileId);
+
+        Assert.True(projected.Enabled);
+        Assert.Equal(FrontendShortcutTileState.Neutral, projected.State);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
+        Assert.NotNull(captured);
+        Assert.Equal(string.Empty, captured!.Arguments);
+    }
+
+    [Fact]
     public void Executable_missing_at_projection_is_unavailable_without_launch()
     {
         var tile = Tile("Missing", ShortcutActionTypeIds.Executable, new { path = @"C:\Tools\Tool.exe" });

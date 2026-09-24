@@ -278,7 +278,8 @@ internal sealed class ShortcutRuntime
             return false;
         }
 
-        if (!parameters.TryGetProperty("arguments", out var argumentsElement))
+        if (!parameters.TryGetProperty("arguments", out var argumentsElement)
+            || argumentsElement.ValueKind == JsonValueKind.Null)
             return true;
 
         if (argumentsElement.ValueKind != JsonValueKind.String)
