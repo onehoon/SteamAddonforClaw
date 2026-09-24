@@ -435,6 +435,50 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Main_window_invalidations_dispatch_its_refresh_batch_and_keep_device_profile_dispatch_local()
+    {
+        var root = FindRepositoryRoot();
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var invalidation = ExtractMethod(mainWindow, "private void OnFrontendStateInvalidated");
+        var refreshBatch = ExtractMethod(mainWindow, "private void RefreshInvalidatedFrontendStateOnUiThread");
+
+        Assert.Contains("DispatcherQueue.HasThreadAccess", invalidation, StringComparison.Ordinal);
+        Assert.Contains("RefreshInvalidatedFrontendStateOnUiThread();", invalidation, StringComparison.Ordinal);
+        Assert.Contains("DispatcherQueue.TryEnqueue(RefreshInvalidatedFrontendStateOnUiThread)", invalidation, StringComparison.Ordinal);
+        Assert.Contains("UI dispatcher is unavailable", invalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("RequestAppUpdateRefresh", invalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("RequestSteamFseRefresh", invalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("RequestClawHudRefresh", invalidation, StringComparison.Ordinal);
+
+        var expectedRefreshes = new[]
+        {
+            "_ = RefreshSystemStatusAsync();",
+            "SettingsContent.RequestAppUpdateRefresh();",
+            "SettingsContent.RequestSteamFseRefresh();",
+            "OverlayContent.RequestClawHudRefresh();",
+            "ShortcutContent.RequestRefresh();",
+        };
+        var previousIndex = -1;
+        foreach (var refresh in expectedRefreshes)
+        {
+            var index = refreshBatch.IndexOf(refresh, StringComparison.Ordinal);
+            Assert.True(index > previousIndex, $"Missing or out-of-order invalidation refresh: {refresh}");
+            previousIndex = index;
+        }
+        Assert.DoesNotContain("RequestStatusRefresh()", refreshBatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeviceContent", refreshBatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileContent", refreshBatch, StringComparison.Ordinal);
+
+        var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var profilePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var deviceInvalidation = ExtractMethod(devicePage, "private void OnStateInvalidated");
+        var profileInvalidation = ExtractMethod(profilePage, "private void OnStateInvalidated");
+
+        Assert.Contains("DispatcherQueue.TryEnqueue", deviceInvalidation, StringComparison.Ordinal);
+        Assert.Contains("DispatcherQueue.TryEnqueue", profileInvalidation, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Overlay_page_owns_the_main_ui_clawhud_surface_and_settings_page_does_not()
     {
         var root = FindRepositoryRoot();
