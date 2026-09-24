@@ -102,7 +102,21 @@ public sealed partial class MainWindow : Window
 
     private void OnFrontendStateInvalidated(object? sender, EventArgs args)
     {
-        RequestStatusRefresh();
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            RefreshInvalidatedFrontendStateOnUiThread();
+            return;
+        }
+
+        if (!DispatcherQueue.TryEnqueue(RefreshInvalidatedFrontendStateOnUiThread))
+        {
+            AppLog.Info("Frontend", "Frontend state invalidation ignored because the UI dispatcher is unavailable.");
+        }
+    }
+
+    private void RefreshInvalidatedFrontendStateOnUiThread()
+    {
+        _ = RefreshSystemStatusAsync();
         SettingsContent.RequestAppUpdateRefresh();
         SettingsContent.RequestSteamFseRefresh();
         OverlayContent.RequestClawHudRefresh();
