@@ -16,7 +16,7 @@ internal static class OverlayWindowGeometry
 {
     internal const double ReferenceTaskbarDip = 48.0;
     internal const double FloatingGapDip = 12.0;
-    internal const double MaxSurfaceWidthDip = 960.0;
+    internal const double MaxSurfaceWidthDip = 720.0;
     private const uint DefaultDpi = 96;
 
     internal static OverlayRect Calculate(

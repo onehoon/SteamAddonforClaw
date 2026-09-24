@@ -68,6 +68,7 @@ internal sealed class OverlayToggleRow
         {
             OnContent = null,
             OffContent = null,
+            MinWidth = 0,
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
         };

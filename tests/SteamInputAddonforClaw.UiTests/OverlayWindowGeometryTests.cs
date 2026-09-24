@@ -14,7 +14,7 @@ public sealed class OverlayWindowGeometryTests
             144,
             out var metrics);
 
-        Assert.Equal(new OverlayRect(240, 90, 1440, 1020), result);
+        Assert.Equal(new OverlayRect(420, 90, 1080, 1020), result);
         Assert.Equal(72, metrics.ReservedEdgePx);
         Assert.Equal(72, metrics.ReferenceTaskbarPx);
         Assert.Equal(18, metrics.ExtraGapPx);
@@ -22,11 +22,11 @@ public sealed class OverlayWindowGeometryTests
     }
 
     [Theory]
-    [InlineData(96, 60, 480, 960)]
-    [InlineData(120, 75, 360, 1200)]
-    [InlineData(144, 90, 240, 1440)]
-    [InlineData(168, 105, 120, 1680)]
-    [InlineData(192, 120, 120, 1680)]
+    [InlineData(96, 60, 600, 720)]
+    [InlineData(120, 75, 510, 900)]
+    [InlineData(144, 90, 420, 1080)]
+    [InlineData(168, 105, 330, 1260)]
+    [InlineData(192, 120, 240, 1440)]
     public void ScalesReferenceMarginAndSurfaceWidthWithDpiWhenWorkAreaHasNoReservedEdge(uint dpi, int expectedMargin, int expectedX, int expectedWidth)
     {
         var result = OverlayWindowGeometry.Calculate(
@@ -45,9 +45,9 @@ public sealed class OverlayWindowGeometryTests
             100, 40, 2020, 1168,
             144);
 
-        Assert.Equal(340, result.X);
+        Assert.Equal(520, result.X);
         Assert.Equal(130, result.Y);
-        Assert.Equal(1440, result.Width);
+        Assert.Equal(1080, result.Width);
         Assert.Equal(1020, result.Height);
     }
 
@@ -59,7 +59,7 @@ public sealed class OverlayWindowGeometryTests
             80, 60, 1840, 1120,
             96);
 
-        Assert.Equal(new OverlayRect(480, 92, 960, 1016), result);
+        Assert.Equal(new OverlayRect(600, 92, 720, 1016), result);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class OverlayWindowGeometryTests
             0, 0, 1920, 1200,
             0);
 
-        Assert.Equal(new OverlayRect(480, 60, 960, 1080), result);
+        Assert.Equal(new OverlayRect(600, 60, 720, 1080), result);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class OverlayWindowGeometryTests
             0, 0, 1920, 1128,
             144);
 
-        Assert.Equal(1440, result.Width);
+        Assert.Equal(1080, result.Width);
         Assert.False(Contains(result, result.X - 1, result.Y + result.Height / 2));
         Assert.False(Contains(result, result.X + result.Width, result.Y + result.Height / 2));
         Assert.True(Contains(result, result.X, result.Y + result.Height / 2));

@@ -251,6 +251,19 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Profile_catalog_titles_are_bounded_to_two_wrapped_lines()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+
+        Assert.Contains("var title = new TextBlock", source);
+        Assert.Contains("Text = entry.Name", source);
+        Assert.Contains("TextWrapping = TextWrapping.Wrap", source);
+        Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", source);
+        Assert.Contains("MaxLines = 2", source);
+        Assert.DoesNotContain("Content = entry.Name", source);
+    }
+
+    [Fact]
     public void Unavailable_active_publication_refreshes_selected_offline_detail_in_place()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
@@ -312,6 +325,11 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("internal enum OverlayValueButtonKind", source);
         Assert.Contains("NumericStepper", source);
         Assert.Contains("DiscreteChoice", source);
+        Assert.Contains("ButtonBase", source);
+        Assert.Contains("new RepeatButton", source);
+        Assert.Contains(": new Button();", source);
+        Assert.Contains("Delay = 300", source);
+        Assert.Contains("Interval = 75", source);
         Assert.Contains("FontIcon", source);
         Assert.Contains("CreateIconButton", source);
         Assert.Contains("MinWidth = 40", source);
@@ -416,7 +434,7 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
         Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
-        Assert.Contains("MaxWidth=\"960\"", xaml);
+        Assert.Contains("MaxWidth=\"720\"", xaml);
         Assert.Contains("x:Name=\"TabStripFrame\"", xaml);
         Assert.Contains("x:Name=\"PreviousTabHint\"", xaml);
         Assert.Contains("x:Name=\"NextTabHint\"", xaml);
@@ -426,6 +444,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("StrokeThickness=\"1.8\"", xaml);
         Assert.Contains("Width=\"30\"", xaml);
         Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
+        Assert.Contains("MinWidth = 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayTabState", shell);
         Assert.Contains("ApplyTabNavigationHintVisual", shell);
         Assert.Contains("PreviousTabHint.Opacity = selectedIndex > 0 ? 1.0 : 0.35;", shell);

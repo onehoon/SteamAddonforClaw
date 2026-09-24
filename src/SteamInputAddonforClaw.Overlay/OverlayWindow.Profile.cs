@@ -156,9 +156,22 @@ public sealed partial class OverlayWindow
         for (var index = 0; index < _profileCatalog.Count; index++)
         {
             var entry = _profileCatalog[index];
+            var title = new TextBlock
+            {
+                Text = entry.Name,
+                TextWrapping = TextWrapping.Wrap,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = 2,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalTextAlignment = TextAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var titleStyle) && titleStyle is Style style)
+                title.Style = style;
+
             var card = new Button
             {
-                Content = entry.Name,
+                Content = title,
                 Tag = index,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Left,
