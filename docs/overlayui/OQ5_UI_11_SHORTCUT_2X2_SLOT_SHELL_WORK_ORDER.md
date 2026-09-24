@@ -1,5 +1,7 @@
 # Work Order — OQ5-UI-11: Shortcut 2×2 Slot Shell
 
+> **Historical / superseded by Shortcut Foundation PR-E (2026-09-24):** This work order documents the former fixed four-slot, `Unassigned`, non-executable POC. Do not use it as the current Shortcut product or transport contract. The active design renders `FrontendShortcutDashboardSnapshot` dynamically and dispatches execution by `TileId`; see `docs/overlayui/ADDON_QUICK_SETTINGS_OVERLAY_ARCHITECTURE.md`.
+
 ## Status
 
 Eleventh implementation PR from:

@@ -5,94 +5,121 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class OverlayShortcutSelectionTests
 {
-    private static OverlayShortcutSelection At(int index)
+    [Fact]
+    public void Zero_tiles_have_no_columns_or_selection()
     {
         var selection = new OverlayShortcutSelection();
-        selection.Select(index);
-        return selection;
+
+        selection.Configure(tileCount: 0, columnCount: 0);
+
+        Assert.Equal(0, selection.TileCount);
+        Assert.Equal(0, selection.ColumnCount);
+        Assert.Null(selection.SelectedIndex);
+        Assert.False(selection.MoveDown());
     }
 
     [Fact]
-    public void StartsOnFirstTemporaryTile()
+    public void One_and_two_tiles_use_their_actual_column_count()
     {
-        Assert.Equal(0, new OverlayShortcutSelection().SelectedIndex);
+        var selection = new OverlayShortcutSelection();
+
+        selection.Configure(tileCount: 1, columnCount: 1);
+        Assert.Equal(0, selection.SelectedIndex);
+        Assert.Equal(1, selection.ColumnCount);
+        Assert.False(selection.MoveRight());
+
+        selection.Configure(tileCount: 2, columnCount: 2);
+        Assert.Equal(0, selection.SelectedIndex);
+        Assert.Equal(2, selection.ColumnCount);
+        Assert.True(selection.MoveRight());
+        Assert.Equal(1, selection.SelectedIndex);
     }
 
     [Fact]
-    public void DirectionalMovesFollowTheTemporary2x2Geometry()
+    public void More_than_four_tiles_are_supported_without_wrapping_rows()
     {
-        (int From, string Direction, int Expected)[] cases =
-        [
-            (0, "Right", 1),
-            (0, "Down", 2),
-            (1, "Left", 0),
-            (1, "Down", 3),
-            (2, "Up", 0),
-            (2, "Right", 3),
-            (3, "Up", 1),
-            (3, "Left", 2),
-        ];
+        var selection = At(tileCount: 6, columnCount: 2, index: 3);
 
-        foreach (var (from, direction, expected) in cases)
-        {
-            var selection = At(from);
-            Assert.True(Move(selection, direction), $"{from} {direction}");
-            Assert.Equal(expected, selection.SelectedIndex);
-        }
+        Assert.False(selection.MoveRight());
+        Assert.True(selection.MoveDown());
+        Assert.Equal(5, selection.SelectedIndex);
+        Assert.False(selection.MoveRight());
     }
 
     [Fact]
-    public void OuterEdgesAreBoundedNoOps()
+    public void Vertical_moves_preserve_column_and_clamp_a_short_final_row()
     {
-        (int From, string Direction)[] cases =
-        [
-            (0, "Left"),
-            (0, "Up"),
-            (1, "Right"),
-            (1, "Up"),
-            (2, "Left"),
-            (2, "Down"),
-            (3, "Right"),
-            (3, "Down"),
-        ];
+        var selection = At(tileCount: 5, columnCount: 2, index: 3);
 
-        foreach (var (from, direction) in cases)
-        {
-            var selection = At(from);
-            Assert.False(Move(selection, direction), $"{from} {direction}");
-            Assert.Equal(from, selection.SelectedIndex);
-        }
+        Assert.True(selection.MoveDown());
+        Assert.Equal(4, selection.SelectedIndex);
+        Assert.True(selection.MoveUp());
+        Assert.Equal(2, selection.SelectedIndex);
     }
 
     [Fact]
-    public void ResetReturnsToFirstTemporaryTile()
+    public void Horizontal_moves_stay_within_the_current_row()
     {
-        var selection = At(3);
+        var selection = At(tileCount: 5, columnCount: 2, index: 2);
 
-        selection.Reset();
+        Assert.False(selection.MoveLeft());
+        Assert.True(selection.MoveRight());
+        Assert.Equal(3, selection.SelectedIndex);
+        Assert.False(selection.MoveRight());
+    }
 
+    [Fact]
+    public void First_and_last_row_edges_are_bounded()
+    {
+        var selection = At(tileCount: 5, columnCount: 2, index: 0);
+        Assert.False(selection.MoveUp());
+
+        selection.Select(4);
+        Assert.False(selection.MoveDown());
+        Assert.Equal(4, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Invalid_selection_is_rejected()
+    {
+        var selection = At(tileCount: 5, columnCount: 2, index: 1);
+
+        Assert.False(selection.Select(-1));
+        Assert.False(selection.Select(5));
+        Assert.Equal(1, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void Reconfigure_normalizes_deleted_selection_and_restores_a_valid_preferred_index()
+    {
+        var selection = At(tileCount: 6, columnCount: 2, index: 5);
+
+        selection.Configure(tileCount: 3, columnCount: 2);
+        Assert.Equal(0, selection.SelectedIndex);
+
+        selection.Configure(tileCount: 5, columnCount: 2, preferredIndex: 3);
+        Assert.Equal(3, selection.SelectedIndex);
+
+        selection.Configure(tileCount: 2, columnCount: 2, preferredIndex: 4);
         Assert.Equal(0, selection.SelectedIndex);
     }
 
     [Fact]
-    public void SelectChangesTheIndexAndRejectsInvalidIndexes()
+    public void Reset_clears_layout_and_selection()
     {
-        var selection = new OverlayShortcutSelection();
+        var selection = At(tileCount: 4, columnCount: 2, index: 3);
 
-        Assert.True(selection.Select(2));
-        Assert.Equal(2, selection.SelectedIndex);
-        Assert.False(selection.Select(2));
-        Assert.False(selection.Select(-1));
-        Assert.False(selection.Select(4));
-        Assert.Equal(2, selection.SelectedIndex);
+        selection.Reset();
+
+        Assert.Equal(0, selection.TileCount);
+        Assert.Equal(0, selection.ColumnCount);
+        Assert.Null(selection.SelectedIndex);
     }
 
-    private static bool Move(OverlayShortcutSelection selection, string direction) => direction switch
+    private static OverlayShortcutSelection At(int tileCount, int columnCount, int index)
     {
-        "Up" => selection.MoveUp(),
-        "Down" => selection.MoveDown(),
-        "Left" => selection.MoveLeft(),
-        "Right" => selection.MoveRight(),
-        _ => throw new ArgumentOutOfRangeException(nameof(direction)),
-    };
+        var selection = new OverlayShortcutSelection();
+        selection.Configure(tileCount, columnCount, index);
+        return selection;
+    }
 }

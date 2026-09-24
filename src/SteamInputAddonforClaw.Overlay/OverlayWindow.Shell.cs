@@ -87,9 +87,8 @@ public sealed partial class OverlayWindow
         ApplySelectedTabVisualState();
     }
 
-    // Device and Profile both get the SF-V2-07/09 generic Quick Settings renderer; Setting gets the
-    // OQ5-UI-10 tab-order editor; Shortcut gets the OQ5-UI-11 2x2 slot shell; every other tab keeps
-    // its OQ5-UI-01 placeholder with zero selectable rows.
+    // Device and Profile use the shared Quick Settings renderer; Setting owns tab-order editing;
+    // Shortcut renders the Runtime-owned dynamic dashboard; other tabs keep their placeholders.
     private FrameworkElement BuildPage(AddonQuickSettingsTabId id, List<OverlayRow> rows) => id switch
     {
         AddonQuickSettingsTabId.Setting => BuildSettingPage(rows),
@@ -138,74 +137,6 @@ public sealed partial class OverlayWindow
         TabOrderMoveRequested?.Invoke(new(tab, delta));
     }
 
-    // OQ5-UI-11: temporary four-tile Shortcut shell data. This local POC does not publish or consume
-    // the shared Shortcut domain/frontend contracts. Not registered as _pageRows --
-    // OverlayShortcutSelection owns the selected tile while this page is active, and A does nothing.
-    private static readonly (string Label, string StatusLabel)[] TemporaryShortcutTiles =
-    [
-        ("Slot 1", "Unassigned"),
-        ("Slot 2", "Unassigned"),
-        ("Slot 3", "Unassigned"),
-        ("Slot 4", "Unassigned"),
-    ];
-
-    private FrameworkElement BuildShortcutPage()
-    {
-        var grid = new Grid
-        {
-            ColumnSpacing = 8,
-            RowSpacing = 8,
-            ColumnDefinitions =
-            {
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-            },
-            RowDefinitions =
-            {
-                new RowDefinition { Height = GridLength.Auto },
-                new RowDefinition { Height = GridLength.Auto },
-            },
-        };
-
-        foreach (var (tileData, index) in TemporaryShortcutTiles.Select((tileData, index) => (tileData, index)))
-        {
-            var row = index / 2;
-            var column = index % 2;
-            var title = new TextBlock { Text = tileData.Label };
-            if (Application.Current.Resources.TryGetValue("BodyStrongTextBlockStyle", out var titleStyle) && titleStyle is Style ts)
-                title.Style = ts;
-
-            var state = new TextBlock { Text = tileData.StatusLabel, Opacity = 0.6 };
-            if (Application.Current.Resources.TryGetValue("CaptionTextBlockStyle", out var stateStyle) && stateStyle is Style ss)
-                state.Style = ss;
-
-            var content = new StackPanel { Spacing = 2 };
-            content.Children.Add(title);
-            content.Children.Add(state);
-
-            var tile = new Border
-            {
-                Child = content,
-                Padding = new Thickness(14, 16, 14, 16),
-                MinHeight = 72,
-                CornerRadius = new CornerRadius(6),
-                BorderThickness = new Thickness(2),
-                BorderBrush = RowUnselectedBrush,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-            };
-            if (Application.Current.Resources.TryGetValue("CardBackgroundFillColorDefaultBrush", out var fill) && fill is Brush fillBrush)
-                tile.Background = fillBrush;
-            tile.Tapped += (_, _) => SelectShortcutTile(index, "Pointer");
-            Grid.SetRow(tile, row);
-            Grid.SetColumn(tile, column);
-            grid.Children.Add(tile);
-            _shortcutTiles[index] = tile;
-        }
-
-        ApplyShortcutSelectionVisual();
-        return grid;
-    }
-
     private static string LabelFor(AddonQuickSettingsTabId id) => AddonQuickSettingsShellContract.LabelFor(id);
 
     private static readonly Brush TabUnselectedForegroundBrush = new SolidColorBrush(Colors.DimGray);
@@ -236,6 +167,7 @@ public sealed partial class OverlayWindow
     private void ResetUiForShow()
     {
         _tabState.ResetForShow();
+        ResetShortcutForShow();
         ApplySelectedTabVisualState();
     }
 
@@ -416,12 +348,11 @@ public sealed partial class OverlayWindow
         _rowSelection.SetRows(CapabilitiesFor(selected));
         ApplyRowSelectionVisual();
 
-        // OQ5-UI-11 s.7.4: entering the Shortcut page selects Slot 1. CapabilitiesFor(Shortcut) is
-        // empty, so _rowSelection has no selected row and OverlayShortcutSelection is the one
-        // selection authority for that page.
+        // Shortcut has its own bounded two-dimensional selection model; the shared row-selection
+        // model remains empty for this page.
         if (selected == AddonQuickSettingsTabId.Shortcut)
         {
-            _shortcutSelection.Reset();
+            ResetShortcutSelection();
             ApplyShortcutSelectionVisual();
         }
 

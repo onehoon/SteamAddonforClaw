@@ -26,6 +26,7 @@ public partial class App : Application
         _window.ProfilePageRequestRequested += OnProfilePageRequestRequested;
         _window.ClawHudEnabledRequested += OnClawHudEnabledRequested;
         _window.ClawHudSettingMutationRequested += OnClawHudSettingMutationRequested;
+        _window.ShortcutExecutionRequested += OnShortcutExecutionRequested;
         OverlayLog.Info("App", "OverlayWindow constructed.", ("Hwnd", _window.HandleForDiagnostics));
         _window.Closed += (_, _) => { OverlayLog.Info("Window", "Closed received."); Exit(); };
         OverlayLog.Info("Window", "Initial hidden preparation started.");
@@ -70,7 +71,9 @@ public partial class App : Application
             // Profile bindings receive only this narrow mutation delegate, never the client itself.
             _window?.ConfigureQuickSettings(intent => _client.SendQuickSettingsMutationAsync(intent));
             OverlayLog.Info("Transport", "Overlay command loop starting.");
-            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync, HandleQuickSettingsPageAsync, HandleClawHudAsync, HandleProfileCatalogAsync, HandleProfilePageAsync).ConfigureAwait(false);
+            await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync,
+                HandleQuickSettingsPageAsync, HandleClawHudAsync, HandleProfileCatalogAsync,
+                HandleProfilePageAsync, HandleShortcutStateAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -182,12 +185,55 @@ public partial class App : Application
         return completion.Task;
     }
 
+    private Task HandleShortcutStateAsync(FrontendShortcutDashboardSnapshot snapshot)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try { _window?.ApplyShortcutState(snapshot); completion.TrySetResult(); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+        }))
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Shortcut state application."));
+        return completion.Task;
+    }
+
     // PR3: forward the typed move and apply only the authoritative mutation result.
     private void OnTabOrderMoveRequested(AddonQuickSettingsTabOrderMoveIntent intent) => _ = SendTabOrderMoveAsync(intent);
 
     private void OnClawHudEnabledRequested(bool enabled) => _ = SendClawHudEnabledAsync(enabled);
 
     private void OnClawHudSettingMutationRequested(FrontendClawHudMutationIntent intent) => _ = SendClawHudSettingAsync(intent);
+
+    private Task OnShortcutExecutionRequested(Guid tileId) => SendShortcutExecutionAsync(tileId);
+
+    private async Task SendShortcutExecutionAsync(Guid tileId)
+    {
+        try
+        {
+            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+            var result = await _client.SendShortcutExecuteAsync(tileId).ConfigureAwait(false);
+            await DispatchShortcutUiAsync(() => _window?.ApplyShortcutExecutionResult(result)).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Shortcut", "Shortcut execution request failed.", null,
+                ("ExceptionType", exception.GetType().Name));
+            try { await DispatchShortcutUiAsync(() => _window?.ApplyShortcutExecutionFailure()).ConfigureAwait(false); }
+            catch { OverlayLog.Warn("Shortcut", "Could not enqueue Shortcut execution failure state."); }
+        }
+    }
+
+    private Task DispatchShortcutUiAsync(Action apply)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try { apply(); completion.TrySetResult(); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+        }))
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Shortcut result application."));
+        return completion.Task;
+    }
 
     private async Task SendClawHudEnabledAsync(bool enabled)
     {

@@ -20,15 +20,13 @@ public sealed partial class OverlayWindow
     private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
     private static readonly Brush RowUnselectedFillBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
 
-    // OQ5-UI-11: the temporary fixed 2x2 Shortcut grid -- one pure selection model + four tile borders.
+    // The Runtime-owned Shortcut projection uses one transient 2D selection model.
     private readonly OverlayShortcutSelection _shortcutSelection = new();
-    private readonly Dictionary<int, Border> _shortcutTiles = new();
 
     // OQ5-UI-04 s.11: NavigateUp/Down move logical row selection; Left/Right and Accept dispatch to
     // the selected row only when it registered that capability. All row/selection state stays private
-    // to OverlayWindow -- App only forwards the semantic action.
-    // OQ5-UI-11 s.7.5: the Shortcut page is the one 2D exception -- the same semantic actions drive
-    // the fixed 2x2 grid instead of the linear row model while that page is active.
+    // to OverlayWindow -- App only forwards the semantic action. Shortcut remains the one 2D page,
+    // with its current Runtime-projected tile count and two-column layout.
     internal void NavigateUp()
     {
         if (OnProfileCatalogPage()) { NavigateProfileCatalogUp(); return; }
@@ -67,8 +65,7 @@ public sealed partial class OverlayWindow
         if (OnProfileCatalogPage()) { ActivateProfileCatalogSelection(); return; }
         if (OnShortcutPage())
         {
-            // Every temporary POC tile is Unassigned: A performs no product action.
-            OverlayLog.Debug("Shortcut", "Accept on an unassigned Shortcut tile; no action.", ("Index", _shortcutSelection.SelectedIndex));
+            RequestSelectedShortcutExecution();
             return;
         }
         if (_rowSelection.ActivateSelected()) RefreshRowSelectionAfterMove();
@@ -88,17 +85,58 @@ public sealed partial class OverlayWindow
         BringSelectedRowIntoView();
     }
 
-    private void SelectShortcutTile(int index, string source)
+    private void SelectShortcutTile(Guid tileId, string source)
     {
-        if (!_shortcutSelection.Select(index)) return;
-        OverlayLog.Debug("Shortcut", "Shortcut tile selected.", ("Index", index), ("Source", source));
-        ApplyShortcutSelectionVisual();
+        var tiles = _shortcutSnapshot.Tiles;
+        for (var index = 0; index < tiles.Count; index++)
+        {
+            if (tiles[index].TileId != tileId || !_shortcutSelection.Select(index)) continue;
+            OverlayLog.Debug("Shortcut", "Shortcut tile selected.", ("TileId", tileId), ("Source", source));
+            ApplyShortcutSelectionVisual();
+            return;
+        }
     }
 
     private void ApplyShortcutSelectionVisual()
     {
-        foreach (var (id, tile) in _shortcutTiles)
-            tile.BorderBrush = id == _shortcutSelection.SelectedIndex ? _rowSelectedBrush : RowUnselectedBrush;
+        var selectedTile = GetSelectedShortcutTile();
+        foreach (var (tileId, tile) in _shortcutTiles)
+            tile.BorderBrush = selectedTile?.TileId == tileId ? _rowSelectedBrush : RowUnselectedBrush;
+        if (selectedTile is not null && _shortcutTiles.TryGetValue(selectedTile.TileId, out var selectedBorder))
+        {
+            try { selectedBorder.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false }); }
+            catch (Exception exception) { OverlayLog.Warn("Shortcut", "Could not bring the selected tile into view.", exception); }
+        }
+    }
+
+    private FrontendShortcutTile? GetSelectedShortcutTile()
+    {
+        if (_shortcutSelection.SelectedIndex is not { } index
+            || index < 0
+            || index >= _shortcutSnapshot.Tiles.Count)
+            return null;
+        return _shortcutSnapshot.Tiles[index];
+    }
+
+    private void ResetShortcutSelection()
+    {
+        var count = _shortcutSnapshot.Available ? _shortcutSnapshot.Tiles.Count : 0;
+        var columns = count == 0 ? 0 : Math.Min(2, count);
+        _shortcutSelection.Configure(count, columns, preferredIndex: 0);
+    }
+
+    private void RefreshShortcutSelection(FrontendShortcutDashboardSnapshot snapshot)
+    {
+        Guid? selectedTileId = GetSelectedShortcutTile()?.TileId;
+        _shortcutSnapshot = snapshot;
+        var columns = snapshot.Available && snapshot.Tiles.Count > 0 ? Math.Min(2, snapshot.Tiles.Count) : 0;
+        var preferredIndex = selectedTileId is { } id
+            ? snapshot.Tiles.ToList().FindIndex(tile => tile.TileId == id)
+            : -1;
+        _shortcutSelection.Configure(snapshot.Available ? snapshot.Tiles.Count : 0, columns,
+            preferredIndex >= 0 ? preferredIndex : 0);
+        RenderShortcutSnapshot();
+        ApplyShortcutSelectionVisual();
     }
 
     private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(AddonQuickSettingsTabId tab) =>

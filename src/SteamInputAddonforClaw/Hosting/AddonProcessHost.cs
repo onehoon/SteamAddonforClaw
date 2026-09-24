@@ -592,6 +592,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             capture: token => _frontendControl!.CaptureClawHudAsync(token),
             setEnabled: (enabled, token) => _frontendControl!.SetClawHudEnabledAsync(enabled, token),
             mutate: (intent, token) => _frontendControl!.MutateClawHudSettingAsync(intent, token));
+        _overlayController.BindShortcutAuthority(
+            capture: _ => Task.FromResult(_shortcutRuntime.Capture()),
+            execute: (tileId, token) => HandleOverlayShortcutExecutionAsync(tileId, token));
         // SF-V2-02 section 17: refresh a currently visible/captured Overlay on ordinary Runtime
         // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
         // scheduled once shutdown admission closes.
@@ -1174,6 +1177,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _ = _overlayController.RefreshQuickSettingsAsync();
             _ = _overlayController.RefreshTabOrderAsync();
             _ = _overlayController.RefreshClawHudAsync();
+            _ = _overlayController.RefreshShortcutAsync();
         }
         catch (Exception exception)
         {
@@ -1201,6 +1205,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
         if (!_overlayCaptureActive) return;
         if (!_overlayController.IsVisible) return;
+        _ = _overlayController.RefreshShortcutAsync();
         // Section 23: an admitted Overlay mutation already returns a fresh authoritative page; a
         // redundant refresh here could otherwise race/overwrite that result (including erasing a
         // typed Succeeded=false + FailureMessage) with an older/less-complete page. Section 10's
@@ -1214,6 +1219,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _ = _overlayController.RefreshQuickSettingsAsync();
         _ = _overlayController.RefreshTabOrderAsync();
         _ = _overlayController.RefreshClawHudAsync();
+    }
+
+    private async Task<OverlayShortcutExecutionOutcome> HandleOverlayShortcutExecutionAsync(Guid tileId, CancellationToken token)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive)
+            return new(false, "Shortcut is unavailable.");
+
+        var result = await _shortcutRuntime.ExecuteAsync(tileId, token).ConfigureAwait(false);
+        return new(result.Outcome == ShortcutExecutionOutcome.Succeeded, result.FailureMessage);
     }
 
     // SF-V2-02/06/09 section 15/16/11: the admission Runtime-side fact this class owns
