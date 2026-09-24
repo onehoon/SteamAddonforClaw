@@ -11,11 +11,19 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
         $"SteamInputAddonforClaw.NirCmdScreenshot.Tests.{Guid.NewGuid():N}");
 
     [Fact]
-    public void Null_folder_resolves_to_pictures_screenshots_and_custom_folder_is_preserved()
+    public void Default_folder_uses_the_unverified_pictures_known_folder_and_custom_folder_is_preserved()
     {
+        var pictures = Environment.GetFolderPath(
+            Environment.SpecialFolder.MyPictures,
+            Environment.SpecialFolderOption.DoNotVerify);
+        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Shortcuts", "NirCmdScreenshotCapture.cs"));
+
         Assert.Equal(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Screenshots"),
+            Path.Combine(pictures, "Screenshots"),
             NirCmdScreenshotCapture.ResolveFolder(null));
+        Assert.True(Path.IsPathFullyQualified(NirCmdScreenshotCapture.ResolveFolder(null)));
+        Assert.Contains("Environment.SpecialFolder.MyPictures", source, StringComparison.Ordinal);
+        Assert.Contains("Environment.SpecialFolderOption.DoNotVerify", source, StringComparison.Ordinal);
         Assert.Equal(@"C:\User Pictures\Game Captures", NirCmdScreenshotCapture.ResolveFolder(@"C:\User Pictures\Game Captures"));
     }
 
@@ -181,6 +189,94 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
     }
 
     [Fact]
+    public async Task Cancellation_before_process_start_does_not_invoke_the_process_runner()
+    {
+        var runCount = 0;
+        var capture = CreateCapture((_, _) =>
+        {
+            runCount++;
+            return Task.FromResult(new NirCmdProcessResult(true, false, 0));
+        });
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => capture.CaptureAsync(_testDirectory, cancellation.Token));
+
+        Assert.Equal(0, runCount);
+        Assert.False(Directory.Exists(_testDirectory));
+    }
+
+    [Fact]
+    public async Task Cancellation_during_owned_process_wait_kills_that_process_and_propagates()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var waitStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var childExit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var killCount = 0;
+        var wait = NirCmdScreenshotCapture.WaitForOwnedProcessAsync(
+            _ =>
+            {
+                waitStarted.TrySetResult();
+                return childExit.Task;
+            },
+            () => 0,
+            () => killCount++,
+            cancellation.Token);
+
+        await waitStarted.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait);
+        Assert.Equal(1, killCount);
+        Assert.False(childExit.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Cancellation_cleans_only_the_attempt_output_and_preserves_collision_file()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        string? preexistingPath = null;
+        string? attemptedPath = null;
+        var executablePath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "NirCmd", "nircmdc.exe");
+        var collisionCreated = false;
+        bool FileExists(string path)
+        {
+            if (string.Equals(path, executablePath, StringComparison.OrdinalIgnoreCase)) return true;
+            if (!collisionCreated && string.Equals(Path.GetDirectoryName(path), _testDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                collisionCreated = true;
+                preexistingPath = path;
+                File.WriteAllBytes(path, [7, 8, 9]);
+                return true;
+            }
+            return File.Exists(path);
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        var runStarted = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var capture = new NirCmdScreenshotCapture(async (info, token) =>
+        {
+            attemptedPath = info.ArgumentList[1];
+            File.WriteAllBytes(attemptedPath, [1, 2]);
+            runStarted.TrySetResult(attemptedPath);
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new NirCmdProcessResult(true, false, 0);
+        }, FileExists);
+
+        var captureTask = capture.CaptureAsync(_testDirectory, cancellation.Token);
+        await runStarted.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => captureTask);
+        Assert.NotNull(preexistingPath);
+        Assert.NotNull(attemptedPath);
+        Assert.NotEqual(preexistingPath, attemptedPath);
+        Assert.Equal([7, 8, 9], File.ReadAllBytes(preexistingPath));
+        Assert.False(File.Exists(attemptedPath));
+    }
+
+    [Fact]
     public async Task Missing_nircmd_payload_is_unavailable_and_does_not_launch()
     {
         var launchCount = 0;
@@ -231,6 +327,16 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
         return new NirCmdScreenshotCapture(
             runProcess,
             path => string.Equals(path, executablePath, StringComparison.OrdinalIgnoreCase) || File.Exists(path));
+    }
+
+    private static string RepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "README.md")))
+            directory = directory.Parent;
+
+        Assert.NotNull(directory);
+        return directory!.FullName;
     }
 
     public void Dispose()
