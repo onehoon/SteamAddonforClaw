@@ -21,6 +21,7 @@ using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Updates;
 using SteamInputAddonforClaw.ClawHud;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Shortcuts;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -85,6 +86,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly GameProfileMutations _gameProfileMutations;
     private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
     private readonly IntelFrameLimiterRuntime _intelFpsRuntime;
+    private readonly ShortcutStore _shortcutStore;
+    private readonly ShortcutRuntime _shortcutRuntime;
     private WindowsAcDcPowerNotificationSource? _acDcPowerSource;
     private TdpRuntime? _tdpRuntime;
     private HelperMsiClawTdpTransport? _tdpTransport;
@@ -156,10 +159,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var profilePath = testOnlyDataRoot is null
             ? AddonDataPaths.ProfilesPath
             : Path.Combine(testOnlyDataRoot, "profiles.json");
+        var shortcutsPath = testOnlyDataRoot is null
+            ? AddonDataPaths.ShortcutsPath
+            : Path.Combine(testOnlyDataRoot, "shortcuts.json");
         var logDirectory = testOnlyDataRoot is null
             ? Install.AddonDataPaths.LogDirectory
             : Path.Combine(testOnlyDataRoot, "logs");
         _profileStore = new(profilePath);
+        _shortcutStore = new(shortcutsPath);
+        _shortcutRuntime = new(_shortcutStore);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
