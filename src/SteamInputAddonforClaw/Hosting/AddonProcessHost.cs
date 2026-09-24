@@ -88,6 +88,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly IntelFrameLimiterRuntime _intelFpsRuntime;
     private readonly ShortcutStore _shortcutStore;
     private readonly ShortcutRuntime _shortcutRuntime;
+    private readonly NirCmdScreenshotCapture _nircmdScreenshotCapture = new();
     private WindowsAcDcPowerNotificationSource? _acDcPowerSource;
     private TdpRuntime? _tdpRuntime;
     private HelperMsiClawTdpTransport? _tdpTransport;
@@ -167,7 +168,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             : Path.Combine(testOnlyDataRoot, "logs");
         _profileStore = new(profilePath);
         _shortcutStore = new(shortcutsPath);
-        _shortcutRuntime = new(_shortcutStore);
+        _shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
@@ -979,6 +980,62 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return false;
         return _presentationOwnership?.TryRequestQuickAccessPulse() == true;
+    }
+
+    private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0)
+            return new(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
+
+        await _visibleSurfaceTransition.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _processShutdownStarted) != 0)
+                return new(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
+
+            if (_overlayCaptureActive || _overlayController.IsVisible)
+            {
+                bool retired;
+                try
+                {
+                    retired = await RetireOverlayCaptureUnderTransitionAsync(
+                        "ShortcutScreenshot",
+                        surfaceAlreadyGone: false).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("Shortcuts", "Screenshot was blocked because Overlay retirement failed.", null,
+                        ("ActionType", ShortcutActionTypeIds.ScreenshotFullscreen),
+                        ("Outcome", ShortcutExecutionOutcome.Unavailable),
+                        ("ExceptionType", exception.GetType().Name));
+                    return new(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
+                }
+
+                if (!retired)
+                {
+                    AppLog.Warn("Shortcuts", "Screenshot was blocked because Overlay retirement was not proven.", null,
+                        ("ActionType", ShortcutActionTypeIds.ScreenshotFullscreen),
+                        ("Outcome", ShortcutExecutionOutcome.Unavailable));
+                    return new(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
+                }
+            }
+
+            var settings = _runtimeStartupSettings;
+            if (settings is null)
+                return new(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
+
+            return await _nircmdScreenshotCapture.CaptureAsync(
+                settings.ScreenshotSaveFolder,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _visibleSurfaceTransition.Release();
+        }
     }
 
     private async Task CoordinateFrontendOpenAsync(FrontendOpenReason reason)

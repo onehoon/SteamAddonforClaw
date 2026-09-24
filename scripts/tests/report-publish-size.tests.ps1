@@ -17,15 +17,19 @@ try {
     Write-TestFile 'SteamInputAddonforClaw.TdpHelper.exe' 5
     Write-TestFile 'Dependencies\HidHide\installer.exe' 11; Write-TestFile 'Dependencies\UsbIpWin2\installer.exe' 13
     Write-TestFile 'Dependencies\Viiper\libVIIPER.dll' 17
+    Write-TestFile 'Dependencies\NirCmd\nircmd.exe' 19
+    Write-TestFile 'Dependencies\NirCmd\nircmdc.exe' 23
+    Write-TestFile 'Dependencies\NirCmd\NirCmd.chm' 29
     & $scriptPath -PublishDirectory $root -TopCount 3 -JsonOutputPath $jsonPath | Out-Null
     $report = Get-Content -Raw $jsonPath | ConvertFrom-Json
-    if ($report.totalBytes -ne 88) { throw "Expected 88 total bytes, got $($report.totalBytes)." }
+    if ($report.totalBytes -ne 159) { throw "Expected 159 total bytes, got $($report.totalBytes)." }
     if ($report.unclassifiedBytes -ne 3 -or $report.components.'Other / Unclassified'.bytes -ne 3) { throw 'Expected three unclassified bytes.' }
     if ($report.components.Runtime.bytes -ne 10 -or $report.components.UI.bytes -ne 20 -or $report.components.Overlay.bytes -ne 0) { throw 'Runtime/UI classification failed.' }
     if ($report.components.'TDP Helper'.bytes -ne 5) { throw 'Helper classification failed.' }
     if ($report.components.'FSE Home'.bytes -ne 9) { throw 'FSE Home classification failed.' }
-    if ($report.components.HidHide.bytes -ne 11 -or $report.components.'USBip-win2'.bytes -ne 13 -or $report.components.VIIPER.bytes -ne 17) { throw 'Third-party classification failed.' }
-    if ($report.largestFiles[0].Path -ne 'ui/managed.dll' -or $report.largestFiles.Count -ne 3) { throw 'Largest-file ordering failed.' }
+    if ($report.components.HidHide.bytes -ne 11 -or $report.components.'USBip-win2'.bytes -ne 13 -or $report.components.VIIPER.bytes -ne 17 -or $report.components.NirCmd.bytes -ne 71) { throw 'Third-party classification failed.' }
+    if ($report.thirdPartyBytes -ne 112) { throw "Expected 112 third-party bytes including NirCmd, got $($report.thirdPartyBytes)." }
+    if ($report.largestFiles[0].Path -ne 'Dependencies/NirCmd/NirCmd.chm' -or $report.largestFiles.Count -ne 3) { throw 'Largest-file ordering failed.' }
     Write-Host 'Publish size report tests passed.'
 }
 finally { if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force } }

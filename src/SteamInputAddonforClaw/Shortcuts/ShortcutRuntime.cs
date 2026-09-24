@@ -40,17 +40,20 @@ internal sealed class ShortcutRuntime
     private readonly ShortcutDocument _document;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private readonly Func<string, bool> _fileExists;
+    private readonly Func<CancellationToken, Task<ShortcutExecutionResult>>? _screenshotAction;
     private readonly bool _available;
 
     internal ShortcutRuntime(
         ShortcutStore store,
         Func<ProcessStartInfo, Process?>? startProcess = null,
-        Func<string, bool>? fileExists = null)
+        Func<string, bool>? fileExists = null,
+        Func<CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null)
     {
         ArgumentNullException.ThrowIfNull(store);
 
         _startProcess = startProcess ?? Process.Start;
         _fileExists = fileExists ?? File.Exists;
+        _screenshotAction = screenshotAction;
 
         var load = store.Load();
         _available = load.Status is ShortcutLoadStatus.Loaded or ShortcutLoadStatus.NotFound;
@@ -83,7 +86,7 @@ internal sealed class ShortcutRuntime
         return new FrontendShortcutDashboardSnapshot(true, tiles);
     }
 
-    internal ShortcutExecutionResult Execute(Guid tileId, CancellationToken cancellationToken = default)
+    internal async Task<ShortcutExecutionResult> ExecuteAsync(Guid tileId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -93,6 +96,9 @@ internal sealed class ShortcutRuntime
         var tile = _document.Dashboard.Tiles.FirstOrDefault(candidate => candidate.TileId == tileId);
         if (tile is null)
             return new ShortcutExecutionResult(ShortcutExecutionOutcome.NotFound, TileNotFoundMessage);
+
+        if (string.Equals(tile.Action.TypeId, ShortcutActionTypeIds.ScreenshotFullscreen, StringComparison.Ordinal))
+            return await ExecuteScreenshotAsync(tile, cancellationToken).ConfigureAwait(false);
 
         return tile.Action.TypeId switch
         {
@@ -105,6 +111,15 @@ internal sealed class ShortcutRuntime
 
     private TileResolution Resolve(ShortcutTileDefinition tile)
     {
+        if (string.Equals(tile.Action.TypeId, ShortcutActionTypeIds.ScreenshotFullscreen, StringComparison.Ordinal))
+        {
+            if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
+                return TileResolution.Unsupported;
+            if (!HasEmptyObjectParameters(tile.Action.Parameters))
+                return TileResolution.Invalid;
+            return _screenshotAction is null ? TileResolution.Unavailable : TileResolution.Available;
+        }
+
         if (!IsSupportedAction(tile.Action))
             return TileResolution.Unsupported;
 
@@ -116,6 +131,39 @@ internal sealed class ShortcutRuntime
             _ => TileResolution.Unsupported
         };
     }
+
+    private async Task<ShortcutExecutionResult> ExecuteScreenshotAsync(
+        ShortcutTileDefinition tile,
+        CancellationToken cancellationToken)
+    {
+        if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage);
+        if (!HasEmptyObjectParameters(tile.Action.Parameters))
+            return InvalidConfiguration();
+        if (_screenshotAction is null)
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            return await _screenshotAction(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Shortcuts", "Screenshot action failed.", null,
+                ("TypeId", tile.Action.TypeId),
+                ("Outcome", ShortcutExecutionOutcome.Failed),
+                ("ExceptionType", exception.GetType().Name));
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Failed, "Screenshot could not be saved.");
+        }
+    }
+
+    private static bool HasEmptyObjectParameters(JsonElement parameters) =>
+        parameters.ValueKind == JsonValueKind.Object && !parameters.EnumerateObject().Any();
 
     private ShortcutExecutionResult ExecuteExecutable(ShortcutTileDefinition tile, CancellationToken cancellationToken)
     {
@@ -343,6 +391,7 @@ internal sealed class ShortcutRuntime
         string? StatusText)
     {
         internal static TileResolution Available { get; } = new(FrontendShortcutTileState.Neutral, true, null);
+        internal static TileResolution Unavailable { get; } = new(FrontendShortcutTileState.Unavailable, false, "Unavailable");
         internal static TileResolution NotFound { get; } = new(FrontendShortcutTileState.Unavailable, false, "Not found");
         internal static TileResolution Unsupported { get; } = new(FrontendShortcutTileState.Unavailable, false, "Unsupported");
         internal static TileResolution Invalid { get; } = new(FrontendShortcutTileState.Unavailable, false, "Invalid configuration");

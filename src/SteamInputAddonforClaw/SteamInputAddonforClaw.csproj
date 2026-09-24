@@ -57,6 +57,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Dependencies\NirCmd\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
     <Content Include="Dependencies\ClawHUD\clawhud.lock.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

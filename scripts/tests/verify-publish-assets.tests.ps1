@@ -12,6 +12,7 @@ function New-Fixture {
         (Join-Path $root 'Dependencies\UsbIpWin2'),
         (Join-Path $root 'Dependencies\Viiper'),
         (Join-Path $root 'Dependencies\ClawHUD'),
+        (Join-Path $root 'Dependencies\NirCmd'),
         (Join-Path $root 'ui\Views'),
         (Join-Path $root 'overlay'),
         (Join-Path $root 'fse')
@@ -26,6 +27,10 @@ function New-Fixture {
         'Dependencies\Viiper\libVIIPER.h' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.h')
         'Dependencies\Viiper\LICENSE.txt' = (Join-Path $dependencyRoot 'Viiper\LICENSE.txt')
         'Dependencies\ClawHUD\clawhud.lock.json' = (Join-Path $dependencyRoot 'ClawHUD\clawhud.lock.json')
+        'Dependencies\NirCmd\PROVENANCE.md' = (Join-Path $dependencyRoot 'NirCmd\PROVENANCE.md')
+        'Dependencies\NirCmd\NirCmd.chm' = (Join-Path $dependencyRoot 'NirCmd\NirCmd.chm')
+        'Dependencies\NirCmd\nircmd.exe' = (Join-Path $dependencyRoot 'NirCmd\nircmd.exe')
+        'Dependencies\NirCmd\nircmdc.exe' = (Join-Path $dependencyRoot 'NirCmd\nircmdc.exe')
         'ui\SteamInputAddonforClaw.UI.exe' = 'ui executable'
         'ui\SteamInputAddonforClaw.UI.dll' = 'managed payload'
         'ui\SteamInputAddonforClaw.UI.pri' = 'application pri'
@@ -91,6 +96,24 @@ try {
     $validRoot = New-Fixture
     $fixturesToClean += $validRoot
     Assert-Success -Result (Invoke-Verify -PublishDirectory $validRoot) -Case 'complete application asset set'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Remove-Item -LiteralPath (Join-Path $root 'Dependencies\NirCmd\nircmdc.exe')
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing NirCmd console executable' -Asset 'Dependencies\NirCmd\nircmdc.exe'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Remove-Item -LiteralPath (Join-Path $root 'Dependencies\NirCmd\NirCmd.chm')
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing NirCmd distribution help file' -Asset 'Dependencies\NirCmd\NirCmd.chm'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'Dependencies\NirCmd\nircmdc.exe') -Value 'wrong executable bytes'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'NirCmd console executable SHA-256') {
+        throw 'Expected a modified NirCmd console executable to fail its pinned hash check.'
+    }
 
     $root = New-Fixture
     $fixturesToClean += $root

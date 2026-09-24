@@ -119,6 +119,111 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.False(settings.QuickSettingsCurrentPowerSourceOnly);
     }
 
+    [Theory]
+    [InlineData("{}")] // absent
+    [InlineData("{\"ScreenshotSaveFolder\":null}")]
+    [InlineData("{\"ScreenshotSaveFolder\":\"\"}")]
+    [InlineData("{\"ScreenshotSaveFolder\":\"   \"}")]
+    [InlineData("{\"ScreenshotSaveFolder\":\"relative\\\\folder\"}")]
+    [InlineData("{\"ScreenshotSaveFolder\":42}")]
+    public void Screenshot_save_folder_invalid_or_absent_values_use_default_mode(string json)
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, json);
+
+        Assert.Null(new SettingsStore(path).Load().ScreenshotSaveFolder);
+    }
+
+    [Fact]
+    public void Screenshot_save_folder_round_trips_without_creating_its_destination()
+    {
+        var destination = Path.Combine(_testDirectory, "Captured Screenshots");
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+
+        store.Save(new AppSettings { ScreenshotSaveFolder = destination });
+
+        Assert.Equal(destination, store.Load().ScreenshotSaveFolder);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Fact]
+    public void Malformed_screenshot_save_folder_does_not_reset_unrelated_settings()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true,\"ScreenshotSaveFolder\":[]}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.Null(settings.ScreenshotSaveFolder);
+        Assert.Equal(AppLogPreference.Debug, settings.LogLevel);
+        Assert.True(settings.DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void ChangeScreenshotSaveFolder_saves_before_publishing()
+    {
+        var destination = Path.Combine(_testDirectory, "Custom Screenshots");
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        Assert.True(coordinator.ChangeScreenshotSaveFolder(destination));
+
+        Assert.Equal(destination, coordinator.ScreenshotSaveFolder);
+        Assert.Equal(destination, store.Load().ScreenshotSaveFolder);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("  ")]
+    public void ChangeScreenshotSaveFolder_null_or_blank_resets_to_default_mode(string? requestedFolder)
+    {
+        var destination = Path.Combine(_testDirectory, "Existing Preference");
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        store.Save(new AppSettings { ScreenshotSaveFolder = destination });
+        var coordinator = new StartupSettingsCoordinator(store.Load(), store, new FakeStartupManager());
+
+        Assert.True(coordinator.ChangeScreenshotSaveFolder(requestedFolder));
+
+        Assert.Null(coordinator.ScreenshotSaveFolder);
+        Assert.Null(store.Load().ScreenshotSaveFolder);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Fact]
+    public void ChangeScreenshotSaveFolder_relative_path_is_rejected_without_state_change()
+    {
+        var existing = Path.Combine(_testDirectory, "Existing Preference");
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        store.Save(new AppSettings { ScreenshotSaveFolder = existing });
+        var before = File.ReadAllText(path);
+        var coordinator = new StartupSettingsCoordinator(store.Load(), store, new FakeStartupManager());
+
+        Assert.False(coordinator.ChangeScreenshotSaveFolder("relative\\folder"));
+
+        Assert.Equal(existing, coordinator.ScreenshotSaveFolder);
+        Assert.Equal(before, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void ChangeScreenshotSaveFolder_does_not_publish_when_save_fails()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var blockingFile = Path.Combine(_testDirectory, "blocking-file");
+        File.WriteAllText(blockingFile, "block");
+        var currentFolder = Path.Combine(_testDirectory, "Current");
+        var store = new SettingsStore(Path.Combine(blockingFile, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(
+            new AppSettings { ScreenshotSaveFolder = currentFolder }, store, new FakeStartupManager());
+
+        Assert.ThrowsAny<IOException>(() => coordinator.ChangeScreenshotSaveFolder(Path.Combine(_testDirectory, "Next")));
+
+        Assert.Equal(currentFolder, coordinator.ScreenshotSaveFolder);
+    }
+
     [Fact]
     public void ExistingSettingsSaveOperations_PreserveDeveloperMenuEnabled()
     {
