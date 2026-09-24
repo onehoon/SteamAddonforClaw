@@ -4,7 +4,8 @@
 **Status:** Ready for implementation  
 **Target repository:** onehoon/SteamAddonforClaw  
 **Target branch:** main  
-**Reviewed main baseline:** d705eb768e91b8c9cce5b86177abec0d653fc25f  
+**Reviewed main baseline:** 0fcb5eec76084af059460737bda9013f47b7bb98  
+**Implementation rule:** re-read the latest `main` before coding; the baseline above records this work-order review point, not a branch pin.  
 **Depends on:** PR #593, PR #594, PR #595, PR #596  
 **Feature area:** Shortcut editor / Runtime mutation authority  
 **Implementation shape:** one focused PR  
@@ -479,7 +480,61 @@ Rules:
 - preserve and display TypeId for unsupported tiles;
 - never log `PowerShellScript`, executable arguments, or full editor payloads.
 
-For a known schema-1 action whose parameters are currently invalid, prefer projecting the known editor kind with whatever safe field values can be extracted so the user can repair it.
+For a known schema-1 action whose parameters are currently invalid, **the editor MUST still project the known action kind as editable** so the user can repair it.
+
+This is required behavior, not a preference.
+
+Project only safely recoverable values:
+
+```text
+EXE
+  path:
+    string value if present
+    otherwise empty
+  arguments:
+    string value if present
+    otherwise empty
+
+PowerShell
+  script:
+    string value if present
+    otherwise empty
+
+URL
+  url:
+    string value if present
+    otherwise empty
+
+Screenshot
+  known schema-1 Screenshot remains editable even if Parameters is non-empty;
+  saving the repaired definition canonicalizes Parameters back to {}
+```
+
+Ignore unexpected/mistyped parameter members when constructing the repair form. Do not reinterpret them into another field.
+
+The editor projection should expose whether the current configuration is valid, for example:
+
+```csharp
+bool ConfigurationValid
+string? ValidationMessage
+```
+
+or an equivalent narrow representation.
+
+UI behavior:
+
+```text
+known schema-1 + invalid parameters
+  -> visible
+  -> Edit enabled
+  -> "Needs attention" / concise validation message
+  -> user can repair and save
+
+unknown TypeId OR unsupported action schema
+  -> visible
+  -> Edit disabled
+  -> Delete/Reorder still allowed
+```
 
 Do not force-delete an invalid known action.
 
@@ -546,6 +601,96 @@ Available=false
 ```
 
 Unsafe-load cases from PR-B remain fail-closed.
+
+## 4.6 Frontend editor payload budget
+
+The current Main App frontend transport has a hard frame limit:
+
+```csharp
+FrontendWireCodec.MaxFrameBytes = 1024 * 1024
+```
+
+PR-D must **not** increase that 1 MiB transport limit and must not add paging/chunking merely for the Shortcut editor.
+
+Instead define one small shared Shortcut-editor size policy.
+
+Required support limits:
+
+```text
+Max single user-entered editor text field:
+  256 KiB UTF-8
+
+Max serialized Shortcut editor mutation payload:
+  512 KiB UTF-8
+
+Max serialized Shortcut editor snapshot/result payload:
+  512 KiB UTF-8
+```
+
+The 512 KiB feature budget intentionally leaves substantial headroom below the 1 MiB frontend envelope limit for:
+
+- RPC envelope fields;
+- method/request metadata;
+- JSON property names;
+- enum string serialization;
+- future small contract additions.
+
+This is the actual supported editor-size boundary.
+
+Do **not** add an arbitrary tile-count cap merely to solve transport sizing.
+
+Collection cardinality remains naturally bounded by the byte budget.
+
+### Mutation request behavior
+
+The Main UI must validate the typed mutation payload against the same shared limits **before sending it** so an oversized user-entered script/path/argument/URL/title does not reach the generic 1 MiB wire failure.
+
+Runtime must validate the same limits again because Runtime remains authority.
+
+Oversized mutation:
+
+```text
+no write
+no Runtime document replacement
+typed mutation failure
+current authoritative snapshot remains current
+```
+
+Do not rely only on client-side validation.
+
+### Snapshot/result behavior
+
+Before returning a full editor snapshot/result containing editable action data, verify it remains inside the 512 KiB editor payload budget.
+
+If an already-existing Shortcut document is too large for the supported editor transport:
+
+```text
+Shortcut execution document:
+  preserved
+  not rewritten
+  not truncated
+
+Main App editor:
+  Available = false
+  small typed FailureMessage such as:
+    "Shortcut configuration is too large to edit in this version."
+```
+
+Never attempt to send an oversized full snapshot and let `FrontendWireCodec` fail the connection.
+
+Do not silently omit only some tiles or truncate PowerShell scripts to make the response fit.
+
+### Required transport-boundary test
+
+Add a test proving the largest accepted editor request/result remains below:
+
+```text
+FrontendWireCodec.MaxFrameBytes
+```
+
+when serialized as the actual `FrontendWireEnvelope`.
+
+Also prove a payload over the PR-D editor budget is rejected feature-locally without changing the Shortcut document.
 
 ---
 
@@ -749,8 +894,10 @@ Create rules:
 - Runtime generates `Guid.NewGuid()`.
 - UI never supplies TileId.
 - validate nonblank title.
-- validate action input.
-- append the new tile to the end of the ordered collection.
+- validate action input;
+- validate the shared PR-D editor payload limits before persistence;
+- append the new tile to the end of the ordered collection;
+- verify the resulting editor snapshot/result remains within the supported payload budget;
 - save-then-publish.
 - return the new authoritative snapshot.
 
@@ -767,7 +914,8 @@ Rules:
 - preserve current collection position.
 - title may change.
 - supported action kind/configuration may change.
-- Runtime rebuilds the canonical `ShortcutActionSpec`.
+- Runtime rebuilds the canonical `ShortcutActionSpec`;
+- validate the shared PR-D editor payload limits and resulting editor snapshot/result before persistence;
 - save-then-publish.
 
 If the existing tile is `Unsupported` / non-editable, Main UI should not offer Edit.
@@ -833,7 +981,10 @@ Execution availability remains a Runtime projection concern.
 - nonblank script;
 - multiline supported;
 - preserve user text;
-- no editor-side execution/test command.
+- no editor-side execution/test command;
+- must satisfy the shared PR-D single-field and mutation/snapshot byte budgets.
+
+The byte limit exists because the current frontend transport is bounded to 1 MiB. Do not work around it with a second transport or chunked script protocol.
 
 ### URL
 
@@ -954,7 +1105,31 @@ Rules:
 - unrelated settings unchanged;
 - save-before-publish remains owned by StartupSettingsCoordinator.
 
-Return the effective folder snapshot after the operation.
+The existing coordinator currently persists synchronously and may throw when `SettingsStore.Save(...)` fails.
+
+**Do not let that persistence failure escape as only a generic pipe RPC error.**
+
+The frontend feature boundary must convert Screenshot-folder persistence failure into the typed result:
+
+```text
+Succeeded = false
+FailureMessage = concise user-safe message
+Snapshot = the still-current authoritative folder snapshot
+```
+
+Because `StartupSettingsCoordinator.ChangeScreenshotSaveFolder(...)` performs `Save(next)` before assigning `Settings = next`, a thrown save leaves the current in-memory setting unchanged. Preserve that ordering.
+
+On persistence failure:
+
+- do not mutate the in-memory setting;
+- do not raise `StateInvalidated`;
+- do not reset unrelated settings;
+- do not return the requested folder as though it committed;
+- return the current folder snapshot.
+
+Invalid relative paths also return a typed failure/current snapshot rather than relying on a transport exception.
+
+Return the effective folder snapshot after every success or typed failure.
 
 Raise `StateInvalidated` only when the persisted setting actually changes.
 
@@ -1479,7 +1654,40 @@ A disconnected Main UI can reopen and recapture the current document.
 
 Invalid folder setting is rejected without changing unrelated settings.
 
+If `SettingsStore.Save(...)` fails while changing ScreenshotSaveFolder:
+
+```text
+StartupSettingsCoordinator current Settings
+  -> unchanged
+
+frontend result
+  -> Succeeded = false
+  -> current authoritative Screenshot folder snapshot
+
+StateInvalidated
+  -> not raised
+```
+
+The named-pipe server must not be the first layer that translates this expected feature persistence failure.
+
 Opening the folder from Main UI is best-effort UI behavior and cannot affect Runtime lifecycle.
+
+## 17.7 Editor payload too large
+
+Do not increase `FrontendWireCodec.MaxFrameBytes`.
+
+For an oversized mutation:
+
+- reject before persistence;
+- return a typed failure;
+- keep the current document unchanged.
+
+For an already-existing document whose full editor projection exceeds the supported PR-D editor budget:
+
+- preserve the document;
+- preserve execution behavior;
+- return a small `Available=false` editor snapshot;
+- do not truncate or rewrite user data.
 
 ---
 
@@ -1497,7 +1705,12 @@ At minimum prove:
 4. URL maps correctly;
 5. Screenshot maps to Screenshot kind with no per-tile folder;
 6. unknown TypeId is visible but non-editable;
-7. unsupported known action schema is visible but non-editable.
+7. unsupported known action schema is visible but non-editable;
+8. known schema-1 EXE with malformed/missing parameter members remains editable and exposes safe repair fields;
+9. known schema-1 PowerShell with malformed/missing script remains editable with a safe empty/current string field;
+10. known schema-1 URL with malformed/missing URL remains editable with a safe empty/current string field;
+11. known schema-1 Screenshot with non-empty Parameters remains editable and can be repaired to canonical `{}`;
+12. invalid known actions expose a concise invalid/"Needs attention" state rather than being downgraded to Unsupported.
 
 ## 18.2 Create
 
@@ -1539,7 +1752,11 @@ At minimum prove:
 2. malformed load cannot be mutated;
 3. unsupported newer root schema cannot be mutated;
 4. read-failure load cannot be mutated;
-5. the original unsafe file is preserved.
+5. the original unsafe file is preserved;
+6. an oversized mutation is rejected before save;
+7. an oversized resulting editor projection is rejected before save;
+8. an already-existing oversized editor document returns a small unavailable editor snapshot without rewriting the document;
+9. an accepted near-limit editor request/result serializes to an actual frontend frame smaller than 1 MiB.
 
 Use the smallest test seam needed to force a save failure.
 
@@ -1559,7 +1776,10 @@ Prove:
 4. null/blank resets to default;
 5. invalid relative folder is rejected;
 6. unrelated AppSettings remain unchanged;
-7. StateInvalidated fires only for an actual committed change.
+7. StateInvalidated fires only for an actual committed change;
+8. SettingsStore save failure returns `FrontendScreenshotFolderMutationResult(Succeeded=false, ...)`;
+9. save failure returns the previous authoritative folder snapshot;
+10. save failure does not change unrelated settings and does not fire StateInvalidated.
 
 ---
 
@@ -1575,7 +1795,9 @@ Prove:
 4. capture rejects unexpected payload;
 5. malformed mutation payload returns a protocol/error result rather than mutating;
 6. v41 peer is rejected at handshake;
-7. CurrentVersion assertions are updated to 42.
+7. CurrentVersion assertions are updated to 42;
+8. an accepted near-limit Shortcut editor request/result remains below the actual 1 MiB serialized frontend frame limit;
+9. oversized editor content is rejected by the Shortcut feature policy before it can become a generic invalid-frame failure.
 
 Do not bump Overlay protocol.
 
@@ -1855,6 +2077,10 @@ NirCmd packaging verification remains unchanged from PR #596.
 - [ ] save succeeds before Runtime publishes the new document.
 - [ ] unsafe loaded files cannot be overwritten.
 - [ ] no multi-editor/version-vector machinery added.
+- [ ] 1 MiB frontend wire limit is unchanged.
+- [ ] PR-D editor uses the 256 KiB single-field / 512 KiB payload budgets.
+- [ ] oversized mutations fail before persistence.
+- [ ] oversized existing editor documents are preserved and project a small unavailable snapshot.
 
 ## Actions
 
@@ -1864,6 +2090,8 @@ NirCmd packaging verification remains unchanged from PR #596.
 - [ ] Screenshot editor.
 - [ ] unknown/newer actions preserved and visible as unsupported.
 - [ ] unsupported tiles are not rewritten.
+- [ ] malformed known schema-1 EXE/PowerShell/URL/Screenshot actions remain editable for repair.
+- [ ] repairing Screenshot canonicalizes Parameters to `{}`.
 - [ ] PowerShell script is not logged.
 - [ ] no raw JSON editor.
 
@@ -1875,6 +2103,8 @@ NirCmd packaging verification remains unchanged from PR #596.
 - [ ] Open folder uses authoritative EffectiveFolder.
 - [ ] no per-tile Screenshot folder.
 - [ ] no PNG/quality/multi-monitor additions.
+- [ ] ScreenshotSaveFolder persistence failure returns a typed failure/current snapshot.
+- [ ] ScreenshotSaveFolder persistence failure does not raise StateInvalidated.
 
 ## Transport
 
@@ -1884,6 +2114,7 @@ NirCmd packaging verification remains unchanged from PR #596.
 - [ ] SetScreenshotSaveFolder RPC.
 - [ ] Overlay protocol unchanged.
 - [ ] ExecuteShortcut RPC remains deferred to PR-E.
+- [ ] accepted maximum-size editor request/result is proven below the 1 MiB wire frame limit.
 
 ## UI
 
