@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 
 namespace SteamInputAddonforClaw.Overlay;
@@ -91,9 +92,9 @@ internal sealed class OverlayValueRow
 {
     private readonly OverlayValueModel _model;
     private readonly Func<double, string> _formatValue;
-    private readonly Button _previousButton;
+    private readonly ButtonBase _previousButton;
     private readonly TextBlock _valueText;
-    private readonly Button _nextButton;
+    private readonly ButtonBase _nextButton;
 
     internal Border Container { get; }
     internal OverlayRowCapabilities Capabilities { get; }
@@ -169,7 +170,7 @@ internal sealed class OverlayValueRow
         Render();
     }
 
-    private static Button CreateIconButton(
+    private static ButtonBase CreateIconButton(
         OverlayValueButtonKind buttonKind,
         bool increase,
         string automationName,
@@ -183,18 +184,23 @@ internal sealed class OverlayValueRow
             Glyph = glyph,
             FontSize = 16,
         };
-        var button = new Button
-        {
-            Content = icon,
-            MinWidth = 40,
-            MinHeight = 40,
-            Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(6),
-            BorderThickness = new Thickness(0),
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center,
-        };
+        ButtonBase button = buttonKind == OverlayValueButtonKind.NumericStepper
+            ? new RepeatButton
+            {
+                Delay = 300,
+                Interval = 75,
+            }
+            : new Button();
+
+        button.Content = icon;
+        button.MinWidth = 40;
+        button.MinHeight = 40;
+        button.Padding = new Thickness(0);
+        button.CornerRadius = new CornerRadius(6);
+        button.BorderThickness = new Thickness(0);
+        button.VerticalAlignment = VerticalAlignment.Center;
+        button.HorizontalContentAlignment = HorizontalAlignment.Center;
+        button.VerticalContentAlignment = VerticalAlignment.Center;
         AutomationProperties.SetName(button, automationName);
         button.Click += click;
         return button;

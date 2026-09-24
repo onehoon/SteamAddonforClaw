@@ -9,7 +9,7 @@
         <Grid x:Name="SurfaceHost" SizeChanged="OnSurfaceHostSizeChanged">
             <Border
                 x:Name="OpaquePanel"
-                MaxWidth="960"
+                MaxWidth="720"
                 HorizontalAlignment="Stretch"
                 Background="{StaticResource OverlaySurfaceBrush}"
                 CornerRadius="18">

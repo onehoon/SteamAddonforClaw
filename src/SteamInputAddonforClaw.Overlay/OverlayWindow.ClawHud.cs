@@ -27,8 +27,8 @@ public sealed partial class OverlayWindow
     private FrameworkElement BuildSettingPage(List<OverlayRow> rows)
     {
         var root = new StackPanel { Spacing = 16 };
-        root.Children.Add(BuildClawHudPage(rows));
-        root.Children.Add(BuildTabOrderEditorPage(rows));
+        root.Children.Add(CreateOverlaySectionCard(BuildClawHudPage(rows)));
+        root.Children.Add(CreateOverlaySectionCard(BuildTabOrderEditorPage(rows)));
         return root;
     }
 

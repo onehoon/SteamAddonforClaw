@@ -282,7 +282,7 @@ public sealed partial class OverlayWindow
                     sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Message, "CaptionTextBlockStyle"));
 
                 var rowStack = new StackPanel { Spacing = 4 };
-                if (usesFeatureHeader && TryCreateQuickSettingsRow(surface, featureHeaderToggle, out var headerRow, section.Label))
+                if (usesFeatureHeader && TryCreateQuickSettingsRow(surface, featureHeaderToggle, out var headerRow, section.Label, strongLabel: true))
                 {
                     rows.Add(headerRow);
                     RegisterRowPointerSelection(headerRow.Container);
@@ -304,7 +304,7 @@ public sealed partial class OverlayWindow
                     rowStack.Children.Add(detailStack);
 
                 sectionPanel.Children.Add(rowStack);
-                surface.Content.Children.Add(sectionPanel);
+                surface.Content.Children.Add(CreateOverlaySectionCard(sectionPanel));
             }
 
             surface.RowShape = page.Sections.SelectMany(s => s.Rows).Select(QuickSettingsRowShapeOf).ToArray();
@@ -336,13 +336,28 @@ public sealed partial class OverlayWindow
         return block;
     }
 
+    private static Border CreateOverlaySectionCard(UIElement child)
+    {
+        var card = new Border
+        {
+            Child = child,
+            Padding = new Thickness(8),
+            CornerRadius = new CornerRadius(8),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        if (Application.Current.Resources.TryGetValue("CardBackgroundFillColorDefaultBrush", out var fill) && fill is Brush brush)
+            card.Background = brush;
+        return card;
+    }
+
     // Malformed/unsupported rows are skipped entirely: they are never registered for selection and
     // can never emit a mutation.
     private bool TryCreateQuickSettingsRow(
         QuickSettingsSurface surface,
         QuickSettingsRow row,
         out OverlayRow overlayRow,
-        string? displayLabelOverride = null)
+        string? displayLabelOverride = null,
+        bool strongLabel = false)
     {
         if (!QuickSettingsRowRendering.IsWellFormed(row))
         {
@@ -353,7 +368,7 @@ public sealed partial class OverlayWindow
         }
 
         overlayRow = row.ControlKind == QuickSettingsControlKind.Toggle
-            ? CreateQuickSettingsToggleRow(surface, row, displayLabelOverride)
+            ? CreateQuickSettingsToggleRow(surface, row, displayLabelOverride, strongLabel)
             : CreateQuickSettingsValueRow(surface, row);
         return true;
     }
@@ -361,12 +376,14 @@ public sealed partial class OverlayWindow
     private OverlayRow CreateQuickSettingsToggleRow(
         QuickSettingsSurface surface,
         QuickSettingsRow row,
-        string? displayLabelOverride = null)
+        string? displayLabelOverride = null,
+        bool strongLabel = false)
     {
         var rowId = row.RowId;
         var toggleRow = new OverlayToggleRow(
             displayLabelOverride ?? row.Label,
-            desired => _ = SubmitQuickSettingsToggleAsync(surface, rowId, desired));
+            desired => _ = SubmitQuickSettingsToggleAsync(surface, rowId, desired),
+            strongLabel);
         ApplyQuickSettingsToggleState(toggleRow, row);
         surface.ToggleRows[rowId] = toggleRow;
         return new OverlayRow(toggleRow.Container, toggleRow.Capabilities, rowId);
