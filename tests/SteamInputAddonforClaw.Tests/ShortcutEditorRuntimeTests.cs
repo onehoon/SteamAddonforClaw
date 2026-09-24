@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Shortcuts;
@@ -135,6 +136,84 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void Oversized_executable_mutation_is_rejected_before_save()
+    {
+        var existing = Tile("Existing", ShortcutActionTypeIds.Url, "{\"url\":\"https://example.com\"}");
+        Save(existing);
+        var before = File.ReadAllText(DocumentPath);
+        var saveCount = 0;
+        var runtime = new ShortcutRuntime(new ShortcutStore(DocumentPath),
+            saveDocument: _ => saveCount++);
+
+        var result = runtime.MutateEditor(CreateIntent("Large executable",
+            FrontendShortcutEditorActionKind.Executable,
+            executablePath: @"C:\Tools\Tool.exe",
+            executableArguments: new string('x', 30_100)), Folder);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.Changed);
+        Assert.Equal("Executable path or arguments are too long to run.", result.FailureMessage);
+        Assert.Equal(0, saveCount);
+        Assert.Equal(before, File.ReadAllText(DocumentPath));
+        Assert.Equal(existing.TileId, Assert.Single(runtime.CaptureEditor(Folder).Tiles).TileId);
+    }
+
+    [Fact]
+    public void Oversized_powershell_mutation_is_rejected_before_save()
+    {
+        var existing = Tile("Existing", ShortcutActionTypeIds.Url, "{\"url\":\"https://example.com\"}");
+        Save(existing);
+        var before = File.ReadAllText(DocumentPath);
+        var saveCount = 0;
+        var runtime = new ShortcutRuntime(new ShortcutStore(DocumentPath),
+            saveDocument: _ => saveCount++);
+
+        var result = runtime.MutateEditor(CreateIntent("Large PowerShell",
+            FrontendShortcutEditorActionKind.PowerShell,
+            script: new string('x', FrontendShortcutEditorPayloadPolicy.MaxFieldUtf8Bytes / 4)), Folder);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.Changed);
+        Assert.Equal("PowerShell script is too long to run.", result.FailureMessage);
+        Assert.Equal(0, saveCount);
+        Assert.Equal(before, File.ReadAllText(DocumentPath));
+        Assert.Equal(existing.TileId, Assert.Single(runtime.CaptureEditor(Folder).Tiles).TileId);
+    }
+
+    [Fact]
+    public async Task Near_safe_powershell_command_is_editable_projected_and_started()
+    {
+        var script = new string('x', 11_000);
+        ProcessStartInfo? captured = null;
+        var runtime = CreateRuntime(info =>
+        {
+            captured = info;
+            return new Process();
+        });
+
+        var mutation = runtime.MutateEditor(CreateIntent("Near-safe PowerShell",
+            FrontendShortcutEditorActionKind.PowerShell, script: script), Folder);
+        var tile = Assert.Single(mutation.Snapshot.Tiles);
+        var editorAction = Assert.Single(runtime.CaptureEditor(Folder).Tiles).Action;
+        var projected = Assert.Single(runtime.Capture().Tiles);
+        var execution = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.True(mutation.Succeeded);
+        Assert.True(tile.Action.ConfigurationValid);
+        Assert.True(editorAction.ConfigurationValid);
+        Assert.True(projected.Enabled);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, execution.Outcome);
+        Assert.NotNull(captured);
+        var encodedScript = captured!.ArgumentList[6];
+        Assert.Equal(script, Encoding.Unicode.GetString(Convert.FromBase64String(encodedScript)));
+        var fixedArgumentChars = new[]
+        {
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"
+        }.Sum(argument => argument.Length);
+        Assert.True(encodedScript.Length + captured.FileName.Length + fixedArgumentChars + 32 < 30_000);
+    }
+
+    [Fact]
     public void Unknown_tiles_invalid_actions_and_bad_move_indexes_fail_without_mutating()
     {
         var tile = Tile("Future", "future.action", "{\"value\":1}");
@@ -248,7 +327,8 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.True(JsonSerializer.SerializeToUtf8Bytes(response, FrontendWireCodec.Json).Length < FrontendWireCodec.MaxFrameBytes);
     }
 
-    private ShortcutRuntime CreateRuntime() => new(new ShortcutStore(DocumentPath));
+    private ShortcutRuntime CreateRuntime(Func<ProcessStartInfo, Process?>? startProcess = null) =>
+        new(new ShortcutStore(DocumentPath), startProcess);
 
     private void Save(params ShortcutTileDefinition[] tiles)
     {
@@ -262,11 +342,13 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         string title,
         FrontendShortcutEditorActionKind kind,
         string? executablePath = null,
+        string? executableArguments = null,
         string? script = null,
         string? url = null) =>
         new(FrontendShortcutMutationKind.Create, Title: title,
             Action: new FrontendShortcutActionInput(kind,
                 ExecutablePath: executablePath,
+                ExecutableArguments: executableArguments,
                 PowerShellScript: script,
                 Url: url));
 

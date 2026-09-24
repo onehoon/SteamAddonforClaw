@@ -29,6 +29,7 @@ internal sealed record ShortcutExecutionResult(
 /// </summary>
 internal sealed class ShortcutRuntime
 {
+    private const int MaxSafeProcessCommandLineChars = 30_000;
     private const int SupportedActionSchemaVersion = 1;
     private const string ShortcutUnavailableMessage = "Shortcut storage is unavailable.";
     private const string EditorTooLargeMessage = "Shortcut configuration is too large to edit in this version.";
@@ -38,6 +39,8 @@ internal sealed class ShortcutRuntime
     private const string InvalidConfigurationMessage = "Shortcut configuration is invalid.";
     private const string LaunchFailedMessage = "Shortcut could not be launched.";
     private const string TileNotFoundMessage = "Shortcut tile was not found.";
+    private const string ExecutableTooLongMessage = "Executable path or arguments are too long to run.";
+    private const string PowerShellTooLongMessage = "PowerShell script is too long to run.";
 
     private readonly ShortcutStore _store;
     private readonly Action<ShortcutDocument>? _saveDocument;
@@ -326,8 +329,19 @@ internal sealed class ShortcutRuntime
             && !string.IsNullOrWhiteSpace(input.ExecutablePath)
             && IsValidExecutablePath(input.ExecutablePath))
         {
+            var parameters = JsonSerializer.SerializeToElement(new
+            {
+                path = input.ExecutablePath,
+                arguments = input.ExecutableArguments
+            });
+            if (!TryReadExecutableParameters(parameters, out _, out _))
+            {
+                failureMessage = ExecutableTooLongMessage;
+                return false;
+            }
+
             action = new(ShortcutActionTypeIds.Executable, SupportedActionSchemaVersion,
-                JsonSerializer.SerializeToElement(new { path = input.ExecutablePath, arguments = input.ExecutableArguments }));
+                parameters);
             return true;
         }
 
@@ -335,8 +349,15 @@ internal sealed class ShortcutRuntime
             && input.ExecutablePath is null && input.ExecutableArguments is null && input.Url is null
             && !string.IsNullOrWhiteSpace(input.PowerShellScript))
         {
+            var parameters = JsonSerializer.SerializeToElement(new { script = input.PowerShellScript });
+            if (!TryReadPowerShellParameters(parameters, out _))
+            {
+                failureMessage = PowerShellTooLongMessage;
+                return false;
+            }
+
             action = new(ShortcutActionTypeIds.PowerShell, SupportedActionSchemaVersion,
-                JsonSerializer.SerializeToElement(new { script = input.PowerShellScript }));
+                parameters);
             return true;
         }
 
@@ -654,19 +675,39 @@ internal sealed class ShortcutRuntime
 
         if (!parameters.TryGetProperty("arguments", out var argumentsElement)
             || argumentsElement.ValueKind == JsonValueKind.Null)
-            return true;
+            return FitsExecutableCommandLine(path, arguments);
 
         if (argumentsElement.ValueKind != JsonValueKind.String)
             return false;
 
         arguments = argumentsElement.GetString() ?? string.Empty;
-        return true;
+        return FitsExecutableCommandLine(path, arguments);
     }
 
     private static bool TryReadPowerShellParameters(JsonElement parameters, out string script)
     {
         script = string.Empty;
-        return TryReadRequiredString(parameters, "script", out script);
+        return TryReadRequiredString(parameters, "script", out script)
+            && FitsPowerShellCommandLine(script);
+    }
+
+    private static bool FitsExecutableCommandLine(string executablePath, string arguments) =>
+        (long)executablePath.Length + arguments.Length + 4 <= MaxSafeProcessCommandLineChars;
+
+    private static bool FitsPowerShellCommandLine(string script)
+    {
+        var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        var fixedArgumentChars = "-NoLogo".Length
+            + "-NoProfile".Length
+            + "-NonInteractive".Length
+            + "-ExecutionPolicy".Length
+            + "Bypass".Length
+            + "-EncodedCommand".Length;
+        var estimatedChars = (long)WindowsPowerShellPath().Length
+            + encodedScript.Length
+            + fixedArgumentChars
+            + 32;
+        return estimatedChars <= MaxSafeProcessCommandLineChars;
     }
 
     private static bool TryReadUrlParameters(JsonElement parameters, out string url)
