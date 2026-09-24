@@ -1,5 +1,7 @@
 # Work Order — Addon Quick Settings Shared Surface PR4: Shared Shortcut Composition + QAM/Overlay Parity
 
+> **Historical / obsolete:** This document's fixed four-slot QAM/Overlay parity design predates the Shortcut Foundation. QAM is retired and the Overlay now consumes the Runtime-owned dynamic Shortcut dashboard over Overlay protocol v12. Do not implement or revive this work order; see `docs/overlayui/ADDON_QUICK_SETTINGS_OVERLAY_ARCHITECTURE.md` and the Shortcut Foundation PR-E implementation.
+
 > **Date:** 2026-09-19  
 > **Status:** Ready for implementation  
 > **Reviewed production baseline:** `main` at `9aa2d52aefd534698110b225472e9d63116afba6` after PR #529  

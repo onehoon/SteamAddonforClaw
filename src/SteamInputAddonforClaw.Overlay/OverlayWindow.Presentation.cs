@@ -43,6 +43,7 @@ public sealed partial class OverlayWindow
             OverlayLog.Error("Animation", "Show animation initial state failed; keeping Overlay visible.", exception);
         }
         WindowInterop.ShowWithoutActivation(this);
+        _isVisible = true;
         WindowInterop.ArmOutsideClickDismissal(this, outsideClick => OutsideClickDismissRequested?.Invoke(outsideClick));
         if (!initialStatePrepared || !AnimationsEnabled())
         {
@@ -75,6 +76,7 @@ public sealed partial class OverlayWindow
 
     internal async Task HideForPocAsync()
     {
+        _isVisible = false;
         // SF-V2-07 section 23/39: hide never waits for the trailing debounce window -- drop any
         // unsubmitted Device/Profile draft so a hidden Overlay cannot fire an obsolete mutation
         // later. Already-submitted work settles on its own and stays subject to the generation check.

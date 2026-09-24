@@ -1,50 +1,86 @@
 namespace SteamInputAddonforClaw.Overlay;
 
-// OQ5-UI-11: pure selection state for the temporary fixed 2x2 Shortcut POC. Not a navigation-graph
-// framework -- the geometry is small and fixed, so it is expressed directly. Bounded / no-wrap;
-// each move returns whether the selection actually changed so the caller can skip a redundant redraw.
-//
-//   index 0 (0,0)  index 1 (0,1)
-//   index 2 (1,0)  index 3 (1,1)
+/// <summary>Transient bounded selection for the currently rendered Shortcut grid.</summary>
 internal sealed class OverlayShortcutSelection
 {
-    private const int TileCount = 4;
-    private const int ColumnCount = 2;
+    internal int TileCount { get; private set; }
+    internal int ColumnCount { get; private set; }
+    internal int? SelectedIndex { get; private set; }
 
-    internal int SelectedIndex { get; private set; }
+    internal void Configure(int tileCount, int columnCount, int? preferredIndex = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(tileCount);
+        if (tileCount == 0)
+        {
+            if (columnCount != 0)
+                throw new ArgumentOutOfRangeException(nameof(columnCount));
+            TileCount = 0;
+            ColumnCount = 0;
+            SelectedIndex = null;
+            return;
+        }
 
-    // Entering the Shortcut tab always starts on the first temporary tile.
-    internal void Reset() => SelectedIndex = 0;
+        if (columnCount < 1 || columnCount > tileCount)
+            throw new ArgumentOutOfRangeException(nameof(columnCount));
+
+        TileCount = tileCount;
+        ColumnCount = columnCount;
+        SelectedIndex = preferredIndex is { } index && index >= 0 && index < tileCount ? index : 0;
+    }
+
+    internal void Reset() => Configure(tileCount: 0, columnCount: 0);
 
     internal bool Select(int index)
     {
-        if (index is < 0 or >= TileCount || index == SelectedIndex)
+        if (index < 0 || index >= TileCount || index == SelectedIndex)
             return false;
         SelectedIndex = index;
         return true;
     }
 
-    internal bool MoveUp() => TryMove(deltaRow: -1, deltaColumn: 0);
+    internal bool MoveUp() => TryMoveVertical(-1);
 
-    internal bool MoveDown() => TryMove(deltaRow: 1, deltaColumn: 0);
+    internal bool MoveDown() => TryMoveVertical(+1);
 
-    internal bool MoveLeft() => TryMove(deltaRow: 0, deltaColumn: -1);
+    internal bool MoveLeft() => TryMoveHorizontal(-1);
 
-    internal bool MoveRight() => TryMove(deltaRow: 0, deltaColumn: 1);
+    internal bool MoveRight() => TryMoveHorizontal(+1);
 
-    private bool TryMove(int deltaRow, int deltaColumn)
+    private bool TryMoveVertical(int deltaRow)
     {
-        var (row, column) = PositionOf(SelectedIndex);
-        var nextRow = row + deltaRow;
-        var nextColumn = column + deltaColumn;
-        if (nextRow is < 0 or > 1 || nextColumn is < 0 or > 1)
-            return false; // bounded, no wrap
+        if (SelectedIndex is not { } selected || ColumnCount == 0)
+            return false;
 
-        SelectedIndex = SlotAt(nextRow, nextColumn);
+        var row = selected / ColumnCount;
+        var targetRow = row + deltaRow;
+        var rowCount = (TileCount + ColumnCount - 1) / ColumnCount;
+        if (targetRow < 0 || targetRow >= rowCount)
+            return false;
+
+        var column = selected % ColumnCount;
+        var targetIndex = targetRow * ColumnCount + column;
+        var targetRowEndExclusive = Math.Min((targetRow + 1) * ColumnCount, TileCount);
+        if (targetIndex >= targetRowEndExclusive)
+            targetIndex = targetRowEndExclusive - 1;
+        if (targetIndex == selected)
+            return false;
+
+        SelectedIndex = targetIndex;
         return true;
     }
 
-    private static (int Row, int Column) PositionOf(int index) => (index / ColumnCount, index % ColumnCount);
+    private bool TryMoveHorizontal(int deltaColumn)
+    {
+        if (SelectedIndex is not { } selected || ColumnCount == 0)
+            return false;
 
-    private static int SlotAt(int row, int column) => row * ColumnCount + column;
+        var rowStart = selected / ColumnCount * ColumnCount;
+        var rowEndExclusive = Math.Min(rowStart + ColumnCount, TileCount);
+        var targetIndex = selected + deltaColumn;
+        if (targetIndex < rowStart || targetIndex >= rowEndExclusive)
+            return false;
+
+        SelectedIndex = targetIndex;
+        return true;
+    }
 }

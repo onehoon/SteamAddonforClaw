@@ -87,6 +87,39 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.DoesNotContain("Task.Delay", handler);
     }
 
+    [Fact]
+    public void Overlay_shortcut_authority_reuses_the_existing_runtime_and_executes_by_tile_id_only()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var execution = ExtractMethod(source, "private async Task<OverlayShortcutExecutionOutcome> HandleOverlayShortcutExecutionAsync");
+
+        Assert.Contains("_overlayController.BindShortcutAuthority(", source, StringComparison.Ordinal);
+        Assert.Contains("capture: _ => Task.FromResult(_shortcutRuntime.Capture())", source, StringComparison.Ordinal);
+        Assert.Contains("execute: (tileId, token) => HandleOverlayShortcutExecutionAsync(tileId, token)", source, StringComparison.Ordinal);
+        Assert.Contains("_shortcutRuntime = new(_shortcutStore, screenshotAction: ExecuteFullscreenScreenshotShortcutAsync);", source, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(source, "_shortcutRuntime = new("));
+        Assert.Contains("Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive", execution, StringComparison.Ordinal);
+        Assert.Contains("_shortcutRuntime.ExecuteAsync(tileId, token)", execution, StringComparison.Ordinal);
+        Assert.DoesNotContain("ActionSpec", execution, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShortcutActionTypeIds", execution, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Shortcut_state_refresh_is_scheduled_after_capture_commit_and_before_quick_settings_suppression()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var invalidation = ExtractMethod(source, "private void OnFrontendStateInvalidatedForOverlay");
+
+        Assert.Contains("_ = _overlayController.RefreshShortcutAsync();", source, StringComparison.Ordinal);
+        Assert.Contains("_ = _overlayController.RefreshShortcutAsync();", invalidation, StringComparison.Ordinal);
+        Assert.True(invalidation.IndexOf("RefreshShortcutAsync", StringComparison.Ordinal)
+            < invalidation.IndexOf("if (Volatile.Read(ref _overlayQuickSettingsMutationInFlight) != 0)", StringComparison.Ordinal));
+        Assert.Contains("_shortcutRuntime.ExecuteAsync(tileId, token)", source, StringComparison.Ordinal);
+        var screenshot = ExtractMethod(source, "private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync");
+        Assert.Contains("RetireOverlayCaptureUnderTransitionAsync(", screenshot, StringComparison.Ordinal);
+        Assert.Contains("\"ShortcutScreenshot\"", screenshot, StringComparison.Ordinal);
+    }
+
     // Section 7.3/7.4: no active game (AppId 0) resolves to an explicit Unavailable page WITHOUT
     // calling into the frontend control at all -- never a fake AppId-0 profile, never a direct
     // ProfileStore/game scan.
@@ -137,5 +170,17 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
 
         Assert.NotNull(directory);
         return File.ReadAllText(Path.Combine([directory!.FullName, .. parts]));
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+        return count;
     }
 }

@@ -102,7 +102,9 @@ public sealed class AddonQuickSettingsSurfaceParityTests
 
         var overlay = ReadOverlayWindowSources();
         Assert.Contains("_ => CreatePlaceholderPage(id)", overlay);
-        Assert.Contains("TemporaryShortcutTiles", overlay);
+        Assert.DoesNotContain("TemporaryShortcutTiles", overlay);
+        Assert.DoesNotContain("AddonQuickSettingsShortcutSlotId", overlay);
+        Assert.Contains("FrontendShortcutDashboardSnapshot", overlay);
         Assert.DoesNotContain("AddonQuickSettingsShortcut", overlay);
     }
 
@@ -112,17 +114,17 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         var overlay = ReadOverlayWindowSources();
         var frontendWire = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "FrontendWire.cs");
         var overlayWire = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "OverlayWire.cs");
+        var shortcutRenderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
 
         Assert.Contains("AddonQuickSettingsShellContract.LabelFor(id)", overlay);
         Assert.Contains("AddonQuickSettingsTabOrderContract", overlay);
-        Assert.Contains("index / 2", overlay);
-        Assert.Contains("index % 2", overlay);
-        Assert.Contains("SelectShortcutTile(index, \"Pointer\")", overlay);
+        Assert.Contains("Math.Min(2, _shortcutSnapshot.Tiles.Count)", shortcutRenderer);
+        Assert.Contains("SelectShortcutTile(tile.TileId, \"Pointer\")", shortcutRenderer + overlay);
         Assert.Contains("SelectedIndex", overlay);
         Assert.DoesNotContain("AddonQuickSettingsShortcutSlotId", overlay);
         Assert.DoesNotContain("setInterval", overlay);
         Assert.Contains("CurrentVersion = 42", frontendWire);
-        Assert.Contains("CurrentVersion = 11", overlayWire);
+        Assert.Contains("CurrentVersion = 12", overlayWire);
         Assert.DoesNotContain("CurrentVersion = 35", frontendWire);
         Assert.DoesNotContain("CurrentVersion = 8", overlayWire);
     }
@@ -143,5 +145,6 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs"),
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"),
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"),
+        ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs"),
         ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
 }

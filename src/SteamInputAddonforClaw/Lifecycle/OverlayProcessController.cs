@@ -36,6 +36,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
     private Func<CancellationToken, Task<IReadOnlyList<FrontendProfileGameCatalogEntry>>>? _scanProfileGames;
     private Func<uint, CancellationToken, Task<QuickSettingsPageSnapshot>>? _captureSelectedProfilePage;
+    private Func<CancellationToken, Task<FrontendShortcutDashboardSnapshot>>? _captureShortcut;
+    private Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>>? _executeShortcut;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
@@ -57,9 +59,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         _logDirectory = logDirectory;
         _startProcess = startProcess ?? Process.Start;
         // The default factory reads the bound authority at connection time (StartCoreAsync), which
-        // always runs after AddonProcessHost has called BindTabOrderAuthority.
+        // always runs after AddonProcessHost has bound its Runtime authorities.
         _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _captureTabOrder, _moveTabOrder, _mutateQuickSettings,
-            _captureClawHud, _setClawHudEnabled, _mutateClawHudSetting, _scanProfileGames, _captureSelectedProfilePage));
+            _captureClawHud, _setClawHudEnabled, _mutateClawHudSetting, _scanProfileGames, _captureSelectedProfilePage,
+            _captureShortcut, _executeShortcut));
     }
 
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
@@ -102,6 +105,14 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     {
         _scanProfileGames = scan ?? throw new ArgumentNullException(nameof(scan));
         _captureSelectedProfilePage = captureSelectedProfilePage ?? throw new ArgumentNullException(nameof(captureSelectedProfilePage));
+    }
+
+    internal void BindShortcutAuthority(
+        Func<CancellationToken, Task<FrontendShortcutDashboardSnapshot>> capture,
+        Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>> execute)
+    {
+        _captureShortcut = capture ?? throw new ArgumentNullException(nameof(capture));
+        _executeShortcut = execute ?? throw new ArgumentNullException(nameof(execute));
     }
 
     internal string ExecutablePath => _executablePath;
@@ -224,6 +235,34 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         }
         try { await server.SendClawHudStateAsync(state).ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Warn("Overlay", "Overlay ClawHUD publish failed.", exception); }
+    }
+
+    internal async Task RefreshShortcutAsync()
+    {
+        NamedPipeOverlayServer? server;
+        var capture = _captureShortcut;
+        lock (_sync) server = _server;
+        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+
+        FrontendShortcutDashboardSnapshot snapshot;
+        try { snapshot = await capture(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Overlay Shortcut capture failed.", null,
+                ("ExceptionType", exception.GetType().Name));
+            snapshot = FrontendShortcutDashboardSnapshot.Unavailable("Shortcut settings are unavailable.");
+        }
+
+        try
+        {
+            if (!await server.SendShortcutStateAsync(snapshot).ConfigureAwait(false))
+                AppLog.Warn("Overlay", "Overlay Shortcut state publish was not accepted.");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Overlay Shortcut state publish failed.", null,
+                ("ExceptionType", exception.GetType().Name));
+        }
     }
 
     private static async Task PublishQuickSettingsPageAsync(
