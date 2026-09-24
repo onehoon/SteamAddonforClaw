@@ -93,10 +93,31 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
         Assert.True(new FileInfo(captured.ArgumentList[1]).Length > 0);
     }
 
+    [Fact]
+    public async Task Nonzero_exit_with_nonempty_output_succeeds_and_preserves_the_screenshot()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        string? outputPath = null;
+        var capture = CreateCapture((info, _) =>
+        {
+            outputPath = info.ArgumentList[1];
+            File.WriteAllBytes(outputPath, [0xFF, 0xD8, 0xFF]);
+            return Task.FromResult(new NirCmdProcessResult(true, false, 1073757860));
+        });
+
+        var result = await capture.CaptureAsync(_testDirectory);
+
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
+        Assert.NotNull(outputPath);
+        Assert.True(File.Exists(outputPath));
+        Assert.True(new FileInfo(outputPath).Length > 0);
+    }
+
     [Theory]
     [InlineData(false, false, null)] // process could not be started
     [InlineData(true, true, null)]   // bounded timeout
     [InlineData(true, false, 1)]    // nonzero exit
+    [InlineData(true, false, null)] // process completion was not observed
     [InlineData(true, false, 0)]    // zero exit but no output file
     public async Task Failed_process_results_are_classified_without_leaking_paths(
         bool started,
@@ -122,6 +143,25 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
         {
             partialPath = info.ArgumentList[1];
             File.WriteAllBytes(partialPath, []);
+            return Task.FromResult(new NirCmdProcessResult(true, true, null));
+        });
+
+        var result = await capture.CaptureAsync(_testDirectory);
+
+        Assert.Equal(ShortcutExecutionOutcome.Failed, result.Outcome);
+        Assert.NotNull(partialPath);
+        Assert.False(File.Exists(partialPath));
+    }
+
+    [Fact]
+    public async Task Timeout_with_nonempty_partial_output_remains_a_failure_and_cleans_the_file()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        string? partialPath = null;
+        var capture = CreateCapture((info, _) =>
+        {
+            partialPath = info.ArgumentList[1];
+            File.WriteAllBytes(partialPath, [0xFF, 0xD8, 0xFF]);
             return Task.FromResult(new NirCmdProcessResult(true, true, null));
         });
 
@@ -175,12 +215,13 @@ public sealed class NirCmdScreenshotCaptureTests : IDisposable
         var capture = new NirCmdScreenshotCapture((info, _) =>
         {
             attemptedPath = info.ArgumentList[1];
-            File.WriteAllBytes(attemptedPath, [1, 2]);
+            File.WriteAllBytes(attemptedPath, []);
             return Task.FromResult(new NirCmdProcessResult(true, false, 2));
         }, FileExists);
 
-        await capture.CaptureAsync(_testDirectory);
+        var result = await capture.CaptureAsync(_testDirectory);
 
+        Assert.Equal(ShortcutExecutionOutcome.Failed, result.Outcome);
         Assert.NotNull(preexistingPath);
         Assert.NotNull(attemptedPath);
         Assert.NotEqual(preexistingPath, attemptedPath);
