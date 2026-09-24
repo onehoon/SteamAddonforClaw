@@ -96,19 +96,14 @@ public sealed class AddonQuickSettingsSurfaceParityTests
     [Fact]
     public void Shortcut_and_controller_remain_narrow_surface_specific_contracts()
     {
-        var shortcut = AddonQuickSettingsShortcutContract.Create();
-        Assert.Equal(
-            [AddonQuickSettingsShortcutSlotId.Slot1, AddonQuickSettingsShortcutSlotId.Slot2, AddonQuickSettingsShortcutSlotId.Slot3, AddonQuickSettingsShortcutSlotId.Slot4],
-            shortcut.Slots.Select(slot => slot.SlotId));
-        Assert.All(shortcut.Slots, slot => Assert.Equal("Unassigned", slot.StatusLabel));
-
         var shell = AddonQuickSettingsShellContract.Create(AddonQuickSettingsTabOrderContract.DefaultOrder);
         Assert.Contains(shell.Tabs, tab => tab.TabId == AddonQuickSettingsTabId.Controller);
         Assert.DoesNotContain(Enum.GetNames<QuickSettingsPageId>(), name => name == "Controller");
 
         var overlay = ReadOverlayWindowSources();
         Assert.Contains("_ => CreatePlaceholderPage(id)", overlay);
-        Assert.Contains("AddonQuickSettingsShortcutContract.Create()", overlay);
+        Assert.Contains("TemporaryShortcutTiles", overlay);
+        Assert.DoesNotContain("AddonQuickSettingsShortcut", overlay);
     }
 
     [Fact]
@@ -122,6 +117,9 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.Contains("AddonQuickSettingsTabOrderContract", overlay);
         Assert.Contains("index / 2", overlay);
         Assert.Contains("index % 2", overlay);
+        Assert.Contains("SelectShortcutTile(index, \"Pointer\")", overlay);
+        Assert.Contains("SelectedIndex", overlay);
+        Assert.DoesNotContain("AddonQuickSettingsShortcutSlotId", overlay);
         Assert.DoesNotContain("setInterval", overlay);
         Assert.Contains("CurrentVersion = 41", frontendWire);
         Assert.Contains("CurrentVersion = 11", overlayWire);

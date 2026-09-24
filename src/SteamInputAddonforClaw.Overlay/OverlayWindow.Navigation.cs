@@ -20,9 +20,9 @@ public sealed partial class OverlayWindow
     private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
     private static readonly Brush RowUnselectedFillBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
 
-    // OQ5-UI-11: the fixed 2x2 Shortcut grid -- one pure selection model + the four tile borders.
+    // OQ5-UI-11: the temporary fixed 2x2 Shortcut grid -- one pure selection model + four tile borders.
     private readonly OverlayShortcutSelection _shortcutSelection = new();
-    private readonly Dictionary<AddonQuickSettingsShortcutSlotId, Border> _shortcutTiles = new();
+    private readonly Dictionary<int, Border> _shortcutTiles = new();
 
     // OQ5-UI-04 s.11: NavigateUp/Down move logical row selection; Left/Right and Accept dispatch to
     // the selected row only when it registered that capability. All row/selection state stays private
@@ -67,8 +67,8 @@ public sealed partial class OverlayWindow
         if (OnProfileCatalogPage()) { ActivateProfileCatalogSelection(); return; }
         if (OnShortcutPage())
         {
-            // Every PR11 slot is Unassigned: A performs no product action.
-            OverlayLog.Debug("Shortcut", "Accept on an unassigned Shortcut slot; no action.", ("Slot", _shortcutSelection.SelectedSlot));
+            // Every temporary POC tile is Unassigned: A performs no product action.
+            OverlayLog.Debug("Shortcut", "Accept on an unassigned Shortcut tile; no action.", ("Index", _shortcutSelection.SelectedIndex));
             return;
         }
         if (_rowSelection.ActivateSelected()) RefreshRowSelectionAfterMove();
@@ -88,17 +88,17 @@ public sealed partial class OverlayWindow
         BringSelectedRowIntoView();
     }
 
-    private void SelectShortcutSlot(AddonQuickSettingsShortcutSlotId slot, string source)
+    private void SelectShortcutTile(int index, string source)
     {
-        if (!_shortcutSelection.Select(slot)) return;
-        OverlayLog.Debug("Shortcut", "Shortcut tile selected.", ("Slot", slot), ("Source", source));
+        if (!_shortcutSelection.Select(index)) return;
+        OverlayLog.Debug("Shortcut", "Shortcut tile selected.", ("Index", index), ("Source", source));
         ApplyShortcutSelectionVisual();
     }
 
     private void ApplyShortcutSelectionVisual()
     {
         foreach (var (id, tile) in _shortcutTiles)
-            tile.BorderBrush = id == _shortcutSelection.SelectedSlot ? _rowSelectedBrush : RowUnselectedBrush;
+            tile.BorderBrush = id == _shortcutSelection.SelectedIndex ? _rowSelectedBrush : RowUnselectedBrush;
     }
 
     private IReadOnlyList<OverlayRowCapabilities> CapabilitiesFor(AddonQuickSettingsTabId tab) =>
