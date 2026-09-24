@@ -43,11 +43,14 @@ public sealed class AddonDataPathsTests
     {
         var settingsPath = AddonDataPaths.ResolveSettingsPath(InstallRoot);
         var profilesPath = AddonDataPaths.ResolveProfilesPath(InstallRoot);
+        var shortcutsPath = AddonDataPaths.ResolveShortcutsPath(InstallRoot);
 
         Assert.Equal(@"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\settings.json", settingsPath);
         Assert.Equal(@"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\profiles.json", profilesPath);
+        Assert.Equal(@"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\shortcuts.json", shortcutsPath);
         Assert.False(settingsPath.StartsWith(Path.GetFullPath(InstallRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
         Assert.False(profilesPath.StartsWith(Path.GetFullPath(InstallRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        Assert.False(shortcutsPath.StartsWith(Path.GetFullPath(InstallRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
