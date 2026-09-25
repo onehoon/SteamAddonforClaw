@@ -1057,6 +1057,7 @@ public sealed class MsiClawAddonPresentationTests
     {
         private readonly object _sync = new();
         internal List<SteamInputAddonforClaw.Feedback.TwoMotorRumble> Writes { get; } = [];
+        internal Queue<SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteResult> Results { get; } = new();
         internal bool Throw { get; set; }
         // When set, the FIRST non-zero write blocks on this gate until the test releases it, modeling
         // WindowsMsiClawRumbleTransport's up-to-250 ms pending physical write.
@@ -1074,7 +1075,12 @@ public sealed class MsiClawAddonPresentationTests
                 gate.Wait();
             }
             lock (_sync) Writes.Add(rumble);
-            return new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "OK");
+            lock (_sync)
+            {
+                return Results.Count > 0
+                    ? Results.Dequeue()
+                    : new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "OK");
+            }
         }
     }
 
@@ -1108,6 +1114,125 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     // ================= Full1902 Suspend/Resume: power-suspend neutral presentation =================
+
+    [Fact]
+    public async Task Suspend_without_a_presentation_requests_physical_stop_and_reports_unconfirmed_failure()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "WriteFailed"));
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        native.Calls.Clear();
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.PausedNoPresentation, pause.Outcome);
+        Assert.False(pause.PhysicalRumbleStopConfirmed);
+        Assert.False(pause.Safe);
+        Assert.Equal([SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped], sink.Writes);
+        Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Suspend_without_a_presentation_is_safe_when_physical_stop_is_confirmed()
+    {
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(new FakeNative(), new FakePublisher(), new FakePublisher(), sink);
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.PausedNoPresentation, pause.Outcome);
+        Assert.True(pause.PhysicalRumbleStopConfirmed);
+        Assert.True(pause.Safe);
+        Assert.Equal([SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped], sink.Writes);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Suspend_keeps_safe_false_when_stop_and_virtual_neutral_fail_but_retirement_succeeds()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "FirstStopFailed"));
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "RetireStopFailed"));
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        native.StateResults.Enqueue(false); // suspend neutral rejected
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.NeutralRejectedPresentationRetired, pause.Outcome);
+        Assert.False(pause.PhysicalRumbleStopConfirmed);
+        Assert.False(pause.Safe);
+        Assert.Null(owner.ActivePresentation);
+        Assert.Equal(2, sink.Writes.Count(w => w.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)));
+        Assert.Contains("DetachUSBDeviceEx", native.Calls);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Suspend_counts_a_successful_retirement_stop_after_the_initial_stop_fails()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "FirstStopFailed"));
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "OK"));
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        native.StateResults.Enqueue(false); // suspend neutral rejected
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.NeutralRejectedPresentationRetired, pause.Outcome);
+        Assert.True(pause.PhysicalRumbleStopConfirmed);
+        Assert.True(pause.Safe);
+        Assert.Equal(2, sink.Writes.Count(w => w.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)));
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Suspend_preserves_a_confirmed_stop_if_a_later_retirement_stop_fails()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "OK"));
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "RetireStopFailed"));
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+        native.StateResults.Enqueue(false); // suspend neutral rejected
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.NeutralRejectedPresentationRetired, pause.Outcome);
+        Assert.True(pause.PhysicalRumbleStopConfirmed);
+        Assert.True(pause.Safe);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Suspend_is_unsafe_when_physical_stop_fails_even_if_virtual_neutral_succeeds()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "StopFailed"));
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        native.Calls.Clear();
+
+        var pause = await owner.PauseForSuspendAsync(default);
+
+        Assert.Equal(SuspendPauseOutcome.Paused, pause.Outcome);
+        Assert.False(pause.PhysicalRumbleStopConfirmed);
+        Assert.False(pause.Safe);
+        Assert.Contains("SetXbox360DeviceState", native.Calls);
+        Assert.Single(sink.Writes, write => write.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped));
+        await owner.DisposeAsync();
+    }
 
     [Fact] // section 16.2
     public async Task Xbox360_suspend_pause_stops_publisher_disarms_feedback_writes_neutral_and_keeps_the_device_attached()

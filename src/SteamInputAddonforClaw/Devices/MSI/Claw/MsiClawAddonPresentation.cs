@@ -106,12 +106,17 @@ internal enum SuspendPauseOutcome
 }
 
 /// <summary>The in-memory result of one Full1902 suspend-pause. Not persisted.</summary>
-internal sealed record SuspendPauseResult(SuspendPauseOutcome Outcome, string Reason)
+internal sealed record SuspendPauseResult(
+    SuspendPauseOutcome Outcome,
+    string Reason,
+    bool PhysicalRumbleStopConfirmed)
 {
     /// <summary>The game-facing output is proven safe (stopped + neutral, or retired). Suspend
-    /// quiesce may report success for this participant.</summary>
-    internal bool Safe => Outcome is SuspendPauseOutcome.Paused or SuspendPauseOutcome.PausedNoPresentation
-        or SuspendPauseOutcome.NeutralRejectedPresentationRetired;
+    /// quiesce may report success for this participant only when any configured physical rumble sink
+    /// also confirmed a STOP during this suspend path.</summary>
+    internal bool Safe => PhysicalRumbleStopConfirmed &&
+        Outcome is (SuspendPauseOutcome.Paused or SuspendPauseOutcome.PausedNoPresentation
+            or SuspendPauseOutcome.NeutralRejectedPresentationRetired);
 }
 
 internal enum SuspendResumeOutcome
@@ -244,6 +249,8 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
 /// </summary>
 internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 {
+    private sealed record PresentationRetirementResult(bool Succeeded, bool PhysicalRumbleStopConfirmed);
+
     private readonly CanonicalViiperRuntime? _viiper;
     private readonly Func<CanonicalViiperRuntime, ICanonicalSteamDeckSession> _deckSessionFactory;
     private readonly Func<IControllerStateSnapshotSource, Func<Xbox360DeviceState, bool>, Action<Exception>, IAddonPresentationPublisher> _xbox360PublisherFactory;
@@ -412,7 +419,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 ("RunningAppId", snapshot.RunningAppId), ("BigPictureActive", snapshot.BigPictureActive),
                 ("PreviousPresentation", previous?.ToString() ?? "None"), ("DesiredPresentation", desired));
 
-            if (previous is not null && !await RetireActivePresentationCoreAsync("SwitchTo:" + desired).ConfigureAwait(false))
+            var retirement = previous is not null
+                ? await RetireActivePresentationCoreAsync("SwitchTo:" + desired).ConfigureAwait(false)
+                : null;
+            if (retirement is { Succeeded: false })
             {
                 // Hard cleanup barrier -- the current presentation could not be proven retired. Do
                 // NOT attach the target; ownership evidence is retained.
@@ -546,7 +556,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// stopped/joined the publisher; <c>armed.Dispose()</c> clears the native registration, cancels
     /// the SteamDeck dead-man stop, and DRAINS any callback still inside its physical write, so the
     /// STOP written below is guaranteed to be the final physical write.</summary>
-    private void DisarmFeedbackAndStopLocked(string reason)
+    private bool DisarmFeedbackAndStopLocked(string reason)
     {
         var armed = _armedFeedback;
         _armedFeedback = null;
@@ -559,18 +569,20 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             }
         }
 
-        if (_rumbleSink is null) return;
+        if (_rumbleSink is null) return true;
         try
         {
             var result = _rumbleSink.SetRumble(TwoMotorRumble.Stopped);
-            if (result.Status is PhysicalRumbleWriteStatus.Failed or PhysicalRumbleWriteStatus.Disposed)
+            if (!result.Succeeded)
                 AppLog.Debug("Rumble", "Production rumble STOP was not confirmed.",
                     ("Event", "ProductionRumbleStopFailed"), ("Reason", reason), ("Status", result.Status));
+            return result.Succeeded;
         }
         catch (Exception exception)
         {
             AppLog.Warn("Rumble", "Production rumble STOP threw.", exception,
                 ("Event", "ProductionRumbleStopFailed"), ("Reason", reason));
+            return false;
         }
     }
 
@@ -638,7 +650,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Error("OverlayCapture", "Neutral write rejected on a stopped publisher; retiring the current presentation.", null,
                     ("Event", "OverlayPauseNeutralRejected"), ("Presentation", kind));
-                if (!await RetireActivePresentationCoreAsync("OverlayPauseNeutralRejected").ConfigureAwait(false))
+                var retirement = await RetireActivePresentationCoreAsync("OverlayPauseNeutralRejected").ConfigureAwait(false);
+                if (!retirement.Succeeded)
                 {
                     AppLog.Error("OverlayCapture", "Presentation could not be proven retired after Overlay neutral rejection; ownership retained.", null,
                         ("Event", "OverlayPauseFailCloseIncomplete"), ("Presentation", kind));
@@ -729,28 +742,31 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             var wasAlreadyPaused = _suspendPaused;
             _suspendPaused = true;
 
-            // Section 7.2: the ACTUAL empty state -> no native work. "_publisher is null" alone is not
-            // proof there is nothing attached: RetireActivePresentationCoreAsync clears _publisher (a
-            // proven-stopped publisher) BEFORE it attempts the canonical neutral+detach, and keeps
-            // _activeKind set when that detach is not proven (e.g. DetachXbox360 RetryableFailure).
-            // Review #490: only the true empty pair may certify PausedNoPresentation/Safe=true, and
-            // even then only once residual typed-device ownership is structurally ruled out.
-            // AttachXbox360Async / AttachSteamDeckAsync never commit _activeKind/_publisher until
-            // AFTER neutral is proven, so a rejected initial neutral write followed by a failed
-            // cleanup detach can leave a residual attached (non-neutral-proven) device while both
-            // managed fields stay null.
+            // Physical STOP is a separate safety fact from virtual presentation state. No configured
+            // sink means there is no physical rumble output to stop; otherwise only a successful STOP
+            // result confirms this suspend path.
+            var physicalRumbleStopConfirmed = _rumbleSink is null;
+
+            // Section 7.2: the ACTUAL empty state -> no presentation work, but the physical sink still
+            // receives STOP. "_publisher is null" alone is not proof there is nothing attached:
+            // RetireActivePresentationCoreAsync clears _publisher before canonical neutral+detach and
+            // keeps _activeKind when detach is not proven. Only the true empty pair may certify
+            // PausedNoPresentation, and only after residual typed-device ownership is ruled out.
             if (_activeKind is null && _publisher is null)
             {
+                physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend");
                 if (!TryProveNoResidualPresentationLocked(out var residualReason))
                 {
                     AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual typed-device ownership evidence.", null,
                         ("Event", "PresentationSuspendPauseFailed"), ("Reason", residualReason));
-                    return new(SuspendPauseOutcome.Blocked, residualReason);
+                    return new(SuspendPauseOutcome.Blocked, residualReason, physicalRumbleStopConfirmed);
                 }
 
                 AppLog.Info("ControllerPresentation", "Presentation suspend pause: no active presentation.",
-                    ("Event", "PresentationSuspendPausedNeutral"), ("Presentation", "None"), ("PublisherWasRunning", false), ("OverlayPaused", _overlayPaused));
-                return new(SuspendPauseOutcome.PausedNoPresentation, wasAlreadyPaused ? "AlreadyPaused" : "NoActivePresentation");
+                    ("Event", "PresentationSuspendPausedNeutral"), ("Presentation", "None"), ("PublisherWasRunning", false),
+                    ("OverlayPaused", _overlayPaused), ("PhysicalRumbleStopConfirmed", physicalRumbleStopConfirmed));
+                return new(SuspendPauseOutcome.PausedNoPresentation,
+                    wasAlreadyPaused ? "AlreadyPaused" : "NoActivePresentation", physicalRumbleStopConfirmed);
             }
 
             // The inverse is an impossible state (a publisher with no active kind) -- never certify
@@ -759,7 +775,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Error("ControllerPresentation", "Presentation suspend pause: publisher present without an active presentation kind.", null,
                     ("Event", "PresentationSuspendPauseFailed"), ("Reason", "InconsistentPresentationState"));
-                return new(SuspendPauseOutcome.Blocked, "InconsistentPresentationState");
+                return new(SuspendPauseOutcome.Blocked, "InconsistentPresentationState", physicalRumbleStopConfirmed);
             }
 
             // A retained active kind with a null publisher means a prior retire already proved the
@@ -783,13 +799,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 {
                     AppLog.Warn("ControllerPresentation", "Presentation publisher could not be stopped for Suspend; pause stays unsafe.", exception,
                         ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStopThrew"));
-                    return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStopThrew");
+                    return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStopThrew", physicalRumbleStopConfirmed);
                 }
                 if (publisher!.IsRunning)
                 {
                     AppLog.Warn("ControllerPresentation", "Presentation publisher still running after StopAsync for Suspend; pause stays unsafe.", null,
                         ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
-                    return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStillRunning");
+                    return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStillRunning", physicalRumbleStopConfirmed);
                 }
             }
 
@@ -798,7 +814,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
             // 3-6. Clear the feedback callback, DRAIN any in-progress physical rumble write, then
             //       request a final physical STOP (sections 7.1 / 12). Reuses the #488 helper.
-            DisarmFeedbackAndStopLocked("Suspend");
+            physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend");
 
             // 7. Write the SAME attached device neutral. A rejected write on a proven-stopped
             //    publisher is a real output-safety failure: fail-close the current presentation
@@ -817,22 +833,25 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Error("ControllerPresentation", "SteamDeck suspend pause has no session to write neutral through; pause stays unsafe.", null,
                     ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "SteamDeckSessionMissing"));
-                return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, "SteamDeckSessionMissing");
+                return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, "SteamDeckSessionMissing", physicalRumbleStopConfirmed);
             }
             if (!neutral)
             {
                 AppLog.Error("ControllerPresentation", "Neutral write rejected on a stopped publisher during Suspend; retiring the current presentation.", null,
                     ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "NeutralRejected"));
-                if (!await RetireActivePresentationCoreAsync("SuspendNeutralRejected").ConfigureAwait(false))
-                    return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, "NeutralRejectedRetireFailed");
-                return new(SuspendPauseOutcome.NeutralRejectedPresentationRetired, "NeutralRejected");
+                var retirement = await RetireActivePresentationCoreAsync("SuspendNeutralRejected").ConfigureAwait(false);
+                physicalRumbleStopConfirmed |= retirement.PhysicalRumbleStopConfirmed;
+                if (!retirement.Succeeded)
+                    return new(SuspendPauseOutcome.NeutralRejectedRetireFailed, "NeutralRejectedRetireFailed", physicalRumbleStopConfirmed);
+                return new(SuspendPauseOutcome.NeutralRejectedPresentationRetired, "NeutralRejected", physicalRumbleStopConfirmed);
             }
 
             // 8. Keep the typed device attached (section 7.1 step 8) -- a healthy device is not
             //    detached/recreated merely because Windows is going to sleep.
             AppLog.Info("ControllerPresentation", "Presentation suspend paused neutral.",
-                ("Event", "PresentationSuspendPausedNeutral"), ("Presentation", kind), ("PublisherWasRunning", publisherWasRunning));
-            return new(SuspendPauseOutcome.Paused, "Paused");
+                ("Event", "PresentationSuspendPausedNeutral"), ("Presentation", kind), ("PublisherWasRunning", publisherWasRunning),
+                ("PhysicalRumbleStopConfirmed", physicalRumbleStopConfirmed));
+            return new(SuspendPauseOutcome.Paused, "Paused", physicalRumbleStopConfirmed);
         }
         finally { _gate.Release(); }
     }
@@ -1019,11 +1038,11 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         return true;
     }
 
-    private static SuspendPauseResult SuspendPauseBlocked(string reason)
+    private SuspendPauseResult SuspendPauseBlocked(string reason)
     {
         AppLog.Info("ControllerPresentation", "Presentation suspend pause not attempted.",
             ("Event", "PresentationSuspendPauseBlocked"), ("Reason", reason));
-        return new(SuspendPauseOutcome.Blocked, reason);
+        return new(SuspendPauseOutcome.Blocked, reason, _rumbleSink is null);
     }
 
     private static SuspendResumeResult SuspendResumeReconcile(string reason, AddonPresentationKind kind)
@@ -1037,8 +1056,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// detach primitive -&gt; clear managed fields). The canonical VIIPER runtime (server / bus / both
     /// typed device objects) stays alive and Ready -- this is the PR7 X360 &lt;-&gt; Deck switch step.
     /// Assumes <see cref="_gate"/> is already held; never reacquires it (work order PR7 section 14).</summary>
-    private async Task<bool> RetireActivePresentationCoreAsync(string reason)
+    private async Task<PresentationRetirementResult> RetireActivePresentationCoreAsync(string reason)
     {
+        var physicalRumbleStopConfirmed = _rumbleSink is null;
+
         // 1. Stop + JOIN the publisher. A join failure is a hard barrier: never detach a device
         //    underneath a possibly-live publisher (section 13/15.1).
         if (_publisher is { } publisher)
@@ -1050,12 +1071,12 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             catch (Exception exception)
             {
                 AppLog.Error("ControllerPresentation", "Presentation publisher could not be joined; ownership retained.", exception, ("Reason", reason));
-                return false;
+                return new(false, physicalRumbleStopConfirmed);
             }
             if (publisher.IsRunning)
             {
                 AppLog.Error("ControllerPresentation", "Presentation publisher still running after StopAsync; ownership retained.", null, ("Reason", reason));
-                return false;
+                return new(false, physicalRumbleStopConfirmed);
             }
             _publisher = null;
         }
@@ -1068,7 +1089,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         // 2-3. Stop accepting old-presentation feedback (clear the native callback) and request a
         //      best-effort physical STOP before the typed device is detached, so a switch/release/
         //      shutdown/fail-close can never leave a motor latched.
-        DisarmFeedbackAndStopLocked(reason);
+        physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked(reason);
 
         // 4. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
         if (_activeKind == AddonPresentationKind.Xbox360)
@@ -1077,7 +1098,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             if (detach != USBDeviceDetachResult.Success)
             {
                 AppLog.Error("ControllerPresentation", "Xbox360 detach did not succeed; ownership retained.", null, ("Result", detach), ("Reason", reason));
-                return false;
+                return new(false, physicalRumbleStopConfirmed);
             }
         }
         else if (_activeKind == AddonPresentationKind.SteamDeck || _deckSession is not null)
@@ -1087,7 +1108,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 if (!session.DetachDevice())
                 {
                     AppLog.Error("ControllerPresentation", "Steam Deck detach did not succeed; ownership retained.", null, ("State", session.State), ("Reason", reason));
-                    return false;
+                    return new(false, physicalRumbleStopConfirmed);
                 }
             }
             _deckSession?.Dispose();
@@ -1098,7 +1119,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         // OQ4 section 5.6: an explicit authority release / teardown that retires the presentation
         // also clears any Overlay pause so the closed state is consistent.
         _overlayPaused = false;
-        return true;
+        return new(true, physicalRumbleStopConfirmed);
     }
 
     internal bool ShouldSuppressRearButton(ControllerState state, AuxiliaryButtonSlot slot)
@@ -1142,7 +1163,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (!await RetireActivePresentationCoreAsync(reason).ConfigureAwait(false))
+            if (!(await RetireActivePresentationCoreAsync(reason).ConfigureAwait(false)).Succeeded)
                 return false;
 
             // 3. Tear the canonical VIIPER runtime down to its proven-safe closed state.

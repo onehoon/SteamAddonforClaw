@@ -291,6 +291,108 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Sink_retries_a_failed_stop_once_and_returns_the_successful_retry()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT"));
+        var transport = new FakeTransport { FailWrites = 1 };
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
+
+        var result = sink.SetRumble(TwoMotorRumble.Stopped);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, result.Status);
+        Assert.Equal(2, transport.WriteCount);
+    }
+
+    [Fact]
+    public void Sink_stops_retrying_after_two_failed_stop_attempts()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT"));
+        var transport = new FakeTransport { FailWrites = 3 };
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
+
+        var result = sink.SetRumble(TwoMotorRumble.Stopped);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, result.Status);
+        Assert.Equal("WriteFailed", result.Reason);
+        Assert.Equal(2, transport.WriteCount);
+    }
+
+    [Fact]
+    public void Stop_retry_rechecks_physical_identity_before_the_second_write()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var transport = new FakeTransport { FailWrites = 1, AfterFailedWrite = () =>
+        {
+            identity.Current = null;
+            identity.Generation++;
+        } };
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
+
+        var result = sink.SetRumble(TwoMotorRumble.Stopped);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, result.Status);
+        Assert.Equal(1, transport.WriteCount);
+    }
+
+    [Fact]
+    public void Sink_does_not_retry_a_failed_nonzero_rumble_write()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT"));
+        var transport = new FakeTransport { FailWrites = 1 };
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
+
+        var result = sink.SetRumble(new(1, 2));
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, result.Status);
+        Assert.Equal(1, transport.WriteCount);
+    }
+
+    [Fact]
+    public void Sink_does_not_retry_an_unavailable_stop()
+    {
+        var transport = new FakeTransport();
+        using var sink = new MsiClawRumbleSink(new FakeIdentity(null), transport, new VerifiedEndpointResolver());
+
+        var result = sink.SetRumble(TwoMotorRumble.Stopped);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, result.Status);
+        Assert.Equal(0, transport.WriteCount);
+    }
+
+    [Fact]
+    public void Sink_does_not_retry_a_disposed_stop()
+    {
+        var transport = new FakeTransport();
+        var sink = new MsiClawRumbleSink(
+            new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")),
+            transport,
+            new VerifiedEndpointResolver());
+        sink.Dispose();
+
+        var result = sink.SetRumble(TwoMotorRumble.Stopped);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Disposed, result.Status);
+        Assert.Equal(0, transport.WriteCount);
+    }
+
+    [Fact]
+    public void Sink_retries_a_partial_stop_write_with_a_fresh_native_handle()
+    {
+        var native = new FakeNativeHid { PartialWrites = 1 };
+        var transport = new WindowsMsiClawRumbleTransport(native);
+        using var sink = new MsiClawRumbleSink(
+            new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")),
+            transport,
+            new VerifiedEndpointResolver());
+
+        var result = sink.SetRumble(TwoMotorRumble.Stopped);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, result.Status);
+        Assert.Equal(2, native.WriteCalls);
+        Assert.Equal(2, native.OpenCount);
+    }
+
+    [Fact]
     public void Sink_rejects_empty_identity_path_without_transport_call()
     {
         var transport = new FakeTransport();
@@ -718,12 +820,13 @@ public sealed class MsiClawRumbleTests
         public bool ThrowOnCancel { get; set; }
         public bool ThrowOnInvalidate { get; set; }
         public int FailWrites { get; set; }
+        public Action? AfterFailedWrite { get; set; }
         public int WriteCount { get; private set; }
         public int? LastOutputReportLength { get; private set; }
         public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseWrite { get; } = new(false);
         public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet, int outputReportLength)
-        { WriteCount++; LastOutputReportLength = outputReportLength; if (Exception is not null) throw Exception; if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Wait(); } if (FailWrites > 0) { FailWrites--; return new(false, "WriteFailed"); } Packets.Add(packet.ToArray()); return Result; }
+        { WriteCount++; LastOutputReportLength = outputReportLength; if (Exception is not null) throw Exception; if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Wait(); } if (FailWrites > 0) { FailWrites--; AfterFailedWrite?.Invoke(); return new(false, "WriteFailed"); } Packets.Add(packet.ToArray()); return Result; }
         public void Dispose() { }
         public void InvalidatePhysicalSession() { if (ThrowOnInvalidate) throw new IOException("invalidate failed"); }
         public void CancelPendingWrite() { if (ThrowOnCancel) throw new IOException("cancel failed"); }
@@ -737,6 +840,7 @@ public sealed class MsiClawRumbleTests
         public bool PartialWrite { get; set; }
         public bool BlockFirstWrite { get; init; }
         public bool BlockFirstWriteUntilCancel { get; set; }
+        public int PartialWrites { get; set; }
         public bool ThrowOnCancelWrite { get; set; }
         public bool DenyReadWriteOpen { get; set; }
         public List<uint> OpenAccessRequests { get; } = [];
@@ -766,7 +870,9 @@ public sealed class MsiClawRumbleTests
                 FirstWriteEntered.TrySetResult();
                 ReleaseFirstWrite.Wait();
             }
-            bytesWritten = WriteResult ? (uint)(PartialWrite ? buffer.Length - 1 : buffer.Length) : 0;
+            var partialWrite = PartialWrite || PartialWrites > 0;
+            if (PartialWrites > 0) PartialWrites--;
+            bytesWritten = WriteResult ? (uint)(partialWrite ? buffer.Length - 1 : buffer.Length) : 0;
             LastError = WriteResult ? 0 : 5;
             return WriteResult;
         }
