@@ -26,6 +26,17 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
 
     public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
     {
+        var first = SetRumbleContained(rumble);
+        if (!rumble.Equals(TwoMotorRumble.Stopped) || first.Status != PhysicalRumbleWriteStatus.Failed)
+            return first;
+
+        var second = SetRumbleContained(rumble);
+        LogStopRetryResult(first, second);
+        return second;
+    }
+
+    private PhysicalRumbleWriteResult SetRumbleContained(TwoMotorRumble rumble)
+    {
         try { return SetRumbleCore(rumble); }
         catch (Exception exception)
         {
@@ -33,6 +44,20 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
             catch { }
             return new(PhysicalRumbleWriteStatus.Failed, "SinkException");
         }
+    }
+
+    private static void LogStopRetryResult(PhysicalRumbleWriteResult first, PhysicalRumbleWriteResult final)
+    {
+        try
+        {
+            AppLog.Debug("Rumble", "MSI physical rumble STOP retry completed.",
+                ("Event", final.Status == PhysicalRumbleWriteStatus.Succeeded
+                    ? "PhysicalRumbleStopRetrySucceeded"
+                    : "PhysicalRumbleStopRetryFailed"),
+                ("Attempt", 2), ("FirstStatus", first.Status), ("FirstReason", first.Reason),
+                ("FinalStatus", final.Status), ("FinalReason", final.Reason));
+        }
+        catch { }
     }
 
     private PhysicalRumbleWriteResult SetRumbleCore(TwoMotorRumble rumble)
