@@ -39,6 +39,43 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
         Assert.False(OverlayQuickSettingsSectionRendering.TryGetFeatureHeaderToggle(labeledWithValueFirst, out _));
     }
 
+    [Fact]
+    public void Section_shape_ignores_authoritative_values_but_detects_renderer_metadata_changes()
+    {
+        var toggle = ToggleRow(QuickSettingsRowId.DeviceTdpEnabled);
+        var before = new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP", [toggle], "Status");
+        var valueOnly = before with
+        {
+            Rows = [toggle with { Available = false, Writable = false, Value = QuickSettingsValue.Boolean(true) }],
+        };
+
+        Assert.True(OverlayQuickSettingsSectionRendering.HasSameShape(before, valueOnly));
+        Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before, before with { Label = "TDP Control" }));
+        Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before, before with { Message = "Changed status" }));
+        Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before,
+            before with { Rows = [toggle with { Visible = false }] }));
+        Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before,
+            before with { Rows = [ValueRow(QuickSettingsRowId.DeviceTdpEnabled)] }));
+    }
+
+    [Fact]
+    public void Section_shape_detects_discrete_options_captured_by_the_row_renderer()
+    {
+        var firstOptions = new[] { new QuickSettingsDiscreteOption(0, "Off"), new QuickSettingsDiscreteOption(1, "On") };
+        var changedOptions = new[] { new QuickSettingsDiscreteOption(0, "Off"), new QuickSettingsDiscreteOption(1, "Enabled") };
+        var row = ValueRow(QuickSettingsRowId.DeviceCpuBoostAc) with
+        {
+            SliderSpec = new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: firstOptions),
+        };
+        var before = new QuickSettingsSection(QuickSettingsSectionId.DeviceCpuBoost, "CPU Boost", [row]);
+        var after = before with
+        {
+            Rows = [row with { SliderSpec = new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: changedOptions) }],
+        };
+
+        Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before, after));
+    }
+
     private static QuickSettingsRow ToggleRow(QuickSettingsRowId rowId) => new(
         rowId,
         "Toggle",
