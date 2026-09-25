@@ -52,6 +52,22 @@ public sealed class OverlayShortcutRendererTests
     }
 
     [Fact]
+    public void Shortcut_execution_guard_is_kept_without_showing_an_in_flight_message()
+    {
+        var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
+        var request = renderer[renderer.IndexOf("private void RequestShortcutExecution(Guid tileId)", StringComparison.Ordinal)..
+            renderer.IndexOf("private async Task ExecuteShortcutIntentAsync", StringComparison.Ordinal)];
+        var update = renderer[renderer.IndexOf("private void UpdateShortcutMessage()", StringComparison.Ordinal)..
+            renderer.IndexOf("private static bool IsShortcutSnapshotValid", StringComparison.Ordinal)];
+
+        Assert.Contains("_shortcutExecutionInFlight", request, StringComparison.Ordinal);
+        Assert.DoesNotContain("Running shortcut...", renderer, StringComparison.Ordinal);
+        Assert.Contains("_shortcutFeedbackMessage", update, StringComparison.Ordinal);
+        Assert.Contains("!_shortcutSnapshot.Available", update, StringComparison.Ordinal);
+        Assert.Contains("No shortcuts configured", update, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Live_refresh_preserves_tile_identity_and_new_show_clears_stale_state()
     {
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");

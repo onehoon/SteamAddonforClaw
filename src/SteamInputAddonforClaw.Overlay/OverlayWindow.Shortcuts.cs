@@ -201,8 +201,7 @@ public sealed partial class OverlayWindow
     {
         if (_shortcutStatus is null) return;
         var message = _shortcutFeedbackMessage
-            ?? (_shortcutExecutionInFlight ? "Running shortcut..."
-                : !_shortcutSnapshot.Available ? _shortcutSnapshot.FailureMessage ?? "Shortcut settings are unavailable."
+            ?? (!_shortcutSnapshot.Available ? _shortcutSnapshot.FailureMessage ?? "Shortcut settings are unavailable."
                 : _shortcutSnapshot.Tiles.Count == 0 ? "No shortcuts configured. Add shortcuts in the Main App."
                 : null);
         _shortcutStatus.Text = message ?? string.Empty;
