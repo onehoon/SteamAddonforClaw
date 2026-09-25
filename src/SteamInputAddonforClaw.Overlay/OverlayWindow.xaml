@@ -6,13 +6,14 @@
         <Grid.Resources>
             <SolidColorBrush x:Key="OverlaySurfaceBrush" Color="#FFE7E7E7" />
         </Grid.Resources>
-        <Grid x:Name="SurfaceHost" SizeChanged="OnSurfaceHostSizeChanged">
+        <Grid
+            x:Name="SurfaceHost"
+            Background="{StaticResource OverlaySurfaceBrush}"
+            SizeChanged="OnSurfaceHostSizeChanged">
             <Border
                 x:Name="OpaquePanel"
                 MaxWidth="720"
-                HorizontalAlignment="Stretch"
-                Background="{StaticResource OverlaySurfaceBrush}"
-                CornerRadius="18">
+                HorizontalAlignment="Stretch">
                 <Grid x:Name="AnimatedContent">
                     <Grid Margin="24,24,24,16" RowSpacing="12">
                         <Grid.RowDefinitions>

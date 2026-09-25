@@ -132,10 +132,18 @@ public sealed class OverlayDeviceRendererWiringTests
     {
         var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
         var source = ReadOverlayWindowSource();
+        var surfaceHostStart = xaml.IndexOf("x:Name=\"SurfaceHost\"", StringComparison.Ordinal);
+        var opaquePanelStart = xaml.IndexOf("x:Name=\"OpaquePanel\"", StringComparison.Ordinal);
+        var animatedContentStart = xaml.IndexOf("<Grid x:Name=\"AnimatedContent\"", opaquePanelStart, StringComparison.Ordinal);
+        Assert.True(surfaceHostStart >= 0 && opaquePanelStart > surfaceHostStart && animatedContentStart > opaquePanelStart);
+        var surfaceHostDeclaration = xaml[surfaceHostStart..opaquePanelStart];
+        var opaquePanelDeclaration = xaml[opaquePanelStart..animatedContentStart];
 
         Assert.Contains("RequestedTheme=\"Light\"", xaml);
         Assert.Contains("x:Key=\"OverlaySurfaceBrush\" Color=\"#FFE7E7E7\"", xaml);
-        Assert.Contains("Background=\"{StaticResource OverlaySurfaceBrush}\"", xaml);
+        Assert.Contains("Background=\"{StaticResource OverlaySurfaceBrush}\"", surfaceHostDeclaration);
+        Assert.DoesNotContain("Background=", opaquePanelDeclaration);
+        Assert.DoesNotContain("CornerRadius=", opaquePanelDeclaration);
         Assert.DoesNotContain("#FFF3F3F3", xaml);
 
         Assert.Contains("private const float HiddenScale = 0.98f;", source);
