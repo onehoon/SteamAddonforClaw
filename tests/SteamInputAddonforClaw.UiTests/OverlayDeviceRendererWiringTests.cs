@@ -184,68 +184,74 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("Visibility.Collapsed", source);
 
         var renderQuickSettingsPage = source[source.IndexOf("private void RenderQuickSettingsPage(QuickSettingsSurface surface)", StringComparison.Ordinal)..
-            source.IndexOf("private static QuickSettingsRowShape QuickSettingsRowShapeOf", StringComparison.Ordinal)];
-        var fastPathCallCount = CountOccurrences(renderQuickSettingsPage, "ApplyQuickSettingsLocalFailure(surface);");
-        Assert.Equal(2, fastPathCallCount); // once after the fast-path update, once after a rebuild
-    }
-
-    // PR #510 review: RowShape alone (RowId/ControlKind/SliderKind/WellFormed) cannot distinguish two
-    // different Profile games with the same enabled features -- the game identity renders from
-    // section Label/Message text (BuildProfile's enriched display name), not row identity. Without
-    // also gating the fast path on AppId and section text, a Profile(A)->Profile(B) switch with an
-    // identical RowShape would take the value-only fast path and leave A's heading on screen.
-    [Fact]
-    public void Quick_settings_fast_path_also_requires_the_same_app_id_and_section_text()
-    {
-        var source = ReadOverlayWindowSource();
-
-        var renderQuickSettingsPage = source[source.IndexOf("private void RenderQuickSettingsPage(QuickSettingsSurface surface)", StringComparison.Ordinal)..
             source.IndexOf("private static void ApplyQuickSettingsLocalFailure", StringComparison.Ordinal)];
+        Assert.Contains("ReconcileQuickSettingsSections(surface, page);", renderQuickSettingsPage);
+        Assert.Contains("RebuildQuickSettingsContent(surface, page);", renderQuickSettingsPage);
+        Assert.Contains("ApplyQuickSettingsLocalFailure(surface);", renderQuickSettingsPage);
+    }
 
-        Assert.Contains("surface.RenderedAppId == page.AppId", renderQuickSettingsPage);
-        Assert.Contains("surface.RenderedSections is not null && surface.RenderedSections.SequenceEqual(sectionShape)", renderQuickSettingsPage);
-        Assert.Contains("QuickSettingsRowShapesEqual(surface.RowShape, rowShape)", renderQuickSettingsPage);
-        Assert.DoesNotContain("surface.RowShape.SequenceEqual(rowShape)", renderQuickSettingsPage);
+    // SectionId is the local view identity. A structural update replaces only the changed section;
+    // matching sections update in place and page availability transitions retain the full rebuild path.
+    [Fact]
+    public void Quick_settings_structural_updates_reconcile_only_the_changed_section()
+    {
+        var source = ReadOverlayWindowSource();
 
-        var rebuildContent = source[source.IndexOf("private void RebuildQuickSettingsContent(QuickSettingsSurface surface", StringComparison.Ordinal)..
+        var surface = source[source.IndexOf("private sealed class QuickSettingsSurface", StringComparison.Ordinal)..
+            source.IndexOf("private readonly Dictionary<QuickSettingsPageId", StringComparison.Ordinal)];
+        var reconcile = source[source.IndexOf("private void ReconcileQuickSettingsSections", StringComparison.Ordinal)..
+            source.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal)];
+        var stableStart = reconcile.IndexOf("if (surface.RenderedSections.TryGetValue", StringComparison.Ordinal);
+        var stableEnd = reconcile.IndexOf("continue;", stableStart, StringComparison.Ordinal);
+        var stableSectionPath = reconcile[stableStart..stableEnd];
+
+        Assert.Contains("Dictionary<QuickSettingsSectionId, RenderedQuickSettingsSection> RenderedSections", surface);
+        Assert.Contains("OverlayQuickSettingsSectionRendering.HasSameShape(rendered.Section, section)", stableSectionPath);
+        Assert.Contains("rendered.Section = section;", stableSectionPath);
+        Assert.Contains("UpdateQuickSettingsRowValues(surface, section);", stableSectionPath);
+        Assert.DoesNotContain("RemoveQuickSettingsSection", stableSectionPath);
+        Assert.DoesNotContain("BuildQuickSettingsSection", stableSectionPath);
+        Assert.Contains("RemoveQuickSettingsSection(surface, rendered);", reconcile);
+        Assert.Contains("BuildQuickSettingsSection(surface, section)", reconcile);
+        Assert.Contains("ReorderQuickSettingsSectionCards(surface, page);", reconcile);
+        Assert.DoesNotContain("surface.Content.Children.Clear()", reconcile);
+        Assert.DoesNotContain("surface.ToggleRows.Clear()", reconcile);
+        Assert.DoesNotContain("surface.ValueRows.Clear()", reconcile);
+    }
+
+    [Fact]
+    public void Quick_settings_section_updates_preserve_selected_row_identity_and_scroll_only_when_needed()
+    {
+        var source = ReadOverlayWindowSource();
+        var selection = source[source.IndexOf("private void UpdateQuickSettingsPageRows", StringComparison.Ordinal)..
             source.IndexOf("private static TextBlock CreateQuickSettingsMessageText", StringComparison.Ordinal)];
-        Assert.Contains("surface.RenderedAppId = page.AppId;", rebuildContent);
-        Assert.Contains("surface.RenderedSections = QuickSettingsSectionShapeOf(page);", rebuildContent);
+
+        Assert.Contains("oldRows[selectedIndex].QuickSettingsRowId", selection);
+        Assert.Contains("_pageRows[surface.TabId] = rows;", selection);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(surface.TabId), preferredIndex);", selection);
+        Assert.Contains("ApplyRowSelectionVisual();", selection);
+        Assert.Contains("selectedIndex != previousSelection || selectedRowId != preferredRowId", selection);
+        Assert.Contains("BringSelectedRowIntoView();", selection);
     }
 
     [Fact]
-    public void Quick_settings_fast_path_reconciles_selection_after_authoritative_row_state_updates()
+    public void Quick_settings_section_shape_includes_all_row_renderer_metadata()
     {
         var source = ReadOverlayWindowSource();
-        var renderQuickSettingsPage = source[source.IndexOf("private void RenderQuickSettingsPage(QuickSettingsSurface surface)", StringComparison.Ordinal)..
-            source.IndexOf("private static QuickSettingsRowShape QuickSettingsRowShapeOf", StringComparison.Ordinal)];
-
-        Assert.Contains("var previousSelection = _rowSelection.SelectedIndex;", renderQuickSettingsPage);
-        Assert.Contains("UpdateQuickSettingsRowValues(surface, page);", renderQuickSettingsPage);
-        Assert.Contains("if (_tabState.SelectedTab == surface.TabId)", renderQuickSettingsPage);
-        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(surface.TabId), previousSelection);", renderQuickSettingsPage);
-        Assert.Contains("ApplyRowSelectionVisual();", renderQuickSettingsPage);
-        Assert.Contains("if (_rowSelection.SelectedIndex != previousSelection)", renderQuickSettingsPage);
-        Assert.Contains("BringSelectedRowIntoView();", renderQuickSettingsPage);
-    }
-
-    [Fact]
-    public void Quick_settings_fast_path_identity_includes_metadata_captured_by_row_renderers()
-    {
-        var source = ReadOverlayWindowSource();
-        var shape = source[source.IndexOf("private readonly record struct QuickSettingsRowShape", StringComparison.Ordinal)..
-            source.IndexOf("private sealed class QuickSettingsSurface", StringComparison.Ordinal)];
-        var shapeFactory = source[source.IndexOf("private static QuickSettingsRowShape QuickSettingsRowShapeOf", StringComparison.Ordinal)..
-            source.IndexOf("private static (QuickSettingsSectionId", StringComparison.Ordinal)];
+        var shape = source[source.IndexOf("private readonly record struct RowShape", StringComparison.Ordinal)..
+            source.IndexOf("internal static bool TryGetFeatureHeaderToggle", StringComparison.Ordinal)];
+        var comparer = source[source.IndexOf("internal static bool HasSameShape", StringComparison.Ordinal)..
+            source.IndexOf("private static bool DiscreteOptionsEqual", StringComparison.Ordinal)];
 
         Assert.Contains("string Label", shape);
         Assert.Contains("string? NumericSuffix", shape);
         Assert.Contains("QuickSettingsDiscreteOption[]? DiscreteOptions", shape);
-        Assert.Contains("row.Label", shapeFactory);
-        Assert.Contains("spec is { Kind: QuickSettingsSliderKind.Numeric } ? spec.Suffix : null", shapeFactory);
-        Assert.Contains("spec is { Kind: QuickSettingsSliderKind.Discrete } ? spec.Options?.ToArray() : null", shapeFactory);
-        Assert.Contains("QuickSettingsRowShapesEqual", source);
-        Assert.Contains("return left.SequenceEqual(right);", source);
+        Assert.Contains("previous.Label", comparer);
+        Assert.Contains("previous.Message", comparer);
+        Assert.Contains("oldShape.Visible != newShape.Visible", comparer);
+        Assert.Contains("oldShape.Label", comparer);
+        Assert.Contains("oldShape.NumericSuffix", comparer);
+        Assert.Contains("DiscreteOptionsEqual", comparer);
     }
 
     // SF-V2-09 section 32: Device and Profile share one generic renderer/binder path -- BuildPage's
@@ -408,7 +414,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("bool WellFormed,", source);
         Assert.Contains("row.Visible", source);
         Assert.Contains("var visibleRows = section.Rows.Where(row => row.Visible).ToArray();", source);
-        Assert.Contains("if (visibleRows.Length == 0) continue;", source);
+        Assert.Contains("if (visibleRows.Length == 0)", source);
+        Assert.Contains("return new RenderedQuickSettingsSection { Section = section, Rows = [] };", source);
     }
 
     [Fact]
