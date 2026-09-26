@@ -22,6 +22,7 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
     private readonly IPhysicalRumbleSink _sink;
     private readonly Func<Xbox360RumbleCallback?, bool> _setNativeCallback;
     private readonly Xbox360RumbleCallback _callback;
+    private readonly Action<byte, byte, long?>? _diagnosticObserver;
     // Serializes the callback's physical write against Dispose: a callback that already passed the
     // _disposed check can still be inside a (up to 250 ms) physical write while the presentation
     // thread issues the lifecycle STOP -- without this drain the late non-zero write would land AFTER
@@ -37,12 +38,14 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
     private Xbox360RumbleFeedbackBridge(
         IPhysicalRumbleSink sink,
         Func<Xbox360RumbleCallback?, bool> setNativeCallback,
-        TimeSpan safetyStopDelay)
+        TimeSpan safetyStopDelay,
+        Action<byte, byte, long?>? diagnosticObserver)
     {
         _sink = sink;
         _setNativeCallback = setNativeCallback;
         _callback = OnRumble;
         _safetyStopDelay = safetyStopDelay;
+        _diagnosticObserver = diagnosticObserver;
     }
 
     /// <summary>8-bit to 16-bit full-range expansion. Preserves exact 8-bit magnitude through the
@@ -55,9 +58,10 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
     internal static Xbox360RumbleFeedbackBridge? TryArm(
         IPhysicalRumbleSink sink,
         Func<Xbox360RumbleCallback?, bool> setNativeCallback,
-        TimeSpan? safetyStop = null)
+        TimeSpan? safetyStop = null,
+        Action<byte, byte, long?>? diagnosticObserver = null)
     {
-        var bridge = new Xbox360RumbleFeedbackBridge(sink, setNativeCallback, safetyStop ?? DefaultSafetyStop);
+        var bridge = new Xbox360RumbleFeedbackBridge(sink, setNativeCallback, safetyStop ?? DefaultSafetyStop, diagnosticObserver);
         if (!setNativeCallback(bridge._callback))
         {
             AppLog.Warn("Rumble", "Production rumble callback registration failed.", null,
@@ -67,6 +71,21 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
         AppLog.Info("Rumble", "Production rumble callback armed.",
             ("Event", "ProductionRumbleCallbackArmed"), ("Presentation", "Xbox360"));
         return bridge;
+    }
+
+    internal bool IsArmed => Volatile.Read(ref _disposed) == 0;
+
+    /// <summary>Runs one developer-diagnostic physical STOP after the loop has stopped producing
+    /// XInput state. Reuses the production callback write gate so an already-admitted callback write
+    /// is drained before this final diagnostic write.</summary>
+    internal PhysicalRumbleWriteResult WriteDiagnosticPhysicalStop()
+    {
+        lock (_callbackWriteGate)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+                return new(PhysicalRumbleWriteStatus.Disposed, "FeedbackBridgeDisposed");
+            return _sink.SetRumble(TwoMotorRumble.Stopped);
+        }
     }
 
     private void OnRumble(nuint handle, byte leftMotor, byte rightMotor)
@@ -85,6 +104,8 @@ internal sealed class Xbox360RumbleFeedbackBridge : IDisposable
                         ("Event", "ProductionXbox360RumbleRx"), ("Presentation", "Xbox360"),
                         ("RumbleSeq", rumbleSequence), ("Left8", leftMotor), ("Right8", rightMotor),
                         ("IsStop", rumble.Equals(TwoMotorRumble.Stopped)));
+                try { _diagnosticObserver?.Invoke(leftMotor, rightMotor, diagnosticEnabled ? rumbleSequence : null); }
+                catch { }
                 try
                 {
                     var result = _sink.SetRumble(rumble);

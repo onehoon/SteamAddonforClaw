@@ -10,13 +10,29 @@ public sealed class VibrationContractRemovalTests
 {
     [Fact]
     public void Frontend_protocol_is_current()
-        => Assert.Equal(42, FrontendTransportProtocol.CurrentVersion);
+        => Assert.Equal(43, FrontendTransportProtocol.CurrentVersion);
 
     [Fact]
     public void No_vibration_test_rpc_methods_remain()
     {
         foreach (var removed in new[] { "RunVibrationTest", "OpenVibrationTestSession", "CloseVibrationTestSession" })
             Assert.DoesNotContain(removed, Enum.GetNames<FrontendRpcMethod>());
+    }
+
+    [Fact]
+    public void Full1902_xbox360_loop_diagnostic_uses_its_new_typed_rpc_contract()
+    {
+        foreach (var required in new[]
+        {
+            "CaptureXbox360RumbleLoopDiagnostic",
+            "StartXbox360RumbleLoopDiagnostic",
+            "StopXbox360RumbleLoopDiagnostic",
+        })
+            Assert.Contains(required, Enum.GetNames<FrontendRpcMethod>());
+
+        var contracts = typeof(SteamInputAddonforClaw.Contracts.Frontend.IAddonFrontendControl).Assembly;
+        Assert.NotNull(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendXbox360RumbleLoopSnapshot"));
+        Assert.Null(contracts.GetType("SteamInputAddonforClaw.Contracts.Frontend.FrontendVibrationTestCommand"));
     }
 
     [Fact]

@@ -275,12 +275,16 @@ internal sealed class HidHideProvisioningReceiptStore(string path) : IHidHidePro
     }
 }
 
-internal enum ElevatedProcessResultKind { Completed, CancelledBeforeStart, FailedToStart }
+internal enum ElevatedProcessResultKind { Completed, CancelledBeforeStart, FailedToStart, TimedOut }
 internal sealed record ElevatedProcessResult(ElevatedProcessResultKind Kind, int? ExitCode = null, string? Reason = null);
 internal interface IElevatedProcessRunner { Task<ElevatedProcessResult> RunAsync(string fileName, string arguments, CancellationToken cancellationToken); }
 
 internal sealed class ElevatedProcessRunner : IElevatedProcessRunner
 {
+    private readonly TimeSpan? _executionTimeout;
+
+    internal ElevatedProcessRunner(TimeSpan? executionTimeout = null) => _executionTimeout = executionTimeout;
+
     public async Task<ElevatedProcessResult> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -291,9 +295,40 @@ internal sealed class ElevatedProcessRunner : IElevatedProcessRunner
         if (process is null) return new(ElevatedProcessResultKind.FailedToStart, Reason: "ProcessStartReturnedNull");
         using (process)
         {
-            await process.WaitForExitAsync().ConfigureAwait(false);
+            if (_executionTimeout is not { } executionTimeout)
+            {
+                await process.WaitForExitAsync().ConfigureAwait(false);
+                return new(ElevatedProcessResultKind.Completed, process.ExitCode);
+            }
+
+            using var timeout = new CancellationTokenSource(executionTimeout);
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+            try
+            {
+                await process.WaitForExitAsync(wait.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                TryTerminate(process);
+                return new(ElevatedProcessResultKind.TimedOut, Reason: "ProcessTimedOut");
+            }
+            catch (OperationCanceledException)
+            {
+                TryTerminate(process);
+                throw;
+            }
+
             return new(ElevatedProcessResultKind.Completed, process.ExitCode);
         }
+    }
+
+    private static void TryTerminate(Process process)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch { }
     }
 }
 

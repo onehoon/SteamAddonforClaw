@@ -44,7 +44,7 @@
                 </Grid>
             </Border>
 
-            <ctcontrols:SettingsCard Header="Vibration Test" Description="Test Steam Deck rumble and haptic feedback through the physical MSI Claw motors. Requires Developer Test Mode.">
+            <ctcontrols:SettingsCard Header="Vibration Test" Description="Run the Full1902 Xbox360 terminal STOP callback diagnostic. Close games and other XInput rumble tools first.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE1D9;" />
                 </ctcontrols:SettingsCard.HeaderIcon>

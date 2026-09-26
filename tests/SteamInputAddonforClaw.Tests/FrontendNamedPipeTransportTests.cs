@@ -60,7 +60,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(42, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(43, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -133,7 +133,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(42, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(43, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -142,6 +142,48 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(fake.ProductionBatterySnapshot, await client.CaptureBatteryChargeLimitAsync());
         Assert.Equal(fake.ProductionBatteryMutationResult, await client.SetDeviceBatteryChargeLimitEnabledAsync(false));
         Assert.Equal(fake.ProductionBatteryMutationResult, await client.SetDeviceBatteryChargeLimitPercentAsync(90));
+    }
+
+    [Fact]
+    public async Task Xbox360_rumble_diagnostic_start_capture_and_stop_round_trip_without_blocking_control()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        using var requestCancellation = new CancellationTokenSource();
+
+        Assert.Equal(43, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
+        var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        requestCancellation.Cancel();
+        Assert.Equal(FrontendXbox360RumbleLoopState.Running, started.State);
+
+        var capturedWhileRunning = await client.CaptureXbox360RumbleLoopDiagnosticAsync();
+        Assert.Equal(FrontendXbox360RumbleLoopState.Running, capturedWhileRunning.State);
+        var stopped = await client.StopXbox360RumbleLoopDiagnosticAsync();
+
+        Assert.Equal(FrontendXbox360RumbleLoopState.Stopped, stopped.State);
+        Assert.Equal(1, fake.RumbleLoopStartCount);
+        Assert.Equal(1, fake.RumbleLoopStopCount);
+    }
+
+    [Fact]
+    public async Task Frontend_disconnect_stops_a_committed_rumble_diagnostic_once()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+
+        await using (var client = await ConnectAsync(pipeName))
+        {
+            var started = await client.StartXbox360RumbleLoopDiagnosticAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(FrontendXbox360RumbleLoopState.Running, started.State);
+        }
+
+        await fake.RumbleLoopStopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, fake.RumbleLoopStopCount);
     }
 
     [Fact]
@@ -1306,13 +1348,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 42 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 43 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":42,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":42,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":42,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":43,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":43,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":43,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1390,6 +1432,29 @@ public sealed class FrontendNamedPipeTransportTests
         await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"GetBootstrap\",\"Payload\":{{}}}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.TotalCalls);
+    }
+
+    [Theory]
+    [InlineData("CaptureXbox360RumbleLoopDiagnostic")]
+    [InlineData("StartXbox360RumbleLoopDiagnostic")]
+    [InlineData("StopXbox360RumbleLoopDiagnostic")]
+    public async Task Xbox360_rumble_loop_no_argument_methods_reject_payloads(string method)
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{{}}}}");
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
         Assert.Equal(0, fake.TotalCalls);
     }
@@ -1759,6 +1824,31 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatterySnapshot); }
         public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
         public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
+        public FrontendXbox360RumbleLoopSnapshot RumbleLoopSnapshot { get; private set; } =
+            new(true, FrontendXbox360RumbleLoopState.Ready, "Ready", null, 0, 0, 0, 0, null, null, null, null, null);
+        public int RumbleLoopStartCount { get; private set; }
+        public int RumbleLoopStopCount { get; private set; }
+        public TaskCompletionSource RumbleLoopStopped { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken t = default)
+        {
+            TotalCalls++;
+            return Task.FromResult(RumbleLoopSnapshot);
+        }
+        public Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken t = default)
+        {
+            TotalCalls++;
+            RumbleLoopStartCount++;
+            RumbleLoopSnapshot = RumbleLoopSnapshot with { State = FrontendXbox360RumbleLoopState.Running, Status = "Running", RunId = "test-run" };
+            return Task.FromResult(RumbleLoopSnapshot);
+        }
+        public Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken t = default)
+        {
+            TotalCalls++;
+            RumbleLoopStopCount++;
+            RumbleLoopSnapshot = RumbleLoopSnapshot with { State = FrontendXbox360RumbleLoopState.Stopped, Status = "Stopped" };
+            RumbleLoopStopped.TrySetResult();
+            return Task.FromResult(RumbleLoopSnapshot);
+        }
     }
 
     private sealed class PartialReadStream : MemoryStream

@@ -111,23 +111,31 @@ public sealed class UiArchitectureTests
         Assert.Contains("XamlControlsResources", appXaml, StringComparison.Ordinal);
     }
 
-    [Fact] // Full1902 Cleanup J: the Vibration Test page stays in the Developer navigation shell but
-           // is a static unavailable placeholder -- it must not open/close a Runtime vibration session
-           // or send any vibration RPC while the feature is disconnected.
-    public void Vibration_test_page_is_a_static_unavailable_shell_with_no_vibration_rpc_dependency()
+    [Fact] // Full1902 terminal STOP work order: this page is a focused diagnostic client over the
+           // typed frontend contract, not the deleted legacy vibration-session surface.
+    public void Vibration_test_page_uses_only_the_full1902_xbox360_loop_diagnostic_contract()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
+        var pageXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml"));
         var mainWindowXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
         Assert.Contains("VibrationTestPage", mainWindowXaml, StringComparison.Ordinal);
-        Assert.Contains("unavailable in this build", page, StringComparison.Ordinal);
+        Assert.Contains("Xbox360 Terminal STOP Loop", pageXaml, StringComparison.Ordinal);
+        Assert.Contains("StartXbox360RumbleLoopDiagnosticAsync", page, StringComparison.Ordinal);
+        Assert.Contains("CaptureXbox360RumbleLoopDiagnosticAsync", page, StringComparison.Ordinal);
+        Assert.Contains("StopXbox360RumbleLoopDiagnosticAsync", page, StringComparison.Ordinal);
+        Assert.Contains("else if (_snapshot.State == FrontendXbox360RumbleLoopState.Running)", page, StringComparison.Ordinal);
+        Assert.Contains("await StopIfRunningAsync();", page, StringComparison.Ordinal);
+        Assert.Contains("DeactivateAsync", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("unavailable in this build", page, StringComparison.Ordinal);
         foreach (var forbidden in new[] { "RunVibrationTestAsync", "OpenVibrationTestSessionAsync", "CloseVibrationTestSessionAsync" })
         {
             Assert.DoesNotContain(forbidden, page, StringComparison.Ordinal);
             Assert.DoesNotContain(forbidden, mainWindow, StringComparison.Ordinal);
         }
+        Assert.DoesNotContain("Haptic Test", pageXaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -747,6 +755,22 @@ public sealed class UiArchitectureTests
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Logging\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Vibration_test_card_describes_only_the_full1902_xbox360_terminal_stop_diagnostic()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
+        var cardStart = page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal);
+        Assert.True(cardStart >= 0);
+        var nextCardStart = page.IndexOf("<ctcontrols:SettingsCard", cardStart + 1, StringComparison.Ordinal);
+        var card = page[cardStart..(nextCardStart >= 0 ? nextCardStart : page.Length)];
+
+        Assert.Contains("Full1902 Xbox360 terminal STOP callback diagnostic", card, StringComparison.Ordinal);
+        Assert.DoesNotContain("Steam Deck", card, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Haptic", card, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Developer Test Mode", card, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

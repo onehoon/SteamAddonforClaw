@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Devices;
@@ -42,6 +43,56 @@ public sealed class FrontendContractTests
         Assert.Null(typeof(IAddonFrontendControl).GetMethod("SetSteamInputRoutingEnabledAsync"));
         Assert.Null(typeof(FrontendSettingsSnapshot).Assembly.GetType(
             "SteamInputAddonforClaw.Contracts.Frontend.FrontendSteamInputRoutingMutationResult"));
+    }
+
+    [Fact]
+    public async Task Xbox360_rumble_loop_default_frontend_methods_fail_closed_as_unavailable()
+    {
+        IAddonFrontendControl control = new MinimalFrontendControl();
+
+        var captured = await control.CaptureXbox360RumbleLoopDiagnosticAsync();
+        var started = await control.StartXbox360RumbleLoopDiagnosticAsync();
+        var stopped = await control.StopXbox360RumbleLoopDiagnosticAsync();
+
+        Assert.Equal(FrontendXbox360RumbleLoopSnapshot.Unavailable(), captured);
+        Assert.Equal(FrontendXbox360RumbleLoopSnapshot.Unavailable(), started);
+        Assert.Equal(FrontendXbox360RumbleLoopSnapshot.Unavailable(), stopped);
+    }
+
+    private sealed class MinimalFrontendControl : IAddonFrontendControl
+    {
+        public event EventHandler? StateInvalidated
+        {
+            add { }
+            remove { }
+        }
+
+        public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(FrontButtonMappingSettings mapping, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FrontendSettingsSnapshot> SetBackButtonMappingAsync(BackButtonMappingSettings mapping, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     [Fact]
