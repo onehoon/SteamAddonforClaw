@@ -628,6 +628,8 @@ Exact name/result type is implementation choice.
 
 The purpose is not to add a new synchronization authority. It reuses the existing `_callbackWriteGate` so a callback that is already inside the physical write cannot land its non-zero write after the diagnostic cleanup STOP.
 
+The diagnostic generator is cancelled before this cleanup. The existing USB/IP OUT path is ordered, so this requirement is intentionally limited to draining a callback already admitted to the bridge; do not add a suppression flag/epoch to defend against hypothetical later non-zero callbacks after the generator has stopped.
+
 Do **not** call `IPhysicalRumbleSink.SetRumble` directly from the diagnostic runner while bypassing that gate.
 
 Do not unregister/re-register the VIIPER callback for this cleanup. After the generator is cancelled, the normal callback stays armed; a legitimately late terminal `0/0` remains harmless and observable.
@@ -834,7 +836,6 @@ Do not make frontend lifetime controller authority.
 Reuse the existing page:
 
 ```text
-src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml
 src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml
 src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs
 ```
@@ -924,8 +925,8 @@ A deliberate vibration generator must not remain headless after that concrete pr
 Reuse the existing single-frontend disconnect boundary in `NamedPipeAddonFrontendServer.ServeAsync`. Follow the same narrow feature-local pattern already used for the Claw Sensor Probe:
 
 - track a connection-local `rumbleLoopMayBeRunning` boolean;
-- set it after a successful Start response indicating the loop was admitted/running;
-- clear it after an explicit Stop response that leaves the loop non-running;
+- after `InvokeAsync(StartXbox360RumbleLoopDiagnostic)` returns successfully, set it **before attempting to send the Start response**. A false-positive is acceptable because Stop is idempotent; missing a committed loop because the response write itself lost the pipe is not;
+- after `InvokeAsync(StopXbox360RumbleLoopDiagnostic)` returns successfully, clear it **before attempting to send the Stop response**;
 - in `ServeAsync` `finally`, if it may still be running, call `StopXbox360RumbleLoopDiagnosticAsync(CancellationToken.None)` best-effort.
 
 If the loop already failed/stopped by itself, this disconnect Stop must be idempotent.
@@ -1287,6 +1288,7 @@ src/SteamInputAddonforClaw.Contracts/Frontend/FrontendContracts.cs
 src/SteamInputAddonforClaw.FrontendTransport/FrontendWire.cs
 src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendServer.cs
 src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs
+src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml
 src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml
 src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs
 
