@@ -57,6 +57,7 @@ typedef enum {
 
 #line 1 "cgo-generated-wrapper"
 
+
 #line 3 "dualsense.go"
 
 #include <stdint.h>
@@ -806,6 +807,14 @@ extern _Bool DetachUSBDevice(uintptr_t handle);
  *
  */
 extern USBDeviceDetachResult DetachUSBDeviceEx(uintptr_t handle);
+/*
+ * SetDiagnosticLogDirectory selects the directory for libVIIPER.log. The UTF-8 input is copied
+ * before returning. It must be called before libVIIPER initializes its owned embedded file sink;
+ * a late or invalid call returns false and leaves the current logging configuration unchanged.
+ * If it is never called, Windows retains the existing loaded-module-directory fallback.
+ *
+ */
+extern GoUint8 SetDiagnosticLogDirectory(char* directory);
 /*
  * CreateDualSenseDevice creates a new DualSense (non-edge) device on the bus with the given ID on the server associated with the given handle.
  * @param serverHandle Handle to the USB server.
