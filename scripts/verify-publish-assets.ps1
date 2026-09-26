@@ -95,7 +95,7 @@ foreach ($forbiddenPrerequisiteInstaller in @{
 
 $viiperPayload = Join-Path $PublishDirectory 'Dependencies\Viiper\libVIIPER.dll'
 # Must match the vendored VIIPER DLL recorded in viiper.lock.json and PROVENANCE.md.
-$expectedViiperSha256 = '9ADD02A7587D140A97D3244C2230963CA393ECB9A8351E222F81A7B3C54E8CA9'
+$expectedViiperSha256 = '7E80B51B62040A1BC0EF1FAF26082A6662495A0BCC987989C4627A87C9F92B9E'
 if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expectedViiperSha256) {
     throw 'Published VIIPER payload SHA-256 does not match its recorded provenance.'
 }
