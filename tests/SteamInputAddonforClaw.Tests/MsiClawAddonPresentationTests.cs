@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
@@ -892,7 +893,8 @@ public sealed class MsiClawAddonPresentationTests
         FakeRumbleSink sink,
         Func<IXbox360RumbleLoopXInput>? xinputFactory = null,
         TimeSpan? rumbleLoopCadence = null,
-        TimeSpan? rumbleLoopTerminalCallbackTimeout = null)
+        TimeSpan? rumbleLoopTerminalCallbackTimeout = null,
+        Func<IXbox360UsbTraceCapture>? traceCaptureFactory = null)
     {
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
         Assert.NotNull(runtime);
@@ -904,7 +906,8 @@ public sealed class MsiClawAddonPresentationTests
             deckPublisherFactory: (_, _, _, fault) => { deck.Fault = fault; return deck; },
             rumbleLoopXInputFactory: xinputFactory,
             rumbleLoopCadence: rumbleLoopCadence,
-            rumbleLoopTerminalCallbackTimeout: rumbleLoopTerminalCallbackTimeout);
+            rumbleLoopTerminalCallbackTimeout: rumbleLoopTerminalCallbackTimeout,
+            rumbleLoopUsbTraceCaptureFactory: traceCaptureFactory);
     }
 
     [Fact]
@@ -1652,6 +1655,54 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
+    public async Task Manual_stop_finalizes_usb_trace_after_host_and_physical_cleanup()
+    {
+        var previousLevel = AppLog.MinimumLevelOverride;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var xinput = new FakeXbox360RumbleLoopXInput();
+        var lifecycleEvents = new ConcurrentQueue<string>();
+        var firstOutput = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sink.WriteObserver = rumble =>
+        {
+            if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
+                lifecycleEvents.Enqueue("PhysicalStop");
+        };
+        xinput.OnSetState = (_, left, _) =>
+        {
+            lifecycleEvents.Enqueue(left == 0 ? "HostStop" : "XInputSetState");
+            if (left != 0) firstOutput.TrySetResult();
+            return Xbox360RumbleLoopDiagnostic.ErrorSuccess;
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            () => xinput, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100),
+            () => new FakeXbox360UsbTraceCapture(lifecycleEvents));
+        try
+        {
+            await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+            await owner.StartXbox360RumbleLoopDiagnosticAsync(0, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+            await firstOutput.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var stopped = await owner.StopXbox360RumbleLoopDiagnosticAsync(CancellationToken.None);
+            var events = lifecycleEvents.ToArray();
+            var traceStart = Array.IndexOf(events, "TraceStart");
+            var hostStop = Array.IndexOf(events, "HostStop");
+            var physicalStop = Array.LastIndexOf(events, "PhysicalStop");
+            var traceStop = Array.FindIndex(events, item => item.StartsWith("TraceStop:", StringComparison.Ordinal));
+
+            Assert.Equal(FrontendXbox360RumbleLoopState.Stopped, stopped.State);
+            Assert.True(traceStart >= 0 && hostStop >= 0 && traceStart < hostStop);
+            Assert.True(physicalStop >= 0 && traceStop >= 0 && hostStop < physicalStop && physicalStop < traceStop);
+        }
+        finally
+        {
+            await owner.DisposeAsync();
+            AppLog.MinimumLevelOverride = previousLevel;
+        }
+    }
+
+    [Fact]
     public async Task Completed_start_request_cancellation_does_not_cancel_loop_and_presentation_retirement_joins_it()
     {
         var previousLevel = AppLog.MinimumLevelOverride;
@@ -1659,14 +1710,25 @@ public sealed class MsiClawAddonPresentationTests
         var native = new FakeNative();
         var sink = new FakeRumbleSink();
         var xinput = new FakeXbox360RumbleLoopXInput();
+        var lifecycleEvents = new ConcurrentQueue<string>();
+        sink.WriteObserver = rumble =>
+        {
+            if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
+                lifecycleEvents.Enqueue("PhysicalStop");
+        };
         var firstOutput = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         xinput.OnSetState = (_, left, _) =>
         {
-            if (left != 0) firstOutput.TrySetResult();
+            if (left != 0)
+            {
+                lifecycleEvents.Enqueue("XInputSetState");
+                firstOutput.TrySetResult();
+            }
             return Xbox360RumbleLoopDiagnostic.ErrorSuccess;
         };
         var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
-            () => xinput, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100));
+            () => xinput, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100),
+            () => new FakeXbox360UsbTraceCapture(lifecycleEvents));
         try
         {
             await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
@@ -1685,6 +1747,13 @@ public sealed class MsiClawAddonPresentationTests
             Assert.Equal(FrontendXbox360RumbleLoopState.Stopped, stopped.State);
             Assert.Equal(setCountAtRetirement, xinput.SetStates.Count);
             Assert.Null(owner.ActivePresentation);
+            var events = lifecycleEvents.ToArray();
+            var traceStart = Array.IndexOf(events, "TraceStart");
+            var firstXinputWrite = Array.IndexOf(events, "XInputSetState");
+            var physicalStop = Array.LastIndexOf(events, "PhysicalStop");
+            var traceStop = Array.FindIndex(events, item => item.StartsWith("TraceStop:", StringComparison.Ordinal));
+            Assert.True(traceStart >= 0 && firstXinputWrite >= 0 && traceStart < firstXinputWrite);
+            Assert.True(physicalStop > traceStart && traceStop >= 0 && physicalStop < traceStop);
         }
         finally
         {
@@ -1731,6 +1800,21 @@ public sealed class MsiClawAddonPresentationTests
             if (StopGate is not null) await StopGate.Task.ConfigureAwait(false);
             if (StopThrows) throw new InvalidOperationException("join failed");
             _running = false;
+        }
+    }
+
+    private sealed class FakeXbox360UsbTraceCapture(ConcurrentQueue<string> lifecycleEvents) : IXbox360UsbTraceCapture
+    {
+        public Task StartAsync(string runId, CancellationToken cancellationToken)
+        {
+            lifecycleEvents.Enqueue("TraceStart");
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(string runId, string reason)
+        {
+            lifecycleEvents.Enqueue("TraceStop:" + reason);
+            return Task.CompletedTask;
         }
     }
 

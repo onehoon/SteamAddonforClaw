@@ -71,11 +71,13 @@ internal sealed class Xbox360RumbleLoopDiagnostic
     private readonly int _slot;
     private readonly IXbox360RumbleLoopXInput _xinput;
     private readonly Func<PhysicalRumbleWriteResult> _physicalStop;
+    private readonly IXbox360UsbTraceCapture? _usbTraceCapture;
     private readonly TimeSpan _cadence;
     private readonly TimeSpan _terminalCallbackTimeout;
     private ExpectedTerminalStop? _expectedTerminalStop;
     private FrontendXbox360RumbleLoopSnapshot _snapshot;
     private int _physicalCleanupRequested;
+    private bool _terminalResultFrozen;
 
     private sealed record ExpectedTerminalStop(
         string RunId,
@@ -89,11 +91,13 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         IXbox360RumbleLoopXInput xinput,
         Func<PhysicalRumbleWriteResult> physicalStop,
         TimeSpan? cadence = null,
-        TimeSpan? terminalCallbackTimeout = null)
+        TimeSpan? terminalCallbackTimeout = null,
+        IXbox360UsbTraceCapture? usbTraceCapture = null)
     {
         _slot = slot;
         _xinput = xinput;
         _physicalStop = physicalStop;
+        _usbTraceCapture = usbTraceCapture;
         _cadence = cadence ?? ProductionCadence;
         _terminalCallbackTimeout = terminalCallbackTimeout ?? ProductionTerminalCallbackTimeout;
         var runId = Guid.NewGuid().ToString("N");
@@ -104,6 +108,11 @@ internal sealed class Xbox360RumbleLoopDiagnostic
     internal FrontendXbox360RumbleLoopSnapshot Snapshot
     {
         get { lock (_callbackGate) return _snapshot; }
+    }
+
+    internal bool IsTerminalResultFrozen
+    {
+        get { lock (_callbackGate) return _terminalResultFrozen; }
     }
 
     internal async Task RunAsync(CancellationToken cancellationToken)
@@ -117,6 +126,8 @@ internal sealed class Xbox360RumbleLoopDiagnostic
                 ("StepIntervalMs", _cadence.TotalMilliseconds),
                 ("TerminalWaitMs", _terminalCallbackTimeout.TotalMilliseconds),
                 ("ProductionDeadmanMs", Xbox360RumbleFeedbackBridge.DefaultSafetyStop.TotalMilliseconds));
+
+            await StartTraceBestEffortAsync(cancellationToken).ConfigureAwait(false);
 
             while (true)
             {
@@ -243,7 +254,7 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         ExpectedTerminalStop? expected;
         lock (_callbackGate)
         {
-            if (_snapshot.State != FrontendXbox360RumbleLoopState.Running) return;
+            if (_snapshot.State != FrontendXbox360RumbleLoopState.Running || _terminalResultFrozen) return;
             _snapshot = _snapshot with
             {
                 LastObservedLeft8 = left8,
@@ -267,7 +278,7 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         }
     }
 
-    internal void CompleteManualStop()
+    internal async Task CompleteManualStopAsync()
     {
         var snapshot = Snapshot;
         if (snapshot.State != FrontendXbox360RumbleLoopState.Running) return;
@@ -294,8 +305,11 @@ internal sealed class Xbox360RumbleLoopDiagnostic
             ("GetStateResult", getResult), ("XInputResult", setResult?.ToString(CultureInfo.InvariantCulture) ?? "NotCalled"),
             ("Exception", failure ?? "None"));
         WritePhysicalCleanupStop(snapshot, "ManualStop");
+        await StopTraceBestEffortAsync("ManualStop").ConfigureAwait(false);
         MarkStopped("Stopped");
     }
+
+    internal Task FinalizeTraceAsync(string reason) => StopTraceBestEffortAsync(reason);
 
     internal void MarkStopped(string reason)
     {
@@ -333,7 +347,7 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         }
 
         var interior = candidates.Take(nonZeroCount - 2).OrderDescending().Select(static value => (byte)value);
-        return [ (byte)start, .. interior, (byte)finalNonZero, 0 ];
+        return [(byte)start, .. interior, (byte)finalNonZero, 0];
     }
 
     private ExpectedTerminalStop ArmTerminalStop(int cycle, int step)
@@ -425,7 +439,14 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         uint? xinputResult = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var snapshot = UpdateSnapshot(current => current with
+        var snapshot = UpdateSnapshot(current =>
+        {
+            _terminalResultFrozen = true;
+            return current with { Cycle = cycle, CurrentValue8 = null };
+        });
+        WritePhysicalCleanupStop(snapshot, reason);
+        await StopTraceBestEffortAsync(reason).ConfigureAwait(false);
+        snapshot = UpdateSnapshot(current => current with
         {
             State = FrontendXbox360RumbleLoopState.Failed,
             Status = reason == "TerminalStopMissing" ? "Failed: terminal STOP callback missing" : "Failed: " + reason,
@@ -444,8 +465,45 @@ internal sealed class Xbox360RumbleLoopDiagnostic
             ("LastObservedRight8", snapshot.LastObservedRight8),
             ("LastObservedRumbleSeq", snapshot.LastObservedCallbackSequence?.ToString(CultureInfo.InvariantCulture) ?? "NotAvailable"),
             ("TimeoutMs", reason == "TerminalStopMissing" ? _terminalCallbackTimeout.TotalMilliseconds : (double?)null));
-        WritePhysicalCleanupStop(snapshot, reason);
-        await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    private async Task StartTraceBestEffortAsync(CancellationToken cancellationToken)
+    {
+        if (_usbTraceCapture is null) return;
+        try
+        {
+            await _usbTraceCapture.StartAsync(Snapshot.RunId ?? "Unknown", cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            AppLog.Debug("Rumble", "Xbox360 USB trace capture start was cancelled.",
+                ("Event", "X360LoopProbeUsbTraceStart"), ("RunId", Snapshot.RunId ?? "Unknown"),
+                ("Session", Xbox360UsbTraceCapture.SessionName), ("Status", "Unavailable"),
+                ("OutputBase", "NotAvailable"), ("Reason", "Cancelled"));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Debug("Rumble", "Xbox360 USB trace capture start was unavailable.",
+                ("Event", "X360LoopProbeUsbTraceStart"), ("RunId", Snapshot.RunId ?? "Unknown"),
+                ("Session", Xbox360UsbTraceCapture.SessionName), ("Status", "Failed"),
+                ("OutputBase", "NotAvailable"), ("Reason", exception.GetType().Name));
+        }
+    }
+
+    private async Task StopTraceBestEffortAsync(string reason)
+    {
+        if (_usbTraceCapture is null) return;
+        try
+        {
+            await _usbTraceCapture.StopAsync(Snapshot.RunId ?? "Unknown", reason).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Debug("Rumble", "Xbox360 USB trace capture stop was unavailable.",
+                ("Event", "X360LoopProbeUsbTraceStop"), ("RunId", Snapshot.RunId ?? "Unknown"),
+                ("Session", Xbox360UsbTraceCapture.SessionName), ("Status", "Failed"),
+                ("OutputPath", "NotAvailable"), ("Reason", exception.GetType().Name + ":" + reason));
+        }
     }
 
     private void WritePhysicalCleanupStop(FrontendXbox360RumbleLoopSnapshot snapshot, string reason)

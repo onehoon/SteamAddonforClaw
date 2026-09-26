@@ -656,7 +656,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var presentation = new Devices.MSI.Claw.MsiClawAddonPresentation(
                 viiper,
                 rumbleSink,
-                backButtonMappingProvider: () => startupSettings.BackButtonMapping);
+                backButtonMappingProvider: () => startupSettings.BackButtonMapping,
+                rumbleLoopUsbTraceCaptureFactory: () => new SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture(
+                    new SteamInputAddonforClaw.HidHide.ElevatedProcessRunner(
+                        SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture.CommandTimeout)));
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));

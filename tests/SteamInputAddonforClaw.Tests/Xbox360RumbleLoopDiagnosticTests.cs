@@ -91,12 +91,15 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
         var terminalSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var physicalStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var physicalStopCount = 0;
+        var lifecycle = new ConcurrentQueue<string>();
+        var traceCapture = new FakeXbox360UsbTraceCapture(lifecycle);
         var diagnostic = CreateDiagnostic(xinput, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(25), () =>
         {
             Interlocked.Increment(ref physicalStopCount);
+            lifecycle.Enqueue("PhysicalStop");
             physicalStop.TrySetResult();
             return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
-        });
+        }, traceCapture);
         xinput.OnSetState = (_, left, right) =>
         {
             if (left == 0 && right == 0) terminalSent.TrySetResult();
@@ -111,6 +114,7 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
         Assert.Single(xinput.SetStates, static state => state.Left == 0 && state.Right == 0);
         Assert.Equal(1, physicalStopCount);
         Assert.Equal(diagnostic.Snapshot.StepCount, xinput.SetStates.Count);
+        Assert.Equal(new[] { "TraceStart", "PhysicalStop", "TraceStop:TerminalStopMissing" }, lifecycle);
     }
 
     [Fact]
@@ -121,11 +125,12 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
             OnSetState = (_, left, right) => left == 0 && right == 0 ? 5u : Xbox360RumbleLoopDiagnostic.ErrorSuccess
         };
         var physicalStops = 0;
+        var traceCapture = new FakeXbox360UsbTraceCapture();
         var diagnostic = CreateDiagnostic(xinput, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(25), () =>
         {
             physicalStops++;
             return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
-        });
+        }, traceCapture);
 
         await diagnostic.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -133,6 +138,7 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
         Assert.Equal("XInputSetStateFailed", diagnostic.Snapshot.FailureReason);
         Assert.Single(xinput.SetStates, static state => state.Left == 0 && state.Right == 0);
         Assert.Equal(1, physicalStops);
+        Assert.Equal(1, traceCapture.StopCount);
     }
 
     [Fact]
@@ -194,29 +200,98 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
             return Xbox360RumbleLoopDiagnostic.ErrorSuccess;
         };
         var physicalStops = 0;
+        var lifecycle = new ConcurrentQueue<string>();
+        var traceCapture = new FakeXbox360UsbTraceCapture(lifecycle);
         var diagnostic = CreateDiagnostic(xinput, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100), () =>
         {
             physicalStops++;
+            lifecycle.Enqueue("PhysicalStop");
             return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
-        });
+        }, traceCapture);
         var run = diagnostic.RunAsync(cancellation.Token);
         await firstOutput.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         cancellation.Cancel();
         await run.WaitAsync(TimeSpan.FromSeconds(5));
-        diagnostic.CompleteManualStop();
+        await diagnostic.CompleteManualStopAsync();
 
         Assert.Equal(FrontendXbox360RumbleLoopState.Stopped, diagnostic.Snapshot.State);
         Assert.Single(xinput.SetStates, static state => state.Left == 0 && state.Right == 0);
         Assert.Equal(1, physicalStops);
+        Assert.Equal(new[] { "TraceStart", "PhysicalStop", "TraceStop:ManualStop" }, lifecycle);
+    }
+
+    [Fact]
+    public async Task Trace_starts_before_first_xinput_write_and_start_failure_does_not_block_the_loop()
+    {
+        var lifecycle = new ConcurrentQueue<string>();
+        var traceCapture = new FakeXbox360UsbTraceCapture(lifecycle) { StartException = new IOException("trace unavailable") };
+        var firstOutput = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var xinput = new FakeXbox360RumbleLoopXInput
+        {
+            OnSetState = (_, _, _) =>
+            {
+                lifecycle.Enqueue("XInputSetState");
+                firstOutput.TrySetResult();
+                cancellation.Cancel();
+                return Xbox360RumbleLoopDiagnostic.ErrorSuccess;
+            }
+        };
+        var diagnostic = CreateDiagnostic(xinput, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(100),
+            () => new(PhysicalRumbleWriteStatus.Succeeded, "OK"), traceCapture);
+
+        await diagnostic.RunAsync(cancellation.Token).WaitAsync(TimeSpan.FromSeconds(5));
+        await firstOutput.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal("Running", diagnostic.Snapshot.Status);
+        Assert.Equal(new[] { "TraceStart", "XInputSetState" }, lifecycle);
+    }
+
+    [Fact]
+    public async Task Trace_stop_failure_does_not_overwrite_the_frozen_rumble_failure_result()
+    {
+        var xinput = new FakeXbox360RumbleLoopXInput();
+        var traceCapture = new FakeXbox360UsbTraceCapture { StopException = new IOException("trace stop failed") };
+        var diagnostic = CreateDiagnostic(xinput, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(10),
+            () => new(PhysicalRumbleWriteStatus.Succeeded, "OK"), traceCapture);
+
+        await diagnostic.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(FrontendXbox360RumbleLoopState.Failed, diagnostic.Snapshot.State);
+        Assert.Equal("TerminalStopMissing", diagnostic.Snapshot.FailureReason);
+        Assert.Equal(1, traceCapture.StopCount);
     }
 
     private static Xbox360RumbleLoopDiagnostic CreateDiagnostic(
         FakeXbox360RumbleLoopXInput xinput,
         TimeSpan cadence,
         TimeSpan callbackTimeout,
-        Func<PhysicalRumbleWriteResult> physicalStop) =>
-        new(0, xinput, physicalStop, cadence, callbackTimeout);
+        Func<PhysicalRumbleWriteResult> physicalStop,
+        IXbox360UsbTraceCapture? traceCapture = null) =>
+        new(0, xinput, physicalStop, cadence, callbackTimeout, traceCapture);
+
+    private sealed class FakeXbox360UsbTraceCapture(ConcurrentQueue<string>? lifecycle = null) : IXbox360UsbTraceCapture
+    {
+        internal Exception? StartException { get; init; }
+        internal Exception? StopException { get; init; }
+        internal int StopCount { get; private set; }
+
+        public Task StartAsync(string runId, CancellationToken cancellationToken)
+        {
+            lifecycle?.Enqueue("TraceStart");
+            if (StartException is not null) throw StartException;
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(string runId, string reason)
+        {
+            StopCount++;
+            lifecycle?.Enqueue("TraceStop:" + reason);
+            if (StopException is not null) throw StopException;
+            return Task.CompletedTask;
+        }
+    }
 }
 
 internal sealed class FakeXbox360RumbleLoopXInput : IXbox360RumbleLoopXInput

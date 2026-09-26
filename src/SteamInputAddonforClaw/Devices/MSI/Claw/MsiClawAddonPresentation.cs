@@ -264,6 +264,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher> _deckPublisherFactory;
     private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
     private readonly Func<IXbox360RumbleLoopXInput> _rumbleLoopXInputFactory;
+    private readonly Func<IXbox360UsbTraceCapture>? _rumbleLoopUsbTraceCaptureFactory;
     private readonly TimeSpan _rumbleLoopCadence;
     private readonly TimeSpan _rumbleLoopTerminalCallbackTimeout;
 
@@ -309,11 +310,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         Func<BackButtonMappingSettings>? backButtonMappingProvider = null,
         Func<IXbox360RumbleLoopXInput>? rumbleLoopXInputFactory = null,
         TimeSpan? rumbleLoopCadence = null,
-        TimeSpan? rumbleLoopTerminalCallbackTimeout = null)
+        TimeSpan? rumbleLoopTerminalCallbackTimeout = null,
+        Func<IXbox360UsbTraceCapture>? rumbleLoopUsbTraceCaptureFactory = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
         _rumbleLoopXInputFactory = rumbleLoopXInputFactory ?? (static () => new WindowsXbox360RumbleLoopXInput());
+        _rumbleLoopUsbTraceCaptureFactory = rumbleLoopUsbTraceCaptureFactory;
         _rumbleLoopCadence = rumbleLoopCadence ?? Xbox360RumbleLoopDiagnostic.ProductionCadence;
         _rumbleLoopTerminalCallbackTimeout = rumbleLoopTerminalCallbackTimeout
             ?? Xbox360RumbleLoopDiagnostic.ProductionTerminalCallbackTimeout;
@@ -421,7 +424,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 xinput,
                 bridge.WriteDiagnosticPhysicalStop,
                 _rumbleLoopCadence,
-                _rumbleLoopTerminalCallbackTimeout);
+                _rumbleLoopTerminalCallbackTimeout,
+                _rumbleLoopUsbTraceCaptureFactory?.Invoke());
             var stop = new CancellationTokenSource();
             _rumbleLoopDiagnostic = diagnostic;
             _rumbleLoopStop = stop;
@@ -444,7 +448,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             var beforeStop = diagnostic.Snapshot;
             // In particular, TerminalStopMissing is a frozen evidence state: a page-deactivate or
             // disconnected-client Stop must not issue another host 0/0 or another physical write.
-            if (beforeStop.State != FrontendXbox360RumbleLoopState.Running)
+            if (beforeStop.State != FrontendXbox360RumbleLoopState.Running || diagnostic.IsTerminalResultFrozen)
             {
                 if (_rumbleLoopTask is { } completedOrFailingTask)
                     await completedOrFailingTask.ConfigureAwait(false);
@@ -457,7 +461,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 await task.ConfigureAwait(false);
 
             if (diagnostic.Snapshot.State == FrontendXbox360RumbleLoopState.Running)
-                diagnostic.CompleteManualStop();
+                await diagnostic.CompleteManualStopAsync().ConfigureAwait(false);
             ReleaseRumbleLoopTaskResourcesLocked();
             return diagnostic.Snapshot;
         }
@@ -519,20 +523,27 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private async Task CancelRumbleLoopForLifecycleLockedAsync(string reason)
     {
         if (_rumbleLoopDiagnostic is not { } diagnostic) return;
-        if (diagnostic.Snapshot.State != FrontendXbox360RumbleLoopState.Running)
+        if (diagnostic.Snapshot.State != FrontendXbox360RumbleLoopState.Running || diagnostic.IsTerminalResultFrozen)
         {
-            // An automatic failure publishes its frozen snapshot before the bridge-serialized
-            // physical cleanup write completes. Join it before lifecycle teardown can dispose the
-            // bridge and make that cleanup unavailable.
+            // An automatic failure freezes its terminal result before the bridge-serialized physical
+            // cleanup and trace finalization. Join it before lifecycle teardown can dispose the
+            // bridge or retire the capture.
             if (_rumbleLoopTask is { } completedOrCleaningTask)
                 await completedOrCleaningTask.ConfigureAwait(false);
-            ReleaseRumbleLoopTaskResourcesLocked();
             return;
         }
 
         _rumbleLoopStop?.Cancel();
         if (_rumbleLoopTask is { } task)
             await task.ConfigureAwait(false);
+    }
+
+    private async Task FinalizeRumbleLoopAfterLifecycleLockedAsync(string reason)
+    {
+        if (_rumbleLoopDiagnostic is not { } diagnostic) return;
+        if (_rumbleLoopTask is { } task)
+            await task.ConfigureAwait(false);
+        await diagnostic.FinalizeTraceAsync("Lifecycle:" + reason).ConfigureAwait(false);
         if (diagnostic.Snapshot.State == FrontendXbox360RumbleLoopState.Running)
             diagnostic.MarkStopped("Stopped by presentation lifecycle: " + reason);
         ReleaseRumbleLoopTaskResourcesLocked();
@@ -817,7 +828,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 return PauseBlocked("SteamDeckSessionNotActive:" + (_deckSession?.State.ToString() ?? "None"));
 
             await CancelRumbleLoopForLifecycleLockedAsync("OverlayPause").ConfigureAwait(false);
-
             // 1. Stop + prove the publisher joined. Never write neutral underneath a possibly-live
             //    publisher; never detach here.
             try
@@ -828,18 +838,21 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Warn("OverlayCapture", "Presentation publisher could not be stopped for Overlay; presentation stays live.", exception,
                     ("Event", "OverlayPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStopThrew"));
+                await FinalizeRumbleLoopAfterLifecycleLockedAsync("OverlayPause").ConfigureAwait(false);
                 return new(OverlayPauseOutcome.PublisherNotStopped, "PublisherStopThrew");
             }
             if (publisher.IsRunning)
             {
                 AppLog.Warn("OverlayCapture", "Presentation publisher still running after StopAsync; presentation stays live.", null,
                     ("Event", "OverlayPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
+                await FinalizeRumbleLoopAfterLifecycleLockedAsync("OverlayPause").ConfigureAwait(false);
                 return new(OverlayPauseOutcome.PublisherNotStopped, "PublisherStillRunning");
             }
 
             // 1b. Clear the feedback callback and request a physical STOP so opening the Overlay can
             //     never leave a pre-existing vibration latched. Resume re-arms the SAME presentation.
-            DisarmFeedbackAndStopLocked("OverlayPause");
+            try { DisarmFeedbackAndStopLocked("OverlayPause"); }
+            finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync("OverlayPause").ConfigureAwait(false); }
 
             // 2. Write the SAME attached device neutral. A rejected neutral write on a proven-stopped
             //    publisher is a real output-safety failure: fail-close the current presentation
@@ -943,7 +956,6 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             var wasAlreadyPaused = _suspendPaused;
             _suspendPaused = true;
             await CancelRumbleLoopForLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
-
             // Physical STOP is a separate safety fact from virtual presentation state. No configured
             // sink means there is no physical rumble output to stop; otherwise only a successful STOP
             // result confirms this suspend path.
@@ -956,7 +968,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             // PausedNoPresentation, and only after residual typed-device ownership is ruled out.
             if (_activeKind is null && _publisher is null)
             {
-                physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend");
+                try { physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend"); }
+                finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false); }
                 if (!TryProveNoResidualPresentationLocked(out var residualReason))
                 {
                     AppLog.Error("ControllerPresentation", "Presentation suspend pause: residual typed-device ownership evidence.", null,
@@ -977,6 +990,7 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             {
                 AppLog.Error("ControllerPresentation", "Presentation suspend pause: publisher present without an active presentation kind.", null,
                     ("Event", "PresentationSuspendPauseFailed"), ("Reason", "InconsistentPresentationState"));
+                await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
                 return new(SuspendPauseOutcome.Blocked, "InconsistentPresentationState", physicalRumbleStopConfirmed);
             }
 
@@ -1001,12 +1015,14 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 {
                     AppLog.Warn("ControllerPresentation", "Presentation publisher could not be stopped for Suspend; pause stays unsafe.", exception,
                         ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStopThrew"));
+                    await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
                     return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStopThrew", physicalRumbleStopConfirmed);
                 }
                 if (publisher!.IsRunning)
                 {
                     AppLog.Warn("ControllerPresentation", "Presentation publisher still running after StopAsync for Suspend; pause stays unsafe.", null,
                         ("Event", "PresentationSuspendPauseFailed"), ("Presentation", kind), ("Reason", "PublisherStillRunning"));
+                    await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false);
                     return new(SuspendPauseOutcome.PublisherNotStopped, "PublisherStillRunning", physicalRumbleStopConfirmed);
                 }
             }
@@ -1016,7 +1032,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
 
             // 3-6. Clear the feedback callback, DRAIN any in-progress physical rumble write, then
             //       request a final physical STOP (sections 7.1 / 12). Reuses the #488 helper.
-            physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend");
+            try { physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked("Suspend"); }
+            finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync("SuspendPause").ConfigureAwait(false); }
 
             // 7. Write the SAME attached device neutral. A rejected write on a proven-stopped
             //    publisher is a real output-safety failure: fail-close the current presentation
@@ -1274,11 +1291,13 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
             catch (Exception exception)
             {
                 AppLog.Error("ControllerPresentation", "Presentation publisher could not be joined; ownership retained.", exception, ("Reason", reason));
+                await FinalizeRumbleLoopAfterLifecycleLockedAsync(reason).ConfigureAwait(false);
                 return new(false, physicalRumbleStopConfirmed);
             }
             if (publisher.IsRunning)
             {
                 AppLog.Error("ControllerPresentation", "Presentation publisher still running after StopAsync; ownership retained.", null, ("Reason", reason));
+                await FinalizeRumbleLoopAfterLifecycleLockedAsync(reason).ConfigureAwait(false);
                 return new(false, physicalRumbleStopConfirmed);
             }
             _publisher = null;
@@ -1292,7 +1311,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         // 2-3. Stop accepting old-presentation feedback (clear the native callback) and request a
         //      best-effort physical STOP before the typed device is detached, so a switch/release/
         //      shutdown/fail-close can never leave a motor latched.
-        physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked(reason);
+        try { physicalRumbleStopConfirmed = DisarmFeedbackAndStopLocked(reason); }
+        finally { await FinalizeRumbleLoopAfterLifecycleLockedAsync(reason).ConfigureAwait(false); }
 
         // 4. Detach the selected typed device (the runtime/session detach primitive writes neutral first).
         if (_activeKind == AddonPresentationKind.Xbox360)
