@@ -1,4 +1,6 @@
 using System.Reflection;
+using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Steam;
@@ -883,7 +885,14 @@ public sealed class MsiClawAddonPresentationTests
 
     // ---- Full1902 production rumble feedback lifetime (work order sections 8-13 / 19.4 / 19.6) ----
 
-    private static MsiClawAddonPresentation BuildWithSink(FakeNative native, FakePublisher xbox360, FakePublisher deck, FakeRumbleSink sink)
+    private static MsiClawAddonPresentation BuildWithSink(
+        FakeNative native,
+        FakePublisher xbox360,
+        FakePublisher deck,
+        FakeRumbleSink sink,
+        Func<IXbox360RumbleLoopXInput>? xinputFactory = null,
+        TimeSpan? rumbleLoopCadence = null,
+        TimeSpan? rumbleLoopTerminalCallbackTimeout = null)
     {
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
         Assert.NotNull(runtime);
@@ -892,7 +901,10 @@ public sealed class MsiClawAddonPresentationTests
             rumbleSink: sink,
             deckSessionFactory: r => new CanonicalSteamDeckSession(r),
             xbox360PublisherFactory: (_, _, fault) => { xbox360.Fault = fault; return xbox360; },
-            deckPublisherFactory: (_, _, _, fault) => { deck.Fault = fault; return deck; });
+            deckPublisherFactory: (_, _, _, fault) => { deck.Fault = fault; return deck; },
+            rumbleLoopXInputFactory: xinputFactory,
+            rumbleLoopCadence: rumbleLoopCadence,
+            rumbleLoopTerminalCallbackTimeout: rumbleLoopTerminalCallbackTimeout);
     }
 
     [Fact]
@@ -1059,6 +1071,7 @@ public sealed class MsiClawAddonPresentationTests
         internal List<SteamInputAddonforClaw.Feedback.TwoMotorRumble> Writes { get; } = [];
         internal Queue<SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteResult> Results { get; } = new();
         internal bool Throw { get; set; }
+        internal Action<SteamInputAddonforClaw.Feedback.TwoMotorRumble>? WriteObserver { get; set; }
         // When set, the FIRST non-zero write blocks on this gate until the test releases it, modeling
         // WindowsMsiClawRumbleTransport's up-to-250 ms pending physical write.
         internal ManualResetEventSlim? BlockFirstNonZeroWrite { get; set; }
@@ -1075,6 +1088,7 @@ public sealed class MsiClawAddonPresentationTests
                 gate.Wait();
             }
             lock (_sync) Writes.Add(rumble);
+            WriteObserver?.Invoke(rumble);
             lock (_sync)
             {
                 return Results.Count > 0
@@ -1585,6 +1599,98 @@ public sealed class MsiClawAddonPresentationTests
         Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes[^1]);
         Assert.Single(sink.Writes, w => w.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped));
         await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Repeated_stop_after_terminal_callback_failure_returns_frozen_result_without_more_writes()
+    {
+        var previousLevel = AppLog.MinimumLevelOverride;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var xinput = new FakeXbox360RumbleLoopXInput();
+        var terminalSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var physicalCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sink.WriteObserver = rumble =>
+        {
+            if (rumble.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped))
+                physicalCleanup.TrySetResult();
+        };
+        xinput.OnSetState = (_, left, right) =>
+        {
+            if (left == 0 && right == 0) terminalSent.TrySetResult();
+            return Xbox360RumbleLoopDiagnostic.ErrorSuccess;
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            () => xinput, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(25));
+        try
+        {
+            await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+            var started = await owner.StartXbox360RumbleLoopDiagnosticAsync(0, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(FrontendXbox360RumbleLoopState.Running, started.State);
+            await Task.WhenAll(terminalSent.Task, physicalCleanup.Task).WaitAsync(TimeSpan.FromSeconds(5));
+
+            var firstStopResult = await owner.StopXbox360RumbleLoopDiagnosticAsync(CancellationToken.None);
+            var setCountAfterFailure = xinput.SetStates.Count;
+            var stoppedCountAfterFailure = sink.Writes.Count(write => write.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped));
+            var secondStopResult = await owner.StopXbox360RumbleLoopDiagnosticAsync(CancellationToken.None);
+
+            Assert.Equal(FrontendXbox360RumbleLoopState.Failed, firstStopResult.State);
+            Assert.Equal("TerminalStopMissing", firstStopResult.FailureReason);
+            Assert.Equal(firstStopResult, secondStopResult);
+            Assert.Single(xinput.SetStates, static state => state.Left == 0 && state.Right == 0);
+            Assert.Equal(1, stoppedCountAfterFailure);
+            Assert.Equal(setCountAfterFailure, xinput.SetStates.Count);
+            Assert.Equal(stoppedCountAfterFailure, sink.Writes.Count(write => write.Equals(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped)));
+        }
+        finally
+        {
+            await owner.DisposeAsync();
+            AppLog.MinimumLevelOverride = previousLevel;
+        }
+    }
+
+    [Fact]
+    public async Task Completed_start_request_cancellation_does_not_cancel_loop_and_presentation_retirement_joins_it()
+    {
+        var previousLevel = AppLog.MinimumLevelOverride;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var xinput = new FakeXbox360RumbleLoopXInput();
+        var firstOutput = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        xinput.OnSetState = (_, left, _) =>
+        {
+            if (left != 0) firstOutput.TrySetResult();
+            return Xbox360RumbleLoopDiagnostic.ErrorSuccess;
+        };
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            () => xinput, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100));
+        try
+        {
+            await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+            using var requestCancellation = new CancellationTokenSource();
+            var started = await owner.StartXbox360RumbleLoopDiagnosticAsync(0, requestCancellation.Token)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            requestCancellation.Cancel();
+            await firstOutput.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var stillRunning = await owner.CaptureXbox360RumbleLoopDiagnosticAsync(0, CancellationToken.None);
+            Assert.Equal(FrontendXbox360RumbleLoopState.Running, stillRunning.State);
+
+            var setCountAtRetirement = xinput.SetStates.Count;
+            Assert.True(await owner.ReleaseForCenterMEnableAsync(CancellationToken.None));
+            var stopped = await owner.CaptureXbox360RumbleLoopDiagnosticAsync(0, CancellationToken.None);
+
+            Assert.Equal(FrontendXbox360RumbleLoopState.Stopped, stopped.State);
+            Assert.Equal(setCountAtRetirement, xinput.SetStates.Count);
+            Assert.Null(owner.ActivePresentation);
+        }
+        finally
+        {
+            await owner.DisposeAsync();
+            AppLog.MinimumLevelOverride = previousLevel;
+        }
     }
 
     // ---- fakes ----

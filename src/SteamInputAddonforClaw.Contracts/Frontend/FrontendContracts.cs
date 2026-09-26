@@ -199,6 +199,27 @@ public sealed record FrontendBatteryChargeLimitMutationResult(
     public bool Succeeded => Outcome == FrontendBatteryChargeLimitMutationOutcome.Succeeded;
 }
 
+public enum FrontendXbox360RumbleLoopState { Unavailable, Ready, Running, Stopped, Failed }
+
+public sealed record FrontendXbox360RumbleLoopSnapshot(
+    bool Available,
+    FrontendXbox360RumbleLoopState State,
+    string Status,
+    string? RunId,
+    int? Slot,
+    int Cycle,
+    int Step,
+    int StepCount,
+    int? CurrentValue8,
+    byte? LastObservedLeft8,
+    byte? LastObservedRight8,
+    long? LastObservedCallbackSequence,
+    string? FailureReason)
+{
+    public static FrontendXbox360RumbleLoopSnapshot Unavailable(string status = "Xbox360 rumble diagnostic is unavailable.") =>
+        new(false, FrontendXbox360RumbleLoopState.Unavailable, status, null, null, 0, 0, 0, null, null, null, null, null);
+}
+
 /// <remarks><see cref="FrontButtonMapping"/> is the settings-layer projection of the one persisted
 /// front-button mapping. The frontend deliberately carries the SAME
 /// <see cref="FrontButtonMappingSettings"/> the runtime persists and the dispatcher validates
@@ -563,6 +584,12 @@ public interface IAddonFrontendControl
     Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendBatteryChargeLimitMutationResult(FrontendBatteryChargeLimitMutationOutcome.Unavailable,
             "MSI battery charge-limit control is unavailable.", FrontendBatteryChargeLimitSnapshot.Unavailable));
+    Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
+    Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
+    Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
     Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));

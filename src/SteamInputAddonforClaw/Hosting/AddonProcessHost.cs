@@ -539,7 +539,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             captureClawHud: CaptureClawHudFrontendAsync,
             setClawHudEnabled: SetClawHudFrontendAsync,
             mutateClawHudSetting: MutateClawHudFrontendAsync,
-            shortcutRuntime: _shortcutRuntime);
+            shortcutRuntime: _shortcutRuntime,
+            captureXbox360RumbleLoopDiagnostic: CaptureXbox360RumbleLoopDiagnosticAsync,
+            startXbox360RumbleLoopDiagnostic: StartXbox360RumbleLoopDiagnosticAsync,
+            stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -985,6 +988,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Volatile.Read(ref _processShutdownStarted) != 0) return false;
         return _presentationOwnership?.TryRequestQuickAccessPulse() == true;
     }
+
+    private Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken) =>
+        _presentationOwnership is { } presentation
+            ? presentation.CaptureXbox360RumbleLoopDiagnosticAsync(_runtimeHost?.ActualRunningAppId ?? 0, cancellationToken)
+            : Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
+
+    private Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken) =>
+        _presentationOwnership is { } presentation
+            ? presentation.StartXbox360RumbleLoopDiagnosticAsync(_runtimeHost?.ActualRunningAppId ?? 0, cancellationToken)
+            : Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
+
+    private Task<FrontendXbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken) =>
+        _presentationOwnership is { } presentation
+            ? presentation.StopXbox360RumbleLoopDiagnosticAsync(cancellationToken)
+            : Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
 
     private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync(CancellationToken cancellationToken)
     {

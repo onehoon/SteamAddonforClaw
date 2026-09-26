@@ -15,7 +15,7 @@ public sealed class CenterMStartupContractTests
         Assert.Equal("RequestCenterMAuthorityTransition", FrontendRpcMethod.RequestCenterMAuthorityTransition.ToString());
         Assert.DoesNotContain("SetCenterMStartupEnabled", Enum.GetNames<FrontendRpcMethod>());
         // Bumped to 42 because the Main App Shortcut editor adds typed frontend operations.
-        Assert.Equal(42, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(43, FrontendTransportProtocol.CurrentVersion);
         Assert.DoesNotContain("RequestEnterBios", Enum.GetNames<FrontendRpcMethod>());
     }
 
