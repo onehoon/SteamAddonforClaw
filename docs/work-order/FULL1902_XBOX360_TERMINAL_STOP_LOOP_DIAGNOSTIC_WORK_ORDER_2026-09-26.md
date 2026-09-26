@@ -249,6 +249,32 @@ scan slots 0..3
 
 Do not invent VID/PID-to-XInput-slot correlation logic.
 
+## 6.1 Keep the XInput test topology stable
+
+This diagnostic intentionally uses one XInput slot and callback timing as its correlation boundary. It is not a general multi-controller attribution system.
+
+Operational preconditions:
+
+```text
+all games closed
+no other tool intentionally sending XInput rumble
+exactly one connected XInput slot at Start
+```
+
+Capture the connected-slot set at Start.
+
+At minimum, re-scan slots 0..3 at each cycle boundary. If the connected-slot set no longer matches the Start snapshot, stop the diagnostic with a distinct result such as:
+
+```text
+XInputTopologyChanged
+```
+
+Do not continue with a newly-added or shifted slot.
+
+Do not build VID/PID correlation, device-instance tracking, or another XInput ownership layer for this developer diagnostic.
+
+An unrelated external process can still issue rumble to the same virtual controller; if that operating precondition is violated, callback-to-command attribution is **inconclusive**, not evidence of a transport defect.
+
 The operator should close games before starting this diagnostic.
 
 If a current Steam AppId is available through the existing Runtime fact and is non-zero, Start should reject the test with a clear status such as:
@@ -533,6 +559,40 @@ Task<Xbox360RumbleLoopSnapshot> StopXbox360RumbleLoopDiagnosticAsync(Cancellatio
 
 Exact internal type names are implementation choice.
 
+## 11.1 Start must return immediately; the presentation owns loop lifetime
+
+The frontend server serializes RPC dispatch through one `operationGate`. Therefore `StartXbox360RumbleLoopDiagnosticAsync` must **not** await the long-running loop.
+
+Required Start behavior:
+
+```text
+RPC Start
+-> acquire existing presentation gate / validate admission
+-> create one presentation-owned diagnostic CancellationTokenSource
+-> start/store one presentation-owned loop Task
+-> publish Running snapshot
+-> return Running snapshot promptly
+-> release RPC operationGate
+```
+
+The loop may run indefinitely after the Start RPC has returned.
+
+The Start request cancellation token is for Start admission/setup only. Once the run has committed and the Running snapshot is returned, do **not** link the loop lifetime to that RPC token or to the request CTS owned by `NamedPipeAddonFrontendServer`.
+
+The presentation owns:
+
+```text
+current diagnostic CTS
+current diagnostic loop Task
+current diagnostic snapshot/result
+```
+
+`StopXbox360RumbleLoopDiagnosticAsync` must cancel the presentation-owned CTS, await the stored loop Task to finish its bounded cleanup path, and then return the terminal snapshot.
+
+`CaptureXbox360RumbleLoopDiagnosticAsync` must remain callable while the loop is Running.
+
+Do not add another worker/service/manager to achieve this; one stored Task + CTS on the existing presentation owner is sufficient.
+
 Do not expose raw VIIPER handles or the physical rumble sink through frontend contracts.
 
 ---
@@ -550,13 +610,29 @@ do **not** call `XInputSetState(0,0)` again.
 
 A second host STOP could succeed and destroy the clean evidence that the first terminal command did not arrive.
 
-Instead request one direct physical STOP through the **existing** presentation-owned:
+Instead request one direct physical STOP through the **existing Xbox360 feedback bridge**, which already owns the callback-vs-physical-write drain gate.
 
-```text
-IPhysicalRumbleSink
+Add one narrow diagnostic cleanup primitive on `Xbox360RumbleFeedbackBridge`, conceptually:
+
+```csharp
+internal PhysicalRumbleWriteResult WriteDiagnosticPhysicalStop()
+{
+    lock (_callbackWriteGate)
+    {
+        return _sink.SetRumble(TwoMotorRumble.Stopped);
+    }
+}
 ```
 
-Log it as a clearly separate diagnostic safety action, for example:
+Exact name/result type is implementation choice.
+
+The purpose is not to add a new synchronization authority. It reuses the existing `_callbackWriteGate` so a callback that is already inside the physical write cannot land its non-zero write after the diagnostic cleanup STOP.
+
+Do **not** call `IPhysicalRumbleSink.SetRumble` directly from the diagnostic runner while bypassing that gate.
+
+Do not unregister/re-register the VIIPER callback for this cleanup. After the generator is cancelled, the normal callback stays armed; a legitimately late terminal `0/0` remains harmless and observable.
+
+Log the bridge-serialized cleanup as a clearly separate diagnostic safety action, for example:
 
 ```text
 Event=X360LoopProbePhysicalCleanupStop
@@ -572,9 +648,9 @@ This physical STOP must not be confused with:
 - a VIIPER callback;
 - the existing 5-second production safety stop.
 
-Do not add a second HID writer.
+Do not add a second HID writer, another lock, or a callback-suppression state machine.
 
-Reuse the existing shared sink.
+Reuse the existing shared sink through the existing bridge write gate.
 
 ---
 
@@ -587,7 +663,7 @@ For a normal operator cancellation:
 1. cancel the loop;
 2. issue one normal `XInputSetState(0,0)` cleanup attempt if the selected slot is still known;
 3. log the cleanup result;
-4. request the existing physical sink STOP as final safety if appropriate;
+4. request the bridge-serialized diagnostic physical STOP as final safety if appropriate;
 5. transition to `Stopped`.
 
 This cleanup `0/0` must be explicitly labeled as:
@@ -697,6 +773,14 @@ FrontendTransportProtocol.CurrentVersion
 
 Add the normal v43 comment explaining that the Developer Vibration page now has a new Full1902 Xbox360 loop diagnostic contract.
 
+The three RPCs must have these lifetime semantics:
+
+- `StartXbox360RumbleLoopDiagnostic` returns a `Running` snapshot promptly after the presentation-owned background loop is started; it never waits for the loop to finish.
+- `CaptureXbox360RumbleLoopDiagnostic` remains available while that loop runs.
+- `StopXbox360RumbleLoopDiagnostic` cancels and joins the presentation-owned loop, then returns the terminal snapshot.
+
+This is required because the current server has one serialized `operationGate`; a Start RPC that awaited the loop would deadlock practical control of the diagnostic by preventing Capture/Stop from dispatching.
+
 Wire through:
 
 ```text
@@ -750,6 +834,7 @@ Do not make frontend lifetime controller authority.
 Reuse the existing page:
 
 ```text
+src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml
 src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml
 src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs
 ```
@@ -800,6 +885,14 @@ When Failed:
 
 The page is developer-only. Do not expose this on Device/Controller/Overlay ordinary UI.
 
+Also update the Developer Menu card in:
+
+```text
+src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml
+```
+
+The existing description still says Steam Deck rumble/haptic and requires Developer Test Mode. Replace it with Xbox360 Terminal STOP diagnostic wording. This new test does **not** depend on the disconnected Developer Test Mode toggle.
+
 ---
 
 # 19. UI activation/deactivation
@@ -821,6 +914,23 @@ When the user leaves the page normally:
 - do not leave a deliberate vibration generator running because its frontend page disappeared.
 
 On UI shutdown, `DeactivateAsync` must await the Stop request before the frontend client is disposed when possible.
+
+## 19.1 Unexpected frontend disconnect must also stop the Runtime-owned loop
+
+Normal page deactivation is not enough. The WinUI frontend can crash, be killed, or lose its named-pipe connection while the Runtime remains alive.
+
+A deliberate vibration generator must not remain headless after that concrete product event.
+
+Reuse the existing single-frontend disconnect boundary in `NamedPipeAddonFrontendServer.ServeAsync`. Follow the same narrow feature-local pattern already used for the Claw Sensor Probe:
+
+- track a connection-local `rumbleLoopMayBeRunning` boolean;
+- set it after a successful Start response indicating the loop was admitted/running;
+- clear it after an explicit Stop response that leaves the loop non-running;
+- in `ServeAsync` `finally`, if it may still be running, call `StopXbox360RumbleLoopDiagnosticAsync(CancellationToken.None)` best-effort.
+
+If the loop already failed/stopped by itself, this disconnect Stop must be idempotent.
+
+Do not create a general frontend-session manager or bind normal controller Runtime ownership to the UI connection. This cleanup applies only to the explicitly UI-started developer diagnostic.
 
 Do not change the product rule that the controller Runtime itself survives frontend closure; only this explicitly developer-started diagnostic should stop.
 
@@ -1090,7 +1200,31 @@ If terminal `XInputSetState` returns an error:
 
 Prove explicit Stop cancels the runner and performs one diagnostic cleanup path without retry loops.
 
-## 23.8 Presentation lifecycle cancellation
+Also prove the cleanup STOP is serialized through the existing Xbox360 bridge `_callbackWriteGate`: if a fake sink deliberately holds one callback physical write in progress, Stop waits for that admitted callback write and the diagnostic STOP is the next physical write. Do not add a new synchronization primitive for the test.
+
+## 23.8 Start RPC lifetime / continued control
+
+Prove Start returns a `Running` snapshot without waiting for the loop to complete.
+
+With the loop still running, prove a subsequent Capture and Stop can dispatch and complete through the frontend server's serialized operation gate.
+
+Prove cancellation of the completed Start RPC/request CTS does not cancel an already-committed presentation-owned loop.
+
+## 23.9 Unexpected frontend disconnect
+
+Start the diagnostic through a served frontend connection, then drop the pipe without sending Stop.
+
+Prove the server's existing connection-finally path issues one best-effort Stop and the Runtime-owned diagnostic no longer generates XInput states.
+
+Do not add a generic connection/session framework.
+
+## 23.10 XInput topology change
+
+Start with exactly one connected slot, then change the fake connected-slot set at a cycle boundary.
+
+Prove the diagnostic stops with `XInputTopologyChanged` and does not silently adopt another slot.
+
+## 23.11 Presentation lifecycle cancellation
 
 At minimum prove a real owner transition that retires/disarms Xbox360 cancels the diagnostic and no later loop step is generated.
 
@@ -1098,13 +1232,13 @@ Use existing presentation test seams.
 
 Do not invent timing-only race tests.
 
-## 23.9 Dead-man unchanged
+## 23.12 Dead-man unchanged
 
 Existing `Xbox360RumbleFeedbackBridgeTests` must continue proving the normal 5-second production policy.
 
 Add a regression assertion if needed that starting the diagnostic does not set the bridge safety delay to zero or disable it.
 
-## 23.10 Legacy vibration contract remains removed
+## 23.13 Legacy vibration contract remains removed
 
 Update `VibrationContractRemovalTests` only enough to recognize the new diagnostic contract.
 
@@ -1119,7 +1253,7 @@ FrontendVibrationTestResult
 FeedbackAuthority
 ```
 
-## 23.11 Frontend wire
+## 23.14 Frontend wire
 
 Prove:
 
@@ -1129,11 +1263,13 @@ Prove:
 - passive/default implementation reports Unavailable;
 - no old vibration RPC is restored.
 
-## 23.12 UI architecture
+## 23.15 UI architecture
 
 Replace the old assertion that the page is always unavailable.
 
 Prove the page exposes the new Terminal STOP Loop controls and does not contain the deleted legacy RPC/type names.
+
+Also prove the Developer Menu card no longer describes this page as Steam Deck rumble/haptic or as requiring Developer Test Mode.
 
 ---
 
@@ -1269,11 +1405,14 @@ The PR is complete when:
 10. A terminal callback expectation is armed before `XInputSetState(0,0)`.
 11. A successful terminal XInput call without callback within 1000 ms stops the test.
 12. Missing-terminal failure does not send a second XInput STOP.
-13. Failure cleanup uses the existing physical rumble sink exactly once as a separately logged diagnostic safety action.
+13. Failure/manual cleanup reuses the existing Xbox360 bridge write-drain gate so an already-admitted callback physical write cannot land after the diagnostic STOP.
 14. The existing production callback remains the one VIIPER callback authority.
 15. Logs carry RunId/Cycle/Seed/Step/expected values/XInput result/callback evidence.
 16. The test is cancelled by real presentation/suspend/shutdown lifecycle transitions.
-17. Frontend protocol is bumped to v43 and Capture/Start/Stop are typed.
-18. The UI stops the developer diagnostic when leaving the page.
-19. Unit/integration/UI tests pass.
-20. The implementation adds no new controller authority, manager hierarchy, retry state machine, or speculative race-defense machinery.
+17. Start returns Running promptly; the loop lifetime is presentation-owned and does not hold the frontend operation gate.
+18. Frontend protocol is bumped to v43 and Capture/Start/Stop are typed.
+19. Normal page departure and unexpected frontend pipe disconnect both stop the explicitly UI-started diagnostic.
+20. XInput slot topology is revalidated at cycle boundaries and a change stops the diagnostic rather than silently changing attribution.
+21. The Developer Menu description matches the new Xbox360 diagnostic and does not claim Developer Test Mode is required.
+22. Unit/integration/UI tests pass.
+23. The implementation adds no new controller authority, manager hierarchy, retry state machine, or speculative race-defense machinery.
