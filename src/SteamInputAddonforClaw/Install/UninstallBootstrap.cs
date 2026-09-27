@@ -55,32 +55,43 @@ internal static class UninstallBootstrap
         return succeeded;
     }
 
-    internal static SingleInstanceGate? AcquireRuntimeGateForSafeUninstall(TimeSpan waitBudget, TimeSpan probeInterval)
+    internal static SingleInstanceGate? AcquireRuntimeGateForSafeUninstall(
+        TimeSpan waitBudget,
+        TimeSpan probeInterval,
+        Func<SingleInstanceGate>? createGate = null,
+        Func<bool>? requestPrimaryUninstall = null,
+        Func<DateTimeOffset>? utcNow = null,
+        Action<TimeSpan>? delay = null)
     {
         if (waitBudget <= TimeSpan.Zero || probeInterval <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(waitBudget));
 
+        createGate ??= SingleInstanceGate.CreateForCurrentUser;
+        requestPrimaryUninstall ??= SingleInstanceGate.RequestPrimaryUninstall;
+        utcNow ??= static () => DateTimeOffset.UtcNow;
+        delay ??= static duration => Thread.Sleep(duration);
+
         try
         {
-            var initial = SingleInstanceGate.CreateForCurrentUser();
+            var initial = createGate();
             if (initial.IsPrimaryInstance) return initial;
             initial.Dispose();
 
-            if (!SingleInstanceGate.RequestPrimaryUninstall())
+            if (!requestPrimaryUninstall())
             {
                 AppLog.Warn("Uninstall", "Running Runtime uninstall request could not be signaled.");
                 return null;
             }
 
-            var deadline = DateTimeOffset.UtcNow + waitBudget;
-            while (DateTimeOffset.UtcNow < deadline)
+            var deadline = utcNow() + waitBudget;
+            while (utcNow() < deadline)
             {
-                var probe = SingleInstanceGate.CreateForCurrentUser();
+                var probe = createGate();
                 if (probe.IsPrimaryInstance) return probe;
                 probe.Dispose();
-                var remaining = deadline - DateTimeOffset.UtcNow;
+                var remaining = deadline - utcNow();
                 if (remaining > TimeSpan.Zero)
-                    Thread.Sleep(remaining < probeInterval ? remaining : probeInterval);
+                    delay(remaining < probeInterval ? remaining : probeInterval);
             }
 
             AppLog.Warn("Uninstall", "Running Runtime did not release its mutex within the safe-uninstall wait budget.", null,

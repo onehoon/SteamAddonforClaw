@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Principal;
+using SteamInputAddonforClaw.ClawHud;
 using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Hosting;
@@ -15,6 +16,7 @@ internal sealed record DirectoryDeletionResult(DirectoryDeletionStatus Status, s
     internal bool Succeeded => Status is DirectoryDeletionStatus.Deleted or DirectoryDeletionStatus.AlreadyAbsent;
 }
 internal enum FinalUninstallHandoffResult { Launched, DataRootRemovalFailed, UpdaterLaunchFailed }
+internal sealed record SafeUninstallPreparationResult(bool Succeeded, string Reason);
 
 internal static class BoundedDirectoryDeletion
 {
@@ -90,27 +92,20 @@ internal static class SafeUninstall
             var host = new AddonProcessHost(headlessUninstallPreparation: true);
             try
             {
-                var startup = host.RunStartupAsync().GetAwaiter().GetResult();
-                if (startup != AddonProcessStartupOutcome.RuntimeReady)
-                    return Abort(silent, "Current controller safety could not be established. No uninstall was started.");
-
-                host.InitializeRuntimeAsync().GetAwaiter().GetResult();
-                var stock = host.PrepareForUninstallAsync().GetAwaiter().GetResult();
-                if (stock is not { Succeeded: true })
+                var preparation = PrepareHeadlessStockSafeState(
+                    () => host.RunStartupAsync().GetAwaiter().GetResult(),
+                    () => host.InitializeRuntimeAsync().GetAwaiter().GetResult(),
+                    () => host.PrepareForUninstallAsync().GetAwaiter().GetResult(),
+                    () => host.StopManagedClawHudForUninstallAsync().GetAwaiter().GetResult());
+                if (!preparation.Succeeded)
                 {
-                    AppLog.Warn("Uninstall", "Independent PR12 stock-safety proof failed; final uninstall was blocked.", null,
-                        ("Reason", stock?.Reason ?? "StockPreparationUnavailable"));
-                    return Abort(silent, "The controller could not be proven stock-safe. No uninstall was started.");
+                    AppLog.Warn("Uninstall", "Headless stock-safe uninstall preparation failed; final uninstall was blocked.", null,
+                        ("Reason", preparation.Reason));
+                    return Abort(silent, "The controller could not be proven stock-safe or Managed ClawHUD could not be stopped. No uninstall was started.");
                 }
 
-                AppLog.Info("Uninstall", "Independent PR12 stock-safety proof succeeded.", ("Reason", stock.Reason));
-                var clawHud = host.StopManagedClawHudForUninstallAsync().GetAwaiter().GetResult();
-                if (!clawHud.Succeeded)
-                {
-                    AppLog.Warn("Uninstall.ClawHUD", "Managed ClawHUD shutdown could not be confirmed; final uninstall was blocked.", null,
-                        ("Reason", clawHud.Reason));
-                    return Abort(silent, "Managed ClawHUD could not be safely stopped. No uninstall was started.");
-                }
+                AppLog.Info("Uninstall", "Independent PR12 stock-safety proof and Managed ClawHUD shutdown succeeded.",
+                    ("Reason", preparation.Reason));
             }
             catch (Exception exception)
             {
@@ -158,6 +153,28 @@ internal static class SafeUninstall
             else
                 runtimeGate.Dispose();
         }
+    }
+
+    internal static SafeUninstallPreparationResult PrepareHeadlessStockSafeState(
+        Func<AddonProcessStartupOutcome> runStartup,
+        Action initializeRuntime,
+        Func<StockUninstallPrepareResult> prepareForUninstall,
+        Func<ClawHudUninstallStopResult> stopManagedClawHud)
+    {
+        var startup = runStartup();
+        if (startup != AddonProcessStartupOutcome.RuntimeReady)
+            return new(false, "StartupNotReady:" + startup);
+
+        initializeRuntime();
+        var stock = prepareForUninstall();
+        if (stock is not { Succeeded: true })
+            return new(false, "StockSafetyNotProven:" + (stock?.Reason ?? "StockPreparationUnavailable"));
+
+        var clawHud = stopManagedClawHud();
+        if (!clawHud.Succeeded)
+            return new(false, "ManagedClawHudShutdownNotConfirmed:" + clawHud.Reason);
+
+        return new(true, "StockSafetyProvenAndManagedClawHudStopped");
     }
 
     private static OwnedPrerequisiteUninstallResult? RunElevatedDependencyCleanup(string root)

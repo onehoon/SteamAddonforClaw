@@ -92,6 +92,104 @@ public sealed class UninstallBootstrapTests
     }
 
     [Fact]
+    public void Safe_uninstall_acquires_the_runtime_gate_when_no_runtime_is_running()
+    {
+        var (mutexName, eventName) = CreateGateNames();
+        SingleInstanceGate CreateGate() => new(mutexName, eventName);
+
+        using var gate = UninstallBootstrap.AcquireRuntimeGateForSafeUninstall(
+            TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(10), CreateGate,
+            requestPrimaryUninstall: static () => throw new Xunit.Sdk.XunitException("No Runtime request should be sent."));
+
+        Assert.NotNull(gate);
+        Assert.True(gate.IsPrimaryInstance);
+    }
+
+    [Fact]
+    public void Safe_uninstall_waits_for_a_running_runtime_to_release_after_preparation_succeeds()
+    {
+        var (mutexName, eventName) = CreateGateNames();
+        using var runtimeReady = new ManualResetEventSlim();
+        using var runtimeMayExit = new ManualResetEventSlim();
+        var runtimeWasPrimary = false;
+        var runtimeThread = new Thread(() =>
+        {
+            using var runtimeGate = new SingleInstanceGate(mutexName, eventName);
+            runtimeWasPrimary = runtimeGate.IsPrimaryInstance;
+            runtimeReady.Set();
+            runtimeMayExit.Wait();
+        }) { IsBackground = true };
+        runtimeThread.Start();
+
+        Assert.True(runtimeReady.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(runtimeWasPrimary);
+        var requestCount = 0;
+        SingleInstanceGate CreateGate() => new(mutexName, eventName);
+        SingleInstanceGate? acquired = null;
+        try
+        {
+            acquired = UninstallBootstrap.AcquireRuntimeGateForSafeUninstall(
+                TimeSpan.FromSeconds(2), TimeSpan.FromMilliseconds(10), CreateGate,
+                requestPrimaryUninstall: () =>
+                {
+                    requestCount++;
+                    runtimeMayExit.Set();
+                    return true;
+                });
+
+            Assert.NotNull(acquired);
+            Assert.True(acquired.IsPrimaryInstance);
+            Assert.Equal(1, requestCount);
+        }
+        finally
+        {
+            runtimeMayExit.Set();
+            runtimeThread.Join(TimeSpan.FromSeconds(2));
+            acquired?.Dispose();
+        }
+    }
+
+    [Fact]
+    public void Safe_uninstall_aborts_when_running_runtime_does_not_release_after_failed_preparation()
+    {
+        var (mutexName, eventName) = CreateGateNames();
+        using var runtimeReady = new ManualResetEventSlim();
+        using var runtimeMayExit = new ManualResetEventSlim();
+        var runtimeWasPrimary = false;
+        var runtimeThread = new Thread(() =>
+        {
+            using var runtimeGate = new SingleInstanceGate(mutexName, eventName);
+            runtimeWasPrimary = runtimeGate.IsPrimaryInstance;
+            runtimeReady.Set();
+            runtimeMayExit.Wait();
+        }) { IsBackground = true };
+        runtimeThread.Start();
+
+        Assert.True(runtimeReady.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(runtimeWasPrimary);
+        var now = DateTimeOffset.UtcNow;
+        var requestCount = 0;
+        SingleInstanceGate CreateGate() => new(mutexName, eventName);
+        try
+        {
+            var acquired = UninstallBootstrap.AcquireRuntimeGateForSafeUninstall(
+                TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(25), CreateGate,
+                requestPrimaryUninstall: () => { requestCount++; return true; },
+                utcNow: () => now,
+                delay: duration => now += duration);
+
+            Assert.Null(acquired);
+            Assert.Equal(1, requestCount);
+            Assert.True(runtimeThread.IsAlive);
+        }
+        finally
+        {
+            runtimeMayExit.Set();
+            runtimeThread.Join(TimeSpan.FromSeconds(2));
+        }
+    }
+
+    [Fact]
     public void Stale_fps_marker_failed_cleanup_preserves_ownership_evidence()
     {
         var marker = Path.Combine(Path.GetTempPath(), $"intel-fps-{Guid.NewGuid():N}.json");
@@ -140,5 +238,12 @@ public sealed class UninstallBootstrapTests
         public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId) => IntelFpsApplyOutcome.Succeeded;
         public bool Disable(AcDcPowerSource? source, uint appId) { DisableCalls++; return DisableResult; }
         public void Dispose() { }
+    }
+
+    private static (string MutexName, string EventName) CreateGateNames()
+    {
+        var unique = Guid.NewGuid().ToString("N");
+        return ($"Local\\SteamInputAddonforClaw.Tests.SafeUninstall.{unique}",
+            $"Local\\SteamInputAddonforClaw.Tests.Activate.SafeUninstall.{unique}");
     }
 }
