@@ -44,6 +44,16 @@
                 </Grid>
             </Border>
 
+            <ctcontrols:SettingsCard Header="PID1902 Input Cadence" Description="Measure distinct raw DirectInput state changes by temporarily oversampling the existing physical controller for 10 seconds. Close games or use a safe screen. Continuously move both sticks and LT/RT during the test.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Repair" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <StackPanel Spacing="6">
+                    <Button x:Name="RunPid1902InputCadenceButton" Click="RunPid1902InputCadenceButton_Click" Content="Run 10s Test" />
+                    <TextBlock x:Name="Pid1902InputCadenceStatusText" Opacity="0.7" TextWrapping="Wrap" Visibility="Collapsed" />
+                </StackPanel>
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsCard Header="Vibration Test" Description="Run the Full1902 Xbox360 terminal STOP callback diagnostic. Close games and other XInput rumble tools first.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE1D9;" />

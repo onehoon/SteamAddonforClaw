@@ -13,6 +13,7 @@ public sealed partial class DeveloperPage : UserControl
     private bool _isInitializingTestMode;
     private bool _isInitializingLogLevel;
     private int _isGeneratingEnvironmentDiscoveryReport;
+    private int _isRunningPid1902InputCadenceDiagnostic;
     private bool _lastKnownTestMode;
     private FrontendLogLevel _lastKnownLogLevel;
     private string _logDirectoryPath = string.Empty;
@@ -169,4 +170,60 @@ public sealed partial class DeveloperPage : UserControl
         EnvironmentDiscoveryReportStatusText.Text = text;
         EnvironmentDiscoveryReportStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
     }
+
+    private async void RunPid1902InputCadenceButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_isPrerequisiteSetupInProgress?.Invoke() == true || _frontend is null) return;
+        if (Interlocked.Exchange(ref _isRunningPid1902InputCadenceDiagnostic, 1) != 0) return;
+
+        RunPid1902InputCadenceButton.IsEnabled = false;
+        SetPid1902InputCadenceStatus("Running...\r\nContinuously move both sticks and LT/RT for 10 seconds.");
+        try
+        {
+            var result = await _frontend.RunPid1902InputCadenceDiagnosticAsync();
+            SetPid1902InputCadenceStatus(FormatPid1902InputCadenceResult(result));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DeveloperMenu", "PID1902 input cadence diagnostic failed.", exception);
+            SetPid1902InputCadenceStatus("Diagnostic failed. See the application log for details.");
+        }
+        finally
+        {
+            RunPid1902InputCadenceButton.IsEnabled = true;
+            Volatile.Write(ref _isRunningPid1902InputCadenceDiagnostic, 0);
+        }
+    }
+
+    private void SetPid1902InputCadenceStatus(string text)
+    {
+        Pid1902InputCadenceStatusText.Text = text;
+        Pid1902InputCadenceStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private static string FormatPid1902InputCadenceResult(FrontendPid1902InputCadenceResult result)
+    {
+        if (result.Outcome != FrontendPid1902InputCadenceOutcome.Completed)
+            return result.Status;
+
+        var text = $"Completed\r\nReads: {result.SuccessfulReadCount:N0} ({FormatHz(result.ObservedReadHz)})\r\n" +
+                   $"Distinct states: {result.DistinctStateCount:N0} ({FormatHz(result.DistinctStateHz)})\r\n" +
+                   $"Duplicates: {result.DuplicatePercent?.ToString("F1") ?? "n/a"}%\r\n\r\n" +
+                   "Distinct interval:\r\n" +
+                   $"Min       {FormatMilliseconds(result.MinDistinctIntervalMs)}\r\n" +
+                   $"Mean      {FormatMilliseconds(result.MeanDistinctIntervalMs)}\r\n" +
+                   $"Median    {FormatMilliseconds(result.MedianDistinctIntervalMs)}\r\n" +
+                   $"P95       {FormatMilliseconds(result.P95DistinctIntervalMs)}\r\n" +
+                   $"Max       {FormatMilliseconds(result.MaxDistinctIntervalMs)}";
+
+        if (result.DistinctStateCount < 2)
+            text += "\r\n\r\nCompleted, but too few changing raw states were observed. Run again while continuously moving both sticks and triggers.";
+        else if (result.ObservedReadHz is not > 250)
+            text += $"\r\n\r\nSampling rate was too low for a reliable 125 Hz vs 250 Hz comparison. Observed read rate: {FormatHz(result.ObservedReadHz)}.";
+
+        return text;
+    }
+
+    private static string FormatHz(double? value) => value is { } hz ? $"{hz:F1} Hz" : "n/a";
+    private static string FormatMilliseconds(double? value) => value is { } milliseconds ? $"{milliseconds:F2} ms" : "n/a";
 }
