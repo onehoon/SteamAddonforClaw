@@ -1424,6 +1424,10 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
         Assert.Contains("startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled", host, StringComparison.Ordinal);
         Assert.Contains("var owner = CreatePhysicalOwnership(startupComposition);", host, StringComparison.Ordinal);
         Assert.Contains("startupResult.DisabledBootAdmission?.IsReady != true", host, StringComparison.Ordinal);
+        Assert.Contains("var allowUsbIpRepairWhileRecoveryUnsafe =", host, StringComparison.Ordinal);
+        Assert.Contains("startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady", host, StringComparison.Ordinal);
+        Assert.Contains("new SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor(", host, StringComparison.Ordinal);
+        Assert.Contains("setupExecutor: setupExecutor", host, StringComparison.Ordinal);
         Assert.True(
             host.IndexOf("_physicalOwnership = owner;", StringComparison.Ordinal)
             < host.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal),

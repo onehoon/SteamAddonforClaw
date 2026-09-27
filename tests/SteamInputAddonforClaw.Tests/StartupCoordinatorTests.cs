@@ -336,6 +336,25 @@ public sealed class StartupCoordinatorTests
         Assert.DoesNotContain("Baseline", events);
     }
 
+    [Fact]
+    public async Task DisabledRoots_PrerequisitesNotReady_KeepsRecoveryUnsafeAndRuntimeAvailable()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(
+            new FakeTopologyWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            stockCenterMBaseline: new FakeBaseline(events),
+            disabledBootAdmission: new FakeDisabledBootAdmission(events, DisabledBootAdmissionOutcome.PrerequisitesNotReady),
+            captureCenterMStartup: () => Roots(FrontendCenterMStartupState.Disabled));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.ShouldStartRuntime);
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(DisabledBootAdmissionOutcome.PrerequisitesNotReady, result.DisabledBootAdmission!.Outcome);
+        Assert.False(result.DisabledBootAdmission.IsReady);
+        Assert.DoesNotContain("Baseline", events);
+    }
+
     [Theory]
     [InlineData("Partial")]
     [InlineData("Unavailable")]
@@ -440,6 +459,7 @@ public sealed class StartupCoordinatorTests
             {
                 DisabledBootAdmissionOutcome.Ready => DisabledBootControllerAdmissionResult.Ready,
                 DisabledBootAdmissionOutcome.NotApplicable => DisabledBootControllerAdmissionResult.NotApplicable,
+                DisabledBootAdmissionOutcome.PrerequisitesNotReady => new(DisabledBootAdmissionOutcome.PrerequisitesNotReady, "test"),
                 _ => DisabledBootControllerAdmissionResult.Blocked("test"),
             };
         }

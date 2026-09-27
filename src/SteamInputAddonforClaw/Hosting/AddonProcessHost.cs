@@ -513,8 +513,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (_runtimeCompositionFactory is null)
             _updateCoordinator = new FrontendUpdateCoordinator(new VelopackUpdateClient(),
                 () => _requestRestart?.Invoke() == true);
+        var allowUsbIpRepairWhileRecoveryUnsafe =
+            startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
+            && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady;
+        var setupExecutor = new SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor(
+            allowUsbIpRepairWhileRecoveryUnsafe);
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost,
+            setupExecutor: setupExecutor,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
             // received -- the UI and the runtime can never disagree about whether OEM1 mapping exists.
             frontButtonMappingAvailable: startupResult.HardwareSupported,

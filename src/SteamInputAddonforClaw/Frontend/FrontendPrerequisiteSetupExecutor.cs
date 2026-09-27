@@ -15,8 +15,14 @@ internal interface IFrontendPrerequisiteSetupExecutor
 
 internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteSetupExecutor
 {
+    private readonly bool _allowUsbIpRepairWhileRecoveryUnsafe;
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
     private readonly IElevatedProcessRunner _setupRunner = new ElevatedProcessRunner();
+
+    internal FrontendPrerequisiteSetupExecutor(bool allowUsbIpRepairWhileRecoveryUnsafe = false)
+    {
+        _allowUsbIpRepairWhileRecoveryUnsafe = allowUsbIpRepairWhileRecoveryUnsafe;
+    }
 
     public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot)
     {
@@ -31,7 +37,7 @@ internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteS
         var usbBootChanged = usbReceipt.Receipt is { State: UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot } up && BootSession.HasChangedSince(up.StartedAtUtc);
         var hidInstall = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
         var usbInstall = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
-        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.RecoverySafe, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged)));
+        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.RecoverySafe, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged), _allowUsbIpRepairWhileRecoveryUnsafe));
     }
 
     public Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken) =>
