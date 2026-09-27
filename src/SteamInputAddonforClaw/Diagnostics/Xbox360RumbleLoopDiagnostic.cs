@@ -61,18 +61,27 @@ internal sealed class WindowsXbox360RumbleLoopXInput : IXbox360RumbleLoopXInput
 /// callback and never registers another callback or writes the physical sink directly.</summary>
 internal sealed class Xbox360RumbleLoopDiagnostic
 {
-    internal const int BaseSeed = unchecked((int)0x434C4157);
     internal const uint ErrorSuccess = 0;
     internal const uint ErrorDeviceNotConnected = 1167;
-    internal static readonly TimeSpan ProductionCadence = TimeSpan.FromSeconds(1);
+    internal static readonly TimeSpan ProductionBurstStepCadence = TimeSpan.FromMilliseconds(65);
+    internal static readonly TimeSpan ProductionCycleIdle = TimeSpan.FromSeconds(2);
     internal static readonly TimeSpan ProductionTerminalCallbackTimeout = TimeSpan.FromSeconds(1);
+
+    private static readonly IReadOnlyList<RumbleReplayPattern> LiesOfPRumblePatterns = Array.AsReadOnly(new RumbleReplayPattern[]
+    {
+        new("LiesOfP-A", Array.AsReadOnly(new RumbleReplayStep[] { new(255, 255), new(241, 241), new(217, 217), new(252, 252), new(230, 230), new(208, 208), new(0, 0) })),
+        new("LiesOfP-B", Array.AsReadOnly(new RumbleReplayStep[] { new(255, 255), new(242, 242), new(218, 218), new(204, 204), new(0, 0) })),
+        new("LiesOfP-C", Array.AsReadOnly(new RumbleReplayStep[] { new(255, 255), new(242, 242), new(217, 217), new(0, 0) })),
+        new("LiesOfP-D", Array.AsReadOnly(new RumbleReplayStep[] { new(255, 255), new(239, 239), new(219, 219), new(255, 255), new(247, 247), new(228, 228), new(209, 209), new(0, 0) }))
+    });
 
     private readonly object _callbackGate = new();
     private readonly int _slot;
     private readonly IXbox360RumbleLoopXInput _xinput;
     private readonly Func<PhysicalRumbleWriteResult> _physicalStop;
     private readonly IXbox360UsbTraceCapture? _usbTraceCapture;
-    private readonly TimeSpan _cadence;
+    private readonly TimeSpan _burstStepCadence;
+    private readonly TimeSpan _cycleIdle;
     private readonly TimeSpan _terminalCallbackTimeout;
     private ExpectedTerminalStop? _expectedTerminalStop;
     private FrontendXbox360RumbleLoopSnapshot _snapshot;
@@ -90,15 +99,17 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         int slot,
         IXbox360RumbleLoopXInput xinput,
         Func<PhysicalRumbleWriteResult> physicalStop,
-        TimeSpan? cadence = null,
+        TimeSpan? burstStepCadence = null,
         TimeSpan? terminalCallbackTimeout = null,
-        IXbox360UsbTraceCapture? usbTraceCapture = null)
+        IXbox360UsbTraceCapture? usbTraceCapture = null,
+        TimeSpan? cycleIdle = null)
     {
         _slot = slot;
         _xinput = xinput;
         _physicalStop = physicalStop;
         _usbTraceCapture = usbTraceCapture;
-        _cadence = cadence ?? ProductionCadence;
+        _burstStepCadence = burstStepCadence ?? ProductionBurstStepCadence;
+        _cycleIdle = cycleIdle ?? ProductionCycleIdle;
         _terminalCallbackTimeout = terminalCallbackTimeout ?? ProductionTerminalCallbackTimeout;
         var runId = Guid.NewGuid().ToString("N");
         _snapshot = new(true, FrontendXbox360RumbleLoopState.Running, "Running", runId, slot, 0, 0, 0,
@@ -122,8 +133,10 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         {
             AppLog.Info("Rumble", "Xbox360 terminal STOP diagnostic started.",
                 ("Event", "X360LoopProbeStart"), ("RunId", Snapshot.RunId ?? "Unknown"),
-                ("Slot", _slot), ("BaseSeed", $"0x{unchecked((uint)BaseSeed):X8}"),
-                ("StepIntervalMs", _cadence.TotalMilliseconds),
+                ("Slot", _slot),
+                ("BurstStepIntervalMs", _burstStepCadence.TotalMilliseconds),
+                ("CycleIdleMs", _cycleIdle.TotalMilliseconds),
+                ("PatternCount", LiesOfPRumblePatterns.Count),
                 ("TerminalWaitMs", _terminalCallbackTimeout.TotalMilliseconds),
                 ("ProductionDeadmanMs", Xbox360RumbleFeedbackBridge.DefaultSafetyStop.TotalMilliseconds));
 
@@ -141,33 +154,32 @@ internal sealed class Xbox360RumbleLoopDiagnostic
                     return;
                 }
 
-                var cycleSeed = BaseSeed ^ currentCycle;
-                var sequence = CreateSequence(currentCycle);
+                var patternIndex = (currentCycle - 1) % LiesOfPRumblePatterns.Count;
+                var pattern = LiesOfPRumblePatterns[patternIndex];
                 var cycleStart = Stopwatch.GetTimestamp();
                 AppLog.Debug("Rumble", "Xbox360 terminal STOP diagnostic cycle started.",
                     ("Event", "X360LoopProbeCycleStart"), ("RunId", Snapshot.RunId ?? "Unknown"),
-                    ("BaseSeed", $"0x{unchecked((uint)BaseSeed):X8}"), ("Cycle", currentCycle),
-                    ("CycleSeed", $"0x{unchecked((uint)cycleSeed):X8}"),
-                    ("Sequence", string.Join(',', sequence)), ("XInputSlot", _slot),
-                    ("NonZeroStepCount", sequence.Length - 1), ("StepCount", sequence.Length));
+                    ("Cycle", currentCycle), ("PatternIndex", patternIndex + 1), ("PatternName", pattern.Name),
+                    ("Sequence", string.Join(',', pattern.Steps.Select(static step => $"{step.Left8}/{step.Right8}"))),
+                    ("XInputSlot", _slot), ("StepCount", pattern.Steps.Count));
 
-                for (var index = 0; index < sequence.Length; index++)
+                for (var index = 0; index < pattern.Steps.Count; index++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await DelayUntilAsync(AddCadence(cycleStart, index), cancellationToken).ConfigureAwait(false);
-                    var value8 = sequence[index];
+                    await DelayUntilAsync(AddDuration(cycleStart, _burstStepCadence, index), cancellationToken).ConfigureAwait(false);
+                    var stepValue = pattern.Steps[index];
                     var step = index + 1;
                     UpdateSnapshot(snapshot => snapshot with
                     {
                         Cycle = currentCycle,
                         Step = step,
-                        StepCount = sequence.Length,
-                        CurrentValue8 = value8
+                        StepCount = pattern.Steps.Count,
+                        CurrentValue8 = stepValue.Left8
                     });
 
-                    if (value8 != 0)
+                    if (stepValue.Left8 != 0 || stepValue.Right8 != 0)
                     {
-                        if (!TrySetState(value8, currentCycle, step, sequence.Length, out var result, out var failure))
+                        if (!TrySetState(stepValue, currentCycle, step, pattern.Steps.Count, out var result, out var failure))
                         {
                             await FailAndCleanAsync(
                                 failure,
@@ -195,7 +207,7 @@ internal sealed class Xbox360RumbleLoopDiagnostic
 
                     AppLog.Debug("Rumble", "Xbox360 terminal STOP command returned.",
                         ("Event", "X360LoopProbeSend"), ("RunId", Snapshot.RunId ?? "Unknown"),
-                        ("Cycle", currentCycle), ("Step", step), ("StepCount", sequence.Length),
+                        ("Cycle", currentCycle), ("Step", step), ("StepCount", pattern.Steps.Count),
                         ("ExpectedLeft8", 0), ("ExpectedRight8", 0), ("Left16", 0), ("Right16", 0), ("XInputSlot", _slot),
                         ("XInputResult", terminalResult));
 
@@ -227,12 +239,11 @@ internal sealed class Xbox360RumbleLoopDiagnostic
                         return;
                     }
 
-                    var nextCycleStart = AddCadence(cycleStart, sequence.Length);
-                    await DelayUntilAsync(nextCycleStart, cancellationToken).ConfigureAwait(false);
-                    UpdateSnapshot(snapshot => snapshot with { Cycle = currentCycle, Step = sequence.Length, CurrentValue8 = 0 });
+                    UpdateSnapshot(snapshot => snapshot with { Cycle = currentCycle, Step = pattern.Steps.Count, CurrentValue8 = 0 });
                     AppLog.Debug("Rumble", "Xbox360 terminal STOP callback matched.",
                         ("Event", "X360LoopProbeTerminalStopMatched"), ("RunId", Snapshot.RunId ?? "Unknown"),
                         ("Cycle", currentCycle), ("Step", step), ("XInputSlot", _slot));
+                    await DelayUntilAsync(AddDuration(Stopwatch.GetTimestamp(), _cycleIdle), cancellationToken).ConfigureAwait(false);
                     currentCycle++;
                     break;
                 }
@@ -324,30 +335,12 @@ internal sealed class Xbox360RumbleLoopDiagnostic
     internal static FrontendXbox360RumbleLoopSnapshot Ready(int slot) =>
         new(true, FrontendXbox360RumbleLoopState.Ready, "Ready", null, slot, 0, 0, 0, null, null, null, null, null);
 
-    internal static byte[] CreateSequence(int cycle)
+    internal static int PatternCount => LiesOfPRumblePatterns.Count;
+
+    internal static RumbleReplayPattern GetPatternForCycle(int cycle)
     {
-        var state = unchecked((uint)(BaseSeed ^ cycle));
-        if (state == 0) state = 0x9E3779B9;
-        int Next(int exclusiveMaximum)
-        {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            return (int)(state % (uint)exclusiveMaximum);
-        }
-
-        var nonZeroCount = 6 + Next(5);
-        var start = 128 + Next(93);
-        var finalNonZero = 4 + Next(13);
-        var candidates = Enumerable.Range(finalNonZero + 1, start - finalNonZero - 1).ToArray();
-        for (var index = 0; index < nonZeroCount - 2; index++)
-        {
-            var selected = index + Next(candidates.Length - index);
-            (candidates[index], candidates[selected]) = (candidates[selected], candidates[index]);
-        }
-
-        var interior = candidates.Take(nonZeroCount - 2).OrderDescending().Select(static value => (byte)value);
-        return [(byte)start, .. interior, (byte)finalNonZero, 0];
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cycle);
+        return LiesOfPRumblePatterns[(cycle - 1) % LiesOfPRumblePatterns.Count];
     }
 
     private ExpectedTerminalStop ArmTerminalStop(int cycle, int step)
@@ -371,16 +364,18 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         }
     }
 
-    private bool TrySetState(byte value8, int cycle, int step, int stepCount, out uint result, out string failure)
+    private bool TrySetState(RumbleReplayStep value, int cycle, int step, int stepCount, out uint result, out string failure)
     {
         try
         {
-            result = _xinput.SetState((uint)_slot, Xbox360RumbleFeedbackBridge.Expand(value8), Xbox360RumbleFeedbackBridge.Expand(value8));
+            var left16 = Xbox360RumbleFeedbackBridge.Expand(value.Left8);
+            var right16 = Xbox360RumbleFeedbackBridge.Expand(value.Right8);
+            result = _xinput.SetState((uint)_slot, left16, right16);
             AppLog.Debug("Rumble", "Xbox360 diagnostic XInput state sent.",
                 ("Event", "X360LoopProbeSend"), ("RunId", Snapshot.RunId ?? "Unknown"),
                 ("Cycle", cycle), ("Step", step), ("StepCount", stepCount),
-                ("ExpectedLeft8", value8), ("ExpectedRight8", value8), ("Left16", Xbox360RumbleFeedbackBridge.Expand(value8)),
-                ("Right16", Xbox360RumbleFeedbackBridge.Expand(value8)), ("XInputSlot", _slot), ("XInputResult", result));
+                ("ExpectedLeft8", value.Left8), ("ExpectedRight8", value.Right8),
+                ("Left16", left16), ("Right16", right16), ("XInputSlot", _slot), ("XInputResult", result));
             failure = result == ErrorSuccess ? string.Empty : "XInputSetStateFailed";
             return result == ErrorSuccess;
         }
@@ -391,7 +386,7 @@ internal sealed class Xbox360RumbleLoopDiagnostic
             AppLog.Debug("Rumble", "Xbox360 diagnostic XInput state threw.",
                 ("Event", "X360LoopProbeSend"), ("RunId", Snapshot.RunId ?? "Unknown"),
                 ("Cycle", cycle), ("Step", step), ("StepCount", stepCount),
-                ("ExpectedLeft8", value8), ("ExpectedRight8", value8), ("XInputSlot", _slot),
+                ("ExpectedLeft8", value.Left8), ("ExpectedRight8", value.Right8), ("XInputSlot", _slot),
                 ("XInputResult", "Exception:" + exception.GetType().Name));
             return false;
         }
@@ -538,6 +533,10 @@ internal sealed class Xbox360RumbleLoopDiagnostic
         }
     }
 
-    private long AddCadence(long timestamp, int periods) =>
-        timestamp + (long)(_cadence.TotalSeconds * Stopwatch.Frequency * periods);
+    private static long AddDuration(long timestamp, TimeSpan duration, int periods = 1) =>
+        timestamp + (long)(duration.TotalSeconds * Stopwatch.Frequency * periods);
 }
+
+internal readonly record struct RumbleReplayStep(byte Left8, byte Right8);
+
+internal sealed record RumbleReplayPattern(string Name, IReadOnlyList<RumbleReplayStep> Steps);
