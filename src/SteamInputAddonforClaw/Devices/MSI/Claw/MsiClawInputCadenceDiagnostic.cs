@@ -1,14 +1,16 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed class MsiClawInputCadenceCollector
+internal sealed class MsiClawInputCadenceCollector : IDisposable
 {
     private readonly object _gate = new();
     private readonly long _requestedDurationMs;
     private readonly long _startedAt;
+    private readonly WindowsHighResolutionOneShotTimer? _timer;
     private readonly TaskCompletionSource<FrontendPid1902InputCadenceResult> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly List<double> _distinctIntervalsMs = [];
@@ -19,12 +21,17 @@ internal sealed class MsiClawInputCadenceCollector
     private int _distinctStateCount;
     private int _duplicateReadCount;
     private int _completed;
+    private bool _timerDisposed;
 
-    internal MsiClawInputCadenceCollector(TimeSpan requestedDuration, long? startedAt = null)
+    internal MsiClawInputCadenceCollector(
+        TimeSpan requestedDuration,
+        long? startedAt = null,
+        WindowsHighResolutionOneShotTimer? timer = null)
     {
         if (requestedDuration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(requestedDuration));
         _requestedDurationMs = (long)requestedDuration.TotalMilliseconds;
         _startedAt = startedAt ?? Stopwatch.GetTimestamp();
+        _timer = timer;
     }
 
     internal Task<FrontendPid1902InputCadenceResult> Completion => _completion.Task;
@@ -55,7 +62,10 @@ internal sealed class MsiClawInputCadenceCollector
             }
 
             if (ElapsedMilliseconds(_startedAt, timestamp) >= _requestedDurationMs)
+            {
                 result = CompleteLocked(FrontendPid1902InputCadenceOutcome.Completed, "Completed", timestamp);
+                DisposeTimerLocked();
+            }
         }
 
         if (result is not null) _completion.TrySetResult(result);
@@ -65,6 +75,32 @@ internal sealed class MsiClawInputCadenceCollector
 
     internal void Fail(string status) => Complete(FrontendPid1902InputCadenceOutcome.Failed, status, Stopwatch.GetTimestamp());
 
+    internal bool WaitForNextSample(TimeSpan interval, CancellationToken sessionCancellation)
+    {
+        // Serialize the bounded timer wait with completion/disposal; session cancellation wakes WaitAny promptly.
+        lock (_gate)
+        {
+            if (_completed != 0) return false;
+            var timer = _timer ?? throw new InvalidOperationException("The cadence diagnostic timer is unavailable.");
+            timer.ArmRelative(interval);
+            var signaled = WaitHandle.WaitAny([timer, sessionCancellation.WaitHandle]);
+            return signaled == 0 && _completed == 0;
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+            DisposeTimerLocked();
+    }
+
+    private void DisposeTimerLocked()
+    {
+        if (_timerDisposed) return;
+        _timerDisposed = true;
+        _timer?.Dispose();
+    }
+
     private void Complete(FrontendPid1902InputCadenceOutcome outcome, string status, long timestamp)
     {
         FrontendPid1902InputCadenceResult result;
@@ -72,6 +108,7 @@ internal sealed class MsiClawInputCadenceCollector
         {
             if (_completed != 0) return;
             result = CompleteLocked(outcome, status, timestamp);
+            DisposeTimerLocked();
         }
 
         _completion.TrySetResult(result);
