@@ -1,6 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
@@ -204,7 +203,7 @@ public sealed class CpuBoostFrontendTests : IDisposable
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
-        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState(),
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null,
             cpuBoostRuntime: runtime);
 
         var result = await control.SetDeviceCpuBoostAcAsync(CpuBoostMode.Aggressive);
@@ -315,7 +314,6 @@ public sealed class CpuBoostFrontendTests : IDisposable
             coordinator,
             new ThrowingSystemStatusProvider(),
             null,
-            new DeveloperTestModeState(),
             cpuBoostRuntime: cpuBoostRuntime, gameProfileMutations: gameProfileMutations, actualRunningAppIdSource: actualRunningAppIdSource);
     }
 

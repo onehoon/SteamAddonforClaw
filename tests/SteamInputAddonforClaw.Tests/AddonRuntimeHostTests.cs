@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Runtime;
@@ -25,8 +24,7 @@ public sealed class AddonRuntimeHostTests
             establishBaseline ?? (_ => Task.FromResult(false)),
             notificationSource);
 
-    [Fact] // Full1902 Cleanup I: the host no longer exposes a synthetic SteamSessionStateChanged
-           // surface or a DeveloperTestModeState property.
+    [Fact] // Full1902 Cleanup I: the host no longer exposes a synthetic SteamSessionStateChanged surface.
     public void Host_has_no_synthetic_steam_session_surface()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -34,7 +32,6 @@ public sealed class AddonRuntimeHostTests
         var source = File.ReadAllText(Path.Combine(dir!.FullName, "src/SteamInputAddonforClaw/Runtime/AddonRuntimeHost.cs"));
 
         Assert.DoesNotContain("SteamSessionStateChanged", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("DeveloperTestModeState", source, StringComparison.Ordinal);
     }
 
     [Fact]

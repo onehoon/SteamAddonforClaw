@@ -1,7 +1,7 @@
 namespace SteamInputAddonforClaw.Steam;
 
 /// <summary>One raw, read-only Steam/BPM fact for the Full-1902 first-presentation decision (work
-/// order PR6 section 8). Deliberately actual-only -- Developer Test Mode must not influence it.</summary>
+/// order PR6 section 8). Deliberately actual-only for controller-presentation selection.</summary>
 internal readonly record struct SteamPresentationSnapshot(uint RunningAppId, bool BigPictureActive)
 {
     internal bool WantsSteamDeck => RunningAppId != 0 || BigPictureActive;

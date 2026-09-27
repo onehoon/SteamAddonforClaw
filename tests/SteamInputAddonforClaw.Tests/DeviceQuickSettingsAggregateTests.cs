@@ -1,6 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
@@ -153,7 +152,6 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
             coordinator,
             new ThrowingSystemStatusProvider(),
             null,
-            new DeveloperTestModeState(),
             cpuBoostRuntime: cpuBoostRuntime,
             powerModeRuntime: powerModeRuntime);
     }

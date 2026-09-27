@@ -22,13 +22,6 @@
                 Text="These diagnostics are for developers only. General users should not use this menu."
                 TextWrapping="Wrap" />
 
-            <ctcontrols:SettingsCard Header="Test Mode" Description="Treat Steam session as active without launching a game. This setting is not saved and resets when the app restarts.">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Repair" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch x:Name="TestModeToggleSwitch" OffContent="" OnContent="" Toggled="TestModeToggleSwitch_Toggled" />
-            </ctcontrols:SettingsCard>
-
             <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
                 <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

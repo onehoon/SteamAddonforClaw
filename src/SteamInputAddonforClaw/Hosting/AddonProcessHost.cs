@@ -4,7 +4,6 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles.Performance;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Profiles;
@@ -511,14 +510,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             },
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _centerMAuthorityTransition = centerMAuthorityTransition;
-        // Full1902 Cleanup I: the Developer Test toggle is disconnected UI-only state. No controller /
-        // presentation / Steam owner consumes it -- this standalone instance exists only so the
-        // frontend RPC and FrontendDeveloperSnapshot(TestModeEnabled) stay coherent.
         if (_runtimeCompositionFactory is null)
             _updateCoordinator = new FrontendUpdateCoordinator(new VelopackUpdateClient(),
                 () => _requestRestart?.Invoke() == true);
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
-            composition.StartupSettings, composition.StatusProvider, _runtimeHost, new SteamInputAddonforClaw.Developer.DeveloperTestModeState(),
+            composition.StartupSettings, composition.StatusProvider, _runtimeHost,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
             // received -- the UI and the runtime can never disagree about whether OEM1 mapping exists.
             frontButtonMappingAvailable: startupResult.HardwareSupported,

@@ -15,7 +15,7 @@ public sealed class FrontButtonTransportContractTests
         // PR-C bumped 24 -> 25; Shared Frontend V2 SF-V2-01 subsequently bumped 25 -> 26
         // (CaptureDeviceQuickSettings aggregate); SD6A PR B bumped 26 -> 27 (Claw Sensor Probe capture modes);
         // Shared Frontend V2 SF-V2-04 bumped 27 -> 28 (generic Quick Settings RPC seam).
-        => Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
+        => Assert.Equal(45, FrontendTransportProtocol.CurrentVersion);
 
     [Fact]
     public void The_split_oem1_wing_rpcs_and_snapshot_members_are_gone()
@@ -64,7 +64,7 @@ public sealed class FrontButtonTransportContractTests
     public void Bootstrap_snapshot_carries_one_front_button_availability_fact()
     {
         var value = new FrontendBootstrapSnapshot(
-            new(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default), new(false), @"C:\Logs", FrontButtonMappingAvailable: true)
+            new(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default), @"C:\Logs", FrontButtonMappingAvailable: true)
         {
             BackButtonMappingAvailable = true,
         };

@@ -751,7 +751,7 @@ public sealed class UiArchitectureTests
         var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
 
         Assert.Equal(1, page.Split("Symbol=\"Rotate\"", StringSplitOptions.None).Length - 1);
-        Assert.True(page.IndexOf("Header=\"Test Mode\"", StringComparison.Ordinal) < page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("Header=\"Test Mode\"", page, StringComparison.Ordinal);
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
@@ -773,7 +773,6 @@ public sealed class UiArchitectureTests
         Assert.Contains("Full1902 Xbox360 terminal STOP callback diagnostic", card, StringComparison.Ordinal);
         Assert.DoesNotContain("Steam Deck", card, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Haptic", card, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Developer Test Mode", card, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

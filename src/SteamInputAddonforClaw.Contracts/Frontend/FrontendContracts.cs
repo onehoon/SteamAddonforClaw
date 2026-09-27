@@ -28,7 +28,7 @@ public sealed record FrontendGameProfileMutationResult(FrontendGameProfileMutati
 }
 public enum FrontendSetupStatus { Complete, Required, Blocked, RestartRequired, NotApplicable, Indeterminate }
 public enum FrontendHardwareStatus { Supported, Unsupported, Indeterminate }
-public enum FrontendSteamSource { Actual, BigPicture, DeveloperTest, Indeterminate }
+public enum FrontendSteamSource { Actual, BigPicture, Indeterminate }
 public enum FrontendPrerequisiteStatus { Ready, Missing, Present, Unusable, Incompatible, Indeterminate }
 public enum FrontendPrerequisiteSetupResultKind { Ready, Installed, RebootRequired, Cancelled, NotInstallable, Blocked, Failed, AlreadyInProgress }
 public enum FrontendAddonOperationalStatus
@@ -254,7 +254,6 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
     public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
 }
-public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
 
 /// <summary>Whether MSI Center M is configured to start with Windows, judged ONLY from the three
 /// startup roots this feature owns (work order PR1): the <c>MSI_Center_M_Server</c> and
@@ -311,7 +310,7 @@ public sealed record FrontendCenterMStartupMutationResult(
 /// condition -- a machine that is not a recognized Claw reports false while its saved mapping stays
 /// untouched. A startup fact, so it lives on bootstrap rather than on the settings snapshot every
 /// setter returns.</param>
-public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool FrontButtonMappingAvailable)
+public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string LogDirectoryPath, bool FrontButtonMappingAvailable)
 {
     /// <summary>Whether the supported Full1902 M1/M2 physical input contract exists on this machine.
     /// This is the same stable startup hardware fact as FrontButtonMappingAvailable.</summary>
@@ -375,7 +374,7 @@ public sealed record FrontendClawSensorProbeBiasSummary(
 /// <remarks>A read-only diagnostic session snapshot for the developer-only Claw Sensor Probe
 /// (gyro/accelerometer discovery and phase-by-phase motion capture). <see cref="Available"/> is
 /// gated purely on the MSI Claw device family (see <c>ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic</c>
-/// on the Runtime side) -- NOT on production hardware-compatibility status, Developer Test Mode, or
+/// on the Runtime side) -- NOT on production hardware-compatibility status, or
 /// any Steam/routing state, so an MSI Claw with Indeterminate/Unsupported model compatibility can
 /// still run this diagnostic.</remarks>
 public sealed record FrontendClawSensorProbeSnapshot(
@@ -507,7 +506,6 @@ public interface IAddonFrontendControl
     /// candidate is rejected by the settings layer and the returned snapshot keeps the current value.</summary>
     Task<FrontendSettingsSnapshot> SetBackButtonMappingAsync(BackButtonMappingSettings mapping, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default);
-    Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default);
     /// <summary>Captures the current MSI Center M startup configuration (work order PR1). Read-only:
     /// opening the Device page and capturing this must not mutate any Windows state.</summary>
     Task<FrontendCenterMStartupSnapshot> CaptureCenterMStartupAsync(CancellationToken cancellationToken = default) =>

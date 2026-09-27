@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Steam;
 using Xunit;
 
@@ -12,7 +11,7 @@ public sealed class EffectiveSteamSessionSourceTests
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
         using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
-        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture);
         watcher.Start();
         bigPicture.Start();
         using var routingPublished = new ManualResetEventSlim();
@@ -33,28 +32,12 @@ public sealed class EffectiveSteamSessionSourceTests
     }
 
     [Fact]
-    public void TestMode_UsesDeveloperSourceWithoutChangingActualState()
-    {
-        var actual = new FakeRunningAppIdSource(0);
-        using var watcher = new SteamSessionWatcher(actual);
-        var testMode = new DeveloperTestModeState();
-        using var effective = new EffectiveSteamSessionSource(watcher, testMode);
-        watcher.Start();
-
-        testMode.SetEnabled(true);
-
-        Assert.Equal(SteamSessionSource.DeveloperTest, effective.State.Source);
-        Assert.Equal(uint.MaxValue, effective.State.RunningAppId);
-        Assert.Equal(0u, actual.GetRunningAppId());
-    }
-
-    [Fact]
     public void WithActualGame_ReportsActualSession()
     {
         var actual = new FakeRunningAppIdSource(123);
         using var watcher = new SteamSessionWatcher(actual);
         using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
-        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture);
         watcher.Start(); bigPicture.Start(); effective.Refresh();
 
         Assert.True(effective.State.IsActive);
@@ -67,26 +50,11 @@ public sealed class EffectiveSteamSessionSourceTests
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
         using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(true), new FakeBigPictureEventHook());
-        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture);
         watcher.Start(); bigPicture.Start();
 
         Assert.True(effective.State.IsActive);
         Assert.Equal(SteamSessionSource.BigPicture, effective.State.Source);
-    }
-
-    [Fact]
-    public void WithDeveloperTestModeOnly_ReportsDeveloperTestSession()
-    {
-        var actual = new FakeRunningAppIdSource(0);
-        using var watcher = new SteamSessionWatcher(actual);
-        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
-        var testMode = new DeveloperTestModeState();
-        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, testMode);
-        watcher.Start(); bigPicture.Start();
-
-        testMode.SetEnabled(true);
-
-        Assert.Equal(SteamSessionSource.DeveloperTest, effective.State.Source);
     }
 
     [Fact]
@@ -95,7 +63,7 @@ public sealed class EffectiveSteamSessionSourceTests
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
         using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
-        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture);
         watcher.Start(); bigPicture.Start();
 
         Assert.False(effective.State.IsActive);
@@ -107,7 +75,7 @@ public sealed class EffectiveSteamSessionSourceTests
         var actual = new FakeRunningAppIdSource(123);
         using var watcher = new SteamSessionWatcher(actual);
         using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(true), new FakeBigPictureEventHook());
-        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture);
         watcher.Start(); bigPicture.Start(); effective.Refresh();
 
         Assert.Equal(SteamSessionSource.Actual, effective.State.Source);
@@ -121,7 +89,7 @@ public sealed class EffectiveSteamSessionSourceTests
         using var watcher = new SteamSessionWatcher(actual);
         var probe = new FakeBigPictureProbe(true);
         using var bigPicture = new SteamBigPictureWatcher(probe, new FakeBigPictureEventHook());
-        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture);
         watcher.Start(); bigPicture.Start(); effective.Refresh();
         var sources = new List<SteamSessionSource>();
         effective.StateChanged += (_, args) => sources.Add(args.Current.Source);
@@ -139,8 +107,7 @@ public sealed class EffectiveSteamSessionSourceTests
     {
         var actual = new FakeRunningAppIdSource(123);
         using var watcher = new SteamSessionWatcher(actual);
-        var testMode = new DeveloperTestModeState();
-        using var effective = new EffectiveSteamSessionSource(watcher, testMode);
+        using var effective = new EffectiveSteamSessionSource(watcher);
         watcher.Start();
 
         Assert.False(effective.State.IsActive);
@@ -151,64 +118,24 @@ public sealed class EffectiveSteamSessionSourceTests
     }
 
     [Fact]
-    public void ActualSession_HasPriorityOverTestMode()
-    {
-        var actual = new FakeRunningAppIdSource(0);
-        using var watcher = new SteamSessionWatcher(actual);
-        var testMode = new DeveloperTestModeState();
-        using var effective = new EffectiveSteamSessionSource(watcher, testMode);
-        watcher.Start();
-        testMode.SetEnabled(true);
-
-        actual.SetRunningAppId(123);
-        Assert.Equal(SteamSessionSource.Actual, effective.State.Source);
-        Assert.Equal(123u, effective.State.RunningAppId);
-
-        actual.SetRunningAppId(0);
-        Assert.Equal(SteamSessionSource.DeveloperTest, effective.State.Source);
-    }
-
-    [Fact]
-    public void TestModeOnAndOffPublishesTheSyntheticSessionBoundary()
-    {
-        var actual = new FakeRunningAppIdSource(0);
-        using var watcher = new SteamSessionWatcher(actual);
-        var testMode = new DeveloperTestModeState();
-        using var effective = new EffectiveSteamSessionSource(watcher, testMode);
-        watcher.Start();
-        var states = new List<SteamSessionState>();
-        effective.StateChanged += (_, args) => states.Add(args.Current);
-
-        testMode.SetEnabled(true);
-        testMode.SetEnabled(false);
-
-        Assert.Equal(2, states.Count);
-        Assert.True(states[0].IsActive);
-        Assert.Equal(SteamSessionSource.DeveloperTest, states[0].Source);
-        Assert.False(states[1].IsActive);
-        Assert.Equal(SteamSessionSource.Actual, states[1].Source);
-    }
-
-    [Fact]
     public void ReentrantChanges_ArePublishedInCommitOrder()
     {
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
-        var testMode = new DeveloperTestModeState();
-        using var effective = new EffectiveSteamSessionSource(watcher, testMode);
+        using var effective = new EffectiveSteamSessionSource(watcher);
         watcher.Start();
         var published = new List<SteamSessionState>();
         effective.StateChanged += (_, args) =>
         {
             published.Add(args.Current);
-            if (args.Current.Source == SteamSessionSource.DeveloperTest) testMode.SetEnabled(false);
+            if (args.Current.IsActive) actual.SetRunningAppId(0);
         };
 
-        testMode.SetEnabled(true);
+        actual.SetRunningAppId(123);
 
         Assert.Equal(2, published.Count);
-        Assert.Equal(SteamSessionSource.DeveloperTest, published[0].Source);
-        Assert.Equal(SteamSessionSource.Actual, published[1].Source);
+        Assert.Equal(123u, published[0].RunningAppId);
+        Assert.Equal(0u, published[1].RunningAppId);
         Assert.False(effective.State.IsActive);
     }
 
@@ -217,14 +144,13 @@ public sealed class EffectiveSteamSessionSourceTests
     {
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
-        var testMode = new DeveloperTestModeState();
-        using var effective = new EffectiveSteamSessionSource(watcher, testMode);
+        using var effective = new EffectiveSteamSessionSource(watcher);
         watcher.Start();
         var called = 0;
         effective.StateChanged += (_, _) => throw new InvalidOperationException("test");
         effective.StateChanged += (_, _) => called++;
 
-        testMode.SetEnabled(true);
+        actual.SetRunningAppId(123);
 
         Assert.Equal(1, called);
     }
@@ -234,8 +160,7 @@ public sealed class EffectiveSteamSessionSourceTests
     {
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
-        var testMode = new DeveloperTestModeState();
-        var effective = new EffectiveSteamSessionSource(watcher, testMode);
+        var effective = new EffectiveSteamSessionSource(watcher);
         watcher.Start();
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
@@ -247,7 +172,7 @@ public sealed class EffectiveSteamSessionSourceTests
             release.Wait();
         };
 
-        var enable = Task.Run(() => testMode.SetEnabled(true));
+        var enable = Task.Run(() => actual.SetRunningAppId(123));
         try
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
@@ -256,7 +181,7 @@ public sealed class EffectiveSteamSessionSourceTests
             release.Set();
             await Task.WhenAll(enable, dispose);
 
-            testMode.SetEnabled(false);
+            actual.SetRunningAppId(0);
             Assert.Equal(1, notifications);
         }
         finally
@@ -273,26 +198,11 @@ public sealed class EffectiveSteamSessionSourceTests
     }
 
     [Fact]
-    public void DeveloperTestModeState_SubscriberExceptionDoesNotBlockRemainingSubscribers()
-    {
-        var state = new DeveloperTestModeState();
-        var called = 0;
-        state.Changed += (_, _) => throw new InvalidOperationException("test");
-        state.Changed += (_, _) => called++;
-
-        state.SetEnabled(true);
-
-        Assert.True(state.IsEnabled);
-        Assert.Equal(1, called);
-    }
-
-    [Fact]
     public void ReentrantDispose_StopsRemainingSubscribers()
     {
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
-        var testMode = new DeveloperTestModeState();
-        var effective = new EffectiveSteamSessionSource(watcher, testMode);
+        var effective = new EffectiveSteamSessionSource(watcher);
         watcher.Start();
         var first = 0;
         var second = 0;
@@ -304,12 +214,12 @@ public sealed class EffectiveSteamSessionSourceTests
         };
         effective.StateChanged += (_, _) => second++;
 
-        testMode.SetEnabled(true);
+        actual.SetRunningAppId(123);
 
         Assert.Equal(1, first);
         Assert.Equal(0, second);
 
-        testMode.SetEnabled(false);
+        actual.SetRunningAppId(0);
         Assert.Equal(0, second);
     }
 

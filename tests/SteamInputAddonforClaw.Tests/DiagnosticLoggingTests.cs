@@ -49,20 +49,20 @@ public sealed class DiagnosticLoggingTests : IDisposable
     }
 
     [Fact]
-    public void DiagnosticSessionTracker_SplitsDeveloperTestAndActualIdentities()
+    public void DiagnosticSessionTracker_SplitsDifferentActualIdentities()
     {
         var tracker = new DiagnosticSessionTracker();
-        tracker.Observe(0, uint.MaxValue, "DeveloperTest");
         tracker.Observe(123, 123, "Actual");
-        tracker.Observe(0, uint.MaxValue, "DeveloperTest");
+        tracker.Observe(570, 570, "Actual");
         tracker.Complete();
 
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
-        Assert.Equal(3, log.Split("Session started", StringSplitOptions.None).Length - 1);
-        Assert.Equal(3, log.Split("Session completed", StringSplitOptions.None).Length - 1);
-        Assert.Contains("EffectiveSource=DeveloperTest", log);
+        Assert.Equal(2, log.Split("Session started", StringSplitOptions.None).Length - 1);
+        Assert.Equal(2, log.Split("Session completed", StringSplitOptions.None).Length - 1);
+        Assert.Equal(4, log.Split("EffectiveSource=Actual", StringSplitOptions.None).Length - 1);
         Assert.Contains("RawRunningAppID=123", log);
+        Assert.Contains("RawRunningAppID=570", log);
     }
 
     [Fact]

@@ -5,15 +5,13 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class SteamSessionRuntimeTests
 {
-    // Full1902 Cleanup I: the production Steam runtime no longer owns DeveloperTestModeState,
-    // EffectiveSteamSessionSource, or DiagnosticSessionTracker. See EffectiveSteamSessionSourceTests
-    // for the parked helper's own spec.
+    // Full1902 Cleanup I: the production Steam runtime uses raw facts, not the legacy effective-session
+    // graph or its diagnostic tracker.
     [Fact]
     public void ProductionRuntime_HasNoSyntheticEffectiveSessionDependency()
     {
         var source = File.ReadAllText(Path.Combine(RepoRoot(), "src/SteamInputAddonforClaw/Steam/SteamSessionRuntime.cs"));
         Assert.DoesNotContain("EffectiveSteamSessionSource", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("DeveloperTestModeState", source, StringComparison.Ordinal);
         Assert.DoesNotContain("DiagnosticSessionTracker", source, StringComparison.Ordinal);
     }
 

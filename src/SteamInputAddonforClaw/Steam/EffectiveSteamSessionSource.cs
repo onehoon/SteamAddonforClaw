@@ -1,5 +1,3 @@
-using SteamInputAddonforClaw.Developer;
-
 namespace SteamInputAddonforClaw.Steam;
 
 public sealed record SteamSessionStateChangedEventArgs(SteamSessionState Previous, SteamSessionState Current);
@@ -7,7 +5,6 @@ public sealed record SteamSessionStateChangedEventArgs(SteamSessionState Previou
 public sealed class EffectiveSteamSessionSource : IDisposable
 {
     private readonly SteamSessionWatcher _watcher;
-    private readonly DeveloperTestModeState _testMode;
     private readonly SteamBigPictureWatcher _bigPictureWatcher;
     private readonly Lock _sync = new();
     private readonly Lock _publicationGate = new();
@@ -16,19 +13,17 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private bool _disposed;
     private SteamSessionState _state;
 
-    internal EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher, DeveloperTestModeState testMode)
+    internal EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher)
     {
         _watcher = watcher ?? throw new ArgumentNullException(nameof(watcher));
-        _testMode = testMode ?? throw new ArgumentNullException(nameof(testMode));
         _bigPictureWatcher = bigPictureWatcher ?? throw new ArgumentNullException(nameof(bigPictureWatcher));
         _state = ComputeState();
         _watcher.StateChanged += OnInputChanged;
         _bigPictureWatcher.StateChanged += OnInputChanged;
-        _testMode.Changed += OnInputChanged;
     }
 
-    public EffectiveSteamSessionSource(SteamSessionWatcher watcher, DeveloperTestModeState testMode)
-        : this(watcher, new SteamBigPictureWatcher(new InactiveSteamBigPictureProbe()), testMode)
+    public EffectiveSteamSessionSource(SteamSessionWatcher watcher)
+        : this(watcher, new SteamBigPictureWatcher(new InactiveSteamBigPictureProbe()))
     {
     }
 
@@ -58,7 +53,7 @@ public sealed class EffectiveSteamSessionSource : IDisposable
         var actual = _watcher.State;
         if (actual.IsActive) return actual;
         if (_bigPictureWatcher.IsActive) return SteamSessionState.CreateBigPicture();
-        return _testMode.IsEnabled ? SteamSessionState.CreateDeveloperTest() : actual;
+        return actual;
     }
 
     private void Drain()
@@ -109,7 +104,6 @@ public sealed class EffectiveSteamSessionSource : IDisposable
         }
         _watcher.StateChanged -= OnInputChanged;
         _bigPictureWatcher.StateChanged -= OnInputChanged;
-        _testMode.Changed -= OnInputChanged;
         GC.SuppressFinalize(this);
     }
 }
