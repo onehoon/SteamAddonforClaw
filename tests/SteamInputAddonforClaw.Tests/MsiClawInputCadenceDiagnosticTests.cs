@@ -12,9 +12,9 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class MsiClawInputCadenceDiagnosticTests
 {
     [Fact]
-    public void Production_poll_interval_is_8ms_and_diagnostic_interval_is_1ms()
+    public void Production_poll_interval_is_4ms_and_diagnostic_interval_is_1ms()
     {
-        Assert.Equal(TimeSpan.FromMilliseconds(8), MsiClawInputSource.ResolvePollInterval(false));
+        Assert.Equal(TimeSpan.FromMilliseconds(4), MsiClawInputSource.ResolvePollInterval(false));
         Assert.Equal(TimeSpan.FromMilliseconds(1), MsiClawInputSource.ResolvePollInterval(true));
     }
 
@@ -81,20 +81,31 @@ public sealed class MsiClawInputCadenceDiagnosticTests
     {
         var enumerator = new TestEnumerator();
         using var timerApi = new FakeWaitableTimerNativeApi();
-        await using var source = new MsiClawInputSource(() => enumerator, () => new WindowsHighResolutionOneShotTimer(timerApi));
+        using var productionTimerApi = new FakeWaitableTimerNativeApi { AutoPulse = false };
+        await using var source = new MsiClawInputSource(
+            () => enumerator,
+            () => new WindowsHighResolutionOneShotTimer(timerApi),
+            () => new WindowsHighResolutionOneShotTimer(productionTimerApi));
 
         Assert.True(source.StartPrepared(Device()).Started);
         await enumerator.Device.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var result = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        var diagnostic = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        productionTimerApi.Pulse();
+        var result = await diagnostic;
+        await productionTimerApi.SecondArm.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(FrontendPid1902InputCadenceOutcome.Completed, result.Outcome);
         Assert.True(timerApi.SetWaitableTimerExCallCount > 0);
         Assert.Equal(-TimeSpan.FromMilliseconds(1).Ticks, timerApi.ArmedDueTime100ns);
         Assert.Equal(1, timerApi.CancelWaitableTimerCallCount);
+        Assert.Equal(1, productionTimerApi.CreateWaitableTimerExCallCount);
+        Assert.True(productionTimerApi.SetWaitableTimerExCallCount >= 2);
+        Assert.InRange(Math.Abs(productionTimerApi.ArmedDueTime100ns + TimeSpan.FromMilliseconds(4).Ticks), 0, 1);
+        Assert.NotEqual(timerApi.SignalHandle, productionTimerApi.SignalHandle);
         Assert.Equal(1, enumerator.CreateCount);
         Assert.Equal(1, enumerator.Device.AcquireCount);
         Assert.True(source.IsRunning);
-        Assert.Equal(TimeSpan.FromMilliseconds(8), MsiClawInputSource.ResolvePollInterval(false));
+        Assert.Equal(TimeSpan.FromMilliseconds(4), MsiClawInputSource.ResolvePollInterval(false));
     }
 
     [Fact]
@@ -112,29 +123,40 @@ public sealed class MsiClawInputCadenceDiagnosticTests
     {
         var enumerator = new TestEnumerator();
         using var timerApi = new FakeWaitableTimerNativeApi();
-        await using var source = new MsiClawInputSource(() => enumerator, () => new WindowsHighResolutionOneShotTimer(timerApi));
+        using var productionTimerApi = new FakeWaitableTimerNativeApi { AutoPulse = false };
+        await using var source = new MsiClawInputSource(
+            () => enumerator,
+            () => new WindowsHighResolutionOneShotTimer(timerApi),
+            () => new WindowsHighResolutionOneShotTimer(productionTimerApi));
         Assert.True(source.StartPrepared(Device()).Started);
         await enumerator.Device.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
         using var cancellation = new CancellationTokenSource();
         var first = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromSeconds(1), cancellation.Token);
 
+        productionTimerApi.Pulse();
         await timerApi.FirstArm.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var second = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromSeconds(1));
         Assert.Equal(FrontendPid1902InputCadenceOutcome.AlreadyRunning, second.Outcome);
 
         cancellation.Cancel();
         var cancelled = await first;
+        await productionTimerApi.SecondArm.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(FrontendPid1902InputCadenceOutcome.Cancelled, cancelled.Outcome);
         Assert.Equal(1, timerApi.CancelWaitableTimerCallCount);
         Assert.True(source.IsRunning);
         Assert.Equal(1, enumerator.CreateCount);
         Assert.Equal(1, enumerator.Device.AcquireCount);
-        Assert.Equal(TimeSpan.FromMilliseconds(8), MsiClawInputSource.ResolvePollInterval(false));
 
-        var next = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        var nextTask = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        productionTimerApi.Pulse();
+        var next = await nextTask;
         Assert.Equal(FrontendPid1902InputCadenceOutcome.Completed, next.Outcome);
+        await productionTimerApi.ThirdArm.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(2, timerApi.CreateWaitableTimerExCallCount);
         Assert.Equal(2, timerApi.CancelWaitableTimerCallCount);
+        Assert.Equal(1, productionTimerApi.CreateWaitableTimerExCallCount);
+        Assert.Equal(1, enumerator.CreateCount);
+        Assert.Equal(1, enumerator.Device.AcquireCount);
     }
 
     [Fact]
@@ -143,24 +165,31 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         var enumerator = new TestEnumerator();
         using var failingTimerApi = new FakeWaitableTimerNativeApi { FailCreate = true };
         using var workingTimerApi = new FakeWaitableTimerNativeApi();
+        using var productionTimerApi = new FakeWaitableTimerNativeApi { AutoPulse = false };
         var timerFactoryCalls = 0;
         await using var source = new MsiClawInputSource(
             () => enumerator,
-            () => new WindowsHighResolutionOneShotTimer(Interlocked.Increment(ref timerFactoryCalls) == 1 ? failingTimerApi : workingTimerApi));
+            () => new WindowsHighResolutionOneShotTimer(Interlocked.Increment(ref timerFactoryCalls) == 1 ? failingTimerApi : workingTimerApi),
+            () => new WindowsHighResolutionOneShotTimer(productionTimerApi));
 
         Assert.True(source.StartPrepared(Device()).Started);
         await enumerator.Device.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var failed = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        var failedTask = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        productionTimerApi.Pulse();
+        var failed = await failedTask;
 
         Assert.Equal(FrontendPid1902InputCadenceOutcome.Failed, failed.Outcome);
         Assert.Contains("high-resolution timer", failed.Status, StringComparison.OrdinalIgnoreCase);
         Assert.True(source.IsRunning);
         Assert.Equal(1, enumerator.CreateCount);
         Assert.Equal(1, enumerator.Device.AcquireCount);
+        productionTimerApi.Pulse();
         await enumerator.Device.SecondRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var recovered = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        var recoveredTask = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        productionTimerApi.Pulse();
+        var recovered = await recoveredTask;
 
         Assert.Equal(FrontendPid1902InputCadenceOutcome.Completed, recovered.Outcome);
         Assert.True(source.IsRunning);
@@ -175,15 +204,19 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         var enumerator = new TestEnumerator();
         using var failingTimerApi = new FakeWaitableTimerNativeApi { FailArm = true };
         using var workingTimerApi = new FakeWaitableTimerNativeApi();
+        using var productionTimerApi = new FakeWaitableTimerNativeApi { AutoPulse = false };
         var timerFactoryCalls = 0;
         await using var source = new MsiClawInputSource(
             () => enumerator,
-            () => new WindowsHighResolutionOneShotTimer(Interlocked.Increment(ref timerFactoryCalls) == 1 ? failingTimerApi : workingTimerApi));
+            () => new WindowsHighResolutionOneShotTimer(Interlocked.Increment(ref timerFactoryCalls) == 1 ? failingTimerApi : workingTimerApi),
+            () => new WindowsHighResolutionOneShotTimer(productionTimerApi));
 
         Assert.True(source.StartPrepared(Device()).Started);
         await enumerator.Device.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var failed = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        var failedTask = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        productionTimerApi.Pulse();
+        var failed = await failedTask;
 
         Assert.Equal(FrontendPid1902InputCadenceOutcome.Failed, failed.Outcome);
         Assert.Contains("timer failed", failed.Status, StringComparison.OrdinalIgnoreCase);
@@ -192,9 +225,12 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         Assert.True(source.IsRunning);
         Assert.Equal(1, enumerator.CreateCount);
         Assert.Equal(1, enumerator.Device.AcquireCount);
+        productionTimerApi.Pulse();
         await enumerator.Device.SecondRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var recovered = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        var recoveredTask = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        productionTimerApi.Pulse();
+        var recovered = await recoveredTask;
 
         Assert.Equal(FrontendPid1902InputCadenceOutcome.Completed, recovered.Outcome);
         Assert.True(source.IsRunning);
@@ -209,11 +245,16 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         var device = new FailingAfterFirstReadDevice();
         var enumerators = new Queue<IDirectInputDeviceEnumerator>([new TestEnumerator(device), new TestEnumerator()]);
         using var timerApi = new FakeWaitableTimerNativeApi();
-        await using var source = new MsiClawInputSource(() => enumerators.Dequeue(), () => new WindowsHighResolutionOneShotTimer(timerApi));
+        using var productionTimerApi = new FakeWaitableTimerNativeApi { AutoPulse = false };
+        await using var source = new MsiClawInputSource(
+            () => enumerators.Dequeue(),
+            () => new WindowsHighResolutionOneShotTimer(timerApi),
+            () => new WindowsHighResolutionOneShotTimer(productionTimerApi));
         Assert.True(source.StartPrepared(Device()).Started);
         await device.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var diagnostic = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromSeconds(1));
+        productionTimerApi.Pulse();
         device.AllowFailure.TrySetResult();
         var result = await diagnostic.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -225,7 +266,9 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         Assert.Equal(1, device.DisposeCount);
 
         Assert.True(source.StartPrepared(Device()).Started);
-        var nextSession = await source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        var nextSessionTask = source.RunPid1902InputCadenceDiagnosticAsync(TimeSpan.FromMilliseconds(25));
+        productionTimerApi.Pulse();
+        var nextSession = await nextSessionTask;
         Assert.Equal(FrontendPid1902InputCadenceOutcome.Completed, nextSession.Outcome);
     }
 
@@ -299,11 +342,15 @@ public sealed class MsiClawInputCadenceDiagnosticTests
 
         internal bool FailCreate;
         internal bool FailArm;
+        internal bool AutoPulse { get; set; } = true;
         internal int CreateWaitableTimerExCallCount;
         internal int SetWaitableTimerExCallCount;
         internal int CancelWaitableTimerCallCount;
         internal long ArmedDueTime100ns;
         internal TaskCompletionSource FirstArm { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource SecondArm { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ThirdArm { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal IntPtr SignalHandle => _signal.SafeWaitHandle.DangerousGetHandle();
 
         internal FakeWaitableTimerNativeApi()
         {
@@ -325,9 +372,11 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         {
             SetWaitableTimerExCallCount++;
             ArmedDueTime100ns = dueTime100ns;
-            FirstArm.TrySetResult();
+            if (SetWaitableTimerExCallCount == 1) FirstArm.TrySetResult();
+            if (SetWaitableTimerExCallCount == 2) SecondArm.TrySetResult();
+            if (SetWaitableTimerExCallCount == 3) ThirdArm.TrySetResult();
             if (FailArm) return false;
-            _pulseTimer.Change(1, Timeout.Infinite);
+            if (AutoPulse) _pulseTimer.Change(1, Timeout.Infinite);
             return true;
         }
 
@@ -339,6 +388,7 @@ public sealed class MsiClawInputCadenceDiagnosticTests
         }
 
         public int GetLastWin32Error() => 5;
+        internal void Pulse() => _signal.Set();
 
         public void Dispose()
         {

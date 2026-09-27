@@ -30,7 +30,7 @@ public sealed record MsiClawInputTestSummary(
     bool CleanupSucceeded,
     MsiClawInputStopReason StopReason);
 
-public enum MsiClawInputStopReason { Stopped, ReadStateFailed, InvalidButtonLayout, InitialStateNotReady }
+public enum MsiClawInputStopReason { Stopped, ReadStateFailed, InvalidButtonLayout, InitialStateNotReady, PollSchedulerFailed, PollWorkerFailed }
 
 internal interface IMsiClawPreparedInputSource : IAsyncDisposable, IControllerStateSnapshotSource
 {
