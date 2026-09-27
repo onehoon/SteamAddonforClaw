@@ -115,7 +115,7 @@ internal sealed class ElevatedOwnedPrerequisiteUninstall
         if (receiptCorrupt || receipt is not
             {
                 IsValid: true,
-                State: UsbIpWin2ProvisioningReceiptState.Provisioned,
+                State: UsbIpWin2ProvisioningReceiptState.Provisioned or UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot,
                 InstalledByAddon: true
             })
         {
@@ -182,7 +182,7 @@ internal sealed class ElevatedOwnedPrerequisiteUninstall
         if (receiptCorrupt || receipt is not
             {
                 IsValid: true,
-                State: HidHideProvisioningReceiptState.Provisioned
+                State: HidHideProvisioningReceiptState.Provisioned or HidHideProvisioningReceiptState.InstalledPendingReboot
             } || receipt.PreProvisioningStatus != PrerequisiteStatus.Missing)
         {
             LogPreserved("HidHide", receiptCorrupt ? "ReceiptCorruptOrUntrusted" : "OwnershipNotProven");

@@ -114,6 +114,110 @@ public sealed class ElevatedOwnedPrerequisiteUninstallTests
         Assert.True(result.RestartRequired);
     }
 
+    [Fact]
+    public void Execute_RemovesPendingRebootOwnedUsbIpAndThenDeletesProvisioningState()
+    {
+        using var fixture = new Fixture();
+        fixture.WriteUsbReceipt(owned: true, UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot);
+        fixture.UsbStates.Enqueue(UsbPackage(installed: true));
+        fixture.UsbStates.Enqueue(UsbPackage(installed: false));
+
+        var result = fixture.Execute();
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.True(result.RestartRequired);
+        Assert.Single(fixture.Runner.Packages);
+        Assert.Equal("usbip", fixture.Runner.Packages[0]);
+        Assert.False(Directory.Exists(fixture.ProvisioningDirectory));
+    }
+
+    [Fact]
+    public void Execute_RemovesPendingRebootOwnedHidHideAndThenDeletesProvisioningState()
+    {
+        using var fixture = new Fixture();
+        fixture.HidReceipt.Store(new(HidReceipt(HidHideProvisioningReceiptState.InstalledPendingReboot), false));
+        fixture.UsbStates.Enqueue(UsbPackage(installed: false));
+        fixture.HidStates.Enqueue(new(true, "1.5.230.0", true));
+        fixture.HidStates.Enqueue(new(false, null, true));
+        fixture.Candidates.Add(HidCandidate());
+
+        var result = fixture.Execute();
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.True(result.RestartRequired);
+        Assert.Single(fixture.Runner.Packages);
+        Assert.Equal("HidHide", fixture.Runner.Packages[0]);
+        Assert.False(Directory.Exists(fixture.ProvisioningDirectory));
+    }
+
+    [Theory]
+    [InlineData(nameof(UsbIpWin2ProvisioningReceiptState.InstallStarted))]
+    [InlineData(nameof(UsbIpWin2ProvisioningReceiptState.AttemptFailed))]
+    [InlineData(nameof(UsbIpWin2ProvisioningReceiptState.AttemptCancelled))]
+    public void Execute_DoesNotUninstallUsbIpForIncompleteReceiptStates(string stateName)
+    {
+        using var fixture = new Fixture();
+        var state = Enum.Parse<UsbIpWin2ProvisioningReceiptState>(stateName);
+        fixture.WriteUsbReceipt(owned: true, state);
+        fixture.UsbStates.Enqueue(UsbPackage(installed: true));
+
+        var result = fixture.Execute();
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.False(result.RestartRequired);
+        Assert.Empty(fixture.Runner.Packages);
+    }
+
+    [Theory]
+    [InlineData(nameof(HidHideProvisioningReceiptState.InstallStarted))]
+    [InlineData(nameof(HidHideProvisioningReceiptState.AttemptFailed))]
+    [InlineData(nameof(HidHideProvisioningReceiptState.AttemptCancelled))]
+    public void Execute_DoesNotUninstallHidHideForIncompleteReceiptStates(string stateName)
+    {
+        using var fixture = new Fixture();
+        var state = Enum.Parse<HidHideProvisioningReceiptState>(stateName);
+        fixture.HidReceipt.Store(new(HidReceipt(state), false));
+        fixture.UsbStates.Enqueue(UsbPackage(installed: false));
+        fixture.HidStates.Enqueue(new(true, "1.5.230.0", true));
+
+        var result = fixture.Execute();
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.False(result.RestartRequired);
+        Assert.Empty(fixture.Runner.Packages);
+    }
+
+    [Fact]
+    public void Execute_RetainsPendingRebootUsbIpReceiptWhenUninstallerFails()
+    {
+        using var fixture = new Fixture();
+        fixture.WriteUsbReceipt(owned: true, UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot);
+        fixture.UsbStates.Enqueue(UsbPackage(installed: true));
+        fixture.Runner.ExitCode = 1603;
+
+        var result = fixture.Execute();
+
+        Assert.False(result.Succeeded);
+        Assert.True(File.Exists(fixture.UsbReceiptPath));
+        Assert.True(Directory.Exists(fixture.ProvisioningDirectory));
+    }
+
+    [Fact]
+    public void Execute_RetainsPendingRebootHidHideReceiptWhenUninstallerFails()
+    {
+        using var fixture = new Fixture();
+        fixture.HidReceipt.Store(new(HidReceipt(HidHideProvisioningReceiptState.InstalledPendingReboot), false));
+        fixture.UsbStates.Enqueue(UsbPackage(installed: false));
+        fixture.HidStates.Enqueue(new(true, "1.5.230.0", true));
+        fixture.Candidates.Add(HidCandidate());
+        fixture.Runner.ExitCode = 1603;
+
+        var result = fixture.Execute();
+
+        Assert.False(result.Succeeded);
+        Assert.True(Directory.Exists(fixture.ProvisioningDirectory));
+    }
+
     private static UsbIpWin2PackageState UsbPackage(bool installed) => installed
         ? new(true, "0.9.8.1", true, true,
             "\"C:\\Program Files\\usbip\\unins.exe\" /UNINSTALL",
@@ -127,9 +231,10 @@ public sealed class ElevatedOwnedPrerequisiteUninstallTests
         UninstallString: "\"C:\\Program Files\\HidHide\\unins.exe\" /UNINSTALL",
         QuietUninstallString: "\"C:\\Program Files\\HidHide\\unins.exe\" /VERYSILENT");
 
-    private static HidHideProvisioningReceipt HidReceipt() => new(
+    private static HidHideProvisioningReceipt HidReceipt(
+        HidHideProvisioningReceiptState state = HidHideProvisioningReceiptState.Provisioned) => new(
         HidHideProvisioningReceipt.CurrentSchemaVersion,
-        HidHideProvisioningReceiptState.Provisioned,
+        state,
         Guid.NewGuid(),
         "1.5.230.0",
         HidHidePackageMetadata.InstallerSha256,
@@ -157,11 +262,13 @@ public sealed class ElevatedOwnedPrerequisiteUninstallTests
             File.WriteAllText(Path.Combine(ProvisioningDirectory, "hidhide.json"), "receipt-state");
         }
 
-        internal void WriteUsbReceipt(bool owned)
+        internal void WriteUsbReceipt(
+            bool owned,
+            UsbIpWin2ProvisioningReceiptState state = UsbIpWin2ProvisioningReceiptState.Provisioned)
         {
             _usbStore.Save(new(
                 UsbIpWin2ProvisioningReceipt.CurrentSchemaVersion,
-                UsbIpWin2ProvisioningReceiptState.Provisioned,
+                state,
                 Guid.NewGuid(), "0.9.8.1", UsbIpWin2PackageMetadata.InstallerSha256,
                 PrerequisiteStatus.Missing, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "0.9.8.1",
                 InstalledByAddon: owned));
