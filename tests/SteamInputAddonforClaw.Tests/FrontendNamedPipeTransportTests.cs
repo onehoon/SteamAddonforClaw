@@ -44,8 +44,6 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(FrontendLogLevel.Info, fake.LastLogLevel);
         Assert.Equal(Settings, await client.SuppressDeveloperMenuWarningAsync());
         Assert.Equal(1, fake.SuppressDeveloperWarningCount);
-        Assert.Equal(new FrontendDeveloperSnapshot(true), await client.SetDeveloperTestModeAsync(true));
-        Assert.True(fake.LastDeveloperTestModeEnabled);
         var setupResult = await client.RunPrerequisiteSetupAsync();
         Assert.Equal(fake.SetupResult.Result, setupResult.Result);
         Assert.Equivalent(fake.SetupResult.Status, setupResult.Status, strict: true);
@@ -60,7 +58,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(45, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -133,7 +131,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(45, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -153,7 +151,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(45, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -177,7 +175,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(45, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -990,7 +988,7 @@ public sealed class FrontendNamedPipeTransportTests
             Assert.Equal(FrontendWireMessageKind.CancelRequest, cancel.Kind);
             await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, request.RequestId, request.Method, Error: new(FrontendRemoteErrorCode.Cancelled, "Operation cancelled.")), writeGate, CancellationToken.None);
             var next = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
-            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method, Payload: FrontendWireCodec.Payload(new FrontendBootstrapSnapshot(new(FrontendLogLevel.Debug, false, FrontButtonMappingSettings.Default), new(false), @"C:\Logs", true))), writeGate, CancellationToken.None);
+            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method, Payload: FrontendWireCodec.Payload(new FrontendBootstrapSnapshot(new(FrontendLogLevel.Debug, false, FrontButtonMappingSettings.Default), @"C:\Logs", true))), writeGate, CancellationToken.None);
         });
 
         await using var client = new NamedPipeAddonFrontendClient(pipeName);
@@ -1398,13 +1396,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 44 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 45 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":44,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":44,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":44,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":45,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":45,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":45,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1438,11 +1436,8 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Theory]
-    [InlineData("SetDeveloperTestMode", "{}")]
     [InlineData("SetLogLevel", "{}")]
-    [InlineData("SetDeveloperTestMode", "null")]
     [InlineData("SetLogLevel", "null")]
-    [InlineData("SetDeveloperTestMode", "{\"Enabled\":\"false\"}")]
     [InlineData("SetLogLevel", "{\"Level\":123}")]
     [InlineData("StartClawSensorProbe", "{}")]
     [InlineData("StartClawSensorProbe", "null")]
@@ -1703,7 +1698,7 @@ public sealed class FrontendNamedPipeTransportTests
     private sealed class RecordingFrontendControl : IAddonFrontendControl
     {
         public event EventHandler? StateInvalidated;
-        public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, new(false), @"C:\Logs", true);
+        public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, @"C:\Logs", true);
         public FrontendPrerequisiteSetupResult SetupResult { get; } = new(FrontendPrerequisiteSetupResultKind.Installed, Status);
         public FrontendEnvironmentReportResult EnvironmentResult { get; } = new(true, null);
         public FrontendSteamFseSnapshot SteamFseSnapshot { get; } = new(true, false, null);
@@ -1726,7 +1721,6 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendLogLevel LastLogLevel { get; private set; }
         public FrontButtonMappingSettings? LastFrontButtonMapping { get; private set; }
         public BackButtonMappingSettings? LastBackButtonMapping { get; private set; }
-        public bool LastDeveloperTestModeEnabled { get; private set; }
         public int SuppressDeveloperWarningCount { get; private set; }
         public bool BlockPrerequisiteSetup { get; init; }
         public bool ThrowOperationCanceledWithoutToken { get; init; }
@@ -1742,7 +1736,6 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendSettingsSnapshot> SetFrontButtonMappingAsync(FrontButtonMappingSettings mapping, CancellationToken t = default) { TotalCalls++; LastFrontButtonMapping = mapping; return Task.FromResult(Settings); }
         public Task<FrontendSettingsSnapshot> SetBackButtonMappingAsync(BackButtonMappingSettings mapping, CancellationToken t = default) { TotalCalls++; LastBackButtonMapping = mapping; return Task.FromResult(Settings with { BackButtonMapping = mapping }); }
         public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken t = default) { TotalCalls++; SuppressDeveloperWarningCount++; return Task.FromResult(Settings); }
-        public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastDeveloperTestModeEnabled = enabled; return Task.FromResult(new FrontendDeveloperSnapshot(enabled)); }
         public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken t = default) { TotalCalls++; if (!BlockPrerequisiteSetup) return SetupResult; PrerequisiteSetupStarted.TrySetResult(); try { await Task.Delay(Timeout.InfiniteTimeSpan, t); throw new UnreachableException(); } catch (OperationCanceledException) { PrerequisiteSetupCancelled.TrySetResult(); throw; } }
         public Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(EnvironmentResult); }
         public Task<FrontendSteamFseSnapshot> CaptureSteamFseAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(SteamFseSnapshot); }

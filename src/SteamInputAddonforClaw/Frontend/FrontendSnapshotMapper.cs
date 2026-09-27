@@ -34,7 +34,6 @@ internal static class FrontendSnapshotMapper
     {
         SteamSessionSource.Actual => FrontendSteamSource.Actual,
         SteamSessionSource.BigPicture => FrontendSteamSource.BigPicture,
-        SteamSessionSource.DeveloperTest => FrontendSteamSource.DeveloperTest,
         _ => FrontendSteamSource.Indeterminate
     };
 

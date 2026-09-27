@@ -1,5 +1,4 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
@@ -17,7 +16,7 @@ namespace SteamInputAddonforClaw.Tests.ClawSensorProbe;
 /// <summary>
 /// Frontend-boundary coverage for the restored Claw Sensor Probe diagnostic:
 /// <see cref="InProcessAddonFrontendControl"/> must gate availability purely on the MSI Claw device
-/// family (never on <see cref="HardwareCompatibilityStatus"/>, Developer Test Mode, or routing/Steam
+/// family (never on <see cref="HardwareCompatibilityStatus"/> or routing/Steam
 /// state), keep exactly one active Runtime-owned coordinator per session, and dispose it correctly on
 /// Close and on process shutdown. Backend Workflow/Discovery/Statistics/Coordinator behavior is
 /// already covered by <see cref="SteamInputAddonforClaw.Tests.ClawSensorProbe.ClawSensorProbeTests"/>;
@@ -412,8 +411,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         return new InProcessAddonFrontendControl(
             coordinator,
             new FixedSystemStatusProvider(snapshot),
-            null,
-            new DeveloperTestModeState());
+            null);
     }
 
     private InProcessAddonFrontendControl CreateControl(ISystemStatusProvider statusProvider)
@@ -424,8 +422,7 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
         return new InProcessAddonFrontendControl(
             coordinator,
             statusProvider,
-            null,
-            new DeveloperTestModeState());
+            null);
     }
 
     private static SystemStatusSnapshot ClawFamilySnapshot(HardwareCompatibilityStatus status) => new(

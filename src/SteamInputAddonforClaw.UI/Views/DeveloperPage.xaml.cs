@@ -8,13 +8,10 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class DeveloperPage : UserControl
 {
     private IAddonFrontendControl? _frontend;
-    private FrontendBootstrapSnapshot? _bootstrap;
     private Func<bool>? _isPrerequisiteSetupInProgress;
-    private bool _isInitializingTestMode;
     private bool _isInitializingLogLevel;
     private int _isGeneratingEnvironmentDiscoveryReport;
     private int _isRunningPid1902InputCadenceDiagnostic;
-    private bool _lastKnownTestMode;
     private FrontendLogLevel _lastKnownLogLevel;
     private string _logDirectoryPath = string.Empty;
 
@@ -39,15 +36,9 @@ public sealed partial class DeveloperPage : UserControl
         Func<bool> isPrerequisiteSetupInProgress)
     {
         _frontend = frontend;
-        _bootstrap = bootstrap;
-        _lastKnownTestMode = bootstrap.Developer.TestModeEnabled;
         _lastKnownLogLevel = bootstrap.Settings.LogLevel;
         _logDirectoryPath = bootstrap.LogDirectoryPath;
         _isPrerequisiteSetupInProgress = isPrerequisiteSetupInProgress;
-
-        _isInitializingTestMode = true;
-        TestModeToggleSwitch.IsOn = bootstrap.Developer.TestModeEnabled;
-        _isInitializingTestMode = false;
 
         _isInitializingLogLevel = true;
         LogLevelComboBox.SelectedIndex = bootstrap.Settings.LogLevel switch
@@ -76,22 +67,6 @@ public sealed partial class DeveloperPage : UserControl
         }
     }
 
-    private async void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_isInitializingTestMode || _isPrerequisiteSetupInProgress?.Invoke() == true || _frontend is null) return;
-        try
-        {
-            var result = await _frontend.SetDeveloperTestModeAsync(TestModeToggleSwitch.IsOn);
-            _lastKnownTestMode = result.TestModeEnabled;
-            SetTestModeToggle(_lastKnownTestMode);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("DeveloperMenu", "Developer test mode update failed.", exception);
-            await RefreshAuthoritativeStateAsync(() => SetTestModeToggle(_lastKnownTestMode));
-        }
-    }
-
     private async void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
         if (_isInitializingLogLevel || _frontend is null || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
@@ -114,11 +89,8 @@ public sealed partial class DeveloperPage : UserControl
         try
         {
             var bootstrap = await _frontend!.GetBootstrapAsync();
-            _bootstrap = bootstrap;
-            _lastKnownTestMode = bootstrap.Developer.TestModeEnabled;
             _lastKnownLogLevel = bootstrap.Settings.LogLevel;
             _logDirectoryPath = bootstrap.LogDirectoryPath;
-            SetTestModeToggle(_lastKnownTestMode);
             SetLogLevel(_lastKnownLogLevel);
         }
         catch (Exception refreshException)
@@ -126,13 +98,6 @@ public sealed partial class DeveloperPage : UserControl
             AppLog.Warn("DeveloperMenu", "Developer settings state refresh failed.", refreshException);
             fallback();
         }
-    }
-
-    private void SetTestModeToggle(bool value)
-    {
-        _isInitializingTestMode = true;
-        TestModeToggleSwitch.IsOn = value;
-        _isInitializingTestMode = false;
     }
 
     private void SetLogLevel(FrontendLogLevel level)

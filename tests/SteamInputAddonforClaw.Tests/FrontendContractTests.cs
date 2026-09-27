@@ -85,9 +85,6 @@ public sealed class FrontendContractTests
         public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
         public Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
@@ -131,23 +128,25 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
-    public void Developer_snapshot_round_trips_through_SystemTextJson()
-    {
-        var value = new FrontendDeveloperSnapshot(true);
-        var restored = JsonSerializer.Deserialize<FrontendDeveloperSnapshot>(JsonSerializer.Serialize(value));
-        Assert.Equal(value, restored);
-    }
-
-    [Fact]
     public void Bootstrap_snapshot_round_trips_through_SystemTextJson()
     {
         var value = new FrontendBootstrapSnapshot(
             new(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default),
-            new(false),
             @"C:\Logs",
             FrontButtonMappingAvailable: true);
         var restored = JsonSerializer.Deserialize<FrontendBootstrapSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
+    }
+
+    [Fact]
+    public void Disconnected_developer_test_mode_contract_is_removed()
+    {
+        Assert.Null(typeof(FrontendBootstrapSnapshot).GetProperty("Developer"));
+        Assert.Null(typeof(IAddonFrontendControl).GetMethod("SetDeveloperTestModeAsync"));
+        Assert.Null(typeof(FrontendBootstrapSnapshot).Assembly.GetType(
+            "SteamInputAddonforClaw.Contracts.Frontend.FrontendDeveloperSnapshot"));
+        Assert.DoesNotContain("SetDeveloperTestMode", Enum.GetNames<SteamInputAddonforClaw.FrontendTransport.FrontendRpcMethod>());
+        Assert.DoesNotContain("DeveloperTest", Enum.GetNames<FrontendSteamSource>());
     }
 
     [Fact]

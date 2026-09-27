@@ -1,6 +1,5 @@
 using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
@@ -87,7 +86,6 @@ public sealed class CenterMStartupFrontendTests : IDisposable
             coordinator,
             new ThrowingSystemStatusProvider(),
             null,
-            new DeveloperTestModeState(),
             centerMStartup: centerM,
             centerMAuthorityTransition: owner);
     }

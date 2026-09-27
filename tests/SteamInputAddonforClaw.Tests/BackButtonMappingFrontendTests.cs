@@ -1,7 +1,6 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
@@ -22,7 +21,7 @@ public sealed class BackButtonMappingFrontendTests : IDisposable
         var store = new SettingsStore(Path.Combine(_directory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new NoOpStartupManager());
         var control = new InProcessAddonFrontendControl(
-            coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState(),
+            coordinator, new ThrowingSystemStatusProvider(), null,
             frontButtonMappingAvailable: true);
         var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.RightBumper);
 
@@ -42,7 +41,7 @@ public sealed class BackButtonMappingFrontendTests : IDisposable
         var current = new BackButtonMappingSettings(Xbox360BackButtonTarget.B, Xbox360BackButtonTarget.B);
         var coordinator = new StartupSettingsCoordinator(new AppSettings { BackButtonMapping = current }, store, new NoOpStartupManager());
         var control = new InProcessAddonFrontendControl(
-            coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState(),
+            coordinator, new ThrowingSystemStatusProvider(), null,
             frontButtonMappingAvailable: false);
 
         var snapshot = await control.SetBackButtonMappingAsync(

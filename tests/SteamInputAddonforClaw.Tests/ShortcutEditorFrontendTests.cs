@@ -1,5 +1,4 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
@@ -21,7 +20,7 @@ public sealed class ShortcutEditorFrontendTests : IDisposable
         Directory.CreateDirectory(_directory);
         var settings = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
         var shortcutRuntime = new ShortcutRuntime(new ShortcutStore(Path.Combine(_directory, "shortcuts.json")));
-        var control = new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null, new DeveloperTestModeState(), shortcutRuntime: shortcutRuntime);
+        var control = new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null, shortcutRuntime: shortcutRuntime);
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
 
@@ -106,7 +105,7 @@ public sealed class ShortcutEditorFrontendTests : IDisposable
     }
 
     private InProcessAddonFrontendControl CreateControl(StartupSettingsCoordinator settings) =>
-        new(settings, new ThrowingStatusProvider(), null, new DeveloperTestModeState());
+        new(settings, new ThrowingStatusProvider(), null);
 
     public void Dispose()
     {

@@ -1,6 +1,5 @@
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
@@ -62,7 +61,7 @@ public sealed class FrontButtonMappingHardwareAvailabilityTests : IDisposable
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(settings, store, new NoOpStartupManager());
         return new InProcessAddonFrontendControl(
-            coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState(),
+            coordinator, new ThrowingSystemStatusProvider(), null,
             frontButtonMappingAvailable: available);
     }
 

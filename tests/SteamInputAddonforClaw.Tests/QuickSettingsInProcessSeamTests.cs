@@ -1,6 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
@@ -215,7 +214,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         };
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = order }, store, new FakeStartupManager());
-        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null);
 
         var shell = await control.CaptureAddonQuickSettingsShellAsync();
 
@@ -237,7 +236,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         };
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = order }, store, new FakeStartupManager());
-        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null);
 
         var snapshot = await control.CaptureAddonQuickSettingsTabOrderAsync();
 
@@ -261,7 +260,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         };
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = order }, store, new FakeStartupManager());
-        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null);
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
 
@@ -280,7 +279,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
         var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
-        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null);
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
         var before = coordinator.AddonQuickSettingsTabOrder.ToArray();
@@ -307,7 +306,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
             AddonQuickSettingsTabId.Setting,
         };
         var coordinator = new StartupSettingsCoordinator(new AppSettings { AddonQuickSettingsTabOrder = current }, new SettingsStore(settingsPath), new FakeStartupManager());
-        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null, new DeveloperTestModeState());
+        var control = new InProcessAddonFrontendControl(coordinator, new ThrowingSystemStatusProvider(), null);
         var invalidations = 0;
         control.StateInvalidated += (_, _) => invalidations++;
 
@@ -371,7 +370,6 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
             coordinator,
             new ThrowingSystemStatusProvider(),
             null,
-            new DeveloperTestModeState(),
             cpuBoostRuntime: cpuBoostRuntime,
             powerModeRuntime: null,
             gameProfileMutations: gameProfileMutations,
