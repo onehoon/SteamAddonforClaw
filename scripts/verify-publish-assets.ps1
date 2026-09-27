@@ -87,6 +87,7 @@ if ($unexpectedFseFiles.Count -gt 0) {
 foreach ($forbiddenPrerequisiteInstaller in @{
     'Dependencies\HidHide\HidHide_1.5.230_x64.exe' = 'HidHide'
     'Dependencies\UsbIpWin2\USBip-0.9.8.0-x64.exe' = 'usbip-win2'
+    'Dependencies\UsbIpWin2\USBip-0.9.8.1-x64.exe' = 'usbip-win2'
 }.GetEnumerator()) {
     if (Test-Path -LiteralPath (Join-Path $PublishDirectory $forbiddenPrerequisiteInstaller.Key) -PathType Leaf) {
         throw "Published output must not bundle the $($forbiddenPrerequisiteInstaller.Value) prerequisite installer."
