@@ -37,11 +37,21 @@ internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteS
         var usbBootChanged = usbReceipt.Receipt is { State: UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot } up && BootSession.HasChangedSince(up.StartedAtUtc);
         var hidInstall = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
         var usbInstall = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
-        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.RecoverySafe, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged), _allowUsbIpRepairWhileRecoveryUnsafe));
+        var allowUsbIpRepairWhileRecoveryUnsafe = AllowsUsbIpRepairWhileRecoveryUnsafe(
+            _allowUsbIpRepairWhileRecoveryUnsafe,
+            snapshot.Prerequisites);
+        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.RecoverySafe, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged), allowUsbIpRepairWhileRecoveryUnsafe));
     }
 
     public Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken) =>
         PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(assessment, _setupRunner, executablePath, ElevatedPrerequisiteSetup.Argument, cancellationToken);
+
+    internal static bool AllowsUsbIpRepairWhileRecoveryUnsafe(
+        bool startupRepairWindow,
+        RuntimePrerequisiteAssessment prerequisites) =>
+        startupRepairWindow
+        && prerequisites.HidHide.Status == PrerequisiteStatus.Ready
+        && prerequisites.Viiper.Status == PrerequisiteStatus.Ready;
 
     private static ComponentProvisioningState ToComponentProvisioningState(HidHideProvisioningReceiptState state) => state switch { HidHideProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned, HidHideProvisioningReceiptState.InstallStarted => ComponentProvisioningState.InstallStarted, HidHideProvisioningReceiptState.InstalledPendingReboot => ComponentProvisioningState.PendingReboot, HidHideProvisioningReceiptState.AttemptFailed => ComponentProvisioningState.AttemptFailed, HidHideProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled, _ => ComponentProvisioningState.Indeterminate };
     private static ComponentProvisioningState ToComponentProvisioningState(UsbIpWin2ProvisioningReceiptState state) => state switch { UsbIpWin2ProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned, UsbIpWin2ProvisioningReceiptState.InstallStarted => ComponentProvisioningState.InstallStarted, UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot => ComponentProvisioningState.PendingReboot, UsbIpWin2ProvisioningReceiptState.AttemptFailed => ComponentProvisioningState.AttemptFailed, UsbIpWin2ProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled, _ => ComponentProvisioningState.Indeterminate };
