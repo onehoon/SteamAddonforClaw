@@ -140,6 +140,10 @@ internal static class ElevatedPrerequisiteSetup
             if (usbReceipt?.State == UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot) restartRequired = true;
             if (ShouldInstallUsbIp(usbInstallation.Status))
             {
+                // Ownership follows a trusted, completed Addon install across later Addon-driven
+                // upgrades. A package version that no longer matches the last verified receipt is
+                // treated conservatively as externally changed and loses uninstall ownership.
+                var installedByAddon = ShouldMarkUsbIpInstalledByAddon(usbReceipt, usbInstallation.Status, usbIp.Version);
                 var acquisition = installerAcquisition.AcquireAsync(UsbIpWin2PackageMetadata.InstallerDescriptor, VelopackAppPaths.ProvisioningStateDirectory, CancellationToken.None).GetAwaiter().GetResult();
                 if (!acquisition.Succeeded || acquisition.InstallerPath is null)
                 {
@@ -149,7 +153,7 @@ internal static class ElevatedPrerequisiteSetup
                 try
                 {
                     var receipt = new UsbIpWin2ProvisioningReceipt(
-                        1,
+                        UsbIpWin2ProvisioningReceipt.CurrentSchemaVersion,
                         UsbIpWin2ProvisioningReceiptState.InstallStarted,
                         Guid.NewGuid(),
                         UsbIpWin2PackageMetadata.BundledVersion.ToString(),
@@ -159,7 +163,8 @@ internal static class ElevatedPrerequisiteSetup
                         null,
                         null,
                         PreInstallationStatus: usbInstallation.Status,
-                        PreviousInstalledVersion: usbInstallation.Status == ComponentInstallationStatus.UpdateRequired ? usbIp.Version : null);
+                        PreviousInstalledVersion: usbInstallation.Status == ComponentInstallationStatus.UpdateRequired ? usbIp.Version : null,
+                        InstalledByAddon: installedByAddon);
                     usbStore.Save(receipt);
                     AppLog.Info("PrerequisiteSetup", "usbip-win2 installation receipt persisted.", ("AttemptId", receipt.AttemptId), ("State", receipt.State), ("Version", receipt.InstallerVersion), ("PreInstallationStatus", receipt.PreInstallationStatus), ("PreviousInstalledVersion", receipt.PreviousInstalledVersion));
                     if (!LogAndAllowSafetyGate("BeforeUsbIpInstall"))
@@ -193,6 +198,24 @@ internal static class ElevatedPrerequisiteSetup
             return 1;
         }
         }
+    }
+
+    internal static bool ShouldMarkUsbIpInstalledByAddon(
+        UsbIpWin2ProvisioningReceipt? priorReceipt,
+        ComponentInstallationStatus currentStatus,
+        string? currentInstalledVersion)
+    {
+        if (currentStatus == ComponentInstallationStatus.Missing)
+            return true;
+        return currentStatus == ComponentInstallationStatus.UpdateRequired
+            && priorReceipt is
+            {
+                IsValid: true,
+                State: UsbIpWin2ProvisioningReceiptState.Provisioned,
+                InstalledByAddon: true,
+                ObservedInstalledVersion: { } observedVersion
+            }
+            && string.Equals(observedVersion, currentInstalledVersion, StringComparison.OrdinalIgnoreCase);
     }
 
     private static (HidHidePackageState Package, PrerequisiteAssessment Prerequisite) WaitForHidHidePostInstallEvidence(string expectedVersion, int installerExitCode)

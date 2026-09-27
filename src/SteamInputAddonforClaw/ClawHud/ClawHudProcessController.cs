@@ -19,6 +19,8 @@ internal sealed record ClawHudState(
     string? RuntimeVersion = null,
     string? ApplicationVersion = null);
 
+internal sealed record ClawHudUninstallStopResult(bool Succeeded, string Reason);
+
 internal sealed record ClawHudProcessLaunchRequest(
     string ExecutablePath,
     string WorkingDirectory,
@@ -41,6 +43,7 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
     private static readonly TimeSpan ReadinessRetryInterval = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan SingleInstanceSettleBudget = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ShutdownBudget = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan KillExitConfirmationBudget = TimeSpan.FromSeconds(2);
 
     private readonly IClawHudControlClient _controlClient;
     private readonly Func<ClawHudProcessLaunchRequest, IClawHudProcessHandle> _launch;
@@ -238,9 +241,16 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
                     try
                     {
                         child.Kill(entireProcessTree: true);
-                        childRetired = true;
                         AppLog.Warn(Category, "Managed ClawHUD graceful shutdown failed; proven child was terminated.", null,
                             ("Event", "ManagedShutdownFallbackKill"));
+                        using var killWait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        killWait.CancelAfter(KillExitConfirmationBudget);
+                        try { await child.WaitForExitAsync(killWait.Token).ConfigureAwait(false); }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                        {
+                            failure ??= "ManagedShutdownKillExitNotConfirmed";
+                        }
+                        childRetired = child.HasExited;
                     }
                     catch (Exception exception)
                     {
@@ -281,6 +291,77 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>Stops a Managed ClawHUD instance for uninstall. An adopted instance has no proven
+    /// child handle, so it is requested to shut down over IPC and must confirm endpoint disappearance;
+    /// this path never force-kills an adopted or unclassified process.</summary>
+    internal async Task<ClawHudUninstallStopResult> StopForUninstallAsync(CancellationToken cancellationToken)
+    {
+        if (_ownedChild is { HasExited: false })
+        {
+            var owned = await StopAsync(desiredEnabled: false, cancellationToken).ConfigureAwait(false);
+            if (owned.ActualState == ClawHudFeatureState.Disabled)
+                return new(true, "OwnedManagedChildStopped");
+            if (_ownedChild is null)
+                return new(true, "OwnedManagedChildExitConfirmed");
+            return new(false, owned.Failure ?? "OwnedManagedChildShutdownUnconfirmed");
+        }
+
+        ClawHudControlResult<ClawHudRuntimeInfo> current;
+        try { current = await _controlClient.GetRuntimeInfoAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            return HasManagedRuntimeProcessOrUnknownPath()
+                ? new(false, "ManagedRuntimeClassificationFailed:" + exception.GetType().Name)
+                : new(true, "NoManagedRuntimeProcess");
+        }
+
+        if (!current.Succeeded || current.Value is null)
+            return HasManagedRuntimeProcessOrUnknownPath()
+                ? new(false, "ManagedRuntimeClassificationFailed:" + Describe(current))
+                : new(true, "NoManagedRuntimeProcess");
+
+        if (current.Value.LaunchMode == ClawHudWireLaunchMode.Standalone)
+            return new(true, "StandalonePreserved");
+        if (current.Value.LaunchMode != ClawHudWireLaunchMode.Managed || !IsProtocolCompatible(current.Value))
+            return new(false, "ManagedRuntimeClassificationUntrusted");
+
+        _managedClassified = true;
+        var stopped = await StopAsync(desiredEnabled: false, cancellationToken).ConfigureAwait(false);
+        return stopped.ActualState == ClawHudFeatureState.Disabled
+            ? new(true, "AdoptedManagedRuntimeStopped")
+            : new(false, stopped.Failure ?? "AdoptedManagedRuntimeShutdownUnconfirmed");
+    }
+
+    private static bool HasManagedRuntimeProcessOrUnknownPath()
+    {
+        var root = Path.GetFullPath(SteamInputAddonforClaw.Install.AddonDataPaths.ClawHudRuntimeRoot);
+        foreach (var process in Process.GetProcessesByName("ClawHUD"))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.HasExited) continue;
+                    var executable = process.MainModule?.FileName;
+                    if (string.IsNullOrWhiteSpace(executable)) return true;
+                    var relative = Path.GetRelativePath(root, Path.GetFullPath(executable));
+                    if (!Path.IsPathRooted(relative)
+                        && !string.Equals(relative, "..", StringComparison.Ordinal)
+                        && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                        && !relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+                        return true;
+                }
+                catch
+                {
+                    // If the executable path cannot be proven, do not risk deleting a possibly
+                    // live managed Runtime or killing a process whose ownership is unknown.
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public async ValueTask DisposeAsync()
@@ -509,7 +590,8 @@ internal sealed class ClawHudProcessController : IAsyncDisposable
         while (DateTime.UtcNow < deadline)
         {
             var probe = await _controlClient.GetRuntimeInfoAsync(cancellationToken).ConfigureAwait(false);
-            if (!probe.Succeeded) return true;
+            if (probe.Kind == ClawHudControlResultKind.TransportUnavailable) return true;
+            if (!probe.Succeeded) return false;
             var remaining = deadline - DateTime.UtcNow;
             await _delay(remaining < ReadinessRetryInterval ? remaining : ReadinessRetryInterval, cancellationToken).ConfigureAwait(false);
         }

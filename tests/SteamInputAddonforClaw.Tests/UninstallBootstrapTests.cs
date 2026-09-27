@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Install;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Profiles.Performance;
@@ -8,6 +9,34 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class UninstallBootstrapTests
 {
+    [Fact]
+    public void Approved_fast_hook_returns_without_recreating_data_or_logging()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"safe-hook-{Guid.NewGuid():N}");
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousLevel = AppLog.MinimumLevelOverride;
+        var previousMarker = Environment.GetEnvironmentVariable(UninstallBootstrap.SafeUninstallApprovedEnvironmentVariable);
+
+        try
+        {
+            AppLog.DirectoryOverride = directory;
+            AppLog.MinimumLevelOverride = AppLogLevel.Info;
+            Environment.SetEnvironmentVariable(UninstallBootstrap.SafeUninstallApprovedEnvironmentVariable, "1");
+
+            UninstallBootstrap.RunFastCallbackOnly();
+            AppLog.DrainForTests();
+
+            Assert.False(Directory.Exists(directory));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(UninstallBootstrap.SafeUninstallApprovedEnvironmentVariable, previousMarker);
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousLevel;
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public void Data_root_is_the_full_reset_root()
     {

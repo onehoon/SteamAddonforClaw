@@ -22,7 +22,15 @@ internal static class HidHidePackageMetadata
 internal sealed record HidHidePackageState(bool Installed, string? Version, bool InspectionSucceeded);
 internal interface IHidHidePackageProbe { HidHidePackageState Inspect(); }
 
-internal sealed record HidHideUninstallCandidate(string DisplayName, string? DisplayVersion, string? Publisher, string? InstallLocation = null);
+internal sealed record HidHideUninstallCandidate(
+    string DisplayName,
+    string? DisplayVersion,
+    string? Publisher,
+    string? InstallLocation = null,
+    string? SubKey = null,
+    bool? WindowsInstaller = null,
+    string? UninstallString = null,
+    string? QuietUninstallString = null);
 internal interface IHidHideUninstallRegistry
 {
     IReadOnlyList<HidHideUninstallCandidate> Enumerate(RegistryView view);
@@ -46,7 +54,15 @@ internal sealed class WindowsHidHideUninstallRegistry : IHidHideUninstallRegistr
         {
             using var entry = uninstall.OpenSubKey(name);
             if (entry?.GetValue("DisplayName") is string displayName)
-                candidates.Add(new(displayName, entry.GetValue("DisplayVersion") as string, entry.GetValue("Publisher") as string, entry.GetValue("InstallLocation") as string));
+                candidates.Add(new(
+                    displayName,
+                    entry.GetValue("DisplayVersion") as string,
+                    entry.GetValue("Publisher") as string,
+                    entry.GetValue("InstallLocation") as string,
+                    name,
+                    entry.GetValue("WindowsInstaller") is int windowsInstaller ? windowsInstaller == 1 : null,
+                    entry.GetValue("UninstallString") as string,
+                    entry.GetValue("QuietUninstallString") as string));
         }
         return candidates;
     }

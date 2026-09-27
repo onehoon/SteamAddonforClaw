@@ -12,7 +12,13 @@ internal static class UsbIpWin2PackageMetadata
     internal static PrerequisiteInstallerDescriptor InstallerDescriptor => new("usbip-win2", BundledVersion, InstallerFileName, InstallerDownloadUri, InstallerSha256);
 }
 
-internal sealed record UsbIpWin2PackageState(bool Installed, string? Version, bool InspectionSucceeded, bool PackageEntryPresent);
+internal sealed record UsbIpWin2PackageState(
+    bool Installed,
+    string? Version,
+    bool InspectionSucceeded,
+    bool PackageEntryPresent,
+    string? UninstallString = null,
+    string? QuietUninstallString = null);
 internal interface IUsbIpWin2PackageProbe { UsbIpWin2PackageState Inspect(); }
 internal sealed class WindowsUsbIpWin2PackageProbe : IUsbIpWin2PackageProbe
 {
@@ -23,7 +29,9 @@ internal sealed class WindowsUsbIpWin2PackageProbe : IUsbIpWin2PackageProbe
         {
             using var key = Registry.LocalMachine.OpenSubKey(Key);
             var version = key?.GetValue("DisplayVersion") as string;
-            return new(!string.IsNullOrWhiteSpace(version), version, true, key is not null);
+            var uninstall = key?.GetValue("UninstallString") as string;
+            var quietUninstall = key?.GetValue("QuietUninstallString") as string;
+            return new(!string.IsNullOrWhiteSpace(version), version, true, key is not null, uninstall, quietUninstall);
         }
         catch { return new(false, null, false, false); }
     }
@@ -43,19 +51,34 @@ internal sealed record UsbIpWin2ProvisioningReceipt(
     string? FailureReason = null,
     int? InstallerExitCode = null,
     ComponentInstallationStatus PreInstallationStatus = ComponentInstallationStatus.Missing,
-    string? PreviousInstalledVersion = null)
+    string? PreviousInstalledVersion = null,
+    bool InstalledByAddon = false)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
     public bool IsValid => SchemaVersion == CurrentSchemaVersion
         && AttemptId != Guid.Empty
         && Version.TryParse(InstallerVersion, out var targetVersion)
         && InstallerSha256 is { Length: 64 } && InstallerSha256.All(Uri.IsHexDigit)
-        && PreInstallationStatus switch
-        {
-            ComponentInstallationStatus.Missing => PreProvisioningStatus == PrerequisiteStatus.Missing && PreviousInstalledVersion is null,
-            ComponentInstallationStatus.UpdateRequired => Version.TryParse(PreviousInstalledVersion, out var previousVersion) && previousVersion.CompareTo(targetVersion) < 0,
-            _ => false
-        };
+        && IsValidOrigin(targetVersion);
+
+    internal bool IsValidV1 => SchemaVersion == 1
+        && AttemptId != Guid.Empty
+        && Version.TryParse(InstallerVersion, out var legacyTargetVersion)
+        && InstallerSha256 is { Length: 64 } && InstallerSha256.All(Uri.IsHexDigit)
+        && IsValidOrigin(legacyTargetVersion);
+
+    internal UsbIpWin2ProvisioningReceipt MigrateV1() => this with
+    {
+        SchemaVersion = CurrentSchemaVersion,
+        InstalledByAddon = PreInstallationStatus == ComponentInstallationStatus.Missing
+    };
+
+    private bool IsValidOrigin(Version targetVersion) => PreInstallationStatus switch
+    {
+        ComponentInstallationStatus.Missing => PreProvisioningStatus == PrerequisiteStatus.Missing && PreviousInstalledVersion is null,
+        ComponentInstallationStatus.UpdateRequired => Version.TryParse(PreviousInstalledVersion, out var previousVersion) && previousVersion.CompareTo(targetVersion) < 0,
+        _ => false
+    };
 }
 internal sealed class UsbIpWin2ProvisioningReceiptStore
 {
@@ -75,7 +98,13 @@ internal sealed class UsbIpWin2ProvisioningReceiptStore
         var security = _storageInspector(directory);
         if (security.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate) return new(null, true);
         if (!File.Exists(_path)) return new(null, false);
-        try { var receipt = JsonSerializer.Deserialize<UsbIpWin2ProvisioningReceipt>(File.ReadAllText(_path)); return receipt is { IsValid: true } ? new(receipt, false) : new(null, true); } catch { return new(null, true); }
+        try
+        {
+            var receipt = JsonSerializer.Deserialize<UsbIpWin2ProvisioningReceipt>(File.ReadAllText(_path));
+            if (receipt is { IsValidV1: true }) receipt = receipt.MigrateV1();
+            return receipt is { IsValid: true } ? new(receipt, false) : new(null, true);
+        }
+        catch { return new(null, true); }
     }
     public void Save(UsbIpWin2ProvisioningReceipt receipt)
     {

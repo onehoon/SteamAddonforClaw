@@ -60,16 +60,41 @@ public sealed class UsbIpWin2ProvisioningReceiptStoreTests
     }
 
     [Fact]
-    public void Load_LegacyV1FirstInstallReceiptWithoutUpgradeFields_RemainsValid()
+    public void Load_V1FirstInstallReceipt_MigratesToOwnedV2()
     {
         using var fixture = new ReceiptStoreFixture();
-        var expected = CreateReceipt();
+        var expected = CreateReceipt() with { SchemaVersion = 1, InstalledByAddon = false };
         var json = JsonNode.Parse(JsonSerializer.Serialize(expected))!.AsObject();
         json.Remove(nameof(UsbIpWin2ProvisioningReceipt.PreInstallationStatus));
         json.Remove(nameof(UsbIpWin2ProvisioningReceipt.PreviousInstalledVersion));
         File.WriteAllText(fixture.Path, json.ToJsonString());
 
-        Assert.Equal(expected, fixture.Store.Load().Receipt);
+        var migrated = fixture.Store.Load().Receipt;
+        Assert.NotNull(migrated);
+        Assert.Equal(UsbIpWin2ProvisioningReceipt.CurrentSchemaVersion, migrated.SchemaVersion);
+        Assert.True(migrated.InstalledByAddon);
+        Assert.False(fixture.Store.Load().IsCorrupt);
+    }
+
+    [Fact]
+    public void Load_V1PreExistingUpgradeReceipt_MigratesWithoutOwnership()
+    {
+        using var fixture = new ReceiptStoreFixture();
+        var legacy = CreateReceipt() with
+        {
+            SchemaVersion = 1,
+            PreProvisioningStatus = PrerequisiteStatus.Incompatible,
+            PreInstallationStatus = ComponentInstallationStatus.UpdateRequired,
+            PreviousInstalledVersion = "0.9.7.6",
+            InstalledByAddon = true,
+        };
+        File.WriteAllText(fixture.Path, JsonSerializer.Serialize(legacy));
+
+        var migrated = fixture.Store.Load().Receipt;
+
+        Assert.NotNull(migrated);
+        Assert.Equal(UsbIpWin2ProvisioningReceipt.CurrentSchemaVersion, migrated.SchemaVersion);
+        Assert.False(migrated.InstalledByAddon);
         Assert.False(fixture.Store.Load().IsCorrupt);
     }
 
@@ -130,7 +155,7 @@ public sealed class UsbIpWin2ProvisioningReceiptStoreTests
     }
 
     private static UsbIpWin2ProvisioningReceipt CreateReceipt() => new(
-        1,
+        UsbIpWin2ProvisioningReceipt.CurrentSchemaVersion,
         UsbIpWin2ProvisioningReceiptState.InstallStarted,
         Guid.NewGuid(),
         UsbIpWin2PackageMetadata.BundledVersion.ToString(),
