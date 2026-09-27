@@ -211,7 +211,7 @@ internal static class ElevatedPrerequisiteSetup
             && priorReceipt is
             {
                 IsValid: true,
-                State: UsbIpWin2ProvisioningReceiptState.Provisioned,
+                State: UsbIpWin2ProvisioningReceiptState.Provisioned or UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot,
                 InstalledByAddon: true,
                 ObservedInstalledVersion: { } observedVersion
             }

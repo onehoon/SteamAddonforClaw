@@ -12,12 +12,36 @@ public sealed class UsbIpAddonOwnershipTests
             null, ComponentInstallationStatus.Missing, null));
     }
 
-    [Fact]
-    public void LaterAddonUpgrade_CarriesProvenOwnershipWhenInstalledVersionMatchesReceipt()
+    [Theory]
+    [InlineData(nameof(UsbIpWin2ProvisioningReceiptState.Provisioned))]
+    [InlineData(nameof(UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot))]
+    public void LaterAddonUpgrade_CarriesProvenOwnershipWhenInstalledVersionMatchesReceipt(string receiptState)
     {
-        var receipt = Receipt() with { InstalledByAddon = true, ObservedInstalledVersion = "0.9.8.1" };
+        var receipt = Receipt() with
+        {
+            State = Enum.Parse<UsbIpWin2ProvisioningReceiptState>(receiptState),
+            InstalledByAddon = true,
+            ObservedInstalledVersion = "0.9.8.1"
+        };
 
         Assert.True(ElevatedPrerequisiteSetup.ShouldMarkUsbIpInstalledByAddon(
+            receipt, ComponentInstallationStatus.UpdateRequired, "0.9.8.1"));
+    }
+
+    [Theory]
+    [InlineData(nameof(UsbIpWin2ProvisioningReceiptState.InstallStarted))]
+    [InlineData(nameof(UsbIpWin2ProvisioningReceiptState.AttemptFailed))]
+    [InlineData(nameof(UsbIpWin2ProvisioningReceiptState.AttemptCancelled))]
+    public void IncompleteReceiptState_DoesNotCarryUsbIpOwnership(string receiptState)
+    {
+        var receipt = Receipt() with
+        {
+            State = Enum.Parse<UsbIpWin2ProvisioningReceiptState>(receiptState),
+            InstalledByAddon = true,
+            ObservedInstalledVersion = "0.9.8.1"
+        };
+
+        Assert.False(ElevatedPrerequisiteSetup.ShouldMarkUsbIpInstalledByAddon(
             receipt, ComponentInstallationStatus.UpdateRequired, "0.9.8.1"));
     }
 
