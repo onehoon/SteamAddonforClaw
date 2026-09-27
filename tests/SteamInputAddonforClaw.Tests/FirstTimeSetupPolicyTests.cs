@@ -218,7 +218,7 @@ public sealed class FirstTimeSetupPolicyTests
 
         Assert.Equal(Enum.Parse<ComponentInstallationStatus>(expectedStatus), assessment.Status);
         Assert.Equal(expectedReason, assessment.Reason);
-        Assert.Equal("0.9.8.0", UsbIpWin2PackageMetadata.BundledVersion.ToString());
+        Assert.Equal("0.9.8.1", UsbIpWin2PackageMetadata.BundledVersion.ToString());
         Assert.Equal("USBip-0.9.8.1-x64.exe", UsbIpWin2PackageMetadata.InstallerFileName);
     }
 
@@ -270,10 +270,10 @@ public sealed class FirstTimeSetupPolicyTests
             () => new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable"),
             () => elapsed,
             milliseconds => elapsed += milliseconds,
-            "0.9.8.0",
+            "0.9.8.1",
             0);
 
-        Assert.Equal(ComponentInstallationStatus.Installed, ComponentInstallationAssessmentPolicy.AssessUsbIp(result.Package, result.Prerequisite, "0.9.8.0").Status);
+        Assert.Equal(ComponentInstallationStatus.Installed, ComponentInstallationAssessmentPolicy.AssessUsbIp(result.Package, result.Prerequisite, "0.9.8.1").Status);
         Assert.Equal(2, polls);
     }
 
