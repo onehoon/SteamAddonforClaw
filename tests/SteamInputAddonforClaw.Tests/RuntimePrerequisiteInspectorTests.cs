@@ -95,10 +95,11 @@ public sealed class RuntimePrerequisiteInspectorTests
         var assessment = InspectUsbIp(true, true, true, true);
 
         Assert.Equal(PrerequisiteStatus.Ready, assessment.Status);
-        Assert.Equal("0.9.8.0", assessment.Version);
+        Assert.Equal("0.9.8.1", assessment.Version);
     }
 
     [Theory]
+    [InlineData("0.9.8.0")]
     [InlineData("0.9.7.8")]
     [InlineData("0.9.7.6")]
     [InlineData("1.0.0.0")]
@@ -113,12 +114,12 @@ public sealed class RuntimePrerequisiteInspectorTests
     [Fact]
     public void OlderUsbIpPackage_IsRuntimeIncompatibleButInstallationUpgradeable()
     {
-        var package = new UsbIpWin2PackageState(true, "0.9.7.7", true, true);
+        var package = new UsbIpWin2PackageState(true, "0.9.8.0", true, true);
         var runtime = new UsbIpWin2PrerequisiteInspector(
             new FakeUsbIpProbe(true, true, true, true),
             new FakeUsbIpPackageProbe(package)).Inspect();
 
-        var installation = ComponentInstallationAssessmentPolicy.AssessUsbIp(package, runtime, "0.9.8.0");
+        var installation = ComponentInstallationAssessmentPolicy.AssessUsbIp(package, runtime, "0.9.8.1");
 
         Assert.Equal(PrerequisiteStatus.Incompatible, runtime.Status);
         Assert.Equal("UsbIpWin2VersionUnsupported", runtime.Reason);
@@ -199,7 +200,7 @@ public sealed class RuntimePrerequisiteInspectorTests
         var assessment = InspectUsbIp(serviceInstalled, devicePresent, driverUsable, filterInstalled);
 
         Assert.Equal(PrerequisiteStatus.Unusable, assessment.Status);
-        Assert.Equal("0.9.8.0", assessment.Version);
+        Assert.Equal("0.9.8.1", assessment.Version);
     }
 
     [Fact]
@@ -267,9 +268,9 @@ public sealed class RuntimePrerequisiteInspectorTests
     private static PrerequisiteAssessment InspectUsbIp(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled, UsbIpWin2PackageState? package = null)
         => new UsbIpWin2PrerequisiteInspector(
             new FakeUsbIpProbe(serviceInstalled, devicePresent, driverUsable, filterInstalled),
-            new FakeUsbIpPackageProbe(package ?? new(true, "0.9.8.0", true, true))).Inspect();
+            new FakeUsbIpPackageProbe(package ?? new(true, "0.9.8.1", true, true))).Inspect();
 
-    private static IUsbIpWin2PackageProbe ExactUsbIpPackageProbe() => new FakeUsbIpPackageProbe(new(true, "0.9.8.0", true, true));
+    private static IUsbIpWin2PackageProbe ExactUsbIpPackageProbe() => new FakeUsbIpPackageProbe(new(true, "0.9.8.1", true, true));
 
     private sealed class FakeHidHideClient(HidHideInspectionStatus status) : IHidHideClient
     {
