@@ -150,6 +150,14 @@ try {
 
     $root = New-Fixture
     $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'Dependencies\UsbIpWin2\USBip-0.9.8.1-x64.exe') -Value 'forbidden usbip installer'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'usbip-win2 prerequisite installer') {
+        throw 'Expected the pinned usbip-win2 prerequisite installer to be rejected.'
+    }
+
+    $root = New-Fixture
+    $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'fse\SteamInputAddonforClaw.FseHome.msix')
     Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing final FSE MSIX' -Asset 'fse\SteamInputAddonforClaw.FseHome.msix'
 

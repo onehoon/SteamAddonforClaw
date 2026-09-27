@@ -5,10 +5,10 @@ namespace SteamInputAddonforClaw.Prerequisites;
 
 internal static class UsbIpWin2PackageMetadata
 {
-    public static readonly Version BundledVersion = new(0, 9, 8, 0);
-    public const string InstallerFileName = "USBip-0.9.8.0-x64.exe";
-    public const string InstallerSha256 = "81F426741F7EE2ED991FEBE24A22DACA8400B6AE2F171054E3FB404897E15D39";
-    public static readonly Uri InstallerDownloadUri = new("https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.8.0/USBip-0.9.8.0-x64.exe");
+    public static readonly Version BundledVersion = new(0, 9, 8, 1);
+    public const string InstallerFileName = "USBip-0.9.8.1-x64.exe";
+    public const string InstallerSha256 = "38CAD6D4432B52D5BB9409D9AD03B72FDFFC4ADA4CD3A48FBECA1A2752A8518A";
+    public static readonly Uri InstallerDownloadUri = new("https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.8.1/USBip-0.9.8.1-x64.exe");
     internal static PrerequisiteInstallerDescriptor InstallerDescriptor => new("usbip-win2", BundledVersion, InstallerFileName, InstallerDownloadUri, InstallerSha256);
 }
 

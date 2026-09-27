@@ -73,15 +73,17 @@ public sealed class UsbIpWin2ProvisioningReceiptStoreTests
         Assert.False(fixture.Store.Load().IsCorrupt);
     }
 
-    [Fact]
-    public void Save_UpgradeReceiptWithOlderOrigin_LoadsAsValid()
+    [Theory]
+    [InlineData("0.9.7.6")]
+    [InlineData("0.9.8.0")]
+    public void Save_UpgradeReceiptWithOlderOrigin_LoadsAsValid(string previousInstalledVersion)
     {
         using var fixture = new ReceiptStoreFixture();
         var expected = CreateReceipt() with
         {
             PreProvisioningStatus = PrerequisiteStatus.Incompatible,
             PreInstallationStatus = ComponentInstallationStatus.UpdateRequired,
-            PreviousInstalledVersion = "0.9.7.6"
+            PreviousInstalledVersion = previousInstalledVersion
         };
 
         fixture.Store.Save(expected);
@@ -90,8 +92,8 @@ public sealed class UsbIpWin2ProvisioningReceiptStoreTests
     }
 
     [Theory]
-    [InlineData("0.9.8.0")]
     [InlineData("0.9.8.1")]
+    [InlineData("0.9.8.2")]
     [InlineData("unknown")]
     public void Load_InvalidUpgradeOrigin_IsCorrupt(string previousInstalledVersion)
     {
