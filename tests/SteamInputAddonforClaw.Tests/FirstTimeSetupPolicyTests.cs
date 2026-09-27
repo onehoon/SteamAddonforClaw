@@ -400,7 +400,6 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.Equal(FirstTimeSetupReason.RecoveryUnsafe, setup.Reason);
         Assert.False(setup.CanInstallRequiredComponents);
     }
-
     [Fact]
     public void DisabledBootPrerequisiteStop_AllowsMissingUsbIpThroughTheExistingSetupPath()
     {
