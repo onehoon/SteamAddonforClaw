@@ -36,6 +36,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 {
     private readonly Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? _runtimeCompositionFactory;
     private readonly Func<string>? _frontendPipeNameFactory;
+    private readonly bool _headlessUninstallPreparation;
     private readonly CancellationTokenSource _startupCancellationTokenSource = new();
     private AddonStartupComposition? _startupComposition;
     private AddonRuntimeHost? _runtimeHost;
@@ -152,10 +153,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         string? testOnlyDataRoot = null,
         Func<string>? testFrontendPipeNameFactory = null,
         Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null,
-        IWindowsAppRuntimePrerequisite? testWindowsAppRuntimePrerequisite = null)
+        IWindowsAppRuntimePrerequisite? testWindowsAppRuntimePrerequisite = null,
+        bool headlessUninstallPreparation = false)
     {
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
         _frontendPipeNameFactory = testFrontendPipeNameFactory;
+        _headlessUninstallPreparation = headlessUninstallPreparation;
         var profilePath = testOnlyDataRoot is null
             ? AddonDataPaths.ProfilesPath
             : Path.Combine(testOnlyDataRoot, "profiles.json");
@@ -300,32 +303,35 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _startupStarted, 1) != 0)
             throw new InvalidOperationException("Startup has already been started.");
 
-        try
+        if (!_headlessUninstallPreparation)
         {
-            // Display recovery is independent of controller hardware compatibility. Restore any
-            // outstanding Addon-owned mode before startup can exit for an unsupported or
-            // indeterminate device result.
-            _displayResolutionRuntime.StartupRecover();
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("Profiles.Display", "Display resolution startup recovery failed.", exception);
-        }
-
-        // FPS ownership recovery is independent of hardware compatibility. Only initialize
-        // IGCL on this early path when the Addon left explicit ownership evidence behind;
-        // ordinary startup remains free of native driver work until the deferred profile phase.
-        try
-        {
-            if (_intelFpsRuntime.HasPendingOwnership)
+            try
             {
-                _intelFpsRuntime.Initialize();
-                _intelFpsRuntime.StartupRecover();
+                // Display recovery is independent of controller hardware compatibility. Restore any
+                // outstanding Addon-owned mode before startup can exit for an unsupported or
+                // indeterminate device result.
+                _displayResolutionRuntime.StartupRecover();
             }
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("Profiles.IntelFps", "Stale Intel FPS startup recovery failed.", exception);
+            catch (Exception exception)
+            {
+                AppLog.Error("Profiles.Display", "Display resolution startup recovery failed.", exception);
+            }
+
+            // FPS ownership recovery is independent of hardware compatibility. Only initialize
+            // IGCL on this early path when the Addon left explicit ownership evidence behind;
+            // ordinary startup remains free of native driver work until the deferred profile phase.
+            try
+            {
+                if (_intelFpsRuntime.HasPendingOwnership)
+                {
+                    _intelFpsRuntime.Initialize();
+                    _intelFpsRuntime.StartupRecover();
+                }
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("Profiles.IntelFps", "Stale Intel FPS startup recovery failed.", exception);
+            }
         }
 
         AppLog.Info("Startup coordination started.");
@@ -340,9 +346,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (startupResult.HardwareStatus is HardwareCompatibilityStatus.Unsupported or HardwareCompatibilityStatus.Indeterminate)
             {
                 var unsupported = startupResult.HardwareStatus == HardwareCompatibilityStatus.Unsupported;
-                NativeStartupWarning.Show(unsupported
-                    ? "This device is not supported by Steam Addon for Claw."
-                    : "This device could not be identified. Steam Addon for Claw will exit without making any changes.");
+                if (!_headlessUninstallPreparation)
+                    NativeStartupWarning.Show(unsupported
+                        ? "This device is not supported by Steam Addon for Claw."
+                        : "This device could not be identified. Steam Addon for Claw will exit without making any changes.");
                 _startupOutcome = unsupported
                     ? AddonProcessStartupOutcome.UnsupportedHardware
                     : AddonProcessStartupOutcome.IndeterminateHardware;
@@ -353,7 +360,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
             // Retire only legacy CEF marker state that this Addon previously owned. New startup
             // never creates or ensures the marker, and cleanup remains feature-local.
-            if (startupResult.ShouldStartRuntime)
+            if (!_headlessUninstallPreparation && startupResult.ShouldStartRuntime)
                 _ = SteamCefLegacyMarkerCleanup.RemoveOwnedMarker();
 
             return _startupOutcome.Value;
@@ -407,17 +414,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 // Its callback reads _presentationOwnership with a null guard at execution time, so it
                 // tolerates the legitimate state where this host exists but Full1902 controller
                 // ownership has not committed (or is unavailable).
-                full1902SuspendParticipant: new Full1902SuspendParticipant(QuiesceFull1902PresentationForSuspendAsync));
+                full1902SuspendParticipant: new Full1902SuspendParticipant(QuiesceFull1902PresentationForSuspendAsync),
+                uninstallPreparationOnly: _headlessUninstallPreparation);
 
         _runtimeHost = composition.RuntimeHost;
         _cpuBoostRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _powerModeRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
         _intelFpsRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
-        _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
-        _runtimeHost.PowerResumeObserved += OnPowerResumeObserved;
+        if (!_headlessUninstallPreparation)
+        {
+            _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
+            _runtimeHost.PowerResumeObserved += OnPowerResumeObserved;
+        }
         // TDP / game-profile support is a supported-hardware/model capability, not a controller
         // authority state -- it applies in both Center M Enabled and Disabled boots.
-        if (startupResult.HardwareDeviceModel is { } tdpModel
+        if (!_headlessUninstallPreparation
+            && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
         {
             _gameProfileMutations.SetModelId(tdpModel);
@@ -510,6 +522,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             },
             new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
         _centerMAuthorityTransition = centerMAuthorityTransition;
+        if (_headlessUninstallPreparation)
+            return;
+
         if (_runtimeCompositionFactory is null)
             _updateCoordinator = new FrontendUpdateCoordinator(new VelopackUpdateClient(),
                 () => _requestRestart?.Invoke() == true);
@@ -1509,10 +1524,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void EnsureClawHudController()
     {
-        if (_clawHudProcessController is not null) return;
+        EnsureClawHudProcessController();
+        if (_clawHudRuntimeAcquirer is not null) return;
         _clawHudHttpClient = new HttpClient();
         _clawHudHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("SteamInputAddonforClaw");
         _clawHudRuntimeAcquirer = new ClawHudRuntimeAcquirer(_clawHudHttpClient);
+    }
+
+    private void EnsureClawHudProcessController()
+    {
+        if (_clawHudProcessController is not null) return;
         _clawHudProcessController = new ClawHudProcessController();
         _clawHudProcessController.StateChanged += OnClawHudStateChanged;
     }
@@ -1679,6 +1700,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("Uninstall", "Stock uninstall preparation threw; the Runtime remains stock-unsafe.", exception);
             return SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult.Fail("PrepareThrew:" + exception.GetType().Name);
         }
+    }
+
+    internal async Task<ClawHudUninstallStopResult> StopManagedClawHudForUninstallAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureClawHudProcessController();
+        var result = await _clawHudProcessController!.StopForUninstallAsync(cancellationToken).ConfigureAwait(false);
+        AppLog.Info("Uninstall.ClawHUD", "Managed ClawHUD uninstall stop completed.",
+            ("Succeeded", result.Succeeded), ("Reason", result.Reason));
+        return result;
     }
 
     internal void BeginProcessShutdown()
@@ -1914,6 +1944,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnBigPictureStateChanged(bool active)
     {
+        if (_headlessUninstallPreparation) return;
         RequestControllerPresentationReconcile("BigPictureChanged");
     }
 

@@ -93,6 +93,16 @@ internal sealed class SingleInstanceGate : IDisposable
 
     public void Dispose()
     {
+        DisposeCore(log: true);
+    }
+
+    internal void DisposeWithoutLogging()
+    {
+        DisposeCore(log: false);
+    }
+
+    private void DisposeCore(bool log)
+    {
         RegisteredWaitHandle? activation;
         RegisteredWaitHandle? uninstall;
         lock (_sync)
@@ -114,7 +124,8 @@ internal sealed class SingleInstanceGate : IDisposable
         _activationEvent.Dispose();
         _uninstallEvent.Dispose();
         _mutex.Dispose();
-        AppLog.Info("SingleInstance", "Single-instance gate disposed.");
+        if (log)
+            AppLog.Info("SingleInstance", "Single-instance gate disposed.");
     }
 
     private void OnActivationSignaled(Action activationHandler, bool timedOut)

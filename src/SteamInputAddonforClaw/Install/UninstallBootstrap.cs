@@ -8,8 +8,16 @@ namespace SteamInputAddonforClaw.Install;
 
 internal static class UninstallBootstrap
 {
+    internal const string SafeUninstallApprovedEnvironmentVariable = "STEAMADDON_SAFE_UNINSTALL_APPROVED";
+
+    internal static bool IsSafeUninstallApproved => string.Equals(
+        Environment.GetEnvironmentVariable(SafeUninstallApprovedEnvironmentVariable), "1", StringComparison.Ordinal);
+
     internal static void RunFastCallbackOnly()
     {
+        if (IsSafeUninstallApproved)
+            return;
+
         AppLog.Info("Uninstall", "Velopack uninstall cleanup started.", ("FastCallback", true));
         // PR12 section 11/18: the running Runtime owns stock restoration AND the startup-task removal
         // (which must come only AFTER stock authority is proven). The fast callback no longer deletes
@@ -33,16 +41,68 @@ internal static class UninstallBootstrap
         AppLog.Info("Uninstall", "FastCallback completed without elevation or dependency teardown.", ("Action", "BoundedOnly"));
     }
 
-    internal static void RunBoundedLocalCleanup(bool runtimeReleased)
+    internal static bool RunBoundedLocalCleanup(bool runtimeReleased, bool deleteDataRoot = true)
     {
         if (!runtimeReleased)
-            return;
+            return false;
         var cefCleaned = Steam.SteamCefLegacyMarkerCleanup.RemoveOwnedMarker();
         var fpsCleaned = TryCleanupOwnedIntelFpsForUninstall();
         var steamFseCleaned = new WindowsGamingHomeConfiguration().TryCleanupForUninstall();
-        TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-        if (cefCleaned && fpsCleaned && steamFseCleaned)
+        var legacyReceiptCleaned = TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
+        var succeeded = cefCleaned && fpsCleaned && steamFseCleaned && legacyReceiptCleaned;
+        if (succeeded && deleteDataRoot)
             AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
+        return succeeded;
+    }
+
+    internal static SingleInstanceGate? AcquireRuntimeGateForSafeUninstall(
+        TimeSpan waitBudget,
+        TimeSpan probeInterval,
+        Func<SingleInstanceGate>? createGate = null,
+        Func<bool>? requestPrimaryUninstall = null,
+        Func<DateTimeOffset>? utcNow = null,
+        Action<TimeSpan>? delay = null)
+    {
+        if (waitBudget <= TimeSpan.Zero || probeInterval <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(waitBudget));
+
+        createGate ??= SingleInstanceGate.CreateForCurrentUser;
+        requestPrimaryUninstall ??= SingleInstanceGate.RequestPrimaryUninstall;
+        utcNow ??= static () => DateTimeOffset.UtcNow;
+        delay ??= static duration => Thread.Sleep(duration);
+
+        try
+        {
+            var initial = createGate();
+            if (initial.IsPrimaryInstance) return initial;
+            initial.Dispose();
+
+            if (!requestPrimaryUninstall())
+            {
+                AppLog.Warn("Uninstall", "Running Runtime uninstall request could not be signaled.");
+                return null;
+            }
+
+            var deadline = utcNow() + waitBudget;
+            while (utcNow() < deadline)
+            {
+                var probe = createGate();
+                if (probe.IsPrimaryInstance) return probe;
+                probe.Dispose();
+                var remaining = deadline - utcNow();
+                if (remaining > TimeSpan.Zero)
+                    delay(remaining < probeInterval ? remaining : probeInterval);
+            }
+
+            AppLog.Warn("Uninstall", "Running Runtime did not release its mutex within the safe-uninstall wait budget.", null,
+                ("WaitBudgetMs", waitBudget.TotalMilliseconds));
+            return null;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Uninstall", "Runtime mutex acquisition for safe uninstall failed.", exception);
+            return null;
+        }
     }
 
     // This is deliberately a feature-local cleanup path. The marker is the only evidence that
@@ -78,10 +138,14 @@ internal static class UninstallBootstrap
         }
     }
 
-    private static void TryDeleteFile(string path)
+    private static bool TryDeleteFile(string path)
     {
-        try { if (File.Exists(path)) File.Delete(path); }
-        catch (Exception exception) { AppLog.Warn("Uninstall", "Bounded Addon-owned file cleanup failed.", exception, ("Path", path)); }
+        try { if (File.Exists(path)) File.Delete(path); return !File.Exists(path); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Uninstall", "Bounded Addon-owned file cleanup failed.", exception, ("Path", path));
+            return false;
+        }
     }
 
     private static bool RequestRunningRuntimeShutdown()

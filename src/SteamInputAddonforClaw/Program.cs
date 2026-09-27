@@ -25,13 +25,29 @@ public static class Program
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
             VelopackApp.Build()
                 .SetAutoApplyOnStartup(false)
+                .OnAfterInstallFastCallback(hook => { SafeUninstallRegistration.EnsureCurrentInstallation(VelopackAppPaths.RootAppDirectory); })
+                .OnAfterUpdateFastCallback(hook => { SafeUninstallRegistration.EnsureCurrentInstallation(VelopackAppPaths.RootAppDirectory); })
                 .OnBeforeUninstallFastCallback(_ => UninstallBootstrap.RunFastCallbackOnly())
                 .Run();
-            AddonLogRetention.PruneDirectory(AppLog.DirectoryPath);
+            if (UninstallBootstrap.IsSafeUninstallApproved)
+                return;
+
+            if (!args.Contains(SafeUninstall.Argument, StringComparer.OrdinalIgnoreCase))
+                AddonLogRetention.PruneDirectory(AppLog.DirectoryPath);
             var persistedLogLevel = LogLevelBootstrap.Read(AddonDataPaths.SettingsPath);
             AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(persistedLogLevel);
             AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
             AppLog.Debug("Velopack", "Velopack bootstrap completed.");
+            var uninstallRegistration = SafeUninstallRegistration.EnsureCurrentInstallation(VelopackAppPaths.RootAppDirectory);
+            if (uninstallRegistration.Success)
+                AppLog.Info("Uninstall", "Safe Windows uninstall entry verified.", ("Result", uninstallRegistration.Reason));
+            else
+                AppLog.Warn("Uninstall", "Safe Windows uninstall entry could not be repaired.", null, ("Reason", uninstallRegistration.Reason));
+            if (args.Contains(SafeUninstall.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = SafeUninstall.Run(args.Contains(SafeUninstallRegistration.SilentArgument, StringComparer.OrdinalIgnoreCase));
+                return;
+            }
             if (args.Contains(SteamFseElevatedRegistration.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = SteamFseElevatedRegistration.Run();
@@ -40,6 +56,11 @@ public static class Program
             if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = ElevatedPrerequisiteSetup.Run();
+                return;
+            }
+            if (args.Contains(ElevatedOwnedPrerequisiteUninstallEntry.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = ElevatedOwnedPrerequisiteUninstallEntry.Run();
                 return;
             }
             if (args.Contains(ElevatedWindowsAppRuntimeSetup.Argument, StringComparer.OrdinalIgnoreCase))

@@ -263,6 +263,117 @@ public sealed class ClawHudProcessControllerTests
     }
 
     [Fact]
+    public async Task Stop_FallbackKillWaitsForConfirmedOwnedChildExit()
+    {
+        var runtime = Runtime("1.0.1");
+        var process = new FakeProcess { ExitOnKillConfirmationWait = true };
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+            Snapshot = Snapshot(true),
+            ShutdownResult = ClawHudControlResult<ClawHudUnit>.Timeout,
+        };
+        var controller = new ClawHudProcessController(control, _ => process);
+        await controller.EnsureRunningAsync(runtime, CancellationToken.None);
+
+        var stopped = await controller.StopForUninstallAsync(CancellationToken.None);
+
+        Assert.True(stopped.Succeeded, stopped.Reason);
+        Assert.True(process.KillCalled);
+        Assert.Equal(1, process.WaitCallsAfterKill);
+        Assert.True(process.HasExited);
+        Assert.True(process.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task StopForUninstall_AdoptedManagedRuntimeRequiresAndConfirmsEndpointDisappearance()
+    {
+        var control = new FakeControl
+        {
+            RuntimeInfos = new Queue<ClawHudRuntimeInfo?>([
+                new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+                new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+                null,
+            ]),
+            Snapshot = Snapshot(true),
+        };
+        var controller = new ClawHudProcessController(control, delay: (_, _) => Task.CompletedTask);
+
+        var stopped = await controller.StopForUninstallAsync(CancellationToken.None);
+
+        Assert.True(stopped.Succeeded, stopped.Reason);
+        Assert.Equal(1, control.RequestShutdownCalls);
+    }
+
+    [Theory]
+    [InlineData((int)ClawHudControlResultKind.ProtocolError)]
+    [InlineData((int)ClawHudControlResultKind.MalformedResponse)]
+    [InlineData((int)ClawHudControlResultKind.TimedOut)]
+    public async Task StopForUninstall_AdoptedManagedRuntimeDoesNotTreatInvalidProbeAsEndpointDisappearance(
+        int failedProbeKindValue)
+    {
+        var failedProbeKind = (ClawHudControlResultKind)failedProbeKindValue;
+        var runtimeInfo = new ClawHudRuntimeInfo("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready);
+        var failedProbe = failedProbeKind switch
+        {
+            ClawHudControlResultKind.ProtocolError => ClawHudControlResult<ClawHudRuntimeInfo>.Protocol(ClawHudControlStatus.RuntimeUnavailable),
+            ClawHudControlResultKind.MalformedResponse => ClawHudControlResult<ClawHudRuntimeInfo>.Malformed,
+            _ => ClawHudControlResult<ClawHudRuntimeInfo>.Timeout,
+        };
+        var control = new FakeControl
+        {
+            RuntimeInfoResults = new Queue<ClawHudControlResult<ClawHudRuntimeInfo>>([
+                ClawHudControlResult<ClawHudRuntimeInfo>.Success(runtimeInfo),
+                ClawHudControlResult<ClawHudRuntimeInfo>.Success(runtimeInfo),
+                failedProbe,
+            ]),
+        };
+        var controller = new ClawHudProcessController(control, delay: (_, _) => Task.CompletedTask);
+
+        var stopped = await controller.StopForUninstallAsync(CancellationToken.None);
+
+        Assert.False(stopped.Succeeded);
+        Assert.Equal("ManagedShutdownNotConfirmed", stopped.Reason);
+        Assert.Equal(1, control.RequestShutdownCalls);
+    }
+
+    [Fact]
+    public async Task StopForUninstall_PreservesStandaloneInstance()
+    {
+        var process = new FakeProcess();
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("9.9.9", 1, 1, ClawHudWireLaunchMode.Standalone, ClawHudWireRuntimeState.Ready),
+        };
+        var controller = new ClawHudProcessController(control, _ => process);
+
+        var stopped = await controller.StopForUninstallAsync(CancellationToken.None);
+
+        Assert.True(stopped.Succeeded, stopped.Reason);
+        Assert.Equal("StandalonePreserved", stopped.Reason);
+        Assert.Equal(0, control.RequestShutdownCalls);
+        Assert.False(process.KillCalled);
+    }
+
+    [Fact]
+    public async Task StopForUninstall_AdoptedManagedRuntimeFailureBlocksCleanupWithoutForceKill()
+    {
+        var control = new FakeControl
+        {
+            RuntimeInfo = new("1.0.1", 1, 1, ClawHudWireLaunchMode.Managed, ClawHudWireRuntimeState.Ready),
+            ShutdownResult = ClawHudControlResult<ClawHudUnit>.Timeout,
+        };
+        var process = new FakeProcess();
+        var controller = new ClawHudProcessController(control, _ => process);
+
+        var stopped = await controller.StopForUninstallAsync(CancellationToken.None);
+
+        Assert.False(stopped.Succeeded);
+        Assert.Equal(1, control.RequestShutdownCalls);
+        Assert.False(process.KillCalled);
+    }
+
+    [Fact]
     public async Task Stop_DisposesProvenChildAfterGracefulShutdown()
     {
         var runtime = Runtime("1.0.1");
@@ -357,6 +468,7 @@ public sealed class ClawHudProcessControllerTests
     {
         internal ClawHudRuntimeInfo? RuntimeInfo { get; init; }
         internal Queue<ClawHudRuntimeInfo?>? RuntimeInfos { get; init; }
+        internal Queue<ClawHudControlResult<ClawHudRuntimeInfo>>? RuntimeInfoResults { get; init; }
         internal ClawHudSettingsSnapshot? Snapshot { get; init; }
         internal ClawHudSettingsSnapshot? EnabledSnapshot { get; init; }
         internal ClawHudControlResult<ClawHudUnit> ShutdownResult { get; init; } = ClawHudControlResult<ClawHudUnit>.Success(new());
@@ -366,6 +478,8 @@ public sealed class ClawHudProcessControllerTests
 
         public Task<ClawHudControlResult<ClawHudRuntimeInfo>> GetRuntimeInfoAsync(CancellationToken cancellationToken = default)
         {
+            if (RuntimeInfoResults is { Count: > 0 })
+                return Task.FromResult(RuntimeInfoResults.Dequeue());
             if (RuntimeInfos is { Count: > 0 })
             {
                 var value = RuntimeInfos.Dequeue();
@@ -417,7 +531,9 @@ public sealed class ClawHudProcessControllerTests
         internal int ExitCodeAfterWait { get; init; }
         internal bool ExitOnSecondWait { get; init; }
         internal bool ExitOnThirdWait { get; init; }
+        internal bool ExitOnKillConfirmationWait { get; init; }
         internal bool KillCalled { get; private set; }
+        internal int WaitCallsAfterKill { get; private set; }
         internal bool DisposeCalled { get; private set; }
         internal int DisposeCalls { get; private set; }
         internal Task DisposedTask => _disposed.Task;
@@ -428,6 +544,11 @@ public sealed class ClawHudProcessControllerTests
         int IClawHudProcessHandle.ExitCode => ExitCode;
         public Task WaitForExitAsync(CancellationToken cancellationToken = default)
         {
+            if (KillCalled)
+            {
+                WaitCallsAfterKill++;
+                if (ExitOnKillConfirmationWait) CompleteExit(0);
+            }
             if (HasExited) return Task.CompletedTask;
             var waitCall = Interlocked.Increment(ref _waitCalls);
             if (waitCall == 1 && ExitOnFirstWait)
@@ -438,7 +559,11 @@ public sealed class ClawHudProcessControllerTests
                 CompleteExit(ExitCodeAfterWait);
             return _exited.Task.WaitAsync(cancellationToken);
         }
-        public void Kill(bool entireProcessTree) { KillCalled = true; CompleteExit(0); }
+        public void Kill(bool entireProcessTree)
+        {
+            KillCalled = true;
+            if (!ExitOnKillConfirmationWait) CompleteExit(0);
+        }
         public ValueTask DisposeAsync() { DisposeCalled = true; DisposeCalls++; _disposed.TrySetResult(true); return ValueTask.CompletedTask; }
 
         internal void CompleteExitForTest() => CompleteExit(0);

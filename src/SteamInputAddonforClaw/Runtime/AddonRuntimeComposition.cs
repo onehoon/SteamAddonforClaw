@@ -35,7 +35,8 @@ internal static class AddonRuntimeCompositionFactory
         // Full1902 Suspend/Resume section 5.2 / addendum A.3: the one host-local Full1902 suspend
         // participant, created by AddonProcessHost and passed through unchanged. Its quiesce callback
         // reads AddonProcessHost's current presentation ownership with a null guard at execution time.
-        IPowerSuspendParticipant? full1902SuspendParticipant = null)
+        IPowerSuspendParticipant? full1902SuspendParticipant = null,
+        bool uninstallPreparationOnly = false)
     {
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
@@ -48,15 +49,19 @@ internal static class AddonRuntimeCompositionFactory
         if (bigPictureStateChanged is not null) steamRuntime.BigPictureStateChanged += bigPictureStateChanged;
         // Installed-app lifecycle infrastructure: prove the owned startup task exists at Runtime
         // startup. A failed repair is logged but never exits an already-running Runtime.
-        var startupRegistrationResult = startupSettings.EnsureStartupRegistration();
-        AppLog.Info("Startup", "Startup registration ensured.",
-            ("Success", startupRegistrationResult.Success), ("Message", startupRegistrationResult.Message));
+        if (!uninstallPreparationOnly)
+        {
+            var startupRegistrationResult = startupSettings.EnsureStartupRegistration();
+            AppLog.Info("Startup", "Startup registration ensured.",
+                ("Success", startupRegistrationResult.Success), ("Message", startupRegistrationResult.Message));
+        }
 
         // Full1902 A2 section 10/12: the legacy Steam-session physical routing owner is never composed,
         // so the routing session watcher is never started. Only the actual-AppID fact used by
         // Device/Profile is observed; raw Steam/BPM facts for the Full1902 X360<->SteamDeck
         // presentation come from SteamSessionRuntime's own always-on BPM watcher + CapturePresentationSnapshot.
-        steamRuntime.StartActualObservation();
+        if (!uninstallPreparationOnly)
+            steamRuntime.StartActualObservation();
 
         var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
         var powerGate = new PowerMutationGate();
