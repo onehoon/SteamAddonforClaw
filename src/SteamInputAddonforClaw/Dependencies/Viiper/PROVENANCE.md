@@ -42,12 +42,14 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
+Reviewed against the previous embedded revision. The generated `libVIIPER.h`
+SHA-256 remains `165086ca138b5e8ffe1389ec1bd0f6f7ded83d236695e89941b5fb80d399fbb0`;
+there are no Addon-visible export, struct, enum, callback, calling-convention,
+or layout changes. The VIIPER change is internal to Windows usbip-win2 native
+attach ABI selection (0.9.8.0/0.9.8.1), so `ICanonicalViiperNativeApi`,
+`CanonicalViiperNativeApi.RequiredExports`,
+`CanonicalViiperNativeTypes.cs`, callback lifetime rooting, and the managed
+ABI tests require no code change.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
