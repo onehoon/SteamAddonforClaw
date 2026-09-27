@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// <summary>
 /// Publishes <see cref="IControllerStateSnapshotSource.LatestState"/>, mapped through
 /// <see cref="Xbox360DeviceStateMapper"/>, to a caller-supplied Xbox360 state sink on a monotonic
-/// absolute ~250 Hz (4 ms) deadline schedule, driven by a dedicated worker thread waiting on
+/// absolute ~125 Hz (8 ms) deadline schedule, driven by a dedicated worker thread waiting on
 /// <see cref="WindowsHighResolutionOneShotTimer"/> and re-armed via
 /// <see cref="CanonicalPublisherDeadlineMath"/>.
 /// </summary>
@@ -32,7 +32,7 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// </remarks>
 internal sealed class CanonicalXbox360InputPublisher
 {
-    private static readonly TimeSpan ProductionPeriod = TimeSpan.FromMilliseconds(4);
+    private static readonly TimeSpan ProductionPeriod = TimeSpan.FromMilliseconds(8);
     private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>Test-only seam so the join-timeout fail-closed path can be exercised deterministically.</summary>
