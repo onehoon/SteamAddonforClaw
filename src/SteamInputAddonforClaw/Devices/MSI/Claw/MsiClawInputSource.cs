@@ -12,28 +12,35 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
 {
     private static readonly int M1AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M1);
     private static readonly int M2AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M2);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(8);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(4);
     private static readonly TimeSpan CadenceDiagnosticPollInterval = TimeSpan.FromMilliseconds(1);
     private static readonly TimeSpan CadenceDiagnosticDuration = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ProductionCadenceSummaryWindow = TimeSpan.FromSeconds(10);
     private const int MaximumKnownInvalidInitialStates = 16;
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
     private readonly Func<WindowsHighResolutionOneShotTimer> _cadenceDiagnosticTimerFactory;
+    private readonly Func<WindowsHighResolutionOneShotTimer> _productionTimerFactory;
+    private readonly Func<long> _timestampProvider;
     private readonly Lock _sync = new();
     private InputSession? _currentSession;
     private int _testSession;
     private bool _disposed;
 
     public MsiClawInputSource(Func<IDirectInputDeviceEnumerator> enumeratorFactory)
-        : this(enumeratorFactory, static () => new WindowsHighResolutionOneShotTimer())
+        : this(enumeratorFactory, static () => new WindowsHighResolutionOneShotTimer(), static () => new WindowsHighResolutionOneShotTimer())
     {
     }
 
     internal MsiClawInputSource(
         Func<IDirectInputDeviceEnumerator> enumeratorFactory,
-        Func<WindowsHighResolutionOneShotTimer> cadenceDiagnosticTimerFactory)
+        Func<WindowsHighResolutionOneShotTimer> cadenceDiagnosticTimerFactory,
+        Func<WindowsHighResolutionOneShotTimer>? productionTimerFactory = null,
+        Func<long>? timestampProvider = null)
     {
         _enumeratorFactory = enumeratorFactory ?? throw new ArgumentNullException(nameof(enumeratorFactory));
         _cadenceDiagnosticTimerFactory = cadenceDiagnosticTimerFactory ?? throw new ArgumentNullException(nameof(cadenceDiagnosticTimerFactory));
+        _productionTimerFactory = productionTimerFactory ?? (static () => new WindowsHighResolutionOneShotTimer());
+        _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
     }
 
     public MsiClawInputSource(IDirectInputDeviceEnumerator enumerator)
@@ -131,11 +138,40 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             return new(MsiClawInputStartStatus.AcquireFailed, "DirectInput device acquisition failed. No controller settings were changed.");
         }
 
-        _currentSession = session;
-        session.PollingTask = PollAsync(session);
+        try
+        {
+            session.ProductionTimer = _productionTimerFactory();
+            session.ProductionPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(PollInterval, Stopwatch.Frequency);
+            var origin = _timestampProvider();
+            session.NextProductionDeadlineTicks = checked(origin + session.ProductionPeriodTicks);
+            ArmForDeadline(session.ProductionTimer, session.NextProductionDeadlineTicks, origin);
+
+            var worker = new Thread(() => PollWorker(session))
+            {
+                IsBackground = true,
+                Name = "SteamInputAddon.PID1902PhysicalInput",
+                Priority = ThreadPriority.AboveNormal,
+            };
+            session.PollingThread = worker;
+            _currentSession = session;
+            (WorkerThreadStartOverrideForTests ?? (static thread => thread.Start()))(worker);
+        }
+        catch (Exception exception)
+        {
+            if (ReferenceEquals(_currentSession, session))
+                _currentSession = null;
+            AppLog.Warn("DirectInput", "Physical input worker initialization failed.", exception,
+                ("TestSession", session.Id), ("Reason", "InputWorkerInitializationFailed"), ("Action", "AbortInput"));
+            CleanupBeforePolling(session);
+            return new(MsiClawInputStartStatus.InitializationFailed, "The physical input polling worker could not be initialized.");
+        }
+
         AppLog.Info(logCategory, "M1/M2 input source started.", ("TestSession", session.Id), ("VID", MsiClawHardware.FormatVendorId()), ("PID", MsiClawHardware.FormatDirectInputProductId()), ("InstanceGuid", descriptor.InstanceGuid));
         return new(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.");
     }
+
+    internal Action<WindowsHighResolutionOneShotTimer, long, long>? ArmForDeadlineOverrideForTests { get; set; }
+    internal Action<Thread>? WorkerThreadStartOverrideForTests { get; set; }
 
     public async Task StopAsync()
     {
@@ -156,13 +192,8 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         }
         catch (ObjectDisposedException)
         {
-            return;
         }
-        var pollingTask = session.PollingTask;
-        if (pollingTask is not null)
-        {
-            await pollingTask.ConfigureAwait(false);
-        }
+        await session.PollingCompletion.Task.ConfigureAwait(false);
     }
 
     public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken)
@@ -259,7 +290,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         await StopAsync().ConfigureAwait(false);
     }
 
-    private async Task PollAsync(InputSession session)
+    private void PollWorker(InputSession session)
     {
         var stopwatch = Stopwatch.StartNew();
         var previous = NeutralState();
@@ -274,11 +305,19 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         var stopReason = MsiClawInputStopReason.Stopped;
         var firstReadLogged = false;
         var invalidInitialStateCount = 0;
+        var nextProductionDeadlineTicks = session.NextProductionDeadlineTicks;
+        var firstProductionWait = true;
+        var diagnosticModeActive = false;
+        var productionCadenceStartedAt = Stopwatch.GetTimestamp();
+        var productionCadenceReadCount = 0;
+        var productionCadenceDiagnosticObserved = false;
+        var productionCadenceSummaryLogged = false;
 
         try
         {
             while (!session.Cancellation.IsCancellationRequested)
             {
+                bool schedulerFailed;
                 DirectInputState input;
                 try
                 {
@@ -307,7 +346,11 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                     {
                         if (invalidInitialStateCount == 1)
                             AppLog.Debug("MsiInput", "Known invalid DirectInput initial state was ignored.", ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("MaximumInitialStates", MaximumKnownInvalidInitialStates), ("Action", "AwaitNextState"), ("Reason", "KnownInvalidInitialState"));
-                        await WaitForNextPollAsync(session, GetCadenceDiagnostic(session)).ConfigureAwait(false);
+                        if (!WaitForNextPoll(session, GetCadenceDiagnostic(session), ref nextProductionDeadlineTicks, ref firstProductionWait, ref diagnosticModeActive, out schedulerFailed))
+                        {
+                            if (schedulerFailed) stopReason = MsiClawInputStopReason.PollSchedulerFailed;
+                            break;
+                        }
                         continue;
                     }
 
@@ -316,8 +359,9 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                     break;
                 }
 
-                var cadenceDiagnosticActive = GetCadenceDiagnostic(session)?.IsActive == true;
-                GetCadenceDiagnostic(session)?.Observe(input, Stopwatch.GetTimestamp());
+                var cadenceDiagnostic = GetCadenceDiagnostic(session);
+                var cadenceDiagnosticActive = cadenceDiagnostic?.IsActive == true;
+                cadenceDiagnostic?.Observe(input, Stopwatch.GetTimestamp());
 
                 if (!TryMapState(input, out var current))
                 {
@@ -335,6 +379,26 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                 Volatile.Write(ref _latestState, new StateBox(current));
                 session.SuccessfulReadCount++;
                 session.LastSuccessfulReadAt = successfulReadAt;
+                if (cadenceDiagnosticActive)
+                    productionCadenceDiagnosticObserved = true;
+                else
+                    productionCadenceReadCount++;
+
+                if (!productionCadenceSummaryLogged && Stopwatch.GetElapsedTime(productionCadenceStartedAt, successfulReadAt) >= ProductionCadenceSummaryWindow)
+                {
+                    productionCadenceSummaryLogged = true;
+                    if (!productionCadenceDiagnosticObserved)
+                    {
+                        var elapsedSeconds = Stopwatch.GetElapsedTime(productionCadenceStartedAt, successfulReadAt).TotalSeconds;
+                        AppLog.Debug("DirectInput", "PID1902 production input cadence summary.",
+                            ("TestSession", session.Id),
+                            ("WindowMs", (long)(elapsedSeconds * 1000)),
+                            ("SuccessfulReadCount", productionCadenceReadCount),
+                            ("ObservedReadHz", elapsedSeconds > 0 ? Math.Round(productionCadenceReadCount / elapsedSeconds, 1) : 0),
+                            ("TargetPeriodMs", (long)PollInterval.TotalMilliseconds));
+                    }
+                }
+
                 if (!firstReadLogged)
                 {
                     firstReadLogged = true;
@@ -387,11 +451,21 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                     AppLog.Info("Diagnostics", "Independent M1/M2 input verified.", ("TestSession", session.Id), ("M1OnlyObserved", true), ("M2OnlyObserved", true), ("M1ButtonIndex", MsiClawHardware.M1DirectInputButtonIndex), ("M2ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex));
                 }
 
-                await WaitForNextPollAsync(session, GetCadenceDiagnostic(session)).ConfigureAwait(false);
+                if (!WaitForNextPoll(session, GetCadenceDiagnostic(session), ref nextProductionDeadlineTicks, ref firstProductionWait, ref diagnosticModeActive, out schedulerFailed))
+                {
+                    if (schedulerFailed) stopReason = MsiClawInputStopReason.PollSchedulerFailed;
+                    break;
+                }
             }
         }
         catch (OperationCanceledException) when (session.Cancellation.IsCancellationRequested)
         {
+        }
+        catch (Exception exception)
+        {
+            stopReason = MsiClawInputStopReason.PollWorkerFailed;
+            AppLog.Error("DirectInput", "Physical input worker failed unexpectedly.", exception,
+                ("TestSession", session.Id), ("Reason", "PollWorkerFailed"));
         }
         finally
         {
@@ -415,8 +489,20 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                 }
             }
             session.Cancellation.Dispose();
-            AppLog.Info("Diagnostics", "M1/M2 input diagnostic completed.", ("TestSession", summary.TestSession), ("DurationMs", summary.DurationMs), ("M1Observed", summary.M1Observed), ("M2Observed", summary.M2Observed), ("Independent", summary.Independent), ("ReadFailures", summary.ReadFailures), ("CleanupSucceeded", summary.CleanupSucceeded), ("StopReason", summary.StopReason));
-            TestCompleted?.Invoke(this, summary);
+            try
+            {
+                AppLog.Info("Diagnostics", "M1/M2 input diagnostic completed.", ("TestSession", summary.TestSession), ("DurationMs", summary.DurationMs), ("M1Observed", summary.M1Observed), ("M2Observed", summary.M2Observed), ("Independent", summary.Independent), ("ReadFailures", summary.ReadFailures), ("CleanupSucceeded", summary.CleanupSucceeded), ("StopReason", summary.StopReason));
+                TestCompleted?.Invoke(this, summary);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("DirectInput", "Physical input completion callback failed.", exception,
+                    ("TestSession", session.Id), ("StopReason", summary.StopReason));
+            }
+            finally
+            {
+                session.PollingCompletion.TrySetResult(true);
+            }
         }
     }
 
@@ -434,6 +520,21 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     private static bool CleanupSession(InputSession session)
     {
         var cleanupSucceeded = true;
+        if (session.ProductionTimer is { } timer)
+        {
+            try
+            {
+                timer.Dispose();
+                session.ProductionTimer = null;
+            }
+            catch (Exception exception)
+            {
+                cleanupSucceeded = false;
+                AppLog.Error("DirectInput", "Physical polling timer cleanup failed.", exception,
+                    ("TestSession", session.Id), ("Operation", "TimerDispose"));
+            }
+        }
+
         try
         {
             AppLog.Info("DirectInput", "Device unacquire started.", ("TestSession", session.Id));
@@ -506,14 +607,22 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     internal static TimeSpan ResolvePollInterval(bool cadenceDiagnosticActive) =>
         cadenceDiagnosticActive ? CadenceDiagnosticPollInterval : PollInterval;
 
-    private static async Task WaitForNextPollAsync(InputSession session, MsiClawInputCadenceCollector? cadenceDiagnostic)
+    private bool WaitForNextPoll(
+        InputSession session,
+        MsiClawInputCadenceCollector? cadenceDiagnostic,
+        ref long nextProductionDeadlineTicks,
+        ref bool firstProductionWait,
+        ref bool diagnosticModeActive,
+        out bool schedulerFailed)
     {
+        schedulerFailed = false;
         if (cadenceDiagnostic?.IsActive == true)
         {
+            diagnosticModeActive = true;
             try
             {
                 if (cadenceDiagnostic.WaitForNextSample(CadenceDiagnosticPollInterval, session.Cancellation.Token))
-                    return;
+                    return !session.Cancellation.IsCancellationRequested;
             }
             catch (Exception exception)
             {
@@ -525,8 +634,57 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             }
         }
 
-        if (!session.Cancellation.IsCancellationRequested)
-            await Task.Delay(PollInterval, session.Cancellation.Token).ConfigureAwait(false);
+        if (session.Cancellation.IsCancellationRequested)
+            return false;
+
+        try
+        {
+            var now = _timestampProvider();
+            if (diagnosticModeActive)
+            {
+                diagnosticModeActive = false;
+                nextProductionDeadlineTicks = checked(now + session.ProductionPeriodTicks);
+                ArmForDeadline(session.ProductionTimer!, nextProductionDeadlineTicks, now);
+            }
+            else if (firstProductionWait)
+            {
+                // The initial production deadline was armed synchronously before the worker started.
+                firstProductionWait = false;
+            }
+            else
+            {
+                var advance = CanonicalPublisherDeadlineMath.AdvanceDeadline(
+                    nextProductionDeadlineTicks,
+                    session.ProductionPeriodTicks,
+                    now);
+                nextProductionDeadlineTicks = advance.NextDeadlineTicks;
+                ArmForDeadline(session.ProductionTimer!, nextProductionDeadlineTicks, now);
+            }
+
+            var signaled = WaitHandle.WaitAny([session.Cancellation.Token.WaitHandle, session.ProductionTimer!]);
+            return signaled == 1 && !session.Cancellation.IsCancellationRequested;
+        }
+        catch (Exception exception)
+        {
+            schedulerFailed = true;
+            AppLog.Error("DirectInput", "PID1902 production polling scheduler failed.", exception,
+                ("TestSession", session.Id), ("Reason", "PollSchedulerFailed"), ("Action", "StopPhysicalInput"));
+            return false;
+        }
+    }
+
+    private void ArmForDeadline(WindowsHighResolutionOneShotTimer timer, long deadlineTicks, long nowTicks)
+    {
+        var arm = ArmForDeadlineOverrideForTests;
+        if (arm is not null)
+        {
+            arm(timer, deadlineTicks, nowTicks);
+            return;
+        }
+
+        var remainingTicks = deadlineTicks - nowTicks;
+        var due100ns = CanonicalPublisherDeadlineMath.ConvertToRelativeDueTime100ns(remainingTicks, Stopwatch.Frequency);
+        timer.ArmRelative(TimeSpan.FromTicks(due100ns));
     }
 
     private static FrontendPid1902InputCadenceResult EmptyCadenceResult(
@@ -556,7 +714,11 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         public IDirectInputDeviceEnumerator Enumerator { get; } = enumerator;
         public IDirectInputDevice Device { get; } = device;
         public CancellationTokenSource Cancellation { get; } = cancellation;
-        public Task? PollingTask { get; set; }
+        public Thread? PollingThread { get; set; }
+        public TaskCompletionSource<bool> PollingCompletion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public WindowsHighResolutionOneShotTimer? ProductionTimer { get; set; }
+        public long ProductionPeriodTicks { get; set; }
+        public long NextProductionDeadlineTicks { get; set; }
         public long StartedAt { get; } = Stopwatch.GetTimestamp();
         public long AcquiredAt { get; set; }
         public long AcquireDurationMs { get; set; }

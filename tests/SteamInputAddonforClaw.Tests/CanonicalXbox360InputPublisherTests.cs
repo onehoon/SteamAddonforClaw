@@ -309,7 +309,7 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
-    public async Task Production_worker_is_background_AboveNormal_and_starts_from_an_8ms_absolute_deadline()
+    public async Task Production_worker_is_background_AboveNormal_and_starts_from_a_4ms_absolute_deadline()
     {
         var origin = 123_456L;
         long observedDeadline = 0;
@@ -350,7 +350,7 @@ public sealed class CanonicalXbox360InputPublisherTests
         }
 
         var expectedPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(
-            TimeSpan.FromMilliseconds(8),
+            TimeSpan.FromMilliseconds(4),
             Stopwatch.Frequency);
 
         Assert.Equal(origin, observedNow);

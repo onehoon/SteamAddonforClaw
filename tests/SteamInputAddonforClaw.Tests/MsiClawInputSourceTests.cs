@@ -1,6 +1,10 @@
+using System.Diagnostics;
+using System.Threading;
+using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -78,6 +82,131 @@ public sealed class MsiClawInputSourceTests
         Assert.Equal(1, device.UnacquireCount);
         Assert.Equal(1, device.DisposeCount);
         Assert.True(enumerator.Disposed);
+    }
+
+    [Fact]
+    public async Task Production_worker_uses_one_high_resolution_4ms_deadline_and_stops_before_returning()
+    {
+        var device = new FakeDevice(State());
+        var enumerator = new FakeEnumerator([], device);
+        using var timerApi = new FakeWaitableTimerNativeApi();
+        var origin = 123_456L;
+        Thread? observedWorker = null;
+        device.ReadAttempted += _ => observedWorker ??= Thread.CurrentThread;
+        await using var source = CreateSource(enumerator, timerApi, () => origin);
+
+        var result = source.StartPrepared(Device(0x0DB0, 0x1902));
+        Assert.True(result.Started);
+        await device.FirstReadAttempted.Task.WaitAsync(AwaitTimeout);
+
+        var expectedPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(
+            TimeSpan.FromMilliseconds(4), Stopwatch.Frequency);
+        var expectedDueTime100ns = CanonicalPublisherDeadlineMath.ConvertToRelativeDueTime100ns(
+            expectedPeriodTicks, Stopwatch.Frequency);
+        Assert.Equal(-expectedDueTime100ns, timerApi.LastDueTime100ns);
+        Assert.NotNull(observedWorker);
+        Assert.NotEqual(Environment.CurrentManagedThreadId, observedWorker!.ManagedThreadId);
+        Assert.True(observedWorker.IsBackground);
+        Assert.Equal(ThreadPriority.AboveNormal, observedWorker.Priority);
+        Assert.Equal("SteamInputAddon.PID1902PhysicalInput", observedWorker.Name);
+        Assert.Equal(1, enumerator.CreateCount);
+        Assert.Equal(1, device.AcquireCount);
+        Assert.True(await source.WaitForFirstValidStateAsync(CancellationToken.None));
+
+        await source.StopAsync();
+        var readsAfterStop = device.ReadCount;
+        timerApi.Pulse();
+
+        Assert.Equal(readsAfterStop, device.ReadCount);
+        Assert.Equal(1, device.UnacquireCount);
+        Assert.Equal(1, device.DisposeCount);
+        Assert.Equal(1, timerApi.CancelCount);
+    }
+
+    [Fact]
+    public void Production_timer_creation_failure_cleans_acquired_input_and_fails_start()
+    {
+        var device = new FakeDevice(State());
+        var enumerator = new FakeEnumerator([], device);
+        using var timerApi = new FakeWaitableTimerNativeApi { FailCreate = true };
+        var source = CreateSource(enumerator, timerApi);
+
+        var result = source.StartPrepared(Device(0x0DB0, 0x1902));
+
+        Assert.Equal(MsiClawInputStartStatus.InitializationFailed, result.Status);
+        Assert.False(source.IsRunning);
+        Assert.Equal(0, device.ReadCount);
+        Assert.Equal(1, device.AcquireCount);
+        Assert.Equal(1, device.UnacquireCount);
+        Assert.Equal(1, device.DisposeCount);
+        Assert.True(enumerator.Disposed);
+    }
+
+    [Fact]
+    public void Production_timer_initial_arm_failure_cleans_acquired_input_and_fails_start()
+    {
+        var device = new FakeDevice(State());
+        var enumerator = new FakeEnumerator([], device);
+        using var timerApi = new FakeWaitableTimerNativeApi { FailOnArmNumber = 1 };
+        var source = CreateSource(enumerator, timerApi);
+
+        var result = source.StartPrepared(Device(0x0DB0, 0x1902));
+
+        Assert.Equal(MsiClawInputStartStatus.InitializationFailed, result.Status);
+        Assert.False(source.IsRunning);
+        Assert.Equal(0, device.ReadCount);
+        Assert.Equal(1, device.UnacquireCount);
+        Assert.Equal(1, device.DisposeCount);
+        Assert.True(enumerator.Disposed);
+        Assert.Equal(1, timerApi.CancelCount);
+    }
+
+    [Fact]
+    public void Production_worker_start_failure_cleans_acquired_input_and_fails_start()
+    {
+        var device = new FakeDevice(State());
+        var enumerator = new FakeEnumerator([], device);
+        using var timerApi = new FakeWaitableTimerNativeApi();
+        var source = CreateSource(enumerator, timerApi);
+        source.WorkerThreadStartOverrideForTests = _ => throw new InvalidOperationException("simulated thread start failure");
+
+        var result = source.StartPrepared(Device(0x0DB0, 0x1902));
+
+        Assert.Equal(MsiClawInputStartStatus.InitializationFailed, result.Status);
+        Assert.False(source.IsRunning);
+        Assert.Equal(0, device.ReadCount);
+        Assert.Equal(1, device.UnacquireCount);
+        Assert.Equal(1, device.DisposeCount);
+        Assert.True(enumerator.Disposed);
+        Assert.Equal(1, timerApi.CancelCount);
+    }
+
+    [Fact]
+    public async Task Production_timer_rearm_failure_stops_owned_session_through_existing_fault_policy()
+    {
+        var device = new FakeDevice(State(), State());
+        var enumerator = new FakeEnumerator([], device);
+        using var timerApi = new FakeWaitableTimerNativeApi { FailOnArmNumber = 2 };
+        var origin = 123_456L;
+        var now = origin;
+        await using var source = CreateSource(enumerator, timerApi, () => Volatile.Read(ref now));
+        var summaryTask = ObserveSummary(source);
+
+        Assert.True(source.StartPrepared(Device(0x0DB0, 0x1902)).Started);
+        await device.FirstReadAttempted.Task.WaitAsync(AwaitTimeout);
+        now = checked(origin + CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(TimeSpan.FromMilliseconds(4), Stopwatch.Frequency));
+        timerApi.Pulse();
+        var summary = await summaryTask.WaitAsync(AwaitTimeout);
+
+        Assert.Equal(MsiClawInputStopReason.PollSchedulerFailed, summary.StopReason);
+        Assert.True(MsiClawPhysicalInputFaultPolicy.IsFatal(summary.StopReason, ownedSessionIdentityPresent: true));
+        Assert.False(source.IsRunning);
+        Assert.Equal(2, device.ReadCount);
+        Assert.Equal(1, enumerator.CreateCount);
+        Assert.Equal(1, device.AcquireCount);
+        Assert.Equal(1, device.UnacquireCount);
+        Assert.Equal(1, device.DisposeCount);
+        Assert.Equal(1, timerApi.CancelCount);
     }
 
     [Fact]
@@ -422,6 +551,13 @@ public sealed class MsiClawInputSourceTests
         return completion.Task;
     }
 
+    private static MsiClawInputSource CreateSource(FakeEnumerator enumerator, FakeWaitableTimerNativeApi productionTimerApi, Func<long>? timestampProvider = null) =>
+        new(
+            () => enumerator,
+            static () => throw new InvalidOperationException("The cadence diagnostic timer is not used by this test."),
+            () => new WindowsHighResolutionOneShotTimer(productionTimerApi),
+            timestampProvider);
+
     private static DirectInputDeviceDescriptor Device(ushort vendorId, ushort productId, string? physicalIdentity = "USB\\MSI_ROOT", int? buttonCount = 17, string? pnpInstanceId = null) =>
         new(Guid.NewGuid(), Guid.NewGuid(), "Test", vendorId, productId, "\\\\?\\hid#vid_0db0&pid_1902&mi_00&col01#test#{00000000-0000-0000-0000-000000000000}", pnpInstanceId ?? "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST", physicalIdentity, 0x0001, 0x0005, buttonCount, 6);
     private static DirectInputState State(params int[] pressedButtons)
@@ -471,6 +607,7 @@ public sealed class MsiClawInputSourceTests
         public Exception? DisposeException { get; init; }
         public event Action<int>? ReadPerformed;
         public event Action<int>? ReadAttempted;
+        public TaskCompletionSource FirstReadAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Acquire()
         {
             AcquireCount++;
@@ -485,6 +622,7 @@ public sealed class MsiClawInputSourceTests
         {
             ReadCount++;
             ReadAttempted?.Invoke(ReadCount);
+            FirstReadAttempted.TrySetResult();
             if (_reads.Count > 0)
             {
                 var next = _reads.Dequeue();
@@ -499,5 +637,43 @@ public sealed class MsiClawInputSourceTests
             DisposeCount++;
             if (DisposeException is not null) throw DisposeException;
         }
+    }
+
+    private sealed class FakeWaitableTimerNativeApi : IWaitableTimerNativeApi, IDisposable
+    {
+        private readonly AutoResetEvent _signal = new(false);
+        private int _createCount;
+        private int _armCount;
+        private int _cancelCount;
+
+        public bool FailCreate { get; init; }
+        public int FailOnArmNumber { get; init; }
+        public int CreateCount => Volatile.Read(ref _createCount);
+        public int ArmCount => Volatile.Read(ref _armCount);
+        public int CancelCount => Volatile.Read(ref _cancelCount);
+        public long LastDueTime100ns { get; private set; }
+
+        public SafeWaitHandle CreateWaitableTimerEx(uint flags, uint desiredAccess)
+        {
+            Interlocked.Increment(ref _createCount);
+            return new SafeWaitHandle(FailCreate ? IntPtr.Zero : _signal.SafeWaitHandle.DangerousGetHandle(), ownsHandle: false);
+        }
+
+        public bool SetWaitableTimerEx(SafeWaitHandle handle, long dueTime100ns, int periodMs)
+        {
+            LastDueTime100ns = dueTime100ns;
+            var arm = Interlocked.Increment(ref _armCount);
+            return arm != FailOnArmNumber;
+        }
+
+        public bool CancelWaitableTimer(SafeWaitHandle handle)
+        {
+            Interlocked.Increment(ref _cancelCount);
+            return true;
+        }
+
+        public int GetLastWin32Error() => 5;
+        public void Pulse() => _signal.Set();
+        public void Dispose() => _signal.Dispose();
     }
 }
