@@ -10,24 +10,56 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class Xbox360RumbleLoopDiagnosticTests
 {
     [Fact]
-    public void Sequences_are_deterministic_descending_and_end_in_one_exact_stop()
+    public void Captured_patterns_rotate_deterministically()
     {
-        var sequences = Enumerable.Range(1, 500)
-            .Select(Xbox360RumbleLoopDiagnostic.CreateSequence)
-            .ToArray();
+        Assert.Equal(4, Xbox360RumbleLoopDiagnostic.PatternCount);
+        Assert.Equal(
+            ["LiesOfP-A", "LiesOfP-B", "LiesOfP-C", "LiesOfP-D", "LiesOfP-A"],
+            Enumerable.Range(1, 5).Select(cycle => Xbox360RumbleLoopDiagnostic.GetPatternForCycle(cycle).Name));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Xbox360RumbleLoopDiagnostic.GetPatternForCycle(0));
+    }
 
-        foreach (var (sequence, cycle) in sequences.Select((sequence, index) => (sequence, index + 1)))
+    [Fact]
+    public void Captured_patterns_have_exact_independent_channels_and_one_terminal_stop()
+    {
+        RumbleReplayStep[][] expectedPatterns =
+        [
+            [new(255, 255), new(241, 241), new(217, 217), new(252, 252), new(230, 230), new(208, 208), new(0, 0)],
+            [new(255, 255), new(242, 242), new(218, 218), new(204, 204), new(0, 0)],
+            [new(255, 255), new(242, 242), new(217, 217), new(0, 0)],
+            [new(255, 255), new(239, 239), new(219, 219), new(255, 255), new(247, 247), new(228, 228), new(209, 209), new(0, 0)]
+        ];
+
+        for (var index = 0; index < expectedPatterns.Length; index++)
         {
-            Assert.Equal(sequence, Xbox360RumbleLoopDiagnostic.CreateSequence(cycle));
-            Assert.InRange(sequence.Length - 1, 6, 10);
-            Assert.InRange(sequence[0], (byte)128, (byte)220);
-            Assert.InRange(sequence[^2], (byte)4, (byte)16);
-            Assert.Equal((byte)0, sequence[^1]);
-            Assert.All(sequence.Take(sequence.Length - 1), value => Assert.NotEqual((byte)0, value));
-            Assert.True(sequence.Take(sequence.Length - 1).Zip(sequence.Skip(1), (left, right) => left > right).All(static descending => descending));
+            var pattern = Xbox360RumbleLoopDiagnostic.GetPatternForCycle(index + 1);
+            Assert.Equal(expectedPatterns[index], pattern.Steps);
+            Assert.Equal(new RumbleReplayStep(0, 0), pattern.Steps[^1]);
+            Assert.Single(pattern.Steps, static step => step.Left8 == 0 && step.Right8 == 0);
+            Assert.All(pattern.Steps.Take(pattern.Steps.Count - 1), static step =>
+            {
+                Assert.NotEqual((byte)0, step.Left8);
+                Assert.NotEqual((byte)0, step.Right8);
+            });
         }
+    }
 
-        Assert.NotEqual(sequences[0], sequences[1]);
+    [Fact]
+    public void Captured_patterns_preserve_later_amplitude_increases()
+    {
+        var patternA = Xbox360RumbleLoopDiagnostic.GetPatternForCycle(1);
+        var patternD = Xbox360RumbleLoopDiagnostic.GetPatternForCycle(4);
+
+        Assert.True(patternA.Steps[3].Left8 > patternA.Steps[2].Left8);
+        Assert.True(patternD.Steps[3].Left8 > patternD.Steps[2].Left8);
+    }
+
+    [Fact]
+    public void Production_timing_uses_separate_burst_and_cycle_intervals()
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(65), Xbox360RumbleLoopDiagnostic.ProductionBurstStepCadence);
+        Assert.Equal(TimeSpan.FromSeconds(2), Xbox360RumbleLoopDiagnostic.ProductionCycleIdle);
+        Assert.Equal(TimeSpan.FromSeconds(1), Xbox360RumbleLoopDiagnostic.ProductionTerminalCallbackTimeout);
     }
 
     [Theory]
@@ -39,7 +71,7 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
         => Assert.Equal((ushort)expected, Xbox360RumbleFeedbackBridge.Expand(value));
 
     [Fact]
-    public async Task Synchronous_terminal_callback_is_armed_before_xinput_and_allows_the_next_cycle()
+    public async Task Synchronous_terminal_callback_is_armed_before_xinput_and_nonzero_steps_do_not_wait_for_callbacks()
     {
         using var stop = new CancellationTokenSource();
         var xinput = new FakeXbox360RumbleLoopXInput();
@@ -74,7 +106,12 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
             Assert.Equal(FrontendXbox360RumbleLoopState.Running, diagnostic.Snapshot.State);
             Assert.Equal((byte)0, diagnostic.Snapshot.LastObservedLeft8);
             Assert.Equal((byte)0, diagnostic.Snapshot.LastObservedRight8);
-            Assert.All(xinput.SetStates, static state => Assert.Equal(state.Left, state.Right));
+            var firstPattern = Xbox360RumbleLoopDiagnostic.GetPatternForCycle(1);
+            var expectedWrites = firstPattern.Steps.Select(step => (
+                Slot: 0u,
+                Left: Xbox360RumbleFeedbackBridge.Expand(step.Left8),
+                Right: Xbox360RumbleFeedbackBridge.Expand(step.Right8)));
+            Assert.Equal(expectedWrites, xinput.SetStates.Take(firstPattern.Steps.Count));
         }
         finally
         {
@@ -82,6 +119,48 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
             await run.WaitAsync(TimeSpan.FromSeconds(5));
         }
         Assert.Single(xinput.SetStates, static state => state.Left == 0 && state.Right == 0);
+    }
+
+    [Fact]
+    public async Task Next_cycle_waits_for_terminal_callback_and_separate_cycle_idle()
+    {
+        using var stop = new CancellationTokenSource();
+        var xinput = new FakeXbox360RumbleLoopXInput();
+        var terminalSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nextCycleStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Xbox360RumbleLoopDiagnostic? diagnostic = null;
+        xinput.OnSetState = (_, left, right) =>
+        {
+            if (left == 0 && right == 0)
+                terminalSent.TrySetResult();
+            else if (diagnostic?.Snapshot.Cycle > 1)
+            {
+                nextCycleStarted.TrySetResult();
+                stop.Cancel();
+            }
+            return Xbox360RumbleLoopDiagnostic.ErrorSuccess;
+        };
+        diagnostic = CreateDiagnostic(
+            xinput,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(100),
+            () => new(PhysicalRumbleWriteStatus.Succeeded, "OK"),
+            cycleIdle: TimeSpan.FromMilliseconds(500));
+
+        var run = diagnostic.RunAsync(stop.Token);
+        await terminalSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var firstPatternStepCount = Xbox360RumbleLoopDiagnostic.GetPatternForCycle(1).Steps.Count;
+        Assert.Equal(firstPatternStepCount, xinput.SetStates.Count);
+        Assert.Equal(1, diagnostic.Snapshot.Cycle);
+
+        diagnostic.ObserveCallback(0, 0, 1);
+        await Task.Delay(TimeSpan.FromMilliseconds(50));
+        Assert.False(nextCycleStarted.Task.IsCompleted);
+        Assert.Equal(firstPatternStepCount, xinput.SetStates.Count);
+
+        await nextCycleStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, diagnostic.Snapshot.Cycle);
     }
 
     [Fact]
@@ -161,6 +240,40 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
         Assert.Equal("XInputSetStateFailed", diagnostic.Snapshot.FailureReason);
         Assert.Single(xinput.SetStates);
         Assert.Equal(1, physicalStops);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Throwing_xinput_call_fails_and_requests_only_physical_cleanup(bool throwOnTerminalStop)
+    {
+        var xinput = new FakeXbox360RumbleLoopXInput
+        {
+            OnSetState = (_, left, right) =>
+            {
+                if (throwOnTerminalStop ? left == 0 && right == 0 : left != 0 || right != 0)
+                    throw new IOException("XInput call failed");
+                return Xbox360RumbleLoopDiagnostic.ErrorSuccess;
+            }
+        };
+        var lifecycle = new ConcurrentQueue<string>();
+        var traceCapture = new FakeXbox360UsbTraceCapture(lifecycle);
+        var physicalStops = 0;
+        var diagnostic = CreateDiagnostic(xinput, TimeSpan.Zero, TimeSpan.FromMilliseconds(25), () =>
+        {
+            physicalStops++;
+            lifecycle.Enqueue("PhysicalStop");
+            return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
+        }, traceCapture);
+
+        await diagnostic.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(FrontendXbox360RumbleLoopState.Failed, diagnostic.Snapshot.State);
+        Assert.Equal("XInputSetStateException", diagnostic.Snapshot.FailureReason);
+        Assert.Equal(throwOnTerminalStop ? Xbox360RumbleLoopDiagnostic.GetPatternForCycle(1).Steps.Count : 1, xinput.SetStates.Count);
+        Assert.Equal(throwOnTerminalStop ? 1 : 0, xinput.SetStates.Count(static state => state.Left == 0 && state.Right == 0));
+        Assert.Equal(1, physicalStops);
+        Assert.Equal(new[] { "TraceStart", "PhysicalStop", "TraceStop:XInputSetStateException" }, lifecycle);
     }
 
     [Fact]
@@ -265,11 +378,12 @@ public sealed class Xbox360RumbleLoopDiagnosticTests
 
     private static Xbox360RumbleLoopDiagnostic CreateDiagnostic(
         FakeXbox360RumbleLoopXInput xinput,
-        TimeSpan cadence,
+        TimeSpan burstStepCadence,
         TimeSpan callbackTimeout,
         Func<PhysicalRumbleWriteResult> physicalStop,
-        IXbox360UsbTraceCapture? traceCapture = null) =>
-        new(0, xinput, physicalStop, cadence, callbackTimeout, traceCapture);
+        IXbox360UsbTraceCapture? traceCapture = null,
+        TimeSpan? cycleIdle = null) =>
+        new(0, xinput, physicalStop, burstStepCadence, callbackTimeout, traceCapture, cycleIdle ?? TimeSpan.FromMilliseconds(1));
 
     private sealed class FakeXbox360UsbTraceCapture(ConcurrentQueue<string>? lifecycle = null) : IXbox360UsbTraceCapture
     {

@@ -265,7 +265,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly Func<BackButtonMappingSettings> _backButtonMappingProvider;
     private readonly Func<IXbox360RumbleLoopXInput> _rumbleLoopXInputFactory;
     private readonly Func<IXbox360UsbTraceCapture>? _rumbleLoopUsbTraceCaptureFactory;
-    private readonly TimeSpan _rumbleLoopCadence;
+    private readonly TimeSpan _rumbleLoopBurstStepCadence;
+    private readonly TimeSpan _rumbleLoopCycleIdle;
     private readonly TimeSpan _rumbleLoopTerminalCallbackTimeout;
 
     /// <summary>Full1902 production rumble: the one shared physical MSI writer, bound to the same
@@ -309,15 +310,17 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         Func<IControllerStateSnapshotSource, ICanonicalSteamDeckStateSink, SteamDeckSystemButtonOverlay, Action<Exception>, IAddonPresentationPublisher>? deckPublisherFactory = null,
         Func<BackButtonMappingSettings>? backButtonMappingProvider = null,
         Func<IXbox360RumbleLoopXInput>? rumbleLoopXInputFactory = null,
-        TimeSpan? rumbleLoopCadence = null,
+        TimeSpan? rumbleLoopBurstStepCadence = null,
         TimeSpan? rumbleLoopTerminalCallbackTimeout = null,
-        Func<IXbox360UsbTraceCapture>? rumbleLoopUsbTraceCaptureFactory = null)
+        Func<IXbox360UsbTraceCapture>? rumbleLoopUsbTraceCaptureFactory = null,
+        TimeSpan? rumbleLoopCycleIdle = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
         _rumbleLoopXInputFactory = rumbleLoopXInputFactory ?? (static () => new WindowsXbox360RumbleLoopXInput());
         _rumbleLoopUsbTraceCaptureFactory = rumbleLoopUsbTraceCaptureFactory;
-        _rumbleLoopCadence = rumbleLoopCadence ?? Xbox360RumbleLoopDiagnostic.ProductionCadence;
+        _rumbleLoopBurstStepCadence = rumbleLoopBurstStepCadence ?? Xbox360RumbleLoopDiagnostic.ProductionBurstStepCadence;
+        _rumbleLoopCycleIdle = rumbleLoopCycleIdle ?? Xbox360RumbleLoopDiagnostic.ProductionCycleIdle;
         _rumbleLoopTerminalCallbackTimeout = rumbleLoopTerminalCallbackTimeout
             ?? Xbox360RumbleLoopDiagnostic.ProductionTerminalCallbackTimeout;
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
@@ -423,9 +426,10 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 slot,
                 xinput,
                 bridge.WriteDiagnosticPhysicalStop,
-                _rumbleLoopCadence,
-                _rumbleLoopTerminalCallbackTimeout,
-                _rumbleLoopUsbTraceCaptureFactory?.Invoke());
+                burstStepCadence: _rumbleLoopBurstStepCadence,
+                terminalCallbackTimeout: _rumbleLoopTerminalCallbackTimeout,
+                usbTraceCapture: _rumbleLoopUsbTraceCaptureFactory?.Invoke(),
+                cycleIdle: _rumbleLoopCycleIdle);
             var stop = new CancellationTokenSource();
             _rumbleLoopDiagnostic = diagnostic;
             _rumbleLoopStop = stop;

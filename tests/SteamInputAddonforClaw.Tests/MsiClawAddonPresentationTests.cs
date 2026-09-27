@@ -892,9 +892,10 @@ public sealed class MsiClawAddonPresentationTests
         FakePublisher deck,
         FakeRumbleSink sink,
         Func<IXbox360RumbleLoopXInput>? xinputFactory = null,
-        TimeSpan? rumbleLoopCadence = null,
+        TimeSpan? rumbleLoopBurstStepCadence = null,
         TimeSpan? rumbleLoopTerminalCallbackTimeout = null,
-        Func<IXbox360UsbTraceCapture>? traceCaptureFactory = null)
+        Func<IXbox360UsbTraceCapture>? traceCaptureFactory = null,
+        TimeSpan? rumbleLoopCycleIdle = null)
     {
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
         Assert.NotNull(runtime);
@@ -905,7 +906,8 @@ public sealed class MsiClawAddonPresentationTests
             xbox360PublisherFactory: (_, _, fault) => { xbox360.Fault = fault; return xbox360; },
             deckPublisherFactory: (_, _, _, fault) => { deck.Fault = fault; return deck; },
             rumbleLoopXInputFactory: xinputFactory,
-            rumbleLoopCadence: rumbleLoopCadence,
+            rumbleLoopBurstStepCadence: rumbleLoopBurstStepCadence,
+            rumbleLoopCycleIdle: rumbleLoopCycleIdle,
             rumbleLoopTerminalCallbackTimeout: rumbleLoopTerminalCallbackTimeout,
             rumbleLoopUsbTraceCaptureFactory: traceCaptureFactory);
     }
