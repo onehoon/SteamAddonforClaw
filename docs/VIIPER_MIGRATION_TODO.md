@@ -23,7 +23,7 @@ Steam Deck typed VIIPER path with identity `28DE:1205`.
 The embedded VIIPER revision is:
 
 ```text
-onehoon/VIIPER@abc9bd0aa1dc061aca92f75cdf6069e259de9476
+onehoon/VIIPER@bf8c8afd2800fac4bf104dac19f049835202a91d
 ```
 
 The Addon-side session, mapper, publisher, PnP identity resolver, and safety
