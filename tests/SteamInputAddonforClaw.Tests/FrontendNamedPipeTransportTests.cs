@@ -60,7 +60,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(43, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -133,7 +133,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(43, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -153,7 +153,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(43, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -167,6 +167,56 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(FrontendXbox360RumbleLoopState.Stopped, stopped.State);
         Assert.Equal(1, fake.RumbleLoopStartCount);
         Assert.Equal(1, fake.RumbleLoopStopCount);
+    }
+
+    [Fact]
+    public async Task Pid1902_input_cadence_diagnostic_round_trips_one_typed_operation()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        Assert.Equal(44, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
+        Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
+    }
+
+    [Fact]
+    public async Task Pid1902_input_cadence_diagnostic_rejects_an_unexpected_payload()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Request, 1,
+            FrontendRpcMethod.RunPid1902InputCadenceDiagnostic, Payload: FrontendWireCodec.Payload(new { unexpected = true })), writeGate, CancellationToken.None);
+
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.Pid1902InputCadenceRunCount);
+    }
+
+    [Fact]
+    public async Task Pid1902_input_cadence_diagnostic_propagates_cancellation_to_the_frontend_operation()
+    {
+        var fake = new RecordingFrontendControl { BlockPid1902InputCadence = true };
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        using var cancellation = new CancellationTokenSource();
+
+        var operation = client.RunPid1902InputCadenceDiagnosticAsync(cancellation.Token);
+        await fake.Pid1902InputCadenceStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
+        await fake.Pid1902InputCadenceCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -1348,13 +1398,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 43 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 44 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":43,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":43,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":43,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":44,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":44,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":44,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1848,6 +1898,24 @@ public sealed class FrontendNamedPipeTransportTests
             RumbleLoopSnapshot = RumbleLoopSnapshot with { State = FrontendXbox360RumbleLoopState.Stopped, Status = "Stopped" };
             RumbleLoopStopped.TrySetResult();
             return Task.FromResult(RumbleLoopSnapshot);
+        }
+        public FrontendPid1902InputCadenceResult Pid1902InputCadenceResult { get; } = new(
+            FrontendPid1902InputCadenceOutcome.Completed, "Completed", 10_000, 10_003, 7_842, 784.0,
+            1_247, 6_595, 84.1, 124.8, 6.94, 8.01, 8.00, 8.46, 11.21);
+        public int Pid1902InputCadenceRunCount { get; private set; }
+        public bool BlockPid1902InputCadence { get; init; }
+        public TaskCompletionSource Pid1902InputCadenceStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Pid1902InputCadenceCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken t = default)
+        {
+            TotalCalls++;
+            Pid1902InputCadenceRunCount++;
+            if (BlockPid1902InputCadence)
+            {
+                Pid1902InputCadenceStarted.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, t); } catch (OperationCanceledException) { Pid1902InputCadenceCancelled.TrySetResult(); throw; }
+            }
+            return Pid1902InputCadenceResult;
         }
     }
 

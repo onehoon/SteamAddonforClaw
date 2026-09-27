@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -48,6 +49,8 @@ internal interface IMsiClawPreparedInputSource : IAsyncDisposable, IControllerSt
 
     MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor);
     Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken);
+    Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
     Task StopAsync();
 }
 

@@ -542,7 +542,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             shortcutRuntime: _shortcutRuntime,
             captureXbox360RumbleLoopDiagnostic: CaptureXbox360RumbleLoopDiagnosticAsync,
             startXbox360RumbleLoopDiagnostic: StartXbox360RumbleLoopDiagnosticAsync,
-            stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync);
+            stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync,
+            runPid1902InputCadenceDiagnostic: RunPid1902InputCadenceDiagnosticAsync);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -1006,6 +1007,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _presentationOwnership is { } presentation
             ? presentation.StopXbox360RumbleLoopDiagnosticAsync(cancellationToken)
             : Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
+
+    private Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken) =>
+        _physicalOwnership?.LiveInputSource is { IsRunning: true } source
+            ? source.RunPid1902InputCadenceDiagnosticAsync(cancellationToken)
+            : Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable("The live PID1902 DirectInput source is unavailable."));
 
     private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync(CancellationToken cancellationToken)
     {
