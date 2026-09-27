@@ -40,8 +40,6 @@ internal static class SafeUninstallRegistration
 {
     internal const string SafeUninstallArgument = "--safe-uninstall";
     internal const string SilentArgument = "--silent";
-    private const string StubExecutableName = "SteamInputAddonforClaw.exe";
-    private const string UpdaterExecutableName = "Update.exe";
 
     internal static SafeUninstallRegistrationResult EnsureCurrentInstallation(
         string rootAppDirectory,
@@ -74,6 +72,7 @@ internal static class SafeUninstallRegistration
     internal static bool TryValidateCurrentInstallation(
         string rootAppDirectory,
         string? currentProcessPath,
+        string? expectedCurrentExecutablePath,
         out string updaterPath,
         ISafeUninstallRegistry? registry = null,
         Func<string, bool>? fileExists = null)
@@ -83,9 +82,9 @@ internal static class SafeUninstallRegistration
         {
             registry ??= new WindowsSafeUninstallRegistry();
             fileExists ??= File.Exists;
-            if (string.IsNullOrWhiteSpace(currentProcessPath)
-                || !TryResolveInstallation(rootAppDirectory, registry, fileExists, out _, out var stubPath, out var resolvedUpdater, out _)
-                || !PathEquals(currentProcessPath, stubPath))
+            if (!VelopackAppPaths.TryResolveCurrentExecutablePath(currentProcessPath, expectedCurrentExecutablePath, out var currentExecutablePath)
+                || !fileExists(currentExecutablePath)
+                || !TryResolveInstallation(rootAppDirectory, registry, fileExists, out _, out _, out var resolvedUpdater, out _))
                 return false;
             updaterPath = resolvedUpdater;
             return true;
@@ -112,8 +111,8 @@ internal static class SafeUninstallRegistration
         if (string.IsNullOrWhiteSpace(rootAppDirectory)) return false;
 
         var root = Path.GetFullPath(rootAppDirectory);
-        stubPath = Path.Combine(root, StubExecutableName);
-        updaterPath = Path.Combine(root, UpdaterExecutableName);
+        stubPath = VelopackAppPaths.ResolveStableExecutablePath(root);
+        updaterPath = Path.Combine(root, VelopackAppPaths.UpdaterExecutableName);
         entry = registry.ReadAddonEntry();
         if (entry is null)
         {

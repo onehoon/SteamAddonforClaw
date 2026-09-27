@@ -75,7 +75,7 @@ internal static class SafeUninstall
     {
         var root = VelopackAppPaths.RootAppDirectory;
         if (!SafeUninstallRegistration.TryValidateCurrentInstallation(
-                root, Environment.ProcessPath, out var updaterPath))
+                root, Environment.ProcessPath, VelopackAppPaths.CurrentExecutablePath, out var updaterPath))
             return Abort(silent, "The Addon installation could not be verified. No files were removed.");
 
         using var attemptMutex = new Mutex(initiallyOwned: true, AttemptMutexName, out var ownsAttempt);
@@ -181,10 +181,9 @@ internal static class SafeUninstall
     {
         try
         {
-            var processPath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(processPath)
-                || !string.Equals(Path.GetFullPath(processPath), Path.GetFullPath(Path.Combine(root, "SteamInputAddonforClaw.exe")), StringComparison.OrdinalIgnoreCase))
-                return new(false, false, "StableAddonExecutablePathChanged");
+            if (!VelopackAppPaths.TryResolveCurrentExecutablePath(
+                    Environment.ProcessPath, VelopackAppPaths.CurrentExecutablePath, out var processPath))
+                return new(false, false, "CurrentAddonExecutablePathChanged");
 
             var startInfo = new ProcessStartInfo(processPath)
             {

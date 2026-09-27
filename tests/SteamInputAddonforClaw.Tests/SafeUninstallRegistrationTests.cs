@@ -15,8 +15,8 @@ public sealed class SafeUninstallRegistrationTests
 
         Assert.True(result.Success, result.Reason);
         Assert.Equal(1, registry.WriteCalls);
-        Assert.Equal($"\"{Path.Combine(root, "SteamInputAddonforClaw.exe")}\" --safe-uninstall", registry.Entry!.UninstallString);
-        Assert.Equal($"\"{Path.Combine(root, "SteamInputAddonforClaw.exe")}\" --safe-uninstall --silent", registry.Entry.QuietUninstallString);
+        Assert.Equal($"\"{Path.Combine(root, VelopackAppPaths.StableLauncherName)}\" --safe-uninstall", registry.Entry!.UninstallString);
+        Assert.Equal($"\"{Path.Combine(root, VelopackAppPaths.StableLauncherName)}\" --safe-uninstall --silent", registry.Entry.QuietUninstallString);
     }
 
     [Fact]
@@ -44,17 +44,57 @@ public sealed class SafeUninstallRegistrationTests
     }
 
     [Fact]
-    public void TryValidateCurrentInstallation_RequiresStableStubFromExactRoot()
+    public void TryValidateCurrentInstallation_AcceptsForwardedCurrentBinaryAndRejectsStableLauncher()
     {
         var root = Path.Combine(Path.GetTempPath(), "SafeUninstall", Guid.NewGuid().ToString("N"));
         var updater = Path.Combine(root, "Update.exe");
-        var stub = Path.Combine(root, "SteamInputAddonforClaw.exe");
+        var currentDirectory = Path.Combine(root, "current");
+        var currentExecutable = Path.Combine(currentDirectory, VelopackAppPaths.MainExecutableName);
         var registry = new FakeRegistry(new(root, $"\"{updater}\" --uninstall", null));
 
-        Assert.True(SafeUninstallRegistration.TryValidateCurrentInstallation(root, stub, out var resolvedUpdater, registry, _ => true));
+        var expectedCurrentExecutable = VelopackAppPaths.ResolveCurrentExecutablePath(currentDirectory);
+        Assert.True(SafeUninstallRegistration.TryValidateCurrentInstallation(root, currentExecutable, expectedCurrentExecutable, out var resolvedUpdater, registry, _ => true));
         Assert.Equal(updater, resolvedUpdater);
-        Assert.False(SafeUninstallRegistration.TryValidateCurrentInstallation(root, Path.Combine(root, "Other.exe"), out _, registry, _ => true));
-        Assert.False(SafeUninstallRegistration.TryValidateCurrentInstallation(root, null, out _, registry, _ => true));
+        Assert.False(SafeUninstallRegistration.TryValidateCurrentInstallation(root, Path.Combine(root, VelopackAppPaths.StableLauncherName), expectedCurrentExecutable, out _, registry, _ => true));
+        Assert.False(SafeUninstallRegistration.TryValidateCurrentInstallation(root, Path.Combine(root, "Other.exe"), expectedCurrentExecutable, out _, registry, _ => true));
+        Assert.False(SafeUninstallRegistration.TryValidateCurrentInstallation(root, null, expectedCurrentExecutable, out _, registry, _ => true));
+    }
+
+    [Fact]
+    public void InstalledVeloPackLayout_RegistersStableLauncherAndValidatesForwardedCurrentBinary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SafeUninstall", Guid.NewGuid().ToString("N"));
+        var currentDirectory = Path.Combine(root, "current");
+        var stableLauncher = Path.Combine(root, VelopackAppPaths.StableLauncherName);
+        var updater = Path.Combine(root, VelopackAppPaths.UpdaterExecutableName);
+        var currentExecutable = Path.Combine(currentDirectory, VelopackAppPaths.MainExecutableName);
+        Directory.CreateDirectory(currentDirectory);
+        File.WriteAllText(stableLauncher, "stub");
+        File.WriteAllText(updater, "updater");
+        File.WriteAllText(currentExecutable, "main executable");
+        var registry = new FakeRegistry(new(root, $"\"{updater}\" --uninstall", null));
+
+        try
+        {
+            var registration = SafeUninstallRegistration.EnsureCurrentInstallation(root, registry);
+            Assert.True(registration.Success, registration.Reason);
+            Assert.Equal($"\"{stableLauncher}\" --safe-uninstall", registry.Entry!.UninstallString);
+            Assert.Equal($"\"{stableLauncher}\" --safe-uninstall --silent", registry.Entry.QuietUninstallString);
+
+            var expectedCurrentExecutable = VelopackAppPaths.ResolveCurrentExecutablePath(currentDirectory);
+            Assert.True(SafeUninstallRegistration.TryValidateCurrentInstallation(
+                root, currentExecutable, expectedCurrentExecutable, out var resolvedUpdater, registry));
+            Assert.Equal(updater, resolvedUpdater);
+            Assert.True(VelopackAppPaths.TryResolveCurrentExecutablePath(
+                currentExecutable, expectedCurrentExecutable, out var elevatedHelperExecutable));
+            Assert.Equal(currentExecutable, elevatedHelperExecutable);
+            Assert.False(VelopackAppPaths.TryResolveCurrentExecutablePath(
+                stableLauncher, expectedCurrentExecutable, out _));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private sealed class FakeRegistry(SafeUninstallRegistryEntry entry) : ISafeUninstallRegistry
