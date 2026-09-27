@@ -11,6 +11,9 @@ internal enum DisabledBootAdmissionOutcome
     /// <summary>Every read-only admission fact was positively verified. PR5 may later attempt the
     /// first physical Full PID1902 ownership operation.</summary>
     Ready,
+    /// <summary>Runtime prerequisites are not ready. Controller acquisition remains blocked, but
+    /// the existing prerequisite setup path may assess whether a bounded repair is installable.</summary>
+    PrerequisitesNotReady,
     /// <summary>At least one required fact could not be positively proven. No controller mutation
     /// runs; the mandatory Runtime stays alive so the user can inspect/repair or Enable and Restart.</summary>
     Blocked,
@@ -34,6 +37,18 @@ internal sealed record DisabledBootControllerAdmissionResult(DisabledBootAdmissi
         AppLog.Warn("ControllerAdmission", "Disabled-boot controller admission blocked.", null, ("Result", "Blocked"), ("Reason", reason));
         return new(DisabledBootAdmissionOutcome.Blocked, reason);
     }
+
+    internal static DisabledBootControllerAdmissionResult PrerequisitesNotReady(RuntimePrerequisiteAssessment prerequisites)
+    {
+        var reason =
+            $"Prerequisites HidHide={prerequisites.HidHide.Status} " +
+            $"UsbIpWin2={prerequisites.UsbIpWin2.Status} " +
+            $"Viiper={prerequisites.Viiper.Status}";
+
+        AppLog.Warn("ControllerAdmission", "Disabled-boot controller admission requires prerequisite repair.", null,
+            ("Result", "PrerequisitesNotReady"), ("Reason", reason));
+        return new(DisabledBootAdmissionOutcome.PrerequisitesNotReady, reason);
+    }
 }
 
 internal interface IDisabledBootControllerAdmission
@@ -47,7 +62,8 @@ internal interface IDisabledBootControllerAdmission
 
 /// <summary>Read-only Disabled-boot admission for the Full PID1902 path. After the startup
 /// coordinator has proven supported hardware and a stable MSI Claw topology, this classifies the
-/// current controller environment as <see cref="DisabledBootAdmissionOutcome.Ready"/> or
+/// current controller environment as <see cref="DisabledBootAdmissionOutcome.Ready"/>,
+/// <see cref="DisabledBootAdmissionOutcome.PrerequisitesNotReady"/>, or
 /// <see cref="DisabledBootAdmissionOutcome.Blocked"/> from current facts only -- the Runtime
 /// prerequisite inspector and the deterministic zero-target HidHide baseline normalization -- and
 /// performs no physical mode command.</summary>
@@ -71,8 +87,7 @@ internal sealed class DisabledBootControllerAdmission(
             return DisabledBootControllerAdmissionResult.Blocked("PrerequisiteInspectionUnavailable");
         }
         if (!prerequisites.IsRoutingReady)
-            return DisabledBootControllerAdmissionResult.Blocked(
-                $"Prerequisites HidHide={prerequisites.HidHide.Status} UsbIpWin2={prerequisites.UsbIpWin2.Status} Viiper={prerequisites.Viiper.Status}");
+            return DisabledBootControllerAdmissionResult.PrerequisitesNotReady(prerequisites);
 
         // 2. Normalize + read-back verify the persistent Addon HidHide baseline on THIS boot. A user
         //    or another program may have changed HidHide while the Addon was not running, so a stale

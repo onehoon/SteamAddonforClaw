@@ -63,17 +63,42 @@ public sealed class DisabledBootControllerAdmissionTests
             DisabledBootAdmissionOutcome.Blocked,
             Build(inspectHidHide: () => throw new InvalidOperationException("boom")).Evaluate().Outcome);
 
-    // ---- 25.6 prerequisites ----
+    // ---- Runtime prerequisites stop ownership before the HidHide baseline stage ----
 
     [Theory]
     [InlineData("UsbIpWin2", "Missing")]
+    [InlineData("UsbIpWin2", "Incompatible")]
     [InlineData("Viiper", "Unusable")]
     [InlineData("HidHide", "Indeterminate")]
     [InlineData("Viiper", "Incompatible")]
-    public void Prerequisite_not_ready_is_blocked(string kind, string status)
-        => Assert.Equal(
-            DisabledBootAdmissionOutcome.Blocked,
-            Build(prerequisites: With(Enum.Parse<PrerequisiteKind>(kind), Enum.Parse<PrerequisiteStatus>(status))).Evaluate().Outcome);
+    public void Prerequisite_not_ready_is_distinguished_from_other_admission_failures(string kind, string status)
+    {
+        var baselineCalled = false;
+        var result = Build(
+            prerequisites: With(Enum.Parse<PrerequisiteKind>(kind), Enum.Parse<PrerequisiteStatus>(status)),
+            inspectHidHide: () =>
+            {
+                baselineCalled = true;
+                return new(AddonHidHideBaselineOutcome.AlreadyCompliant, "test", AddonHidHideBaselineSnapshot.Unknown);
+            }).Evaluate();
+
+        Assert.Equal(DisabledBootAdmissionOutcome.PrerequisitesNotReady, result.Outcome);
+        Assert.False(result.IsReady);
+        Assert.False(baselineCalled);
+    }
+
+    [Fact]
+    public void Actual_0927_prerequisite_state_is_prerequisites_not_ready()
+    {
+        var result = Build(prerequisites: new(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "Ready"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Incompatible, "UsbIpWin2VersionUnsupported", "0.9.8.0"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Ready"))).Evaluate();
+
+        Assert.Equal(DisabledBootAdmissionOutcome.PrerequisitesNotReady, result.Outcome);
+        Assert.False(result.IsReady);
+        Assert.Contains("UsbIpWin2=Incompatible", result.Reason, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void Prerequisite_inspection_throwing_is_blocked()

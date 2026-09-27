@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
@@ -30,7 +31,10 @@ public sealed class FirstTimeSetupPolicyTests
     {
         var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing) with
         {
-            HardwareCompatibility = new((HardwareCompatibilityStatus)hardwareStatus, null, null, "test")
+            HardwareCompatibility = new((HardwareCompatibilityStatus)hardwareStatus, null, null, "test"),
+            RecoverySafe = false,
+            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0")
         });
 
         Assert.Equal((FirstTimeSetupStatus)expectedSetupStatus, result.Status);
@@ -332,6 +336,8 @@ public sealed class FirstTimeSetupPolicyTests
     {
         var input = Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
         {
+            RecoverySafe = false,
+            AllowUsbIpRepairWhileRecoveryUnsafe = true,
             Steam = SteamSessionState.FromRunningAppId(1234),
             UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.7.6")
         };
@@ -353,6 +359,76 @@ public sealed class FirstTimeSetupPolicyTests
         });
 
         Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void DisabledBootPrerequisiteStop_AllowsOnlyTheExistingUsbIpUpgradePath()
+    {
+        var prerequisites = RuntimePrerequisites(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready);
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            RecoverySafe = false,
+            AllowUsbIpRepairWhileRecoveryUnsafe = FrontendPrerequisiteSetupExecutor.AllowsUsbIpRepairWhileRecoveryUnsafe(
+                startupRepairWindow: true,
+                prerequisites),
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0")
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.True(setup.CanInstallRequiredComponents);
+    }
+
+    [Theory]
+    [InlineData((int)PrerequisiteStatus.Indeterminate, (int)PrerequisiteStatus.Ready)]
+    [InlineData((int)PrerequisiteStatus.Ready, (int)PrerequisiteStatus.Incompatible)]
+    public void DisabledBootUsbIpRepairWindow_RemainsClosedWhenHidHideOrViiperIsNotReady(
+        int hidHideStatus,
+        int viiperStatus)
+    {
+        var prerequisites = RuntimePrerequisites((PrerequisiteStatus)hidHideStatus, (PrerequisiteStatus)viiperStatus);
+        var setup = FirstTimeSetupPolicy.Evaluate(Input((PrerequisiteStatus)hidHideStatus, PrerequisiteStatus.Incompatible) with
+        {
+            RecoverySafe = false,
+            AllowUsbIpRepairWhileRecoveryUnsafe = FrontendPrerequisiteSetupExecutor.AllowsUsbIpRepairWhileRecoveryUnsafe(
+                startupRepairWindow: true,
+                prerequisites),
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0")
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.RecoveryUnsafe, setup.Reason);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+    [Fact]
+    public void DisabledBootPrerequisiteStop_AllowsMissingUsbIpThroughTheExistingSetupPath()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Missing) with
+        {
+            RecoverySafe = false,
+            AllowUsbIpRepairWhileRecoveryUnsafe = true
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.True(setup.CanInstallRequiredComponents);
+    }
+
+    [Theory]
+    [InlineData((int)ComponentInstallationStatus.Incompatible)]
+    [InlineData((int)ComponentInstallationStatus.ExistingUnverified)]
+    [InlineData((int)ComponentInstallationStatus.Indeterminate)]
+    [InlineData((int)ComponentInstallationStatus.Installed)]
+    public void DisabledBootRepairWindow_DoesNotBypassRecoveryUnsafeForOtherUsbIpStates(int installationStatus)
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            RecoverySafe = false,
+            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, (ComponentInstallationStatus)installationStatus, "test", "0.9.8.1")
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.RecoveryUnsafe, setup.Reason);
         Assert.False(setup.CanInstallRequiredComponents);
     }
 
@@ -412,6 +488,40 @@ public sealed class FirstTimeSetupPolicyTests
     }
 
     [Fact]
+    public void DisabledBootRepairWindow_DoesNotBypassPendingReboot()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            RecoverySafe = false,
+            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0"),
+            Provisioning = new(ComponentProvisioningState.None, ComponentProvisioningState.PendingReboot)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.RestartRequired, setup.Status);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Theory]
+    [InlineData((int)ComponentProvisioningState.Corrupt)]
+    [InlineData((int)ComponentProvisioningState.Indeterminate)]
+    [InlineData((int)ComponentProvisioningState.InstallStarted)]
+    public void DisabledBootRepairWindow_DoesNotBypassUnresolvedUsbIpReceipt(int provisioningState)
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
+        {
+            RecoverySafe = false,
+            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0"),
+            Provisioning = new(ComponentProvisioningState.None, (ComponentProvisioningState)provisioningState)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.ProvisioningUncertain, setup.Reason);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
     public void PendingRebootAfterBootChangeIsCompleteWhenPackagesAreInstalled()
     {
         var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
@@ -467,4 +577,11 @@ public sealed class FirstTimeSetupPolicyTests
 
     private static ComponentInstallationAssessment Installation(PrerequisiteStatus status, PrerequisiteKind kind) =>
         new(kind, status is PrerequisiteStatus.Ready or PrerequisiteStatus.Unusable ? ComponentInstallationStatus.Installed : status == PrerequisiteStatus.Missing ? ComponentInstallationStatus.Missing : ComponentInstallationStatus.ExistingUnverified, "test");
+
+    private static RuntimePrerequisiteAssessment RuntimePrerequisites(
+        PrerequisiteStatus hidHide,
+        PrerequisiteStatus viiper) => new(
+            new(PrerequisiteKind.HidHide, hidHide, "test"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Incompatible, "test", "0.9.8.0"),
+            new(PrerequisiteKind.Viiper, viiper, "test"));
 }
