@@ -1,0 +1,702 @@
+
+# Work Order — Replay Lies of P Rumble Burst Patterns in the Xbox360 Terminal-STOP Diagnostic
+
+## Goal
+
+Change the existing Developer-only Xbox360 terminal-STOP loop diagnostic in onehoon/SteamAddonforClaw so its host-side XInput rumble traffic resembles the real Lies of P traffic that reproduced the CTW stuck-rumble issue.
+
+This is a diagnostic-pattern change only.
+
+Do not change production rumble forwarding, VIIPER, physical rumble safety, Full1902 lifecycle ownership, routing, attachment, HidHide, or controller presentation policy.
+
+The diagnostic should remain suitable for being left running unattended:
+
+- it may run slowly for a long time;
+- it must continue looping while terminal STOP callbacks are observed normally;
+- it must automatically stop on the first missing terminal STOP callback or other existing failure;
+- existing physical cleanup STOP and USB trace cleanup behavior must remain intact.
+
+The objective is not to make the test faster.
+
+The objective is to reproduce the short, rapidly changing rumble burst shape seen in real Lies of P gameplay rather than the current artificial one-second-step pattern.
+
+---
+
+## 1. Current implementation
+
+Primary files:
+
+~~~text
+src/SteamInputAddonforClaw/Diagnostics/Xbox360RumbleLoopDiagnostic.cs
+tests/SteamInputAddonforClaw.Tests/Xbox360RumbleLoopDiagnosticTests.cs
+src/SteamInputAddonforClaw/Devices/MSI/Claw/MsiClawAddonPresentation.cs
+src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs
+~~~
+
+Current diagnostic behavior is approximately:
+
+~~~text
+CreateSequence(cycle)
+    -> deterministic pseudo-random strictly descending sequence
+    -> 6..10 non-zero values
+    -> one exact zero
+
+ProductionCadence = 1 second
+
+value #1
+  1 s
+value #2
+  1 s
+...
+value #N
+  1 s
+0 / 0
+  wait for terminal callback
+  1 s
+next cycle
+~~~
+
+The current test therefore keeps individual motor values active for about one second and produces a total non-zero burst lasting roughly 6-10 seconds.
+
+That is not representative of the real title that reproduces the problem.
+
+---
+
+## 2. Source observation from the real CTW / Lies of P reproductions
+
+The supplied CTW / libVIIPER field logs show that Lies of P does not hold one rumble level for a second at a time.
+
+Observed game behavior is change-driven.
+
+Within an individual rumble burst, motor values can change on the order of roughly 60-75 ms, with a complete burst often lasting only a few hundred milliseconds.
+
+Representative captured patterns include:
+
+### Captured pattern A
+
+~~~text
+255 / 255
+241 / 241
+217 / 217
+252 / 252
+230 / 230
+208 / 208
+0 / 0
+~~~
+
+The corresponding failing field occurrence ended after the final non-zero value without the expected terminal STOP being observed on the existing VIIPER device trace.
+
+For the diagnostic replay, always include the final 0 / 0 because the point of the test is to determine whether an explicit host STOP survives the path.
+
+### Captured pattern B
+
+~~~text
+255 / 255
+242 / 242
+218 / 218
+204 / 204
+0 / 0
+~~~
+
+A failing field occurrence similarly went silent after the final non-zero value.
+
+Again, the diagnostic must explicitly issue the terminal 0 / 0.
+
+### Captured pattern C
+
+A representative normally completed short burst is:
+
+~~~text
+255 / 255
+242 / 242
+217 / 217
+0 / 0
+~~~
+
+### Captured pattern D
+
+The game can also increase again inside one burst rather than following a simple monotonic decay.
+
+Use a representative replay shape:
+
+~~~text
+255 / 255
+239 / 239
+219 / 219
+255 / 255
+247 / 247
+228 / 228
+209 / 209
+0 / 0
+~~~
+
+The exact purpose of these patterns is to preserve the characteristics that the current diagnostic lacks:
+
+~~~text
+short burst
+rapid state changes
+high initial amplitude
+multiple updates before STOP
+non-monotonic changes in some bursts
+one explicit terminal STOP
+~~~
+
+Do not invent random values at runtime.
+
+Use a fixed deterministic pattern table so failures are reproducible and logs can identify the exact pattern.
+
+---
+
+## 3. Important distinction: burst cadence vs total test duration
+
+The user does not need the overall diagnostic to finish quickly.
+
+The diagnostic is intentionally allowed to run for a long time while unattended.
+
+Therefore separate the two concepts:
+
+~~~text
+burst step cadence
+    ~= real game timing
+
+cycle idle
+    deliberately much longer
+~~~
+
+Recommended production defaults:
+
+~~~text
+BurstStepCadence = 65 ms
+CycleIdle = 2 seconds
+TerminalCallbackTimeout = retain the current bounded 1-second default
+~~~
+
+A step cadence near 65 ms is representative of the captured real-game bursts.
+
+The cycle idle is not intended to reproduce every gameplay interval exactly. It exists to avoid turning the diagnostic into an artificial continuous motor stress test and to make it safe/convenient to leave running.
+
+Do not optimize the test for cycles per minute.
+
+If implementation simplicity favors a fixed 2-second idle, use it.
+
+Do not randomize the idle interval.
+
+---
+
+## 4. Required new pattern model
+
+Replace the current generated byte-array CreateSequence(int cycle) behavior with a small immutable deterministic table of captured patterns.
+
+Prefer a tiny two-channel step representation, for example:
+
+~~~csharp
+internal readonly record struct RumbleReplayStep(byte Left8, byte Right8);
+~~~
+
+A suitable pattern table is conceptually:
+
+~~~csharp
+private static readonly RumbleReplayStep[][] LiesOfPRumblePatterns =
+[
+    [new(255,255), new(241,241), new(217,217), new(252,252), new(230,230), new(208,208), new(0,0)],
+    [new(255,255), new(242,242), new(218,218), new(204,204), new(0,0)],
+    [new(255,255), new(242,242), new(217,217), new(0,0)],
+    [new(255,255), new(239,239), new(219,219), new(255,255), new(247,247), new(228,228), new(209,209), new(0,0)],
+];
+~~~
+
+The exact syntax may follow current code style.
+
+Do not introduce a generic pattern engine, strategy abstraction, configuration service, JSON schema, or persistence layer.
+
+This is a narrow developer diagnostic.
+
+Cycle selection should be deterministic:
+
+~~~text
+cycle 1 -> pattern A
+cycle 2 -> pattern B
+cycle 3 -> pattern C
+cycle 4 -> pattern D
+cycle 5 -> pattern A
+...
+~~~
+
+A simple modulo lookup is sufficient.
+
+Remove the pseudo-random BaseSeed sequence-generation contract if it no longer has a purpose.
+
+If BaseSeed exists only for old diagnostic logging/tests, remove it rather than keeping dead compatibility state.
+
+---
+
+## 5. Preserve independent motor-channel correctness
+
+The captured Lies of P examples used here have equal left/right values.
+
+Do not encode that equality into the architecture.
+
+Keep Left8 and Right8 distinct in the replay step model so a later captured pattern can use independent motors without another redesign.
+
+Do not add a general-purpose rumble scripting framework.
+
+---
+
+## 6. Scheduling behavior
+
+Preserve deadline-based scheduling rather than accumulated delay drift if practical.
+
+Within a burst:
+
+~~~text
+step 1 at T + 0 ms
+step 2 at T + 65 ms
+step 3 at T + 130 ms
+...
+terminal STOP at the next 65 ms deadline
+~~~
+
+After the terminal STOP callback is successfully observed:
+
+~~~text
+wait CycleIdle
+verify topology
+start next captured pattern
+~~~
+
+Do not use the 2-second cycle idle as another rumble step.
+
+Do not keep the old behavior where one cadence value controls both every rumble update and the next cycle boundary.
+
+Use two explicit concepts:
+
+~~~text
+_burstStepCadence
+_cycleIdle
+~~~
+
+This distinction is the main implementation change.
+
+---
+
+## 7. Terminal STOP contract must remain unchanged
+
+Every replay pattern must contain exactly one terminal:
+
+~~~text
+Left8 = 0
+Right8 = 0
+~~~
+
+The diagnostic must continue to:
+
+1. arm ExpectedTerminalStop before issuing the terminal XInput call;
+2. call XInputSetState(slot, 0, 0);
+3. require ERROR_SUCCESS;
+4. wait for the existing production callback to observe exact 0 / 0;
+5. classify timeout as TerminalStopMissing;
+6. freeze the failure result;
+7. request exactly one physical cleanup STOP through the existing path;
+8. stop the USB trace best-effort;
+9. end the diagnostic automatically.
+
+Do not send a second host-side XInput STOP when the expected terminal callback is missing.
+
+The existing diagnostic intentionally freezes the first failure boundary.
+
+Preserve that.
+
+---
+
+## 8. Preserve current safety and lifecycle behavior
+
+Do not change:
+
+- one-XInput-slot admission;
+- topology verification between cycles;
+- current presentation eligibility;
+- production callback ownership;
+- production callback registration/rooting;
+- Xbox360RumbleFeedbackBridge;
+- physical rumble writer;
+- physical rumble watchdog;
+- Full1902 suspend/resume behavior;
+- presentation attach/detach;
+- VIIPER runtime lifetime;
+- X360 typed device lifetime;
+- Steam Deck path;
+- HidHide;
+- PID1901/PID1902 mode handling;
+- USB trace ownership;
+- manual Stop behavior.
+
+Manual Stop must still:
+
+~~~text
+cancel loop
+-> best-effort XInput 0/0 if the original slot is still present
+-> physical cleanup STOP
+-> trace stop
+-> Stopped
+~~~
+
+---
+
+## 9. Logging changes
+
+Update diagnostic logging so the exact replay pattern is identifiable.
+
+At run start, log:
+
+~~~text
+BurstStepIntervalMs
+CycleIdleMs
+PatternCount
+TerminalWaitMs
+~~~
+
+Remove BaseSeed if sequence generation no longer uses it.
+
+At cycle start, log:
+
+~~~text
+Cycle
+PatternIndex
+PatternName
+Sequence
+StepCount
+XInputSlot
+~~~
+
+Example:
+
+~~~text
+PatternName=LiesOfP-A
+Sequence=255/255,241/241,217/217,252/252,230/230,208/208,0/0
+~~~
+
+At every send, continue to record:
+
+~~~text
+Cycle
+Step
+StepCount
+ExpectedLeft8
+ExpectedRight8
+Left16
+Right16
+XInputSlot
+XInputResult
+~~~
+
+If cheap, expose PatternName in the developer page status; otherwise logs are sufficient.
+
+Do not expand frontend contracts merely for cosmetic UI.
+
+---
+
+## 10. Do not wait for callbacks on intermediate non-zero steps
+
+Keep the existing diagnostic principle:
+
+~~~text
+non-zero XInputSetState
+-> require successful API return
+-> continue on scheduled burst cadence
+~~~
+
+Only the terminal exact 0 / 0 requires the bounded callback expectation.
+
+Do not serialize every non-zero step on callback arrival.
+
+That would distort the replay timing and turn the callback path into the scheduler.
+
+---
+
+## 11. Why the current one-second pattern is insufficient
+
+The current pattern exercises:
+
+~~~text
+long held values
+slow monotonic changes
+terminal STOP after several seconds
+~~~
+
+The real reproducing title exercises:
+
+~~~text
+several XInput rumble changes within roughly 200-400 ms
+possibly non-monotonic strength changes
+terminal STOP immediately after that burst
+longer idle/gameplay interval afterwards
+~~~
+
+A timing-sensitive XInput / USB-IP / VIIPER interaction can remain invisible under the current diagnostic even if every component is otherwise identical.
+
+This work order does not claim that the short burst is the root cause.
+
+It makes the Addon diagnostic a better reproduction control.
+
+---
+
+## 12. Interaction with the current VIIPER investigation
+
+onehoon/VIIPER is separately adding an earlier USB/IP OUT receive-boundary trace.
+
+Do not make this Addon PR depend on that VIIPER PR at compile time.
+
+The Addon diagnostic must continue to work with the current libVIIPER ABI.
+
+When both diagnostics are available, a failing cycle can be correlated across:
+
+~~~text
+Addon X360LoopProbeSend
+    -> Windows XInput
+    -> usbip-win2
+    -> VIIPER X360USBIPOutIngress
+    -> X360RumbleRaw
+    -> X360RumbleParsed
+    -> X360RumbleCallbackDispatch
+    -> Addon production callback
+~~~
+
+The Addon PR must not add another callback or transport observer.
+
+---
+
+## 13. Required tests
+
+Update tests/SteamInputAddonforClaw.Tests/Xbox360RumbleLoopDiagnosticTests.cs.
+
+### 13.1 Pattern table is deterministic
+
+Verify:
+
+~~~text
+1 -> A
+2 -> B
+3 -> C
+4 -> D
+5 -> A
+~~~
+
+No randomness.
+
+### 13.2 Exact captured values
+
+Assert the exact values:
+
+~~~text
+A = 255,241,217,252,230,208,0
+B = 255,242,218,204,0
+C = 255,242,217,0
+D = 255,239,219,255,247,228,209,0
+~~~
+
+If using RumbleReplayStep, assert both channels explicitly.
+
+### 13.3 Exactly one terminal STOP per pattern
+
+For every pattern:
+
+- final step is 0/0;
+- no earlier step is 0/0;
+- all non-terminal steps are non-zero in these captured patterns.
+
+### 13.4 Non-monotonic replay is preserved
+
+Prove pattern A and/or D retains a later increase.
+
+Do not reintroduce the old strictly-descending invariant.
+
+### 13.5 Burst scheduling
+
+With injected short test timings, prove sends occur in the intended order and the runner does not wait for a callback between non-zero steps.
+
+Avoid fragile real-time millisecond assertions.
+
+Use observable ordering.
+
+### 13.6 Cycle idle is separate
+
+Prove the next cycle does not begin until:
+
+~~~text
+terminal callback matched
++
+cycle idle boundary
+~~~
+
+Do not couple this to exact wall-clock precision.
+
+### 13.7 Terminal callback success
+
+Preserve the existing test that a synchronous exact terminal callback allows the next cycle.
+
+Adapt it to the replay patterns.
+
+### 13.8 Missing terminal callback
+
+Preserve the existing invariant:
+
+- one successful XInput terminal 0/0 call;
+- missing callback;
+- diagnostic fails TerminalStopMissing;
+- no second host terminal STOP is emitted by failure handling;
+- one physical cleanup STOP is requested;
+- trace is stopped with TerminalStopMissing.
+
+### 13.9 XInput failure
+
+Preserve existing coverage for non-zero failure, terminal failure, and thrown XInput calls.
+
+### 13.10 Topology change
+
+Preserve current fail-closed slot/topology behavior.
+
+### 13.11 Manual stop
+
+Preserve current manual cleanup semantics.
+
+---
+
+## 14. Testability
+
+Production defaults:
+
+~~~text
+65 ms burst step cadence
+2 s cycle idle
+1 s terminal callback timeout
+~~~
+
+Tests must not sleep for production durations.
+
+Extend constructor timing injection minimally to accept:
+
+~~~text
+burstStepCadence
+cycleIdle
+terminalCallbackTimeout
+~~~
+
+Do not add an injectable clock abstraction unless current tests genuinely require it.
+
+Prefer the smallest change.
+
+---
+
+## 15. UI
+
+The Developer Vibration Test page may remain functionally identical.
+
+Update descriptive text only if it currently describes a slow/random/descending sequence.
+
+Suitable wording:
+
+~~~text
+Replays captured Lies of P-style Xbox360 rumble bursts and stops automatically if the terminal 0/0 callback is not observed.
+~~~
+
+Do not add cadence, strength, pattern-selection, or idle sliders.
+
+Fixed replay is preferable for comparable field results.
+
+---
+
+## 16. Non-goals
+
+Do not:
+
+- modify VIIPER;
+- change async IN behavior;
+- change batching;
+- change USB/IP receive mode;
+- switch typed/legacy APIs;
+- add Corando InputGate/persistent workers;
+- alter production X360 input publisher rate;
+- alter production rumble feedback;
+- change physical rumble dead-man;
+- intentionally omit the terminal STOP;
+- simulate failure by suppressing callbacks;
+- add random fuzzing;
+- create a generic rumble stress framework;
+- add user-facing vibration controls.
+
+---
+
+## 17. Validation
+
+Run normal repository checks, including at minimum:
+
+~~~text
+dotnet build
+dotnet test
+~~~
+
+Pay specific attention to:
+
+~~~text
+Xbox360RumbleLoopDiagnosticTests
+Xbox360UsbTraceCaptureTests
+MsiClawAddonPresentationTests
+Frontend contract / named-pipe tests touching the diagnostic
+UI architecture tests if VibrationTestPage text changes
+~~~
+
+Prefer no frontend contract change.
+
+---
+
+## 18. Hardware validation
+
+Use an Xbox360 Full1902 presentation with the Developer Vibration Test.
+
+Expected normal behavior:
+
+~~~text
+short ~65 ms rapid rumble changes
+terminal STOP
+callback observed
+2 s idle
+next captured pattern
+repeat indefinitely
+~~~
+
+Leave it running.
+
+Do not manually stop merely because many cycles succeed.
+
+The diagnostic should automatically stop on the first terminal callback failure.
+
+On failure, preserve:
+
+- Addon log;
+- libVIIPER log;
+- USB trace output if available;
+- run ID;
+- cycle;
+- pattern name/index;
+- failed terminal step.
+
+Do not combine this validation with another VIIPER behavioral change.
+
+If this real-pattern replay reproduces the missing terminal STOP while the old slow diagnostic did not, that is strong evidence that traffic shape/timing is relevant, but it still does not identify which layer lost the STOP.
+
+---
+
+## 19. Acceptance criteria
+
+The PR is complete when:
+
+1. the pseudo-random descending sequence is no longer used;
+2. the diagnostic deterministically rotates through the four captured Lies of P-style patterns;
+3. burst steps use a fixed approximately 65 ms production cadence;
+4. cycle idle is a separate fixed approximately 2-second interval;
+5. every pattern explicitly sends exactly one terminal 0/0;
+6. only the terminal STOP waits for the production callback;
+7. the first missing terminal callback still automatically fails and stops the run;
+8. existing physical cleanup and USB trace cleanup behavior remain unchanged;
+9. no production routing/lifecycle/VIIPER behavior changes;
+10. tests prove the exact replay patterns and existing failure semantics.
