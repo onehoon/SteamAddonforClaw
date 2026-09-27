@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -16,14 +17,23 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
     private static readonly TimeSpan CadenceDiagnosticDuration = TimeSpan.FromSeconds(10);
     private const int MaximumKnownInvalidInitialStates = 16;
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
+    private readonly Func<WindowsHighResolutionOneShotTimer> _cadenceDiagnosticTimerFactory;
     private readonly Lock _sync = new();
     private InputSession? _currentSession;
     private int _testSession;
     private bool _disposed;
 
     public MsiClawInputSource(Func<IDirectInputDeviceEnumerator> enumeratorFactory)
+        : this(enumeratorFactory, static () => new WindowsHighResolutionOneShotTimer())
+    {
+    }
+
+    internal MsiClawInputSource(
+        Func<IDirectInputDeviceEnumerator> enumeratorFactory,
+        Func<WindowsHighResolutionOneShotTimer> cadenceDiagnosticTimerFactory)
     {
         _enumeratorFactory = enumeratorFactory ?? throw new ArgumentNullException(nameof(enumeratorFactory));
+        _cadenceDiagnosticTimerFactory = cadenceDiagnosticTimerFactory ?? throw new ArgumentNullException(nameof(cadenceDiagnosticTimerFactory));
     }
 
     public MsiClawInputSource(IDirectInputDeviceEnumerator enumerator)
@@ -171,8 +181,11 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
         if (cancellationToken.IsCancellationRequested)
             return new(FrontendPid1902InputCadenceOutcome.Cancelled, "Cancelled.", requestedDurationMs, 0, 0, null, 0, 0, null, null, null, null, null, null, null);
 
-        InputSession? session;
-        MsiClawInputCadenceCollector collector;
+        if (duration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(duration));
+
+        InputSession session;
+        MsiClawInputCadenceCollector? collector = null;
+        Exception? timerCreationFailure = null;
         lock (_sync)
         {
             if (_disposed || _currentSession is null || _currentSession.Cancellation.IsCancellationRequested)
@@ -182,8 +195,24 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             if (session.CadenceDiagnostic is not null)
                 return new(FrontendPid1902InputCadenceOutcome.AlreadyRunning, "A PID1902 input cadence diagnostic is already running.", requestedDurationMs, 0, 0, null, 0, 0, null, null, null, null, null, null, null);
 
-            collector = new MsiClawInputCadenceCollector(duration);
-            session.CadenceDiagnostic = collector;
+            try
+            {
+                collector = new MsiClawInputCadenceCollector(duration, timer: _cadenceDiagnosticTimerFactory());
+                session.CadenceDiagnostic = collector;
+            }
+            catch (Exception exception)
+            {
+                timerCreationFailure = exception;
+            }
+        }
+
+        if (collector is null)
+        {
+            AppLog.Warn("Diagnostics", "PID1902 input cadence diagnostic could not create its high-resolution timer.", timerCreationFailure,
+                ("Reason", "CadenceTimerCreateFailed"),
+                ("Action", "FailDiagnostic"));
+            return EmptyCadenceResult(FrontendPid1902InputCadenceOutcome.Failed,
+                "The PID1902 cadence diagnostic could not create its high-resolution timer.", requestedDurationMs);
         }
 
         AppLog.Info("Diagnostics", "PID1902 input cadence diagnostic started.",
@@ -197,8 +226,16 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
             value.Collector.Cancel(value.Status);
         }, (collector, "The PID1902 input cadence diagnostic was cancelled."));
 
-        var result = await collector.Completion.ConfigureAwait(false);
-        ClearCadenceDiagnostic(session, collector);
+        FrontendPid1902InputCadenceResult result;
+        try
+        {
+            result = await collector.Completion.ConfigureAwait(false);
+        }
+        finally
+        {
+            ClearCadenceDiagnostic(session, collector);
+            collector.Dispose();
+        }
         AppLog.Info("Diagnostics", "PID1902 input cadence diagnostic completed.",
             ("Outcome", result.Outcome),
             ("ActualDurationMs", result.ActualDurationMs),
@@ -270,7 +307,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                     {
                         if (invalidInitialStateCount == 1)
                             AppLog.Debug("MsiInput", "Known invalid DirectInput initial state was ignored.", ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("MaximumInitialStates", MaximumKnownInvalidInitialStates), ("Action", "AwaitNextState"), ("Reason", "KnownInvalidInitialState"));
-                        await Task.Delay(ResolvePollInterval(GetCadenceDiagnostic(session)?.IsActive == true), session.Cancellation.Token).ConfigureAwait(false);
+                        await WaitForNextPollAsync(session, GetCadenceDiagnostic(session)).ConfigureAwait(false);
                         continue;
                     }
 
@@ -350,7 +387,7 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
                     AppLog.Info("Diagnostics", "Independent M1/M2 input verified.", ("TestSession", session.Id), ("M1OnlyObserved", true), ("M2OnlyObserved", true), ("M1ButtonIndex", MsiClawHardware.M1DirectInputButtonIndex), ("M2ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex));
                 }
 
-                await Task.Delay(ResolvePollInterval(GetCadenceDiagnostic(session)?.IsActive == true), session.Cancellation.Token).ConfigureAwait(false);
+                await WaitForNextPollAsync(session, GetCadenceDiagnostic(session)).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (session.Cancellation.IsCancellationRequested)
@@ -468,6 +505,35 @@ public sealed class MsiClawInputSource : IMsiClawPreparedInputSource, IControlle
 
     internal static TimeSpan ResolvePollInterval(bool cadenceDiagnosticActive) =>
         cadenceDiagnosticActive ? CadenceDiagnosticPollInterval : PollInterval;
+
+    private static async Task WaitForNextPollAsync(InputSession session, MsiClawInputCadenceCollector? cadenceDiagnostic)
+    {
+        if (cadenceDiagnostic?.IsActive == true)
+        {
+            try
+            {
+                if (cadenceDiagnostic.WaitForNextSample(CadenceDiagnosticPollInterval, session.Cancellation.Token))
+                    return;
+            }
+            catch (Exception exception)
+            {
+                cadenceDiagnostic.Fail("The PID1902 cadence diagnostic high-resolution timer failed.");
+                AppLog.Warn("Diagnostics", "PID1902 input cadence diagnostic high-resolution timer failed; normal polling will continue.", exception,
+                    ("Reason", "CadenceTimerArmFailed"),
+                    ("Action", "FailDiagnostic"),
+                    ("TestSession", session.Id));
+            }
+        }
+
+        if (!session.Cancellation.IsCancellationRequested)
+            await Task.Delay(PollInterval, session.Cancellation.Token).ConfigureAwait(false);
+    }
+
+    private static FrontendPid1902InputCadenceResult EmptyCadenceResult(
+        FrontendPid1902InputCadenceOutcome outcome,
+        string status,
+        long requestedDurationMs) =>
+        new(outcome, status, requestedDurationMs, 0, 0, null, 0, 0, null, null, null, null, null, null, null);
 
     private MsiClawInputCadenceCollector? GetCadenceDiagnostic(InputSession session)
     {
