@@ -46,8 +46,8 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 ### VIIPER
 
 - Project: VIIPER
-- Canonical source: https://github.com/onehoon/VIIPER/tree/6296af4cb3f488791c9fae55a6ebe58610c0c9b4
-- Source baseline: pinned commit `6296af4cb3f488791c9fae55a6ebe58610c0c9b4`
+- Canonical source: https://github.com/onehoon/VIIPER/tree/c19faa3140be78e99ae75a866037f1b33709a510
+- Source baseline: pinned commit `c19faa3140be78e99ae75a866037f1b33709a510`
 - Lineage: https://github.com/Valkirie/VIIPER -> https://github.com/Alia5/VIIPER
 - Copyright: Peter Repukat (as identified by the upstream project)
 - License: GPL-3.0
