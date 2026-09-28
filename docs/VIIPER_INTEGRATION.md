@@ -19,7 +19,7 @@ Game Bar foreground does not select another virtual controller.
 | Item | Current contract |
 | --- | --- |
 | Canonical embedded API | `lib/viiper` typed ABI |
-| Embedded VIIPER revision | `973f072365cd40ac6c0a03d5d07b8eedf1a8b338` |
+| Embedded VIIPER revision | `906958fca2e7d39a85a6bc1fcd445d0448a5df16` |
 | Tracked Windows usbip-win2 package | `0.9.8.1` |
 | Primary Steam routing target | Steam Deck `28DE:1205` |
 | Game Bar policy | Native Win+G/Game Bar path protected during active routing; no X360 presentation switch |
