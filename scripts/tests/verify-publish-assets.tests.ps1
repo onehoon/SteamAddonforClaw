@@ -15,7 +15,6 @@ function New-Fixture {
         (Join-Path $root 'Dependencies\NirCmd'),
         (Join-Path $root 'ui\Views'),
         (Join-Path $root 'overlay'),
-        (Join-Path $root 'overlay\Assets\Controller'),
         (Join-Path $root 'fse')
     )
     New-Item -ItemType Directory -Force -Path $directories | Out-Null
@@ -46,8 +45,6 @@ function New-Fixture {
         'overlay\SteamInputAddonforClaw.Overlay.pri' = 'overlay application pri'
         'overlay\App.xbf' = 'overlay app xbf'
         'overlay\OverlayWindow.xbf' = 'overlay window xbf'
-        'overlay\Assets\Controller\Steam_LB.png' = 'left bumper glyph'
-        'overlay\Assets\Controller\Steam_RB.png' = 'right bumper glyph'
         'fse\SteamInputAddonforClaw.FseHome.msix' = (Join-Path $repoRoot 'src\SteamInputAddonforClaw.FseHome\Packaging\Distribution\SteamInputAddonforClaw.FseHome.msix')
         'fse\SteamInputAddonforClaw.FseHome.cer' = (Join-Path $repoRoot 'src\SteamInputAddonforClaw.FseHome\Packaging\Distribution\SteamInputAddonforClaw.FseHome.cer')
     }
@@ -109,11 +106,6 @@ try {
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'Dependencies\NirCmd\NirCmd.chm')
     Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing NirCmd distribution help file' -Asset 'Dependencies\NirCmd\NirCmd.chm'
-
-    $root = New-Fixture
-    $fixturesToClean += $root
-    Remove-Item -LiteralPath (Join-Path $root 'overlay\Assets\Controller\Steam_RB.png')
-    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing Overlay right bumper glyph' -Asset 'overlay\Assets\Controller\Steam_RB.png'
 
     $root = New-Fixture
     $fixturesToClean += $root
