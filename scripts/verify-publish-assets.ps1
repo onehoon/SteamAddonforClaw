@@ -40,8 +40,6 @@ $requiredAssets = @(
     'overlay\SteamInputAddonforClaw.Overlay.pri',
     'overlay\App.xbf',
     'overlay\OverlayWindow.xbf',
-    'overlay\Assets\Controller\Steam_LB.png',
-    'overlay\Assets\Controller\Steam_RB.png',
     'fse\SteamInputAddonforClaw.FseHome.msix',
     'fse\SteamInputAddonforClaw.FseHome.cer'
 )
