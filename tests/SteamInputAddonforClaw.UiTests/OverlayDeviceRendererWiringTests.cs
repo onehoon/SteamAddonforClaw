@@ -501,17 +501,14 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("x:Name=\"TabStripFrame\"", xaml);
         Assert.Contains("x:Name=\"PreviousTabHint\"", xaml);
         Assert.Contains("x:Name=\"NextTabHint\"", xaml);
-        Assert.Contains("<Path", xaml);
-        Assert.Contains("Data=\"M3,16 C4,9", xaml);
-        Assert.Contains("Data=\"M27,16 C26,9", xaml);
-        Assert.Contains("StrokeThickness=\"1.8\"", xaml);
-        Assert.Contains("Width=\"30\"", xaml);
+        Assert.Contains("Source=\"ms-appx:///Assets/Controller/Steam_LB.png\"", xaml);
+        Assert.Contains("Source=\"ms-appx:///Assets/Controller/Steam_RB.png\"", xaml);
+        Assert.Contains("Opacity=\"1\"", xaml);
+        Assert.DoesNotContain("PreviousTabHint.Opacity", shell);
+        Assert.DoesNotContain("NextTabHint.Opacity", shell);
         Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
         Assert.Contains("MinWidth = 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayTabState", shell);
-        Assert.Contains("ApplyTabNavigationHintVisual", shell);
-        Assert.Contains("PreviousTabHint.Opacity = selectedIndex > 0 ? 1.0 : 0.35;", shell);
-        Assert.Contains("NextTabHint.Opacity = selectedIndex >= 0 && selectedIndex < _tabState.Order.Count - 1 ? 1.0 : 0.35;", shell);
         Assert.Contains("button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;", shell);
     }
 

@@ -28,6 +28,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Assets\Controller\Steam_LB.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\Controller\Steam_RB.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="SteamInputAddonforClaw.Tests" />
     <InternalsVisibleTo Include="SteamInputAddonforClaw.UiTests" />
   </ItemGroup>

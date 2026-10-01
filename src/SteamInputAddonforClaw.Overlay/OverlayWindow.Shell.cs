@@ -172,8 +172,7 @@ public sealed partial class OverlayWindow
     }
 
     // OQ5-UI-02: LB/RB semantic tab navigation from the Runtime capture path. Keeps all visual
-    // dictionary/page-visibility logic here; only re-applies visuals when selection actually moved
-    // (no-op at a boundary). App marshals the semantic action, it never touches tab state directly.
+    // dictionary/page-visibility logic here; App marshals the semantic action and never touches tab state.
     internal void SelectPreviousTab()
     {
         if (_tabState.SelectPrevious()) ApplySelectedTabVisualState();
@@ -306,24 +305,6 @@ public sealed partial class OverlayWindow
             if (_tabIndicators.TryGetValue(id, out var indicator))
                 indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed;
         }
-
-        ApplyTabNavigationHintVisual();
-    }
-
-    private void ApplyTabNavigationHintVisual()
-    {
-        var selectedIndex = -1;
-        for (var index = 0; index < _tabState.Order.Count; index++)
-        {
-            if (_tabState.Order[index] == _tabState.SelectedTab)
-            {
-                selectedIndex = index;
-                break;
-            }
-        }
-
-        PreviousTabHint.Opacity = selectedIndex > 0 ? 1.0 : 0.35;
-        NextTabHint.Opacity = selectedIndex >= 0 && selectedIndex < _tabState.Order.Count - 1 ? 1.0 : 0.35;
     }
 
     // s.12: deterministic tab-change ordering -- tab visuals, then show the page and reset the
