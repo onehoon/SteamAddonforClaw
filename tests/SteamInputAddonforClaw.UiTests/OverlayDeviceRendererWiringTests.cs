@@ -489,23 +489,34 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Overlay_shell_uses_a_constrained_surface_and_visual_bumper_hints()
+    public void Overlay_shell_uses_a_full_width_tab_rail_without_bumper_images()
     {
         var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var project = ReadSource("src", "SteamInputAddonforClaw.Overlay", "SteamInputAddonforClaw.Overlay.csproj");
+        var tabStripStart = xaml.IndexOf("<Grid x:Name=\"TabStripFrame\"", StringComparison.Ordinal);
+        var tabStripEnd = xaml.IndexOf("<ScrollViewer", tabStripStart, StringComparison.Ordinal);
+        var tabStrip = xaml[tabStripStart..tabStripEnd];
+        var tabRailStart = tabStrip.IndexOf("x:Name=\"TabRail\"", StringComparison.Ordinal);
+        var tabStripChrome = tabStrip[..tabRailStart];
 
         Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
         Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
         Assert.Contains("MaxWidth=\"720\"", xaml);
         Assert.Contains("x:Name=\"TabStripFrame\"", xaml);
-        Assert.Contains("x:Name=\"PreviousTabHint\"", xaml);
-        Assert.Contains("x:Name=\"NextTabHint\"", xaml);
-        Assert.Contains("Source=\"ms-appx:///Assets/Controller/Steam_LB.png\"", xaml);
-        Assert.Contains("Source=\"ms-appx:///Assets/Controller/Steam_RB.png\"", xaml);
-        Assert.Contains("Opacity=\"1\"", xaml);
-        Assert.DoesNotContain("PreviousTabHint.Opacity", shell);
-        Assert.DoesNotContain("NextTabHint.Opacity", shell);
+        Assert.Contains("x:Name=\"TabRail\"", tabStrip);
+        Assert.Contains("HorizontalAlignment=\"Stretch\"", tabStrip);
+        Assert.DoesNotContain("ColumnDefinitions", tabStripChrome);
+        Assert.DoesNotContain("ColumnSpacing=\"8\"", tabStripChrome);
+        Assert.DoesNotContain("PreviousTabHint", tabStrip);
+        Assert.DoesNotContain("NextTabHint", tabStrip);
+        Assert.DoesNotContain("Steam_LB.png", xaml);
+        Assert.DoesNotContain("Steam_RB.png", xaml);
+        Assert.DoesNotContain("Assets\\Controller\\Steam_LB.png", project);
+        Assert.DoesNotContain("Assets\\Controller\\Steam_RB.png", project);
+        Assert.DoesNotContain("PreviousTabHint", shell);
+        Assert.DoesNotContain("NextTabHint", shell);
         Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
         Assert.Contains("MinWidth = 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayTabState", shell);
