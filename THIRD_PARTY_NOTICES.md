@@ -4,6 +4,14 @@ This file lists third-party software distributed with, linked by, or referenced 
 
 ## Distributed / Linked Components
 
+### Valve Steam Controller Glyphs
+
+- Source archive: https://steamcdn-a.akamaihd.net/steam/partner/controller/SteamControllerGlyphs_v1.zip
+- Source documentation: https://partner.steamgames.com/doc/features/steam_controller/getting_started_for_devs
+- Retrieved: 2026-10-01
+- Included assets: `shoulder_l.png` and `shoulder_r.png`, copied unmodified as the Overlay's `Steam_LB.png` and `Steam_RB.png` navigation hints.
+- The downloaded archive contained no separate license or notice file; the links above identify the official source and its applicable terms.
+
 The following are the direct NuGet dependencies currently declared by `src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj`.
 
 ### CommunityToolkit.WinUI.Controls.SettingsControls
