@@ -457,19 +457,25 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Overlay_sections_use_one_shared_card_without_changing_row_selection_ownership()
+    public void Setting_cards_expand_inline_and_render_the_claw_hud_rows()
     {
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
         var valueRow = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
 
         Assert.Contains("CreateOverlaySectionCard(sectionPanel)", quickSettings);
         Assert.Contains("CardBackgroundFillColorDefaultBrush", quickSettings);
         Assert.Contains("Padding = new Thickness(8)", quickSettings);
         Assert.Contains("CornerRadius = new CornerRadius(8)", quickSettings);
-        Assert.Contains("CreateOverlaySectionCard(BuildClawHudPage(rows))", clawHud);
-        Assert.Contains("CreateOverlaySectionCard(BuildTabOrderEditorPage(rows))", clawHud);
+        Assert.Contains("CreateSettingCard(SettingCardId.ClawHud", clawHud);
+        Assert.Contains("CreateSettingCard(SettingCardId.TabOrder", clawHud);
+        Assert.Contains("section.Children.Add(row.Container);", clawHud);
+        Assert.Contains("_expandedSettingCard == card", clawHud);
+        Assert.Contains("ToggleSettingCard", clawHud);
+        Assert.Contains("ResetSettingCardsForShow();", shell);
+        Assert.Contains("TryHandleSettingBack()", profile);
         Assert.Contains("RegisterRowPointerSelection(overlayRow.Container);", quickSettings);
         Assert.Contains("OverlayRowChrome.Create(grid)", valueRow);
         Assert.DoesNotContain("CreateOverlaySectionCard(BuildShortcutPage())", shell);

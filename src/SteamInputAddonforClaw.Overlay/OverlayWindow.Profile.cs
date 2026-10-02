@@ -83,6 +83,9 @@ public sealed partial class OverlayWindow
 
     internal bool TryHandleBack()
     {
+        if (TryHandleSettingBack())
+            return true;
+
         if (_tabState.SelectedTab != AddonQuickSettingsTabId.Profile || _profileMode != ProfilePresentationMode.SelectedDetail)
             return false;
         _quickSettingsSurfaces[QuickSettingsPageId.Profile].Binding?.CancelUnsubmittedDrafts();
