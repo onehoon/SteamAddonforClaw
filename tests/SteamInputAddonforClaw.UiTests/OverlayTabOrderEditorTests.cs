@@ -49,7 +49,7 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
     {
         var state = new OverlayTabState();
         const int clawHudRowCount = 3;
-        const int alignmentRowIndex = 1;
+        const int alignmentRowIndex = 2; // ClawHUD card header precedes its detail rows.
         var rows = Enumerable.Range(0, clawHudRowCount + state.Order.Count)
             .Select(_ => Selectable())
             .ToArray();
@@ -76,6 +76,62 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
         selection.SetRows(rows, preferredIndex);
 
         Assert.Equal(alignmentRowIndex, selection.SelectedIndex);
+    }
+
+    [Fact]
+    public void AuthoritativeRefreshKeepsTheSelectedTabOrderRowIdentityAfterCardHeaders()
+    {
+        var state = new OverlayTabState();
+        const int clawHudRowCount = 3;
+        var previousOrder = state.Order.ToArray();
+        var selectedIndex = clawHudRowCount + 2 + 2; // Two card headers, then the Controller editor row.
+        IReadOnlyList<AddonQuickSettingsTabId> appliedOrder =
+        [
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Setting,
+        ];
+
+        var preferredIndex = OverlayWindow.ResolvePreferredSettingRowIndex(
+            selectedIndex,
+            clawHudRowCount,
+            previousOrder,
+            appliedOrder);
+
+        Assert.Equal(clawHudRowCount + 2 + 3, preferredIndex);
+        Assert.Equal(AddonQuickSettingsTabId.Controller, appliedOrder[preferredIndex!.Value - clawHudRowCount - 2]);
+    }
+
+    [Fact]
+    public void Collapsed_setting_card_skips_its_hidden_detail_rows()
+    {
+        var expanded = false;
+        var rows = new OverlayRowSelection();
+        rows.SetRows(
+        [
+            Selectable(),
+            new OverlayRowCapabilities(() => expanded),
+            Selectable(),
+        ]);
+
+        Assert.True(rows.MoveNext());
+        Assert.Equal(2, rows.SelectedIndex);
+
+        expanded = true;
+        rows.SetRows(
+        [
+            Selectable(),
+            new OverlayRowCapabilities(() => expanded),
+            Selectable(),
+        ], preferredIndex: 0);
+        Assert.True(rows.MoveNext());
+        Assert.Equal(1, rows.SelectedIndex);
+
+        expanded = false;
+        Assert.True(rows.MoveNext());
+        Assert.Equal(2, rows.SelectedIndex);
     }
 
     [Fact]

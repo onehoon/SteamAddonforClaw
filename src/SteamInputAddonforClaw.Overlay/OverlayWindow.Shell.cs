@@ -98,16 +98,10 @@ public sealed partial class OverlayWindow
         _ => CreatePlaceholderPage(id),
     };
 
-    // OQ5-UI-10: the five fixed tab-order rows live in one 5-row Grid, created once and kept by
-    // AddonQuickSettingsTabId. ApplyTabOrder repositions them via Grid.SetRow -- instances are never recreated.
-    private FrameworkElement BuildTabOrderEditorPage(List<OverlayRow> rows)
+    private StackPanel BuildTabOrderEditorPage()
     {
         var section = new StackPanel { Spacing = 5 };
-
-        var heading = new TextBlock { Text = "Tab Order" };
-        if (Application.Current.Resources.TryGetValue("BodyStrongTextBlockStyle", out var style) && style is Style headingStyle)
-            heading.Style = headingStyle;
-        section.Children.Add(heading);
+        section.Children.Add(CreateStatusText("Use Left and Right to move the selected tab."));
 
         var grid = new Grid { RowSpacing = 4 };
         var order = _tabState.Order;
@@ -120,7 +114,6 @@ public sealed partial class OverlayWindow
             Grid.SetRow(row.Container, i);
             grid.Children.Add(row.Container);
             _tabOrderRows[id] = row;
-            rows.Add(new OverlayRow(row.Container, row.Capabilities));
             RegisterRowPointerSelection(row.Container);
         }
 
@@ -168,6 +161,7 @@ public sealed partial class OverlayWindow
     {
         _tabState.ResetForShow();
         ResetShortcutForShow();
+        ResetSettingCardsForShow();
         ApplySelectedTabVisualState();
     }
 
@@ -233,9 +227,10 @@ public sealed partial class OverlayWindow
         // Rebuild the Setting page's ordered row list so CapabilitiesFor(Setting) / the selection
         // model see the authoritative order. The AddonQuickSettingsTabOrderRow instances are reused.
         if (_tabOrderRows.Count == applied.Count)
-            _pageRows[AddonQuickSettingsTabId.Setting] = _clawHudRows.Concat(applied
-                .Select(id => new OverlayRow(_tabOrderRows[id].Container, _tabOrderRows[id].Capabilities))
-                .ToArray()).ToArray();
+        {
+            _pageRows[AddonQuickSettingsTabId.Setting] = BuildSettingRows(applied);
+            UpdateTabOrderCardSummary(applied);
+        }
 
         ApplySelectedHeaderVisual();
 
@@ -266,17 +261,17 @@ public sealed partial class OverlayWindow
         IReadOnlyList<AddonQuickSettingsTabId> appliedOrder)
     {
         AddonQuickSettingsTabId? selectedEditorTab = null;
+        var editorRowStart = clawHudRowCount + 2; // ClawHUD detail rows plus the two card headers.
         if (selectedSettingIndex is { } selected &&
-            selected >= clawHudRowCount &&
-            selected - clawHudRowCount < previousOrder.Count)
+            selected >= editorRowStart &&
+            selected - editorRowStart < previousOrder.Count)
         {
-            selectedEditorTab = previousOrder[selected - clawHudRowCount];
+            selectedEditorTab = previousOrder[selected - editorRowStart];
         }
 
-        int? preferredIndex =
-            selectedSettingIndex is { } index && index >= 0 && index < clawHudRowCount
-                ? index
-                : null;
+        int? preferredIndex = selectedSettingIndex is { } index && index >= 0 && index < editorRowStart
+            ? index
+            : null;
 
         if (selectedEditorTab is { } tab)
         {
@@ -284,7 +279,7 @@ public sealed partial class OverlayWindow
             {
                 if (appliedOrder[i] == tab)
                 {
-                    preferredIndex = clawHudRowCount + i;
+                    preferredIndex = editorRowStart + i;
                     break;
                 }
             }
