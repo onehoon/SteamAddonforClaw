@@ -39,6 +39,31 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
+    public void SelectedSecondRowSurvivesTemporaryMutationDisableAndAuthoritativeRefresh()
+    {
+        var mutationPending = false;
+        var rows = new[]
+        {
+            new OverlayRowCapabilities(() => !mutationPending),
+            new OverlayRowCapabilities(() => !mutationPending),
+        };
+        var selection = new OverlayRowSelection();
+        selection.SetRows(rows);
+        Assert.True(selection.MoveNext());
+        Assert.Equal(1, selection.SelectedIndex);
+
+        mutationPending = true;
+        // Mutation and an intervening authoritative refresh leave row capabilities disabled.
+        // The renderer skips SetRows until settlement, so the logical M2 selection is retained.
+        Assert.Equal(1, selection.SelectedIndex);
+
+        mutationPending = false;
+        selection.SetRows(rows, preferredIndex: selection.SelectedIndex);
+
+        Assert.Equal(1, selection.SelectedIndex);
+    }
+
+    [Fact]
     public void SetRowsWithAnInvalidOrUnselectablePreferredIndexFallsBackToFirstSelectable()
     {
         var selection = new OverlayRowSelection();

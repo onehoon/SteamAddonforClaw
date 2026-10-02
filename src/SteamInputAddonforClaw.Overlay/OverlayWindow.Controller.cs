@@ -114,7 +114,9 @@ public sealed partial class OverlayWindow
 
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
-            _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller));
+            var preferredIndex = _rowSelection.SelectedIndex;
+            if (!_backButtonMutationInFlight)
+                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }
     }

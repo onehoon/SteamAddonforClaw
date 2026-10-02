@@ -22,7 +22,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("AddBackButtonMappingRow(section, rows, m2Row)", controller);
         Assert.Contains("RegisterRowPointerSelection(row.Container)", controller);
         Assert.Contains("rows.Add(new(row.Container, row.Capabilities))", controller);
-        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller))", controller);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
     }
 
     [Fact]
@@ -41,6 +41,9 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("var maximum = (double)Xbox360BackButtonTarget.XboxGuide", controller);
         Assert.Contains("_m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M1)", controller);
         Assert.Contains("_m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M2)", controller);
+        Assert.Contains("var preferredIndex = _rowSelection.SelectedIndex;", controller);
+        Assert.Contains("if (!_backButtonMutationInFlight)", controller);
+        Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
         Assert.Contains("HandleBackButtonMappingStateAsync", app);
         Assert.Contains("BackButtonMappingEditRequested", app);
         Assert.Contains("_backButtonMappingAvailable = state.Available", controller);
