@@ -402,18 +402,18 @@ Frozen defaults:
 
 ```text
 Normal:
-  Gamebar Button  → Quick Settings Overlay
-  Center M Button → Steam Big Picture
+  Gamebar Button  → Steam Big Picture
+  Center M Button → Quick Settings Overlay
 
 Steam Game / Big Picture:
   Gamebar Button  → Steam Button
-  Center M Button → Steam Quick Access
+  Center M Button → Quick Settings Overlay
 ```
 
-The Normal Gamebar default is `Quick Settings Overlay` — it does NOT default to Steam Button
-regardless of presentation. `None`, persisted Double slots, and a per-button Remapping Enabled
-switch do not exist. Within one domain the two buttons may not use the same action. There is one
-atomic `FrontButtonMappingSettings` and one `SetFrontButtonMapping` frontend RPC (protocol v25).
+These are first-install / no-valid-saved-mapping defaults. Valid user mappings are preserved across
+updates. `None`, persisted Double slots, and a per-button Remapping Enabled switch do not exist.
+Within one domain the two buttons may not use the same action. There is one atomic
+`FrontButtonMappingSettings` and one `SetFrontButtonMapping` frontend RPC (protocol v25).
 
 #### M1 / M2
 

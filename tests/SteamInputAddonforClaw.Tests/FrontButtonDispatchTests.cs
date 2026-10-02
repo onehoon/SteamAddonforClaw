@@ -26,36 +26,38 @@ public sealed class FrontButtonDispatchTests
     }
 
     [Fact]
-    public void Center_m_default_normal_press_launches_big_picture()
+    public void Center_m_default_normal_press_toggles_overlay()
     {
         var seams = new Seams();
         var dispatcher = new Oem1ActionDispatcher(() => FrontButtonMappingSettings.Default, () => false, seams.Executor());
 
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
-        Assert.Equal(1, seams.BigPicture);
+        Assert.Equal(1, seams.Overlay);
         Assert.Equal(0, seams.QuickAccess);
     }
 
     [Fact]
-    public void Center_m_default_steam_press_pulses_quick_access()
+    public void Center_m_default_steam_press_toggles_overlay()
     {
         var seams = new Seams();
         var dispatcher = new Oem1ActionDispatcher(() => FrontButtonMappingSettings.Default, () => true, seams.Executor());
 
         dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
-        Assert.Equal(1, seams.QuickAccess);
+        Assert.Equal(1, seams.Overlay);
+        Assert.Equal(0, seams.QuickAccess);
         Assert.Equal(0, seams.BigPicture);
     }
 
     [Fact]
-    public void Gamebar_default_normal_press_toggles_the_overlay_and_steam_press_pulses_steam()
+    public void Gamebar_default_normal_press_launches_big_picture_and_steam_press_pulses_steam()
     {
         var seams = new Seams();
         var steamActive = false;
         var dispatcher = new WingActionDispatcher(() => FrontButtonMappingSettings.Default, () => steamActive, seams.Executor());
 
         dispatcher.Dispatch(WingGesture.Single);
-        Assert.Equal(1, seams.Overlay);
+        Assert.Equal(1, seams.BigPicture);
+        Assert.Equal(0, seams.Overlay);
 
         steamActive = true;
         dispatcher.Dispatch(WingGesture.Single);
@@ -110,8 +112,8 @@ public sealed class FrontButtonDispatchTests
     public void A_center_m_action_execution_failure_returns_false_for_fail_open()
     {
         var executor = new FrontButtonActionExecutor(
-            requestOverlayToggle: () => { },
-            launchBigPicture: () => throw new InvalidOperationException("boom"),
+            requestOverlayToggle: () => throw new InvalidOperationException("boom"),
+            launchBigPicture: () => { },
             tryRequestSteamPulse: () => false,
             tryRequestQuickAccessPulse: () => false);
         var dispatcher = new Oem1ActionDispatcher(() => FrontButtonMappingSettings.Default, () => false, executor);

@@ -163,20 +163,20 @@ public sealed record FrontButtonMappingSettings
     [JsonRequired]
     public FrontButtonDomainMapping Steam { get; init; } = null!;
 
-    /// <summary>First-install / no-persisted-value defaults, frozen by the work order:
-    /// Normal Gamebar = Quick Settings Overlay, Normal Center M = Steam Big Picture,
-    /// Steam Gamebar = Steam Button, Steam Center M = Steam Quick Access.</summary>
+    /// <summary>First-install / no-persisted-value defaults:
+    /// Normal Gamebar = Steam Big Picture, Normal Center M = Quick Settings Overlay,
+    /// Steam Gamebar = Steam Button, Steam Center M = Quick Settings Overlay.</summary>
     public static FrontButtonMappingSettings Default { get; } = new()
     {
         Normal = new()
         {
-            Gamebar = FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay),
-            CenterM = FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture)
+            Gamebar = FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture),
+            CenterM = FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay)
         },
         Steam = new()
         {
             Gamebar = FrontButtonBinding.Of(FrontButtonAction.SteamButton),
-            CenterM = FrontButtonBinding.Of(FrontButtonAction.SteamQuickAccess)
+            CenterM = FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay)
         }
     };
 

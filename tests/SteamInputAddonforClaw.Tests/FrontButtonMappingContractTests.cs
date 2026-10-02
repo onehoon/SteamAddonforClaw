@@ -15,10 +15,10 @@ public sealed class FrontButtonMappingContractTests
     {
         var d = FrontButtonMappingSettings.Default;
 
-        Assert.Equal(FrontButtonAction.QuickSettingsOverlay, d.Resolve(FrontButtonKind.Gamebar, FrontButtonDomain.Normal).Action);
-        Assert.Equal(FrontButtonAction.SteamBigPicture, d.Resolve(FrontButtonKind.CenterM, FrontButtonDomain.Normal).Action);
+        Assert.Equal(FrontButtonAction.SteamBigPicture, d.Resolve(FrontButtonKind.Gamebar, FrontButtonDomain.Normal).Action);
+        Assert.Equal(FrontButtonAction.QuickSettingsOverlay, d.Resolve(FrontButtonKind.CenterM, FrontButtonDomain.Normal).Action);
         Assert.Equal(FrontButtonAction.SteamButton, d.Resolve(FrontButtonKind.Gamebar, FrontButtonDomain.Steam).Action);
-        Assert.Equal(FrontButtonAction.SteamQuickAccess, d.Resolve(FrontButtonKind.CenterM, FrontButtonDomain.Steam).Action);
+        Assert.Equal(FrontButtonAction.QuickSettingsOverlay, d.Resolve(FrontButtonKind.CenterM, FrontButtonDomain.Steam).Action);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public sealed class FrontButtonMappingContractTests
     public void Same_domain_duplicate_is_rejected()
     {
         var mapping = FrontButtonMappingSettings.Default.With(
-            FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay));
+            FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture));
 
         Assert.NotNull(FrontButtonMappingValidation.Validate(mapping));
     }
@@ -106,9 +106,10 @@ public sealed class FrontButtonMappingContractTests
     public void Same_action_across_different_domains_is_allowed()
     {
         var mapping = FrontButtonMappingSettings.Default.With(
-            FrontButtonKind.Gamebar, FrontButtonDomain.Steam, FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay));
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay))
+            .With(FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture));
 
-        // Normal.Gamebar is also QuickSettingsOverlay by default; cross-domain reuse must be fine.
+        // QuickSettingsOverlay is reused by Normal.Gamebar and Steam.CenterM; cross-domain reuse is valid.
         Assert.Null(FrontButtonMappingValidation.Validate(mapping));
     }
 

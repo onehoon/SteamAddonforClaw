@@ -72,15 +72,15 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
 
         var loaded = Assert.Single(lines, line => line.Contains("Front-button mapping loaded.", StringComparison.Ordinal));
         Assert.Contains("NormalGamebar=KeyboardHotkey", loaded, StringComparison.Ordinal);
-        Assert.Contains("NormalCenterM=SteamBigPicture", loaded, StringComparison.Ordinal);
+        Assert.Contains("NormalCenterM=QuickSettingsOverlay", loaded, StringComparison.Ordinal);
         Assert.Contains("SteamGamebar=SteamButton", loaded, StringComparison.Ordinal);
-        Assert.Contains("SteamCenterM=SteamQuickAccess", loaded, StringComparison.Ordinal);
+        Assert.Contains("SteamCenterM=QuickSettingsOverlay", loaded, StringComparison.Ordinal);
 
         var saved = Assert.Single(lines, line => line.Contains("Front-button mapping saved.", StringComparison.Ordinal));
         Assert.Contains("NormalGamebar=KeyboardHotkey", saved, StringComparison.Ordinal);
-        Assert.Contains("NormalCenterM=SteamBigPicture", saved, StringComparison.Ordinal);
+        Assert.Contains("NormalCenterM=QuickSettingsOverlay", saved, StringComparison.Ordinal);
         Assert.Contains("SteamGamebar=SteamButton", saved, StringComparison.Ordinal);
-        Assert.Contains("SteamCenterM=SteamQuickAccess", saved, StringComparison.Ordinal);
+        Assert.Contains("SteamCenterM=QuickSettingsOverlay", saved, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
         coordinator.FrontButtonMappingChanged += (_, _) => changes++;
 
         var duplicate = FrontButtonMappingSettings.Default.With(
-            FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay));
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay));
 
         Assert.False(coordinator.ChangeFrontButtonMapping(duplicate));
         Assert.Equal(0, changes);
@@ -115,7 +115,7 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
     {
         var coordinator = NewCoordinator();
         var mapping = FrontButtonMappingSettings.Default.With(
-            FrontButtonKind.Gamebar, FrontButtonDomain.Steam, FrontButtonBinding.Of(FrontButtonAction.QuickSettingsOverlay));
+            FrontButtonKind.CenterM, FrontButtonDomain.Steam, FrontButtonBinding.Of(FrontButtonAction.SteamQuickAccess));
         coordinator.ChangeFrontButtonMapping(mapping);
         coordinator.ChangeLogLevel(AppLogPreference.Debug);
 
