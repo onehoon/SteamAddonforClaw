@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
@@ -22,6 +23,7 @@ public partial class App : Application
         _window = new OverlayWindow();
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
         _window.TabOrderMoveRequested += OnTabOrderMoveRequested;
+        _window.BackButtonMappingEditRequested += OnBackButtonMappingEditRequested;
         _window.ProfileCatalogRequestRequested += OnProfileCatalogRequestRequested;
         _window.ProfilePageRequestRequested += OnProfilePageRequestRequested;
         _window.ClawHudEnabledRequested += OnClawHudEnabledRequested;
@@ -73,7 +75,7 @@ public partial class App : Application
             OverlayLog.Info("Transport", "Overlay command loop starting.");
             await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync,
                 HandleQuickSettingsPageAsync, HandleClawHudAsync, HandleProfileCatalogAsync,
-                HandleProfilePageAsync, HandleShortcutStateAsync).ConfigureAwait(false);
+                HandleProfilePageAsync, HandleShortcutStateAsync, HandleBackButtonMappingStateAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -197,8 +199,54 @@ public partial class App : Application
         return completion.Task;
     }
 
+    private Task HandleBackButtonMappingStateAsync(OverlayBackButtonMappingState state)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try { _window?.ApplyBackButtonMappingState(state); completion.TrySetResult(); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+        }))
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for M1 / M2 mapping application."));
+        return completion.Task;
+    }
+
     // PR3: forward the typed move and apply only the authoritative mutation result.
     private void OnTabOrderMoveRequested(AddonQuickSettingsTabOrderMoveIntent intent) => _ = SendTabOrderMoveAsync(intent);
+
+    private void OnBackButtonMappingEditRequested(BackButtonMappingSettings mapping) => _ = SendBackButtonMappingAsync(mapping);
+
+    private async Task SendBackButtonMappingAsync(BackButtonMappingSettings mapping)
+    {
+        try
+        {
+            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+            var result = await _client.SendBackButtonMappingMutationAsync(mapping).ConfigureAwait(false);
+            await DispatchBackButtonMappingUiAsync(() => _window?.ApplyBackButtonMappingMutationResult(result)).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Controller", "M1 / M2 mapping update failed.", null,
+                ("ExceptionType", exception.GetType().Name));
+            try
+            {
+                await DispatchBackButtonMappingUiAsync(() => _window?.ApplyBackButtonMappingFailure(exception.Message)).ConfigureAwait(false);
+            }
+            catch { OverlayLog.Warn("Controller", "Could not enqueue M1 / M2 mapping failure state."); }
+        }
+    }
+
+    private Task DispatchBackButtonMappingUiAsync(Action apply)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try { apply(); completion.TrySetResult(); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+        }))
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for M1 / M2 mapping result application."));
+        return completion.Task;
+    }
 
     private void OnClawHudEnabledRequested(bool enabled) => _ = SendClawHudEnabledAsync(enabled);
 
