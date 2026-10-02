@@ -209,10 +209,11 @@ internal static class WindowInterop
             ("Dpi", dpi), ("Scale", dpi / 96.0),
             ("MonitorWidth", geometry.MonitorWidth), ("MonitorHeight", geometry.MonitorHeight),
             ("WorkWidth", geometry.WorkWidth), ("WorkHeight", geometry.WorkHeight),
-            ("ReservedEdgePx", geometry.ReservedEdgePx),
-            ("ReferenceTaskbarPx", geometry.ReferenceTaskbarPx),
-            ("ExtraGapPx", geometry.ExtraGapPx),
-            ("OuterMarginPx", geometry.OuterMarginPx),
+            ("ReservedLeftPx", geometry.ReservedLeftPx),
+            ("ReservedTopPx", geometry.ReservedTopPx),
+            ("ReservedRightPx", geometry.ReservedRightPx),
+            ("ReservedBottomPx", geometry.ReservedBottomPx),
+            ("FloatingGapPx", geometry.FloatingGapPx),
             ("OverlayWidthPx", rect.Width), ("OverlayHeightPx", rect.Height));
     }
 

@@ -10,40 +10,31 @@
             x:Name="SurfaceHost"
             Background="{StaticResource OverlaySurfaceBrush}"
             SizeChanged="OnSurfaceHostSizeChanged">
-            <Border
-                x:Name="OpaquePanel"
-                MaxWidth="720"
-                HorizontalAlignment="Stretch">
-                <Grid x:Name="AnimatedContent">
-                    <Grid Margin="24,24,24,16" RowSpacing="12">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
+        <Border
+            x:Name="OpaquePanel"
+            MaxWidth="416"
+            HorizontalAlignment="Stretch">
+            <Grid x:Name="AnimatedContent">
+                <Grid x:Name="QamShell">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="52" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                        <Grid x:Name="TabStripFrame" Grid.Row="0">
-                            <Border
-                                x:Name="TabRail"
-                                Grid.Column="0"
-                                HorizontalAlignment="Stretch"
-                                Padding="4"
-                                Background="#FFD6D6D6"
-                                CornerRadius="12">
-                                <Grid x:Name="TabStrip" ColumnSpacing="4">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                </Grid>
-                            </Border>
-                        </Grid>
+                    <Border
+                        x:Name="TabRail"
+                        Grid.Column="0"
+                        Background="#FFD6D6D6"
+                        CornerRadius="12">
+                        <Grid
+                            x:Name="TabStrip"
+                            VerticalAlignment="Top"
+                            RowSpacing="4" />
+                    </Border>
 
+                    <Grid Grid.Column="1" Margin="16,16,16,12">
                         <ScrollViewer
                             x:Name="BodyScroll"
-                            Grid.Row="1"
                             VerticalScrollBarVisibility="Hidden"
                             HorizontalScrollBarVisibility="Disabled"
                             HorizontalContentAlignment="Stretch">
@@ -54,7 +45,8 @@
                         </ScrollViewer>
                     </Grid>
                 </Grid>
-            </Border>
+            </Grid>
+        </Border>
         </Grid>
     </Grid>
 </Window>

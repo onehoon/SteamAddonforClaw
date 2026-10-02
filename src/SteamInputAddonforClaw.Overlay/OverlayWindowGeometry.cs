@@ -7,16 +7,16 @@ internal readonly record struct OverlayGeometryMetrics(
     int MonitorHeight,
     int WorkWidth,
     int WorkHeight,
-    int ReservedEdgePx,
-    int ReferenceTaskbarPx,
-    int ExtraGapPx,
-    int OuterMarginPx);
+    int ReservedLeftPx,
+    int ReservedTopPx,
+    int ReservedRightPx,
+    int ReservedBottomPx,
+    int FloatingGapPx);
 
 internal static class OverlayWindowGeometry
 {
-    internal const double ReferenceTaskbarDip = 48.0;
-    internal const double FloatingGapDip = 12.0;
-    internal const double MaxSurfaceWidthDip = 720.0;
+    internal const double FloatingGapDip = 4.0;
+    internal const double MaxSurfaceWidthDip = 416.0;
     private const uint DefaultDpi = 96;
 
     internal static OverlayRect Calculate(
@@ -62,33 +62,33 @@ internal static class OverlayWindowGeometry
         var reservedTop = Math.Max(0, workTop - monitorTop);
         var reservedRight = Math.Max(0, monitorRight - workRight);
         var reservedBottom = Math.Max(0, monitorBottom - workBottom);
-        var reservedEdgePx = Math.Max(Math.Max(reservedLeft, reservedTop), Math.Max(reservedRight, reservedBottom));
-        var referenceTaskbarPx = DipToPixels(ReferenceTaskbarDip, effectiveDpi);
-        var extraGapPx = DipToPixels(FloatingGapDip, effectiveDpi);
-        var requestedOuterMarginPx = Math.Max(reservedEdgePx, referenceTaskbarPx) + extraGapPx;
-
-        // Keep one margin value on all four sides, but clamp it to the smallest monitor
-        // dimension so an unusually small display never produces an inverted rectangle.
-        var outerMarginPx = Math.Min(requestedOuterMarginPx, Math.Min(monitorWidth, monitorHeight) / 2);
-        outerMarginPx = Math.Max(0, outerMarginPx);
-
-        var requestedWidth = Math.Max(0, monitorWidth - 2 * outerMarginPx);
+        var floatingGapPx = DipToPixels(FloatingGapDip, effectiveDpi);
         var maxSurfaceWidthPx = DipToPixels(MaxSurfaceWidthDip, effectiveDpi);
-        var width = Math.Min(requestedWidth, maxSurfaceWidthPx);
-        var height = Math.Max(0, monitorHeight - 2 * outerMarginPx);
 
         metrics = new OverlayGeometryMetrics(
             monitorWidth,
             monitorHeight,
             workWidth,
             workHeight,
-            reservedEdgePx,
-            referenceTaskbarPx,
-            extraGapPx,
-            outerMarginPx);
+            reservedLeft,
+            reservedTop,
+            reservedRight,
+            reservedBottom,
+            floatingGapPx);
 
-        var x = monitorLeft + Math.Max(0, (monitorWidth - width) / 2);
-        return new OverlayRect(x, monitorTop + outerMarginPx, width, height);
+        if (monitorWidth == 0 || monitorHeight == 0)
+            return new OverlayRect(monitorLeft, monitorTop, 0, 0);
+
+        var leftUsable = monitorLeft + reservedLeft + floatingGapPx;
+        var topUsable = monitorTop + reservedTop + floatingGapPx;
+        var rightUsable = monitorRight - reservedRight - floatingGapPx;
+        var bottomUsable = monitorBottom - reservedBottom - floatingGapPx;
+        var availableWidth = Math.Max(0, rightUsable - leftUsable);
+        var width = Math.Min(availableWidth, maxSurfaceWidthPx);
+        var x = Math.Max(leftUsable, rightUsable - width);
+        var height = Math.Max(0, bottomUsable - topUsable);
+
+        return new OverlayRect(x, topUsable, width, height);
     }
 
     private static int DipToPixels(double dip, uint dpi) =>

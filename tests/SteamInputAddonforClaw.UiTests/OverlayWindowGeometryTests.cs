@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayWindowGeometryTests
 {
     [Fact]
-    public void UsesTaskbarReferenceAndGapForTheReferenceDisplay()
+    public void UsesRightSide416DipSurfaceWithIndependentBottomTaskbarReservation()
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 1920, 1200,
@@ -14,27 +14,28 @@ public sealed class OverlayWindowGeometryTests
             144,
             out var metrics);
 
-        Assert.Equal(new OverlayRect(420, 90, 1080, 1020), result);
-        Assert.Equal(72, metrics.ReservedEdgePx);
-        Assert.Equal(72, metrics.ReferenceTaskbarPx);
-        Assert.Equal(18, metrics.ExtraGapPx);
-        Assert.Equal(90, metrics.OuterMarginPx);
+        Assert.Equal(new OverlayRect(1290, 6, 624, 1116), result);
+        Assert.Equal(0, metrics.ReservedLeftPx);
+        Assert.Equal(0, metrics.ReservedTopPx);
+        Assert.Equal(0, metrics.ReservedRightPx);
+        Assert.Equal(72, metrics.ReservedBottomPx);
+        Assert.Equal(6, metrics.FloatingGapPx);
     }
 
     [Theory]
-    [InlineData(96, 60, 600, 720)]
-    [InlineData(120, 75, 510, 900)]
-    [InlineData(144, 90, 420, 1080)]
-    [InlineData(168, 105, 330, 1260)]
-    [InlineData(192, 120, 240, 1440)]
-    public void ScalesReferenceMarginAndSurfaceWidthWithDpiWhenWorkAreaHasNoReservedEdge(uint dpi, int expectedMargin, int expectedX, int expectedWidth)
+    [InlineData(96, 4, 1500, 416, 1192)]
+    [InlineData(120, 5, 1395, 520, 1190)]
+    [InlineData(144, 6, 1290, 624, 1188)]
+    [InlineData(168, 7, 1185, 728, 1186)]
+    [InlineData(192, 8, 1080, 832, 1184)]
+    public void ScalesFloatingGapAndMaximumWidthWithDpi(uint dpi, int expectedGap, int expectedX, int expectedWidth, int expectedHeight)
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 1920, 1200,
             0, 0, 1920, 1200,
             dpi);
 
-        Assert.Equal(new OverlayRect(expectedX, expectedMargin, expectedWidth, 1200 - 2 * expectedMargin), result);
+        Assert.Equal(new OverlayRect(expectedX, expectedGap, expectedWidth, expectedHeight), result);
     }
 
     [Fact]
@@ -45,32 +46,62 @@ public sealed class OverlayWindowGeometryTests
             100, 40, 2020, 1168,
             144);
 
-        Assert.Equal(520, result.X);
-        Assert.Equal(130, result.Y);
-        Assert.Equal(1080, result.Width);
-        Assert.Equal(1020, result.Height);
+        Assert.Equal(new OverlayRect(1390, 46, 624, 1116), result);
     }
 
     [Fact]
-    public void LargerReservedEdgeWinsBeforeTheAdditionalGap()
+    public void RightTaskbarReservationMovesTheSurfaceLeftWithoutChangingTopOrBottomInsets()
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 1920, 1200,
-            80, 60, 1840, 1120,
-            96);
+            0, 0, 1848, 1200,
+            144);
 
-        Assert.Equal(new OverlayRect(600, 92, 720, 1016), result);
+        Assert.Equal(new OverlayRect(1218, 6, 624, 1188), result);
     }
 
     [Fact]
-    public void UsesReferenceMarginWhenWorkAreaHasNoReservedEdge()
+    public void LeftTaskbarReservationIsAppliedOnlyToTheLeftUsableBound()
+    {
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            72, 0, 1920, 1200,
+            144);
+
+        Assert.Equal(new OverlayRect(1290, 6, 624, 1188), result);
+    }
+
+    [Fact]
+    public void TopTaskbarReservationIsAppliedOnlyToTheTopUsableBound()
+    {
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            0, 72, 1920, 1200,
+            144);
+
+        Assert.Equal(new OverlayRect(1290, 78, 624, 1116), result);
+    }
+
+    [Fact]
+    public void BottomTaskbarReservationIsAppliedOnlyToTheBottomUsableBound()
+    {
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            0, 0, 1920, 1128,
+            144);
+
+        Assert.Equal(new OverlayRect(1290, 6, 624, 1116), result);
+    }
+
+    [Fact]
+    public void UsesFloatingGapWhenWorkAreaHasNoReservedEdge()
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 1920, 1200,
             0, 0, 1920, 1200,
             0);
 
-        Assert.Equal(new OverlayRect(600, 60, 720, 1080), result);
+        Assert.Equal(new OverlayRect(1500, 4, 416, 1192), result);
     }
 
     [Fact]
@@ -81,7 +112,7 @@ public sealed class OverlayWindowGeometryTests
             0, 0, 1920, 1128,
             144);
 
-        Assert.Equal(1080, result.Width);
+        Assert.Equal(624, result.Width);
         Assert.False(Contains(result, result.X - 1, result.Y + result.Height / 2));
         Assert.False(Contains(result, result.X + result.Width, result.Y + result.Height / 2));
         Assert.True(Contains(result, result.X, result.Y + result.Height / 2));
@@ -89,15 +120,14 @@ public sealed class OverlayWindowGeometryTests
     }
 
     [Fact]
-    public void ClampsMarginAndDimensionsForAnUnusuallySmallMonitor()
+    public void ClampsDimensionsForAnUnusuallySmallMonitor()
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 10, 10,
             0, 0, 10, 10,
             192);
 
-        Assert.True(result.Width >= 0);
-        Assert.True(result.Height >= 0);
+        Assert.Equal(new OverlayRect(8, 8, 0, 0), result);
         Assert.True(result.X >= 0 && result.X <= result.X + result.Width && result.X + result.Width <= 10);
         Assert.True(result.Y >= 0 && result.Y <= result.Y + result.Height && result.Y + result.Height <= 10);
     }
@@ -110,8 +140,7 @@ public sealed class OverlayWindowGeometryTests
             0, 0, 0, 0,
             96);
 
-        Assert.Equal(0, result.Width);
-        Assert.Equal(0, result.Height);
+        Assert.Equal(new OverlayRect(0, 0, 0, 0), result);
     }
 
     private static bool Contains(OverlayRect rect, int x, int y) =>
