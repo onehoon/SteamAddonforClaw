@@ -286,6 +286,10 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
     private const int TaskActionExec = 0;
     private const int TaskCreateOrUpdate = 6;
 
+    internal static bool IsExactMissingTaskException(Exception exception) =>
+        exception.HResult == FileNotFoundHResult
+        && (exception is COMException or FileNotFoundException);
+
     public OwnedStartupTaskState? Read()
     {
         try
@@ -294,7 +298,7 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
             dynamic rootFolder = service.GetFolder("\\");
             dynamic task;
             try { task = rootFolder.GetTask(WindowsTaskSchedulerStartupManager.TaskName); }
-            catch (COMException exception) when (exception.HResult == FileNotFoundHResult) { return null; }
+            catch (Exception exception) when (IsExactMissingTaskException(exception)) { return null; }
 
             bool enabled = task.Enabled;
             dynamic definition = task.Definition;
@@ -335,14 +339,14 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
             return new OwnedStartupTaskState(enabled, actionPath, actionArguments, logonTriggerUserId, logonType, runLevel,
                 disallowOnBatteries, stopGoingOnBatteries, executionTimeLimit);
         }
-        catch (COMException exception) when (exception.HResult == FileNotFoundHResult)
+        catch (Exception exception) when (IsExactMissingTaskException(exception))
         {
             return null;
         }
         catch (Exception exception)
         {
             // review [P1]: a genuine read failure must surface as a failure, not as "task absent".
-            // Only FileNotFound above is real absence.
+            // Only the exact Task Scheduler missing-task HRESULT is real absence.
             AppLog.Warn("TaskScheduler", "Owned startup task could not be read.", exception);
             throw;
         }

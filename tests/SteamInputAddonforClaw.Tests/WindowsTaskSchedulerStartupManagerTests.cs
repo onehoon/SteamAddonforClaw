@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Install;
 using Xunit;
 
@@ -229,6 +230,61 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     }
 
     [Fact]
+    public void Disable_succeeds_when_post_delete_readback_reports_exact_file_not_found_hresult()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), MissingTaskOnReadNumber = 2 };
+        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
+
+        var result = Manager(store, elevated).Synchronize(false);
+
+        Assert.True(result.Success);
+        Assert.Equal(1, elevated.RemoveCalls);
+        Assert.Equal(2, store.ReadCalls);
+        Assert.Null(store.Current);
+    }
+
+    [Fact]
+    public void Exact_com_missing_task_hresult_is_classified_as_absent()
+    {
+        var exception = new COMException("Task not found.", unchecked((int)0x80070002));
+
+        Assert.True(WindowsOwnedStartupTaskStore.IsExactMissingTaskException(exception));
+    }
+
+    [Fact]
+    public void Exact_file_not_found_hresult_is_classified_as_absent()
+    {
+        var exception = new FileNotFoundException("Task not found.");
+        Assert.Equal(unchecked((int)0x80070002), exception.HResult);
+
+        Assert.True(WindowsOwnedStartupTaskStore.IsExactMissingTaskException(exception));
+    }
+
+    [Fact]
+    public void File_not_found_with_a_different_hresult_remains_a_read_failure()
+    {
+        var exception = new FileNotFoundExceptionWithHResult(unchecked((int)0x80070005));
+
+        Assert.False(WindowsOwnedStartupTaskStore.IsExactMissingTaskException(exception));
+    }
+
+    [Fact]
+    public void Disable_fails_when_post_delete_file_not_found_has_a_different_hresult()
+    {
+        var exception = new FileNotFoundExceptionWithHResult(unchecked((int)0x80070005));
+        var store = new FakeTaskStore
+        {
+            Current = Compliant(),
+            ReadException = exception,
+            ReadExceptionNumber = 2,
+        };
+        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
+
+        Assert.False(Manager(store, elevated).Synchronize(false).Success);
+        Assert.Equal(1, elevated.RemoveCalls);
+    }
+
+    [Fact]
     public void Disable_fails_when_the_elevated_removal_leaves_the_task_present()
     {
         var store = new FakeTaskStore { Current = Compliant() };
@@ -301,6 +357,10 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         public OwnedStartupTaskState? CompliantValue;
         // Task Scheduler read failure: from the Nth Read() onward, Read() throws (0 == never).
         public int FailReadsFrom;
+        // Models the dynamic COM/binder exception classified by the production read boundary.
+        public int MissingTaskOnReadNumber;
+        public Exception? ReadException;
+        public int ReadExceptionNumber;
         public int RegisterCalls;
         public int DeleteCalls;
         public int ReadCalls;
@@ -311,6 +371,19 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             ReadCalls++;
             if (FailReadsFrom > 0 && ReadCalls >= FailReadsFrom)
                 throw new InvalidOperationException("Simulated Task Scheduler read failure.");
+            if (MissingTaskOnReadNumber > 0 && ReadCalls == MissingTaskOnReadNumber)
+            {
+                var exception = new FileNotFoundException("Simulated missing Task Scheduler task.");
+                if (WindowsOwnedStartupTaskStore.IsExactMissingTaskException(exception))
+                    return null;
+                throw exception;
+            }
+            if (ReadException is not null && ReadCalls >= ReadExceptionNumber)
+            {
+                if (WindowsOwnedStartupTaskStore.IsExactMissingTaskException(ReadException))
+                    return null;
+                throw ReadException;
+            }
             if (CompliantOnReadNumber > 0 && ReadCalls >= CompliantOnReadNumber && CompliantValue is not null)
                 Current = CompliantValue;
             return Current;
@@ -352,5 +425,10 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             if (Store is not null) OnRemove?.Invoke(Store);
             return RemoveOutcome;
         }
+    }
+
+    private sealed class FileNotFoundExceptionWithHResult : FileNotFoundException
+    {
+        public FileNotFoundExceptionWithHResult(int hresult) => HResult = hresult;
     }
 }
