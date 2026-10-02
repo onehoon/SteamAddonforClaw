@@ -58,6 +58,17 @@ public sealed class OverlayQamVisualResourcesTests
     }
 
     [Fact]
+    public void Qam_row_padding_maps_css_vertical_horizontal_values_to_winui_thickness_order()
+    {
+        var root = RepoRoot();
+        var resources = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var rowChrome = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs"));
+
+        Assert.Contains("<Thickness x:Key=\"QamRowPadding\">16,10,16,10</Thickness>", resources);
+        Assert.Contains("new Thickness(16, 10, 16, 10)", rowChrome);
+    }
+
+    [Fact]
     public void Overlay_product_chrome_no_longer_uses_light_surface_or_windows_accent_and_card_resources()
     {
         var root = RepoRoot();

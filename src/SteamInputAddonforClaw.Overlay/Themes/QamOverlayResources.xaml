@@ -29,7 +29,7 @@
     <Thickness x:Key="QamDetailIndent">16,0,0,0</Thickness>
     <Thickness x:Key="QamDetailMargin">16,0,16,0</Thickness>
     <x:Double x:Key="QamRowSpacing">0</x:Double>
-    <Thickness x:Key="QamRowPadding">10,16,10,16</Thickness>
+    <Thickness x:Key="QamRowPadding">16,10,16,10</Thickness>
     <Thickness x:Key="QamRowMargin">-16,0,-16,0</Thickness>
     <x:Double x:Key="QamRowMinHeight">42</x:Double>
     <CornerRadius x:Key="QamRowCornerRadius">2</CornerRadius>

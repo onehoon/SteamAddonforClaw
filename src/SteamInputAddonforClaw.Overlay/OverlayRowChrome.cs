@@ -11,7 +11,7 @@ internal static class OverlayRowChrome
     internal static Border Create(UIElement child) => new()
     {
         Child = child,
-        Padding = OverlayQamResources.Get("QamRowPadding", new Thickness(10, 16, 10, 16)),
+        Padding = OverlayQamResources.Get("QamRowPadding", new Thickness(16, 10, 16, 10)),
         Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
         MinHeight = OverlayQamResources.Get("QamRowMinHeight", 42.0),
         CornerRadius = OverlayQamResources.Get("QamRowCornerRadius", new CornerRadius(2)),
