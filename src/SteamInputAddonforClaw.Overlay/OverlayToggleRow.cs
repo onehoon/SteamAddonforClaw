@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 
 namespace SteamInputAddonforClaw.Overlay;
 
@@ -60,9 +59,7 @@ internal sealed class OverlayToggleRow
             VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
         };
-        var textStyleKey = strongLabel ? "BodyStrongTextBlockStyle" : "BodyTextBlockStyle";
-        if (Application.Current.Resources.TryGetValue(textStyleKey, out var style) && style is Style labelStyle)
-            text.Style = labelStyle;
+        OverlayQamResources.ApplyTextStyle(text, strongLabel ? "QamBodyStrongTextStyle" : "QamBodyTextStyle");
         Grid.SetColumn(text, 0);
 
         _toggle = new ToggleSwitch

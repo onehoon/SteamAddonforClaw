@@ -1,4 +1,3 @@
-using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.BackButtons;
@@ -23,8 +22,10 @@ public sealed partial class OverlayWindow
 
     private FrameworkElement BuildControllerPage(List<OverlayRow> rows)
     {
-        var section = new StackPanel { Spacing = 8 };
-        section.Children.Add(new TextBlock { Text = "M1 / M2", FontWeight = FontWeights.SemiBold });
+        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
+        var heading = new TextBlock { Text = "M1 / M2" };
+        OverlayQamResources.ApplyTextStyle(heading, "QamBodyStrongTextStyle");
+        section.Children.Add(heading);
         _backButtonStatusText = CreateStatusText(BackButtonMappingCaption);
         section.Children.Add(_backButtonStatusText);
 

@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -52,7 +51,7 @@ public sealed partial class OverlayWindow
         _tabOrderCard = CreateSettingCard(SettingCardId.TabOrder, "Tab Order", string.Empty, tabOrderDetails);
         UpdateTabOrderCardSummary(_tabState.Order);
 
-        var root = new StackPanel { Spacing = 12 };
+        var root = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
         root.Children.Add(_clawHudCard.Container);
         root.Children.Add(_tabOrderCard.Container);
         rows.AddRange(BuildSettingRows(_tabState.Order));
@@ -62,29 +61,26 @@ public sealed partial class OverlayWindow
     private SettingCardView CreateSettingCard(SettingCardId id, string title, string summary, FrameworkElement detailsContent)
     {
         var titleText = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap };
-        if (Application.Current.Resources.TryGetValue("BodyStrongTextBlockStyle", out var titleStyle) && titleStyle is Style strongStyle)
-            titleText.Style = strongStyle;
+        OverlayQamResources.ApplyTextStyle(titleText, "QamBodyStrongTextStyle");
 
         var summaryText = new TextBlock
         {
             Text = summary,
-            Opacity = 0.75,
             TextWrapping = TextWrapping.Wrap,
         };
-        if (Application.Current.Resources.TryGetValue("CaptionTextBlockStyle", out var summaryStyle) && summaryStyle is Style captionStyle)
-            summaryText.Style = captionStyle;
+        OverlayQamResources.ApplyTextStyle(summaryText, "QamCaptionTextStyle");
 
-        var text = new StackPanel { Spacing = 2 };
+        var text = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         text.Children.Add(titleText);
         text.Children.Add(summaryText);
 
         var chevron = new TextBlock
         {
             Text = "›",
-            FontSize = 20,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(12, 0, 4, 0),
         };
+        OverlayQamResources.ApplyTextStyle(chevron, "QamBodyStrongTextStyle");
 
         var headerGrid = new Grid
         {
@@ -103,10 +99,10 @@ public sealed partial class OverlayWindow
             Content = headerGrid,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(6),
-            MinHeight = 54,
+            Padding = new Thickness(0),
+            MinHeight = 0,
             BorderThickness = new Thickness(0),
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = OverlayQamResources.Brush("QamSectionBrush"),
         };
         AutomationProperties.SetName(headerButton, $"{title}, expand settings");
         headerButton.Click += (_, _) => ToggleSettingCard(id);
@@ -119,13 +115,13 @@ public sealed partial class OverlayWindow
 
         var details = new StackPanel
         {
-            Spacing = 6,
-            Margin = new Thickness(4, 2, 4, 4),
+            Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0),
+            Margin = OverlayQamResources.Get("QamDetailMargin", new Thickness(16, 0, 16, 0)),
             Visibility = Visibility.Collapsed,
         };
         details.Children.Add(detailsContent);
 
-        var content = new StackPanel { Spacing = 6 };
+        var content = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         content.Children.Add(header);
         content.Children.Add(details);
 
@@ -232,7 +228,7 @@ public sealed partial class OverlayWindow
 
     private StackPanel BuildClawHudPage()
     {
-        var section = new StackPanel { Spacing = 5 };
+        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
 
         _clawHudStatusText = CreateStatusText("Waiting for ClawHUD state.");
         section.Children.Add(_clawHudStatusText);
@@ -304,9 +300,8 @@ public sealed partial class OverlayWindow
 
     private static TextBlock CreateStatusText(string text)
     {
-        var block = new TextBlock { Text = text, Opacity = 0.75, TextWrapping = TextWrapping.Wrap };
-        if (Application.Current.Resources.TryGetValue("CaptionTextBlockStyle", out var style) && style is Style captionStyle)
-            block.Style = captionStyle;
+        var block = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap };
+        OverlayQamResources.ApplyTextStyle(block, "QamCaptionTextStyle");
         return block;
     }
 

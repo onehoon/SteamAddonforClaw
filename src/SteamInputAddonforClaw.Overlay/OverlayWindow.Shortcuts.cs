@@ -2,7 +2,6 @@ using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
@@ -24,18 +23,20 @@ public sealed partial class OverlayWindow
 
     private FrameworkElement BuildShortcutPage()
     {
-        var page = new StackPanel { Spacing = 8 };
+        var page = new StackPanel { Spacing = OverlayQamResources.Get("QamTileSpacing", 8.0) };
         _shortcutStatus = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.75,
             Visibility = Visibility.Collapsed,
         };
-        if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
-            _shortcutStatus.Style = bodyStyle;
+        OverlayQamResources.ApplyTextStyle(_shortcutStatus, "QamCaptionTextStyle");
         page.Children.Add(_shortcutStatus);
 
-        _shortcutGrid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+        _shortcutGrid = new Grid
+        {
+            ColumnSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
+            RowSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
+        };
         page.Children.Add(_shortcutGrid);
         RenderShortcutSnapshot();
         return page;
@@ -110,30 +111,30 @@ public sealed partial class OverlayWindow
             {
                 Text = tile.Title,
                 TextWrapping = TextWrapping.Wrap,
-                FontSize = 17,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             };
+            OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
             content.Children.Add(title);
             if (tile.StatusText is { } statusText)
             {
-                content.Children.Add(new TextBlock
+                var status = new TextBlock
                 {
                     Text = statusText,
                     TextWrapping = TextWrapping.Wrap,
-                    Opacity = 0.7,
-                });
+                };
+                OverlayQamResources.ApplyTextStyle(status, "QamCaptionTextStyle");
+                content.Children.Add(status);
             }
 
             var border = new Border
             {
                 Child = content,
-                Padding = new Thickness(14, 13, 14, 13),
-                MinHeight = 76,
-                CornerRadius = new CornerRadius(8),
-                BorderThickness = new Thickness(2),
-                BorderBrush = RowUnselectedBrush,
-                Background = ResolveShortcutTileBackground(),
-                Opacity = tile.Enabled ? 1.0 : 0.48,
+                Padding = OverlayQamResources.Get("QamTilePadding", new Thickness(12)),
+                MinHeight = OverlayQamResources.Get("QamTileMinHeight", 58.0),
+                CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
+                BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
+                BorderBrush = OverlayQamResources.Brush("QamFocusBorderBrush"),
+                Background = OverlayQamResources.Brush("QamTileBrush"),
+                Opacity = tile.Enabled ? 1.0 : OverlayQamResources.Get("QamDisabledOpacity", 0.48),
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 IsHitTestVisible = true,
             };
@@ -146,12 +147,6 @@ public sealed partial class OverlayWindow
 
         ApplyShortcutSelectionVisual();
     }
-
-    private static Brush ResolveShortcutTileBackground() =>
-        Application.Current.Resources.TryGetValue("CardBackgroundFillColorDefaultBrush", out var fill)
-            && fill is Brush brush
-                ? brush
-                : new SolidColorBrush(Microsoft.UI.Colors.LightGray);
 
     private void OnShortcutTileTapped(FrontendShortcutTile tile)
     {
