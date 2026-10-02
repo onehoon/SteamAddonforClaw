@@ -1,4 +1,3 @@
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -9,16 +8,15 @@ namespace SteamInputAddonforClaw.Overlay;
 // stateless construction helper rather than a row base class or visual framework.
 internal static class OverlayRowChrome
 {
-    internal const double SelectionAccentWidth = 3;
-
     internal static Border Create(UIElement child) => new()
     {
         Child = child,
-        Padding = new Thickness(14, 7, 14, 7),
-        MinHeight = 54,
-        CornerRadius = new CornerRadius(8),
-        BorderThickness = new Thickness(SelectionAccentWidth, 0, 0, 0),
-        BorderBrush = new SolidColorBrush(Colors.Transparent),
-        Background = new SolidColorBrush(Colors.Transparent),
+        Padding = OverlayQamResources.Get("QamRowPadding", new Thickness(10, 16, 10, 16)),
+        Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
+        MinHeight = OverlayQamResources.Get("QamRowMinHeight", 42.0),
+        CornerRadius = OverlayQamResources.Get("QamRowCornerRadius", new CornerRadius(2)),
+        BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
+        BorderBrush = OverlayQamResources.Brush("QamFocusBorderBrush"),
+        Background = OverlayQamResources.Brush("QamContentBrush"),
     };
 }

@@ -34,8 +34,7 @@ internal sealed class AddonQuickSettingsTabOrderRow
             VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
         };
-        if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
-            _label.Style = bodyStyle;
+        OverlayQamResources.ApplyTextStyle(_label, "QamBodyTextStyle");
         Grid.SetColumn(_label, 0);
 
         _moveEarlier = CreateMoveButton("◂", "Move earlier", -1);

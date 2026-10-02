@@ -1,10 +1,7 @@
 using System.Linq;
-using Microsoft.UI;
-using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -15,7 +12,6 @@ public sealed partial class OverlayWindow
     private readonly OverlayTabState _tabState = new();
     private readonly Dictionary<AddonQuickSettingsTabId, Button> _tabButtons = new();
     private readonly Dictionary<AddonQuickSettingsTabId, Grid> _tabHosts = new();
-    private readonly Dictionary<AddonQuickSettingsTabId, Border> _tabIndicators = new();
     private readonly Dictionary<AddonQuickSettingsTabId, FrameworkElement> _tabPages = new();
     private readonly Dictionary<AddonQuickSettingsTabId, AddonQuickSettingsTabOrderRow> _tabOrderRows = new();
 
@@ -36,47 +32,32 @@ public sealed partial class OverlayWindow
 
             var button = new Button
             {
-                Content = new SymbolIcon { Symbol = SymbolFor(id), Width = 20, Height = 20 },
+                Content = new SymbolIcon
+                {
+                    Symbol = SymbolFor(id),
+                    Width = OverlayQamResources.Get("QamRailIconSize", 24.0),
+                    Height = OverlayQamResources.Get("QamRailIconSize", 24.0),
+                },
                 Tag = id,
-                Width = 44,
-                Height = 44,
+                Style = OverlayQamResources.Style("QamRailButtonStyle"),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-                VerticalContentAlignment = VerticalAlignment.Center,
-                Padding = new Thickness(0),
-                MinWidth = 44,
-                MinHeight = 44,
-                CornerRadius = new CornerRadius(8),
-                BorderThickness = new Thickness(0),
-                Background = RowUnselectedFillBrush,
-                Foreground = TabUnselectedForegroundBrush,
+                Background = OverlayQamResources.Brush("QamSectionBrush"),
+                Foreground = OverlayQamResources.Brush("QamRailIconBrush"),
             };
             AutomationProperties.SetName(button, label);
             ToolTipService.SetToolTip(button, label);
             button.Click += OnTabHeaderClick;
 
-            var tabHost = new Grid { Height = 48 };
+            var tabHost = new Grid { Height = OverlayQamResources.Get("QamRailItemHeight", 64.0) };
             Grid.SetRow(button, 0);
             tabHost.Children.Add(button);
-
-            var indicator = new Border
-            {
-                Width = 3,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Stretch,
-                Background = _rowSelectedBrush,
-                Visibility = Visibility.Collapsed,
-            };
-            Grid.SetRow(indicator, 0);
-            tabHost.Children.Add(indicator);
 
             TabStrip.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Grid.SetRow(tabHost, position);
             TabStrip.Children.Add(tabHost);
             _tabButtons[id] = button;
             _tabHosts[id] = tabHost;
-            _tabIndicators[id] = indicator;
 
             var rows = new List<OverlayRow>();
             var page = BuildPage(id, rows);
@@ -113,10 +94,10 @@ public sealed partial class OverlayWindow
 
     private StackPanel BuildTabOrderEditorPage()
     {
-        var section = new StackPanel { Spacing = 5 };
+        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
         section.Children.Add(CreateStatusText("Use Left and Right to move the selected tab."));
 
-        var grid = new Grid { RowSpacing = 4 };
+        var grid = new Grid { RowSpacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         var order = _tabState.Order;
         for (var i = 0; i < order.Count; i++)
         {
@@ -145,18 +126,14 @@ public sealed partial class OverlayWindow
 
     private static string LabelFor(AddonQuickSettingsTabId id) => AddonQuickSettingsShellContract.LabelFor(id);
 
-    private static readonly Brush TabUnselectedForegroundBrush = new SolidColorBrush(Colors.DimGray);
-
     private static FrameworkElement CreatePlaceholderPage(AddonQuickSettingsTabId id)
     {
         var page = new TextBlock
         {
             Text = LabelFor(id),
-            Opacity = 0.6,
             TextWrapping = TextWrapping.Wrap,
         };
-        if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
-            page.Style = bodyStyle;
+        OverlayQamResources.ApplyTextStyle(page, "QamCaptionTextStyle");
         return page;
     }
 
@@ -307,11 +284,12 @@ public sealed partial class OverlayWindow
         foreach (var (id, button) in _tabButtons)
         {
             var isSelected = id == selected;
-            button.FontWeight = isSelected ? FontWeights.SemiBold : FontWeights.Normal;
-            button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;
-            button.Foreground = isSelected ? _rowSelectedBrush : TabUnselectedForegroundBrush;
-            if (_tabIndicators.TryGetValue(id, out var indicator))
-                indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed;
+            button.Background = isSelected
+                ? OverlayQamResources.Brush("QamRailSelectedFillBrush")
+                : OverlayQamResources.Brush("QamSectionBrush");
+            button.Foreground = isSelected
+                ? OverlayQamResources.Brush("QamRailIconSelectedBrush")
+                : OverlayQamResources.Brush("QamRailIconBrush");
         }
     }
 

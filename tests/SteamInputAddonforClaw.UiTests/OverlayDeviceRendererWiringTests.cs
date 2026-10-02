@@ -139,9 +139,9 @@ public sealed class OverlayDeviceRendererWiringTests
         var surfaceHostDeclaration = xaml[surfaceHostStart..opaquePanelStart];
         var opaquePanelDeclaration = xaml[opaquePanelStart..animatedContentStart];
 
-        Assert.Contains("RequestedTheme=\"Light\"", xaml);
-        Assert.Contains("x:Key=\"OverlaySurfaceBrush\" Color=\"#FFE7E7E7\"", xaml);
-        Assert.Contains("Background=\"{StaticResource OverlaySurfaceBrush}\"", surfaceHostDeclaration);
+        Assert.Contains("RequestedTheme=\"Dark\"", xaml);
+        Assert.Contains("Background=\"{StaticResource QamSurfaceBrush}\"", surfaceHostDeclaration);
+        Assert.Contains("Background=\"{StaticResource QamRailBrush}\"", xaml);
         Assert.DoesNotContain("Background=", opaquePanelDeclaration);
         Assert.DoesNotContain("CornerRadius=", opaquePanelDeclaration);
         Assert.DoesNotContain("#FFF3F3F3", xaml);
@@ -426,7 +426,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
 
         Assert.Contains("var sectionPanel = new StackPanel", quickSettings);
-        Assert.Contains("var content = new StackPanel { Spacing = 16 }", quickSettings);
+        Assert.Contains("QamSectionSpacing", quickSettings);
         Assert.Contains("var rowStack = new StackPanel", quickSettings);
         Assert.Contains("sectionPanel.Children.Add(rowStack);", quickSettings);
         Assert.Contains("RegisterRowPointerSelection(overlayRow.Container);", quickSettings);
@@ -449,7 +449,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("TryGetFeatureHeaderToggle", quickSettings);
         Assert.Contains("displayLabelOverride ?? row.Label", quickSettings);
         Assert.Contains("visibleRows.Skip(1)", quickSettings);
-        Assert.Contains("Margin = new Thickness(16, 0, 0, 0)", quickSettings);
+        Assert.Contains("QamDetailIndent", quickSettings);
         Assert.Contains("strongLabel: true", quickSettings);
         Assert.DoesNotContain("section.Label.Contains", quickSettings);
         Assert.DoesNotContain("section.Label == \"TDP\"", quickSettings);
@@ -466,9 +466,9 @@ public sealed class OverlayDeviceRendererWiringTests
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
 
         Assert.Contains("CreateOverlaySectionCard(sectionPanel)", quickSettings);
-        Assert.Contains("CardBackgroundFillColorDefaultBrush", quickSettings);
-        Assert.Contains("Padding = new Thickness(8)", quickSettings);
-        Assert.Contains("CornerRadius = new CornerRadius(8)", quickSettings);
+        Assert.Contains("QamSectionPadding", quickSettings);
+        Assert.Contains("QamSectionCornerRadius", quickSettings);
+        Assert.Contains("QamSectionBrush", quickSettings);
         Assert.Contains("CreateSettingCard(SettingCardId.ClawHud", clawHud);
         Assert.Contains("CreateSettingCard(SettingCardId.TabOrder", clawHud);
         Assert.Contains("section.Children.Add(row.Container);", clawHud);
@@ -489,7 +489,7 @@ public sealed class OverlayDeviceRendererWiringTests
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
 
         Assert.Contains("bool strongLabel = false", toggle);
-        Assert.Contains("BodyStrongTextBlockStyle", toggle);
+        Assert.Contains("QamBodyStrongTextStyle", toggle);
         Assert.Contains("displayLabelOverride ?? row.Label", quickSettings);
         Assert.Contains("strongLabel)", quickSettings);
     }
@@ -519,10 +519,11 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("x:Name=\"TabRail\"", tabRail);
         Assert.Contains("Grid.Column=\"0\"", tabRail);
         Assert.Contains("x:Name=\"TabStrip\"", tabRail);
-        Assert.Contains("RowSpacing=\"4\"", tabRail);
+        Assert.Contains("VerticalAlignment=\"Center\"", tabRail);
+        Assert.Contains("RowSpacing=\"{StaticResource QamRailSpacing}\"", tabRail);
         Assert.DoesNotContain("ColumnDefinitions", tabRail);
         Assert.DoesNotContain("Grid.ColumnDefinitions", bodyColumn);
-        Assert.Contains("Grid.Column=\"1\" Margin=\"16,16,16,12\"", bodyColumn);
+        Assert.Contains("Grid.Column=\"1\" Margin=\"{StaticResource QamContentPadding}\"", bodyColumn);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(xaml, "<ScrollViewer\\b"));
         Assert.Contains("x:Name=\"BodyScroll\"", xaml);
         Assert.Contains("x:Name=\"TabBody\"", xaml);
@@ -542,13 +543,13 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("Symbol.XboxOneConsole", shell);
         Assert.Contains("Symbol.ViewAll", shell);
         Assert.Contains("Symbol.Setting", shell);
-        Assert.Contains("Width = 3", shell);
-        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Right", shell);
-        Assert.Contains("VerticalAlignment = VerticalAlignment.Stretch", shell);
+        Assert.Contains("QamRailButtonStyle", shell);
+        Assert.Contains("QamRailIconSize", shell);
+        Assert.DoesNotContain("_tabIndicators", shell);
         Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
         Assert.Contains("MinWidth = 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayTabState", shell);
-        Assert.Contains("button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;", shell);
+        Assert.Contains("QamRailSelectedFillBrush", shell);
         Assert.Contains("SelectPreviousTab", shell);
         Assert.Contains("SelectNextTab", shell);
         Assert.Contains("case OverlayNavigationAction.PreviousTab:", app);
@@ -562,27 +563,29 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Ordinary_rows_share_the_left_accent_chrome_and_selected_tabs_use_an_indicator()
+    public void Rows_and_tabs_use_the_measured_qam_fill_and_resource_owned_metrics()
     {
         var chrome = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs");
+        var resources = ReadSource("src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml");
         var source = ReadOverlayWindowSource();
 
-        Assert.Contains("SelectionAccentWidth = 3", chrome);
-        Assert.Contains("MinHeight = 54", chrome);
-        Assert.Contains("CornerRadius = new CornerRadius(8)", chrome);
-        Assert.Contains("new Thickness(SelectionAccentWidth, 0, 0, 0)", chrome);
+        Assert.Contains("QamRowPadding", chrome);
+        Assert.Contains("QamRowMinHeight", chrome);
+        Assert.Contains("QamRowCornerRadius", chrome);
+        Assert.Contains("QamSelectionBorderThickness", chrome);
+        Assert.Contains("QamSelectedFillBrush", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"));
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
-        Assert.Contains("_tabIndicators", source);
         Assert.Contains("_tabHosts", source);
         Assert.Contains("Grid.SetRow(tabHost, position)", source);
         Assert.DoesNotContain("Grid.SetColumn(tabHost, position)", source);
         Assert.DoesNotContain("Grid.SetColumn(button, position)", source);
         Assert.Contains("_tabState.TryApplyOrder(normalized)", source);
-        Assert.Contains("indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed", source);
-        Assert.Contains("button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;", source);
-        Assert.Contains("button.Foreground = isSelected ? _rowSelectedBrush : TabUnselectedForegroundBrush;", source);
+        Assert.Contains("QamRailSelectedFillBrush", source);
+        Assert.Contains("QamRailIconSelectedBrush", source);
+        Assert.Contains("QamRailSelectedFillBrush", resources);
+        Assert.DoesNotContain("Width = 3", source);
     }
 
     [Fact]

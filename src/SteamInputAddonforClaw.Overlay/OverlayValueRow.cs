@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Media;
 
 namespace SteamInputAddonforClaw.Overlay;
 
@@ -124,11 +123,8 @@ internal sealed class OverlayValueRow
         };
         _valueText = valueText;
 
-        if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var style) && style is Style bodyStyle)
-        {
-            labelText.Style = bodyStyle;
-            _valueText.Style = bodyStyle;
-        }
+        OverlayQamResources.ApplyTextStyle(labelText, "QamBodyTextStyle");
+        OverlayQamResources.ApplyTextStyle(_valueText, "QamValueTextStyle");
 
         _previousButton = CreateIconButton(buttonKind, increase: false, "Previous value", OnPreviousClicked);
         _nextButton = CreateIconButton(buttonKind, increase: true, "Next value", OnNextClicked);

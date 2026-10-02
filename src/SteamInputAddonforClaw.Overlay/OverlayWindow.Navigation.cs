@@ -17,8 +17,8 @@ public sealed partial class OverlayWindow
     private readonly Dictionary<AddonQuickSettingsTabId, IReadOnlyList<OverlayRow>> _pageRows = new();
     private readonly OverlayRowSelection _rowSelection = new();
     private readonly Brush _rowSelectedFillBrush;
-    private static readonly Brush RowUnselectedBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-    private static readonly Brush RowUnselectedFillBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+    private static readonly Brush RowUnselectedBrush = OverlayQamResources.Brush("QamFocusBorderBrush");
+    private static readonly Brush RowUnselectedFillBrush = OverlayQamResources.Brush("QamSectionBrush");
 
     // The Runtime-owned Shortcut projection uses one transient 2D selection model.
     private readonly OverlayShortcutSelection _shortcutSelection = new();
@@ -101,7 +101,11 @@ public sealed partial class OverlayWindow
     {
         var selectedTile = GetSelectedShortcutTile();
         foreach (var (tileId, tile) in _shortcutTiles)
-            tile.BorderBrush = selectedTile?.TileId == tileId ? _rowSelectedBrush : RowUnselectedBrush;
+        {
+            var selected = selectedTile?.TileId == tileId;
+            tile.BorderBrush = _rowSelectedBrush;
+            tile.Background = OverlayQamResources.Brush(selected ? "QamTileSelectedBrush" : "QamTileBrush");
+        }
         if (selectedTile is not null && _shortcutTiles.TryGetValue(selectedTile.TileId, out var selectedBorder))
         {
             try { selectedBorder.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false }); }

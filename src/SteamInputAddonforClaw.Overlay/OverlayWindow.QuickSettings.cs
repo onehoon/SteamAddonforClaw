@@ -1,7 +1,6 @@
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -151,10 +150,10 @@ public sealed partial class OverlayWindow
     // updated after ConfigureQuickSettings/ApplyQuickSettingsPage runs.
     private FrameworkElement BuildQuickSettingsPage(AddonQuickSettingsTabId tabId, QuickSettingsPageId pageId)
     {
-        var failureText = CreateQuickSettingsMessageText(string.Empty, "CaptionTextBlockStyle");
+        var failureText = CreateQuickSettingsMessageText(string.Empty, "QamCaptionTextStyle");
         failureText.Visibility = Visibility.Collapsed;
-        var content = new StackPanel { Spacing = 16 };
-        var root = new StackPanel { Spacing = 4 };
+        var content = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
+        var root = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         root.Children.Add(failureText);
         root.Children.Add(content);
         _quickSettingsSurfaces[pageId] = new QuickSettingsSurface
@@ -252,7 +251,7 @@ public sealed partial class OverlayWindow
 
         if (!page.Available)
         {
-            surface.UnavailableText = CreateQuickSettingsMessageText(page.Message ?? "Quick Settings are unavailable.", "BodyTextBlockStyle");
+            surface.UnavailableText = CreateQuickSettingsMessageText(page.Message ?? "Quick Settings are unavailable.", "QamBodyTextStyle");
             surface.Content.Children.Add(surface.UnavailableText);
             surface.RenderedAvailable = false;
         }
@@ -314,15 +313,15 @@ public sealed partial class OverlayWindow
         if (visibleRows.Length == 0)
             return new RenderedQuickSettingsSection { Section = section, Rows = [] };
 
-        var sectionPanel = new StackPanel { Spacing = 5 };
+        var sectionPanel = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
         var usesFeatureHeader = OverlayQuickSettingsSectionRendering.TryGetFeatureHeaderToggle(section, out var featureHeaderToggle);
         if (!usesFeatureHeader && !string.IsNullOrEmpty(section.Label))
-            sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Label, "BodyStrongTextBlockStyle"));
+            sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Label, "QamBodyStrongTextStyle"));
         if (!string.IsNullOrEmpty(section.Message))
-            sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Message, "CaptionTextBlockStyle"));
+            sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Message, "QamCaptionTextStyle"));
 
         var rows = new List<OverlayRow>();
-        var rowStack = new StackPanel { Spacing = 4 };
+        var rowStack = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         if (usesFeatureHeader && TryCreateQuickSettingsRow(surface, featureHeaderToggle, out var headerRow, section.Label, strongLabel: true))
         {
             rows.Add(headerRow);
@@ -331,7 +330,11 @@ public sealed partial class OverlayWindow
         }
 
         var detailStack = usesFeatureHeader
-            ? new StackPanel { Spacing = 4, Margin = new Thickness(16, 0, 0, 0) }
+            ? new StackPanel
+            {
+                Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0),
+                Margin = OverlayQamResources.Get("QamDetailIndent", new Thickness(16, 0, 0, 0)),
+            }
             : rowStack;
         foreach (var row in usesFeatureHeader ? visibleRows.Skip(1) : visibleRows)
         {
@@ -446,16 +449,14 @@ public sealed partial class OverlayWindow
 
     private static Border CreateOverlaySectionCard(UIElement child)
     {
-        var card = new Border
+        return new Border
         {
             Child = child,
-            Padding = new Thickness(8),
-            CornerRadius = new CornerRadius(8),
+            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(0)),
+            CornerRadius = OverlayQamResources.Get("QamSectionCornerRadius", new CornerRadius(0)),
             HorizontalAlignment = HorizontalAlignment.Stretch,
+            Background = OverlayQamResources.Brush("QamSectionBrush"),
         };
-        if (Application.Current.Resources.TryGetValue("CardBackgroundFillColorDefaultBrush", out var fill) && fill is Brush brush)
-            card.Background = brush;
-        return card;
     }
 
     // Malformed/unsupported rows are skipped entirely: they are never registered for selection and

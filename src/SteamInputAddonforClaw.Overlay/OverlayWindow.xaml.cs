@@ -1,4 +1,3 @@
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 
@@ -15,14 +14,8 @@ public sealed partial class OverlayWindow : Window
     public OverlayWindow()
     {
         InitializeComponent();
-        _rowSelectedBrush =
-            Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var accent) && accent is Brush brush
-                ? brush
-                : new SolidColorBrush(Colors.SlateGray);
-        _rowSelectedFillBrush =
-            Application.Current.Resources.TryGetValue("SubtleFillColorSecondaryBrush", out var subtleFill) && subtleFill is Brush subtleBrush
-                ? subtleBrush
-                : new SolidColorBrush(Colors.Gray) { Opacity = 0.25 };
+        _rowSelectedBrush = OverlayQamResources.Brush("QamFocusBorderBrush");
+        _rowSelectedFillBrush = OverlayQamResources.Brush("QamSelectedFillBrush");
         BuildShell();
         Closed += (_, _) =>
         {

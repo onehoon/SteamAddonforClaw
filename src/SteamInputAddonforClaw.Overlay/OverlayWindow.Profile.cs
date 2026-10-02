@@ -1,7 +1,6 @@
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
@@ -29,18 +28,21 @@ public sealed partial class OverlayWindow
 
     private FrameworkElement BuildProfilePage()
     {
-        var root = new Grid { RowSpacing = 8 };
+        var root = new Grid { RowSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        _profileCatalogStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.72 };
-        if (Application.Current.Resources.TryGetValue("CaptionTextBlockStyle", out var statusStyle) && statusStyle is Style style)
-            _profileCatalogStatus.Style = style;
-        _profileCatalogGrid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+        _profileCatalogStatus = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        OverlayQamResources.ApplyTextStyle(_profileCatalogStatus, "QamCaptionTextStyle");
+        _profileCatalogGrid = new Grid
+        {
+            ColumnSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
+            RowSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
+        };
         for (var i = 0; i < 3; i++)
             _profileCatalogGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        _profileCatalogPanel = new StackPanel { Spacing = 10 };
+        _profileCatalogPanel = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
         _profileCatalogPanel.Children.Add(_profileCatalogStatus);
         _profileCatalogPanel.Children.Add(_profileCatalogGrid);
         Grid.SetRow(_profileCatalogPanel, 0);
@@ -169,8 +171,7 @@ public sealed partial class OverlayWindow
                 HorizontalTextAlignment = TextAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            if (Application.Current.Resources.TryGetValue("BodyTextBlockStyle", out var titleStyle) && titleStyle is Style style)
-                title.Style = style;
+            OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
 
             var card = new Button
             {
@@ -178,13 +179,13 @@ public sealed partial class OverlayWindow
                 Tag = index,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Left,
-                Padding = new Thickness(12, 12, 12, 12),
-                MinHeight = 58,
-                CornerRadius = new CornerRadius(8),
-                BorderThickness = new Thickness(1),
+                Padding = OverlayQamResources.Get("QamTilePadding", new Thickness(12)),
+                MinHeight = OverlayQamResources.Get("QamTileMinHeight", 58.0),
+                CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
+                BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
+                BorderBrush = OverlayQamResources.Brush("QamFocusBorderBrush"),
+                Background = OverlayQamResources.Brush("QamTileBrush"),
             };
-            if (Application.Current.Resources.TryGetValue("CardBackgroundFillColorDefaultBrush", out var fill) && fill is Brush brush)
-                card.Background = brush;
             card.Click += OnProfileCatalogCardClick;
             Grid.SetRow(card, index / 3);
             Grid.SetColumn(card, index % 3);
@@ -208,8 +209,8 @@ public sealed partial class OverlayWindow
         for (var index = 0; index < _profileCatalogCards.Count; index++)
         {
             var selected = index == _profileCatalogSelection.SelectedIndex;
-            _profileCatalogCards[index].BorderBrush = selected ? _rowSelectedBrush : RowUnselectedBrush;
-            _profileCatalogCards[index].Background = selected ? _rowSelectedFillBrush : RowUnselectedFillBrush;
+            _profileCatalogCards[index].BorderBrush = _rowSelectedBrush;
+            _profileCatalogCards[index].Background = OverlayQamResources.Brush(selected ? "QamTileSelectedBrush" : "QamTileBrush");
         }
     }
 
