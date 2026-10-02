@@ -177,14 +177,8 @@ public sealed partial class OverlayWindow
             {
                 Content = title,
                 Tag = index,
+                Style = OverlayQamResources.Style("QamTileButtonStyle"),
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Padding = OverlayQamResources.Get("QamTilePadding", new Thickness(12)),
-                MinHeight = OverlayQamResources.Get("QamTileMinHeight", 58.0),
-                CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
-                BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
-                BorderBrush = OverlayQamResources.Brush("QamFocusBorderBrush"),
-                Background = OverlayQamResources.Brush("QamTileBrush"),
             };
             card.Click += OnProfileCatalogCardClick;
             Grid.SetRow(card, index / 3);

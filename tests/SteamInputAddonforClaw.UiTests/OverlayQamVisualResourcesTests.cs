@@ -24,7 +24,8 @@ public sealed class OverlayQamVisualResourcesTests
     private static readonly string[] RequiredStyleKeys =
     [
         "QamBodyTextStyle", "QamBodyStrongTextStyle", "QamCaptionTextStyle",
-        "QamSectionHeaderTextStyle", "QamValueTextStyle", "QamTileTitleTextStyle", "QamRailButtonStyle",
+        "QamSectionHeaderTextStyle", "QamPageTitleTextStyle", "QamValueTextStyle", "QamTileTitleTextStyle",
+        "QamFlatButtonStyle", "QamTileButtonStyle", "QamRailButtonStyle",
         "QamToggleStyle", "QamSliderStyle", "QamValueButtonStyle",
     ];
 
@@ -61,6 +62,9 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("<ColumnDefinition Width=\"52\" />", source);
         Assert.Contains("QamContentPadding", source);
         Assert.Contains("<Thickness x:Key=\"QamContentPadding\">16,16,16,12</Thickness>", resources);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(source, "<ScrollViewer\\b"));
+        Assert.Contains("VerticalScrollBarVisibility=\"Hidden\"", source);
+        Assert.DoesNotContain("Footer", source);
     }
 
     [Fact]
@@ -72,6 +76,78 @@ public sealed class OverlayQamVisualResourcesTests
 
         Assert.Contains("<Thickness x:Key=\"QamRowPadding\">16,10,16,10</Thickness>", resources);
         Assert.Contains("new Thickness(16, 10, 16, 10)", rowChrome);
+    }
+
+    [Fact]
+    public void Canonical_page_titles_are_added_once_around_each_existing_page_builder()
+    {
+        var root = RepoRoot();
+        var shell = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"));
+        var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var pageTitle = resources.Descendants().Single(element =>
+            element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == "QamPageTitleTextStyle");
+        var buildPage = SliceMethod(shell, "private FrameworkElement BuildPage(", "private static FrameworkElement CreateQamPage(");
+        var createPage = SliceMethod(shell, "private static FrameworkElement CreateQamPage(", "private StackPanel BuildTabOrderEditorPage(");
+
+        Assert.Equal("{StaticResource QamSectionHeaderTextStyle}", (string?)pageTitle.Attribute("BasedOn"));
+        Assert.Equal("QamPageContentSpacing", Assert.Single(
+            resources.Descendants().Attributes(Xaml + "Key"),
+            attribute => attribute.Value == "QamPageContentSpacing").Value);
+        Assert.Equal(1, CountOccurrences(buildPage, "CreateQamPage("));
+        Assert.Contains("var content = id switch", buildPage);
+        Assert.Contains("BuildQuickSettingsPage(id, QuickSettingsPageId.Device)", buildPage);
+        Assert.Contains("BuildProfilePage()", buildPage);
+        Assert.Contains("BuildControllerPage(rows)", buildPage);
+        Assert.Contains("BuildShortcutPage()", buildPage);
+        Assert.Contains("BuildSettingPage(rows)", buildPage);
+        Assert.Contains("return CreateQamPage(id, content);", buildPage);
+        Assert.Contains("Text = LabelFor(id)", createPage);
+        Assert.Contains("QamPageContentSpacing", createPage);
+        Assert.Contains("QamPageTitleTextStyle", createPage);
+        Assert.DoesNotContain("Quick Settings", createPage);
+        Assert.Equal(1, CountOccurrences(shell, "QamPageTitleTextStyle"));
+    }
+
+    [Fact]
+    public void Large_product_buttons_use_flat_qam_template_without_changing_value_button_chrome()
+    {
+        var root = RepoRoot();
+        var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var shell = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"));
+        var profile = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
+        var setting = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs"));
+        var valueRow = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
+        var tabOrder = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
+        var flatStyle = resources.Descendants().Single(element =>
+            element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == "QamFlatButtonStyle");
+        var template = flatStyle.Descendants().Single(element => element.Name.LocalName == "ControlTemplate");
+        var states = template.Descendants().Where(element => element.Name.LocalName == "VisualState")
+            .Select(element => (string?)element.Attribute(Xaml + "Name")).ToArray();
+
+        Assert.Equal(new[] { "Normal", "PointerOver", "Pressed", "Disabled" }, states);
+        Assert.Contains("Property=\"IsTabStop\" Value=\"False\"", flatStyle.ToString());
+        Assert.Contains("Property=\"UseSystemFocusVisuals\" Value=\"False\"", flatStyle.ToString());
+        Assert.Contains("QamHoverFillBrush", template.ToString());
+        Assert.Contains("QamPressedFillBrush", template.ToString());
+        Assert.Contains("QamDisabledTextBrush", template.ToString());
+        Assert.DoesNotContain("Accent", flatStyle.ToString());
+        Assert.DoesNotContain("SystemAccent", flatStyle.ToString());
+
+        Assert.Contains("BasedOn=\"{StaticResource QamFlatButtonStyle}\"", resources.Descendants().Single(element =>
+            element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == "QamRailButtonStyle").ToString());
+        Assert.Contains("BasedOn=\"{StaticResource QamFlatButtonStyle}\"", resources.Descendants().Single(element =>
+            element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == "QamTileButtonStyle").ToString());
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamRailButtonStyle\")", shell);
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamTileButtonStyle\")", profile);
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", setting);
+
+        Assert.Contains("x:Key=\"QamValueButtonStyle\" TargetType=\"primitives:ButtonBase\"", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml")));
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", valueRow);
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
+
+        Assert.Contains("for (var i = 0; i < 3; i++)", profile);
+        Assert.Contains("Grid.SetColumn(card, index % 3)", profile);
+        Assert.Contains("Math.Min(2, _shortcutSnapshot.Tiles.Count)", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs")));
     }
 
     [Fact]
@@ -176,5 +252,25 @@ public sealed class OverlayQamVisualResourcesTests
 
         Assert.NotNull(directory);
         return directory!.FullName;
+    }
+
+    private static string SliceMethod(string source, string start, string end)
+    {
+        var startIndex = source.IndexOf(start, StringComparison.Ordinal);
+        var endIndex = source.IndexOf(end, startIndex, StringComparison.Ordinal);
+        Assert.True(startIndex >= 0 && endIndex > startIndex);
+        return source[startIndex..endIndex];
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+        return count;
     }
 }

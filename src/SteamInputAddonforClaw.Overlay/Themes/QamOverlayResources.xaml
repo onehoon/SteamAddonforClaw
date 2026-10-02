@@ -42,6 +42,8 @@
     <Thickness x:Key="QamSectionPadding">0</Thickness>
     <CornerRadius x:Key="QamSectionCornerRadius">0</CornerRadius>
     <x:Double x:Key="QamSectionHeaderSpacing">4</x:Double>
+    <!-- Provisional title-to-content spacing; this distance has not been measured on live Steam QAM. -->
+    <x:Double x:Key="QamPageContentSpacing">8</x:Double>
     <Thickness x:Key="QamDetailIndent">16,0,0,0</Thickness>
     <Thickness x:Key="QamDetailMargin">16,0,16,0</Thickness>
     <x:Double x:Key="QamRowSpacing">0</x:Double>
@@ -97,8 +99,75 @@
     </Style>
     <Style x:Key="QamValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource QamBodyTextStyle}" />
     <Style x:Key="QamTileTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource QamBodyStrongTextStyle}" />
+    <Style x:Key="QamPageTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource QamSectionHeaderTextStyle}" />
 
-    <Style x:Key="QamRailButtonStyle" TargetType="Button">
+    <Style x:Key="QamFlatButtonStyle" TargetType="Button">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="CornerRadius" Value="{StaticResource QamRowCornerRadius}" />
+        <Setter Property="BorderThickness" Value="{StaticResource QamSelectionBorderThickness}" />
+        <Setter Property="BorderBrush" Value="{StaticResource QamFocusBorderBrush}" />
+        <Setter Property="Background" Value="{StaticResource QamSectionBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource QamPrimaryTextBrush}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="UseSystemFocusVisuals" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup x:Name="CommonStates">
+                                <VisualState x:Name="Normal" />
+                                <VisualState x:Name="PointerOver">
+                                    <VisualState.Setters>
+                                        <Setter Target="FlatButtonBackground.Background" Value="{StaticResource QamHoverFillBrush}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="Pressed">
+                                    <VisualState.Setters>
+                                        <Setter Target="FlatButtonBackground.Background" Value="{StaticResource QamPressedFillBrush}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="Disabled">
+                                    <VisualState.Setters>
+                                        <Setter Target="FlatButtonBackground.Background" Value="{StaticResource QamSectionBrush}" />
+                                        <Setter Target="FlatButtonContent.Foreground" Value="{StaticResource QamDisabledTextBrush}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                        <Border x:Name="FlatButtonBackground"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{TemplateBinding CornerRadius}">
+                            <ContentPresenter x:Name="FlatButtonContent"
+                                              Content="{TemplateBinding Content}"
+                                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                                              ContentTransitions="{TemplateBinding ContentTransitions}"
+                                              Padding="{TemplateBinding Padding}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="QamTileButtonStyle" TargetType="Button" BasedOn="{StaticResource QamFlatButtonStyle}">
+        <Setter Property="Padding" Value="{StaticResource QamTilePadding}" />
+        <Setter Property="MinHeight" Value="{StaticResource QamTileMinHeight}" />
+        <Setter Property="CornerRadius" Value="{StaticResource QamTileCornerRadius}" />
+        <Setter Property="Background" Value="{StaticResource QamTileBrush}" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+    </Style>
+
+    <Style x:Key="QamRailButtonStyle" TargetType="Button" BasedOn="{StaticResource QamFlatButtonStyle}">
         <Setter Property="Width" Value="{StaticResource QamRailButtonSize}" />
         <Setter Property="Height" Value="{StaticResource QamRailItemHeight}" />
         <Setter Property="MinWidth" Value="{StaticResource QamRailButtonSize}" />
