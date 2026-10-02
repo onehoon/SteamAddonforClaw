@@ -60,11 +60,26 @@ For the Korean label 모서리에 FPS 표시, DevTools reported platform fonts M
 | Neutral QAM accent resource | No distinct blue accent or selected indicator was visible. The resource reuses the measured neutral rail-icon color (#8B929A), not the Windows accent. |
 | Shortcut disabled opacity 0.48 | No disabled tile was visible in QAM; the Overlay retains its existing disabled-state opacity centrally. |
 
+## PR B control inspection — 2026-10-02
+
+The retained `QuickAccess_uid17` target was present during this follow-up, but its document was hidden and the Performance page had no live SliderField or ToggleField elements. Consequently, no control bounding boxes, computed styles, active/inactive states, or discrete-field geometry could be measured in this session. The following are stylesheet declarations only; their selectors were not tied to a visible product control instance and must not be described as computed QAM values:
+
+| Loaded stylesheet selector | Declared properties | Evidence boundary |
+| --- | --- | --- |
+| `.HqVrl-7SIPNdZd1uHcMK1 .SliderTrack` | height 4px; inactive fill `rgba(255,255,255,0.133)`; inset shadow; `--left-track-color: #B8BCBF` | Raw rule only; no live matching slider was available |
+| `.HqVrl-7SIPNdZd1uHcMK1 .SliderControl` | `--slider-handle-width: 12px` | Raw rule only; visual handle size/state not measured |
+| `.HqVrl-7SIPNdZd1uHcMK1 .SliderHandle` | 12 × 12px; `rgb(238,238,238)` | Raw rule only; hover declares 14 × 14px |
+| `.pKqdj8AMVbHjzLei06ytQ` slider rules | 4px track; active fill `rgba(255,255,255,0.533)`; 12px handle; `rgb(184,188,191)` handle | Separate raw rule group; its live role/state was not identified |
+
+No corresponding live ToggleField rules or finite ordered choice field were identified. The existing PR B control resource values are therefore provisional: Slider track/handle candidates are drawn from the stylesheet declarations above, toggle colors reuse the already measured neutral QAM palette, and the discrete buttons reuse measured row/text colors. The native WinUI ToggleSwitch template is retained rather than asserting an unmeasured Steam toggle geometry. These choices are not a claim of exact control parity.
+
+Before treating these control constants as final, reopen the current Steam QAM Performance page and capture read-only computed geometry/styles for an actual SliderField and ToggleField; capture a finite ordered field if one is available. The PR B implementation can be reviewed and built independently, but its visual-acceptance gate remains pending that live capture and MSI Claw 1920 × 1200 / 150% comparison.
+
 The Overlay intentionally retains the work-order's 416 DIP surface and 52 DIP structural rail. Only the internal visual treatment uses the measurements above; the 48 CSS px Steam rail does not change Overlay geometry.
 
 ## Deferred to PR B or hardware acceptance
 
-- ToggleSwitch track/thumb, numeric slider, discrete selector, and stepper-button templates/states.
+- Measured ToggleSwitch track/thumb, numeric slider, discrete selector, and stepper-button templates/states; PR B follow-up found stylesheet declarations only and no live control instance.
 - Steam disabled, hover, pressed, warning/error, and distinct caption roles.
 - Text letter-spacing/opacity, ordinary value typography, bottom content padding, and labeled section-header-to-row distance were not separately measured in this capture.
 - 1920 × 1200 / 150% MSI Claw side-by-side visual acceptance, including WinUI's rendered Korean fallback and the effect of the expected per-monitor scaling.

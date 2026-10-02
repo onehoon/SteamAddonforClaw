@@ -320,16 +320,19 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Overlay_value_renderer_uses_one_value_row_for_numeric_and_discrete_shared_slider_contracts()
+    public void Overlay_value_renderer_routes_debounced_numeric_to_native_slider_and_discrete_to_value_row()
     {
         var source = ReadOverlayWindowSource();
         var contracts = ReadSource("src", "SteamInputAddonforClaw.Contracts", "Frontend", "QuickSettingsContracts.cs");
 
+        Assert.Contains("Dictionary<QuickSettingsRowId, OverlayNumericSliderRow> NumericSliderRows", source);
         Assert.Contains("Dictionary<QuickSettingsRowId, OverlayValueRow> ValueRows", source);
         Assert.Contains("CreateQuickSettingsValueRow", source);
         Assert.Contains("ApplyQuickSettingsValueState", source);
         Assert.Contains("QuickSettingsSliderKind.Numeric", source);
-        Assert.Contains("OverlayValueButtonKind.NumericStepper", source);
+        Assert.Contains("OverlayNumericSliderRow", source);
+        Assert.Contains("QuickSettingsCommitMode.TrailingDebounce", source);
+        Assert.Contains("ApplyQuickSettingsNumericSliderState(sliderRow, row)", source);
         Assert.Contains("var options = spec.Options!", source);
         Assert.Contains("FormatDiscreteLabel(options, index)", source);
         Assert.Contains("QuickSettingsValue.Integer(options[i].Value)", source);
@@ -337,11 +340,23 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("new OverlayValueRow", source);
         Assert.Contains("ScheduleQuickSettingsSlider", source);
         Assert.DoesNotContain("OverlaySliderRow", source);
-        Assert.DoesNotContain("SliderRows", source);
+        Assert.Contains("ApplyQuickSettingsNumericSliderState", source);
 
         Assert.Contains("public enum QuickSettingsControlKind { Toggle, Slider }", contracts);
         Assert.Contains("QuickSettingsSliderKind.Numeric", contracts);
         Assert.Contains("QuickSettingsSliderKind.Discrete", contracts);
+    }
+
+    [Fact]
+    public void Stable_numeric_quick_settings_updates_reuse_the_existing_slider_row()
+    {
+        var source = ReadOverlayWindowSource();
+        var update = source[source.IndexOf("private static void UpdateQuickSettingsRowValues", StringComparison.Ordinal)..
+            source.IndexOf("private static void ApplyQuickSettingsToggleState", StringComparison.Ordinal)];
+
+        Assert.Contains("surface.NumericSliderRows.TryGetValue(row.RowId, out var numericSlider)", update);
+        Assert.Contains("ApplyQuickSettingsNumericSliderState(numericSlider, row)", update);
+        Assert.DoesNotContain("new OverlayNumericSliderRow", update);
     }
 
     [Fact]
@@ -361,9 +376,9 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("Interval = 75", source);
         Assert.Contains("FontIcon", source);
         Assert.Contains("CreateIconButton", source);
-        Assert.Contains("MinWidth = 40", source);
-        Assert.Contains("MinHeight = 40", source);
-        Assert.Contains("CornerRadius = new CornerRadius(6)", source);
+        Assert.Contains("QamValueButtonStyle", source);
+        Assert.Contains("QamValueButtonSize", source);
+        Assert.Contains("QamValueButtonCornerRadius", source);
         Assert.Contains("button.Click += click", source);
         Assert.Contains("_model.RequestAdjust(-1)", source);
         Assert.Contains("_model.RequestAdjust(+1)", source);
@@ -372,9 +387,11 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("CreateArrowButton", source);
         Assert.DoesNotContain("‹", source);
         Assert.DoesNotContain("›", source);
-        Assert.DoesNotContain("Slider", source);
-        Assert.DoesNotContain("ComboBox", source);
-        Assert.DoesNotContain("RequestSet", source);
+        var rowStart = source.IndexOf("internal sealed class OverlayValueRow", StringComparison.Ordinal);
+        var valueRowSource = source[rowStart..];
+        Assert.DoesNotContain("Slider", valueRowSource);
+        Assert.DoesNotContain("ComboBox", valueRowSource);
+        Assert.DoesNotContain("RequestSet", valueRowSource);
     }
 
     // SF-V2-09 section 32/6/20/37: no Profile-specific product table/policy may be duplicated into

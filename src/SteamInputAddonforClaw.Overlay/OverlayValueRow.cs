@@ -54,6 +54,16 @@ internal sealed class OverlayValueModel
         Edit(PreviewValue + delta * Step);
     }
 
+    // Pointer/touch sliders provide a raw value; normalize it through the same semantic authority
+    // used by controller one-step adjustment before publishing the desired value.
+    internal void RequestSet(double desired)
+    {
+        if (!IsAvailable || !double.IsFinite(desired))
+            return;
+
+        Edit(desired);
+    }
+
     private bool CanAdjust(int delta) =>
         ConstraintsValid && IsAvailable && Normalize(PreviewValue + delta * Step) != PreviewValue;
 
@@ -117,7 +127,7 @@ internal sealed class OverlayValueRow
         {
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            MinWidth = 88,
+            MinWidth = OverlayQamResources.Get("QamDiscreteValueMinWidth", 88.0),
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.NoWrap,
         };
@@ -189,10 +199,11 @@ internal sealed class OverlayValueRow
             : new Button();
 
         button.Content = icon;
-        button.MinWidth = 40;
-        button.MinHeight = 40;
+        button.Style = OverlayQamResources.Style("QamValueButtonStyle");
+        button.MinWidth = OverlayQamResources.Get("QamValueButtonSize", 40.0);
+        button.MinHeight = OverlayQamResources.Get("QamValueButtonSize", 40.0);
         button.Padding = new Thickness(0);
-        button.CornerRadius = new CornerRadius(6);
+        button.CornerRadius = OverlayQamResources.Get("QamValueButtonCornerRadius", new CornerRadius(6));
         button.BorderThickness = new Thickness(0);
         button.VerticalAlignment = VerticalAlignment.Center;
         button.HorizontalContentAlignment = HorizontalAlignment.Center;
