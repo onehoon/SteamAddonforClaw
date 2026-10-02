@@ -14,12 +14,18 @@ public sealed class OverlayQamVisualResourcesTests
         "QamAccentBrush", "QamSelectedFillBrush", "QamHoverFillBrush", "QamPressedFillBrush",
         "QamFocusBorderBrush", "QamSeparatorBrush", "QamSectionBrush", "QamTileBrush",
         "QamTileSelectedBrush", "QamRailIconBrush", "QamRailIconSelectedBrush", "QamRailSelectedFillBrush",
+        "QamToggleOffBrush", "QamToggleOnBrush", "QamToggleDisabledBrush", "QamToggleThumbBrush",
+        "QamToggleThumbDisabledBrush", "QamSliderTrackBrush", "QamSliderValueTrackBrush",
+        "QamSliderDisabledTrackBrush", "QamSliderThumbBrush", "QamSliderDisabledThumbBrush",
+        "QamValueButtonForeground", "QamValueButtonDisabledForeground", "QamValueButtonHoverFill",
+        "QamValueButtonPressedFill",
     ];
 
     private static readonly string[] RequiredStyleKeys =
     [
         "QamBodyTextStyle", "QamBodyStrongTextStyle", "QamCaptionTextStyle",
         "QamSectionHeaderTextStyle", "QamValueTextStyle", "QamTileTitleTextStyle", "QamRailButtonStyle",
+        "QamToggleStyle", "QamSliderStyle", "QamValueButtonStyle",
     ];
 
     [Fact]
@@ -66,6 +72,33 @@ public sealed class OverlayQamVisualResourcesTests
 
         Assert.Contains("<Thickness x:Key=\"QamRowPadding\">16,10,16,10</Thickness>", resources);
         Assert.Contains("new Thickness(16, 10, 16, 10)", rowChrome);
+    }
+
+    [Fact]
+    public void Qam_control_styles_are_keyed_and_keep_theme_overrides_local_to_each_native_control()
+    {
+        var root = RepoRoot();
+        var resources = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var toggle = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
+        var slider = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayNumericSliderRow.cs"));
+        var valueRow = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
+        var tabOrder = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
+        var app = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "App.xaml"));
+
+        Assert.Contains("x:Key=\"QamToggleStyle\" TargetType=\"ToggleSwitch\" BasedOn=\"{StaticResource DefaultToggleSwitchStyle}\"", resources);
+        Assert.Contains("x:Key=\"QamSliderStyle\" TargetType=\"Slider\" BasedOn=\"{StaticResource DefaultSliderStyle}\"", resources);
+        Assert.Contains("x:Key=\"QamValueButtonStyle\" TargetType=\"primitives:ButtonBase\"", resources);
+        Assert.Contains("_toggle.Style = toggleStyle", toggle);
+        Assert.Contains("toggle.Resources[key] = brush is", toggle);
+        Assert.Contains("_suppress = true", toggle);
+        Assert.Contains("_model.RequestToggle", toggle);
+        Assert.Contains("_model.RequestSet(_toggle.IsOn)", toggle);
+        Assert.Contains("_toggle.IsEnabled = isAvailable", toggle);
+        Assert.Contains("slider.Resources[key] = brush", slider);
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", valueRow);
+        Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
+        Assert.DoesNotContain("ToggleSwitchFillOn", app);
+        Assert.DoesNotContain("SliderTrackValueFill", app);
     }
 
     [Fact]
@@ -128,7 +161,7 @@ public sealed class OverlayQamVisualResourcesTests
         {
             "OverlayWindow.xaml", "OverlayWindow.xaml.cs", "OverlayWindow.Shell.cs",
             "OverlayWindow.Navigation.cs", "OverlayRowChrome.cs", "OverlayToggleRow.cs",
-            "OverlayValueRow.cs", "OverlayTabOrderRow.cs", "OverlayWindow.QuickSettings.cs",
+            "OverlayValueRow.cs", "OverlayNumericSliderRow.cs", "OverlayTabOrderRow.cs", "OverlayWindow.QuickSettings.cs",
             "OverlayWindow.Profile.cs", "OverlayWindow.Controller.cs", "OverlayWindow.ClawHud.cs",
             "OverlayWindow.Shortcuts.cs",
         };

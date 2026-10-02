@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 
 namespace SteamInputAddonforClaw.Overlay;
@@ -70,6 +71,10 @@ internal sealed class OverlayToggleRow
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
+        if (OverlayQamResources.Style("QamToggleStyle") is { } toggleStyle)
+            _toggle.Style = toggleStyle;
+        AutomationProperties.SetName(_toggle, label);
+        ApplyQamToggleResources(_toggle);
         _toggle.Toggled += OnToggleSwitchToggled;
         Grid.SetColumn(_toggle, 1);
 
@@ -113,5 +118,60 @@ internal sealed class OverlayToggleRow
     {
         if (!_suppress)
             _model.RequestSet(_toggle.IsOn);
+    }
+
+    private static void ApplyQamToggleResources(ToggleSwitch toggle)
+    {
+        var off = OverlayQamResources.Brush("QamToggleOffBrush");
+        var on = OverlayQamResources.Brush("QamToggleOnBrush");
+        var disabled = OverlayQamResources.Brush("QamToggleDisabledBrush");
+        var thumb = OverlayQamResources.Brush("QamToggleThumbBrush");
+        var disabledThumb = OverlayQamResources.Brush("QamToggleThumbDisabledBrush");
+        var transparent = OverlayQamResources.Brush("QamSectionBrush");
+
+        // The keyed style retains WinUI's native ToggleSwitch template and drag/input behavior.
+        // ThemeResource overrides are scoped to this instance and cannot recolor other controls.
+        SetBrush(toggle, "ToggleSwitchContainerBackground", transparent);
+        SetBrush(toggle, "ToggleSwitchContainerBackgroundPointerOver", transparent);
+        SetBrush(toggle, "ToggleSwitchContainerBackgroundPressed", transparent);
+        SetBrush(toggle, "ToggleSwitchContainerBackgroundDisabled", transparent);
+        SetBrush(toggle, "ToggleSwitchFillOff", off);
+        SetBrush(toggle, "ToggleSwitchFillOffPointerOver", off);
+        SetBrush(toggle, "ToggleSwitchFillOffPressed", off);
+        SetBrush(toggle, "ToggleSwitchFillOffDisabled", disabled);
+        SetBrush(toggle, "ToggleSwitchStrokeOff", transparent);
+        SetBrush(toggle, "ToggleSwitchStrokeOffPointerOver", transparent);
+        SetBrush(toggle, "ToggleSwitchStrokeOffPressed", transparent);
+        SetBrush(toggle, "ToggleSwitchStrokeOffDisabled", transparent);
+        SetBrush(toggle, "ToggleSwitchFillOn", on);
+        SetBrush(toggle, "ToggleSwitchFillOnPointerOver", on);
+        SetBrush(toggle, "ToggleSwitchFillOnPressed", on);
+        SetBrush(toggle, "ToggleSwitchFillOnDisabled", disabled);
+        SetBrush(toggle, "ToggleSwitchStrokeOn", on);
+        SetBrush(toggle, "ToggleSwitchStrokeOnPointerOver", on);
+        SetBrush(toggle, "ToggleSwitchStrokeOnPressed", on);
+        SetBrush(toggle, "ToggleSwitchStrokeOnDisabled", disabled);
+        SetBrush(toggle, "ToggleSwitchKnobFillOff", thumb);
+        SetBrush(toggle, "ToggleSwitchKnobFillOffPointerOver", thumb);
+        SetBrush(toggle, "ToggleSwitchKnobFillOffPressed", thumb);
+        SetBrush(toggle, "ToggleSwitchKnobFillOffDisabled", disabledThumb);
+        SetBrush(toggle, "ToggleSwitchKnobFillOn", thumb);
+        SetBrush(toggle, "ToggleSwitchKnobFillOnPointerOver", thumb);
+        SetBrush(toggle, "ToggleSwitchKnobFillOnPressed", thumb);
+        SetBrush(toggle, "ToggleSwitchKnobFillOnDisabled", disabledThumb);
+        SetBrush(toggle, "ToggleSwitchKnobStrokeOn", thumb);
+        SetBrush(toggle, "ToggleSwitchContentForeground", OverlayQamResources.Brush("QamPrimaryTextBrush"));
+        SetBrush(toggle, "ToggleSwitchContentForegroundDisabled", OverlayQamResources.Brush("QamDisabledTextBrush"));
+        SetBrush(toggle, "ToggleSwitchHeaderForeground", OverlayQamResources.Brush("QamPrimaryTextBrush"));
+        SetBrush(toggle, "ToggleSwitchHeaderForegroundDisabled", OverlayQamResources.Brush("QamDisabledTextBrush"));
+    }
+
+    private static void SetBrush(ToggleSwitch toggle, string key, Microsoft.UI.Xaml.Media.Brush brush)
+    {
+        // The native template animates some brush Color properties. Clone each resource so an
+        // animation cannot mutate the application-level QAM palette or another toggle's state.
+        toggle.Resources[key] = brush is Microsoft.UI.Xaml.Media.SolidColorBrush solid
+            ? new Microsoft.UI.Xaml.Media.SolidColorBrush(solid.Color) { Opacity = solid.Opacity }
+            : brush;
     }
 }

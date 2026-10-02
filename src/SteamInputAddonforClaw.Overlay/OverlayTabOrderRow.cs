@@ -97,8 +97,7 @@ internal sealed class AddonQuickSettingsTabOrderRow
         var button = new Button
         {
             Content = glyph,
-            Padding = new Thickness(8, 2, 8, 2),
-            MinWidth = 0,
+            Style = OverlayQamResources.Style("QamValueButtonStyle"),
         };
         AutomationProperties.SetName(button, accessibleName);
         ToolTipService.SetToolTip(button, accessibleName);

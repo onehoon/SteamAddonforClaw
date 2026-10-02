@@ -101,6 +101,7 @@ public sealed partial class OverlayWindow
         internal required TextBlock FailureText { get; init; }
         internal OverlayQuickSettingsPageBinding? Binding { get; set; }
         internal Dictionary<QuickSettingsRowId, OverlayToggleRow> ToggleRows { get; } = new();
+        internal Dictionary<QuickSettingsRowId, OverlayNumericSliderRow> NumericSliderRows { get; } = new();
         internal Dictionary<QuickSettingsRowId, OverlayValueRow> ValueRows { get; } = new();
         internal Dictionary<QuickSettingsSectionId, RenderedQuickSettingsSection> RenderedSections { get; } = new();
         internal bool? RenderedAvailable { get; set; }
@@ -205,6 +206,8 @@ public sealed partial class OverlayWindow
         {
             if (surface.ToggleRows.TryGetValue(row.RowId, out var toggle))
                 ApplyQuickSettingsToggleState(toggle, row);
+            else if (surface.NumericSliderRows.TryGetValue(row.RowId, out var numericSlider))
+                ApplyQuickSettingsNumericSliderState(numericSlider, row);
             else if (surface.ValueRows.TryGetValue(row.RowId, out var valueRow))
                 ApplyQuickSettingsValueState(valueRow, row);
         }
@@ -215,6 +218,15 @@ public sealed partial class OverlayWindow
         var isOn = row.Value is { Kind: QuickSettingsValueKind.Boolean, BooleanValue: true };
         var isAvailable = row.Visible && row.Available && row.Writable && row.Value is { Kind: QuickSettingsValueKind.Boolean };
         toggle.ApplyState(isAvailable, isOn);
+    }
+
+    private static void ApplyQuickSettingsNumericSliderState(OverlayNumericSliderRow sliderRow, QuickSettingsRow row)
+    {
+        if (row.SliderSpec is not { Kind: QuickSettingsSliderKind.Numeric } spec) return;
+        var hasValue = row.Value is { Kind: QuickSettingsValueKind.Integer, IntegerValue: not null };
+        var value = hasValue ? row.Value!.IntegerValue!.Value : spec.Minimum;
+        var available = row.Visible && row.Available && row.Writable && hasValue;
+        sliderRow.ApplyState(available, spec.Minimum, spec.Maximum, spec.Step, value);
     }
 
     private static void ApplyQuickSettingsValueState(OverlayValueRow valueRow, QuickSettingsRow row)
@@ -244,6 +256,7 @@ public sealed partial class OverlayWindow
         var (preferredRowId, previousSelection) = CaptureQuickSettingsSelection(surface);
 
         surface.ToggleRows.Clear();
+        surface.NumericSliderRows.Clear();
         surface.ValueRows.Clear();
         surface.RenderedSections.Clear();
         surface.UnavailableText = null;
@@ -365,6 +378,7 @@ public sealed partial class OverlayWindow
         {
             if (row.QuickSettingsRowId is not { } rowId) continue;
             surface.ToggleRows.Remove(rowId);
+            surface.NumericSliderRows.Remove(rowId);
             surface.ValueRows.Remove(rowId);
         }
     }
@@ -509,28 +523,40 @@ public sealed partial class OverlayWindow
     {
         var rowId = row.RowId;
         var spec = row.SliderSpec!;
-        OverlayValueRow valueRow;
+        if (spec.Kind == QuickSettingsSliderKind.Numeric &&
+            row.CommitPolicy is { Mode: QuickSettingsCommitMode.TrailingDebounce, DelayMilliseconds: > 0 })
+        {
+            var suffix = spec.Suffix ?? string.Empty;
+            var sliderRow = new OverlayNumericSliderRow(row.Label,
+                value => OverlayValueRow.FormatInteger(value) + suffix,
+                desired => ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer((int)Math.Round(desired))));
+            ApplyQuickSettingsNumericSliderState(sliderRow, row);
+            surface.NumericSliderRows[rowId] = sliderRow;
+            return new OverlayRow(sliderRow.Container, sliderRow.Capabilities, rowId);
+        }
+
         if (spec.Kind == QuickSettingsSliderKind.Numeric)
         {
             var suffix = spec.Suffix ?? string.Empty;
-            valueRow = new OverlayValueRow(row.Label,
+            var stepperRow = new OverlayValueRow(row.Label,
                 value => OverlayValueRow.FormatInteger(value) + suffix,
                 desired => ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer((int)Math.Round(desired))),
                 OverlayValueButtonKind.NumericStepper);
+            ApplyQuickSettingsValueState(stepperRow, row);
+            surface.ValueRows[rowId] = stepperRow;
+            return new OverlayRow(stepperRow.Container, stepperRow.Capabilities, rowId);
         }
-        else
-        {
-            var options = spec.Options!;
-            valueRow = new OverlayValueRow(row.Label,
-                index => FormatDiscreteLabel(options, index),
-                desired =>
-                {
-                    var i = (int)Math.Round(desired);
-                    if (i < 0 || i >= options.Count) return;
-                    ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer(options[i].Value));
-                },
-                OverlayValueButtonKind.DiscreteChoice);
-        }
+
+        var options = spec.Options!;
+        var valueRow = new OverlayValueRow(row.Label,
+            index => FormatDiscreteLabel(options, index),
+            desired =>
+            {
+                var i = (int)Math.Round(desired);
+                if (i < 0 || i >= options.Count) return;
+                ScheduleQuickSettingsSlider(surface, rowId, QuickSettingsValue.Integer(options[i].Value));
+            },
+            OverlayValueButtonKind.DiscreteChoice);
 
         ApplyQuickSettingsValueState(valueRow, row);
         surface.ValueRows[rowId] = valueRow;
