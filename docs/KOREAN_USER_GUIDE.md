@@ -4,7 +4,7 @@ Steam Addon for Claw는 지원되는 MSI Claw 핸드헬드의 내장 컨트롤�
 
 Addon이 컨트롤러 권한을 보유하는 동안(MSI Center M 비활성화 상태) 내장 MSI 컨트롤러를 항상 하나의 가상 컨트롤러로 Windows에 표현합니다. Steam 게임이나 Steam Big Picture 세션이 활성 상태이면 가상 Steam Deck 컨트롤러로, 그렇지 않으면 가상 Xbox 360 컨트롤러로 표현됩니다. 이 동작에는 사용자 스위치가 없으며 Steam/Big Picture 상태에 따라 자동으로 결정됩니다.
 
-Center M 버튼 리매핑, Device 단위 CPU Boost 및 TDP 제어, 게임별 성능 프로파일, Steam Quick Access Menu의 성능 제어 기능은 독립적인 기능입니다.
+전면 버튼 리매핑, Device 단위 CPU Boost 및 TDP 제어, 게임별 성능 프로파일, Steam Quick Access Menu의 성능 제어 기능은 독립적인 기능입니다.
 
 ## 지원 기기
 
@@ -40,7 +40,7 @@ Addon은 MSI의 정확한 Board ID를 기준으로 지원 모델을 식별합니
 - 가상 Steam Deck 컨트롤러 출력 (`VID 28DE`, `PID 1205`)
 - 내장 컨트롤러 버튼, 스틱, 트리거, D-pad, 후면 버튼 매핑
 - 물리 진동(Rumble) 지원
-- Center M의 일반 동작(Normal Action) 사용자 설정 가능
+- WING / Gamebar 및 Center M 버튼을 Normal / Steam 모드별로 설정 가능
 - 독립 기능인 Device 단위 CPU Boost 및 TDP 제어
 - 독립 기능인 게임별 CPU Boost 및 TDP 프로파일
 - 주기적인 게임/프로세스 Polling 없이 이벤트 기반으로 Steam 게임 감지
@@ -86,18 +86,18 @@ MSI Claw 내장 컨트롤러의 입력은 다음과 같이 가상 Steam Deck 컨
 
 Motion / Gyro 출력은 현재 지원되는 컨트롤러 매핑에 포함되지 않습니다.
 
-## Center M 버튼 리매핑
+## 전면 버튼 리매핑
 
-**Controller** 탭에는 Center M 버튼 설정이 있습니다.
+**Controller** 탭에서 WING(Gamebar)과 Center M 버튼 동작을 Normal 및 Steam Game / Big Picture 모드별로 각각 설정할 수 있습니다. 활성 매핑 모드는 Addon의 실제 Full1902 컨트롤러 프레젠테이션을 따릅니다.
 
-Center M 리매핑은 Addon이 관리하며 UI에는 **Always enabled**로 표시됩니다. 사용자가 수정할 수 있는 **Normal Action**은 Center M 버튼을 눌렀을 때 수행할 동작을 결정합니다.
+최초 설치 시 기본 동작은 다음과 같습니다.
 
-사용 가능한 Normal Action은 다음과 같습니다.
+| 버튼 | Normal 모드 | Steam Game / Big Picture 모드 |
+| --- | --- | --- |
+| WING / Gamebar | Steam Big Picture | Steam Button |
+| Center M | Quick Settings Overlay | Quick Settings Overlay |
 
-- **None**
-- **Steam Big Picture** — 기본 동작
-- **Keyboard / Hotkey** — Ctrl, Shift, Alt, Win 조합 키와 하나의 키를 조합할 수 있음
-- **Launch Application** — 선택한 `.exe`를 실행하며 필요하면 실행 인수(arguments)도 지정 가능
+각 버튼과 모드의 매핑은 독립적으로 변경할 수 있습니다. 업데이트는 유효하게 저장된 사용자 매핑을 초기화하지 않으며, 유효한 저장값이 없을 때 위 기본값을 사용합니다.
 
 ### MSI Center M과 컨트롤러 소유권
 

@@ -55,7 +55,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
     }
 
     [Fact]
-    public async Task Default_normal_domain_center_m_press_launches_big_picture_and_gamebar_press_toggles_overlay()
+    public async Task Default_normal_domain_center_m_toggles_overlay_and_gamebar_launches_big_picture()
     {
         var overlay = 0;
         var bigPicture = 0;
@@ -67,10 +67,10 @@ public sealed class MsiClawFrontButtonRuntimeTests
         Assert.True(oem1.StartCalled);
 
         oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
-        Assert.Equal(1, bigPicture);   // Normal / Center M default = Steam Big Picture
+        Assert.Equal(1, overlay);      // Normal / Center M default = Quick Settings Overlay
 
         wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
-        Assert.Equal(1, overlay);      // Normal / Gamebar default = Quick Settings Overlay
+        Assert.Equal(1, bigPicture);  // Normal / Gamebar default = Steam Big Picture
     }
 
     [Fact]
@@ -78,10 +78,12 @@ public sealed class MsiClawFrontButtonRuntimeTests
     {
         var steamPulses = 0;
         var quickAccess = 0;
+        var overlay = 0;
         var oem1 = new FakeEventSource();
         var wing = new FakeEventSource();
         await using var runtime = Create(FrontButtonMappingSettings.Default, oem1, wing,
             steamDeckActive: true,
+            requestOverlayToggle: () => overlay++,
             quickAccessPulse: () => { quickAccess++; return true; },
             steamPulse: () => { steamPulses++; return true; });
 
@@ -89,13 +91,15 @@ public sealed class MsiClawFrontButtonRuntimeTests
         oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
 
         Assert.Equal(1, steamPulses);  // Steam / Gamebar default = Steam Button
-        Assert.Equal(1, quickAccess);  // Steam / Center M default = Steam Quick Access
+        Assert.Equal(1, overlay);      // Steam / Center M default = Quick Settings Overlay
+        Assert.Equal(0, quickAccess);  // Steam Quick Access is no longer the default mapping
     }
 
     [Fact]
     public async Task Domain_follows_the_actual_steamdeck_presentation_not_raw_steam_demand()
     {
         var overlay = 0;
+        var bigPicture = 0;
         var steamPulses = 0;
         var steamDeckActive = false;
         var oem1 = new FakeEventSource();
@@ -107,6 +111,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
             requestOverlayToggle: () => overlay++,
             tryRequestQuickAccessPulse: () => false,
             tryRequestSteamPulse: () => { steamPulses++; return true; },
+            launchBigPictureOverride: () => bigPicture++,
             nativeWinGSuppressionReady: () => true,
             oem1EventSourceOverride: oem1,
             wingEventSourceOverride: wing,
@@ -115,12 +120,14 @@ public sealed class MsiClawFrontButtonRuntimeTests
             wingGestureDelay: new ImmediateDelay());
 
         wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
-        Assert.Equal(1, overlay);
+        Assert.Equal(1, bigPicture);
+        Assert.Equal(0, overlay);
         Assert.Equal(0, steamPulses);
 
         steamDeckActive = true;
         wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
-        Assert.Equal(1, overlay);
+        Assert.Equal(1, bigPicture);
+        Assert.Equal(0, overlay);
         Assert.Equal(1, steamPulses);
     }
 

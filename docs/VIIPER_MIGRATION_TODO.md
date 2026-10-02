@@ -89,15 +89,18 @@ input loss remains fail-close, Game Bar/X360 foreground switching remains
 dormant, and real hardware validation of this policy remains pending. This does
 not mark SD3 complete.
 
-### Routing-time native UI policy
+### Front-button defaults and routing-time native UI policy
 
-- Outside an active Steam route, WING remains stock Win+G / Xbox Game Bar.
-- During an active Steam route, Win+G/Game Bar is suppressed; WING mapping is
-  a separate action policy whose default is Steam Button.
+- Front-button action domain follows the actual Full1902 presentation: Normal
+  uses WING → Steam Big Picture and Center M → Quick Settings Overlay; Steam
+  Game / Big Picture uses WING → Steam Button and Center M → Quick Settings
+  Overlay. These are first-install defaults; valid saved user mappings remain
+  authoritative.
+- During an active Steam route, native Win+G/Game Bar is suppressed while the
+  WING mapping remains an independent action policy.
 - OEM1 remapping remains independent of the routing master setting. The
   route-bound Center M guard prevents the native Center M MainUI path from
-  becoming operational while routing owns the route; the default routing action
-  remains Steam Quick Access.
+  becoming operational while routing owns the route.
 - MSI Center M MainUI is unavailable while the Addon owns the active Steam
   route.
 

@@ -160,11 +160,13 @@ behavior.
 
 The current product direction therefore keeps one canonical Steam Deck
 presentation for the complete active Steam route. Route-bound native Win+G is
-protected while routing owns the controller, WING defaults to the Steam
-Button, routing-active OEM1 defaults to Steam Quick Access, and Addon quick
-controls integrate with Steam QAM. These Steam-native interactions remove the
-need for a foreground virtual-controller identity switch while keeping one
-clear presentation authority and teardown path.
+protected while routing owns the controller. The first-install WING default is
+Steam Big Picture in Normal presentation and Steam Button in Steam Game / Big
+Picture presentation; Center M defaults to the Addon Quick Settings Overlay in
+both domains. Addon performance controls remain integrated with Steam QAM.
+These interactions remove the need for a foreground virtual-controller
+identity switch while keeping one clear presentation authority and teardown
+path.
 
 The dormant Addon Xbox360 foundation remains in the current code for now, and
 VIIPER's generic typed Xbox360 capability remains supported. Neither fact makes

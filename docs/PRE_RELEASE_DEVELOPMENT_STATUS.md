@@ -51,14 +51,14 @@ The canonical Steam Deck is the single production virtual-controller
 presentation for an active Steam routing session. Game Bar foreground does not
 select another virtual controller.
 
-During active Steam routing:
+The WING and Center M mappings are selected from the actual Full1902 presentation domain:
 
-- WING defaults to the Steam Button;
-- Center M / OEM1 defaults to Steam Quick Access;
-- Addon quick controls are integrated into Steam Quick Access Menu;
-- native Win+G/Game Bar activation is protected while the route is owned.
+- Normal: WING defaults to Steam Big Picture; Center M defaults to Quick Settings Overlay.
+- Steam Game / Big Picture: WING defaults to Steam Button; Center M defaults to Quick Settings Overlay.
+- Addon performance controls remain integrated into Steam Quick Access Menu.
+- Native Win+G / Game Bar activation remains protected while controller routing owns the device.
 
-Outside routing, native Windows and Game Bar behavior is restored.
+These defaults apply when no valid saved mapping exists; user-selected mappings remain intact.
 
 ## Initial MSI Claw mapping
 

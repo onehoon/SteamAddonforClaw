@@ -11,7 +11,7 @@ Steam Addon for Claw brings Steam Input and Steam Deck-style controller integrat
 
 While the Addon holds controller authority (MSI Center M disabled), it continuously presents the built-in MSI controller to Windows. When a Steam game or Steam Big Picture session is active, that presentation is a virtual Steam Deck controller; otherwise it is a virtual Xbox 360 controller. There is no user switch for this — presentation follows the Steam/Big Picture state automatically.
 
-Center M button remapping, device-level CPU Boost and TDP controls, per-game performance profiles, and Steam Quick Access Menu performance controls are independent features.
+Front-button remapping, device-level CPU Boost and TDP controls, per-game performance profiles, and Steam Quick Access Menu performance controls are independent features.
 
 ## Supported devices
 
@@ -47,7 +47,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - Virtual Steam Deck controller output (`VID 28DE`, `PID 1205`)
 - Built-in controller button, stick, trigger, D-pad, and rear-button mapping
 - Physical rumble support
-- Configurable Center M normal action
+- Configurable WING / Gamebar and Center M actions for Normal and Steam presentation modes
 - Device-level CPU Boost, Windows 11 Power Mode, and TDP control as independent features
 - Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles as independent features
 - Event-driven Steam game detection without periodic game/process polling
@@ -93,18 +93,18 @@ The built-in MSI Claw controls are mapped to the virtual Steam Deck controller a
 
 Motion / gyro output is not currently part of the supported controller mapping.
 
-## Center M button remapping
+## Front-button remapping
 
-The **Controller** tab contains the Center M button settings.
+The **Controller** tab lets you configure the WING (Gamebar) and Center M buttons independently for the Normal and Steam Game / Big Picture presentation domains. The active domain follows the Addon's actual Full1902 controller presentation.
 
-Center M remapping is managed by the Addon and is shown as **Always enabled**. The editable **Normal Action** controls what a normal Center M press does.
+The first-install defaults are:
 
-Available Normal Actions are:
+| Button | Normal mode | Steam Game / Big Picture mode |
+| --- | --- | --- |
+| WING / Gamebar | Steam Big Picture | Steam Button |
+| Center M | Quick Settings Overlay | Quick Settings Overlay |
 
-- **None**
-- **Steam Big Picture** — the default action
-- **Keyboard / Hotkey** — optional Ctrl, Shift, Alt, or Win modifiers plus one key
-- **Launch Application** — launches a selected `.exe`, with optional arguments
+Each button/domain mapping can be customized independently. Application updates preserve valid saved mappings; these defaults are used when no valid mapping has been saved.
 
 ### MSI Center M and controller ownership
 
