@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
@@ -616,6 +617,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _overlayController.BindShortcutAuthority(
             capture: _ => Task.FromResult(_shortcutRuntime.Capture()),
             execute: (tileId, token) => HandleOverlayShortcutExecutionAsync(tileId, token));
+        _overlayController.BindBackButtonMappingAuthority(
+            capture: CaptureOverlayBackButtonMappingAsync,
+            mutate: MutateOverlayBackButtonMappingAsync);
         // SF-V2-02 section 17: refresh a currently visible/captured Overlay on ordinary Runtime
         // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
         // scheduled once shutdown admission closes.
@@ -636,6 +640,46 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId: null, message: "No active game."));
 
         return _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId, token);
+    }
+
+    private async Task<OverlayBackButtonMappingState> CaptureOverlayBackButtonMappingAsync(CancellationToken token)
+    {
+        var control = _frontendControl ?? throw new InvalidOperationException("Frontend control is unavailable.");
+        var bootstrap = await control.GetBootstrapAsync(token).ConfigureAwait(false);
+        return new(
+            bootstrap.BackButtonMappingAvailable,
+            bootstrap.Settings.BackButtonMapping,
+            bootstrap.BackButtonMappingAvailable ? null : "M1 / M2 mapping is unavailable.");
+    }
+
+    private async Task<OverlayBackButtonMappingMutationOutcome> MutateOverlayBackButtonMappingAsync(
+        BackButtonMappingSettings candidate,
+        CancellationToken token)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive)
+        {
+            var current = await CaptureOverlayBackButtonMappingSafelyAsync(token).ConfigureAwait(false);
+            return new(false, "The Overlay is not active.", current);
+        }
+
+        var control = _frontendControl;
+        if (control is null)
+            return new(false, "M1 / M2 mapping is unavailable.", OverlayBackButtonMappingState.Unavailable());
+
+        var bootstrap = await control.GetBootstrapAsync(token).ConfigureAwait(false);
+        var result = await control.SetBackButtonMappingAsync(candidate, token).ConfigureAwait(false);
+        var succeeded = result.BackButtonMapping == candidate;
+        var state = new OverlayBackButtonMappingState(
+            bootstrap.BackButtonMappingAvailable,
+            result.BackButtonMapping,
+            bootstrap.BackButtonMappingAvailable ? null : "M1 / M2 mapping is unavailable.");
+        return new(succeeded, succeeded ? null : "M1 / M2 mapping update was not applied.", state);
+    }
+
+    private async Task<OverlayBackButtonMappingState> CaptureOverlayBackButtonMappingSafelyAsync(CancellationToken token)
+    {
+        try { return await CaptureOverlayBackButtonMappingAsync(token).ConfigureAwait(false); }
+        catch { return OverlayBackButtonMappingState.Unavailable(); }
     }
 
     /// <summary>PR5/PR6: the whole Disabled-mode controller startup sequence. Runs only for an exact
@@ -1222,6 +1266,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _ = _overlayController.RefreshTabOrderAsync();
             _ = _overlayController.RefreshClawHudAsync();
             _ = _overlayController.RefreshShortcutAsync();
+            _ = _overlayController.RefreshBackButtonMappingAsync();
         }
         catch (Exception exception)
         {
@@ -1250,6 +1295,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (!_overlayCaptureActive) return;
         if (!_overlayController.IsVisible) return;
         _ = _overlayController.RefreshShortcutAsync();
+        _ = _overlayController.RefreshBackButtonMappingAsync();
         // Section 23: an admitted Overlay mutation already returns a fresh authoritative page; a
         // redundant refresh here could otherwise race/overwrite that result (including erasing a
         // typed Succeeded=false + FailureMessage) with an older/less-complete page. Section 10's

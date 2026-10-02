@@ -99,12 +99,13 @@ public sealed partial class OverlayWindow
         _ => throw new ArgumentOutOfRangeException(nameof(id), id, "Unknown Overlay tab identity."),
     };
 
-    // Device and Profile use the shared Quick Settings renderer; Setting owns tab-order editing;
-    // Shortcut renders the Runtime-owned dynamic dashboard; other tabs keep their placeholders.
+    // Device/Profile use shared Quick Settings, Controller projects the Runtime-owned M1/M2 mapping,
+    // Setting owns tab-order editing, and Shortcut renders the Runtime-owned dynamic dashboard.
     private FrameworkElement BuildPage(AddonQuickSettingsTabId id, List<OverlayRow> rows) => id switch
     {
         AddonQuickSettingsTabId.Setting => BuildSettingPage(rows),
         AddonQuickSettingsTabId.Shortcut => BuildShortcutPage(),
+        AddonQuickSettingsTabId.Controller => BuildControllerPage(rows),
         AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
         AddonQuickSettingsTabId.Profile => BuildProfilePage(),
         _ => CreatePlaceholderPage(id),

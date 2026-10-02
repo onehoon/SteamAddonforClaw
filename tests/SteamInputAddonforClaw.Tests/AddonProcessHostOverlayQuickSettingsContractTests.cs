@@ -105,6 +105,39 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
     }
 
     [Fact]
+    public void Overlay_back_button_mapping_binds_capture_and_mutation_to_the_frontend_control()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var capture = ExtractMethod(source, "private async Task<OverlayBackButtonMappingState> CaptureOverlayBackButtonMappingAsync");
+        var mutate = ExtractMethod(source, "private async Task<OverlayBackButtonMappingMutationOutcome> MutateOverlayBackButtonMappingAsync");
+
+        Assert.Contains("_overlayController.BindBackButtonMappingAuthority(", source, StringComparison.Ordinal);
+        Assert.Contains("capture: CaptureOverlayBackButtonMappingAsync", source, StringComparison.Ordinal);
+        Assert.Contains("mutate: MutateOverlayBackButtonMappingAsync", source, StringComparison.Ordinal);
+        Assert.Contains("_frontendControl ?? throw", capture, StringComparison.Ordinal);
+        Assert.Contains("control.GetBootstrapAsync(token)", capture, StringComparison.Ordinal);
+        Assert.Contains("bootstrap.BackButtonMappingAvailable", capture, StringComparison.Ordinal);
+        Assert.Contains("bootstrap.Settings.BackButtonMapping", capture, StringComparison.Ordinal);
+        Assert.Contains("control.SetBackButtonMappingAsync(candidate, token)", mutate, StringComparison.Ordinal);
+        Assert.Contains("result.BackButtonMapping == candidate", mutate, StringComparison.Ordinal);
+        Assert.DoesNotContain("ChangeBackButtonMapping", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsStore", mutate, StringComparison.Ordinal);
+        Assert.DoesNotContain("_startupComposition.Coordinator", mutate, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Overlay_back_button_mapping_refresh_runs_after_capture_and_on_visible_state_invalidation()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var invalidation = ExtractMethod(source, "private void OnFrontendStateInvalidatedForOverlay");
+
+        Assert.Equal(2, CountOccurrences(source, "_ = _overlayController.RefreshBackButtonMappingAsync();"));
+        Assert.Contains("_ = _overlayController.RefreshBackButtonMappingAsync();", invalidation, StringComparison.Ordinal);
+        Assert.Contains("if (!_overlayCaptureActive) return;", invalidation, StringComparison.Ordinal);
+        Assert.Contains("if (!_overlayController.IsVisible) return;", invalidation, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Shortcut_state_refresh_is_scheduled_after_capture_commit_and_before_quick_settings_suppression()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.FrontendTransport;
@@ -38,6 +39,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private Func<uint, CancellationToken, Task<QuickSettingsPageSnapshot>>? _captureSelectedProfilePage;
     private Func<CancellationToken, Task<FrontendShortcutDashboardSnapshot>>? _captureShortcut;
     private Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>>? _executeShortcut;
+    private Func<CancellationToken, Task<OverlayBackButtonMappingState>>? _captureBackButtonMapping;
+    private Func<BackButtonMappingSettings, CancellationToken, Task<OverlayBackButtonMappingMutationOutcome>>? _mutateBackButtonMapping;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
@@ -62,7 +65,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         // always runs after AddonProcessHost has bound its Runtime authorities.
         _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _captureTabOrder, _moveTabOrder, _mutateQuickSettings,
             _captureClawHud, _setClawHudEnabled, _mutateClawHudSetting, _scanProfileGames, _captureSelectedProfilePage,
-            _captureShortcut, _executeShortcut));
+            _captureShortcut, _executeShortcut, _captureBackButtonMapping, _mutateBackButtonMapping));
     }
 
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
@@ -113,6 +116,14 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     {
         _captureShortcut = capture ?? throw new ArgumentNullException(nameof(capture));
         _executeShortcut = execute ?? throw new ArgumentNullException(nameof(execute));
+    }
+
+    internal void BindBackButtonMappingAuthority(
+        Func<CancellationToken, Task<OverlayBackButtonMappingState>> capture,
+        Func<BackButtonMappingSettings, CancellationToken, Task<OverlayBackButtonMappingMutationOutcome>> mutate)
+    {
+        _captureBackButtonMapping = capture ?? throw new ArgumentNullException(nameof(capture));
+        _mutateBackButtonMapping = mutate ?? throw new ArgumentNullException(nameof(mutate));
     }
 
     internal string ExecutablePath => _executablePath;
@@ -263,6 +274,31 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             AppLog.Warn("Overlay", "Overlay Shortcut state publish failed.", null,
                 ("ExceptionType", exception.GetType().Name));
         }
+    }
+
+    internal async Task RefreshBackButtonMappingAsync()
+    {
+        NamedPipeOverlayServer? server;
+        var capture = _captureBackButtonMapping;
+        lock (_sync) server = _server;
+        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+
+        OverlayBackButtonMappingState state;
+        try { state = await capture(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Overlay", "Overlay M1 / M2 mapping capture failed.", exception);
+            state = OverlayBackButtonMappingState.Unavailable();
+        }
+        if (!OverlayBackButtonMappingWireValidation.IsStructurallyValid(state))
+            state = OverlayBackButtonMappingState.Unavailable();
+
+        try
+        {
+            if (!await server.SendBackButtonMappingStateAsync(state).ConfigureAwait(false))
+                AppLog.Warn("Overlay", "Overlay M1 / M2 mapping state publish was not accepted.");
+        }
+        catch (Exception exception) { AppLog.Warn("Overlay", "Overlay M1 / M2 mapping state publish failed.", exception); }
     }
 
     private static async Task PublishQuickSettingsPageAsync(

@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
@@ -38,11 +39,13 @@ internal static class OverlayTransportProtocol
     // peer must fail the handshake; no compatibility shim.
     // Version 12: adds Runtime-owned sanitized Shortcut state, TileId-only execution requests, and
     // correlated execution results. A v11 peer must fail the handshake; no compatibility shim.
-    internal const int CurrentVersion = 12;
+    // Version 13: adds Runtime-owned global Xbox360 M1/M2 mapping state and one correlated
+    // whole-record mutation. A v12 peer must fail the handshake; no compatibility shim.
+    internal const int CurrentVersion = 13;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ProfileCatalogRequest, ProfileCatalogState, ProfilePageRequest, ProfilePageResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ProfileCatalogRequest, ProfileCatalogState, ProfilePageRequest, ProfilePageResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult }
 internal enum OverlayCommand { Show, Hide, Shutdown }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
@@ -73,6 +76,26 @@ internal sealed record OverlayShortcutExecuteResponse(
     string? FailureMessage,
     FrontendShortcutDashboardSnapshot Snapshot);
 
+internal sealed record OverlayBackButtonMappingState(
+    bool Available,
+    BackButtonMappingSettings Mapping,
+    string? FailureMessage = null)
+{
+    internal static OverlayBackButtonMappingState Unavailable() =>
+        new(false, BackButtonMappingSettings.Default, "M1 / M2 mapping is unavailable.");
+}
+
+internal sealed record OverlayBackButtonMappingMutationRequest(long RequestId, BackButtonMappingSettings Mapping);
+internal sealed record OverlayBackButtonMappingMutationOutcome(
+    bool Succeeded,
+    string? FailureMessage,
+    OverlayBackButtonMappingState State);
+internal sealed record OverlayBackButtonMappingMutationResponse(
+    long RequestId,
+    bool Succeeded,
+    string? FailureMessage,
+    OverlayBackButtonMappingState State);
+
 internal sealed record OverlayWireMessage(
     int ProtocolVersion,
     OverlayWireMessageKind Kind,
@@ -94,7 +117,72 @@ internal sealed record OverlayWireMessage(
     OverlayProfilePageResponse? ProfilePageResult = null,
     FrontendShortcutDashboardSnapshot? ShortcutState = null,
     OverlayShortcutExecuteRequest? ShortcutExecuteRequest = null,
-    OverlayShortcutExecuteResponse? ShortcutExecuteResult = null);
+    OverlayShortcutExecuteResponse? ShortcutExecuteResult = null,
+    OverlayBackButtonMappingState? BackButtonMappingState = null,
+    OverlayBackButtonMappingMutationRequest? BackButtonMappingMutationRequest = null,
+    OverlayBackButtonMappingMutationResponse? BackButtonMappingMutationResponse = null);
+
+internal static class OverlayBackButtonMappingWireValidation
+{
+    internal static bool IsStructurallyValid(OverlayBackButtonMappingState? state) =>
+        state is { Mapping: not null } && BackButtonMappingValidation.IsValid(state.Mapping);
+
+    internal static bool IsStructurallyValid(OverlayBackButtonMappingMutationRequest? request) =>
+        request is { RequestId: > 0, Mapping: not null } && BackButtonMappingValidation.IsValid(request.Mapping);
+
+    internal static bool IsStructurallyValid(OverlayBackButtonMappingMutationResponse? response) =>
+        response is { RequestId: > 0, State: not null } && IsStructurallyValid(response.State);
+
+    internal static bool IsValidStateMessage(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.BackButtonMappingState
+        && IsStructurallyValid(message.BackButtonMappingState)
+        && message.BackButtonMappingMutationRequest is null
+        && message.BackButtonMappingMutationResponse is null
+        && !HasNonBackButtonMappingPayload(message);
+
+    internal static bool IsValidMutationRequestMessage(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.BackButtonMappingMutationRequest
+        && IsStructurallyValid(message.BackButtonMappingMutationRequest)
+        && message.BackButtonMappingState is null
+        && message.BackButtonMappingMutationResponse is null
+        && !HasNonBackButtonMappingPayload(message);
+
+    internal static bool IsValidMutationResultMessage(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.BackButtonMappingMutationResult
+        && IsStructurallyValid(message.BackButtonMappingMutationResponse)
+        && message.BackButtonMappingState is null
+        && message.BackButtonMappingMutationRequest is null
+        && !HasNonBackButtonMappingPayload(message);
+
+    internal static bool HasBackButtonMappingPayload(OverlayWireMessage message) =>
+        message.BackButtonMappingState is not null
+        || message.BackButtonMappingMutationRequest is not null
+        || message.BackButtonMappingMutationResponse is not null;
+
+    private static bool HasNonBackButtonMappingPayload(OverlayWireMessage message) =>
+        message.Command is not null
+        || message.Navigation is not null
+        || message.State is not null
+        || message.Error is not null
+        || message.TabOrderState is not null
+        || message.TabOrderMove is not null
+        || message.TabOrderMutationResult is not null
+        || message.QuickSettingsPage is not null
+        || message.QuickSettingsMutationRequest is not null
+        || message.QuickSettingsMutationResponse is not null
+        || message.ClawHudState is not null
+        || message.ClawHudMutationRequest is not null
+        || message.ClawHudMutationResponse is not null
+        || message.ProfileCatalogState is not null
+        || message.ProfilePageRequest is not null
+        || message.ProfilePageResult is not null
+        || message.ShortcutState is not null
+        || message.ShortcutExecuteRequest is not null
+        || message.ShortcutExecuteResult is not null;
+}
 
 /// <summary>SF-V2-06 section 10/11: the Overlay transport's own job is only wire-structural safety --
 /// "is this a closed Quick Settings message that can be handed to the shared adapter without a
@@ -269,7 +357,8 @@ internal static class OverlayShortcutWireValidation
         || message.ClawHudMutationResponse is not null
         || message.ProfileCatalogState is not null
         || message.ProfilePageRequest is not null
-        || message.ProfilePageResult is not null;
+        || message.ProfilePageResult is not null
+        || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message);
 }
 
 internal static class OverlayWireCodec
@@ -357,6 +446,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
     private readonly Func<uint, CancellationToken, Task<QuickSettingsPageSnapshot>> _captureProfilePage;
     private readonly Func<CancellationToken, Task<FrontendShortcutDashboardSnapshot>>? _captureShortcut;
     private readonly Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>>? _executeShortcut;
+    private readonly Func<CancellationToken, Task<OverlayBackButtonMappingState>>? _captureBackButtonMapping;
+    private readonly Func<BackButtonMappingSettings, CancellationToken, Task<OverlayBackButtonMappingMutationOutcome>>? _mutateBackButtonMapping;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _commandGate = new(1, 1);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -387,14 +478,17 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         Func<CancellationToken, Task<IReadOnlyList<FrontendProfileGameCatalogEntry>>>? scanProfileGames = null,
         Func<uint, CancellationToken, Task<QuickSettingsPageSnapshot>>? captureProfilePage = null,
         Func<CancellationToken, Task<FrontendShortcutDashboardSnapshot>>? captureShortcut = null,
-        Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>>? executeShortcut = null)
+        Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>>? executeShortcut = null,
+        Func<CancellationToken, Task<OverlayBackButtonMappingState>>? captureBackButtonMapping = null,
+        Func<BackButtonMappingSettings, CancellationToken, Task<OverlayBackButtonMappingMutationOutcome>>? mutateBackButtonMapping = null)
         : this(pipeName, () => new NamedPipeServerStream(
             pipeName,
             PipeDirection.InOut,
             1,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly), captureTabOrder, moveTabOrder, mutateQuickSettings,
-            captureClawHud, setClawHudEnabled, mutateClawHudSetting, scanProfileGames, captureProfilePage, captureShortcut, executeShortcut)
+            captureClawHud, setClawHudEnabled, mutateClawHudSetting, scanProfileGames, captureProfilePage, captureShortcut, executeShortcut,
+            captureBackButtonMapping, mutateBackButtonMapping)
     { }
 
     internal NamedPipeOverlayServer(string pipeName, Func<NamedPipeServerStream> pipeFactory,
@@ -407,7 +501,9 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         Func<CancellationToken, Task<IReadOnlyList<FrontendProfileGameCatalogEntry>>>? scanProfileGames = null,
         Func<uint, CancellationToken, Task<QuickSettingsPageSnapshot>>? captureProfilePage = null,
         Func<CancellationToken, Task<FrontendShortcutDashboardSnapshot>>? captureShortcut = null,
-        Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>>? executeShortcut = null)
+        Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>>? executeShortcut = null,
+        Func<CancellationToken, Task<OverlayBackButtonMappingState>>? captureBackButtonMapping = null,
+        Func<BackButtonMappingSettings, CancellationToken, Task<OverlayBackButtonMappingMutationOutcome>>? mutateBackButtonMapping = null)
     {
         _pipeName = pipeName;
         _pipeFactory = pipeFactory;
@@ -422,6 +518,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         _captureProfilePage = captureProfilePage ?? ((appId, _) => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, "Profile settings are unavailable.")));
         _captureShortcut = captureShortcut;
         _executeShortcut = executeShortcut;
+        _captureBackButtonMapping = captureBackButtonMapping;
+        _mutateBackButtonMapping = mutateBackButtonMapping;
     }
 
     internal bool IsReady { get { lock (_sync) return _readyState; } }
@@ -595,6 +693,33 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         }
     }
 
+    internal async Task<bool> SendBackButtonMappingStateAsync(OverlayBackButtonMappingState state, CancellationToken token = default)
+    {
+        if (!OverlayBackButtonMappingWireValidation.IsStructurallyValid(state))
+            throw new FrontendProtocolException("Invalid Overlay M1/M2 mapping state.");
+
+        NamedPipeServerStream? pipe;
+        lock (_sync)
+        {
+            if (!_readyState || _state != OverlayState.Visible) return false;
+            pipe = _activePipe;
+        }
+        if (pipe is null) return false;
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.BackButtonMappingState,
+                    BackButtonMappingState: state),
+                _writeGate, linked.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException or FrontendProtocolException)
+        {
+            return false;
+        }
+    }
+
     // PR3: send the typed authoritative tab-order state on the one instance write gate.
     private async Task SendTabOrderStateAsync(Stream pipe, AddonQuickSettingsTabOrderSnapshot state, CancellationToken token)
     {
@@ -699,7 +824,8 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         // per-connection semaphore would let a tab-order reply and a SendNavigationAsync/
         // SendCommandAsync write interleave 4-byte prefixes and payloads on the same byte stream.
         var hello = await OverlayWireCodec.ReadAsync(pipe, connection.Token).ConfigureAwait(false);
-        if (hello.Kind != OverlayWireMessageKind.Handshake || hello.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
+        if (hello.Kind != OverlayWireMessageKind.Handshake || hello.ProtocolVersion != OverlayTransportProtocol.CurrentVersion ||
+            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(hello))
         {
             await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProtocolError, Error: "Overlay protocol version mismatch."), _writeGate, connection.Token).ConfigureAwait(false);
             return;
@@ -716,7 +842,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
             if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                 throw new FrontendProtocolException("Invalid Overlay state message.");
 
-            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null && message.ProfileCatalogState is null && message.ProfilePageRequest is null && message.ProfilePageResult is null && !OverlayShortcutWireValidation.HasShortcutPayload(message))
+            if (message.Kind == OverlayWireMessageKind.DismissRequested && message.Command is null && message.Navigation is null && message.State is null && message.Error is null && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null && message.ProfileCatalogState is null && message.ProfilePageRequest is null && message.ProfilePageResult is null && !OverlayShortcutWireValidation.HasShortcutPayload(message) && !OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
             {
                 DismissRequested?.Invoke(this);
                 continue;
@@ -724,7 +850,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             if (message.Kind == OverlayWireMessageKind.TabOrderMoveRequest)
             {
-                if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderMove) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderMove) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                     throw new FrontendProtocolException("Invalid Overlay tab-order move message.");
                 _ = HandleTabOrderMoveRequestAsync(pipe, message.TabOrderMove!, connection.Token);
                 continue;
@@ -732,7 +858,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             if (message.Kind == OverlayWireMessageKind.QuickSettingsMutationRequest)
             {
-                if (message.QuickSettingsMutationRequest is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                if (message.QuickSettingsMutationRequest is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                     throw new FrontendProtocolException("Invalid Overlay Quick Settings mutation request.");
                 var request = message.QuickSettingsMutationRequest;
                 if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(request))
@@ -749,7 +875,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             if (message.Kind == OverlayWireMessageKind.ClawHudMutationRequest)
             {
-                if (message.ClawHudMutationRequest is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                if (message.ClawHudMutationRequest is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                     throw new FrontendProtocolException("Invalid Overlay ClawHUD mutation request.");
                 _ = HandleClawHudMutationRequestAsync(pipe, message.ClawHudMutationRequest, connection.Token);
                 continue;
@@ -757,7 +883,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             if (message.Kind == OverlayWireMessageKind.ProfileCatalogRequest)
             {
-                if (message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                if (message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                     throw new FrontendProtocolException("Invalid Overlay Profile catalog request.");
                 _ = HandleProfileCatalogRequestAsync(pipe, connection.Token);
                 continue;
@@ -765,7 +891,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             if (message.Kind == OverlayWireMessageKind.ProfilePageRequest)
             {
-                if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfilePageRequest) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfileCatalogState is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfilePageRequest) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfileCatalogState is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                     throw new FrontendProtocolException("Invalid Overlay Profile page request.");
                 _ = HandleProfilePageRequestAsync(pipe, message.ProfilePageRequest!, connection.Token);
                 continue;
@@ -779,7 +905,15 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
                 continue;
             }
 
-            if (message.Kind != OverlayWireMessageKind.State || message.State is null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+            if (message.Kind == OverlayWireMessageKind.BackButtonMappingMutationRequest)
+            {
+                if (!OverlayBackButtonMappingWireValidation.IsValidMutationRequestMessage(message))
+                    throw new FrontendProtocolException("Invalid Overlay M1/M2 mapping mutation request.");
+                _ = HandleBackButtonMappingMutationRequestAsync(pipe, message.BackButtonMappingMutationRequest!, connection.Token);
+                continue;
+            }
+
+            if (message.Kind != OverlayWireMessageKind.State || message.State is null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                 throw new FrontendProtocolException("Invalid Overlay state message.");
 
             lock (_sync)
@@ -922,6 +1056,73 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
         catch { /* execution or connection teardown cannot fault the Overlay read loop */ }
     }
 
+    private async Task HandleBackButtonMappingMutationRequestAsync(
+        Stream pipe,
+        OverlayBackButtonMappingMutationRequest request,
+        CancellationToken token)
+    {
+        try
+        {
+            bool admitted;
+            lock (_sync) admitted = _readyState && _state == OverlayState.Visible;
+
+            OverlayBackButtonMappingMutationOutcome outcome;
+            var mutate = _mutateBackButtonMapping;
+            if (!admitted || mutate is null)
+            {
+                outcome = new(false,
+                    admitted ? "M1 / M2 mapping is unavailable." : "The Overlay is not visible.",
+                    await CaptureBackButtonMappingSafelyAsync(token).ConfigureAwait(false));
+            }
+            else
+            {
+                try
+                {
+                    outcome = await mutate(request.Mapping, token).ConfigureAwait(false);
+                    if (!OverlayBackButtonMappingWireValidation.IsStructurallyValid(outcome.State))
+                        outcome = new(false, "M1 / M2 mapping is unavailable.",
+                            await CaptureBackButtonMappingSafelyAsync(token).ConfigureAwait(false));
+                    else if (outcome.Succeeded && outcome.State.Mapping != request.Mapping)
+                        outcome = outcome with { Succeeded = false, FailureMessage = "M1 / M2 mapping update was not applied." };
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+                catch
+                {
+                    outcome = new(false, "M1 / M2 mapping update failed.",
+                        await CaptureBackButtonMappingSafelyAsync(token).ConfigureAwait(false));
+                }
+            }
+
+            var response = new OverlayBackButtonMappingMutationResponse(
+                request.RequestId,
+                outcome.Succeeded,
+                outcome.FailureMessage,
+                outcome.State);
+            if (!OverlayBackButtonMappingWireValidation.IsStructurallyValid(response))
+                response = new(request.RequestId, false, "M1 / M2 mapping update failed.", OverlayBackButtonMappingState.Unavailable());
+
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.BackButtonMappingMutationResult,
+                    BackButtonMappingMutationResponse: response),
+                _writeGate, token).ConfigureAwait(false);
+        }
+        catch { /* mutation or connection teardown cannot fault the Overlay read loop */ }
+    }
+
+    private async Task<OverlayBackButtonMappingState> CaptureBackButtonMappingSafelyAsync(CancellationToken token)
+    {
+        try
+        {
+            var state = _captureBackButtonMapping is null
+                ? OverlayBackButtonMappingState.Unavailable()
+                : await _captureBackButtonMapping(token).ConfigureAwait(false);
+            return OverlayBackButtonMappingWireValidation.IsStructurallyValid(state)
+                ? state
+                : OverlayBackButtonMappingState.Unavailable();
+        }
+        catch { return OverlayBackButtonMappingState.Unavailable(); }
+    }
+
     private async Task<FrontendShortcutDashboardSnapshot> CaptureShortcutSafelyAsync(CancellationToken token)
     {
         try
@@ -1047,6 +1248,12 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     private long _pendingShortcutExecutionRequestId;
     private Guid _pendingShortcutExecutionTileId;
     private TaskCompletionSource<OverlayShortcutExecuteResponse>? _pendingShortcutExecution;
+    private readonly SemaphoreSlim _backButtonMappingMutationGate = new(1, 1);
+    private readonly object _backButtonMappingMutationSync = new();
+    private long _backButtonMappingRequestSequence;
+    private long _pendingBackButtonMappingRequestId;
+    private BackButtonMappingSettings? _pendingBackButtonMapping;
+    private TaskCompletionSource<OverlayBackButtonMappingMutationResponse>? _pendingBackButtonMappingMutation;
     private NamedPipeClientStream? _pipe;
     private int _disposed;
 
@@ -1104,6 +1311,20 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         Func<OverlayProfilePageResponse, Task>? profilePageHandler,
         Func<FrontendShortcutDashboardSnapshot, Task>? shortcutStateHandler,
         CancellationToken token = default)
+        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, quickSettingsPageHandler,
+            clawHudHandler, profileCatalogHandler, profilePageHandler, shortcutStateHandler, null, token).ConfigureAwait(false);
+
+    internal async Task RunAsync(
+        Func<OverlayCommand, Task> commandHandler,
+        Func<OverlayNavigationAction, Task>? navigationHandler,
+        Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
+        Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
+        Func<FrontendClawHudSnapshot, Task>? clawHudHandler,
+        Func<OverlayProfileCatalogState, Task>? profileCatalogHandler,
+        Func<OverlayProfilePageResponse, Task>? profilePageHandler,
+        Func<FrontendShortcutDashboardSnapshot, Task>? shortcutStateHandler,
+        Func<OverlayBackButtonMappingState, Task>? backButtonMappingHandler,
+        CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -1112,12 +1333,14 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         await pipe.ConnectAsync(5000, linked.Token).ConfigureAwait(false);
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.Handshake), _writeGate, linked.Token).ConfigureAwait(false);
         var accepted = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
-        if (accepted.Kind != OverlayWireMessageKind.HandshakeAccepted || accepted.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
+        if (accepted.Kind != OverlayWireMessageKind.HandshakeAccepted || accepted.ProtocolVersion != OverlayTransportProtocol.CurrentVersion ||
+            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(accepted))
             throw new FrontendProtocolException("Overlay handshake was rejected.");
 
         // OQ5-UI-09 section 6: apply the mandatory initial authoritative order BEFORE reporting Ready.
         var initial = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
-        if (initial.ProtocolVersion != OverlayTransportProtocol.CurrentVersion || initial.Kind != OverlayWireMessageKind.TabOrderState)
+        if (initial.ProtocolVersion != OverlayTransportProtocol.CurrentVersion || initial.Kind != OverlayWireMessageKind.TabOrderState ||
+            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(initial))
             throw new FrontendProtocolException("Overlay did not receive an initial tab-order state.");
         var initialOrder = ValidateTabOrderMessage(initial);
         if (tabOrderHandler is not null)
@@ -1140,7 +1363,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.TabOrderMoveResult)
                 {
-                    if (!ValidateTabOrderMutationResult(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                    if (!ValidateTabOrderMutationResult(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay tab-order mutation result.");
                     TaskCompletionSource<AddonQuickSettingsTabOrderMutationResult>? pending;
                     lock (_tabOrderMoveSync) pending = _pendingTabOrderMove;
@@ -1149,7 +1372,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.Navigation)
                 {
-                    if (message.Navigation is null || message.Command is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                    if (message.Navigation is null || message.Command is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay navigation message.");
                     if (navigationHandler is not null)
                         await navigationHandler(message.Navigation.Value).ConfigureAwait(false);
@@ -1157,7 +1380,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.QuickSettingsPageState)
                 {
-                    if (message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                    if (message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay Quick Settings page message.");
                     // Section 11: fail closed on a malformed outbound page frame rather than pass null
                     // collections into the future SF-V2-07 renderer.
@@ -1169,7 +1392,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.ClawHudState)
                 {
-                    if (message.ClawHudState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || !IsStructurallyValid(message.ClawHudState))
+                    if (message.ClawHudState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message) || !IsStructurallyValid(message.ClawHudState))
                         throw new FrontendProtocolException("Invalid Overlay ClawHUD state message.");
                     if (clawHudHandler is not null)
                         await clawHudHandler(message.ClawHudState).ConfigureAwait(false);
@@ -1199,9 +1422,34 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     pending?.TrySetResult(response);
                     continue;
                 }
+                if (message.Kind == OverlayWireMessageKind.BackButtonMappingState)
+                {
+                    if (!OverlayBackButtonMappingWireValidation.IsValidStateMessage(message))
+                        throw new FrontendProtocolException("Invalid Overlay M1/M2 mapping state message.");
+                    if (backButtonMappingHandler is not null)
+                        await backButtonMappingHandler(message.BackButtonMappingState!).ConfigureAwait(false);
+                    continue;
+                }
+                if (message.Kind == OverlayWireMessageKind.BackButtonMappingMutationResult)
+                {
+                    if (!OverlayBackButtonMappingWireValidation.IsValidMutationResultMessage(message))
+                        throw new FrontendProtocolException("Invalid Overlay M1/M2 mapping mutation result.");
+                    var response = message.BackButtonMappingMutationResponse!;
+                    TaskCompletionSource<OverlayBackButtonMappingMutationResponse>? pending;
+                    lock (_backButtonMappingMutationSync)
+                    {
+                        pending = response.RequestId == _pendingBackButtonMappingRequestId
+                            ? _pendingBackButtonMappingMutation
+                            : null;
+                        if (pending is not null && response.Succeeded && response.State.Mapping != _pendingBackButtonMapping)
+                            throw new FrontendProtocolException("Overlay M1/M2 mapping result does not match the requested mapping.");
+                    }
+                    pending?.TrySetResult(response);
+                    continue;
+                }
                 if (message.Kind == OverlayWireMessageKind.ProfileCatalogState)
                 {
-                    if (message.ProfileCatalogState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || !OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfileCatalogState))
+                    if (message.ProfileCatalogState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message) || !OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfileCatalogState))
                         throw new FrontendProtocolException("Invalid Overlay Profile catalog state message.");
                     if (profileCatalogHandler is not null)
                         await profileCatalogHandler(message.ProfileCatalogState).ConfigureAwait(false);
@@ -1209,7 +1457,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.ProfilePageResult)
                 {
-                    if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfilePageResult) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                    if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfilePageResult) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay Profile page result message.");
                     if (profilePageHandler is not null)
                         await profilePageHandler(message.ProfilePageResult!).ConfigureAwait(false);
@@ -1217,7 +1465,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.QuickSettingsMutationResult)
                 {
-                    if (message.QuickSettingsMutationResponse is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                    if (message.QuickSettingsMutationResponse is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay Quick Settings mutation result.");
                     // Section 23.9: only complete the CURRENT pending request. A late result whose id was
                     // superseded by a newer send must never complete that newer request.
@@ -1229,7 +1477,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.ClawHudMutationResult)
                 {
-                    if (!ValidateClawHudMutationResult(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                    if (!ValidateClawHudMutationResult(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay ClawHUD mutation result.");
                     TaskCompletionSource<OverlayClawHudMutationResponse>? pending;
                     lock (_clawHudMutationSync)
@@ -1237,7 +1485,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     pending?.TrySetResult(message.ClawHudMutationResponse);
                     continue;
                 }
-                if (message.Kind != OverlayWireMessageKind.Command || message.Command is null || message.Navigation is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message))
+                if (message.Kind != OverlayWireMessageKind.Command || message.Command is null || message.Navigation is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                     throw new FrontendProtocolException("Invalid Overlay command message.");
                 await commandHandler(message.Command.Value).ConfigureAwait(false);
                 if (message.Command == OverlayCommand.Show)
@@ -1251,6 +1499,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         finally
         {
             CancelPendingShortcutExecution();
+            CancelPendingBackButtonMappingMutation();
         }
     }
 
@@ -1259,7 +1508,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
 
     private static AddonQuickSettingsTabOrderSnapshot ValidateTabOrderMessage(OverlayWireMessage message)
     {
-        if (message.TabOrderState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+        if (message.TabOrderState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
             throw new FrontendProtocolException("Invalid Overlay tab-order message.");
         if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderState))
             throw new FrontendProtocolException("Overlay tab-order state was malformed.");
@@ -1268,7 +1517,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
 
     private static bool ValidateTabOrderMutationResult(OverlayWireMessage message)
     {
-        if (message.TabOrderMutationResult is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message))
+        if (message.TabOrderMutationResult is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
             return false;
         return OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderMutationResult.State);
     }
@@ -1383,6 +1632,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
             && message.QuickSettingsMutationResponse is null
             && message.ClawHudState is null
             && message.ClawHudMutationRequest is null
+            && !OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message)
             && IsStructurallyValid(snapshot);
     }
 
@@ -1442,6 +1692,66 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         }
     }
 
+    internal async Task<OverlayBackButtonMappingMutationResponse> SendBackButtonMappingMutationAsync(
+        BackButtonMappingSettings mapping,
+        CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        if (!BackButtonMappingValidation.IsValid(mapping))
+            throw new FrontendProtocolException("Invalid Overlay M1/M2 mapping.");
+
+        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
+        await _backButtonMappingMutationGate.WaitAsync(token).ConfigureAwait(false);
+        var requestId = Interlocked.Increment(ref _backButtonMappingRequestSequence);
+        try
+        {
+            if (requestId <= 0)
+                throw new FrontendProtocolException("Overlay M1/M2 mapping request id is invalid.");
+
+            var completion = new TaskCompletionSource<OverlayBackButtonMappingMutationResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_backButtonMappingMutationSync)
+            {
+                _pendingBackButtonMappingRequestId = requestId;
+                _pendingBackButtonMapping = mapping;
+                _pendingBackButtonMappingMutation = completion;
+            }
+
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            var request = new OverlayBackButtonMappingMutationRequest(requestId, mapping);
+            await OverlayWireCodec.WriteAsync(pipe,
+                new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.BackButtonMappingMutationRequest,
+                    BackButtonMappingMutationRequest: request),
+                _writeGate, linked.Token).ConfigureAwait(false);
+            return await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_backButtonMappingMutationSync)
+            {
+                if (_pendingBackButtonMappingRequestId == requestId)
+                {
+                    _pendingBackButtonMappingRequestId = 0;
+                    _pendingBackButtonMapping = null;
+                    _pendingBackButtonMappingMutation = null;
+                }
+            }
+            _backButtonMappingMutationGate.Release();
+        }
+    }
+
+    private void CancelPendingBackButtonMappingMutation()
+    {
+        TaskCompletionSource<OverlayBackButtonMappingMutationResponse>? pending;
+        lock (_backButtonMappingMutationSync)
+        {
+            pending = _pendingBackButtonMappingMutation;
+            _pendingBackButtonMappingMutation = null;
+            _pendingBackButtonMapping = null;
+            _pendingBackButtonMappingRequestId = 0;
+        }
+        pending?.TrySetCanceled();
+    }
+
     internal Task<FrontendClawHudMutationResult> SendClawHudEnabledAsync(bool enabled, CancellationToken token = default) =>
         SendClawHudMutationCoreAsync(new OverlayClawHudMutationRequest(0, Enabled: enabled), token);
 
@@ -1491,17 +1801,21 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         {
             _lifetime.Cancel();
             _pipe?.Dispose();
+            CancelPendingBackButtonMappingMutation();
 
             // Let the one pending Shortcut request observe cancellation and release its gate before
             // disposing that gate.
             await _shortcutExecutionGate.WaitAsync().ConfigureAwait(false);
             _shortcutExecutionGate.Release();
+            await _backButtonMappingMutationGate.WaitAsync().ConfigureAwait(false);
+            _backButtonMappingMutationGate.Release();
 
             _writeGate.Dispose();
             _quickSettingsMutationGate.Dispose();
             _clawHudMutationGate.Dispose();
             _tabOrderMoveGate.Dispose();
             _shortcutExecutionGate.Dispose();
+            _backButtonMappingMutationGate.Dispose();
             _lifetime.Dispose();
         }
     }

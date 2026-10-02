@@ -8,7 +8,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-// Overlay v12 carries typed tab order, ClawHUD, Profile, and Shortcut wires alongside the
+// Overlay v13 carries typed tab order, ClawHUD, Profile, Shortcut, and M1/M2 mapping wires alongside the
 // QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult contract
 // already consumed by the Main UI / Overlay (SF-V2-04/05), inside narrow transport correlation wrappers.
 // OQ4/lifecycle regression coverage lives in OverlayTransportTests/AddonQuickSettingsTabOrderTransportTests and
@@ -33,9 +33,9 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     // ---- Protocol / handshake -----------------------------------------------------------------
 
     [Fact]
-    public void Protocol_is_v12_and_frontend_transport_is_current()
+    public void Protocol_is_v13_and_frontend_transport_is_current()
     {
-        Assert.Equal(12, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(13, OverlayTransportProtocol.CurrentVersion);
         // The desktop frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
         Assert.Equal(45, FrontendTransportProtocol.CurrentVersion);

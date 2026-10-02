@@ -10,13 +10,13 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayShortcutTransportTests
 {
     [Fact]
-    public void Overlay_protocol_is_v12_and_rejects_a_v11_peer()
+    public void Overlay_protocol_is_v13_and_rejects_a_v12_peer()
     {
-        Assert.Equal(12, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(13, OverlayTransportProtocol.CurrentVersion);
     }
 
     [Fact]
-    public async Task V11_handshake_is_rejected()
+    public async Task V12_handshake_is_rejected()
     {
         var pipeName = NewPipeName();
         await using var server = new NamedPipeOverlayServer(pipeName);
@@ -25,7 +25,7 @@ public sealed class OverlayShortcutTransportTests
         await client.ConnectAsync(5000);
         using var writeGate = new SemaphoreSlim(1, 1);
 
-        await OverlayWireCodec.WriteAsync(client, new(11, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(client, new(12, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
 
         var response = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
         Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);
