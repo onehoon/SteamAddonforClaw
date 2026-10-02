@@ -77,6 +77,14 @@ Before treating these control constants as final, reopen the current Steam QAM P
 
 The Overlay intentionally retains the work-order's 416 DIP surface and 52 DIP structural rail. Only the internal visual treatment uses the measurements above; the 48 CSS px Steam rail does not change Overlay geometry.
 
+## PR C page polish — 2026-10-02
+
+- The measured 22px / 700 / 28px page-title typography is now consumed by all five Addon pages through the canonical `Device`, `Profile`, `Controller`, `Shortcut`, and `Setting` labels.
+- `QamPageContentSpacing` is currently 8 DIP and remains provisional; title-to-content spacing was not measured on the live Steam QAM.
+- `QamFlatButtonStyle` removes the default WinUI Button visual template from the rail, Profile catalog cards, and Setting expandable headers while preserving native Button activation/accessibility semantics.
+- Profile and Shortcut tile layouts remain Overlay-specific and are not claimed to be Steam-native equivalents.
+- Profile 3-column and Shortcut 2-column density remains deferred to MSI Claw hardware acceptance.
+
 ## Deferred to PR B or hardware acceptance
 
 - Measured ToggleSwitch track/thumb, numeric slider, discrete selector, and stepper-button templates/states; PR B follow-up found stylesheet declarations only and no live control instance.

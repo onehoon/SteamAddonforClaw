@@ -82,15 +82,33 @@ public sealed partial class OverlayWindow
 
     // Device/Profile use shared Quick Settings, Controller projects the Runtime-owned M1/M2 mapping,
     // Setting owns tab-order editing, and Shortcut renders the Runtime-owned dynamic dashboard.
-    private FrameworkElement BuildPage(AddonQuickSettingsTabId id, List<OverlayRow> rows) => id switch
+    private FrameworkElement BuildPage(AddonQuickSettingsTabId id, List<OverlayRow> rows)
     {
-        AddonQuickSettingsTabId.Setting => BuildSettingPage(rows),
-        AddonQuickSettingsTabId.Shortcut => BuildShortcutPage(),
-        AddonQuickSettingsTabId.Controller => BuildControllerPage(rows),
-        AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
-        AddonQuickSettingsTabId.Profile => BuildProfilePage(),
-        _ => CreatePlaceholderPage(id),
-    };
+        var content = id switch
+        {
+            AddonQuickSettingsTabId.Setting => BuildSettingPage(rows),
+            AddonQuickSettingsTabId.Shortcut => BuildShortcutPage(),
+            AddonQuickSettingsTabId.Controller => BuildControllerPage(rows),
+            AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
+            AddonQuickSettingsTabId.Profile => BuildProfilePage(),
+            _ => CreatePlaceholderPage(id),
+        };
+
+        return CreateQamPage(id, content);
+    }
+
+    private static FrameworkElement CreateQamPage(AddonQuickSettingsTabId id, FrameworkElement content)
+    {
+        var page = new StackPanel
+        {
+            Spacing = OverlayQamResources.Get("QamPageContentSpacing", 8.0),
+        };
+        var title = new TextBlock { Text = LabelFor(id) };
+        OverlayQamResources.ApplyTextStyle(title, "QamPageTitleTextStyle");
+        page.Children.Add(title);
+        page.Children.Add(content);
+        return page;
+    }
 
     private StackPanel BuildTabOrderEditorPage()
     {

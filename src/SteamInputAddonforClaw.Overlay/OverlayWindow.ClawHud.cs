@@ -97,6 +97,7 @@ public sealed partial class OverlayWindow
         var headerButton = new Button
         {
             Content = headerGrid,
+            Style = OverlayQamResources.Style("QamFlatButtonStyle"),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(0),
