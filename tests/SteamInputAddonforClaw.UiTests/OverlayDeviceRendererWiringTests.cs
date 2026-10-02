@@ -495,38 +495,70 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Overlay_shell_uses_a_full_width_tab_rail_without_bumper_images()
+    public void Overlay_shell_uses_a_left_vertical_icon_rail_without_bumper_images()
     {
         var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
         var presentation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Presentation.cs");
+        var navigation = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs");
         var project = ReadSource("src", "SteamInputAddonforClaw.Overlay", "SteamInputAddonforClaw.Overlay.csproj");
-        var tabStripStart = xaml.IndexOf("<Grid x:Name=\"TabStripFrame\"", StringComparison.Ordinal);
-        var tabStripEnd = xaml.IndexOf("<ScrollViewer", tabStripStart, StringComparison.Ordinal);
-        var tabStrip = xaml[tabStripStart..tabStripEnd];
-        var tabRailStart = tabStrip.IndexOf("x:Name=\"TabRail\"", StringComparison.Ordinal);
-        var tabStripChrome = tabStrip[..tabRailStart];
+        var tabRailStart = xaml.IndexOf("x:Name=\"TabRail\"", StringComparison.Ordinal);
+        var tabRailEnd = xaml.IndexOf("</Border>", tabRailStart, StringComparison.Ordinal);
+        var tabRail = xaml[tabRailStart..tabRailEnd];
+        var bodyStart = xaml.IndexOf("<Grid Grid.Column=\"1\"", StringComparison.Ordinal);
+        var bodyEnd = xaml.IndexOf("</Grid>", bodyStart, StringComparison.Ordinal);
+        var bodyColumn = xaml[bodyStart..bodyEnd];
 
         Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
         Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
-        Assert.Contains("MaxWidth=\"720\"", xaml);
-        Assert.Contains("x:Name=\"TabStripFrame\"", xaml);
-        Assert.Contains("x:Name=\"TabRail\"", tabStrip);
-        Assert.Contains("HorizontalAlignment=\"Stretch\"", tabStrip);
-        Assert.DoesNotContain("ColumnDefinitions", tabStripChrome);
-        Assert.DoesNotContain("ColumnSpacing=\"8\"", tabStripChrome);
-        Assert.DoesNotContain("PreviousTabHint", tabStrip);
-        Assert.DoesNotContain("NextTabHint", tabStrip);
+        Assert.Contains("MaxWidth=\"416\"", xaml);
+        Assert.Contains("x:Name=\"QamShell\"", xaml);
+        Assert.Contains("<ColumnDefinition Width=\"52\" />", xaml);
+        Assert.Contains("<ColumnDefinition Width=\"*\" />", xaml);
+        Assert.Contains("x:Name=\"TabRail\"", tabRail);
+        Assert.Contains("Grid.Column=\"0\"", tabRail);
+        Assert.Contains("x:Name=\"TabStrip\"", tabRail);
+        Assert.Contains("RowSpacing=\"4\"", tabRail);
+        Assert.DoesNotContain("ColumnDefinitions", tabRail);
+        Assert.DoesNotContain("Grid.ColumnDefinitions", bodyColumn);
+        Assert.Contains("Grid.Column=\"1\" Margin=\"16,16,16,12\"", bodyColumn);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(xaml, "<ScrollViewer\\b"));
+        Assert.Contains("x:Name=\"BodyScroll\"", xaml);
+        Assert.Contains("x:Name=\"TabBody\"", xaml);
         Assert.DoesNotContain("Steam_LB.png", xaml);
         Assert.DoesNotContain("Steam_RB.png", xaml);
         Assert.DoesNotContain("Assets\\Controller\\Steam_LB.png", project);
         Assert.DoesNotContain("Assets\\Controller\\Steam_RB.png", project);
         Assert.DoesNotContain("PreviousTabHint", shell);
         Assert.DoesNotContain("NextTabHint", shell);
+        Assert.Contains("Grid.SetRow(tabHost, position)", shell);
+        Assert.DoesNotContain("Grid.SetColumn(tabHost, position)", shell);
+        Assert.Contains("TabStrip.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });", shell);
+        Assert.Contains("AutomationProperties.SetName(button, label)", shell);
+        Assert.Contains("ToolTipService.SetToolTip(button, label)", shell);
+        Assert.Contains("Symbol.CellPhone", shell);
+        Assert.Contains("Symbol.Contact", shell);
+        Assert.Contains("Symbol.XboxOneConsole", shell);
+        Assert.Contains("Symbol.ViewAll", shell);
+        Assert.Contains("Symbol.Setting", shell);
+        Assert.Contains("Width = 3", shell);
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Right", shell);
+        Assert.Contains("VerticalAlignment = VerticalAlignment.Stretch", shell);
         Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
         Assert.Contains("MinWidth = 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayTabState", shell);
         Assert.Contains("button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;", shell);
+        Assert.Contains("SelectPreviousTab", shell);
+        Assert.Contains("SelectNextTab", shell);
+        Assert.Contains("case OverlayNavigationAction.PreviousTab:", app);
+        Assert.Contains("_window?.SelectPreviousTab();", app);
+        Assert.Contains("case OverlayNavigationAction.NextTab:", app);
+        Assert.Contains("_window?.SelectNextTab();", app);
+        Assert.Contains("_tabState.ResetForShow();", shell);
+        Assert.Contains("NavigateUp", navigation);
+        Assert.Contains("NavigateDown", navigation);
+        Assert.Contains("AdjustSelectedRow", navigation);
     }
 
     [Fact]
@@ -544,8 +576,10 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayTabOrderRow.cs"));
         Assert.Contains("_tabIndicators", source);
         Assert.Contains("_tabHosts", source);
-        Assert.Contains("Grid.SetColumn(tabHost, position)", source);
+        Assert.Contains("Grid.SetRow(tabHost, position)", source);
+        Assert.DoesNotContain("Grid.SetColumn(tabHost, position)", source);
         Assert.DoesNotContain("Grid.SetColumn(button, position)", source);
+        Assert.Contains("_tabState.TryApplyOrder(normalized)", source);
         Assert.Contains("indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed", source);
         Assert.Contains("button.Background = isSelected ? _rowSelectedFillBrush : RowUnselectedFillBrush;", source);
         Assert.Contains("button.Foreground = isSelected ? _rowSelectedBrush : TabUnselectedForegroundBrush;", source);

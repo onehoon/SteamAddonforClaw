@@ -2,6 +2,7 @@ using System.Linq;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -28,49 +29,50 @@ public sealed partial class OverlayWindow
     private void BuildShell()
     {
         var order = _tabState.Order;
-        for (var column = 0; column < order.Count; column++)
+        for (var position = 0; position < order.Count; position++)
         {
-            var id = order[column];
+            var id = order[position];
+            var label = LabelFor(id);
 
             var button = new Button
             {
-                Content = LabelFor(id),
+                Content = new SymbolIcon { Symbol = SymbolFor(id), Width = 20, Height = 20 },
                 Tag = id,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Width = 44,
+                Height = 44,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
-                Padding = new Thickness(6, 6, 6, 8),
-                MinWidth = 0,
-                MinHeight = 34,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Padding = new Thickness(0),
+                MinWidth = 44,
+                MinHeight = 44,
                 CornerRadius = new CornerRadius(8),
                 BorderThickness = new Thickness(0),
                 Background = RowUnselectedFillBrush,
                 Foreground = TabUnselectedForegroundBrush,
-                FontSize = 13,
             };
+            AutomationProperties.SetName(button, label);
+            ToolTipService.SetToolTip(button, label);
             button.Click += OnTabHeaderClick;
 
-            var tabHost = new Grid
-            {
-                RowDefinitions =
-                {
-                    new RowDefinition { Height = GridLength.Auto },
-                    new RowDefinition { Height = GridLength.Auto },
-                },
-            };
+            var tabHost = new Grid { Height = 48 };
             Grid.SetRow(button, 0);
             tabHost.Children.Add(button);
 
             var indicator = new Border
             {
-                Height = 3,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Width = 3,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Stretch,
                 Background = _rowSelectedBrush,
                 Visibility = Visibility.Collapsed,
             };
-            Grid.SetRow(indicator, 1);
+            Grid.SetRow(indicator, 0);
             tabHost.Children.Add(indicator);
 
-            Grid.SetColumn(tabHost, column);
+            TabStrip.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(tabHost, position);
             TabStrip.Children.Add(tabHost);
             _tabButtons[id] = button;
             _tabHosts[id] = tabHost;
@@ -86,6 +88,16 @@ public sealed partial class OverlayWindow
 
         ApplySelectedTabVisualState();
     }
+
+    private static Symbol SymbolFor(AddonQuickSettingsTabId id) => id switch
+    {
+        AddonQuickSettingsTabId.Device => Symbol.CellPhone,
+        AddonQuickSettingsTabId.Profile => Symbol.Contact,
+        AddonQuickSettingsTabId.Controller => Symbol.XboxOneConsole,
+        AddonQuickSettingsTabId.Shortcut => Symbol.ViewAll,
+        AddonQuickSettingsTabId.Setting => Symbol.Setting,
+        _ => throw new ArgumentOutOfRangeException(nameof(id), id, "Unknown Overlay tab identity."),
+    };
 
     // Device and Profile use the shared Quick Settings renderer; Setting owns tab-order editing;
     // Shortcut renders the Runtime-owned dynamic dashboard; other tabs keep their placeholders.
@@ -178,7 +190,7 @@ public sealed partial class OverlayWindow
     }
 
     // OQ5-UI-09: apply an authoritative tab order from the Runtime without disturbing the visible
-    // session. The five page/button/row instances are preserved; only the tab-strip column order and
+    // session. The five page/button/row instances are preserved; only the tab-strip row order and
     // the selected-header accent change. Selected page/row/scroll position stay exactly as they are
     // (s.11.1) -- the new first tab only takes effect on the next Show via ResetForShow().
     internal void ApplyTabOrderState(AddonQuickSettingsTabOrderSnapshot state)
@@ -213,7 +225,7 @@ public sealed partial class OverlayWindow
         for (var position = 0; position < applied.Count; position++)
         {
             if (_tabHosts.TryGetValue(applied[position], out var tabHost))
-                Grid.SetColumn(tabHost, position);
+                Grid.SetRow(tabHost, position);
             if (_tabOrderRows.TryGetValue(applied[position], out var editorRow))
             {
                 Grid.SetRow(editorRow.Container, position);
