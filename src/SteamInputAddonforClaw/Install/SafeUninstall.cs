@@ -15,7 +15,7 @@ internal sealed record DirectoryDeletionResult(DirectoryDeletionStatus Status, s
 {
     internal bool Succeeded => Status is DirectoryDeletionStatus.Deleted or DirectoryDeletionStatus.AlreadyAbsent;
 }
-internal enum FinalUninstallHandoffResult { Launched, DataRootRemovalFailed, UpdaterLaunchFailed }
+internal enum FinalUninstallHandoffResult { Launched, OwnedRuntimeCleanupFailed, UpdaterLaunchFailed }
 internal sealed record SafeUninstallPreparationResult(bool Succeeded, string Reason);
 
 internal static class BoundedDirectoryDeletion
@@ -89,6 +89,7 @@ internal static class SafeUninstall
         var logShutdown = false;
         try
         {
+            AppLog.Info("Uninstall", "Safe uninstall entered.", ("Event", "SafeUninstallEntry"), ("Silent", silent));
             var host = new AddonProcessHost(headlessUninstallPreparation: true);
             try
             {
@@ -120,27 +121,33 @@ internal static class SafeUninstall
             var dependencyResult = RunElevatedDependencyCleanup(root);
             if (dependencyResult is null || !dependencyResult.Succeeded)
                 return Abort(silent, "Owned prerequisite cleanup did not complete. No uninstall was started.");
+            AppLog.Info("Uninstall", "Owned prerequisite removal outcome recorded.",
+                ("RestartRequired", dependencyResult.RestartRequired), ("RestartNoticeShown", dependencyResult.RestartRequired && !silent));
             if (dependencyResult.RestartRequired && !silent)
                 NativeStartupWarning.Show("A Windows restart is required after uninstall to finish removing the Addon-owned controller drivers.");
 
-            if (!UninstallBootstrap.RunBoundedLocalCleanup(runtimeReleased: true, deleteDataRoot: false))
+            if (!UninstallBootstrap.RunBoundedLocalCleanup(runtimeReleased: true))
                 return Abort(silent, "Addon-owned local cleanup could not be completed. No uninstall was started.");
 
-            var clawHudCache = BoundedDirectoryDeletion.Delete(AddonDataPaths.ClawHudRuntimeRoot);
-            AppLog.Info("Uninstall", "Managed ClawHUD cache removal completed.",
-                ("Status", clawHudCache.Status), ("Reason", clawHudCache.Reason));
-            if (!clawHudCache.Succeeded)
-                return Abort(silent, "Managed ClawHUD files could not be removed. No uninstall was started.");
-
-            AppLog.Info("Uninstall", "Safe uninstall preparation completed; final Addon data-root removal is starting.",
-                ("RestartRequired", dependencyResult.RestartRequired));
-            var handoff = DeleteDataRootAndLaunchVeloPack(
-                AddonDataPaths.RootDirectory, updaterPath, root, silent,
+            var handoff = PreserveUserDataAndLaunchVeloPack(
+                AddonDataPaths.RootDirectory, AddonDataPaths.ClawHudRuntimeRoot, updaterPath, root, silent,
+                (dataRoot, cleanup) =>
+                {
+                    AppLog.Info("Uninstall", "Managed ClawHUD cache removal completed.",
+                        ("Status", cleanup.Status), ("Reason", cleanup.Reason));
+                    if (!cleanup.Succeeded) return;
+                    AppLog.Info("Uninstall", "Safe uninstall preparation completed; persistent user data will be retained.",
+                        ("RestartRequired", dependencyResult.RestartRequired), ("ClawHudRuntimeRemoved", true),
+                        ("UserDataRoot", dataRoot), ("UserDataPreserved", true));
+                    AppLog.Info("Uninstall", "VeloPack handoff starting; Addon user data and logs are retained.",
+                        ("Event", "VeloPackHandoffStarting"), ("DataRoot", dataRoot), ("UserDataPreserved", true),
+                        ("LogsPreserved", true), ("RestartRequired", dependencyResult.RestartRequired));
+                },
                 () => { AppLog.Shutdown(); logShutdown = true; }, path => BoundedDirectoryDeletion.Delete(path), LaunchProcess);
             return handoff switch
             {
                 FinalUninstallHandoffResult.Launched => 0,
-                FinalUninstallHandoffResult.DataRootRemovalFailed => Abort(silent, "Addon data files could not be removed. No uninstall was started."),
+                FinalUninstallHandoffResult.OwnedRuntimeCleanupFailed => Abort(silent, "Managed ClawHUD files could not be removed. No uninstall was started."),
                 _ => Abort(silent, "The final VeloPack uninstall could not be started. Run uninstall again to retry.")
             };
         }
@@ -215,23 +222,31 @@ internal static class SafeUninstall
         }
     }
 
-    internal static FinalUninstallHandoffResult DeleteDataRootAndLaunchVeloPack(
+    internal static FinalUninstallHandoffResult PreserveUserDataAndLaunchVeloPack(
         string dataRoot,
+        string clawHudRuntimeRoot,
         string updaterPath,
         string root,
         bool silent,
+        Action<string, DirectoryDeletionResult> logFinalPreparation,
         Action shutdownLogs,
-        Func<string, DirectoryDeletionResult> deleteDirectory,
+        Func<string, DirectoryDeletionResult> deleteOwnedRuntimeDirectory,
         Func<ProcessStartInfo, bool> launch)
     {
-        DirectoryDeletionResult deletion;
+        DirectoryDeletionResult runtimeCleanup;
+        try
+        {
+            runtimeCleanup = deleteOwnedRuntimeDirectory(clawHudRuntimeRoot);
+            logFinalPreparation(dataRoot, runtimeCleanup);
+        }
+        catch { return FinalUninstallHandoffResult.OwnedRuntimeCleanupFailed; }
+        if (!runtimeCleanup.Succeeded) return FinalUninstallHandoffResult.OwnedRuntimeCleanupFailed;
+
         try
         {
             shutdownLogs();
-            deletion = deleteDirectory(dataRoot);
         }
-        catch { return FinalUninstallHandoffResult.DataRootRemovalFailed; }
-        if (!deletion.Succeeded) return FinalUninstallHandoffResult.DataRootRemovalFailed;
+        catch { return FinalUninstallHandoffResult.UpdaterLaunchFailed; }
 
         try
         {

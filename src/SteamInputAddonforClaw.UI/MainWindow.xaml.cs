@@ -27,11 +27,11 @@ public sealed partial class MainWindow : Window
     private bool _suppressDeveloperMenuWarning;
     private int _isRefreshingStatus;
     private int _statusRefreshPending;
-    private bool _setupPromptActive;
-    private bool _setupPromptDeclinedForCurrentProcess;
     private bool _windowActivatedForUser;
-    private bool _setupPromptPendingActivation;
+    private bool _prerequisiteSetupPendingActivation;
     private bool _prerequisiteSetupInProgress;
+    private bool _prerequisiteSetupAttemptedForCurrentProcess;
+    private bool _prerequisiteSetupCancelledForCurrentProcess;
 
     // App UI PR-C: the single ordered mutation path for the WHOLE front-button mapping. The
     // cross-button same-domain uniqueness rule belongs to one whole mapping, so there is one save
@@ -142,7 +142,7 @@ public sealed partial class MainWindow : Window
         if (args.WindowActivationState == WindowActivationState.Deactivated) return;
         if (_windowActivatedForUser)
         {
-            if (_setupPromptPendingActivation) _ = RefreshSystemStatusAsync();
+            if (_prerequisiteSetupPendingActivation) _ = RefreshSystemStatusAsync();
             return;
         }
         _windowActivatedForUser = true;
@@ -302,16 +302,16 @@ public sealed partial class MainWindow : Window
         if (snapshot.CanInstallRequiredComponents)
         {
             if (_windowActivatedForUser)
-                _ = PromptForPrerequisiteSetupAsync();
+                _ = RunPrerequisiteSetupAsync();
             else
-                RequestSetupPromptActivation();
+                RequestPrerequisiteSetupActivation();
         }
     }
 
-    private void RequestSetupPromptActivation()
+    private void RequestPrerequisiteSetupActivation()
     {
-        if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess || _setupPromptPendingActivation) return;
-        _setupPromptPendingActivation = true;
+        if (_prerequisiteSetupAttemptedForCurrentProcess || _prerequisiteSetupPendingActivation) return;
+        _prerequisiteSetupPendingActivation = true;
         DispatcherQueue.TryEnqueue(() =>
         {
             if (_windowActivatedForUser) return;
@@ -320,43 +320,16 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private async Task PromptForPrerequisiteSetupAsync()
-    {
-        if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess || _prerequisiteSetupInProgress) return;
-        if (Content.XamlRoot is null)
-        {
-            _setupPromptPendingActivation = true;
-            return;
-        }
-        _setupPromptPendingActivation = false;
-        _setupPromptActive = true;
-        try
-        {
-            var dialog = new ContentDialog
-            {
-                Title = "Setup required",
-                Content = "Steam Addon for Claw needs a few required components. Install them now?",
-                PrimaryButtonText = "Install",
-                CloseButtonText = "Not now",
-                XamlRoot = Content.XamlRoot
-            };
-            AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt shown.", ("Action", "Shown"));
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            {
-                _setupPromptDeclinedForCurrentProcess = true;
-                AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt declined.", ("Action", "Declined"));
-                return;
-            }
-            AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt accepted.", ("Action", "Accepted"));
-            await RunPrerequisiteSetupAsync();
-        }
-        catch (Exception exception) { AppLog.Warn("PrerequisiteSetup", "Prerequisite setup prompt failed.", exception); }
-        finally { _setupPromptActive = false; }
-    }
-
     private async Task RunPrerequisiteSetupAsync()
     {
-        if (_prerequisiteSetupInProgress) return;
+        if (_prerequisiteSetupAttemptedForCurrentProcess || _prerequisiteSetupCancelledForCurrentProcess || _prerequisiteSetupInProgress) return;
+        if (Content.XamlRoot is null)
+        {
+            _prerequisiteSetupPendingActivation = true;
+            return;
+        }
+        _prerequisiteSetupPendingActivation = false;
+        _prerequisiteSetupAttemptedForCurrentProcess = true;
         _prerequisiteSetupInProgress = true;
         UpdatePrerequisiteSetupBusyUi();
         try
@@ -365,8 +338,16 @@ public sealed partial class MainWindow : Window
             AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", result.Result));
             if (result.Status is not null)
                 RenderSystemStatus(result.Status);
-            await ShowPrerequisiteSetupResultDialogAsync(result.Result);
+            if (result.Result == FrontendPrerequisiteSetupResultKind.Cancelled)
+            {
+                _prerequisiteSetupCancelledForCurrentProcess = true;
+                AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup was cancelled; automatic setup is suppressed for this process.", ("Action", "NoRetry"));
+                return;
+            }
+
+            await HandlePrerequisiteSetupResultAsync(result.Result);
         }
+        catch (Exception exception) { AppLog.Warn("PrerequisiteSetup", "Automatic prerequisite setup failed.", exception); }
         finally
         {
             _prerequisiteSetupInProgress = false;
@@ -375,42 +356,31 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task ShowPrerequisiteSetupResultDialogAsync(FrontendPrerequisiteSetupResultKind resultKind)
+    private async Task HandlePrerequisiteSetupResultAsync(FrontendPrerequisiteSetupResultKind resultKind)
     {
-        if (Content.XamlRoot is null) return;
+        if (resultKind is FrontendPrerequisiteSetupResultKind.Ready
+            or FrontendPrerequisiteSetupResultKind.Installed
+            or FrontendPrerequisiteSetupResultKind.RebootRequired)
+        {
+            await DeviceContent.ConfirmCenterMDisableAfterPrerequisiteSetupAsync();
+            return;
+        }
 
-        if (resultKind == FrontendPrerequisiteSetupResultKind.NotInstallable)
+        if (Content.XamlRoot is null || resultKind is not (FrontendPrerequisiteSetupResultKind.Blocked
+            or FrontendPrerequisiteSetupResultKind.AlreadyInProgress
+            or FrontendPrerequisiteSetupResultKind.Failed))
             return;
 
-        if (resultKind == FrontendPrerequisiteSetupResultKind.RebootRequired)
+        var message = resultKind == FrontendPrerequisiteSetupResultKind.AlreadyInProgress
+            ? "Another setup operation is already in progress."
+            : "Setup couldn't be completed. Check Settings > Required Components or the application log for details.";
+        await new ContentDialog
         {
-            var restartDialog = new ContentDialog
-            {
-                Title = "Restart required",
-                Content = "Windows needs to restart to finish setting up Steam Addon for Claw.",
-                PrimaryButtonText = "Restart now",
-                CloseButtonText = "Later",
-                XamlRoot = Content.XamlRoot
-            };
-            if (await restartDialog.ShowAsync() == ContentDialogResult.Primary)
-                Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false });
-        }
-        else if (resultKind is FrontendPrerequisiteSetupResultKind.Blocked or FrontendPrerequisiteSetupResultKind.AlreadyInProgress or FrontendPrerequisiteSetupResultKind.Failed)
-        {
-            var message = resultKind == FrontendPrerequisiteSetupResultKind.AlreadyInProgress
-                ? "Another setup operation is already in progress."
-                : "Setup couldn't be completed. Check Settings > Required Components or the application log for details.";
-            await new ContentDialog
-            {
-                Title = "Setup unavailable",
-                Content = message,
-                CloseButtonText = "OK",
-                XamlRoot = Content.XamlRoot
-            }.ShowAsync();
-        }
-        // Ready/Installed/Cancelled/NotInstallable need no dialog: Ready/Installed complete silently (the
-        // Settings Required Components list already reflects the new state), and Cancelled mirrors the
-        // prompt's own "Not now" path.
+            Title = "Setup unavailable",
+            Content = message,
+            CloseButtonText = "OK",
+            XamlRoot = Content.XamlRoot
+        }.ShowAsync();
     }
 
     private void UpdatePrerequisiteSetupBusyUi()
@@ -548,8 +518,8 @@ public sealed partial class MainWindow : Window
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
     {
         SetEnglishSettingsItemContent();
-        if (_setupPromptPendingActivation && _windowActivatedForUser)
-            _ = PromptForPrerequisiteSetupAsync();
+        if (_prerequisiteSetupPendingActivation && _windowActivatedForUser)
+            _ = RefreshSystemStatusAsync();
 
         var navigationItems = MainNavigationView.MenuItems
             .OfType<NavigationViewItem>()

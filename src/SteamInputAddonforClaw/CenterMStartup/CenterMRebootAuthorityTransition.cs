@@ -129,6 +129,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     // and PR12 uninstall preparation. Production drops native Win+G suppression here.
     private readonly Action _onStockAuthorityRestored;
     private readonly IWindowsRestartRequester _restartRequester;
+    private readonly Func<RuntimePrerequisiteAssessment, bool> _hasExactPendingPrerequisites;
+    private readonly Func<bool> _hasActiveControllerOwnership;
+    private readonly bool _disabledBootPrerequisiteRepairWindow;
     private int _inProgress;
 
     public bool IsInProgress => Volatile.Read(ref _inProgress) != 0;
@@ -147,7 +150,10 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         Func<IReadOnlyList<string>> captureExistingOwnedHiddenTargets,
         Func<StartupRegistrationResult> removeStartupRegistration,
         Action onStockAuthorityRestored,
-        IWindowsRestartRequester restartRequester)
+        IWindowsRestartRequester restartRequester,
+        Func<RuntimePrerequisiteAssessment, bool>? hasExactPendingPrerequisites = null,
+        Func<bool>? hasActiveControllerOwnership = null,
+        bool disabledBootPrerequisiteRepairWindow = false)
     {
         _centerMStartup = centerMStartup;
         _startupSettings = startupSettings;
@@ -160,6 +166,9 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         _removeStartupRegistration = removeStartupRegistration;
         _onStockAuthorityRestored = onStockAuthorityRestored;
         _restartRequester = restartRequester;
+        _hasExactPendingPrerequisites = hasExactPendingPrerequisites ?? (_ => false);
+        _hasActiveControllerOwnership = hasActiveControllerOwnership ?? (() => false);
+        _disabledBootPrerequisiteRepairWindow = disabledBootPrerequisiteRepairWindow;
     }
 
     /// <param name="centerMEnabled">The requested next-boot authority: <see langword="true"/> =
@@ -193,36 +202,63 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private async Task<FrontendCenterMStartupMutationResult> DisableAsync(CancellationToken cancellationToken)
     {
         var snapshot = _centerMStartup.Capture();
-        if (snapshot.State == FrontendCenterMStartupState.Unavailable)
+        if (snapshot.State is FrontendCenterMStartupState.Partial or FrontendCenterMStartupState.Unavailable)
             return Unavailable(snapshot);
 
         // --- read-only preflight (honors the caller token) ---
         if (!_lowerLevelRuntimeSafety().CanTerminate)
             return Fail(snapshot, "Controller authority cannot change while a routing, native-mode, or recovery operation is in progress. Try again once it finishes.");
 
-        // Disable is the point where the next boot is committed to Addon controller authority, so it
-        // must not run on top of an unverified controller state. Both facts are already captured by
-        // the one Runtime status snapshot -- no new authority is introduced here.
+        // Disable is the point where the next boot is committed to Addon controller authority. The
+        // ordinary Ready path keeps its existing admission and HidHide ordering. A narrow exception
+        // permits a verified current-boot pending package only for the next boot; it never makes the
+        // current Runtime routing-ready or starts controller ownership in this session.
         var admission = await _captureAdmission(cancellationToken).ConfigureAwait(false);
-
-        // RecoverySafe reflects the live current-process power/recovery boundary (RecoverySafetyState):
-        // e.g. a resume baseline that has not re-established a verified safe state. Committing the
-        // next boot to Addon authority while that is unresolved is not safe.
-        if (!admission.RecoverySafe)
-            return Fail(snapshot,
-                "Controller recovery is not in a verified safe state, so MSI Center M was not disabled. Resolve controller recovery and retry Disable and Restart.");
-
-        // A known-missing/unusable virtual-controller prerequisite (USBIP2, libVIIPER, HidHide) must
-        // stop the transition before any persistent mutation (work order PR3 section 6.2 item 6).
-        if (!admission.Prerequisites.IsRoutingReady)
+        var prerequisitesReady = admission.Prerequisites.IsRoutingReady;
+        var exactPendingPrerequisites = !prerequisitesReady && _hasExactPendingPrerequisites(admission.Prerequisites);
+        if (!prerequisitesReady && !exactPendingPrerequisites)
             return Fail(snapshot,
                 $"Required controller components are not ready, so MSI Center M was not disabled. " +
                 $"HidHide={admission.Prerequisites.HidHide.Status}, UsbIpWin2={admission.Prerequisites.UsbIpWin2.Status}, Viiper={admission.Prerequisites.Viiper.Status}. " +
                 $"Complete first-time setup, then retry Disable and Restart.");
 
-        var inspection = _hidHideBaseline.InspectDisabledModeBaseline([]);
-        if (inspection.Outcome is AddonHidHideBaselineOutcome.Conflict or AddonHidHideBaselineOutcome.Unavailable)
-            return Fail(snapshot, $"HidHide is not in a safe state for Addon controller isolation: {inspection.Reason}.");
+        var activeControllerOwnership = _hasActiveControllerOwnership();
+        if (exactPendingPrerequisites && activeControllerOwnership)
+            return Fail(snapshot, "A controller owner is already active, so pending prerequisite installation cannot be combined with the next-boot authority commit.");
+
+        // A Disabled boot that was specifically admitted as PrerequisitesNotReady keeps its
+        // RecoverySafe snapshot false for this process. After automatic setup, allow only the
+        // explicit onboarding recommit when fresh prerequisites are Ready or exact current-boot
+        // pending, and no controller owner was started. Every other unsafe RecoverySafe case fails.
+        var disabledBootRepairCommit = snapshot.State == FrontendCenterMStartupState.Disabled
+            && _disabledBootPrerequisiteRepairWindow
+            && !activeControllerOwnership
+            && (prerequisitesReady || exactPendingPrerequisites);
+        if (!admission.RecoverySafe && !disabledBootRepairCommit)
+            return Fail(snapshot,
+                "Controller recovery is not in a verified safe state, so MSI Center M was not disabled. Resolve controller recovery and retry Disable and Restart.");
+
+        // An already-Disabled state is an onboarding recommit, not a fresh authority mutation. Do
+        // not replace a live Addon HidHide target set with the empty Enabled->Disabled baseline, and
+        // do not release/reacquire physical ownership or rewrite already-Disabled startup roots.
+        if (snapshot.State == FrontendCenterMStartupState.Disabled)
+        {
+            var recommitRegistration = _startupSettings.EnsureStartupRegistration();
+            AppLog.Info("CenterM.Authority", "Disabled authority recommit startup verification.", ("Success", recommitRegistration.Success), ("Message", recommitRegistration.Message));
+            if (!recommitRegistration.Success)
+                return Fail(snapshot, $"The Addon could not be registered to start at the next Windows logon, so MSI Center M authority was not recommitted. {recommitRegistration.Message}");
+            return RequestRestart(snapshot);
+        }
+
+        if (exactPendingPrerequisites)
+            AppLog.Info("CenterM.Authority", "Exact current-boot pending prerequisites verified for next-boot admission.", ("Action", "CommitCenterMOnly"));
+
+        if (!exactPendingPrerequisites)
+        {
+            var inspection = _hidHideBaseline.InspectDisabledModeBaseline([]);
+            if (inspection.Outcome is AddonHidHideBaselineOutcome.Conflict or AddonHidHideBaselineOutcome.Unavailable)
+                return Fail(snapshot, $"HidHide is not in a safe state for Addon controller isolation: {inspection.Reason}.");
+        }
         cancellationToken.ThrowIfCancellationRequested();
 
         // --- ordered persistent mutation (Runtime-owned scope; a disconnecting frontend must not
@@ -234,11 +270,15 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         if (!registration.Success)
             return Fail(snapshot, $"The Addon could not be registered to start at the next Windows logon, so MSI Center M was not disabled. {registration.Message}");
 
-        // 2. Persistent zero-target HidHide baseline (no physical PID1902 target is known at PR3).
-        var apply = _hidHideBaseline.ApplyDisabledModeBaseline([]);
-        AppLog.Info("CenterM.Authority", "HidHide baseline apply.", ("Outcome", apply.Outcome), ("Reason", apply.Reason));
-        if (!apply.IsCompliant)
-            return Fail(snapshot, $"The Addon HidHide controller baseline could not be applied, so MSI Center M was not disabled: {apply.Reason}. The startup registration was left enabled.");
+        // 2. Persistent zero-target HidHide baseline for the ordinary Ready path only. A pending
+        //    installer is not runtime-ready; next boot's DisabledBootAdmission owns normalization.
+        if (!exactPendingPrerequisites)
+        {
+            var apply = _hidHideBaseline.ApplyDisabledModeBaseline([]);
+            AppLog.Info("CenterM.Authority", "HidHide baseline apply.", ("Outcome", apply.Outcome), ("Reason", apply.Reason));
+            if (!apply.IsCompliant)
+                return Fail(snapshot, $"The Addon HidHide controller baseline could not be applied, so MSI Center M was not disabled: {apply.Reason}. The startup registration was left enabled.");
+        }
 
         // 3. Center M startup roots -> Disabled (exact read-back verified inside the primitive).
         var mutation = await _centerMStartup.SetEnabledAsync(false, CancellationToken.None).ConfigureAwait(false);

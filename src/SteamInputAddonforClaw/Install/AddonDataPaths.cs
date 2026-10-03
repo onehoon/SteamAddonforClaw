@@ -43,13 +43,6 @@ internal static class AddonDataPaths
         return Path.Combine(ResolveClawHudRuntimeRoot(rootAppDirectory), runtimeVersion);
     }
 
-    internal static void DeleteFullResetRoot(string rootAppDirectory)
-    {
-        var root = ResolveDataRoot(rootAppDirectory);
-        try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
-        catch (Exception exception) { Diagnostics.AppLog.Warn("Uninstall", "Full reset data removal failed.", exception, ("Path", root)); }
-    }
-
     internal static string ResolveDataRoot(string rootAppDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootAppDirectory);
