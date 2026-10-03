@@ -8,6 +8,11 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 internal interface IMsiClawRawHidTransport
 {
     Task<bool> WriteAsync(string devicePath, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken);
+    bool TryGetDeviceAttributes(string devicePath, out MsiClawHidDeviceAttributes attributes)
+    {
+        attributes = default;
+        return false;
+    }
     Task<byte[]?> ReadAsync(string devicePath, int reportLength, TimeSpan timeout, CancellationToken cancellationToken) => Task.FromResult<byte[]?>(null);
     Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(
         string devicePath,
@@ -17,6 +22,8 @@ internal interface IMsiClawRawHidTransport
         TimeSpan timeout,
         CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<byte[]>?>(null);
 }
+
+internal readonly record struct MsiClawHidDeviceAttributes(ushort VendorId, ushort ProductId, ushort VersionNumber);
 
 internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
 {
@@ -64,6 +71,28 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
 
         AppLog.Debug("NativeMode", "Raw MSI HID write succeeded.", ("Operation", "Write"), ("BytesWritten", written), ("RequestedLength", buffer.Length));
         return Task.FromResult(true);
+    }
+
+    public bool TryGetDeviceAttributes(string devicePath, out MsiClawHidDeviceAttributes attributes)
+    {
+        attributes = default;
+        if (string.IsNullOrWhiteSpace(devicePath)) return false;
+
+        using var handle = _api.Open(devicePath, GenericRead, ShareRead | ShareWrite, OpenExisting);
+        if (handle.IsInvalid)
+        {
+            AppLog.Debug("NativeMode", "Raw MSI HID attribute open failed.", ("Operation", "GetAttributes"), ("Win32Error", _api.LastError));
+            return false;
+        }
+
+        if (!_api.TryGetAttributes(handle, out var vendorId, out var productId, out var versionNumber))
+        {
+            AppLog.Debug("NativeMode", "Raw MSI HID attributes unavailable.", ("Operation", "GetAttributes"), ("Win32Error", _api.LastError));
+            return false;
+        }
+
+        attributes = new(vendorId, productId, versionNumber);
+        return true;
     }
 
     public async Task<byte[]?> ReadAsync(string devicePath, int reportLength, TimeSpan timeout, CancellationToken cancellationToken)
@@ -170,6 +199,11 @@ internal interface IMsiClawNativeHidApi
     void CancelWrite(SafeFileHandle handle) { }
     bool Read(SafeFileHandle handle, byte[] buffer, out uint bytesRead) { bytesRead = 0; return false; }
     void CancelRead(SafeFileHandle handle) { }
+    bool TryGetAttributes(SafeFileHandle handle, out ushort vendorId, out ushort productId, out ushort versionNumber)
+    {
+        vendorId = productId = versionNumber = 0;
+        return false;
+    }
 
     /// <summary>
     /// Reads the true input/output report byte lengths and HID Usage/UsagePage for an opened HID
@@ -293,6 +327,23 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
         }
     }
 
+    public bool TryGetAttributes(SafeFileHandle handle, out ushort vendorId, out ushort productId, out ushort versionNumber)
+    {
+        vendorId = productId = versionNumber = 0;
+        var attributes = new HIDD_ATTRIBUTES { Size = Marshal.SizeOf<HIDD_ATTRIBUTES>() };
+        if (!HidD_GetAttributes(handle, ref attributes))
+        {
+            LastError = Marshal.GetLastWin32Error();
+            return false;
+        }
+
+        vendorId = attributes.VendorID;
+        productId = attributes.ProductID;
+        versionNumber = attributes.VersionNumber;
+        LastError = 0;
+        return true;
+    }
+
     private const int HidpStatusSuccess = 0x00110000;
 
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -316,12 +367,25 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool HidD_GetPreparsedData(SafeFileHandle hidDeviceObject, out IntPtr preparsedData);
 
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_GetAttributes(SafeFileHandle hidDeviceObject, ref HIDD_ATTRIBUTES attributes);
+
     [DllImport("hid.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool HidD_FreePreparsedData(IntPtr preparsedData);
 
     [DllImport("hid.dll")]
     private static extern int HidP_GetCaps(IntPtr preparsedData, out HIDP_CAPS capabilities);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HIDD_ATTRIBUTES
+    {
+        public int Size;
+        public ushort VendorID;
+        public ushort ProductID;
+        public ushort VersionNumber;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct HIDP_CAPS

@@ -22,6 +22,7 @@ using SteamInputAddonforClaw.Updates;
 using SteamInputAddonforClaw.ClawHud;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Shortcuts;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -121,6 +122,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // PR5: the process-lifetime Full PID1902 physical owner. Non-null only after an exact Disabled
     // boot; owns one live DirectInput session which PR6 consumes.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? _physicalOwnership;
+    private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawLedController? _controllerLedController;
     // The command-HID GamepadMode client is shared by the Disabled-mode physical owner and its
     // startup/recovery normalization path.
     private SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator? _msiControllerDevices;
@@ -561,7 +563,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             captureXbox360RumbleLoopDiagnostic: CaptureXbox360RumbleLoopDiagnosticAsync,
             startXbox360RumbleLoopDiagnostic: StartXbox360RumbleLoopDiagnosticAsync,
             stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync,
-            runPid1902InputCadenceDiagnostic: RunPid1902InputCadenceDiagnosticAsync);
+            runPid1902InputCadenceDiagnostic: RunPid1902InputCadenceDiagnosticAsync,
+            // This is a presentation capability derived from the existing supported-hardware and
+            // startup authority facts. The apply callback re-checks live authority and ownership.
+            controllerLedAvailable: startupResult.HardwareSupported
+                && startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled,
+            applyControllerLedSettings: ApplyOwnedControllerLedSettingsAsync);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -749,6 +756,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 await presentation.ReleaseForCenterMEnableAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
                 return;
             }
+
+            // The LED is part of physical PID1902 ownership, not VIIPER presentation. Apply the
+            // persisted state once as soon as the normal owned DirectInput session is healthy,
+            // including the default Off state.
+            await ApplyOwnedControllerLedSettingsAsync(startupSettings.ControllerLed, _startupCancellationTokenSource.Token).ConfigureAwait(false);
 
             // Full1902 Policy B section 5.2/5.3: while the Addon owns the controller, native Win+G /
             // Xbox Game Bar must never surface. Arm suppression -- and PROVE it armed -- BEFORE the
@@ -992,7 +1004,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // 11: raw Steam/BPM state may have changed while input was down and PR7 correctly refused
             // forward mutation on a non-running source. Re-run the existing reconcile exactly once.
             if (result.IsOwned && result.Reason != "RecoveryNotNeeded")
+            {
+                await ApplyOwnedControllerLedSettingsAsync(
+                    _runtimeStartupSettings?.ControllerLed ?? ControllerLedSettings.Default,
+                    cancellationToken).ConfigureAwait(false);
                 RequestControllerPresentationReconcile("PhysicalInputRecovered");
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception exception)
@@ -1014,6 +1031,43 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                     ("Event", "OwnedPhysicalRecoveryRequested"), ("Trigger", "DeferredDeviceArrival"));
                 _ownedControllerRecovery = RecoverOwnedControllerPhysicalInputAsync(physical, "DeferredDeviceArrival", _startupCancellationTokenSource.Token);
             }
+        }
+    }
+
+    private async Task ApplyOwnedControllerLedSettingsAsync(ControllerLedSettings settings, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled)
+            {
+                AppLog.Info("ControllerLed", "Static LED apply skipped because Addon authority is not active.",
+                    ("Event", "ControllerLedApplySkipped"), ("Reason", "StockAuthorityOrUnavailable"));
+                return;
+            }
+
+            var physical = _physicalOwnership;
+            if (physical?.LiveInputSource is not { IsRunning: true } || physical.OwnedPhysicalIdentity is not { } identity)
+            {
+                AppLog.Info("ControllerLed", "Static LED apply skipped because no healthy owned PID1902 session is available.",
+                    ("Event", "ControllerLedApplySkipped"), ("Reason", "OwnedPhysicalSessionUnavailable"));
+                return;
+            }
+
+            _controllerLedController ??= new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawLedController(
+                GetMsiControllerDevices(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawHidDeviceInformationLookup(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawRawHidTransport());
+            await _controllerLedController.ApplyAsync(settings, identity, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerLed", "Static LED apply failed; Full1902 controller ownership remains active.", exception,
+                ("Event", "ControllerLedApplyFailed"));
         }
     }
 
@@ -2121,6 +2175,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // immediately -- it carries the suspend-pause release pre-step and must not wait behind the
         // unrelated 2.5 s CPU Boost / Power Mode profile settle below.
         RequestControllerPresentationReconcile("PowerResume");
+        // A healthy DirectInput source can survive the controller's hibernate power-cycle, so the
+        // physical-recovery path may not run even though firmware has restored its LED state.
+        // Reapply the latest desired state once after the control HID has had a bounded settle.
+        _ = ReapplyControllerLedAfterResumeAsync(_startupCancellationTokenSource.Token);
 
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.NotifyQuickSettingsPowerSourceChanged();
@@ -2177,6 +2235,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("Profiles.Battery", "Battery charge-limit resume reconcile failed.", exception);
+        }
+    }
+
+    private async Task ReapplyControllerLedAfterResumeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+            if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+
+            await ApplyOwnedControllerLedSettingsAsync(
+                _runtimeStartupSettings?.ControllerLed ?? ControllerLedSettings.Default,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
     }
 
