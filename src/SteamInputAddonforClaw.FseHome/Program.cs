@@ -186,12 +186,16 @@ internal static class SteamLauncher
 
 internal sealed class FseHomeDiagnostics
 {
-    private readonly string _path = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SteamInputAddonforClaw",
-        "logs",
-        "fse-home-last.log");
+    private const string PersistentDataDirectoryName = "SteamInputAddonforClaw-Data";
+    private readonly string _path = ResolveLogPath(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
     private bool _available = true;
+
+    internal static string ResolveLogPath(string localApplicationData)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localApplicationData);
+        return Path.Combine(localApplicationData, PersistentDataDirectoryName, "logs", "fse-home-last.log");
+    }
 
     internal void Start()
     {
