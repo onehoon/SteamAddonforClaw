@@ -80,7 +80,8 @@ public sealed class ControllerVibrationStrengthUiTests
     public void Page_wires_value_changed_to_draft_only_and_renders_returned_firmware_values()
     {
         var root = FindRepositoryRoot();
-        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"));
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
         var handlerStart = page.IndexOf("private void VibrationStrengthSlider_ValueChanged", StringComparison.Ordinal);
         var handlerEnd = page.IndexOf("private async void LeftVibrationTestButton_Click", handlerStart, StringComparison.Ordinal);
         Assert.True(handlerStart >= 0 && handlerEnd > handlerStart);
