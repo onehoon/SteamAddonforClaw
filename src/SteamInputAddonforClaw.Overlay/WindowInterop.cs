@@ -34,8 +34,11 @@ internal static class WindowInterop
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoSendChanging = 0x0400;
     private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoOwnerZOrder = 0x0200;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
+    private const uint SwpShowWindow = 0x0040;
+    private const uint SwpHideWindow = 0x0080;
     private const uint SwpFrameChanged = 0x0020;
     private const uint DwmwaWindowCornerPreference = 33;
     private const int DwmcpRound = 2;
@@ -46,12 +49,16 @@ internal static class WindowInterop
     private const uint WmClose = 0x0010;
     private const uint WmDestroy = 0x0002;
     private const uint WmNcDestroy = 0x0082;
+    private const uint WmWindowPosChanged = 0x0047;
+    private const uint WmStyleChanged = 0x007D;
     private const uint WmLButtonDown = 0x0201;
     private const uint WmRButtonDown = 0x0204;
     private const uint WmMButtonDown = 0x0207;
     private const uint WmXButtonDown = 0x020B;
     private const int WhMouseLl = 14;
     private const int HtClient = 1;
+    private const int SwShowNoActivate = 4;
+    private const int SwHide = 0;
     private static readonly nint IdcArrow = 32512;
     private const nint MaNoActivate = 3;
     private const uint WsExNoActivate = 0x08000000;
@@ -187,13 +194,12 @@ internal static class WindowInterop
             presenter.IsResizable = false;
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
-            presenter.IsAlwaysOnTop = true;
         }
 
         ApplyRoundedCorners(hwnd);
 
-        if (!SetWindowPos(hwnd, IntPtr.Zero, rect.X, rect.Y, rect.Width, rect.Height,
-                SwpNoActivate | SwpNoSendChanging | SwpNoZOrder | SwpFrameChanged))
+        if (!SetWindowPos(hwnd, HwndTopmost, rect.X, rect.Y, rect.Width, rect.Height,
+                SwpNoActivate | SwpNoOwnerZOrder | SwpFrameChanged))
         {
             var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not place the Overlay window.");
             OverlayLog.Error("Geometry", "Final Overlay placement failed.", exception, ("Operation", "SetWindowPos.Final"));
@@ -220,52 +226,50 @@ internal static class WindowInterop
     internal static void ShowWithoutActivation(OverlayWindow window)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
-        var appWindow = AppWindow.GetFromWindowId(Win32Interop.GetWindowIdFromWindow(hwnd));
-        var presenter = appWindow.Presenter as OverlappedPresenter;
-        appWindow.Show(false);
-
         if (!SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0,
-                SwpNoActivate | SwpNoSendChanging | SwpNoSize | SwpNoMove))
+                SwpNoMove | SwpNoSize | SwpNoActivate | SwpNoOwnerZOrder | SwpShowWindow))
         {
-            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not promote the Overlay window to the topmost band.");
-            OverlayLog.Error("Window", "Overlay topmost promotion failed.", exception, ("Operation", "SetWindowPos.ShowTopmost"), ("OverlayHwnd", hwnd));
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not show the Overlay window in the topmost band.");
+            OverlayLog.Error("Window", "Overlay native show/topmost transaction failed.", exception,
+                ("Operation", "SetWindowPos.ShowTopmost"), ("OverlayHwnd", hwnd));
             throw exception;
         }
 
-        VerifyTopmostStateAfterShow(hwnd, presenter);
+        ShowWindow(hwnd, SwShowNoActivate);
+        VerifyTopmostStateAfterShow(hwnd);
     }
 
     internal static void Hide(OverlayWindow window)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
-        try
+        ShowWindow(hwnd, SwHide);
+
+        if (IsWindowVisible(hwnd))
         {
-            AppWindow.GetFromWindowId(Win32Interop.GetWindowIdFromWindow(hwnd)).Hide();
-        }
-        catch (Exception exception)
-        {
-            OverlayLog.Error("Window", "Overlay hide operation failed.", exception, ("Operation", "AppWindow.Hide"), ("OverlayHwnd", hwnd));
-            throw;
+            var exception = new InvalidOperationException("Overlay remained visible after the native Hide operation.");
+            OverlayLog.Error("Window", "Overlay native hide postcondition failed.", exception,
+                ("OverlayHwnd", hwnd), ("WindowVisible", true));
+            throw exception;
         }
     }
 
-    private static void VerifyTopmostStateAfterShow(nint hwnd, OverlappedPresenter? presenter)
+    private static void VerifyTopmostStateAfterShow(nint hwnd)
     {
+        var windowVisible = IsWindowVisible(hwnd);
         var topmostStyle = HasTopmostStyle(hwnd);
         var foreground = GetForegroundWindow();
-        var presenterTopmost = presenter?.IsAlwaysOnTop;
         var fields = new (string Key, object? Value)[]
         {
             ("OverlayHwnd", hwnd),
+            ("WindowVisible", windowVisible),
             ("TopmostStyle", topmostStyle),
-            ("PresenterAlwaysOnTop", presenterTopmost),
             ("ForegroundHwnd", foreground),
             ("IsOverlayForeground", foreground == hwnd)
         };
 
-        if (!topmostStyle)
+        if (!windowVisible || !topmostStyle)
         {
-            var exception = new InvalidOperationException("Overlay was shown without the required topmost window state.");
+            var exception = new InvalidOperationException("Overlay was shown without the required visible topmost window state.");
             OverlayLog.Error("Window", "Overlay topmost postcondition failed.", exception, fields);
             throw exception;
         }
@@ -367,6 +371,38 @@ internal static class WindowInterop
                     // This Overlay intentionally has no usable non-client frame, so the
                     // entire HWND rectangle is its client area.
                     return IntPtr.Zero;
+                }
+
+                break;
+            case WmWindowPosChanged:
+                if (lParam != IntPtr.Zero)
+                {
+                    var windowPos = Marshal.PtrToStructure<WINDOWPOS>(lParam);
+                    if ((windowPos.Flags & SwpNoZOrder) == 0 ||
+                        (windowPos.Flags & (SwpShowWindow | SwpHideWindow)) != 0)
+                    {
+                        var positionForeground = GetForegroundWindow();
+                        OverlayLog.Debug("Window", "Overlay window position changed.",
+                            ("OverlayHwnd", hwnd),
+                            ("hwndInsertAfter", windowPos.HwndInsertAfter),
+                            ("flags", $"0x{windowPos.Flags:X8}"),
+                            ("WindowVisible", IsWindowVisible(hwnd)),
+                            ("TopmostStyle", HasTopmostStyle(hwnd)),
+                            ("ForegroundHwnd", positionForeground));
+                    }
+                }
+
+                break;
+            case WmStyleChanged:
+                if (wParam == GwlExStyle && lParam != IntPtr.Zero)
+                {
+                    var style = Marshal.PtrToStructure<STYLESTRUCT>(lParam);
+                    OverlayLog.Debug("Window", "Overlay extended style changed.",
+                        ("OverlayHwnd", hwnd),
+                        ("styleOld", $"0x{style.styleOld:X8}"),
+                        ("styleNew", $"0x{style.styleNew:X8}"),
+                        ("oldTopmost", (style.styleOld & (uint)WsExTopmost) != 0),
+                        ("newTopmost", (style.styleNew & (uint)WsExTopmost) != 0));
                 }
 
                 break;
@@ -481,6 +517,12 @@ internal static class WindowInterop
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
 
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(nint hwnd, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(nint hwnd);
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(nint hwnd, uint attribute, ref int value, uint valueSize);
 
@@ -533,6 +575,25 @@ internal static class WindowInterop
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { internal int Left; internal int Top; internal int Right; internal int Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WINDOWPOS
+    {
+        internal nint Hwnd;
+        internal nint HwndInsertAfter;
+        internal int X;
+        internal int Y;
+        internal int Cx;
+        internal int Cy;
+        internal uint Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct STYLESTRUCT
+    {
+        internal uint styleOld;
+        internal uint styleNew;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MONITORINFO
