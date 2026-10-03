@@ -132,6 +132,7 @@ public sealed class CanonicalSteamDeckSessionTests
 
     private sealed class FakeNative : ICanonicalViiperNativeApi
     {
+        public bool SetDiagnosticLogDirectory(string _) => true;
         internal readonly List<string> Calls = [];
         internal USBDeviceAttachmentState AttachmentState { get; init; } = USBDeviceAttachmentState.Detached;
         internal Queue<USBDeviceAttachmentState> AttachmentStates { get; } = [];
