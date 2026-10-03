@@ -36,7 +36,7 @@ public sealed class ControllerLedLifecycleContractTests
     }
 
     [Fact]
-    public void Presentation_and_resume_reconcile_paths_do_not_write_leds()
+    public void Presentation_reconcile_stays_led_free_and_power_resume_schedules_one_reapply()
     {
         var host = ReadHost();
         var presentation = Method(host, "private async Task ReconcileControllerPresentationAsync(", "private Task<bool> QuiesceFull1902PresentationForSuspendAsync(");
@@ -44,6 +44,11 @@ public sealed class ControllerLedLifecycleContractTests
 
         Assert.DoesNotContain("ApplyOwnedControllerLedSettingsAsync", presentation, StringComparison.Ordinal);
         Assert.DoesNotContain("ApplyOwnedControllerLedSettingsAsync", resume, StringComparison.Ordinal);
+        Assert.Equal(1, resume.Split("ReapplyControllerLedAfterResumeAsync(", StringSplitOptions.None).Length - 1);
+        var reapply = Method(host, "private async Task ReapplyControllerLedAfterResumeAsync(", "private void OnAcDcPowerSourceChanged()");
+        Assert.Contains("Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken)", reapply, StringComparison.Ordinal);
+        Assert.Equal(1, reapply.Split("ApplyOwnedControllerLedSettingsAsync(", StringSplitOptions.None).Length - 1);
+        Assert.Contains("_runtimeStartupSettings?.ControllerLed ?? ControllerLedSettings.Default", reapply, StringComparison.Ordinal);
         Assert.Contains("RecoverLostInputAsync", host, StringComparison.Ordinal);
         Assert.Contains("ApplyOwnedControllerLedSettingsAsync(", host, StringComparison.Ordinal);
     }

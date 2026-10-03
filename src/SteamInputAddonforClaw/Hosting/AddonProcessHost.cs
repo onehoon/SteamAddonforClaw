@@ -2175,6 +2175,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // immediately -- it carries the suspend-pause release pre-step and must not wait behind the
         // unrelated 2.5 s CPU Boost / Power Mode profile settle below.
         RequestControllerPresentationReconcile("PowerResume");
+        // A healthy DirectInput source can survive the controller's hibernate power-cycle, so the
+        // physical-recovery path may not run even though firmware has restored its LED state.
+        // Reapply the latest desired state once after the control HID has had a bounded settle.
+        _ = ReapplyControllerLedAfterResumeAsync(_startupCancellationTokenSource.Token);
 
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.NotifyQuickSettingsPowerSourceChanged();
@@ -2231,6 +2235,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("Profiles.Battery", "Battery charge-limit resume reconcile failed.", exception);
+        }
+    }
+
+    private async Task ReapplyControllerLedAfterResumeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+            if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+
+            await ApplyOwnedControllerLedSettingsAsync(
+                _runtimeStartupSettings?.ControllerLed ?? ControllerLedSettings.Default,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
     }
 
