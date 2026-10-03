@@ -21,7 +21,11 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Equal("Vibration Strength", (string?)expander.Attribute("Header"));
         Assert.Equal("False", (string?)expander.Attribute("IsExpanded"));
         Assert.Contains(expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon");
-        Assert.DoesNotContain("Controller Settings", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase);
+        var ledExpander = document.Descendants().Single(element =>
+            element.Name.LocalName == "SettingsExpander"
+            && (string?)element.Attribute(x + "Name") == "ControllerLedExpander");
+        Assert.NotSame(ledExpander.Parent, expander.Parent);
+        Assert.DoesNotContain("Controller Settings", expander.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("settings.json", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase);
 
         var mappingContent = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "MappingContent");

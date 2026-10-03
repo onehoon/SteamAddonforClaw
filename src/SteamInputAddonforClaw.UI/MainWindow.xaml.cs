@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using SteamInputAddonforClaw.Windowing;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Windows.Foundation;
@@ -48,6 +49,12 @@ public sealed partial class MainWindow : Window
     private Task _backButtonSaveChain = Task.CompletedTask;
     private long _backButtonEditVersion;
 
+    private ControllerLedSettings _controllerLedUiSettings = ControllerLedSettings.Default;
+    private ControllerLedSettings _controllerLedPersistedSettings = ControllerLedSettings.Default;
+    private Task _controllerLedSaveChain = Task.CompletedTask;
+    private long _controllerLedEditVersion;
+    private DispatcherQueueTimer? _controllerLedMutationTimer;
+
     internal MainWindow(
         IAddonFrontendControl frontend,
         FrontendBootstrapSnapshot bootstrap)
@@ -59,6 +66,8 @@ public sealed partial class MainWindow : Window
         _frontButtonPersistedMapping = bootstrap.Settings.FrontButtonMapping;
         _backButtonUiMapping = bootstrap.Settings.BackButtonMapping;
         _backButtonPersistedMapping = bootstrap.Settings.BackButtonMapping;
+        _controllerLedUiSettings = bootstrap.Settings.ControllerLed;
+        _controllerLedPersistedSettings = bootstrap.Settings.ControllerLed;
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -70,6 +79,10 @@ public sealed partial class MainWindow : Window
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
         ControllerContent.Initialize(_bootstrap, _frontend, () => WindowNative.GetWindowHandle(this));
+        _controllerLedMutationTimer = DispatcherQueue.CreateTimer();
+        _controllerLedMutationTimer.Interval = TimeSpan.FromMilliseconds(200);
+        _controllerLedMutationTimer.IsRepeating = false;
+        _controllerLedMutationTimer.Tick += ControllerLedMutationTimer_Tick;
         OverlayContent.Initialize(_frontend);
         ShortcutContent.Initialize(_frontend, () => WindowNative.GetWindowHandle(this));
         // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
@@ -80,6 +93,7 @@ public sealed partial class MainWindow : Window
         // already owns navigation between the two pages.
         ControllerContent.MappingEditRequested += (_, mapping) => QueueFrontButtonMutation(mapping);
         ControllerContent.BackButtonMappingEditRequested += (_, mapping) => QueueBackButtonMutation(mapping);
+        ControllerContent.ControllerLedEditRequested += (_, settings) => QueueControllerLedMutation(settings);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
@@ -123,7 +137,10 @@ public sealed partial class MainWindow : Window
         ShortcutContent.RequestRefresh();
     }
 
-    private void OnWindowClosed(object sender, WindowEventArgs args) => _frontend.StateInvalidated -= OnFrontendStateInvalidated;
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        _frontend.StateInvalidated -= OnFrontendStateInvalidated;
+    }
 
     internal async Task CloseVibrationTestForUiShutdownAsync()
     {
@@ -528,12 +545,57 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Waits for the already-queued front and back controller mapping saves.</summary>
+    private void QueueControllerLedMutation(ControllerLedSettings next)
+    {
+        _controllerLedUiSettings = next;
+        _controllerLedEditVersion++;
+        ControllerContent.ApplyControllerLedSettings(next);
+        _controllerLedMutationTimer?.Stop();
+        _controllerLedMutationTimer?.Start();
+    }
+
+    private void ControllerLedMutationTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        var version = _controllerLedEditVersion;
+        _controllerLedSaveChain = SaveControllerLedAfterAsync(_controllerLedSaveChain, _controllerLedUiSettings, version);
+    }
+
+    private async Task SaveControllerLedAfterAsync(Task previous, ControllerLedSettings next, long version)
+    {
+        try { await previous; }
+        catch { /* observed where it happened */ }
+
+        try
+        {
+            var result = await _frontend.SetControllerLedSettingsAsync(next);
+            _controllerLedPersistedSettings = result.ControllerLed;
+            if (version != _controllerLedEditVersion) return;
+            _controllerLedUiSettings = result.ControllerLed;
+            ControllerContent.ApplyControllerLedSettings(result.ControllerLed);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Window", "Controller LED settings save/apply request failed; restoring the last persisted preference.", exception);
+            if (version != _controllerLedEditVersion) return;
+            _controllerLedUiSettings = _controllerLedPersistedSettings;
+            ControllerContent.ApplyControllerLedSettings(_controllerLedPersistedSettings);
+        }
+    }
+
+    /// <summary>Waits for queued controller settings and flushes the shared LED debounce timer.</summary>
     internal Task DrainPendingControllerMappingSavesAsync()
     {
+        if (_controllerLedMutationTimer?.IsRunning == true)
+        {
+            _controllerLedMutationTimer.Stop();
+            var version = _controllerLedEditVersion;
+            _controllerLedSaveChain = SaveControllerLedAfterAsync(_controllerLedSaveChain, _controllerLedUiSettings, version);
+        }
         var front = _frontButtonSaveChain;
         var back = _backButtonSaveChain;
-        return Task.WhenAll(front, back);
+        var led = _controllerLedSaveChain;
+        return Task.WhenAll(front, back, led);
     }
 
     private void ReturnToSettings(string reason)

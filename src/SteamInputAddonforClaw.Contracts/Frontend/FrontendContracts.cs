@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 
@@ -286,6 +287,7 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
     public bool DeveloperMenuEnabled { get; init; }
     public bool QuickSettingsCurrentPowerSourceOnly { get; init; }
     public BackButtonMappingSettings BackButtonMapping { get; init; } = BackButtonMappingSettings.Default;
+    public ControllerLedSettings ControllerLed { get; init; } = ControllerLedSettings.Default;
 }
 
 /// <summary>Whether MSI Center M is configured to start with Windows, judged ONLY from the three
@@ -348,6 +350,9 @@ public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings
     /// <summary>Whether the supported Full1902 M1/M2 physical input contract exists on this machine.
     /// This is the same stable startup hardware fact as FrontButtonMappingAvailable.</summary>
     public bool BackButtonMappingAvailable { get; init; }
+
+    /// <summary>Whether static controller LED settings apply on supported hardware under Addon authority.</summary>
+    public bool ControllerLedAvailable { get; init; }
 }
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
@@ -538,6 +543,9 @@ public interface IAddonFrontendControl
     /// <summary>Persists the complete global Xbox360 M1/M2 mapping as one atomic setting. An invalid
     /// candidate is rejected by the settings layer and the returned snapshot keeps the current value.</summary>
     Task<FrontendSettingsSnapshot> SetBackButtonMappingAsync(BackButtonMappingSettings mapping, CancellationToken cancellationToken = default);
+    /// <summary>Persists the whole desired static LED setting, then best-effort applies it only when Addon owns a healthy PID1902 session.</summary>
+    Task<FrontendSettingsSnapshot> SetControllerLedSettingsAsync(ControllerLedSettings settings, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Controller LED settings are not supported by this frontend.");
     Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default);
     /// <summary>Captures the current MSI Center M startup configuration (work order PR1). Read-only:
     /// opening the Device page and capturing this must not mutate any Windows state.</summary>

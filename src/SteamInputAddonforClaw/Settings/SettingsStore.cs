@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
@@ -72,6 +73,7 @@ public sealed class SettingsStore
                 ScreenshotSaveFolder = ReadScreenshotSaveFolder(root),
                 FrontButtonMapping = ReadFrontButtonMapping(root),
                 BackButtonMapping = ReadBackButtonMapping(root),
+                ControllerLed = ReadControllerLedSettings(root),
                 AddonQuickSettingsTabOrder = ReadAddonQuickSettingsTabOrder(root)
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LogLevel", settings.LogLevel));
@@ -87,6 +89,32 @@ public sealed class SettingsStore
             AppLog.Warn("Settings", "Settings read failed. Using defaults.", exception, ("Action", "Defaults"));
             return new AppSettings(LogLevel: AppLogPreference.Off);
         }
+    }
+
+    /// <summary>Reads this optional feature in isolation; absent or malformed LED data uses Off defaults.</summary>
+    private static ControllerLedSettings ReadControllerLedSettings(JsonElement root)
+    {
+        if (!root.TryGetProperty("ControllerLed", out var property) || property.ValueKind != JsonValueKind.Object)
+            return ControllerLedSettings.Default;
+
+        if (!property.TryGetProperty("Enabled", out var enabledProperty)
+            || enabledProperty.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+            || !property.TryGetProperty("Brightness", out var brightnessProperty)
+            || !brightnessProperty.TryGetInt32(out var brightness)
+            || brightness is < 0 or > 100
+            || !property.TryGetProperty("Red", out var redProperty)
+            || !redProperty.TryGetByte(out var red)
+            || !property.TryGetProperty("Green", out var greenProperty)
+            || !greenProperty.TryGetByte(out var green)
+            || !property.TryGetProperty("Blue", out var blueProperty)
+            || !blueProperty.TryGetByte(out var blue))
+        {
+            AppLog.Warn("Settings", "Controller LED settings are malformed; using Off defaults for this feature only.", null,
+                ("Reason", "InvalidControllerLedSettings"));
+            return ControllerLedSettings.Default;
+        }
+
+        return new(enabledProperty.GetBoolean(), brightness, red, green, blue);
     }
 
     /// <summary>
@@ -256,7 +284,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.ScreenshotSaveFolder, settings.FrontButtonMapping, settings.BackButtonMapping, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.ScreenshotSaveFolder, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

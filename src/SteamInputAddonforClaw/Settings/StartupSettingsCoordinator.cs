@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Install;
@@ -25,6 +26,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public string? ScreenshotSaveFolder => Settings.ScreenshotSaveFolder;
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
     public BackButtonMappingSettings BackButtonMapping => Settings.BackButtonMapping;
+    public ControllerLedSettings ControllerLed => Settings.ControllerLed;
     public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
     public event EventHandler? FrontButtonMappingChanged;
 
@@ -101,6 +103,29 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
         Settings = next;
         SteamInputAddonforClaw.Diagnostics.AppLog.Debug("Settings", "Back-button mapping saved.",
             ("M1", Settings.BackButtonMapping.M1), ("M2", Settings.BackButtonMapping.M2));
+        return true;
+    }
+
+    /// <summary>Validates, saves, then publishes the whole desired controller LED setting.</summary>
+    public bool ChangeControllerLedSettings(ControllerLedSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var reason = ControllerLedSettingsValidation.Validate(settings);
+        if (reason is not null)
+        {
+            SteamInputAddonforClaw.Diagnostics.AppLog.Warn("Settings", "Rejected invalid controller LED settings.", null, ("Reason", reason));
+            return false;
+        }
+
+        if (Settings.ControllerLed == settings) return true;
+
+        var next = Settings with { ControllerLed = settings };
+        _settingsStore.Save(next);
+        Settings = next;
+        SteamInputAddonforClaw.Diagnostics.AppLog.Debug("Settings", "Controller LED settings saved.",
+            ("Enabled", settings.Enabled), ("Brightness", settings.Brightness),
+            ("Red", settings.Red), ("Green", settings.Green), ("Blue", settings.Blue));
         return true;
     }
 

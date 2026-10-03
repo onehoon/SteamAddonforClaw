@@ -54,6 +54,9 @@ internal interface IMsiClawAddonPhysicalOwnership : IAsyncDisposable
     /// the SAME source). Null before success or after teardown.</summary>
     IMsiClawPreparedInputSource? LiveInputSource { get; }
 
+    /// <summary>The strong physical identity committed by the currently owned PID1902 session.</summary>
+    MsiClawPhysicalIdentity? OwnedPhysicalIdentity { get; }
+
     /// <summary>The official Center M Enable-and-Restart release: retire the process-owned DirectInput
     /// session, then restore the same strongly-verified physical MSI Claw to PID1901. Runs through the
     /// same owner gate as acquisition, so the two can never interleave. Does NOT clear HidHide or
@@ -151,6 +154,8 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
     }
 
     public IMsiClawPreparedInputSource? LiveInputSource => _ownsInputSource ? _inputSource : null;
+
+    public MsiClawPhysicalIdentity? OwnedPhysicalIdentity => _ownsInputSource ? _ownedPhysicalIdentity : null;
 
     public MsiClawPhysicalInputIdentity? CurrentIdentity { get { lock (_identitySync) return _currentIdentity; } }
 

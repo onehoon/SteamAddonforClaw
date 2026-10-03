@@ -270,6 +270,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetFrontButtonMappingAsync(FrontendWireCodec.Decode<SetFrontButtonMappingRequest>(p).Mapping, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetBackButtonMapping
         ? FrontendWireCodec.Payload(await _inner.SetBackButtonMappingAsync(FrontendWireCodec.Decode<SetBackButtonMappingRequest>(p).Mapping, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetControllerLedSettings
+        ? FrontendWireCodec.Payload(await _inner.SetControllerLedSettingsAsync(FrontendWireCodec.Decode<SetControllerLedSettingsRequest>(p).Settings, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CapturePowerMode
         ? FrontendWireCodec.Payload(await _inner.CapturePowerModeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetDevicePowerModeAc

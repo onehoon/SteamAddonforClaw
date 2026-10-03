@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.CenterMStartup;
@@ -32,6 +33,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
     private readonly Func<string?> _processPath;
     private readonly bool _frontButtonMappingAvailable;
+    private readonly bool _controllerLedAvailable;
+    private readonly Func<ControllerLedSettings, CancellationToken, Task>? _applyControllerLedSettings;
     private int _shutdownStarted;
     private readonly object _clawSensorProbeGate = new();
     private ClawSensorProbeSession? _clawSensorProbe;
@@ -100,9 +103,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null, Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null, Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null, Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null, ShortcutRuntime? shortcutRuntime = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? captureXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? startXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? stopXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? runPid1902InputCadenceDiagnostic = null, MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null, Func<bool>? controllerVibrationTestAvailable = null, Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? testControllerVibrationMotor = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null, Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null, Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null, Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null, ShortcutRuntime? shortcutRuntime = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? captureXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? startXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? stopXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? runPid1902InputCadenceDiagnostic = null, MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null, Func<bool>? controllerVibrationTestAvailable = null, Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? testControllerVibrationMotor = null, bool controllerLedAvailable = false, Func<ControllerLedSettings, CancellationToken, Task>? applyControllerLedSettings = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
+        _controllerLedAvailable = controllerLedAvailable;
+        _applyControllerLedSettings = applyControllerLedSettings;
         _centerMStartup = centerMStartup;
         _centerMAuthorityTransition = centerMAuthorityTransition;
         _updateCoordinator = updateCoordinator;
@@ -436,7 +441,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(false, new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
     private FrontendGameProfileMutationResult UnavailableMutation(uint appId, string message) => new(FrontendGameProfileMutationOutcome.Unavailable, message, CaptureGameProfile(appId));
 
-    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), AppLog.DirectoryPath, _frontButtonMappingAvailable) { BackButtonMappingAvailable = _frontButtonMappingAvailable });
+    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), AppLog.DirectoryPath, _frontButtonMappingAvailable) { BackButtonMappingAvailable = _frontButtonMappingAvailable, ControllerLedAvailable = _controllerLedAvailable });
 
     public Task<FrontendUpdateSnapshot> CaptureAppUpdateAsync(CancellationToken cancellationToken = default)
     {
@@ -546,6 +551,37 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _settings.ChangeBackButtonMapping(mapping);
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(MapSettings());
+    }
+
+    public async Task<FrontendSettingsSnapshot> SetControllerLedSettingsAsync(ControllerLedSettings settings, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_controllerLedAvailable)
+        {
+            AppLog.Info("ControllerLed", "Controller LED mutation is unavailable outside supported Addon authority.");
+            return MapSettings();
+        }
+
+        if (!_settings.ChangeControllerLedSettings(settings))
+            return MapSettings();
+
+        // Desired state is already persisted. A transient hardware failure is feature-local and
+        // must never roll the user's preference back or affect controller ownership.
+        if (_applyControllerLedSettings is not null)
+        {
+            try { await _applyControllerLedSettings(settings, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                AppLog.Warn("ControllerLed", "Controller LED apply failed after settings were persisted.", exception,
+                    ("Event", "ControllerLedApplyFailed"));
+            }
+        }
+
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return MapSettings();
     }
 
     public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default)
@@ -1162,7 +1198,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping };
+    private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };
 
     // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
     // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1
