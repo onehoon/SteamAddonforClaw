@@ -140,7 +140,6 @@ public sealed partial class MainWindow : Window
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         _frontend.StateInvalidated -= OnFrontendStateInvalidated;
-        _controllerLedMutationTimer?.Stop();
     }
 
     internal async Task CloseVibrationTestForUiShutdownAsync()

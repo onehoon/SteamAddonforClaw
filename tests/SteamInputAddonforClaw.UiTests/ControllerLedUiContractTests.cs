@@ -49,6 +49,21 @@ public sealed class ControllerLedUiContractTests
         Assert.Contains("Task.WhenAll(front, back, led)", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Window_close_leaves_led_timer_for_shutdown_drain_to_stop_and_flush()
+    {
+        var source = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
+        var closed = source[source.IndexOf("private void OnWindowClosed(", StringComparison.Ordinal)..];
+        closed = closed[..closed.IndexOf("internal async Task CloseVibrationTestForUiShutdownAsync(", StringComparison.Ordinal)];
+        var drain = source[source.IndexOf("internal Task DrainPendingControllerMappingSavesAsync(", StringComparison.Ordinal)..];
+        drain = drain[..drain.IndexOf("private void ReturnToSettings(", StringComparison.Ordinal)];
+
+        Assert.DoesNotContain("_controllerLedMutationTimer?.Stop()", closed, StringComparison.Ordinal);
+        Assert.Contains("if (_controllerLedMutationTimer?.IsRunning == true)", drain, StringComparison.Ordinal);
+        Assert.Contains("_controllerLedMutationTimer.Stop();", drain, StringComparison.Ordinal);
+        Assert.Contains("_controllerLedSaveChain = SaveControllerLedAfterAsync", drain, StringComparison.Ordinal);
+    }
+
     private static string Source(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
