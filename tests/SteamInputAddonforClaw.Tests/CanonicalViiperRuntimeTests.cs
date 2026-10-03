@@ -1285,6 +1285,7 @@ public sealed class CanonicalViiperRuntimeTests
 
     private sealed class FakeNative : ICanonicalViiperNativeApi
     {
+        public bool SetDiagnosticLogDirectory(string _) => true;
         internal readonly List<string> Calls = [];
         internal bool NewServerResult { get; init; } = true;
         internal bool CreateBusResult { get; init; } = true;
