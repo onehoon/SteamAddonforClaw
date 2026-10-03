@@ -33,7 +33,7 @@ public sealed class FirstTimeSetupPolicyTests
         {
             HardwareCompatibility = new((HardwareCompatibilityStatus)hardwareStatus, null, null, "test"),
             RecoverySafe = false,
-            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true,
             UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0")
         });
 
@@ -337,7 +337,7 @@ public sealed class FirstTimeSetupPolicyTests
         var input = Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
         {
             RecoverySafe = false,
-            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true,
             Steam = SteamSessionState.FromRunningAppId(1234),
             UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.7.6")
         };
@@ -363,13 +363,13 @@ public sealed class FirstTimeSetupPolicyTests
     }
 
     [Fact]
-    public void DisabledBootPrerequisiteStop_AllowsOnlyTheExistingUsbIpUpgradePath()
+    public void DisabledBootPrerequisiteStop_AllowsARealPrerequisiteRepairWhenViiperIsReady()
     {
         var prerequisites = RuntimePrerequisites(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready);
         var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
         {
             RecoverySafe = false,
-            AllowUsbIpRepairWhileRecoveryUnsafe = FrontendPrerequisiteSetupExecutor.AllowsUsbIpRepairWhileRecoveryUnsafe(
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(
                 startupRepairWindow: true,
                 prerequisites),
             UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0")
@@ -379,25 +379,141 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.True(setup.CanInstallRequiredComponents);
     }
 
+    [Fact]
+    public void DisabledBootFirstInstall_AllowsMissingHidHideAndUsbIpWhenViiperIsReady()
+    {
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Ready"));
+        var input = Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing) with
+        {
+            RecoverySafe = false,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(
+                startupRepairWindow: true,
+                prerequisites)
+        };
+
+        var setup = FirstTimeSetupPolicy.Evaluate(input);
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.MissingComponents, setup.Reason);
+        Assert.True(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void DisabledBootHidHideOnlyRepair_IsAllowedWhenViiperIsReady()
+    {
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Ready"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Ready"));
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Ready) with
+        {
+            RecoverySafe = false,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(
+                startupRepairWindow: true,
+                prerequisites)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.MissingComponents, setup.Reason);
+        Assert.True(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void DisabledBootRepairWindow_DoesNotBypassRecoveryUnsafeWhenNoPackageRepairIsRequired()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
+        {
+            RecoverySafe = false,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.RecoveryUnsafe, setup.Reason);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
     [Theory]
-    [InlineData((int)PrerequisiteStatus.Indeterminate, (int)PrerequisiteStatus.Ready)]
-    [InlineData((int)PrerequisiteStatus.Ready, (int)PrerequisiteStatus.Incompatible)]
-    public void DisabledBootUsbIpRepairWindow_RemainsClosedWhenHidHideOrViiperIsNotReady(
+    [InlineData(false, (int)PrerequisiteStatus.Ready, false)]
+    [InlineData(true, (int)PrerequisiteStatus.Missing, false)]
+    [InlineData(true, (int)PrerequisiteStatus.Unusable, false)]
+    [InlineData(true, (int)PrerequisiteStatus.Indeterminate, false)]
+    [InlineData(true, (int)PrerequisiteStatus.Ready, true)]
+    public void PrerequisiteRepairPermission_RequiresStartupWindowAndReadyViiper(
+        bool startupRepairWindow,
+        int viiperStatus,
+        bool expected)
+    {
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.Viiper, (PrerequisiteStatus)viiperStatus, "Test"));
+
+        Assert.Equal(expected, FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(
+            startupRepairWindow,
+            prerequisites));
+    }
+
+    [Theory]
+    [InlineData((int)ComponentInstallationStatus.ExistingUnverified)]
+    [InlineData((int)ComponentInstallationStatus.Incompatible)]
+    [InlineData((int)ComponentInstallationStatus.Indeterminate)]
+    public void MissingHidHide_DoesNotMakeUnsafeUsbIpInstallationsRepairable(int usbIpInstallationStatus)
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Incompatible) with
+        {
+            RecoverySafe = false,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true,
+            UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2,
+                (ComponentInstallationStatus)usbIpInstallationStatus, "UnsafePackageState")
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.ProvisioningUncertain, setup.Reason);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Theory]
+    [InlineData((int)ComponentInstallationStatus.ExistingUnverified)]
+    [InlineData((int)ComponentInstallationStatus.Incompatible)]
+    [InlineData((int)ComponentInstallationStatus.Indeterminate)]
+    public void MissingUsbIp_DoesNotMakeUnsafeHidHideInstallationsRepairable(int hidHideInstallationStatus)
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Unusable, PrerequisiteStatus.Missing) with
+        {
+            RecoverySafe = false,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true,
+            HidHideInstallation = new(PrerequisiteKind.HidHide,
+                (ComponentInstallationStatus)hidHideInstallationStatus, "UnsafePackageState")
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
+        Assert.Equal(FirstTimeSetupReason.ProvisioningUncertain, setup.Reason);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Theory]
+    [InlineData((int)PrerequisiteStatus.Indeterminate, (int)PrerequisiteStatus.Ready, (int)FirstTimeSetupReason.ProvisioningUncertain)]
+    [InlineData((int)PrerequisiteStatus.Ready, (int)PrerequisiteStatus.Incompatible, (int)FirstTimeSetupReason.RecoveryUnsafe)]
+    public void DisabledBootPrerequisiteRepair_RemainsClosedWhenInstallationOrViiperIsUnsafe(
         int hidHideStatus,
-        int viiperStatus)
+        int viiperStatus,
+        int expectedReason)
     {
         var prerequisites = RuntimePrerequisites((PrerequisiteStatus)hidHideStatus, (PrerequisiteStatus)viiperStatus);
         var setup = FirstTimeSetupPolicy.Evaluate(Input((PrerequisiteStatus)hidHideStatus, PrerequisiteStatus.Incompatible) with
         {
             RecoverySafe = false,
-            AllowUsbIpRepairWhileRecoveryUnsafe = FrontendPrerequisiteSetupExecutor.AllowsUsbIpRepairWhileRecoveryUnsafe(
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(
                 startupRepairWindow: true,
                 prerequisites),
             UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0")
         });
 
         Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
-        Assert.Equal(FirstTimeSetupReason.RecoveryUnsafe, setup.Reason);
+        Assert.Equal((FirstTimeSetupReason)expectedReason, setup.Reason);
         Assert.False(setup.CanInstallRequiredComponents);
     }
     [Fact]
@@ -406,7 +522,7 @@ public sealed class FirstTimeSetupPolicyTests
         var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Missing) with
         {
             RecoverySafe = false,
-            AllowUsbIpRepairWhileRecoveryUnsafe = true
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true
         });
 
         Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
@@ -423,7 +539,7 @@ public sealed class FirstTimeSetupPolicyTests
         var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
         {
             RecoverySafe = false,
-            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true,
             UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, (ComponentInstallationStatus)installationStatus, "test", "0.9.8.1")
         });
 
@@ -454,6 +570,33 @@ public sealed class FirstTimeSetupPolicyTests
     [InlineData((int)ComponentInstallationStatus.Indeterminate, false)]
     public void ExistingUsbIpInstallerPath_IsSelectedOnlyForMissingOrUpdateRequired(int statusValue, bool expected)
         => Assert.Equal(expected, ElevatedPrerequisiteSetup.ShouldInstallUsbIp((ComponentInstallationStatus)statusValue));
+
+    [Fact]
+    public void TrueFirstInstall_SelectsBothExistingInstallerSteps()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing) with
+        {
+            RecoverySafe = false,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.True(setup.CanInstallRequiredComponents);
+        Assert.True(ElevatedPrerequisiteSetup.ShouldAcquireHidHide(ComponentInstallationStatus.Missing));
+        Assert.True(ElevatedPrerequisiteSetup.ShouldInstallUsbIp(ComponentInstallationStatus.Missing));
+    }
+
+    [Fact]
+    public void ElevatedFirstInstall_ProcessesHidHideBeforeUsbIp()
+    {
+        var source = ReadElevatedSetupSource();
+        var hidHideStep = source.IndexOf("if (ShouldAcquireHidHide(hidInstallation.Status))", StringComparison.Ordinal);
+        var usbIpProbe = source.IndexOf("var usbPackageProbe = new WindowsUsbIpWin2PackageProbe();", StringComparison.Ordinal);
+        var usbIpStep = source.IndexOf("if (ShouldInstallUsbIp(usbInstallation.Status))", StringComparison.Ordinal);
+
+        Assert.True(hidHideStep >= 0 && hidHideStep < usbIpProbe);
+        Assert.True(usbIpProbe < usbIpStep);
+    }
 
     [Theory]
     [InlineData((int)ComponentInstallationStatus.Missing, true)]
@@ -493,7 +636,7 @@ public sealed class FirstTimeSetupPolicyTests
         var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
         {
             RecoverySafe = false,
-            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true,
             UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0"),
             Provisioning = new(ComponentProvisioningState.None, ComponentProvisioningState.PendingReboot)
         });
@@ -511,7 +654,7 @@ public sealed class FirstTimeSetupPolicyTests
         var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Incompatible) with
         {
             RecoverySafe = false,
-            AllowUsbIpRepairWhileRecoveryUnsafe = true,
+            AllowPrerequisiteRepairWhileRecoveryUnsafe = true,
             UsbIpWin2Installation = new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0"),
             Provisioning = new(ComponentProvisioningState.None, (ComponentProvisioningState)provisioningState)
         });
@@ -584,4 +727,14 @@ public sealed class FirstTimeSetupPolicyTests
             new(PrerequisiteKind.HidHide, hidHide, "test"),
             new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Incompatible, "test", "0.9.8.0"),
             new(PrerequisiteKind.Viiper, viiper, "test"));
+
+    private static string ReadElevatedSetupSource()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "README.md")))
+            directory = directory.Parent;
+
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine(directory!.FullName, "src", "SteamInputAddonforClaw", "Prerequisites", "ElevatedPrerequisiteSetup.cs"));
+    }
 }

@@ -36,8 +36,8 @@ internal static class AppLog
     private static StreamWriter? _openWriter;
 
     internal static string? DirectoryOverride { get; set; }
-    // Logging ships disabled by default; the user opts into Info (M5/runtime diagnostics) or Debug
-    // (verbose) explicitly. See AppLogPreference/AppSettingsPolicy for the persisted user setting.
+    // Logging starts disabled until startup applies the persisted preference. Fresh installs resolve
+    // to Info through LogLevelBootstrap, while an explicit Off preference remains authoritative.
     private static int _minimumLevel = (int)AppLogLevel.Off;
     internal static AppLogLevel MinimumLevelOverride { get => (AppLogLevel)Volatile.Read(ref _minimumLevel); set => Volatile.Write(ref _minimumLevel, (int)value); }
 

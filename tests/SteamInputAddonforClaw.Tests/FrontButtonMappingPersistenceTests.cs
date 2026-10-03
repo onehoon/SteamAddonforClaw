@@ -87,6 +87,7 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
     public void Invalid_duplicate_candidate_is_rejected_with_no_write_and_no_event()
     {
         var coordinator = NewCoordinator();
+        var initialSettings = File.ReadAllText(PathName);
         var changes = 0;
         coordinator.FrontButtonMappingChanged += (_, _) => changes++;
 
@@ -96,7 +97,7 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
         Assert.False(coordinator.ChangeFrontButtonMapping(duplicate));
         Assert.Equal(0, changes);
         Assert.Equal(FrontButtonMappingSettings.Default, coordinator.FrontButtonMapping);
-        Assert.False(File.Exists(PathName));
+        Assert.Equal(initialSettings, File.ReadAllText(PathName));
     }
 
     [Fact]
@@ -142,6 +143,7 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
     public void A_gamebar_win_g_candidate_is_rejected_with_no_write_and_no_event()
     {
         var coordinator = NewCoordinator();
+        var initialSettings = File.ReadAllText(PathName);
         var changes = 0;
         coordinator.FrontButtonMappingChanged += (_, _) => changes++;
 
@@ -153,7 +155,7 @@ public sealed class FrontButtonMappingPersistenceTests : IDisposable
 
         Assert.False(coordinator.ChangeFrontButtonMapping(winG));
         Assert.Equal(0, changes);
-        Assert.False(File.Exists(PathName));
+        Assert.Equal(initialSettings, File.ReadAllText(PathName));
     }
 
     [Theory]

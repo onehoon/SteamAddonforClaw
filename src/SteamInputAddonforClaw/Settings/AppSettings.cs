@@ -7,7 +7,7 @@ namespace SteamInputAddonforClaw.Settings;
 public enum AppLogPreference { Off, Info, Debug }
 
 public sealed record AppSettings(
-    AppLogPreference LogLevel = AppLogPreference.Off,
+    AppLogPreference LogLevel = AppLogPreference.Info,
     bool SuppressDeveloperMenuWarning = false)
 {
     /// <summary>Top-level desired state for the optional ClawHUD Managed Runtime.</summary>
