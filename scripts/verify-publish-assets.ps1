@@ -154,8 +154,9 @@ foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), 
 
 $fsePackagePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.msix'
 $fseCertificatePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.cer'
-$expectedFsePackageSha256 = '9D4C46ABCC1324803AE5AB031B11EC8EF39057D77C9C04FCB243D80BC122F86B'
-$expectedFseCertificateSha256 = '663053482DA50F9017CC902CA5DF6E9BBFD5A6F06624B8608266318F54687390'
+$expectedFseSignerThumbprint = 'F1155636D18C99BAAE2F835309A493BF08BCA65B'
+$expectedFsePackageSha256 = 'B43CDCD249B5EDACC4DB7F3B57D2BF57D482D544BD2EBB5DBDA644557FCB8B14'
+$expectedFseCertificateSha256 = '82382E9445A9B5E1D080E0F97ADF808E11799B88EB3A5EEB3FB9BB22193B2E15'
 if ((Get-FileHash -LiteralPath $fsePackagePath -Algorithm SHA256).Hash -ne $expectedFsePackageSha256) {
     throw 'Published FSE MSIX SHA-256 does not match the fixed distribution artifact.'
 }
@@ -166,6 +167,9 @@ if ((Get-FileHash -LiteralPath $fseCertificatePath -Algorithm SHA256).Hash -ne $
 $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($fseCertificatePath)
 if ($certificate.Subject -ne 'CN=SteamInputAddonforClaw') {
     throw "Published FSE certificate subject '$($certificate.Subject)' does not match the package publisher."
+}
+if ($certificate.Thumbprint -ne $expectedFseSignerThumbprint) {
+    throw "Published FSE certificate does not match the permanent FSE signing identity."
 }
 
 $archive = [System.IO.Compression.ZipFile]::OpenRead($fsePackagePath)
@@ -193,7 +197,7 @@ try {
     }
     if ($identityValues.Name -ne 'SteamInputAddonforClaw.FseHome' -or
         $identityValues.Publisher -ne 'CN=SteamInputAddonforClaw' -or
-        $identityValues.Version -ne '1.0.0.0' -or
+        $identityValues.Version -ne '1.0.1.0' -or
         $identityValues.ProcessorArchitecture -ne 'x64') {
         throw 'Fixed FSE MSIX manifest identity does not match the pinned package contract.'
     }

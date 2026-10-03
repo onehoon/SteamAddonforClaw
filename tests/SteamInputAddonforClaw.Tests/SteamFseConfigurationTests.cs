@@ -71,7 +71,7 @@ public sealed class SteamFseConfigurationTests
         var package = new FakePackageProbe(null);
         var registration = new FakeRegistration
         {
-            OnEnsure = () => package.Package = Package("SteamInputAddonforClaw.FseHome_registered", "1.0.0.0"),
+            OnEnsure = () => package.Package = Package("SteamInputAddonforClaw.FseHome_registered", "1.0.1.0"),
         };
         var store = new FakeConfigurationStore();
 
@@ -84,18 +84,21 @@ public sealed class SteamFseConfigurationTests
     }
 
     [Fact]
-    public async Task Enable_with_older_package_registers_once()
+    public async Task Enable_with_older_package_registers_once_and_reads_back_the_actual_family()
     {
         var package = new FakePackageProbe(Package("old_family", "0.9.0.0"));
         var registration = new FakeRegistration
         {
-            OnEnsure = () => package.Package = Package("new_family", "1.0.0.0"),
+            OnEnsure = () => package.Package = Package("new_family", "1.0.1.0"),
         };
+        var store = new FakeConfigurationStore();
 
-        var result = await CreateConfiguration(package: package, registration: registration).SetEnabledAsync(true);
+        var result = await CreateConfiguration(store: store, package: package, registration: registration).SetEnabledAsync(true);
 
         Assert.True(result.Succeeded);
         Assert.Equal(1, registration.Calls);
+        Assert.Equal("new_family!App", store.GamingHomeApp);
+        Assert.True(store.StartupToGamingHome);
     }
 
     [Fact]

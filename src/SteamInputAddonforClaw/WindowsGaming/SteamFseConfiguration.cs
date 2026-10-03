@@ -12,7 +12,7 @@ internal static class SteamFsePackageContract
     internal const string PackageRelativePath = "fse\\SteamInputAddonforClaw.FseHome.msix";
     internal const string CertificateRelativePath = "fse\\SteamInputAddonforClaw.FseHome.cer";
     internal const string CertificateSubject = "CN=SteamInputAddonforClaw";
-    internal const string FixedPackageVersionText = "1.0.0.0";
+    internal const string FixedPackageVersionText = "1.0.1.0";
     internal static Version FixedPackageVersion { get; } = Version.Parse(FixedPackageVersionText);
 }
 

@@ -27,6 +27,7 @@ project.fragment.lock.json
 artifacts-*/
 
 # WinUI 3 / MSIX packaging outputs and local signing material
+.private/
 AppPackages/
 BundleArtifacts/
 Package.StoreAssociation.xml
