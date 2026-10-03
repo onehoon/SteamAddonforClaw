@@ -10,6 +10,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$expectedFseSignerThumbprint = 'F1155636D18C99BAAE2F835309A493BF08BCA65B'
 
 . (Join-Path $PSScriptRoot 'invoke-sdk-tool.ps1')
 
@@ -73,6 +74,9 @@ $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]:
 try {
     if ($certificate.Subject -ne 'CN=SteamInputAddonforClaw') {
         throw "FSE Home signing certificate subject '$($certificate.Subject)' does not match the package publisher."
+    }
+    if ($certificate.Thumbprint -ne $expectedFseSignerThumbprint) {
+        throw "FSE Home signing certificate thumbprint '$($certificate.Thumbprint)' does not match the permanent FSE signing identity."
     }
 
     New-Item -ItemType Directory -Path $packageSource, (Split-Path -Parent $output) -Force | Out-Null

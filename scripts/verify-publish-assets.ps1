@@ -154,6 +154,7 @@ foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), 
 
 $fsePackagePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.msix'
 $fseCertificatePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.cer'
+$expectedFseSignerThumbprint = 'F1155636D18C99BAAE2F835309A493BF08BCA65B'
 $expectedFsePackageSha256 = 'B43CDCD249B5EDACC4DB7F3B57D2BF57D482D544BD2EBB5DBDA644557FCB8B14'
 $expectedFseCertificateSha256 = '82382E9445A9B5E1D080E0F97ADF808E11799B88EB3A5EEB3FB9BB22193B2E15'
 if ((Get-FileHash -LiteralPath $fsePackagePath -Algorithm SHA256).Hash -ne $expectedFsePackageSha256) {
@@ -166,6 +167,9 @@ if ((Get-FileHash -LiteralPath $fseCertificatePath -Algorithm SHA256).Hash -ne $
 $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($fseCertificatePath)
 if ($certificate.Subject -ne 'CN=SteamInputAddonforClaw') {
     throw "Published FSE certificate subject '$($certificate.Subject)' does not match the package publisher."
+}
+if ($certificate.Thumbprint -ne $expectedFseSignerThumbprint) {
+    throw "Published FSE certificate does not match the permanent FSE signing identity."
 }
 
 $archive = [System.IO.Compression.ZipFile]::OpenRead($fsePackagePath)

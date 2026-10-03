@@ -101,6 +101,7 @@ public sealed class SteamFsePackagingContractTests
         var signingDocumentation = ReadSource("docs", "STEAM_FSE_PACKAGE_SIGNING.md");
         var ci = ReadSource(".github", "workflows", "ci.yml");
         var release = ReadSource(".github", "workflows", "release.yml");
+        const string expectedFseSignerThumbprint = "F1155636D18C99BAAE2F835309A493BF08BCA65B";
 
         Assert.DoesNotContain("FseCertificatePath", pack, StringComparison.Ordinal);
         Assert.DoesNotContain("FseCertificatePassword", pack, StringComparison.Ordinal);
@@ -113,6 +114,10 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("1.0.1.0", configuration, StringComparison.Ordinal);
         Assert.Contains("1.0.1.0", verifier, StringComparison.Ordinal);
         Assert.Contains("1.0.1.0", package, StringComparison.Ordinal);
+        Assert.Contains(expectedFseSignerThumbprint, package, StringComparison.Ordinal);
+        Assert.Contains(expectedFseSignerThumbprint, verifier, StringComparison.Ordinal);
+        Assert.Contains("$certificate.Thumbprint -ne $expectedFseSignerThumbprint", package, StringComparison.Ordinal);
+        Assert.Contains("$certificate.Thumbprint -ne $expectedFseSignerThumbprint", verifier, StringComparison.Ordinal);
         Assert.Contains(".private/", gitignore, StringComparison.Ordinal);
         Assert.Contains("*.pfx", gitignore, StringComparison.Ordinal);
         Assert.Contains("*.p12", gitignore, StringComparison.Ordinal);
