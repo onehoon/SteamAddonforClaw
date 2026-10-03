@@ -6,6 +6,18 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class FseHomeHandoffTests
 {
     [Fact]
+    public void Fse_home_diagnostics_use_the_persistent_addon_log_directory()
+    {
+        var localAppData = Path.Combine(Path.GetTempPath(), "local-app-data");
+
+        var path = FseHomeDiagnostics.ResolveLogPath(localAppData);
+
+        Assert.Equal(
+            Path.Combine(localAppData, "SteamInputAddonforClaw-Data", "logs", "fse-home-last.log"),
+            path);
+    }
+
+    [Fact]
     public void Steam_executable_resolution_prefers_a_valid_steam_exe_registry_value()
     {
         var root = CreateTemporaryDirectory();

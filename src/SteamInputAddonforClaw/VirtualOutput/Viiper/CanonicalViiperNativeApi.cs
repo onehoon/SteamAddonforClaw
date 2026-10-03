@@ -25,6 +25,7 @@ internal enum Xbox360DeviceRemoveResult : int
 
 internal interface ICanonicalViiperNativeApi
 {
+    bool SetDiagnosticLogDirectory(string directory);
     bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null);
     bool CloseUSBServer(nuint serverHandle);
     bool CreateUSBBus(nuint serverHandle, ref uint busId);
@@ -65,6 +66,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 {
     internal static readonly IReadOnlyList<string> RequiredExports =
     [
+        "SetDiagnosticLogDirectory",
         "NewUSBServer",
         "CloseUSBServer",
         "CreateUSBBus",
@@ -87,6 +89,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         "RemoveXbox360DeviceEx"
     ];
 
+    private readonly SetDiagnosticLogDirectoryDelegate _setDiagnosticLogDirectory;
     private readonly NewUsbServerDelegate _newUsbServer;
     private readonly CloseUsbServerDelegate _closeUsbServer;
     private readonly CreateUsbBusDelegate _createUsbBus;
@@ -122,6 +125,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     internal CanonicalViiperNativeApi(nint library, Func<nint, string, nint>? exportResolver = null)
     {
         var resolve = exportResolver ?? NativeLibrary.GetExport;
+        _setDiagnosticLogDirectory = Bind<SetDiagnosticLogDirectoryDelegate>(library, resolve, "SetDiagnosticLogDirectory");
         _newUsbServer = Bind<NewUsbServerDelegate>(library, resolve, "NewUSBServer");
         _closeUsbServer = Bind<CloseUsbServerDelegate>(library, resolve, "CloseUSBServer");
         _createUsbBus = Bind<CreateUsbBusDelegate>(library, resolve, "CreateUSBBus");
@@ -146,6 +150,22 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     internal static CanonicalViiperNativeApi Load(string absolutePath)
         => new(ViiperNativeModuleCache.GetOrLoad(absolutePath));
+
+    public bool SetDiagnosticLogDirectory(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+            return false;
+
+        var utf8 = Marshal.StringToCoTaskMemUTF8(directory);
+        try
+        {
+            return Succeeded(_setDiagnosticLogDirectory(utf8));
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(utf8);
+        }
+    }
 
     public bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null)
     {
@@ -363,6 +383,9 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         => Marshal.GetDelegateForFunctionPointer<T>(resolver(library, export));
 
     private static bool Succeeded(byte value) => value != 0;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte SetDiagnosticLogDirectoryDelegate(nint directory);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate byte NewUsbServerDelegate(ref USBServerConfig config, out nuint outHandle, ViiperLogCallback? logCallback);

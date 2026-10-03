@@ -82,6 +82,12 @@ internal static class SafeUninstall
         if (!ownsAttempt)
             return Abort(silent, "Another Addon uninstall attempt is already running.");
 
+        if (!silent && !NativeStartupWarning.ConfirmUninstall())
+        {
+            AppLog.Info("Uninstall", "Safe uninstall cancelled at the initial confirmation.", ("Event", "SafeUninstallCancelled"));
+            return 0;
+        }
+
         var runtimeGate = UninstallBootstrap.AcquireRuntimeGateForSafeUninstall(RuntimeReleaseBudget, RuntimeProbeInterval);
         if (runtimeGate is null)
             return Abort(silent, "The running Addon Runtime did not complete safe shutdown. No uninstall was started.");
@@ -122,9 +128,7 @@ internal static class SafeUninstall
             if (dependencyResult is null || !dependencyResult.Succeeded)
                 return Abort(silent, "Owned prerequisite cleanup did not complete. No uninstall was started.");
             AppLog.Info("Uninstall", "Owned prerequisite removal outcome recorded.",
-                ("RestartRequired", dependencyResult.RestartRequired), ("RestartNoticeShown", dependencyResult.RestartRequired && !silent));
-            if (dependencyResult.RestartRequired && !silent)
-                NativeStartupWarning.Show("A Windows restart is required after uninstall to finish removing the Addon-owned controller drivers.");
+                ("RestartRequired", dependencyResult.RestartRequired));
 
             if (!UninstallBootstrap.RunBoundedLocalCleanup(runtimeReleased: true))
                 return Abort(silent, "Addon-owned local cleanup could not be completed. No uninstall was started.");

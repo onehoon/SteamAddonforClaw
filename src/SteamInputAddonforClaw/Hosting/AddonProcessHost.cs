@@ -853,7 +853,31 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("SteamOutput", "Canonical VIIPER module could not be loaded; Steam output is unavailable for this process lifetime.", exception);
             return null;
         }
-        return native is null ? null : VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
+
+        if (native is null)
+            return null;
+
+        try
+        {
+            var logDirectory = SteamInputAddonforClaw.Install.AddonDataPaths.LogDirectory;
+            Directory.CreateDirectory(logDirectory);
+            if (!native.SetDiagnosticLogDirectory(logDirectory))
+            {
+                AppLog.Warn("SteamOutput", "VIIPER diagnostic log directory override was rejected; controller routing will continue with VIIPER's fallback logging path.", null,
+                    ("RequestedDirectory", logDirectory));
+            }
+            else
+            {
+                AppLog.Debug("SteamOutput", "VIIPER diagnostic log directory configured.",
+                    ("Directory", logDirectory), ("FileName", "libVIIPER.log"));
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("SteamOutput", "VIIPER diagnostic log directory could not be prepared; controller routing will continue with VIIPER's fallback logging path.", exception);
+        }
+
+        return VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
     }
 
     // Returns the concrete owner (not just IMsiClawAddonPhysicalOwnership): the Full1902 rumble sink
@@ -2300,9 +2324,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 internal static class NativeStartupWarning
 {
     private const uint MbOk = 0x00000000;
+    private const uint MbOkCancel = 0x00000001;
     private const uint MbIconWarning = 0x00000030;
+    private const uint MbIconInformation = 0x00000040;
+    private const int IdOk = 1;
 
     internal static void Show(string message) => MessageBoxW(0, message, "Steam Addon for Claw", MbOk | MbIconWarning);
+
+    internal static bool ConfirmUninstall() =>
+        MessageBoxW(
+            0,
+            "Steam Addon for Claw will now be removed.\n\nAfter the uninstall finishes, restart Windows to complete the removal.",
+            "Steam Addon for Claw",
+            MbOkCancel | MbIconInformation) == IdOk;
 
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern int MessageBoxW(nint hWnd, string lpText, string lpCaption, uint uType);

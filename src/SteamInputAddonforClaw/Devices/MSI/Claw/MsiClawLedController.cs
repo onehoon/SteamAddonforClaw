@@ -41,7 +41,20 @@ internal sealed class MsiClawLedController(
             || attributes.ProductId != MsiClawHardware.DirectInputProductId)
             return Fail("ControlHidAttributesUnavailableOrUnexpected");
         if (!MsiClawLedProtocol.TryBuildStaticWrites(attributes.VersionNumber, settings, out var writes))
-            return Fail(MsiClawLedProtocol.TryResolveRgbAddress(attributes.VersionNumber, out _) ? "InvalidSettings" : "UnsupportedFirmware");
+        {
+            var failureReason = MsiClawLedProtocol.TryResolveRgbAddress(attributes.VersionNumber, out _)
+                ? "InvalidSettings"
+                : "UnsupportedFirmware";
+            if (failureReason == "UnsupportedFirmware")
+            {
+                AppLog.Warn("ControllerLed", "Static LED settings were not applied because the controller firmware is not in the verified RGB address table; controller ownership remains unchanged.", null,
+                    ("Event", "ControllerLedApplyFailed"), ("Reason", failureReason),
+                    ("FirmwareVersion", $"0x{attributes.VersionNumber:X4}"));
+                return false;
+            }
+
+            return Fail(failureReason);
+        }
 
         for (var index = 0; index < writes.Count; index++)
         {
