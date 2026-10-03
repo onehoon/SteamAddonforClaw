@@ -66,6 +66,47 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
+    public async Task Disable_from_partial_repairs_roots_to_exact_disabled()
+    {
+        var h = new Harness(this)
+        {
+            StartPartial = true,
+            RecoverySafe = true,
+            PrerequisitesReady = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart)
+            .RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, result.Snapshot.State);
+        Assert.Equal(new[] { "startup:true", "hidhide:disable", "centerm:false", "restart" }, h.Order);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, h.Roots.Classify());
+        Assert.Equal(1, restart.Calls);
+    }
+
+    [Fact]
+    public async Task Disable_from_partial_does_not_use_the_pending_prerequisite_exception()
+    {
+        var h = new Harness(this)
+        {
+            StartPartial = true,
+            RecoverySafe = true,
+            PrerequisitesReady = false,
+            PendingPrerequisiteEvidenceValid = true,
+        };
+
+        var result = await h.Build()
+            .RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.DoesNotContain("centerm:false", h.Order);
+        Assert.DoesNotContain("restart", h.Order);
+        Assert.Empty(h.Order);
+    }
+
+    [Fact]
     public async Task Disable_is_blocked_while_a_lower_level_runtime_operation_owns_the_controller()
     {
         var h = new Harness(this)
@@ -244,6 +285,100 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         Assert.Empty(h.Order);
         Assert.Equal(0, restart.Calls);
         Assert.False(h.Hid.Active);
+    }
+
+    [Fact]
+    public async Task Disable_with_exact_pending_packages_commits_center_m_without_current_session_hidhide_mutation()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            PrerequisitesReady = false,
+            PendingPrerequisiteEvidenceValid = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(new[] { "startup:true", "centerm:false", "restart" }, h.Order);
+        Assert.False(h.Hid.Active);
+        Assert.Equal(1, restart.Calls);
+    }
+
+    [Fact]
+    public async Task Disable_recommit_when_already_disabled_preserves_live_hidhide_targets_and_only_restarts()
+    {
+        var h = new Harness(this) { StartEnabled = false, RecoverySafe = true, ControllerOwnershipActive = true };
+        h.Hid.Active = true;
+        h.Hid.Hidden.Add("HID#OWNED-PID1902");
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(new[] { "startup:true", "restart" }, h.Order);
+        Assert.Equal(new[] { "HID#OWNED-PID1902" }, h.Hid.Hidden);
+        Assert.True(h.Hid.Active);
+        Assert.Equal(1, restart.Calls);
+    }
+
+    [Fact]
+    public async Task Disabled_prerequisite_repair_window_allows_recommit_after_setup_without_false_recovery_safe()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            RecoverySafe = false,
+            DisabledBootPrerequisiteRepairWindow = true,
+            ControllerOwnershipActive = false,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(new[] { "startup:true", "restart" }, h.Order);
+        Assert.Equal(1, restart.Calls);
+    }
+
+    [Fact]
+    public async Task Disabled_prerequisite_repair_window_rejects_invalid_pending_evidence()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = false,
+            PrerequisitesReady = false,
+            RecoverySafe = false,
+            DisabledBootPrerequisiteRepairWindow = true,
+            PendingPrerequisiteEvidenceValid = false,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Empty(h.Order);
+        Assert.Equal(0, restart.Calls);
+    }
+
+    [Fact]
+    public async Task Pending_commit_is_blocked_if_controller_ownership_is_active()
+    {
+        var h = new Harness(this)
+        {
+            StartEnabled = true,
+            PrerequisitesReady = false,
+            PendingPrerequisiteEvidenceValid = true,
+            ControllerOwnershipActive = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart).RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.Empty(h.Order);
+        Assert.Equal(0, restart.Calls);
     }
 
     [Fact]
@@ -755,6 +890,9 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool CenterMHelperCancels { get; init; }
         public bool PrerequisitesReady { get; init; } = true;
         public bool RecoverySafe { get; init; } = true;
+        public bool PendingPrerequisiteEvidenceValid { get; init; }
+        public bool ControllerOwnershipActive { get; init; }
+        public bool DisabledBootPrerequisiteRepairWindow { get; init; }
         public SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult PhysicalRelease { get; init; } =
             SteamInputAddonforClaw.Devices.MSI.Claw.PhysicalOwnershipReleaseResult.NothingOwned;
         public Action? OnPhysicalRelease { get; set; }
@@ -840,7 +978,10 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
                 // Full1902 Policy B: the verified stock-authority-restored boundary callback. Counted
                 // rather than added to Order so the existing ordering assertions stay unchanged.
                 () => { StockAuthorityRestoredCalls++; StockAuthorityRestoredAtOrderIndex = Order.Count; },
-                r);
+                r,
+                _ => PendingPrerequisiteEvidenceValid,
+                () => ControllerOwnershipActive,
+                DisabledBootPrerequisiteRepairWindow);
         }
 
         private sealed class FakeInvoker(Harness h) : ICenterMStartupHelperInvoker

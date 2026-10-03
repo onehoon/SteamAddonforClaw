@@ -422,16 +422,34 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Removing_status_ui_keeps_the_window_level_status_capture_and_prerequisite_setup_path()
+    public void Missing_prerequisites_start_automatically_after_activation_and_reuse_center_m_confirmation()
     {
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var devicePage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        var centerMTransition = ExtractMethod(devicePage, "private async Task RequestCenterMTransitionAsync");
 
-        // The Status page is gone but the frontend status snapshot pipeline that drives the
-        // prerequisite setup prompt must remain intact.
         Assert.Contains("_frontend.CaptureStatusAsync()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("snapshot.CanInstallRequiredComponents", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("PromptForPrerequisiteSetupAsync", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RunPrerequisiteSetupAsync()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RequestPrerequisiteSetupActivation()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_prerequisiteSetupInProgress", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_prerequisiteSetupCancelledForCurrentProcess", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_prerequisiteSetupAttemptedForCurrentProcess", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("result.Result == FrontendPrerequisiteSetupResultKind.Cancelled", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Setup required", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Not now", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Restart required", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("shutdown.exe", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("DeviceContent.ConfirmCenterMDisableAfterPrerequisiteSetupAsync()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ConfirmCenterMDisableAfterPrerequisiteSetupAsync", devicePage, StringComparison.Ordinal);
+        Assert.Contains("RequestCenterMTransitionAsync(centerMEnabled: false)", devicePage, StringComparison.Ordinal);
+        Assert.Contains("_frontend.RequestCenterMAuthorityTransitionAsync(centerMEnabled)", devicePage, StringComparison.Ordinal);
+        Assert.Contains("if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;", centerMTransition, StringComparison.Ordinal);
+        Assert.True(
+            centerMTransition.IndexOf("dialog.ShowAsync()", StringComparison.Ordinal)
+            < centerMTransition.IndexOf("RequestCenterMAuthorityTransitionAsync(centerMEnabled)", StringComparison.Ordinal),
+            "The Center M mutation request must remain after explicit confirmation.");
         Assert.Contains("_frontend.StateInvalidated += OnFrontendStateInvalidated", mainWindow, StringComparison.Ordinal);
 
         // The snapshot is now routed to the owner pages instead of a Status page.
@@ -440,6 +458,27 @@ public sealed class UiArchitectureTests
 
         // The removed "Check Status" wording no longer points users at a page that does not exist.
         Assert.DoesNotContain("Check Status", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Normal_uninstall_paths_never_recursively_delete_the_persistent_data_root()
+    {
+        var root = FindRepositoryRoot();
+        var bootstrap = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Install/UninstallBootstrap.cs"));
+        var safeUninstall = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Install/SafeUninstall.cs"));
+        var dataPaths = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Install/AddonDataPaths.cs"));
+        var boundedCleanup = ExtractMethod(bootstrap, "internal static bool RunBoundedLocalCleanup");
+        var fastCallback = ExtractMethod(bootstrap, "internal static void RunFastCallbackOnly");
+        var handoff = ExtractMethod(safeUninstall, "internal static FinalUninstallHandoffResult PreserveUserDataAndLaunchVeloPack");
+
+        Assert.DoesNotContain("DeleteFullResetRoot", bootstrap + safeUninstall + dataPaths, StringComparison.Ordinal);
+        Assert.DoesNotContain("Directory.Delete", boundedCleanup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Directory.Delete", fastCallback, StringComparison.Ordinal);
+        Assert.DoesNotContain("Directory.Delete(dataRoot", handoff, StringComparison.Ordinal);
+        Assert.Contains("RunBoundedLocalCleanup(runtimeReleased)", fastCallback, StringComparison.Ordinal);
+        Assert.Contains("deleteOwnedRuntimeDirectory(clawHudRuntimeRoot)", handoff, StringComparison.Ordinal);
+        Assert.Contains("shutdownLogs()", handoff, StringComparison.Ordinal);
+        Assert.Contains("launch(startInfo)", handoff, StringComparison.Ordinal);
     }
 
     [Fact]

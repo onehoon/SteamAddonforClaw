@@ -528,7 +528,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 AppLog.Info("Wing.Guard", "Full1902 Win+G suppression released; stock controller authority restored.",
                     ("Authority", "StockCenterM"), ("Event", "Full1902WinGSuppressionReleased"));
             },
-            new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester());
+            new SteamInputAddonforClaw.CenterMStartup.WindowsRestartRequester(),
+            hasExactPendingPrerequisites: SteamInputAddonforClaw.Prerequisites.PrerequisiteNextBootCommitPolicy.InspectCurrentBoot,
+            hasActiveControllerOwnership: () =>
+                _physicalOwnership?.LiveInputSource is { IsRunning: true }
+                || _presentationOwnership?.ActivePresentation is not null,
+            disabledBootPrerequisiteRepairWindow:
+                startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled
+                && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady);
         _centerMAuthorityTransition = centerMAuthorityTransition;
         if (_headlessUninstallPreparation)
             return;

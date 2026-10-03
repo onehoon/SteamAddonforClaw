@@ -91,7 +91,24 @@ public sealed class ElevatedOwnedPrerequisiteUninstallTests
         Assert.True(result.Succeeded, result.Reason);
         Assert.Single(fixture.Runner.Commands);
         Assert.Equal("C:\\Program Files\\usbip\\unins.exe", fixture.Runner.Commands[0].FileName);
-        Assert.Equal("/VERYSILENT", fixture.Runner.Commands[0].Arguments);
+        Assert.Equal("/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", fixture.Runner.Commands[0].Arguments);
+        Assert.True(result.RestartRequired);
+    }
+
+    [Fact]
+    public void Execute_hardens_usbip_uninstall_fallback_command_without_changing_its_executable()
+    {
+        using var fixture = new Fixture();
+        fixture.WriteUsbReceipt(owned: true);
+        fixture.UsbStates.Enqueue(UsbPackage(installed: true, quietCommand: false));
+        fixture.UsbStates.Enqueue(UsbPackage(installed: false));
+
+        var result = fixture.Execute();
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Single(fixture.Runner.Commands);
+        Assert.Equal("C:\\Program Files\\usbip\\unins.exe", fixture.Runner.Commands[0].FileName);
+        Assert.Equal("/UNINSTALL /VERYSILENT /SUPPRESSMSGBOXES /NORESTART", fixture.Runner.Commands[0].Arguments);
         Assert.True(result.RestartRequired);
     }
 
@@ -218,10 +235,10 @@ public sealed class ElevatedOwnedPrerequisiteUninstallTests
         Assert.True(Directory.Exists(fixture.ProvisioningDirectory));
     }
 
-    private static UsbIpWin2PackageState UsbPackage(bool installed) => installed
+    private static UsbIpWin2PackageState UsbPackage(bool installed, bool quietCommand = true) => installed
         ? new(true, "0.9.8.1", true, true,
             "\"C:\\Program Files\\usbip\\unins.exe\" /UNINSTALL",
-            "\"C:\\Program Files\\usbip\\unins.exe\" /VERYSILENT")
+            quietCommand ? "\"C:\\Program Files\\usbip\\unins.exe\" /VERYSILENT" : null)
         : new(false, null, true, false);
 
     private static HidHideUninstallCandidate HidCandidate() => new(

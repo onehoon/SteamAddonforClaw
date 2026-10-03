@@ -41,7 +41,7 @@ internal static class UninstallBootstrap
         AppLog.Info("Uninstall", "FastCallback completed without elevation or dependency teardown.", ("Action", "BoundedOnly"));
     }
 
-    internal static bool RunBoundedLocalCleanup(bool runtimeReleased, bool deleteDataRoot = true)
+    internal static bool RunBoundedLocalCleanup(bool runtimeReleased)
     {
         if (!runtimeReleased)
             return false;
@@ -50,8 +50,10 @@ internal static class UninstallBootstrap
         var steamFseCleaned = new WindowsGamingHomeConfiguration().TryCleanupForUninstall();
         var legacyReceiptCleaned = TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
         var succeeded = cefCleaned && fpsCleaned && steamFseCleaned && legacyReceiptCleaned;
-        if (succeeded && deleteDataRoot)
-            AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
+        AppLog.Info("Uninstall", "Bounded Addon-owned local cleanup completed.",
+            ("Succeeded", succeeded), ("CefMarkerCleaned", cefCleaned), ("IntelFpsCleaned", fpsCleaned),
+            ("SteamFseCleaned", steamFseCleaned), ("LegacyReceiptCleaned", legacyReceiptCleaned),
+            ("UserDataRootPreserved", true));
         return succeeded;
     }
 

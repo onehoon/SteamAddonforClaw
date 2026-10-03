@@ -90,7 +90,10 @@ internal sealed class ElevatedOwnedPrerequisiteUninstall
             if (!UninstallOwnedHidHide(hidHideLoaded.Receipt, hidHideLoaded.IsCorrupt, ref restartRequired, out var hidHideFailure))
                 return new(false, restartRequired, hidHideFailure);
 
-            if (!RemoveProvisioningDirectory(_provisioningDirectory))
+            var provisioningRemoved = RemoveProvisioningDirectory(_provisioningDirectory);
+            AppLog.Info("Uninstall.Dependency", "ProgramData prerequisite provisioning cleanup completed.",
+                ("Event", "ProgramDataProvisioningCleanup"), ("Succeeded", provisioningRemoved));
+            if (!provisioningRemoved)
                 return new(false, restartRequired, "ProgramDataProvisioningCleanupFailed");
 
             AppLog.Info("Uninstall.Dependency", "Owned prerequisite cleanup completed.",
@@ -150,6 +153,7 @@ internal sealed class ElevatedOwnedPrerequisiteUninstall
             failure = "OwnedUsbIpUninstallEvidenceMissingOrMalformed";
             return false;
         }
+        command = EnsureUsbIpWin2SilentNoRestart(command);
         if (!RunUninstaller("usbip-win2", command, out var exitCode))
         {
             failure = "OwnedUsbIpUninstallerFailedToStart";
@@ -280,6 +284,19 @@ internal sealed class ElevatedOwnedPrerequisiteUninstall
         AppLog.Info("Uninstall.Dependency", "Registered prerequisite uninstaller completed.",
             ("Package", package), ("Started", started), ("ExitCode", started ? exitCode : null));
         return started;
+    }
+
+    private static RegisteredUninstallCommand EnsureUsbIpWin2SilentNoRestart(RegisteredUninstallCommand command)
+    {
+        var arguments = command.Arguments;
+        foreach (var requiredSwitch in new[] { "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" })
+        {
+            var present = arguments.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Any(argument => string.Equals(argument.Trim('"'), requiredSwitch, StringComparison.OrdinalIgnoreCase));
+            if (!present)
+                arguments = string.IsNullOrWhiteSpace(arguments) ? requiredSwitch : arguments + " " + requiredSwitch;
+        }
+        return command with { Arguments = arguments };
     }
 
     private static bool RemoveProvisioningDirectory(string path)

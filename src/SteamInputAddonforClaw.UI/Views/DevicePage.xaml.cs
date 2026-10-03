@@ -724,6 +724,11 @@ public sealed partial class DevicePage : UserControl
     private async void CenterMStartupEnableButton_Click(object sender, RoutedEventArgs e) => await RequestCenterMTransitionAsync(centerMEnabled: true);
     private async void CenterMStartupDisableButton_Click(object sender, RoutedEventArgs e) => await RequestCenterMTransitionAsync(centerMEnabled: false);
 
+    internal Task ConfirmCenterMDisableAfterPrerequisiteSetupAsync() =>
+        _frontend is null || XamlRoot is null
+            ? Task.CompletedTask
+            : RequestCenterMTransitionAsync(centerMEnabled: false);
+
     private async Task RequestCenterMTransitionAsync(bool centerMEnabled)
     {
         if (_frontend is null || _centerMStartupBusy) return;
