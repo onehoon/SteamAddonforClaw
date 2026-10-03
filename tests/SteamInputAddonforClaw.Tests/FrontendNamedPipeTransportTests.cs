@@ -59,7 +59,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(46, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -95,7 +95,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(46, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -148,7 +148,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(46, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -168,7 +168,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(46, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -192,9 +192,58 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(46, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
+    }
+
+    [Fact]
+    public async Task Controller_vibration_capture_pair_mutation_and_motor_test_round_trip()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var captured = await client.CaptureControllerVibrationStrengthAsync();
+        var mutated = await client.SetControllerVibrationStrengthAsync(70, 35);
+        var leftTest = await client.TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor.Left);
+        var rightTest = await client.TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor.Right);
+
+        Assert.Equal(fake.ControllerVibrationSnapshot, captured);
+        Assert.Equal(fake.ControllerVibrationMutationResult, mutated);
+        Assert.Equal((70, 35), fake.LastControllerVibrationPair);
+        Assert.Equal(FrontendControllerVibrationMotor.Left, fake.ControllerVibrationTestMotors[0]);
+        Assert.Equal(FrontendControllerVibrationMotor.Right, fake.ControllerVibrationTestMotors[1]);
+        Assert.Equal(FrontendControllerVibrationTestOutcome.Succeeded, leftTest.Outcome);
+        Assert.Equal(FrontendControllerVibrationTestOutcome.Succeeded, rightTest.Outcome);
+    }
+
+    [Theory]
+    [InlineData("SetControllerVibrationStrength", "{\"LeftPercent\":101,\"RightPercent\":50}")]
+    [InlineData("TestControllerVibrationMotor", "{\"Motor\":99}")]
+    public async Task Invalid_controller_vibration_payload_fails_closed_before_frontend_dispatch(string method, string payload)
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe,
+            new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+        using var payloadDocument = JsonDocument.Parse(payload);
+        await FrontendWireCodec.WriteAsync(pipe,
+            new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Request, 1,
+                Enum.Parse<FrontendRpcMethod>(method), Payload: payloadDocument.RootElement.Clone()),
+            writeGate, CancellationToken.None);
+
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.ControllerVibrationMutationCount);
+        Assert.Empty(fake.ControllerVibrationTestMotors);
     }
 
     [Fact]
@@ -520,7 +569,7 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task A_v27_frontend_peer_is_rejected_by_the_v28_server()
+    public async Task A_v46_frontend_peer_is_rejected_by_the_v47_server()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
@@ -1413,13 +1462,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 46 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 47 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":46,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":46,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":46,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":47,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":47,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":47,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1886,6 +1935,20 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatterySnapshot); }
         public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
         public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
+        public FrontendControllerVibrationStrengthSnapshot ControllerVibrationSnapshot { get; } =
+            new(true, true, true, 35, 70, "Firmware values read successfully.");
+        public FrontendControllerVibrationStrengthMutationResult ControllerVibrationMutationResult { get; } = new(
+            FrontendControllerVibrationStrengthMutationOutcome.Succeeded,
+            new(true, true, true, 70, 35, "Firmware values read successfully."), null);
+        public (int Left, int Right)? LastControllerVibrationPair { get; private set; }
+        public int ControllerVibrationMutationCount { get; private set; }
+        public List<FrontendControllerVibrationMotor> ControllerVibrationTestMotors { get; } = [];
+        public Task<FrontendControllerVibrationStrengthSnapshot> CaptureControllerVibrationStrengthAsync(CancellationToken t = default)
+        { TotalCalls++; return Task.FromResult(ControllerVibrationSnapshot); }
+        public Task<FrontendControllerVibrationStrengthMutationResult> SetControllerVibrationStrengthAsync(int left, int right, CancellationToken t = default)
+        { TotalCalls++; ControllerVibrationMutationCount++; LastControllerVibrationPair = (left, right); return Task.FromResult(ControllerVibrationMutationResult); }
+        public Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor motor, CancellationToken t = default)
+        { TotalCalls++; ControllerVibrationTestMotors.Add(motor); return Task.FromResult(new FrontendControllerVibrationTestResult(FrontendControllerVibrationTestOutcome.Succeeded, null)); }
         public FrontendXbox360RumbleLoopSnapshot RumbleLoopSnapshot { get; private set; } =
             new(true, FrontendXbox360RumbleLoopState.Ready, "Ready", null, 0, 0, 0, 0, null, null, null, null, null);
         public int RumbleLoopStartCount { get; private set; }

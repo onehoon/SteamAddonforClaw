@@ -14,8 +14,8 @@ public sealed class CenterMStartupContractTests
         // PR3: the PR1 SetCenterMStartupEnabled RPC is renamed to the reboot-bound authority transition.
         Assert.Equal("RequestCenterMAuthorityTransition", FrontendRpcMethod.RequestCenterMAuthorityTransition.ToString());
         Assert.DoesNotContain("SetCenterMStartupEnabled", Enum.GetNames<FrontendRpcMethod>());
-        // Bumped to 42 because the Main App Shortcut editor adds typed frontend operations.
-        Assert.Equal(46, FrontendTransportProtocol.CurrentVersion);
+        // v46 adds Controller LED settings; v47 adds firmware-backed controller vibration RPCs.
+        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
         Assert.DoesNotContain("RequestEnterBios", Enum.GetNames<FrontendRpcMethod>());
     }
 

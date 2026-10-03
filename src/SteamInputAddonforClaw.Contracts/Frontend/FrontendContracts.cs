@@ -200,6 +200,39 @@ public sealed record FrontendBatteryChargeLimitMutationResult(
     public bool Succeeded => Outcome == FrontendBatteryChargeLimitMutationOutcome.Succeeded;
 }
 
+public enum FrontendControllerVibrationMotor { Left, Right }
+public enum FrontendControllerVibrationStrengthMutationOutcome { Succeeded, Unavailable, Failed }
+public enum FrontendControllerVibrationTestOutcome { Succeeded, Unavailable, Failed }
+
+/// <summary>The actual firmware-backed Left/Right motor ceiling readback. These values are not App
+/// settings; <see cref="Available"/> is independent from live physical-rumble test availability.</summary>
+public sealed record FrontendControllerVibrationStrengthSnapshot(
+    bool Available,
+    bool Writable,
+    bool TestAvailable,
+    int? LeftPercent,
+    int? RightPercent,
+    string Status)
+{
+    public static FrontendControllerVibrationStrengthSnapshot Unavailable(string status = "Firmware vibration values are unavailable.") =>
+        new(false, false, false, null, null, status);
+}
+
+public sealed record FrontendControllerVibrationStrengthMutationResult(
+    FrontendControllerVibrationStrengthMutationOutcome Outcome,
+    FrontendControllerVibrationStrengthSnapshot Snapshot,
+    string? FailureMessage)
+{
+    public bool Succeeded => Outcome == FrontendControllerVibrationStrengthMutationOutcome.Succeeded;
+}
+
+public sealed record FrontendControllerVibrationTestResult(
+    FrontendControllerVibrationTestOutcome Outcome,
+    string? FailureMessage)
+{
+    public bool Succeeded => Outcome == FrontendControllerVibrationTestOutcome.Succeeded;
+}
+
 public enum FrontendXbox360RumbleLoopState { Unavailable, Ready, Running, Stopped, Failed }
 
 public sealed record FrontendXbox360RumbleLoopSnapshot(
@@ -613,6 +646,19 @@ public interface IAddonFrontendControl
     Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendBatteryChargeLimitMutationResult(FrontendBatteryChargeLimitMutationOutcome.Unavailable,
             "MSI battery charge-limit control is unavailable.", FrontendBatteryChargeLimitSnapshot.Unavailable));
+    Task<FrontendControllerVibrationStrengthSnapshot> CaptureControllerVibrationStrengthAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendControllerVibrationStrengthSnapshot.Unavailable());
+    Task<FrontendControllerVibrationStrengthMutationResult> SetControllerVibrationStrengthAsync(
+        int leftPercent, int rightPercent, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendControllerVibrationStrengthMutationResult(
+            FrontendControllerVibrationStrengthMutationOutcome.Unavailable,
+            FrontendControllerVibrationStrengthSnapshot.Unavailable(),
+            "Controller vibration strength is unavailable."));
+    Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(
+        FrontendControllerVibrationMotor motor, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendControllerVibrationTestResult(
+            FrontendControllerVibrationTestOutcome.Unavailable,
+            "Physical controller vibration testing is unavailable."));
     Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
     Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>

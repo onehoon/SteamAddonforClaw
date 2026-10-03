@@ -173,6 +173,16 @@ internal interface IMsiClawAddonPresentation : IAsyncDisposable
     /// routing status.</summary>
     AddonPresentationKind? ActivePresentation { get; }
 
+    /// <summary>Whether the existing Full1902 presentation, physical rumble sink, and live owned
+    /// physical-input session currently permit a bounded Controller-page motor test.</summary>
+    bool IsVibrationTestAvailable { get; }
+
+    /// <summary>Emits one full-scale selected-channel pulse through the already-owned production
+    /// rumble sink and confirms a final STOP. It never creates or resolves another physical writer.</summary>
+    Task<SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestResult> TestVibrationMotorAsync(
+        SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor motor,
+        CancellationToken cancellationToken);
+
     /// <summary>Full1902 A2: request a synthetic SteamDeck <c>Steam</c> system-button pulse on the
     /// existing publish path. Returns <see langword="false"/> (no-op) unless the current presentation
     /// is a healthy live SteamDeck publication. No attach/detach, no VIIPER recreation, no PID
@@ -268,6 +278,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     private readonly TimeSpan _rumbleLoopBurstStepCadence;
     private readonly TimeSpan _rumbleLoopCycleIdle;
     private readonly TimeSpan _rumbleLoopTerminalCallbackTimeout;
+    private readonly Func<bool>? _physicalRumbleTestAvailabilityProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
     /// <summary>Full1902 production rumble: the one shared physical MSI writer, bound to the same
     /// process-owned PID1902 physical session that feeds this presentation. Null in unit tests and on
@@ -313,7 +325,9 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         TimeSpan? rumbleLoopBurstStepCadence = null,
         TimeSpan? rumbleLoopTerminalCallbackTimeout = null,
         Func<IXbox360UsbTraceCapture>? rumbleLoopUsbTraceCaptureFactory = null,
-        TimeSpan? rumbleLoopCycleIdle = null)
+        TimeSpan? rumbleLoopCycleIdle = null,
+        Func<bool>? physicalRumbleTestAvailabilityProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _viiper = viiper;
         _rumbleSink = rumbleSink;
@@ -323,6 +337,8 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
         _rumbleLoopCycleIdle = rumbleLoopCycleIdle ?? Xbox360RumbleLoopDiagnostic.ProductionCycleIdle;
         _rumbleLoopTerminalCallbackTimeout = rumbleLoopTerminalCallbackTimeout
             ?? Xbox360RumbleLoopDiagnostic.ProductionTerminalCallbackTimeout;
+        _physicalRumbleTestAvailabilityProvider = physicalRumbleTestAvailabilityProvider;
+        _delay = delay ?? Task.Delay;
         _deckSessionFactory = deckSessionFactory ?? (runtime => new CanonicalSteamDeckSession(runtime));
         _backButtonMappingProvider = backButtonMappingProvider ?? (static () => BackButtonMappingSettings.Default);
         _xbox360PublisherFactory = xbox360PublisherFactory
@@ -349,6 +365,77 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
     /// <summary>Lock-free read (matches the existing internal accessor): a torn read during a switch
     /// at worst makes one queued gesture pick the other mapping domain, which the next press corrects.</summary>
     public AddonPresentationKind? ActivePresentation => _activeKind;
+
+    public bool IsVibrationTestAvailable => CanTestVibration();
+
+    public async Task<SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestResult> TestVibrationMotorAsync(
+        SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor motor,
+        CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(motor))
+            return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Failed,
+                "The selected vibration motor is invalid.");
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        IPhysicalRumbleSink sink;
+        PhysicalRumbleWriteResult? pulseResult = null;
+        PhysicalRumbleWriteResult? stopResult = null;
+        Exception? failure = null;
+        var cancelled = false;
+        try
+        {
+            if (!CanTestVibration())
+                return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable,
+                    "The live Full1902 physical rumble path is unavailable.");
+
+            sink = _rumbleSink!;
+            var pulse = motor == SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor.Left
+                ? new TwoMotorRumble(ushort.MaxValue, 0)
+                : new TwoMotorRumble(0, ushort.MaxValue);
+
+            AppLog.Info("ControllerVibration", "ControllerVibrationTestStarted", ("Motor", motor));
+            try { pulseResult = sink.SetRumble(pulse); }
+            catch (Exception exception) { failure = exception; }
+        }
+        finally { _gate.Release(); }
+
+        try
+        {
+            if (pulseResult is { Succeeded: true })
+                await _delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancelled = true;
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+        finally
+        {
+            try { stopResult = sink.SetRumble(TwoMotorRumble.Stopped); }
+            catch (Exception exception) { failure ??= exception; }
+        }
+
+        if (cancelled)
+            throw new OperationCanceledException(cancellationToken);
+
+        var stopped = stopResult is { Succeeded: true };
+        if (failure is not null || pulseResult is not { Succeeded: true } || !stopped)
+        {
+            var unavailable = pulseResult?.Status == PhysicalRumbleWriteStatus.Unavailable;
+            var outcome = unavailable && stopped && failure is null
+                ? SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable
+                : SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Failed;
+            AppLog.Warn("ControllerVibration", "ControllerVibrationTestFailed", failure,
+                ("Motor", motor), ("PulseStatus", pulseResult?.Status), ("StopStatus", stopResult?.Status));
+            return new(outcome, "The physical vibration test or final STOP could not be confirmed.");
+        }
+
+        AppLog.Info("ControllerVibration", "ControllerVibrationTestCompleted", ("Motor", motor), ("StopConfirmed", true));
+        return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Succeeded, null);
+    }
 
     internal bool IsOverlayPaused => _overlayPaused;
 
@@ -763,6 +850,20 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 SteamDeckRumbleFeedbackAdapter.TryArm(_rumbleSink, session.SetOutputCallback, session.ClearOutputCallback),
             _ => null,
         };
+    }
+
+    private bool CanTestVibration()
+    {
+        if (_disposed
+            || _rumbleSink is null
+            || _activeKind is null
+            || _publisher is not { IsRunning: true }
+            || _overlayPaused
+            || _suspendPaused)
+            return false;
+
+        try { return _physicalRumbleTestAvailabilityProvider?.Invoke() == true; }
+        catch { return false; }
     }
 
     /// <summary>Clears the native feedback callback and requests a best-effort physical STOP, so a
