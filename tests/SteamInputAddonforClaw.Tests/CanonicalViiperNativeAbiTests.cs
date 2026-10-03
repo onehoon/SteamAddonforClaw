@@ -22,7 +22,7 @@ public sealed class CanonicalViiperNativeAbiTests
     {
         var expected = new[]
         {
-            "NewUSBServer", "CloseUSBServer", "CreateUSBBus", "RemoveUSBBus",
+            "SetDiagnosticLogDirectory", "NewUSBServer", "CloseUSBServer", "CreateUSBBus", "RemoveUSBBus",
             "GetUSBDeviceIdentity", "AttachUSBDevice", "DetachUSBDevice",
             "AttachUSBDeviceEx", "DetachUSBDeviceEx", "GetUSBDeviceAttachmentState",
             "CreateSteamDeckDevice", "SetSteamDeckDeviceState", "SetSteamDeckOutputCallback",
@@ -190,6 +190,7 @@ public sealed class CanonicalViiperNativeAbiTests
     [Fact]
     public void CanonicalDelegatesHaveTheExpectedParameterSignatures()
     {
+        AssertParameters("SetDiagnosticLogDirectoryDelegate", typeof(nint));
         AssertParameters("NewUsbServerDelegate", typeof(USBServerConfig).MakeByRefType(), typeof(nuint).MakeByRefType(), typeof(ViiperLogCallback));
         AssertParameters("CloseUsbServerDelegate", typeof(nuint));
         AssertParameters("CreateUsbBusDelegate", typeof(nuint), typeof(uint).MakeByRefType());
@@ -243,6 +244,27 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.Equal(0, (int)USBDeviceAttachmentState.Detached);
         Assert.Equal(1, (int)USBDeviceAttachmentState.Attached);
         Assert.Equal(2, (int)USBDeviceAttachmentState.OutcomeUnknown);
+    }
+
+    [Fact]
+    public void SetDiagnosticLogDirectory_ForwardsUtf8DirectoryAndNativeResult()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        FakeExports.FailSetDiagnosticLogDirectory = false;
+        FakeExports.LastDiagnosticLogDirectory = null;
+
+        Assert.True(api.SetDiagnosticLogDirectory(@"C:\테스트\SteamInputAddonforClaw-Data\logs"));
+        Assert.Equal(@"C:\테스트\SteamInputAddonforClaw-Data\logs", FakeExports.LastDiagnosticLogDirectory);
+
+        FakeExports.FailSetDiagnosticLogDirectory = true;
+        try
+        {
+            Assert.False(api.SetDiagnosticLogDirectory(@"C:\logs"));
+        }
+        finally
+        {
+            FakeExports.FailSetDiagnosticLogDirectory = false;
+        }
     }
 
     [Theory]
@@ -896,6 +918,7 @@ public sealed class CanonicalViiperNativeAbiTests
 
     private static class FakeExports
     {
+        private static readonly CanonicalViiperNativeApi.SetDiagnosticLogDirectoryDelegate SetDiagnosticLogDirectory = SetDiagnosticLogDirectoryImpl;
         private static readonly CanonicalViiperNativeApi.NewUsbServerDelegate NewServer = NewServerImpl;
         private static readonly CanonicalViiperNativeApi.CloseUsbServerDelegate CloseServer = CloseServerImpl;
         private static readonly CanonicalViiperNativeApi.CreateUsbBusDelegate CreateBus = CreateBusImpl;
@@ -918,6 +941,24 @@ public sealed class CanonicalViiperNativeAbiTests
         private static readonly CanonicalViiperNativeApi.SetXbox360RumbleCallbackDelegate SetXbox360RumbleCallback = SetXbox360RumbleCallbackImpl;
         private static readonly CanonicalViiperNativeApi.RemoveXbox360DeviceDelegate RemoveXbox360 = RemoveXbox360Impl;
         private static readonly CanonicalViiperNativeApi.RemoveXbox360DeviceExDelegate RemoveXbox360Ex = RemoveXbox360ExImpl;
+
+        [ThreadStatic]
+        private static bool _failSetDiagnosticLogDirectory;
+
+        [ThreadStatic]
+        private static string? _lastDiagnosticLogDirectory;
+
+        internal static bool FailSetDiagnosticLogDirectory
+        {
+            get => _failSetDiagnosticLogDirectory;
+            set => _failSetDiagnosticLogDirectory = value;
+        }
+
+        internal static string? LastDiagnosticLogDirectory
+        {
+            get => _lastDiagnosticLogDirectory;
+            set => _lastDiagnosticLogDirectory = value;
+        }
 
         [ThreadStatic]
         private static bool _failCloseServer;
@@ -1021,6 +1062,7 @@ public sealed class CanonicalViiperNativeAbiTests
 
         private static readonly Dictionary<string, nint> Pointers = new(StringComparer.Ordinal)
         {
+            ["SetDiagnosticLogDirectory"] = Marshal.GetFunctionPointerForDelegate(SetDiagnosticLogDirectory),
             ["NewUSBServer"] = Marshal.GetFunctionPointerForDelegate(NewServer),
             ["CloseUSBServer"] = Marshal.GetFunctionPointerForDelegate(CloseServer),
             ["CreateUSBBus"] = Marshal.GetFunctionPointerForDelegate(CreateBus),
@@ -1044,6 +1086,12 @@ public sealed class CanonicalViiperNativeAbiTests
         };
 
         internal static nint Resolve(nint _, string name) => Pointers[name];
+
+        private static byte SetDiagnosticLogDirectoryImpl(nint directory)
+        {
+            LastDiagnosticLogDirectory = Marshal.PtrToStringUTF8(directory);
+            return FailSetDiagnosticLogDirectory ? (byte)0 : (byte)1;
+        }
 
         private static byte NewServerImpl(ref USBServerConfig _, out nuint handle, ViiperLogCallback? __)
         {
