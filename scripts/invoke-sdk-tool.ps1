@@ -4,7 +4,8 @@ function Invoke-SdkTool {
         [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$FilePath,
         [Parameter(Mandatory)] [string[]]$Arguments,
         [Parameter(Mandatory)] [ValidateRange(1, 600)] [int]$TimeoutSeconds,
-        [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$Operation
+        [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$Operation,
+        [switch]$RedactArguments
     )
 
     $process = [System.Diagnostics.Process]::new()
@@ -27,7 +28,12 @@ function Invoke-SdkTool {
         $startInfo.RedirectStandardError = $true
         $process.StartInfo = $startInfo
 
-        Write-Host "Starting ${Operation}: $FilePath $argumentList"
+        if ($RedactArguments) {
+            Write-Host "Starting ${Operation}: $FilePath [arguments redacted]"
+        }
+        else {
+            Write-Host "Starting ${Operation}: $FilePath $argumentList"
+        }
         if (-not $process.Start()) {
             throw "Unable to start ${Operation}: $FilePath"
         }

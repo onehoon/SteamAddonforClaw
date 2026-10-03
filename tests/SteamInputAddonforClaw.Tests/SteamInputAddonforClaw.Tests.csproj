@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw\SteamInputAddonforClaw.csproj" />
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" />
+    <ProjectReference Include="..\..\src\SteamInputAddonforClaw.FseHome\SteamInputAddonforClaw.FseHome.csproj" />
     <ProjectReference Include="..\..\tools\RumbleProbe\RumbleProbe.csproj" />
   </ItemGroup>
 </Project>

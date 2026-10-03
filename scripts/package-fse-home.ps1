@@ -4,7 +4,7 @@ param(
     [string]$OutputPath,
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$CertificatePath,
     [Parameter(Mandatory)] [SecureString]$CertificatePassword,
-    [ValidatePattern('^\d+\.\d+\.\d+\.\d+$')] [string]$FseVersion = '1.0.0.0',
+    [ValidatePattern('^\d+\.\d+\.\d+\.\d+$')] [string]$FseVersion = '1.0.1.0',
     [string]$DistributionDirectory
 )
 
@@ -79,7 +79,7 @@ try {
     Get-ChildItem -LiteralPath $PublishDirectory -File | Where-Object Extension -ne '.pdb' | Copy-Item -Destination $packageSource -Force
     New-Item -ItemType Directory -Path (Join-Path $packageSource 'Public'), (Join-Path $packageSource 'Assets') -Force | Out-Null
     $manifest = Get-Content (Join-Path $repositoryRoot 'src\SteamInputAddonforClaw.FseHome\Packaging\AppxManifest.xml') -Raw
-    $manifest = $manifest.Replace('Version="1.0.0.0"', ('Version="' + $FseVersion + '"'))
+    $manifest = $manifest.Replace('Version="1.0.1.0"', ('Version="' + $FseVersion + '"'))
     Set-Content -LiteralPath (Join-Path $packageSource 'AppxManifest.xml') -Value $manifest -Encoding UTF8
     Copy-Item (Join-Path $repositoryRoot 'src\SteamInputAddonforClaw.FseHome\Packaging\CustomCapability.SCCD') (Join-Path $packageSource 'CustomCapability.SCCD') -Force
     Copy-Item (Join-Path $repositoryRoot 'src\SteamInputAddonforClaw.FseHome\Packaging\Public\README.txt') (Join-Path $packageSource 'Public\README.txt') -Force
@@ -89,7 +89,7 @@ try {
     $makePri = Find-SdkTool 'makepri'
     $signTool = Find-SdkTool 'signtool'
     $resourceConfig = Join-Path $packageSource 'priconfig.xml'
-    Invoke-SdkTool -FilePath $makePri -Arguments @('createconfig', '/cf', $resourceConfig, '/dq', 'en-US', '/o') -TimeoutSeconds 60 -Operation 'makepri createconfig'
+    Invoke-SdkTool -FilePath $makePri -Arguments @('createconfig', '/cf', $resourceConfig, '/dq', 'en-US', '/pv', '10.0.0', '/o') -TimeoutSeconds 60 -Operation 'makepri createconfig'
     Invoke-SdkTool -FilePath $makePri -Arguments @('new', '/pr', $packageSource, '/cf', $resourceConfig, '/of', (Join-Path $packageSource 'resources.pri')) -TimeoutSeconds 60 -Operation 'makepri new'
     Remove-Item -LiteralPath $resourceConfig -Force
     if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }
@@ -98,7 +98,7 @@ try {
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($CertificatePassword)
     try {
         $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-        Invoke-SdkTool -FilePath $signTool -Arguments @('sign', '/fd', 'SHA256', '/f', $CertificatePath, '/p', $password, $output) -TimeoutSeconds 60 -Operation 'signtool sign'
+        Invoke-SdkTool -FilePath $signTool -Arguments @('sign', '/fd', 'SHA256', '/f', $CertificatePath, '/p', $password, $output) -TimeoutSeconds 60 -Operation 'signtool sign' -RedactArguments
     }
     finally {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
