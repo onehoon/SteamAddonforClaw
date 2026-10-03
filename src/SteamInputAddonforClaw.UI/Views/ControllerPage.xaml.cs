@@ -3,8 +3,12 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Windows.Storage.Pickers;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using Microsoft.UI;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -25,8 +29,10 @@ public sealed partial class ControllerPage : UserControl
 {
     private FrontButtonMappingSettings _mapping = FrontButtonMappingSettings.Default;
     private BackButtonMappingSettings _backButtonMapping = BackButtonMappingSettings.Default;
+    private ControllerLedSettings _controllerLed = ControllerLedSettings.Default;
     private bool _available;
     private bool _backButtonAvailable;
+    private bool _controllerLedAvailable;
     private BindingEditor[] _editors = [];
     /// <summary>Suppresses change handlers while the page writes persisted state INTO the controls,
     /// so restoring the UI never looks like a user edit and re-saves.</summary>
@@ -36,15 +42,19 @@ public sealed partial class ControllerPage : UserControl
 
     internal event EventHandler<FrontButtonMappingSettings>? MappingEditRequested;
     internal event EventHandler<BackButtonMappingSettings>? BackButtonMappingEditRequested;
+    internal event EventHandler<ControllerLedSettings>? ControllerLedEditRequested;
 
     internal void Initialize(FrontendBootstrapSnapshot bootstrap, Func<nint> windowHandleProvider)
     {
         _available = bootstrap.FrontButtonMappingAvailable;
         _backButtonAvailable = bootstrap.BackButtonMappingAvailable;
+        _controllerLedAvailable = bootstrap.ControllerLedAvailable;
         FrontButtonMappingContent.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
         BackButtonMappingExpander.Visibility = _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
-        MappingContent.Visibility = _available || _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
-        MappingUnavailableText.Visibility = _available || _backButtonAvailable ? Visibility.Collapsed : Visibility.Visible;
+        ControllerSettingsHeader.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
+        ControllerLedExpander.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
+        MappingContent.Visibility = _available || _backButtonAvailable || _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
+        MappingUnavailableText.Visibility = _available || _backButtonAvailable || _controllerLedAvailable ? Visibility.Collapsed : Visibility.Visible;
 
         _editors =
         [
@@ -61,6 +71,53 @@ public sealed partial class ControllerPage : UserControl
             PopulateBackButtonTargets();
             ApplyBackButtonMapping(_backButtonMapping);
         }
+        ApplyControllerLedSettings(bootstrap.Settings.ControllerLed);
+    }
+
+    internal void ApplyControllerLedSettings(ControllerLedSettings settings)
+    {
+        _isLoading = true;
+        try
+        {
+            _controllerLed = settings;
+            ControllerLedEnabledToggle.IsOn = settings.Enabled;
+            ControllerLedBrightnessSlider.Value = settings.Brightness;
+            ControllerLedBrightnessValue.Text = settings.Brightness.ToString();
+            ControllerLedColorPicker.Color = Color.FromArgb(255, settings.Red, settings.Green, settings.Blue);
+            ControllerLedColorSwatch.Background = new SolidColorBrush(Color.FromArgb(255, settings.Red, settings.Green, settings.Blue));
+            ControllerLedBrightnessSlider.IsEnabled = settings.Enabled;
+            ControllerLedColorButton.IsEnabled = settings.Enabled;
+        }
+        finally { _isLoading = false; }
+    }
+
+    private void ControllerLedEnabled_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_isLoading || !_controllerLedAvailable) return;
+        _controllerLed = _controllerLed with { Enabled = ControllerLedEnabledToggle.IsOn };
+        ControllerLedBrightnessSlider.IsEnabled = _controllerLed.Enabled;
+        ControllerLedColorButton.IsEnabled = _controllerLed.Enabled;
+        ControllerLedEditRequested?.Invoke(this, _controllerLed);
+    }
+
+    private void ControllerLedBrightness_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs args)
+    {
+        var rounded = (int)Math.Round(args.NewValue, MidpointRounding.AwayFromZero);
+        ControllerLedBrightnessValue.Text = rounded.ToString();
+        if (_isLoading || !_controllerLedAvailable || !_controllerLed.Enabled) return;
+        if (_controllerLed.Brightness == rounded) return;
+        _controllerLed = _controllerLed with { Brightness = rounded };
+        ControllerLedEditRequested?.Invoke(this, _controllerLed);
+    }
+
+    private void ControllerLedColor_Changed(ColorPicker sender, ColorChangedEventArgs args)
+    {
+        ControllerLedColorSwatch.Background = new SolidColorBrush(Color.FromArgb(255, args.NewColor.R, args.NewColor.G, args.NewColor.B));
+        if (_isLoading || !_controllerLedAvailable || !_controllerLed.Enabled) return;
+        var next = _controllerLed with { Red = args.NewColor.R, Green = args.NewColor.G, Blue = args.NewColor.B };
+        if (_controllerLed == next) return;
+        _controllerLed = next;
+        ControllerLedEditRequested?.Invoke(this, _controllerLed);
     }
 
     /// <summary>Writes a persisted mapping into every control. Never tears the editors down.</summary>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Devices;
@@ -125,6 +126,20 @@ public sealed class FrontendContractTests
         var value = new FrontendSettingsSnapshot(FrontendLogLevel.Debug, true, FrontButtonMappingSettings.Default);
         var restored = JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
+    }
+
+    [Fact]
+    public void Controller_led_settings_and_bootstrap_availability_round_trip()
+    {
+        var led = new ControllerLedSettings(true, 50, 12, 34, 56);
+        var settings = new FrontendSettingsSnapshot(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default)
+        {
+            ControllerLed = led
+        };
+        var bootstrap = new FrontendBootstrapSnapshot(settings, @"C:\Logs", true) { ControllerLedAvailable = true };
+
+        Assert.Equal(settings, JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(settings)));
+        Assert.Equal(bootstrap, JsonSerializer.Deserialize<FrontendBootstrapSnapshot>(JsonSerializer.Serialize(bootstrap)));
     }
 
     [Fact]

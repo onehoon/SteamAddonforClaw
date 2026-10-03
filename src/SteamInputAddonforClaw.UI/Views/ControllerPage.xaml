@@ -80,6 +80,43 @@
                         </ctcontrols:SettingsCard>
                     </ctcontrols:SettingsExpander.Items>
                 </ctcontrols:SettingsExpander>
+
+                <TextBlock x:Name="ControllerSettingsHeader" Text="Controller Settings" FontSize="18" Visibility="Collapsed" />
+                <ctcontrols:SettingsExpander
+                    x:Name="ControllerLedExpander"
+                    Header="Joystick LED"
+                    Description="Set one static color and global brightness for all controller LEDs."
+                    Visibility="Collapsed">
+                    <ctcontrols:SettingsExpander.Items>
+                        <ctcontrols:SettingsCard Header="Enabled">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Setting" /></ctcontrols:SettingsCard.HeaderIcon>
+                            <ToggleSwitch x:Name="ControllerLedEnabledToggle" OffContent="" OnContent="" Toggled="ControllerLedEnabled_Toggled" />
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard Header="Brightness">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsCard.HeaderIcon>
+                            <StackPanel MinWidth="260" Orientation="Horizontal" Spacing="12">
+                                <Slider x:Name="ControllerLedBrightnessSlider" Minimum="0" Maximum="100" Width="220" ValueChanged="ControllerLedBrightness_ValueChanged" />
+                                <TextBlock x:Name="ControllerLedBrightnessValue" MinWidth="28" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ctcontrols:SettingsCard>
+                        <ctcontrols:SettingsCard Header="Color">
+                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Edit" /></ctcontrols:SettingsCard.HeaderIcon>
+                            <Button x:Name="ControllerLedColorButton">
+                                <Button.Flyout>
+                                    <Flyout>
+                                        <ColorPicker x:Name="ControllerLedColorPicker" IsAlphaEnabled="False" ColorChanged="ControllerLedColor_Changed" />
+                                    </Flyout>
+                                </Button.Flyout>
+                                <Button.Content>
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <Border x:Name="ControllerLedColorSwatch" Width="28" Height="20" BorderBrush="Gray" BorderThickness="1" />
+                                        <TextBlock Text="Choose color" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+                        </ctcontrols:SettingsCard>
+                    </ctcontrols:SettingsExpander.Items>
+                </ctcontrols:SettingsExpander>
             </StackPanel>
         </StackPanel>
     </ScrollViewer>

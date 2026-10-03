@@ -13,7 +13,7 @@ public sealed class ControllerMappingShutdownDrainTests
     }
 
     [Fact]
-    public void MainWindow_drain_captures_and_joins_both_existing_mapping_chains()
+    public void MainWindow_drain_flushes_and_joins_controller_mapping_and_led_chains()
     {
         var mainWindow = Read("src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs");
         var start = mainWindow.IndexOf("internal Task DrainPendingControllerMappingSavesAsync", StringComparison.Ordinal);
@@ -22,7 +22,9 @@ public sealed class ControllerMappingShutdownDrainTests
 
         Assert.Contains("var front = _frontButtonSaveChain", method, StringComparison.Ordinal);
         Assert.Contains("var back = _backButtonSaveChain", method, StringComparison.Ordinal);
-        Assert.Contains("Task.WhenAll(front, back)", method, StringComparison.Ordinal);
+        Assert.Contains("_controllerLedMutationTimer.Stop()", method, StringComparison.Ordinal);
+        Assert.Contains("var led = _controllerLedSaveChain", method, StringComparison.Ordinal);
+        Assert.Contains("Task.WhenAll(front, back, led)", method, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Delay", method, StringComparison.Ordinal);
         Assert.DoesNotContain("WaitAsync", method, StringComparison.Ordinal);
     }

@@ -1,8 +1,10 @@
 # RE: MSI Claw Joystick LED Control
 
-Status: the static/per-zone RGB write and readback protocol is established for the
-A2VM path. EX firmware `0x0411` is not yet directly validated; the current address
-selection is a nearest-table inference and must remain diagnostic until tested.
+Status: this document retains the historical protocol/reverse-engineering notes and
+records the current production references. HHC's current firmware map includes EX
+`0x0411` and `0x0414`; SteamAddon's Basic Static implementation uses exact table
+matches and fails closed for unknown versions. This does not claim that the SteamAddon
+implementation has passed physical hardware acceptance.
 
 ## Transport and packet
 
@@ -13,10 +15,10 @@ PID 1901: usage page 0xFFA0 / usage 0x0001
 PID 1902: usage page 0xFFF0 / usage 0x0040
 Output report: 64 bytes, preamble 0F 00 00 3C
 Command:       21 01 (WriteProfile)
-Sync:          22 (SyncToROM)
+Historical sync command: 22 (SyncToROM; not issued by the current static setter)
 ```
 
-The firmware-specific RGB profile base observed for A2VM is `0x024A` (`02 4A`).
+The firmware-specific RGB profile base is selected by the exact firmware table below.
 The 32-byte block is:
 
 | Block byte | Meaning |
@@ -51,42 +53,61 @@ response: 10 00 00 3C 05 01 <addrHi> <addrLo> 20 00 01
           <effect> <speed> <brightness> <9 x RGB>
 ```
 
-The response acknowledgement is `0x05` at byte `[4]`. Readback is important because
-the firmware address depends on controller firmware and because MSI's animated
-effect experiments showed that stale follow-on frames can remain in the profile.
+The response acknowledgement is `0x05` at byte `[4]`. This describes the historical
+readback RE. The current Basic Static setter uses the exact firmware table and fills
+all four frame slots instead of reading profile state on each edit.
 
-## Firmware address selection
+## Current firmware address evidence
 
-| Controller firmware | Evidence | RGB address |
+Handheld Companion's current MSI Claw source maps the following USB firmware versions
+to RGB profile addresses. In particular, its MS-1T91 / EX entries are present in the
+current table, superseding the older note that `0x0411` was absent.
+
+| Firmware version | RGB address |
+| ---: | ---: |
+| `0x0163` | `0x01FA` |
+| `0x0166` | `0x024A` |
+| `0x0167` | `0x024A` |
+| `0x0211` | `0x01FA` |
+| `0x0217` | `0x024A` |
+| `0x0219` | `0x024A` |
+| `0x0308` | `0x024A` |
+| EX `0x0411` | `0x024A` |
+| EX `0x0414` | `0x024A` |
+
+Source: [Handheld Companion `ClawA1M.cs`](https://github.com/Valkirie/HandheldCompanion/blob/master/HandheldCompanion/Devices/MSI/ClawA1M.cs).
+SteamAddon does not infer or probe an address for any other version.
+
+## Historical device-specific RE notes
+
+| Controller firmware | Historical evidence | RGB address |
 | --- | --- | --- |
 | A2VM `0x229` | on-device read/write RE; nearest firmware table entry | `02 4A` |
 | A2VM `0x308` | device control-surface RE | `02 4A` |
-| EX `0x0411` | address not present in current table | nearest-match inference to `02 4A` |
+| EX `0x0411` | current HHC table | `02 4A` |
+| EX `0x0414` | current HHC table | `02 4A` |
 
-For EX, do not silently claim support from the nearest-match rule. First read the
-candidate block, validate the response shape and expected RGB state, then perform
-only a reversible static-color write and readback. If the address is wrong, stop;
-do not probe arbitrary EEPROM addresses because an invalid profile write can wedge
-the controller until reboot.
+The table is evidence for address selection, not a SteamAddon hardware acceptance
+result. Unknown versions remain unsupported; do not probe arbitrary EEPROM addresses.
 
-## Static write recipe
+## CTW production Static reference
 
-For a static color, construct the known 32-byte block from a valid current read,
-change only the intended mode/brightness/zone fields, then write it using:
+CTW `release/v0.3.98.0`'s shipped static setter uses Static mode `0x01`, speed `0x03`,
+and one RGB triplet repeated across all nine zones. It writes the base header block,
+then fills the remaining three frame slots with identical raw 27-byte RGB payloads at
+`base + 32`, `base + 59`, and `base + 86`. It does not issue SyncToROM in its normal
+static setter. Source: [CTW `MsiClawLedController.cs`](https://github.com/onehoon/ClawTweaks-Dev/blob/release/v0.3.98.0/XboxGamingBarHelper/Devices/MSIClaw/MsiClawLedController.cs).
 
-```text
-0F 00 00 3C 21 01 <rgbAddrHi> <rgbAddrLo> 20
-<index> <mode> 09 <speed> <brightness> <9 x RGB> ...
-0F 00 00 3C 22
-```
+SteamAddon implements only this Basic Static subset: On/Off, global brightness, and one
+uniform color. Battery/SoC, animation effects, speed/direction, per-zone editing, and
+other effect research below remain historical/reference material and are out of scope.
 
-Read back with `0x04` and compare the owned fields. Preserve unknown bytes and do
-not use the historical guessed mode values blindly. Static mode `0x01` is the
-current effect-RE's write-side static code; the original static packet also has
-the `0x09` constant at the following field. The field meanings differ between
-read-side labels and write-side implementation notes, so a production writer must
-follow one verified packet builder and its round-trip test rather than mix labels
-from different RE revisions.
+The SteamAddon base packet contains the Static header and first frame. The three
+follow-on packets contain raw frames only (no effect header).
+
+The firmware version must exactly match the table above. Effective hardware brightness
+is the saved brightness while enabled and zero while disabled; the saved brightness
+and color are retained. SteamAddon sends no `0x22` SyncToROM command.
 
 ## Effects and stale-frame hazard
 
@@ -99,9 +120,8 @@ The effect RE reports these observations:
 - Wave and color-cycle experiments use contiguous 27-byte frame slots after the
   base header; stale frames must be overwritten or cleared.
 
-For this repository's next implementation, static/per-zone RGB is the safest
-documented surface. Do not implement an effect writer from these notes without a
-fresh round-trip test for that exact firmware.
+Do not implement an effect writer from these notes without a separate scoped work order
+and validation for that exact firmware.
 
 ## Evidence
 
