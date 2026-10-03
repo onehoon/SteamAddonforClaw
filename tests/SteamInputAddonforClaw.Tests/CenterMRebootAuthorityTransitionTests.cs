@@ -66,6 +66,47 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
+    public async Task Disable_from_partial_repairs_roots_to_exact_disabled()
+    {
+        var h = new Harness(this)
+        {
+            StartPartial = true,
+            RecoverySafe = true,
+            PrerequisitesReady = true,
+        };
+        var restart = new FakeRestart();
+
+        var result = await h.Build(restart)
+            .RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, result.Snapshot.State);
+        Assert.Equal(new[] { "startup:true", "hidhide:disable", "centerm:false", "restart" }, h.Order);
+        Assert.Equal(FrontendCenterMStartupState.Disabled, h.Roots.Classify());
+        Assert.Equal(1, restart.Calls);
+    }
+
+    [Fact]
+    public async Task Disable_from_partial_does_not_use_the_pending_prerequisite_exception()
+    {
+        var h = new Harness(this)
+        {
+            StartPartial = true,
+            RecoverySafe = true,
+            PrerequisitesReady = false,
+            PendingPrerequisiteEvidenceValid = true,
+        };
+
+        var result = await h.Build()
+            .RequestAsync(centerMEnabled: false, CancellationToken.None);
+
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
+        Assert.DoesNotContain("centerm:false", h.Order);
+        Assert.DoesNotContain("restart", h.Order);
+        Assert.Empty(h.Order);
+    }
+
+    [Fact]
     public async Task Disable_is_blocked_while_a_lower_level_runtime_operation_owns_the_controller()
     {
         var h = new Harness(this)

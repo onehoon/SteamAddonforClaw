@@ -202,7 +202,7 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
     private async Task<FrontendCenterMStartupMutationResult> DisableAsync(CancellationToken cancellationToken)
     {
         var snapshot = _centerMStartup.Capture();
-        if (snapshot.State is FrontendCenterMStartupState.Partial or FrontendCenterMStartupState.Unavailable)
+        if (snapshot.State == FrontendCenterMStartupState.Unavailable)
             return Unavailable(snapshot);
 
         // --- read-only preflight (honors the caller token) ---
@@ -215,7 +215,12 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
         // current Runtime routing-ready or starts controller ownership in this session.
         var admission = await _captureAdmission(cancellationToken).ConfigureAwait(false);
         var prerequisitesReady = admission.Prerequisites.IsRoutingReady;
-        var exactPendingPrerequisites = !prerequisitesReady && _hasExactPendingPrerequisites(admission.Prerequisites);
+        // Pending-reboot onboarding applies only to unambiguous Enabled/Disabled startup roots.
+        // Partial remains repairable by an explicit Disable request, but only through the ordinary
+        // fully Ready admission and verified Center M transition below.
+        var exactPendingPrerequisites = snapshot.State is FrontendCenterMStartupState.Enabled or FrontendCenterMStartupState.Disabled
+            && !prerequisitesReady
+            && _hasExactPendingPrerequisites(admission.Prerequisites);
         if (!prerequisitesReady && !exactPendingPrerequisites)
             return Fail(snapshot,
                 $"Required controller components are not ready, so MSI Center M was not disabled. " +
