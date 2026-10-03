@@ -15,43 +15,37 @@
                 <TextBlock Text="Button Mapping" FontSize="18" FontWeight="SemiBold" />
 
                 <StackPanel x:Name="FrontButtonMappingContent" Spacing="12">
-                <ctcontrols:SettingsExpander Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="True">
+                <ctcontrols:SettingsExpander Header="Gamebar Button" Description="The action for the Gamebar button, per runtime presentation domain." IsExpanded="False">
+                    <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Contact" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Normal">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Contact" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox x:Name="GamebarNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="GamebarNormalConfigCard" ContentAlignment="Vertical">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Setting" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel x:Name="GamebarNormalConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="Steam Game / Big Picture">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="View" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox x:Name="GamebarSteamActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="GamebarSteamConfigCard" ContentAlignment="Vertical">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Edit" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel x:Name="GamebarSteamConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
                     </ctcontrols:SettingsExpander.Items>
                 </ctcontrols:SettingsExpander>
 
-                <ctcontrols:SettingsExpander Header="Center M Button" Description="The action for the Center M button, per runtime presentation domain." IsExpanded="True">
+                <ctcontrols:SettingsExpander Header="Center M Button" Description="The action for the Center M button, per runtime presentation domain." IsExpanded="False">
+                    <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Help" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Normal">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Help" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox x:Name="CenterMNormalActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="CenterMNormalConfigCard" ContentAlignment="Vertical">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel x:Name="CenterMNormalConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="Steam Game / Big Picture">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="AllApps" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox x:Name="CenterMSteamActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard x:Name="CenterMSteamConfigCard" ContentAlignment="Vertical">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Find" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel x:Name="CenterMSteamConfigPanel" Spacing="8" />
                         </ctcontrols:SettingsCard>
                     </ctcontrols:SettingsExpander.Items>
@@ -62,17 +56,16 @@
                     x:Name="BackButtonMappingExpander"
                     Header="M1 / M2"
                     Description="Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4."
-                    IsExpanded="True">
+                    IsExpanded="False">
+                    <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Rotate" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="M1">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Rotate" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox
                                 x:Name="M1TargetComboBox"
                                 MinWidth="220"
                                 SelectionChanged="BackButtonTargetComboBox_SelectionChanged" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="M2">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="List" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ComboBox
                                 x:Name="M2TargetComboBox"
                                 MinWidth="220"
@@ -86,21 +79,20 @@
                     x:Name="ControllerLedExpander"
                     Header="Joystick LED"
                     Description="Set one static color and global brightness for all controller LEDs."
+                    IsExpanded="False"
                     Visibility="Collapsed">
+                    <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Setting" /></ctcontrols:SettingsExpander.HeaderIcon>
                     <ctcontrols:SettingsExpander.Items>
                         <ctcontrols:SettingsCard Header="Enabled">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Setting" /></ctcontrols:SettingsCard.HeaderIcon>
                             <ToggleSwitch x:Name="ControllerLedEnabledToggle" OffContent="" OnContent="" Toggled="ControllerLedEnabled_Toggled" />
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="Brightness">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsCard.HeaderIcon>
                             <StackPanel MinWidth="260" Orientation="Horizontal" Spacing="12">
                                 <Slider x:Name="ControllerLedBrightnessSlider" Minimum="0" Maximum="100" Width="220" ValueChanged="ControllerLedBrightness_ValueChanged" />
                                 <TextBlock x:Name="ControllerLedBrightnessValue" MinWidth="28" VerticalAlignment="Center" />
                             </StackPanel>
                         </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="Color">
-                            <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Edit" /></ctcontrols:SettingsCard.HeaderIcon>
                             <Button x:Name="ControllerLedColorButton">
                                 <Button.Flyout>
                                     <Flyout>
@@ -129,7 +121,6 @@
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard Header="Left Motor" ContentAlignment="Vertical">
-                        <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Volume" /></ctcontrols:SettingsCard.HeaderIcon>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -157,7 +148,6 @@
                         </Grid>
                     </ctcontrols:SettingsCard>
                     <ctcontrols:SettingsCard Header="Right Motor" ContentAlignment="Vertical">
-                        <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Volume" /></ctcontrols:SettingsCard.HeaderIcon>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />

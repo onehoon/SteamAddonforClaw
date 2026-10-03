@@ -53,7 +53,7 @@
             </ctcontrols:SettingsCard>
 
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
-            <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control"
+            <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control" IsExpanded="False"
                 Description="Configure processor power limits for plugged-in and battery operation.">
                 <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="TdpEnabledToggleSwitch" OffContent="" OnContent="" Toggled="TdpEnabledToggleSwitch_Toggled" />
@@ -78,7 +78,8 @@
             <ctcontrols:SettingsExpander
                 x:Name="CpuBoostExpander"
                 Header="CPU Boost"
-                Description="Processor performance boost mode.">
+                Description="Processor performance boost mode."
+                IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xEEA1;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
@@ -106,7 +107,7 @@
             </ctcontrols:SettingsExpander>
 
             <InfoBar x:Name="PowerModeInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
-            <ctcontrols:SettingsExpander x:Name="PowerModeExpander" Header="Windows Power Mode" Description="Configured Windows 11 power mode for each power rail.">
+            <ctcontrols:SettingsExpander x:Name="PowerModeExpander" Header="Windows Power Mode" Description="Configured Windows 11 power mode for each power rail." IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE83F;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
