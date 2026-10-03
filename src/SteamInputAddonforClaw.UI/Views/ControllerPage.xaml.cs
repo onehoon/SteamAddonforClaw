@@ -1,6 +1,8 @@
 using CommunityToolkit.WinUI.Controls;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.Windows.Storage.Pickers;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
@@ -28,6 +30,13 @@ public sealed partial class ControllerPage : UserControl
     private bool _available;
     private bool _backButtonAvailable;
     private BindingEditor[] _editors = [];
+    private IAddonFrontendControl? _frontend;
+    private FrontendControllerVibrationStrengthSnapshot _vibrationSnapshot =
+        FrontendControllerVibrationStrengthSnapshot.Unavailable();
+    private ControllerVibrationStrengthDebounce? _vibrationDebounce;
+    private bool _isRenderingVibration;
+    private bool _vibrationMutationInProgress;
+    private bool _vibrationTestInProgress;
     /// <summary>Suppresses change handlers while the page writes persisted state INTO the controls,
     /// so restoring the UI never looks like a user edit and re-saves.</summary>
     private bool _isLoading;
@@ -37,14 +46,19 @@ public sealed partial class ControllerPage : UserControl
     internal event EventHandler<FrontButtonMappingSettings>? MappingEditRequested;
     internal event EventHandler<BackButtonMappingSettings>? BackButtonMappingEditRequested;
 
-    internal void Initialize(FrontendBootstrapSnapshot bootstrap, Func<nint> windowHandleProvider)
+    internal void Initialize(
+        FrontendBootstrapSnapshot bootstrap,
+        IAddonFrontendControl frontend,
+        Func<nint> windowHandleProvider)
     {
+        _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         _available = bootstrap.FrontButtonMappingAvailable;
         _backButtonAvailable = bootstrap.BackButtonMappingAvailable;
         FrontButtonMappingContent.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
         BackButtonMappingExpander.Visibility = _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
         MappingContent.Visibility = _available || _backButtonAvailable ? Visibility.Visible : Visibility.Collapsed;
         MappingUnavailableText.Visibility = _available || _backButtonAvailable ? Visibility.Collapsed : Visibility.Visible;
+        VibrationStrengthExpander.Visibility = _available ? Visibility.Visible : Visibility.Collapsed;
 
         _editors =
         [
@@ -61,6 +75,19 @@ public sealed partial class ControllerPage : UserControl
             PopulateBackButtonTargets();
             ApplyBackButtonMapping(_backButtonMapping);
         }
+
+        var dispatcher = DispatcherQueue.GetForCurrentThread();
+        _vibrationDebounce = new ControllerVibrationStrengthDebounce(
+            Task.Delay,
+            action => dispatcher.TryEnqueue(() => action()),
+            (left, right) => _ = CommitVibrationStrengthAsync(left, right));
+        ApplyVibrationStrengthSnapshot(FrontendControllerVibrationStrengthSnapshot.Unavailable(), preserveDraft: false);
+    }
+
+    internal void Activate()
+    {
+        if (_frontend is not null)
+            _ = RefreshVibrationStrengthAsync();
     }
 
     /// <summary>Writes a persisted mapping into every control. Never tears the editors down.</summary>
@@ -129,6 +156,186 @@ public sealed partial class ControllerPage : UserControl
 
         BackButtonMappingEditRequested?.Invoke(this, _backButtonMapping);
     }
+
+    private void VibrationStrengthSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs args)
+    {
+        if (_isRenderingVibration
+            || _frontend is null
+            || !_vibrationSnapshot.Available
+            || !_vibrationSnapshot.Writable
+            || _vibrationMutationInProgress
+            || _vibrationTestInProgress)
+            return;
+
+        var left = ToPercent(LeftVibrationStrengthSlider.Value);
+        var right = ToPercent(RightVibrationStrengthSlider.Value);
+        LeftVibrationStrengthPercentText.Text = $"{left}%";
+        RightVibrationStrengthPercentText.Text = $"{right}%";
+        _vibrationDebounce?.Schedule(left, right);
+        UpdateVibrationControls();
+    }
+
+    private async void LeftVibrationTestButton_Click(object sender, RoutedEventArgs args) =>
+        await TestVibrationMotorAsync(FrontendControllerVibrationMotor.Left);
+
+    private async void RightVibrationTestButton_Click(object sender, RoutedEventArgs args) =>
+        await TestVibrationMotorAsync(FrontendControllerVibrationMotor.Right);
+
+    private async Task CommitVibrationStrengthAsync(int leftPercent, int rightPercent)
+    {
+        if (_frontend is null || !_vibrationSnapshot.Available || !_vibrationSnapshot.Writable)
+            return;
+
+        _vibrationMutationInProgress = true;
+        UpdateVibrationControls();
+        try
+        {
+            var result = await _frontend.SetControllerVibrationStrengthAsync(leftPercent, rightPercent);
+            ApplyVibrationStrengthSnapshot(result.Snapshot, preserveDraft: false);
+            if (!result.Succeeded)
+            {
+                ShowVibrationMessage(result.FailureMessage ?? "Firmware vibration values could not be verified.", InfoBarSeverity.Error);
+                await RefreshVibrationStrengthAsync(preserveFailure: true);
+                return;
+            }
+
+            if (!result.Snapshot.Writable && result.Snapshot.Available)
+                ShowVibrationMessage(result.Snapshot.Status, InfoBarSeverity.Informational);
+            else
+                HideVibrationMessage();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerVibration", "Controller vibration firmware mutation transport failed.", exception);
+            ShowVibrationMessage("The firmware result is uncertain. Reading the current values again.", InfoBarSeverity.Error);
+            await RefreshVibrationStrengthAsync(preserveFailure: true);
+        }
+        finally
+        {
+            _vibrationMutationInProgress = false;
+            UpdateVibrationControls();
+        }
+    }
+
+    private async Task TestVibrationMotorAsync(FrontendControllerVibrationMotor motor)
+    {
+        if (_frontend is null
+            || !_vibrationSnapshot.Available
+            || !_vibrationSnapshot.TestAvailable
+            || _vibrationDebounce?.HasPendingDraft == true
+            || _vibrationMutationInProgress
+            || _vibrationTestInProgress)
+            return;
+
+        _vibrationTestInProgress = true;
+        UpdateVibrationControls();
+        try
+        {
+            var result = await _frontend.TestControllerVibrationMotorAsync(motor);
+            if (result.Succeeded)
+                HideVibrationMessage();
+            else
+                ShowVibrationMessage(result.FailureMessage ?? "The physical vibration test did not complete safely.", InfoBarSeverity.Error);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerVibration", "Controller vibration test transport failed.", exception,
+                ("Motor", motor));
+            ShowVibrationMessage("The test result is uncertain. Refreshing firmware values.", InfoBarSeverity.Error);
+            await RefreshVibrationStrengthAsync(preserveFailure: true);
+        }
+        finally
+        {
+            _vibrationTestInProgress = false;
+            UpdateVibrationControls();
+        }
+    }
+
+    private async Task RefreshVibrationStrengthAsync(bool preserveFailure = false)
+    {
+        if (_frontend is null)
+            return;
+
+        try
+        {
+            var snapshot = await _frontend.CaptureControllerVibrationStrengthAsync();
+            var preserveDraft = _vibrationMutationInProgress || _vibrationDebounce?.HasPendingDraft == true;
+            ApplyVibrationStrengthSnapshot(snapshot, preserveDraft);
+            if (preserveFailure)
+                return;
+            if (!snapshot.Available)
+                ShowVibrationMessage(snapshot.Status, InfoBarSeverity.Error);
+            else if (!snapshot.Writable)
+                ShowVibrationMessage(snapshot.Status, InfoBarSeverity.Informational);
+            else
+                HideVibrationMessage();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerVibration", "Controller vibration firmware capture transport failed.", exception);
+            _vibrationDebounce?.CancelPending();
+            ApplyVibrationStrengthSnapshot(
+                FrontendControllerVibrationStrengthSnapshot.Unavailable("The firmware vibration values could not be read."),
+                preserveDraft: false);
+            ShowVibrationMessage("The firmware vibration values could not be read.", InfoBarSeverity.Error);
+        }
+    }
+
+    private void ApplyVibrationStrengthSnapshot(
+        FrontendControllerVibrationStrengthSnapshot snapshot,
+        bool preserveDraft)
+    {
+        _vibrationSnapshot = snapshot;
+        if (preserveDraft && !snapshot.Available)
+        {
+            _vibrationDebounce?.CancelPending();
+            preserveDraft = false;
+        }
+
+        if (!preserveDraft)
+        {
+            _isRenderingVibration = true;
+            try
+            {
+                LeftVibrationStrengthSlider.Visibility = snapshot.Available ? Visibility.Visible : Visibility.Collapsed;
+                RightVibrationStrengthSlider.Visibility = snapshot.Available ? Visibility.Visible : Visibility.Collapsed;
+                LeftVibrationStrengthSlider.Value = snapshot.LeftPercent ?? 0;
+                RightVibrationStrengthSlider.Value = snapshot.RightPercent ?? 0;
+                LeftVibrationStrengthPercentText.Text = snapshot.LeftPercent is { } left ? $"{left}%" : "—";
+                RightVibrationStrengthPercentText.Text = snapshot.RightPercent is { } right ? $"{right}%" : "—";
+            }
+            finally { _isRenderingVibration = false; }
+        }
+
+        UpdateVibrationControls();
+    }
+
+    private void UpdateVibrationControls()
+    {
+        var operationInProgress = _vibrationMutationInProgress || _vibrationTestInProgress;
+        LeftVibrationStrengthSlider.IsEnabled = _vibrationSnapshot.Available
+            && _vibrationSnapshot.Writable && !operationInProgress;
+        RightVibrationStrengthSlider.IsEnabled = _vibrationSnapshot.Available
+            && _vibrationSnapshot.Writable && !operationInProgress;
+
+        var testsEnabled = _vibrationSnapshot.Available
+            && _vibrationSnapshot.TestAvailable
+            && _vibrationDebounce?.HasPendingDraft != true
+            && !operationInProgress;
+        LeftVibrationTestButton.IsEnabled = testsEnabled;
+        RightVibrationTestButton.IsEnabled = testsEnabled;
+    }
+
+    private void ShowVibrationMessage(string message, InfoBarSeverity severity)
+    {
+        VibrationStrengthInfoBar.Severity = severity;
+        VibrationStrengthInfoBar.Message = message;
+        VibrationStrengthInfoBar.IsOpen = true;
+    }
+
+    private void HideVibrationMessage() => VibrationStrengthInfoBar.IsOpen = false;
+
+    private static int ToPercent(double value) => Math.Clamp((int)Math.Round(value), 0, 100);
 
     private static void SelectBackButtonTarget(ComboBox comboBox, Xbox360BackButtonTarget target)
     {

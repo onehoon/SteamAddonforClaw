@@ -593,7 +593,7 @@ public sealed class UiArchitectureTests
         var icons = cards.Select(card => card.Elements().SingleOrDefault(element => element.Name.LocalName == "SettingsCard.HeaderIcon"))
             .ToArray();
 
-        Assert.Equal(10, cards.Length);
+        Assert.Equal(12, cards.Length);
         Assert.All(icons, icon => Assert.NotNull(icon));
     }
 

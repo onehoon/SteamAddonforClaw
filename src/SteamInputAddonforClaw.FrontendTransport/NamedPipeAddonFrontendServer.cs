@@ -164,10 +164,16 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureSteamFse or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.CaptureShortcutEditor or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit or FrontendRpcMethod.CaptureXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StartXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StopXbox360RumbleLoopDiagnostic or FrontendRpcMethod.RunPid1902InputCadenceDiagnostic)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureSteamFse or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.CaptureShortcutEditor or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit or FrontendRpcMethod.CaptureControllerVibrationStrength or FrontendRpcMethod.CaptureXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StartXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StopXbox360RumbleLoopDiagnostic or FrontendRpcMethod.RunPid1902InputCadenceDiagnostic)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
+                    continue;
+                }
+                if (!IsControllerVibrationPayloadValid(message.Method.Value, message.Payload))
+                {
+                    requests.TryRemove(id, out var invalidVibrationPayloadCts); invalidVibrationPayloadCts?.Dispose();
+                    await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Invalid controller vibration payload."))).ConfigureAwait(false);
                     continue;
                 }
                 var startSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -196,6 +202,28 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         var request = FrontendWireCodec.Decode<CaptureQuickSettingsPageRequest>(p);
         return FrontendWireCodec.Payload(await _inner.CaptureQuickSettingsPageAsync(request.PageId, request.AppId, t).ConfigureAwait(false));
     }
+
+    private static bool IsControllerVibrationPayloadValid(FrontendRpcMethod method, System.Text.Json.JsonElement? payload)
+    {
+        try
+        {
+            return method switch
+            {
+                FrontendRpcMethod.SetControllerVibrationStrength =>
+                    FrontendWireCodec.Decode<SetControllerVibrationStrengthRequest>(payload) is { } pair
+                    && pair.LeftPercent is >= 0 and <= 100
+                    && pair.RightPercent is >= 0 and <= 100,
+                FrontendRpcMethod.TestControllerVibrationMotor =>
+                    Enum.IsDefined(FrontendWireCodec.Decode<TestControllerVibrationMotorRequest>(payload).Motor),
+                _ => true,
+            };
+        }
+        catch (FrontendProtocolException)
+        {
+            return false;
+        }
+    }
+
     private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.CaptureAppUpdate
         ? FrontendWireCodec.Payload(await _inner.CaptureAppUpdateAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CheckAndDownloadAppUpdate
@@ -276,6 +304,17 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.CaptureBatteryChargeLimitTestAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureBatteryChargeLimit
         ? FrontendWireCodec.Payload(await _inner.CaptureBatteryChargeLimitAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureControllerVibrationStrength
+        ? FrontendWireCodec.Payload(await _inner.CaptureControllerVibrationStrengthAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetControllerVibrationStrength
+        ? FrontendWireCodec.Payload(await _inner.SetControllerVibrationStrengthAsync(
+            FrontendWireCodec.Decode<SetControllerVibrationStrengthRequest>(p).LeftPercent,
+            FrontendWireCodec.Decode<SetControllerVibrationStrengthRequest>(p).RightPercent,
+            t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.TestControllerVibrationMotor
+        ? FrontendWireCodec.Payload(await _inner.TestControllerVibrationMotorAsync(
+            FrontendWireCodec.Decode<TestControllerVibrationMotorRequest>(p).Motor,
+            t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetDeviceBatteryChargeLimitEnabled
         ? FrontendWireCodec.Payload(await _inner.SetDeviceBatteryChargeLimitEnabledAsync(FrontendWireCodec.Decode<SetDeviceBatteryChargeLimitEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetDeviceBatteryChargeLimitPercent

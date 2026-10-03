@@ -429,6 +429,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         // TDP / game-profile support is a supported-hardware/model capability, not a controller
         // authority state -- it applies in both Center M Enabled and Disabled boots.
+        SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null;
         if (!_headlessUninstallPreparation
             && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
@@ -439,6 +440,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel, tdpHardware);
             _batteryChargeLimitHardware = new MsiClawBatteryChargeLimitHardware(_tdpTransport);
             _batteryChargeLimitRuntime = new(_profileStore, _profileMutationGate, tdpModel, _batteryChargeLimitHardware);
+            controllerVibrationStrengthClient = new(
+                GetMsiControllerDevices(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawVibrationProfileIo());
             _tdpRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
@@ -561,7 +566,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             captureXbox360RumbleLoopDiagnostic: CaptureXbox360RumbleLoopDiagnosticAsync,
             startXbox360RumbleLoopDiagnostic: StartXbox360RumbleLoopDiagnosticAsync,
             stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync,
-            runPid1902InputCadenceDiagnostic: RunPid1902InputCadenceDiagnosticAsync);
+            runPid1902InputCadenceDiagnostic: RunPid1902InputCadenceDiagnosticAsync,
+            controllerVibrationStrengthClient: controllerVibrationStrengthClient,
+            controllerVibrationTestAvailable: () => _presentationOwnership?.IsVibrationTestAvailable == true,
+            testControllerVibrationMotor: (motor, token) => _presentationOwnership is { } presentation
+                ? presentation.TestVibrationMotorAsync(motor, token)
+                : Task.FromResult(new SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestResult(
+                    SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable,
+                    "The live Full1902 physical rumble path is unavailable.")));
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -721,7 +733,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 backButtonMappingProvider: () => startupSettings.BackButtonMapping,
                 rumbleLoopUsbTraceCaptureFactory: () => new SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture(
                     new SteamInputAddonforClaw.HidHide.ElevatedProcessRunner(
-                        SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture.CommandTimeout)));
+                        SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture.CommandTimeout)),
+                physicalRumbleTestAvailabilityProvider: () =>
+                    owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null);
             _presentationOwnership = presentation;
             AppLog.Info("ControllerPresentation", "Canonical VIIPER runtime initialized.", ("Event", "ViiperRuntimeInitialized"),
                 ("State", presentation.ViiperState?.ToString() ?? "Unavailable"));

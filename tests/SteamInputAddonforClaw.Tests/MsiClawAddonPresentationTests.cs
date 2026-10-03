@@ -895,7 +895,9 @@ public sealed class MsiClawAddonPresentationTests
         TimeSpan? rumbleLoopBurstStepCadence = null,
         TimeSpan? rumbleLoopTerminalCallbackTimeout = null,
         Func<IXbox360UsbTraceCapture>? traceCaptureFactory = null,
-        TimeSpan? rumbleLoopCycleIdle = null)
+        TimeSpan? rumbleLoopCycleIdle = null,
+        Func<bool>? vibrationTestAvailable = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
         Assert.NotNull(runtime);
@@ -909,7 +911,94 @@ public sealed class MsiClawAddonPresentationTests
             rumbleLoopBurstStepCadence: rumbleLoopBurstStepCadence,
             rumbleLoopCycleIdle: rumbleLoopCycleIdle,
             rumbleLoopTerminalCallbackTimeout: rumbleLoopTerminalCallbackTimeout,
-            rumbleLoopUsbTraceCaptureFactory: traceCaptureFactory);
+            rumbleLoopUsbTraceCaptureFactory: traceCaptureFactory,
+            physicalRumbleTestAvailabilityProvider: vibrationTestAvailable,
+            delay: delay);
+    }
+
+    [Theory]
+    [InlineData(FrontendControllerVibrationMotor.Left, 65535, 0)]
+    [InlineData(FrontendControllerVibrationMotor.Right, 0, 65535)]
+    public async Task Controller_motor_test_uses_full_scale_selected_channel_then_one_second_then_stop(
+        FrontendControllerVibrationMotor motor, int expectedLarge, int expectedSmall)
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var delays = new List<TimeSpan>();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            vibrationTestAvailable: () => true,
+            delay: (duration, _) => { delays.Add(duration); return Task.CompletedTask; });
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        sink.Writes.Clear();
+
+        var result = await owner.TestVibrationMotorAsync(motor, CancellationToken.None);
+
+        Assert.Equal(FrontendControllerVibrationTestOutcome.Succeeded, result.Outcome);
+        Assert.Equal(new[]
+        {
+            new SteamInputAddonforClaw.Feedback.TwoMotorRumble((ushort)expectedLarge, (ushort)expectedSmall),
+            SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped,
+        }, sink.Writes);
+        Assert.Equal(new[] { TimeSpan.FromSeconds(1) }, delays);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Controller_motor_test_is_unavailable_without_the_live_test_path()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            vibrationTestAvailable: () => false);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        sink.Writes.Clear();
+
+        var result = await owner.TestVibrationMotorAsync(FrontendControllerVibrationMotor.Left, CancellationToken.None);
+
+        Assert.Equal(FrontendControllerVibrationTestOutcome.Unavailable, result.Outcome);
+        Assert.Empty(sink.Writes);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Controller_motor_test_attempts_stop_after_pulse_failure()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            vibrationTestAvailable: () => true);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        sink.Writes.Clear();
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "PulseFailed"));
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "Stopped"));
+
+        var result = await owner.TestVibrationMotorAsync(FrontendControllerVibrationMotor.Left, CancellationToken.None);
+
+        Assert.Equal(FrontendControllerVibrationTestOutcome.Failed, result.Outcome);
+        Assert.Equal(2, sink.Writes.Count);
+        Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes[^1]);
+        await owner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Controller_motor_test_is_not_successful_when_final_stop_fails()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            vibrationTestAvailable: () => true,
+            delay: (_, _) => Task.CompletedTask);
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        sink.Writes.Clear();
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Succeeded, "Pulse"));
+        sink.Results.Enqueue(new(SteamInputAddonforClaw.Feedback.PhysicalRumbleWriteStatus.Failed, "StopFailed"));
+
+        var result = await owner.TestVibrationMotorAsync(FrontendControllerVibrationMotor.Right, CancellationToken.None);
+
+        Assert.Equal(FrontendControllerVibrationTestOutcome.Failed, result.Outcome);
+        Assert.Equal(new SteamInputAddonforClaw.Feedback.TwoMotorRumble(0, ushort.MaxValue), sink.Writes[0]);
+        Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, sink.Writes[1]);
+        await owner.DisposeAsync();
     }
 
     [Fact]

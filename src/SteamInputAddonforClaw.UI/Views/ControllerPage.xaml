@@ -81,6 +81,80 @@
                     </ctcontrols:SettingsExpander.Items>
                 </ctcontrols:SettingsExpander>
             </StackPanel>
+
+            <ctcontrols:SettingsExpander
+                x:Name="VibrationStrengthExpander"
+                Header="Vibration Strength"
+                Description="Set the persistent firmware ceiling for each controller motor."
+                IsExpanded="False">
+                <ctcontrols:SettingsExpander.HeaderIcon>
+                    <SymbolIcon Symbol="Volume" />
+                </ctcontrols:SettingsExpander.HeaderIcon>
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard Header="Left Motor" ContentAlignment="Vertical">
+                        <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Volume" /></ctcontrols:SettingsCard.HeaderIcon>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="56" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Slider
+                                x:Name="LeftVibrationStrengthSlider"
+                                Minimum="0"
+                                Maximum="100"
+                                StepFrequency="1"
+                                Visibility="Collapsed"
+                                ValueChanged="VibrationStrengthSlider_ValueChanged" />
+                            <TextBlock
+                                x:Name="LeftVibrationStrengthPercentText"
+                                Grid.Column="1"
+                                Text="—"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Center" />
+                            <Button
+                                x:Name="LeftVibrationTestButton"
+                                Grid.Column="2"
+                                Content="Test"
+                                Click="LeftVibrationTestButton_Click" />
+                        </Grid>
+                    </ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard Header="Right Motor" ContentAlignment="Vertical">
+                        <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Volume" /></ctcontrols:SettingsCard.HeaderIcon>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="56" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Slider
+                                x:Name="RightVibrationStrengthSlider"
+                                Minimum="0"
+                                Maximum="100"
+                                StepFrequency="1"
+                                Visibility="Collapsed"
+                                ValueChanged="VibrationStrengthSlider_ValueChanged" />
+                            <TextBlock
+                                x:Name="RightVibrationStrengthPercentText"
+                                Grid.Column="1"
+                                Text="—"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Center" />
+                            <Button
+                                x:Name="RightVibrationTestButton"
+                                Grid.Column="2"
+                                Content="Test"
+                                Click="RightVibrationTestButton_Click" />
+                        </Grid>
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
+            <InfoBar
+                x:Name="VibrationStrengthInfoBar"
+                IsOpen="False"
+                IsClosable="False"
+                Severity="Informational"
+                Message="" />
         </StackPanel>
     </ScrollViewer>
 </UserControl>

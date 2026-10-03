@@ -69,7 +69,7 @@ public sealed partial class MainWindow : Window
         SettingsContent.Initialize(_bootstrap, _frontend);
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
-        ControllerContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
+        ControllerContent.Initialize(_bootstrap, _frontend, () => WindowNative.GetWindowHandle(this));
         OverlayContent.Initialize(_frontend);
         ShortcutContent.Initialize(_frontend, () => WindowNative.GetWindowHandle(this));
         // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
@@ -256,6 +256,7 @@ public sealed partial class MainWindow : Window
         FanHardwareProbeContent.Visibility = page == MainNavigationPage.FanHardwareProbe ? Visibility.Visible : Visibility.Collapsed;
         BatteryChargeLimitTestContent.Visibility = page == MainNavigationPage.BatteryChargeLimitTest ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
+        if (page == MainNavigationPage.Controller) ControllerContent.Activate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how
         // the user leaves.
