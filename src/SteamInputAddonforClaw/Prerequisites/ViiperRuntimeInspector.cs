@@ -25,7 +25,7 @@ internal sealed class ViiperRuntimeInspector(IRuntimePayloadFileSystem fileSyste
     internal const string PayloadFileName = "libVIIPER.dll";
     internal static string PayloadRelativePath => Path.Combine("Dependencies", "Viiper", PayloadFileName);
     // Pins the Phase 2B2 canonical Steam Deck output-callback ABI adoption libVIIPER.dll build (see Dependencies/Viiper/PROVENANCE.md).
-    internal const string ExpectedPayloadSha256 = "4016DC7C1D9E746908F2C080E6BF741A29A1FAE9358BFB5B949924B9B3C15AF0";
+    internal const string ExpectedPayloadSha256 = "1584CCD8DAC7ABB86DE5024CF851AF510FFA44D912C670BEC3D2C3A073123494";
 
     public ViiperRuntimeInspector()
         : this(new RuntimePayloadFileSystem(), Path.Combine(AppContext.BaseDirectory, PayloadRelativePath), new RuntimePayloadHashProvider())
