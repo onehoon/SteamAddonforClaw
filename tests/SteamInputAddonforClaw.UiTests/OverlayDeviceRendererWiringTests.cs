@@ -52,51 +52,98 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void WindowInterop_uses_AppWindow_visibility_and_fails_closed_on_a_missing_topmost_postcondition()
+    public void WindowInterop_uses_one_native_visibility_and_topmost_authority()
     {
         var source = ReadWindowInteropSource();
 
-        Assert.Contains("presenter.IsAlwaysOnTop = true;", source);
+        Assert.DoesNotContain("presenter.IsAlwaysOnTop = true;", source);
+        Assert.DoesNotContain("appWindow.Show(false);", source);
+        Assert.DoesNotContain(".Hide();", source);
+        Assert.DoesNotContain("MoveInZOrderAtTop", source);
         Assert.Contains("private const long WsExTopmost = 0x00000008L;", source);
         Assert.Contains("Overlay topmost state verified.", source);
         Assert.Contains("Overlay topmost postcondition failed.", source);
         Assert.DoesNotContain("Overlay topmost style is missing after a successful Show.", source);
         Assert.DoesNotContain("Activate()", source);
         Assert.DoesNotContain("SetForegroundWindow", source);
-        Assert.DoesNotContain("SwpShowWindow", source);
-        Assert.DoesNotContain("SwpHideWindow", source);
+        Assert.Contains("private const uint SwpShowWindow = 0x0040;", source);
+        Assert.Contains("private const uint SwpHideWindow = 0x0080;", source);
+        Assert.Contains("private const int SwShowNoActivate = 4;", source);
+        Assert.Contains("private const int SwHide = 0;", source);
         Assert.Contains("private const uint WsExNoActivate = 0x08000000;", source);
         Assert.Contains("case WmMouseActivate:", source);
         Assert.Contains("return MaNoActivate;", source);
 
         var configure = source[source.IndexOf("internal static void Configure", StringComparison.Ordinal)..
             source.IndexOf("internal static void ShowWithoutActivation", StringComparison.Ordinal)];
-        Assert.Contains("SwpNoZOrder", configure);
-        Assert.DoesNotContain("HwndTopmost", configure);
+        Assert.Contains("presenter.SetBorderAndTitleBar(false, false);", configure);
+        Assert.Contains("presenter.IsResizable = false;", configure);
+        Assert.Contains("HwndTopmost", configure);
+        var finalPlacement = configure[configure.LastIndexOf("if (!SetWindowPos(", StringComparison.Ordinal)..];
+        Assert.Contains("SwpNoActivate", finalPlacement);
+        Assert.Contains("SwpNoOwnerZOrder", finalPlacement);
+        Assert.Contains("SwpFrameChanged", finalPlacement);
+        Assert.DoesNotContain("SwpNoZOrder", finalPlacement);
+        Assert.DoesNotContain("SwpNoSendChanging", finalPlacement);
 
         var show = source[source.IndexOf("internal static void ShowWithoutActivation", StringComparison.Ordinal)..
             source.IndexOf("internal static void Hide", StringComparison.Ordinal)];
-        Assert.Contains("appWindow.Show(false);", show);
+        Assert.DoesNotContain("AppWindow", show);
+        Assert.Contains("HwndTopmost", show);
+        Assert.Contains("SwpShowWindow", show);
         Assert.Contains("SwpNoActivate", show);
+        Assert.Contains("SwpNoOwnerZOrder", show);
         Assert.Equal(1, CountOccurrences(show, "SetWindowPos("));
-        var visibility = show.IndexOf("appWindow.Show(false);", StringComparison.Ordinal);
-        var topmostPromotion = show.IndexOf("SetWindowPos(hwnd, HwndTopmost", StringComparison.Ordinal);
-        var verification = show.IndexOf("VerifyTopmostStateAfterShow(hwnd, presenter);", StringComparison.Ordinal);
-        Assert.True(visibility >= 0 && visibility < topmostPromotion);
-        Assert.True(topmostPromotion < verification);
-        Assert.Contains("SwpNoActivate | SwpNoSendChanging | SwpNoSize | SwpNoMove", show[topmostPromotion..]);
-        Assert.DoesNotContain("SwpNoZOrder", show);
+        var topmostPromotion = show.IndexOf("SetWindowPos(", StringComparison.Ordinal);
+        var nativeShow = show.IndexOf("ShowWindow(hwnd, SwShowNoActivate);", StringComparison.Ordinal);
+        var verification = show.IndexOf("VerifyTopmostStateAfterShow(hwnd);", StringComparison.Ordinal);
+        Assert.True(topmostPromotion >= 0 && topmostPromotion < nativeShow);
+        Assert.True(nativeShow < verification);
+        Assert.Contains("SwpNoMove", show);
+        Assert.Contains("SwpNoSize", show);
 
         var hide = source[source.IndexOf("internal static void Hide", StringComparison.Ordinal)..
             source.IndexOf("private static void VerifyTopmostStateAfterShow", StringComparison.Ordinal)];
-        Assert.Contains(".Hide();", hide);
+        Assert.Contains("ShowWindow(hwnd, SwHide);", hide);
+        Assert.Contains("if (IsWindowVisible(hwnd))", hide);
+        Assert.Contains("Overlay remained visible after the native Hide operation.", hide);
         Assert.DoesNotContain("SetWindowPos", hide);
+        Assert.DoesNotContain("AppWindow", hide);
 
         var verifier = source[source.IndexOf("private static void VerifyTopmostStateAfterShow", StringComparison.Ordinal)..
             source.IndexOf("private static bool HasTopmostStyle", StringComparison.Ordinal)];
-        Assert.Contains("if (!topmostStyle)", verifier);
+        Assert.Contains("if (!windowVisible || !topmostStyle)", verifier);
+        Assert.Contains("IsWindowVisible(hwnd)", verifier);
+        Assert.Contains("(\"WindowVisible\", windowVisible)", verifier);
+        Assert.Contains("(\"TopmostStyle\", topmostStyle)", verifier);
+        Assert.Contains("(\"IsOverlayForeground\", foreground == hwnd)", verifier);
+        Assert.DoesNotContain("presenter", verifier.ToLowerInvariant());
+        Assert.DoesNotContain("if (foreground == hwnd)", verifier);
         Assert.Contains("OverlayLog.Error(\"Window\", \"Overlay topmost postcondition failed.\"", verifier);
         Assert.Contains("throw exception;", verifier);
+    }
+
+    [Fact]
+    public void WindowInterop_logs_only_native_z_order_visibility_and_extended_style_transitions()
+    {
+        var source = ReadWindowInteropSource();
+
+        Assert.Contains("private const uint WmWindowPosChanged = 0x0047;", source);
+        Assert.Contains("private const uint WmStyleChanged = 0x007D;", source);
+        Assert.Contains("case WmWindowPosChanged:", source);
+        Assert.Contains("case WmStyleChanged:", source);
+        Assert.Contains("Marshal.PtrToStructure<WINDOWPOS>(lParam)", source);
+        Assert.Contains("windowPos.HwndInsertAfter", source);
+        Assert.Contains("windowPos.Flags", source);
+        Assert.Contains("SwpNoZOrder", source);
+        Assert.Contains("SwpShowWindow | SwpHideWindow", source);
+        Assert.Contains("Overlay window position changed.", source);
+        Assert.Contains("Overlay extended style changed.", source);
+        Assert.Contains("wParam == GwlExStyle", source);
+        Assert.Contains("styleOld", source);
+        Assert.Contains("styleNew", source);
+        Assert.Contains("oldTopmost", source);
+        Assert.Contains("newTopmost", source);
     }
 
     [Fact]
