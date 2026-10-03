@@ -853,7 +853,31 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("SteamOutput", "Canonical VIIPER module could not be loaded; Steam output is unavailable for this process lifetime.", exception);
             return null;
         }
-        return native is null ? null : VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
+
+        if (native is null)
+            return null;
+
+        try
+        {
+            var logDirectory = SteamInputAddonforClaw.Install.AddonDataPaths.LogDirectory;
+            Directory.CreateDirectory(logDirectory);
+            if (!native.SetDiagnosticLogDirectory(logDirectory))
+            {
+                AppLog.Warn("SteamOutput", "VIIPER diagnostic log directory override was rejected; controller routing will continue with VIIPER's fallback logging path.", null,
+                    ("RequestedDirectory", logDirectory));
+            }
+            else
+            {
+                AppLog.Debug("SteamOutput", "VIIPER diagnostic log directory configured.",
+                    ("Directory", logDirectory), ("FileName", "libVIIPER.log"));
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("SteamOutput", "VIIPER diagnostic log directory could not be prepared; controller routing will continue with VIIPER's fallback logging path.", exception);
+        }
+
+        return VirtualOutput.Viiper.CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
     }
 
     // Returns the concrete owner (not just IMsiClawAddonPhysicalOwnership): the Full1902 rumble sink
