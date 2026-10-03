@@ -519,67 +519,105 @@ This remains a separately versioned frozen component.
 
 ---
 
-## 15. Rebuild the fixed distribution artifact
+## 15. Establish the permanent FSE signing identity now
 
-Because FseHome is embedded in the fixed MSIX, source changes are not sufficient.
+The existing fixed 1.0.0.0 artifact is pre-release, and the original private signing key/PFX is not available.
 
-After implementation:
+Do **not** attempt to preserve update compatibility with that disposable pre-release signer.
 
-1. publish SteamInputAddonforClaw.FseHome framework-dependent win-x64;
-2. run the existing manual package-fse-home.ps1 path;
-3. use the dedicated FSE-only signing PFX;
-4. build/sign version 1.0.1.0;
-5. replace:
-   - Packaging/Distribution/SteamInputAddonforClaw.FseHome.msix
-   - Packaging/Distribution/SteamInputAddonforClaw.FseHome.cer as applicable;
-6. update the pinned SHA-256 values in verify-publish-assets.ps1.
+Instead, this PR is the point where the project establishes the permanent FSE signing identity that all future fixed FSE MSIX updates will reuse.
 
-Use the existing certificate if available.
+Create one dedicated self-signed code-signing certificate with:
+
+~~~text
+Subject = CN=SteamInputAddonforClaw
+EKU     = Code Signing (1.3.6.1.5.5.7.3.3)
+KeyUse  = Digital Signature
+Private key = exportable
+~~~
+
+The subject must exactly match the existing manifest Publisher:
+
+~~~xml
+Publisher="CN=SteamInputAddonforClaw"
+~~~
+
+Keep the package identity name and Application Id unchanged.
+
+Export and preserve:
+
+~~~text
+permanent encrypted PFX  ← private signing identity, REQUIRED for future FSE updates
+matching public CER      ← shipped registration trust artifact
+~~~
+
+The PFX is a project secret.
 
 Do not:
 
-- generate a new signing key in CI;
-- add PFX/password to the repository;
-- restore release-time FSE signing;
-- make normal CI rebuild the FSE artifact.
+- commit the PFX;
+- commit its password;
+- write the password into documentation;
+- generate a fresh signer for each FSE rebuild;
+- generate the signer in normal CI;
+- replace it with an unrelated product certificate.
 
-If the exact same public certificate is retained, its CER hash should normally remain unchanged. Verify rather than assume.
+Recommended ownership:
+
+~~~text
+working copy:
+  CurrentUser\My or another user-controlled local certificate store
+
+backup:
+  encrypted PFX in a private user-controlled secret/backup location outside the repository
+~~~
+
+The exact private storage path is an operator concern and must not be hard-coded into product code.
+
+Once this signer is created, treat losing the PFX/private key as a signing-identity loss requiring explicit recovery/migration work. Future routine FSE version updates must reuse this same signing identity.
 
 ---
 
-## 16. Existing 1.0.0.0 installation migration
+## 16. Rebuild the fixed distribution artifact with the new permanent signer
 
-Do not reintroduce Runtime startup package provisioning.
+Because FseHome is embedded in the fixed MSIX, source changes are not sufficient.
 
-Current lazy registration policy remains authoritative:
+After implementation and after the new permanent FSE signing identity exists:
+
+1. publish SteamInputAddonforClaw.FseHome framework-dependent win-x64;
+2. run the existing manual package-fse-home.ps1 path;
+3. use the new permanent FSE-only PFX;
+4. build/sign version 1.0.1.0;
+5. replace:
+   - Packaging/Distribution/SteamInputAddonforClaw.FseHome.msix
+   - Packaging/Distribution/SteamInputAddonforClaw.FseHome.cer;
+6. update both pinned SHA-256 values in verify-publish-assets.ps1.
+
+The old pre-release 1.0.0.0 CER/MSIX may be replaced completely.
+
+No compatibility guarantee is required from the old 1.0.0.0 signer to the new permanent signer because the product has not been released.
+
+For hardware/dev machines that already have the old package registered, use a clean migration for this one pre-release transition:
 
 ~~~text
-installed FSE version < bundled fixed version
-→ Settings reports it as not current
-→ next explicit FSE ON performs one bounded registration/update
+disable/clear FSE preference if needed
+→ remove the exact old SteamInputAddonforClaw.FseHome package
+→ register/trust the new 1.0.1.0 artifact through the existing normal first-enable path
+→ verify GamingHomeApp from the actually registered FamilyName
+→ reboot/test
 ~~~
 
-For the current pre-release population, requiring one explicit FSE re-enable to upgrade the fixed component is acceptable.
+Do not add product code whose only purpose is to migrate the lost old development signer.
 
-Required upgrade test:
+Do not:
 
-~~~text
-installed package = 1.0.0.0
-bundled fixed version = 1.0.1.0
-user requests FSE ON
-→ registration invoked once
-→ parent readback confirms 1.0.1.0
-→ GamingHomeApp written from actual FamilyName
-→ StartupToGamingHome = true
-~~~
+- reintroduce Runtime startup package provisioning;
+- add a package watcher;
+- add a background repair daemon;
+- restore release-time FSE signing;
+- make normal CI rebuild the FSE artifact.
 
-Do not add:
-
-- startup auto-update;
-- package watcher;
-- background repair daemon.
-
-If product requirements later demand silent FSE component upgrades while already enabled, design that separately from this launcher-handoff PR.
+Future fixed FSE updates after 1.0.1.0 may use the existing lazy registration/version policy because they will be signed by the same preserved permanent PFX.
 
 ---
 
@@ -636,7 +674,7 @@ Update expected:
 
 - MSIX version 1.0.1.0;
 - new MSIX SHA-256;
-- CER SHA-256 only if the actual certificate artifact changes.
+- new CER SHA-256 from the newly established permanent FSE signer.
 
 ### Narrow logic tests
 
@@ -746,11 +784,13 @@ Complete only when all are true:
 11. no Runtime/controller/VIIPER/HidHide dependency is introduced.
 12. manifest package splash remains out of scope.
 13. FSE fixed package advances to 1.0.1.0.
-14. fixed MSIX is rebuilt/signed and its hash contract is updated.
-15. ordinary Addon CI/release still does not rebuild or sign FSE.
-16. real cold-boot validation shows the Windows login surface is no longer exposed for the whole Steam BPM startup interval.
-17. no FseHome process/window remains after handoff.
-18. full build/test suite passes.
+14. a new permanent FSE-only signing PFX is established and preserved outside the repository.
+15. fixed MSIX/CER are rebuilt from that signer and both hash contracts are updated.
+16. future FSE package rebuilds reuse the same preserved PFX rather than generating a new signer.
+17. ordinary Addon CI/release still does not rebuild or sign FSE.
+18. real cold-boot validation shows the Windows login surface is no longer exposed for the whole Steam BPM startup interval.
+19. no FseHome process/window remains after handoff.
+20. full build/test suite passes.
 
 ---
 
