@@ -944,6 +944,64 @@ public sealed class MsiClawAddonPresentationTests
     }
 
     [Fact]
+    public async Task Suspend_stops_motor_test_without_waiting_for_its_delay()
+    {
+        var native = new FakeNative();
+        var sink = new FakeRumbleSink();
+        var delayEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = BuildWithSink(native, new FakePublisher(), new FakePublisher(), sink,
+            vibrationTestAvailable: () => true,
+            delay: (_, _) =>
+            {
+                delayEntered.TrySetResult();
+                return releaseDelay.Task;
+            });
+        await owner.AttachInitialAsync(new FakeSource(), WantsXbox(), default);
+        sink.Writes.Clear();
+
+        var test = owner.TestVibrationMotorAsync(FrontendControllerVibrationMotor.Left, CancellationToken.None);
+        Task<SuspendPauseResult>? suspend = null;
+        try
+        {
+            await delayEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            suspend = owner.PauseForSuspendAsync(default);
+            var pauseResult = await suspend.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.True(pauseResult.Safe);
+            Assert.False(test.IsCompleted);
+            Assert.Equal(new[]
+            {
+                new SteamInputAddonforClaw.Feedback.TwoMotorRumble(ushort.MaxValue, 0),
+                SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped,
+            }, sink.Writes);
+
+            releaseDelay.TrySetResult();
+            var testResult = await test.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(FrontendControllerVibrationTestOutcome.Succeeded, testResult.Outcome);
+
+            var writes = sink.Writes.ToArray();
+            Assert.Equal(3, writes.Length);
+            Assert.Equal(new SteamInputAddonforClaw.Feedback.TwoMotorRumble(ushort.MaxValue, 0), writes[0]);
+            Assert.All(writes.Skip(1), write => Assert.Equal(SteamInputAddonforClaw.Feedback.TwoMotorRumble.Stopped, write));
+        }
+        finally
+        {
+            releaseDelay.TrySetResult();
+            try
+            {
+                await test.WaitAsync(TimeSpan.FromSeconds(5));
+                if (suspend is not null)
+                    await suspend.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            finally
+            {
+                await owner.DisposeAsync();
+            }
+        }
+    }
+
+    [Fact]
     public async Task Controller_motor_test_is_unavailable_without_the_live_test_path()
     {
         var native = new FakeNative();

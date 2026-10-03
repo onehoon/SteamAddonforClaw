@@ -377,63 +377,64 @@ internal sealed class MsiClawAddonPresentation : IMsiClawAddonPresentation
                 "The selected vibration motor is invalid.");
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        IPhysicalRumbleSink sink;
+        PhysicalRumbleWriteResult? pulseResult = null;
+        PhysicalRumbleWriteResult? stopResult = null;
+        Exception? failure = null;
+        var cancelled = false;
         try
         {
             if (!CanTestVibration())
                 return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable,
                     "The live Full1902 physical rumble path is unavailable.");
 
+            sink = _rumbleSink!;
             var pulse = motor == SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationMotor.Left
                 ? new TwoMotorRumble(ushort.MaxValue, 0)
                 : new TwoMotorRumble(0, ushort.MaxValue);
-            PhysicalRumbleWriteResult? pulseResult = null;
-            PhysicalRumbleWriteResult? stopResult = null;
-            Exception? failure = null;
-            var cancelled = false;
 
             AppLog.Info("ControllerVibration", "ControllerVibrationTestStarted", ("Motor", motor));
-            try
-            {
-                pulseResult = _rumbleSink!.SetRumble(pulse);
-                if (pulseResult.Value.Succeeded)
-                    await _delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                cancelled = true;
-            }
-            catch (Exception exception)
-            {
-                failure = exception;
-            }
-            finally
-            {
-                try { stopResult = _rumbleSink!.SetRumble(TwoMotorRumble.Stopped); }
-                catch (Exception exception) { failure ??= exception; }
-            }
+            try { pulseResult = sink.SetRumble(pulse); }
+            catch (Exception exception) { failure = exception; }
+        }
+        finally { _gate.Release(); }
 
-            if (cancelled)
-                throw new OperationCanceledException(cancellationToken);
-
-            var stopped = stopResult is { Succeeded: true };
-            if (failure is not null || pulseResult is not { Succeeded: true } || !stopped)
-            {
-                var unavailable = pulseResult?.Status == PhysicalRumbleWriteStatus.Unavailable;
-                var outcome = unavailable && stopped && failure is null
-                    ? SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable
-                    : SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Failed;
-                AppLog.Warn("ControllerVibration", "ControllerVibrationTestFailed", failure,
-                    ("Motor", motor), ("PulseStatus", pulseResult?.Status), ("StopStatus", stopResult?.Status));
-                return new(outcome, "The physical vibration test or final STOP could not be confirmed.");
-            }
-
-            AppLog.Info("ControllerVibration", "ControllerVibrationTestCompleted", ("Motor", motor), ("StopConfirmed", true));
-            return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Succeeded, null);
+        try
+        {
+            if (pulseResult is { Succeeded: true })
+                await _delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancelled = true;
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
         }
         finally
         {
-            _gate.Release();
+            try { stopResult = sink.SetRumble(TwoMotorRumble.Stopped); }
+            catch (Exception exception) { failure ??= exception; }
         }
+
+        if (cancelled)
+            throw new OperationCanceledException(cancellationToken);
+
+        var stopped = stopResult is { Succeeded: true };
+        if (failure is not null || pulseResult is not { Succeeded: true } || !stopped)
+        {
+            var unavailable = pulseResult?.Status == PhysicalRumbleWriteStatus.Unavailable;
+            var outcome = unavailable && stopped && failure is null
+                ? SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Unavailable
+                : SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Failed;
+            AppLog.Warn("ControllerVibration", "ControllerVibrationTestFailed", failure,
+                ("Motor", motor), ("PulseStatus", pulseResult?.Status), ("StopStatus", stopResult?.Status));
+            return new(outcome, "The physical vibration test or final STOP could not be confirmed.");
+        }
+
+        AppLog.Info("ControllerVibration", "ControllerVibrationTestCompleted", ("Motor", motor), ("StopConfirmed", true));
+        return new(SteamInputAddonforClaw.Contracts.Frontend.FrontendControllerVibrationTestOutcome.Succeeded, null);
     }
 
     internal bool IsOverlayPaused => _overlayPaused;
