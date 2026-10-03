@@ -1969,6 +1969,7 @@ public sealed class MsiClawAddonPresentationTests
 
     private sealed class FakeNative : ICanonicalViiperNativeApi
     {
+        public bool SetDiagnosticLogDirectory(string _) => true;
         internal readonly List<string> Calls = [];
         internal Queue<USBDeviceAttachResult> AttachResults { get; } = [];
         internal Queue<USBDeviceDetachResult> DetachResults { get; } = [];
