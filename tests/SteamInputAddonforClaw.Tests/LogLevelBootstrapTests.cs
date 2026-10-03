@@ -6,10 +6,10 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class LogLevelBootstrapTests
 {
     [Fact]
-    public void MissingMalformedAndInvalidSettingsFailSafeToOff()
+    public void MissingSettingsDefaultsToInfo_ExistingMalformedAndInvalidSettingsRemainOff()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        Assert.Equal(AppLogPreference.Off, LogLevelBootstrap.Read(path));
+        Assert.Equal(AppLogPreference.Info, LogLevelBootstrap.Read(path));
         File.WriteAllText(path, "{");
         Assert.Equal(AppLogPreference.Off, LogLevelBootstrap.Read(path));
         File.WriteAllText(path, "{\"LogLevel\":\"Invalid\"}");

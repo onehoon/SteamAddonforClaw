@@ -31,8 +31,26 @@ public sealed class SettingsStore
         {
             if (!File.Exists(_settingsPath))
             {
-                AppLog.Info("Settings", "Settings file not found. Using defaults.");
-                return new AppSettings();
+                var defaults = new AppSettings();
+                try
+                {
+                    Save(defaults);
+                    AppLog.Info("Settings", "Default settings file created.",
+                        ("Path", _settingsPath),
+                        ("LogLevel", defaults.LogLevel));
+                }
+                catch (IOException exception)
+                {
+                    AppLog.Warn("Settings", "Default settings file could not be created; using in-memory defaults.", exception,
+                        ("Path", _settingsPath));
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    AppLog.Warn("Settings", "Default settings file could not be created; using in-memory defaults.", exception,
+                        ("Path", _settingsPath));
+                }
+
+                return defaults;
             }
 
             using var document = JsonDocument.Parse(File.ReadAllText(_settingsPath));
@@ -62,12 +80,12 @@ public sealed class SettingsStore
         catch (JsonException exception)
         {
             AppLog.Warn("Settings", "Settings parsing failed. Using defaults.", exception, ("Action", "Defaults"));
-                return new AppSettings();
+            return new AppSettings(LogLevel: AppLogPreference.Off);
         }
         catch (IOException exception)
         {
             AppLog.Warn("Settings", "Settings read failed. Using defaults.", exception, ("Action", "Defaults"));
-            return new AppSettings();
+            return new AppSettings(LogLevel: AppLogPreference.Off);
         }
     }
 

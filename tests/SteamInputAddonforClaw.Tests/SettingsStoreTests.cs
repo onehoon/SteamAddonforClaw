@@ -54,6 +54,42 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_MissingSettingsFile_CreatesCanonicalDefaults()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+
+        var defaults = store.Load();
+
+        Assert.True(File.Exists(path));
+        Assert.Equal(AppLogPreference.Info, defaults.LogLevel);
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+        var root = document.RootElement;
+        Assert.Equal("Info", root.GetProperty("LogLevel").GetString());
+        Assert.Equal(defaults.SuppressDeveloperMenuWarning, root.GetProperty("SuppressDeveloperMenuWarning").GetBoolean());
+        Assert.Equal(defaults.ClawHudEnabled, root.GetProperty("ClawHudEnabled").GetBoolean());
+        Assert.Equal(defaults.DeveloperMenuEnabled, root.GetProperty("DeveloperMenuEnabled").GetBoolean());
+        Assert.Equal(defaults.QuickSettingsCurrentPowerSourceOnly, root.GetProperty("QuickSettingsCurrentPowerSourceOnly").GetBoolean());
+        Assert.Equal(defaults.ScreenshotSaveFolder, root.GetProperty("ScreenshotSaveFolder").ValueKind == System.Text.Json.JsonValueKind.Null
+            ? null
+            : root.GetProperty("ScreenshotSaveFolder").GetString());
+        Assert.True(root.GetProperty("FrontButtonMapping").ValueKind == System.Text.Json.JsonValueKind.Object);
+        Assert.True(root.GetProperty("BackButtonMapping").ValueKind == System.Text.Json.JsonValueKind.Object);
+        Assert.Equal(5, root.GetProperty("OverlayTabOrder").GetArrayLength());
+
+        var reloaded = store.Load();
+        Assert.Equal(defaults.LogLevel, reloaded.LogLevel);
+        Assert.Equal(defaults.SuppressDeveloperMenuWarning, reloaded.SuppressDeveloperMenuWarning);
+        Assert.Equal(defaults.ClawHudEnabled, reloaded.ClawHudEnabled);
+        Assert.Equal(defaults.DeveloperMenuEnabled, reloaded.DeveloperMenuEnabled);
+        Assert.Equal(defaults.QuickSettingsCurrentPowerSourceOnly, reloaded.QuickSettingsCurrentPowerSourceOnly);
+        Assert.Equal(defaults.ScreenshotSaveFolder, reloaded.ScreenshotSaveFolder);
+        Assert.Equal(defaults.FrontButtonMapping, reloaded.FrontButtonMapping);
+        Assert.Equal(defaults.BackButtonMapping, reloaded.BackButtonMapping);
+        Assert.Equal(defaults.AddonQuickSettingsTabOrder, reloaded.AddonQuickSettingsTabOrder);
+    }
+
+    [Fact]
     public void Load_WhenDeveloperMenuEnabledIsMissing_DefaultsToFalse()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
@@ -277,6 +313,16 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void MalformedExistingSettings_DefaultsLogLevelToOff()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{");
+
+        Assert.Equal(AppLogPreference.Off, new SettingsStore(path).Load().LogLevel);
+    }
+
+    [Fact]
     public void DebugLogLevel_RoundTripsAsText()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -304,9 +350,22 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void NewAppSettings_DefaultsLogLevelToOff()
+    public void NewAppSettings_DefaultsLogLevelToInfo()
     {
-        Assert.Equal(AppLogPreference.Off, new AppSettings().LogLevel);
+        Assert.Equal(AppLogPreference.Info, new AppSettings().LogLevel);
+    }
+
+    [Fact]
+    public void ExplicitOff_RemainsOffAcrossBootstrapAndSettingsLoad()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        store.Save(new AppSettings(AppLogPreference.Off));
+        var savedJson = File.ReadAllText(path);
+
+        Assert.Equal(AppLogPreference.Off, LogLevelBootstrap.Read(path));
+        Assert.Equal(AppLogPreference.Off, store.Load().LogLevel);
+        Assert.Equal(savedJson, File.ReadAllText(path));
     }
 
     [Fact]

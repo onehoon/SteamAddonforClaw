@@ -15,13 +15,13 @@ internal interface IFrontendPrerequisiteSetupExecutor
 
 internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteSetupExecutor
 {
-    private readonly bool _allowUsbIpRepairWhileRecoveryUnsafe;
+    private readonly bool _allowPrerequisiteRepairWhileRecoveryUnsafe;
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
     private readonly IElevatedProcessRunner _setupRunner = new ElevatedProcessRunner();
 
-    internal FrontendPrerequisiteSetupExecutor(bool allowUsbIpRepairWhileRecoveryUnsafe = false)
+    internal FrontendPrerequisiteSetupExecutor(bool allowPrerequisiteRepairWhileRecoveryUnsafe = false)
     {
-        _allowUsbIpRepairWhileRecoveryUnsafe = allowUsbIpRepairWhileRecoveryUnsafe;
+        _allowPrerequisiteRepairWhileRecoveryUnsafe = allowPrerequisiteRepairWhileRecoveryUnsafe;
     }
 
     public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot)
@@ -37,20 +37,19 @@ internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteS
         var usbBootChanged = usbReceipt.Receipt is { State: UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot } up && BootSession.HasChangedSince(up.StartedAtUtc);
         var hidInstall = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
         var usbInstall = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
-        var allowUsbIpRepairWhileRecoveryUnsafe = AllowsUsbIpRepairWhileRecoveryUnsafe(
-            _allowUsbIpRepairWhileRecoveryUnsafe,
+        var allowPrerequisiteRepairWhileRecoveryUnsafe = AllowsPrerequisiteRepairWhileRecoveryUnsafe(
+            _allowPrerequisiteRepairWhileRecoveryUnsafe,
             snapshot.Prerequisites);
-        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.RecoverySafe, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged), allowUsbIpRepairWhileRecoveryUnsafe));
+        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.RecoverySafe, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged), allowPrerequisiteRepairWhileRecoveryUnsafe));
     }
 
     public Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken) =>
         PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(assessment, _setupRunner, executablePath, ElevatedPrerequisiteSetup.Argument, cancellationToken);
 
-    internal static bool AllowsUsbIpRepairWhileRecoveryUnsafe(
+    internal static bool AllowsPrerequisiteRepairWhileRecoveryUnsafe(
         bool startupRepairWindow,
         RuntimePrerequisiteAssessment prerequisites) =>
         startupRepairWindow
-        && prerequisites.HidHide.Status == PrerequisiteStatus.Ready
         && prerequisites.Viiper.Status == PrerequisiteStatus.Ready;
 
     private static ComponentProvisioningState ToComponentProvisioningState(HidHideProvisioningReceiptState state) => state switch { HidHideProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned, HidHideProvisioningReceiptState.InstallStarted => ComponentProvisioningState.InstallStarted, HidHideProvisioningReceiptState.InstalledPendingReboot => ComponentProvisioningState.PendingReboot, HidHideProvisioningReceiptState.AttemptFailed => ComponentProvisioningState.AttemptFailed, HidHideProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled, _ => ComponentProvisioningState.Indeterminate };

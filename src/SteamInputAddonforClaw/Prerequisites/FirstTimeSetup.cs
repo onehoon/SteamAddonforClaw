@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.Prerequisites;
 
 internal enum ComponentProvisioningState { None, Provisioned, InstallStarted, PendingReboot, AttemptFailed, AttemptCancelled, Corrupt, Indeterminate, Legacy }
 internal sealed record ProvisioningStateAssessment(ComponentProvisioningState HidHide, ComponentProvisioningState UsbIpWin2, bool HidHideBootSessionChanged = false, bool UsbIpWin2BootSessionChanged = false);
-internal sealed record FirstTimeSetupInput(HardwareCompatibilityAssessment HardwareCompatibility, bool RecoverySafe, SteamSessionState Steam, PrerequisiteAssessment HidHide, PrerequisiteAssessment UsbIpWin2, ComponentInstallationAssessment HidHideInstallation, ComponentInstallationAssessment UsbIpWin2Installation, ProvisioningStateAssessment Provisioning, bool AllowUsbIpRepairWhileRecoveryUnsafe = false);
+internal sealed record FirstTimeSetupInput(HardwareCompatibilityAssessment HardwareCompatibility, bool RecoverySafe, SteamSessionState Steam, PrerequisiteAssessment HidHide, PrerequisiteAssessment UsbIpWin2, ComponentInstallationAssessment HidHideInstallation, ComponentInstallationAssessment UsbIpWin2Installation, ProvisioningStateAssessment Provisioning, bool AllowPrerequisiteRepairWhileRecoveryUnsafe = false);
 internal enum FirstTimeSetupStatus { Complete, Required, RestartRequired, Blocked, NotApplicable, Indeterminate }
 internal enum FirstTimeSetupReason { Complete, MissingComponents, PendingReboot, RecoveryUnsafe, HardwareUnsupported, HardwareIndeterminate, SteamActive, ProvisioningUncertain, LegacyHidHideMissing }
 internal sealed record FirstTimeSetupAssessment(FirstTimeSetupStatus Status, FirstTimeSetupReason Reason, bool CanInstallRequiredComponents);
@@ -33,9 +33,11 @@ internal static class FirstTimeSetupPolicy
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
         if (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.AttemptFailed && input.UsbIpWin2Installation.Status is not (ComponentInstallationStatus.Missing or ComponentInstallationStatus.Installed or ComponentInstallationStatus.UpdateRequired))
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
+        var hidHideRepairRequired = input.HidHideInstallation.Status == ComponentInstallationStatus.Missing;
         var usbIpRepairRequired = input.UsbIpWin2Installation.Status is
             ComponentInstallationStatus.Missing or ComponentInstallationStatus.UpdateRequired;
-        if (!input.RecoverySafe && !(input.AllowUsbIpRepairWhileRecoveryUnsafe && usbIpRepairRequired))
+        var prerequisiteRepairRequired = hidHideRepairRequired || usbIpRepairRequired;
+        if (!input.RecoverySafe && !(input.AllowPrerequisiteRepairWhileRecoveryUnsafe && prerequisiteRepairRequired))
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.RecoveryUnsafe, false);
         if (input.Provisioning.HidHide == ComponentProvisioningState.Legacy && input.HidHide.Status == PrerequisiteStatus.Missing)
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.LegacyHidHideMissing, false);

@@ -83,7 +83,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
             new(PrerequisiteKind.HidHide, ComponentInstallationStatus.Installed, "ExpectedPackagePresent", "1.5.230.0"),
             new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.UpdateRequired, "OlderPackageVersion", "0.9.8.0"),
             new(ComponentProvisioningState.None, ComponentProvisioningState.None),
-            AllowUsbIpRepairWhileRecoveryUnsafe: true));
+            AllowPrerequisiteRepairWhileRecoveryUnsafe: true));
         var executor = new FakeExecutor(setup)
         {
             Result = new(ElevatedProcessResultKind.Completed, 3010)
@@ -105,6 +105,50 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
         Assert.True(result.Status.CanInstallRequiredComponents);
         Assert.Equal(1, executor.RunCallCount); // The existing setup owner is the only launch path.
         Assert.True(executor.SuppliedAssessment!.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public async Task Disabled_boot_first_install_reaches_the_existing_setup_runner()
+    {
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Ready"));
+        var allowPrerequisiteRepair = FrontendPrerequisiteSetupExecutor.AllowsPrerequisiteRepairWhileRecoveryUnsafe(
+            startupRepairWindow: true,
+            prerequisites);
+        var setup = FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
+            new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "Test"),
+            RecoverySafe: false,
+            SteamSessionState.FromRunningAppId(0),
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "Missing"),
+            new(PrerequisiteKind.HidHide, ComponentInstallationStatus.Missing, "PackageAndRuntimeMissing"),
+            new(PrerequisiteKind.UsbIpWin2, ComponentInstallationStatus.Missing, "PackageAndRuntimeMissing"),
+            new(ComponentProvisioningState.None, ComponentProvisioningState.None),
+            AllowPrerequisiteRepairWhileRecoveryUnsafe: allowPrerequisiteRepair));
+        var executor = new FakeExecutor(setup)
+        {
+            Result = new(ElevatedProcessResultKind.Completed, 0)
+        };
+        var firstInstall = Snapshot("first-install") with
+        {
+            Prerequisites = new(
+                new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"),
+                new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "Missing"),
+                new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Ready")),
+            RecoverySafe = false
+        };
+        var control = CreateControl([firstInstall, firstInstall], executor);
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal(FrontendPrerequisiteSetupResultKind.Installed, result.Result);
+        Assert.Equal(FrontendSetupStatus.Required, result.Status!.SetupStatus);
+        Assert.True(result.Status.CanInstallRequiredComponents);
+        Assert.Equal(1, executor.RunCallCount);
+        Assert.True(executor.SuppliedAssessment!.CanInstallRequiredComponents);
+        Assert.True(allowPrerequisiteRepair);
     }
 
     [Theory]
