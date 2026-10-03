@@ -154,7 +154,7 @@ foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'ui'), 
 
 $fsePackagePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.msix'
 $fseCertificatePath = Join-Path $PublishDirectory 'fse\SteamInputAddonforClaw.FseHome.cer'
-$expectedFsePackageSha256 = 'D4A88D70E4C360CFDDF825A18C118E4171ACC857738A51162118C8F1785199AA'
+$expectedFsePackageSha256 = 'B43CDCD249B5EDACC4DB7F3B57D2BF57D482D544BD2EBB5DBDA644557FCB8B14'
 $expectedFseCertificateSha256 = '82382E9445A9B5E1D080E0F97ADF808E11799B88EB3A5EEB3FB9BB22193B2E15'
 if ((Get-FileHash -LiteralPath $fsePackagePath -Algorithm SHA256).Hash -ne $expectedFsePackageSha256) {
     throw 'Published FSE MSIX SHA-256 does not match the fixed distribution artifact.'

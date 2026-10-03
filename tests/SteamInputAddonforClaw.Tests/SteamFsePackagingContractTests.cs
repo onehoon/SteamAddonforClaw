@@ -28,6 +28,10 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("ExpectedWindowClass = \"SDL_app\"", native, StringComparison.Ordinal);
         Assert.Contains("ExpectedTitlePrefix = \"Steam Big Picture\"", native, StringComparison.Ordinal);
         Assert.Contains("intentionally matches SteamBigPictureWindowProbe", native, StringComparison.Ordinal);
+        Assert.Contains("MatchesVisibleIdentity(", native, StringComparison.Ordinal);
+        Assert.Contains("NativeMethods.IsWindowVisible(handle)", native, StringComparison.Ordinal);
+        Assert.Contains("NativeMethods.IsIconic(candidate.Handle)", program, StringComparison.Ordinal);
+        Assert.Contains("ShowWindowMaximized = 3", native, StringComparison.Ordinal);
         Assert.Contains("steam://open/bigpicture", program, StringComparison.Ordinal);
         Assert.Contains("SteamExe", program, StringComparison.Ordinal);
         Assert.Contains("SteamPath", program, StringComparison.Ordinal);

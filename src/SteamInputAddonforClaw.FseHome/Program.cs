@@ -39,8 +39,8 @@ internal static class Program
                     diagnostics.Write($"Foreground before handoff HWND={FormatHwnd(NativeMethods.GetForegroundWindow())}");
 
                     handoffWindow.Hide();
-                    if (!NativeMethods.IsWindowVisible(candidate.Handle))
-                        NativeMethods.ShowWindow(candidate.Handle, NativeMethods.ShowWindowNormal);
+                    if (NativeMethods.IsIconic(candidate.Handle))
+                        NativeMethods.ShowWindow(candidate.Handle, NativeMethods.ShowWindowMaximized);
 
                     var foregroundRequestSucceeded = NativeMethods.SetForegroundWindow(candidate.Handle);
                     var foregroundAfterHandoff = NativeMethods.GetForegroundWindow();

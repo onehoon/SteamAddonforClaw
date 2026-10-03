@@ -71,6 +71,21 @@ public sealed class FseHomeHandoffTests
         Assert.False(SteamBigPictureWindowProbe.MatchesIdentity(processName, windowClass, title));
     }
 
+    [Fact]
+    public void Big_picture_readiness_requires_a_visible_matching_window()
+    {
+        Assert.False(SteamBigPictureWindowProbe.MatchesVisibleIdentity(
+            "steamwebhelper",
+            "SDL_app",
+            "Steam Big Picture",
+            isVisible: false));
+        Assert.True(SteamBigPictureWindowProbe.MatchesVisibleIdentity(
+            "steamwebhelper",
+            "SDL_app",
+            "Steam Big Picture",
+            isVisible: true));
+    }
+
     private static string CreateTemporaryDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), $"fse-home-test-{Guid.NewGuid():N}");

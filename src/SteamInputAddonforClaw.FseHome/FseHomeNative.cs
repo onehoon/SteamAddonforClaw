@@ -141,6 +141,9 @@ internal static class SteamBigPictureWindowProbe
         string.Equals(windowClass, ExpectedWindowClass, StringComparison.Ordinal) &&
         title.StartsWith(ExpectedTitlePrefix, StringComparison.OrdinalIgnoreCase);
 
+    internal static bool MatchesVisibleIdentity(string processName, string windowClass, string title, bool isVisible) =>
+        isVisible && MatchesIdentity(processName, windowClass, title);
+
     internal static bool TryFind(out SteamBigPictureWindow candidate)
     {
         candidate = default;
@@ -199,7 +202,12 @@ internal static class SteamBigPictureWindowProbe
             return false;
         }
 
-        if (!MatchesIdentity(processName, className.ToString(), title.ToString()) || !NativeMethods.IsWindow(handle))
+        if (!MatchesVisibleIdentity(
+                processName,
+                className.ToString(),
+                title.ToString(),
+                NativeMethods.IsWindowVisible(handle)) ||
+            !NativeMethods.IsWindow(handle))
             return false;
 
         candidate = new(handle, processId);
@@ -210,6 +218,7 @@ internal static class SteamBigPictureWindowProbe
 internal static class NativeMethods
 {
     internal const int ShowWindowNormal = 5;
+    internal const int ShowWindowMaximized = 3;
     internal const int ShowWindowHide = 0;
     internal const uint MessageDestroy = 0x0002;
 
@@ -341,6 +350,10 @@ internal static class NativeMethods
     [DllImport("user32.dll", EntryPoint = "IsWindowVisible", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool IsWindowVisible(IntPtr handle);
+
+    [DllImport("user32.dll", EntryPoint = "IsIconic", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsIconic(IntPtr handle);
 
     [DllImport("user32.dll", EntryPoint = "EnumWindows", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
