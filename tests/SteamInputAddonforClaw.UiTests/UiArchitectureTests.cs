@@ -196,7 +196,7 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Device_feature_expanders_follow_authoritative_enabled_snapshots()
+    public void Device_feature_expanders_start_collapsed_without_snapshot_driven_expansion()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
@@ -204,9 +204,7 @@ public sealed class UiArchitectureTests
         var normalizedXaml = xaml.Replace("\r\n", "\n", StringComparison.Ordinal);
 
         Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("CpuBoostExpander.IsExpanded = snapshot.Enabled", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("PowerModeExpander.IsExpanded = snapshot.Enabled", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("TdpExpander.IsExpanded = snapshot.Configuration?.Enabled == true", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("Expander.IsExpanded =", codeBehind, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE83F;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", normalizedXaml, StringComparison.Ordinal);
         Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
@@ -624,16 +622,19 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Controller_option_cards_have_header_icons()
+    public void Controller_expanders_have_parent_icons_and_option_cards_have_no_icons()
     {
         var root = FindRepositoryRoot();
         var controllerXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml"));
         var cards = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
-        var icons = cards.Select(card => card.Elements().SingleOrDefault(element => element.Name.LocalName == "SettingsCard.HeaderIcon"))
-            .ToArray();
+        var expanders = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander").ToArray();
 
         Assert.Equal(15, cards.Length);
-        Assert.All(icons, icon => Assert.NotNull(icon));
+        Assert.Equal(5, expanders.Length);
+        Assert.All(expanders, expander => Assert.Single(
+            expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon"));
+        Assert.All(cards, card => Assert.DoesNotContain(
+            card.Elements(), element => element.Name.LocalName == "SettingsCard.HeaderIcon"));
     }
 
     [Fact]
@@ -697,7 +698,7 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Profile_feature_order_expander_state_and_resolution_contract_are_explicit()
+    public void Profile_feature_order_collapsed_defaults_and_resolution_contract_are_explicit()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml"));
@@ -715,10 +716,7 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("x:Name=\"DisplayExpander\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsCard Header=\"Resolution\">", xaml, StringComparison.Ordinal);
-        Assert.Contains("IntelFpsExpander.IsExpanded = snapshot.FpsLimit?.Enabled == true", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("PowerModeExpander.IsExpanded = snapshot.PowerMode?.Enabled == true", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("CpuBoostExpander.IsExpanded = snapshot.CpuBoost.Enabled", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("TdpExpander.IsExpanded = snapshot.Tdp.Enabled", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("Expander.IsExpanded =", codeBehind, StringComparison.Ordinal);
         Assert.Contains("new(null, null, \"Do not change\"), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", codeBehind, StringComparison.Ordinal);
         Assert.Contains("HeaderIcon", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xEC4A;\"", xaml, StringComparison.Ordinal);
