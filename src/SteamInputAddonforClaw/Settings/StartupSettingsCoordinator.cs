@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
+using SteamInputAddonforClaw.Contracts.ControllerVibration;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Install;
@@ -27,6 +28,7 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
     public FrontButtonMappingSettings FrontButtonMapping => Settings.FrontButtonMapping;
     public BackButtonMappingSettings BackButtonMapping => Settings.BackButtonMapping;
     public ControllerLedSettings ControllerLed => Settings.ControllerLed;
+    public ControllerVibrationSettings ControllerVibration => Settings.ControllerVibration;
     public IReadOnlyList<AddonQuickSettingsTabId> AddonQuickSettingsTabOrder => Settings.AddonQuickSettingsTabOrder;
     public event EventHandler? FrontButtonMappingChanged;
 
@@ -126,6 +128,29 @@ public sealed class StartupSettingsCoordinator : IFrontButtonMappingPreference
         SteamInputAddonforClaw.Diagnostics.AppLog.Debug("Settings", "Controller LED settings saved.",
             ("Enabled", settings.Enabled), ("Brightness", settings.Brightness),
             ("Red", settings.Red), ("Green", settings.Green), ("Blue", settings.Blue));
+        return true;
+    }
+
+    /// <summary>Validates and persists the whole desired vibration pair before publishing it.</summary>
+    public bool ChangeControllerVibrationSettings(ControllerVibrationSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var reason = ControllerVibrationSettingsValidation.Validate(settings);
+        if (reason is not null)
+        {
+            SteamInputAddonforClaw.Diagnostics.AppLog.Warn("Settings", "Rejected invalid controller vibration settings.", null,
+                ("Reason", reason));
+            return false;
+        }
+
+        if (Settings.ControllerVibration == settings) return true;
+
+        var next = Settings with { ControllerVibration = settings };
+        _settingsStore.Save(next);
+        Settings = next;
+        SteamInputAddonforClaw.Diagnostics.AppLog.Debug("Settings", "Controller vibration settings saved.",
+            ("LeftPercent", settings.LeftPercent), ("RightPercent", settings.RightPercent));
         return true;
     }
 

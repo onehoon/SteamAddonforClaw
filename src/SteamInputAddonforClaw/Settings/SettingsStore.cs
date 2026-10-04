@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
+using SteamInputAddonforClaw.Contracts.ControllerVibration;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
@@ -74,6 +75,7 @@ public sealed class SettingsStore
                 FrontButtonMapping = ReadFrontButtonMapping(root),
                 BackButtonMapping = ReadBackButtonMapping(root),
                 ControllerLed = ReadControllerLedSettings(root),
+                ControllerVibration = ReadControllerVibrationSettings(root),
                 AddonQuickSettingsTabOrder = ReadAddonQuickSettingsTabOrder(root)
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LogLevel", settings.LogLevel));
@@ -115,6 +117,27 @@ public sealed class SettingsStore
         }
 
         return new(enabledProperty.GetBoolean(), brightness, red, green, blue);
+    }
+
+    /// <summary>Reads the vibration pair in isolation; absent or malformed values use 50/50 only for this feature.</summary>
+    private static ControllerVibrationSettings ReadControllerVibrationSettings(JsonElement root)
+    {
+        if (!root.TryGetProperty("ControllerVibration", out var property) || property.ValueKind != JsonValueKind.Object)
+            return ControllerVibrationSettings.Default;
+
+        if (!property.TryGetProperty("LeftPercent", out var leftProperty)
+            || !leftProperty.TryGetInt32(out var left)
+            || left is < 0 or > 100
+            || !property.TryGetProperty("RightPercent", out var rightProperty)
+            || !rightProperty.TryGetInt32(out var right)
+            || right is < 0 or > 100)
+        {
+            AppLog.Warn("Settings", "Controller vibration settings are malformed; using 50/50 defaults for this feature only.", null,
+                ("Reason", "InvalidControllerVibrationSettings"));
+            return ControllerVibrationSettings.Default;
+        }
+
+        return new(left, right);
     }
 
     /// <summary>
@@ -284,7 +307,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.ScreenshotSaveFolder, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
+        var payload = new { LogLevel = settings.LogLevel.ToString(), settings.SuppressDeveloperMenuWarning, settings.ClawHudEnabled, settings.DeveloperMenuEnabled, settings.QuickSettingsCurrentPowerSourceOnly, settings.ScreenshotSaveFolder, settings.FrontButtonMapping, settings.BackButtonMapping, settings.ControllerLed, settings.ControllerVibration, OverlayTabOrder = AddonQuickSettingsTabOrderContract.NormalizeOrDefault(settings.AddonQuickSettingsTabOrder) };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

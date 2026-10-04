@@ -114,7 +114,7 @@
             <ctcontrols:SettingsExpander
                 x:Name="VibrationStrengthExpander"
                 Header="Vibration Strength"
-                Description="Set the persistent firmware ceiling for each controller motor."
+                Description="Set the vibration strength applied while the Addon owns the controller."
                 IsExpanded="False">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <SymbolIcon Symbol="Volume" />

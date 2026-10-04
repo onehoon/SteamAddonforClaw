@@ -120,7 +120,7 @@ public sealed partial class VibrationTestPage : UserControl
         {
             VibrationProfileProbeStatusText.Text = mode == FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty
                 ? "Restore request failed; the motors may remain at test values. Press Restore 50 / 50 again manually."
-                : "The profile write request failed. Physical effect is unknown; see the application log.";
+                : "The developer profile write failed; production saved strength is unchanged. See the application log.";
             AppLog.Warn("ControllerVibration", "ControllerVibrationProfileWriteProbeUiFailed", exception,
                 ("Mode", mode), ("Reason", exception.GetType().Name));
         }
