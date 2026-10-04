@@ -115,6 +115,15 @@ public sealed partial class OverlayWindow
         ConfigureQuickSettingsSurface(QuickSettingsPageId.Profile, mutate);
     }
 
+    internal Task FlushPendingUserEditsAsync() => Task.WhenAll(
+        _quickSettingsSurfaces.OrderBy(pair => pair.Key)
+            .Select(pair => pair.Value.Binding?.FlushPendingUserEditsAsync() ?? Task.CompletedTask));
+
+    internal Task FlushProfilePendingUserEditsAsync() =>
+        _quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)
+            ? surface.Binding?.FlushPendingUserEditsAsync() ?? Task.CompletedTask
+            : Task.CompletedTask;
+
     private void ConfigureQuickSettingsSurface(QuickSettingsPageId pageId, Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> mutate)
     {
         if (!_quickSettingsSurfaces.TryGetValue(pageId, out var surface)) return;

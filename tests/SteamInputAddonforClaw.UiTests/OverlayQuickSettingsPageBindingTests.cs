@@ -30,7 +30,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
         new(rowId, rowId.ToString(), QuickSettingsControlKind.Slider, available, writable,
             QuickSettingsValue.Integer(value),
             new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, min, max, Step: 1, Suffix: suffix),
-            QuickSettingsCommitPolicy.TrailingDebounce2000, group);
+            QuickSettingsCommitPolicy.TrailingDebounce300, group);
 
     private static QuickSettingsRow Discrete(
         QuickSettingsRowId rowId, int value, IReadOnlyList<QuickSettingsDiscreteOption>? options = null,
@@ -38,7 +38,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
         new(rowId, rowId.ToString(), QuickSettingsControlKind.Slider, available, writable,
             QuickSettingsValue.Integer(value),
             new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: options ?? NonContiguousOptions),
-            QuickSettingsCommitPolicy.TrailingDebounce2000);
+            QuickSettingsCommitPolicy.TrailingDebounce300);
 
     // TDP (grouped, linked PL1/PL2) + CPU Boost (independent discrete sliders) -- the two shapes
     // the real Device page exercises (work order sections 12/24/26).
@@ -760,6 +760,131 @@ public sealed class OverlayQuickSettingsPageBindingTests
 
         Assert.False(submitted);
         Assert.Empty(mutate.Calls);
+    }
+
+    [Fact]
+    public async Task Flush_pending_profile_tdp_submits_one_whole_mutation_for_the_selected_app_id()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var uiThread = new UiThreadStub();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, uiThread, delay.Func);
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsValue.Integer(26));
+
+        var flush = binding.FlushPendingUserEditsAsync();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "Profile TDP flush submitted", uiThread);
+        var intent = Assert.Single(mutate.Calls);
+        Assert.Equal(480u, intent.AppId);
+        Assert.Equal(QuickSettingsCommitGroupId.ProfileTdpConfiguration,
+            binding.FindRow(QuickSettingsRowId.ProfileTdpAcPl1) is { } row ? row.CommitGroupId : null);
+        Assert.Equal(new[]
+        {
+            QuickSettingsRowId.ProfileTdpEnabled,
+            QuickSettingsRowId.ProfileTdpAcPl1,
+            QuickSettingsRowId.ProfileTdpAcPl2,
+            QuickSettingsRowId.ProfileTdpDcPl1,
+            QuickSettingsRowId.ProfileTdpDcPl2,
+        }, intent.Values.Select(value => value.RowId));
+        Assert.Equal(26, intent.Values.Single(value => value.RowId == QuickSettingsRowId.ProfileTdpAcPl1).Value.IntegerValue);
+
+        mutate.CompleteNext(Success(ProfilePage(480, pl1Ac: 26, pl2Ac: 27)));
+        await flush;
+        uiThread.Pump();
+        Assert.Empty(binding.PendingKeys);
+    }
+
+    [Fact]
+    public async Task Flush_pending_device_tdp_submits_the_final_group_without_waiting_for_delay()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var uiThread = new UiThreadStub();
+        using var binding = NewBinding(TdpPage(), mutate.Func, uiThread, delay.Func);
+        binding.ScheduleSlider(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsValue.Integer(26));
+
+        var flush = binding.FlushPendingUserEditsAsync();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "Device TDP flush submitted", uiThread);
+        var intent = Assert.Single(mutate.Calls);
+        Assert.Equal(QuickSettingsCommitGroupId.DeviceTdpConfiguration,
+            binding.FindRow(QuickSettingsRowId.DeviceTdpAcPl1)!.CommitGroupId);
+        Assert.Equal(new[]
+        {
+            QuickSettingsRowId.DeviceTdpEnabled,
+            QuickSettingsRowId.DeviceTdpAcPl1,
+            QuickSettingsRowId.DeviceTdpAcPl2,
+            QuickSettingsRowId.DeviceTdpDcPl1,
+            QuickSettingsRowId.DeviceTdpDcPl2,
+        }, intent.Values.Select(value => value.RowId));
+        Assert.Equal(26, intent.Values.Single(value => value.RowId == QuickSettingsRowId.DeviceTdpAcPl1).Value.IntegerValue);
+
+        mutate.CompleteNext(Success(TdpPage(pl1Ac: 26, pl2Ac: 27)));
+        await flush;
+        uiThread.Pump();
+        Assert.Empty(binding.PendingKeys);
+    }
+
+    [Fact]
+    public async Task Flush_pending_independent_slider_submits_its_latest_value_once()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var uiThread = new UiThreadStub();
+        using var binding = NewBinding(TdpPage(), mutate.Func, uiThread, delay.Func);
+        binding.ScheduleSlider(QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsValue.Integer(20));
+        binding.ScheduleSlider(QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsValue.Integer(40));
+
+        var flush = binding.FlushPendingUserEditsAsync();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "independent slider flush submitted", uiThread);
+        var intent = Assert.Single(mutate.Calls);
+        Assert.Equal(QuickSettingsRowId.DeviceCpuBoostAc, intent.EditedRowId);
+        Assert.Equal(40, Assert.Single(intent.Values).Value.IntegerValue);
+
+        mutate.CompleteNext(Success(TdpPage()));
+        await flush;
+        uiThread.Pump();
+        Assert.Empty(binding.PendingKeys);
+    }
+
+    [Fact]
+    public async Task Flush_submits_distinct_pending_entries_sequentially_within_one_binding()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var uiThread = new UiThreadStub();
+        using var binding = NewBinding(TdpPage(), mutate.Func, uiThread, delay.Func);
+        binding.ScheduleSlider(QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsValue.Integer(20));
+        binding.ScheduleSlider(QuickSettingsRowId.DeviceCpuBoostDc, QuickSettingsValue.Integer(40));
+
+        var flush = binding.FlushPendingUserEditsAsync();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "first pending entry submitted", uiThread);
+        Assert.Single(mutate.Calls);
+
+        mutate.CompleteNext(Success(TdpPage()));
+        await SpinUntilAsync(() => mutate.Calls.Count == 2, "second pending entry submitted", uiThread);
+        Assert.Equal(
+            new[] { QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsRowId.DeviceCpuBoostDc },
+            mutate.Calls.Select(intent => intent.EditedRowId));
+
+        mutate.CompleteNext(Success(TdpPage()));
+        await flush;
+        uiThread.Pump();
+        Assert.Empty(binding.PendingKeys);
+    }
+
+    [Fact]
+    public async Task Flush_after_profile_context_change_does_not_submit_the_retired_app_id()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, delay.Func);
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsValue.Integer(26));
+        binding.ApplyAuthoritativePage(ProfilePage(570));
+
+        await binding.FlushPendingUserEditsAsync();
+
+        Assert.Empty(mutate.Calls);
+        Assert.Empty(binding.PendingKeys);
+        Assert.Equal(570u, binding.AuthoritativePage.AppId);
     }
 
     // --- Hide / teardown (section 39/40) -----------------------------------------------------------

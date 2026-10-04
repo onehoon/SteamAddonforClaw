@@ -558,7 +558,7 @@ The exact threshold/repeat timing should be hardware-tuned later. Start simple; 
 
 Held-direction navigation and feature-mutation debounce are different problems.
 
-Do not use the 2-second slider commit delay as a navigation repeat delay.
+Do not use the 300 ms Overlay slider commit delay as a navigation repeat delay.
 
 If hardware testing shows that holding a stick/DPad should repeatedly move/adjust, add one narrow held-direction repeat policy. Do not create a generalized input timing manager before it is needed.
 
@@ -763,11 +763,11 @@ Left/Right changes value
 → update local visible draft immediately
 → schedule authoritative mutation
 
-another Left/Right before 2 seconds
+another Left/Right before 300 ms
 → replace/reset pending commit for the same key
 → keep latest draft visible
 
-2 seconds after last change
+300 ms after the last change
 → send latest desired value/configuration to Runtime
 → receive authoritative result/readback
 → reconcile visible state
@@ -791,7 +791,7 @@ pending local slider draft exists
 
 ### 13.3 Toggles remain immediate
 
-The existing QAM generally treats toggle actions as immediate mutations rather than applying the 2-second slider debounce to them.
+The existing QAM generally treats toggle actions as immediate mutations rather than applying its slider debounce to them. Overlay Device/Profile sliders use the shared 300 ms policy; their toggles remain immediate.
 
 Initial Overlay rule:
 
@@ -802,7 +802,7 @@ A toggles
 → apply authoritative result/readback
 ```
 
-Do not delay a simple On/Off toggle for 2 seconds merely because sliders use delayed commit.
+Do not delay a simple On/Off toggle merely because sliders use delayed commit.
 
 ### 13.4 Reuse behavior, not necessarily code abstraction
 
@@ -812,7 +812,7 @@ Do **not** refactor the QAM implementation into a cross-language/generalized deb
 
 Reuse:
 
-- the 2-second relaxed commit policy;
+- the shared 300 ms Overlay Device/Profile commit policy;
 - latest-value-wins per mutation key;
 - immediate local preview;
 - authoritative result/readback;
@@ -1202,20 +1202,22 @@ The initial tab should not display stale values merely because the process staye
 
 B/outside click/toggle-off/Main UI open/Overlay process loss remain lifecycle events governed by OQ4.
 
-The UI should stop accepting new mutations as close begins.
+For a normal user Back or outside-click dismissal, submit valid pending user drafts immediately through their existing mutation paths, wait for those already-submitted operations to settle, then send the existing `DismissRequested`. The pipe reader must remain available while the App awaits those mutation responses.
 
-For debounced slider drafts, the focused OQ5 implementation must choose one simple explicit close policy and test it. Preferred direction:
+Runtime-forced Hide, stale Profile AppId replacement, and process teardown remain cancellation-oriented. The UI must not keep controller capture open for the 300 ms debounce window.
 
 ```text
-close begins
-→ stop new adjustments
-→ if latest draft has already been submitted, settle normally
-→ do not keep Overlay capture alive solely to finish a long UI-side debounce timer
+normal user Back/outside click
+→ flush valid unsubmitted drafts immediately
+→ await current mutation settlement
+→ send existing DismissRequested
+
+Runtime/lifecycle Hide
+→ cancel unsubmitted local drafts
+→ continue OQ4 retirement without waiting for debounce or mutation
 ```
 
-Do not let a 2-second UI debounce become a controller-safety/lifecycle authority.
-
-Exact flush/cancel behavior for an unsubmitted draft should be frozen in the feature-binding work order after the transport mutation seam is implemented.
+Do not let the UI debounce become a controller-safety/lifecycle authority. `HideForPocAsync()` never waits for a debounce or feature mutation.
 
 ---
 
@@ -1466,7 +1468,7 @@ SLIDER
 - Left/Right adjusts immediately
 - A not required for edit mode
 - immediate local preview
-- QAM-style 2-second latest-value commit policy
+- Shared Overlay slider policy: commit the latest value 300 ms after the last edit
 
 TOGGLE
 - Up/Down selects row

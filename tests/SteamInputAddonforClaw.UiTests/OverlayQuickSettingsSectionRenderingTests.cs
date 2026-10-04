@@ -94,5 +94,5 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
         Writable: true,
         QuickSettingsValue.Integer(10),
         new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 0, Maximum: 20),
-        QuickSettingsCommitPolicy.TrailingDebounce2000);
+        QuickSettingsCommitPolicy.TrailingDebounce300);
 }

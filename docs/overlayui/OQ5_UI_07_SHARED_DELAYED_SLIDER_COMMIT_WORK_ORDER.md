@@ -446,6 +446,8 @@ Do not add fake TDP/CPU/FPS failures as product UI.
 
 ## 11. Close / hide / lifecycle policy
 
+> The current close policy is superseded by `OVERLAY_300MS_DELAYED_COMMIT_AND_USER_DISMISS_FLUSH_WORK_ORDER_2026-10-04.md`: normal user Back/outside-click flushes valid pending edits before the existing dismissal request; Runtime-forced Hide and genuine context invalidation still cancel unsubmitted drafts.
+
 The UI design deliberately says a 2-second debounce must never become a controller-capture authority.
 
 Required invariant:
@@ -466,17 +468,14 @@ The delayed helper must not hold Overlay visibility or controller capture open.
 
 ### 11.2 Distinguish unsubmitted delay from already-submitted operation
 
-The current UI design intentionally defers the **production feature** choice of flush-vs-cancel for an unsubmitted draft until the real feature mutation transport is bound.
-
-Do not prematurely freeze a single product-wide flush policy in this infrastructure PR.
-
-Instead, the helper must expose a narrow lifecycle operation sufficient for later bindings, e.g.:
+The original infrastructure stage deferred the **production feature** choice of flush-vs-cancel until the real feature mutation transport was bound. The current product choice is now explicit:
 
 ```text
-cancel unsubmitted scheduled draft
+normal user Back/outside-click → flush valid pending edit, await its existing mutation result
+Runtime-forced Hide/context invalidation → cancel unsubmitted draft
 ```
 
-For the temporary preview fixture in this PR, cancel the unsubmitted fake commit when the Overlay begins hiding so a hidden preview cannot fire an obsolete fake mutation later.
+The helper exposes both narrow operations. For the temporary preview fixture, forced Hide still cancels unsubmitted fake work so a hidden preview cannot fire an obsolete mutation later.
 
 If a commit has already been submitted before close:
 

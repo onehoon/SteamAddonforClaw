@@ -77,10 +77,11 @@ public sealed partial class OverlayWindow
     internal async Task HideForPocAsync()
     {
         _isVisible = false;
-        // SF-V2-07 section 23/39: hide never waits for the trailing debounce window -- drop any
-        // unsubmitted Device/Profile draft so a hidden Overlay cannot fire an obsolete mutation
-        // later. Already-submitted work settles on its own and stays subject to the generation check.
+        // Normal user Back/outside-click flushes valid drafts before sending DismissRequested.
+        // A Runtime-forced Hide remains lifecycle cleanup: cancel any still-unsubmitted work and
+        // never wait for a debounce or feature mutation here.
         foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.CancelUnsubmittedDrafts();
+        CancelPendingControllerVibrationDraft();
         WindowInterop.DisarmOutsideClickDismissal();
         if (AnimationsEnabled())
         {

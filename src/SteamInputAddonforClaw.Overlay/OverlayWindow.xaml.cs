@@ -10,6 +10,8 @@ public sealed partial class OverlayWindow : Window
     private readonly Brush _rowSelectedBrush;
 
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
+    internal event Action? ProfileSelectedDetailBackRequested;
+    internal event Action? ProfileSelectedDetailTabLeaveRequested;
 
     public OverlayWindow()
     {
@@ -19,6 +21,7 @@ public sealed partial class OverlayWindow : Window
         BuildShell();
         Closed += (_, _) =>
         {
+            CancelPendingControllerVibrationDraft();
             foreach (var surface in _quickSettingsSurfaces.Values) surface.Binding?.Dispose();
         };
     }

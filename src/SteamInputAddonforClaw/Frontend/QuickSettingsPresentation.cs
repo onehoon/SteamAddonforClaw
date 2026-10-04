@@ -122,7 +122,7 @@ internal static class QuickSettingsPresentation
                 Writable: snapshot.Available && snapshot.PersistenceWritable,
                 Value: snapshot.Available ? QuickSettingsValue.Integer(percent) : null,
                 SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, 60, 100, Step: 5, Suffix: "%"),
-                CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000),
+                CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300),
         };
         return new QuickSettingsSection(QuickSettingsSectionId.DeviceBatteryChargeLimit, "Battery Charge Limit", rows, snapshot.LastFailure);
     }
@@ -192,7 +192,7 @@ internal static class QuickSettingsPresentation
             Writable: writable,
             Value: QuickSettingsValue.Integer(currentWatts),
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, minimumWatts, maximumWatts, Step: 1, Suffix: null),
-            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000,
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300,
             CommitGroupId: QuickSettingsCommitGroupId.ProfileTdpConfiguration);
 
     private static QuickSettingsSection BuildProfileCpuBoostSection(FrontendGameProfileSnapshot snapshot)
@@ -223,7 +223,7 @@ internal static class QuickSettingsPresentation
             Writable: writable,
             Value: QuickSettingsValue.Integer((int)mode),
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: CpuBoostDiscreteOptions),
-            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
 
     private static QuickSettingsSection BuildProfilePowerModeSection(FrontendGameProfileSnapshot snapshot)
     {
@@ -254,7 +254,7 @@ internal static class QuickSettingsPresentation
             Writable: writable,
             Value: QuickSettingsValue.Integer((int)mode),
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: PowerModeDiscreteOptions),
-            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
 
     private static QuickSettingsSection BuildProfileFpsLimitSection(FrontendGameProfileSnapshot snapshot)
     {
@@ -290,7 +290,7 @@ internal static class QuickSettingsPresentation
         new(rowId, label, QuickSettingsControlKind.Slider,
             Available: true, Writable: writable, Value: QuickSettingsValue.Integer(fps),
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 40, Maximum: 120, Step: 1, Suffix: " FPS"),
-            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
 
     private static QuickSettingsSection BuildProfileResolutionSection(FrontendGameProfileSnapshot snapshot)
     {
@@ -351,7 +351,7 @@ internal static class QuickSettingsPresentation
             Writable: writable,
             Value: QuickSettingsValue.Integer(currentWatts),
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, minimumWatts, maximumWatts, Step: 1, Suffix: "W"),
-            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000,
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300,
             CommitGroupId: QuickSettingsCommitGroupId.DeviceTdpConfiguration);
 
     /// <summary>Known proven PL1/PL2 gap policy (work order section 13.1/SF-V2-08 section 6.4). Any
@@ -422,7 +422,7 @@ internal static class QuickSettingsPresentation
             Writable: hasValue && persistenceWritable,
             Value: hasValue ? QuickSettingsValue.Integer((int)mode!.Value) : null,
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: CpuBoostDiscreteOptions),
-            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
     }
 
     /// <summary>Section 16.3's "no meaningful state to represent" case: the Unavailable sentinel is
@@ -465,7 +465,7 @@ internal static class QuickSettingsPresentation
             Writable: hasValue && writable,
             Value: hasValue ? QuickSettingsValue.Integer((int)mode!.Value) : null,
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: PowerModeDiscreteOptions),
-            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000);
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
     }
 
     private static bool IsPowerModeAvailable(FrontendPowerModeSnapshot powerMode) =>

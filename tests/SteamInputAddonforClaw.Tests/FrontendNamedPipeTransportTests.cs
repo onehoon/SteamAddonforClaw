@@ -1927,10 +1927,10 @@ public sealed class FrontendNamedPipeTransportTests
             [
                 new(QuickSettingsSectionId.DeviceTdp, "TDP", [
                     new(QuickSettingsRowId.DeviceTdpEnabled, "TDP Control", QuickSettingsControlKind.Toggle, true, true, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate),
-                    new(QuickSettingsRowId.DeviceTdpAcPl1, "Plugged in · PL1", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(20), new(QuickSettingsSliderKind.Numeric, 8, 30, 1, "W"), QuickSettingsCommitPolicy.TrailingDebounce2000, QuickSettingsCommitGroupId.DeviceTdpConfiguration),
+                    new(QuickSettingsRowId.DeviceTdpAcPl1, "Plugged in · PL1", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(20), new(QuickSettingsSliderKind.Numeric, 8, 30, 1, "W"), QuickSettingsCommitPolicy.TrailingDebounce300, QuickSettingsCommitGroupId.DeviceTdpConfiguration),
                 ]),
                 new(QuickSettingsSectionId.DeviceCpuBoost, "CPU Boost", [
-                    new(QuickSettingsRowId.DeviceCpuBoostAc, "Plugged in", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(1), new(QuickSettingsSliderKind.Discrete, Options: [new(0, "Disabled"), new(1, "Enabled")]), QuickSettingsCommitPolicy.TrailingDebounce2000),
+                    new(QuickSettingsRowId.DeviceCpuBoostAc, "Plugged in", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(1), new(QuickSettingsSliderKind.Discrete, Options: [new(0, "Disabled"), new(1, "Enabled")]), QuickSettingsCommitPolicy.TrailingDebounce300),
                 ]),
             ],
             [new(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, 1)]);

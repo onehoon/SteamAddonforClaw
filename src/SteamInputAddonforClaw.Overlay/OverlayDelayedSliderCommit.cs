@@ -31,6 +31,7 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
     private bool _commitInFlight;
     private bool _disposed;
     private CancellationTokenSource? _scheduleCts;
+    private Task _currentRunTask = Task.CompletedTask;
 
     internal OverlayDelayedSliderCommit(
         Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> commitAsync,
@@ -85,7 +86,41 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             token = _scheduleCts.Token;
         }
 
-        _ = RunAsync(intent, generation, delay, token);
+        var runTask = RunAsync(intent, generation, delay, token);
+        lock (_sync)
+        {
+            if (!_disposed && generation == _generation)
+                _currentRunTask = runTask;
+        }
+    }
+
+    // Normal user navigation keeps the latest valid edit: cancel only its debounce wait, submit
+    // the same generation through the existing mutation delegate, and await its current operation.
+    // Runtime-forced Hide and stale-context paths continue to use CancelUnsubmitted instead.
+    internal Task FlushAsync()
+    {
+        QuickSettingsMutationIntent intent;
+        int generation;
+        TaskCompletionSource completion;
+        lock (_sync)
+        {
+            if (_disposed || !_hasPendingDraft)
+                return Task.CompletedTask;
+            if (_commitInFlight)
+                return _currentRunTask;
+
+            intent = _pendingIntent!;
+            generation = _generation;
+            _commitInFlight = true;
+            _scheduleCts?.Cancel();
+            _scheduleCts?.Dispose();
+            _scheduleCts = null;
+            completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _currentRunTask = completion.Task;
+        }
+
+        _ = CompleteFlushedCommitAsync(intent, generation, completion);
+        return completion.Task;
     }
 
     // Cancel a draft that is still waiting out the trailing window (e.g. Overlay begins hiding).
@@ -105,6 +140,7 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
             _scheduleCts?.Cancel();
             _scheduleCts?.Dispose();
             _scheduleCts = null;
+            _currentRunTask = Task.CompletedTask;
         }
     }
 
@@ -137,11 +173,32 @@ internal sealed class OverlayDelayedSliderCommit : IDisposable
 
         lock (_sync)
         {
-            if (_disposed || generation != _generation) return;
+            if (_disposed || generation != _generation || _commitInFlight) return;
             // Past the delay: this draft is now submitted, so CancelUnsubmitted() must leave it be.
             _commitInFlight = true;
         }
 
+        await CommitGenerationAsync(intent, generation).ConfigureAwait(false);
+    }
+
+    private async Task CompleteFlushedCommitAsync(
+        QuickSettingsMutationIntent intent,
+        int generation,
+        TaskCompletionSource completion)
+    {
+        try
+        {
+            await CommitGenerationAsync(intent, generation).ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
+        }
+    }
+
+    private async Task CommitGenerationAsync(QuickSettingsMutationIntent intent, int generation)
+    {
         QuickSettingsCommitSettlement settlement;
         try
         {

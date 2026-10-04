@@ -290,6 +290,24 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         return true;
     }
 
+    // Normal user navigation means "keep the edits": take one stable page-local snapshot and
+    // submit its existing generations sequentially. Runtime/context invalidation still uses the
+    // separate cancellation paths below.
+    internal Task FlushPendingUserEditsAsync()
+    {
+        if (_disposed || _pending.Count == 0)
+            return Task.CompletedTask;
+
+        var pending = _pending.Values.ToArray();
+        return FlushPendingEntriesAsync(pending);
+    }
+
+    private static async Task FlushPendingEntriesAsync(IReadOnlyList<PendingEntry> pending)
+    {
+        foreach (var entry in pending)
+            await entry.Commit.FlushAsync().ConfigureAwait(false);
+    }
+
     // Section 24: never fabricate a value -- every row in the containing section must already
     // carry a structurally valid product value or the group draft is not seeded at all.
     private static bool TrySeedSectionDraft(

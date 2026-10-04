@@ -7,7 +7,7 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class OverlayDelayedSliderCommitTests
 {
-    private static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(2000);
+    private static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(300);
 
     private static QuickSettingsMutationIntent Intent(int value) => new(
         QuickSettingsPageId.Device, AppId: null, QuickSettingsRowId.DeviceTdpAcPl1,
@@ -139,10 +139,83 @@ public sealed class OverlayDelayedSliderCommitTests
         var commit = new GatedCommit();
         using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, delay.Func);
 
-        // A 750ms shared policy is honored with no Overlay production 2000ms constant involved.
+        // A synthetic 750ms policy is honored without an Overlay-owned delay constant.
         helper.Schedule(Intent(55), TimeSpan.FromMilliseconds(750));
 
         Assert.True(helper.HasPendingDraft);
+    }
+
+    [Fact]
+    public async Task Flush_before_timer_submits_the_current_generation_once_without_waiting_for_delay()
+    {
+        var delay = new ManualDelay();
+        var commit = new GatedCommit();
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, delay.Func);
+        helper.Schedule(Intent(55), Delay);
+
+        var flush = helper.FlushAsync();
+        await SpinUntilAsync(() => commit.Submitted.Count == 1, "flushed mutation submitted");
+        Assert.Equal(new[] { 55 }, commit.Submitted);
+
+        delay.Elapse();
+        await Task.Delay(30);
+        Assert.Single(commit.Submitted);
+
+        commit.CompleteNext(SuccessResult(55));
+        await flush;
+        Assert.False(helper.HasPendingDraft);
+    }
+
+    [Fact]
+    public async Task Flush_submits_only_the_latest_unsubmitted_generation()
+    {
+        var delay = new ManualDelay();
+        var commit = new GatedCommit();
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, delay.Func);
+        helper.Schedule(Intent(55), Delay);
+        helper.Schedule(Intent(65), Delay);
+
+        var flush = helper.FlushAsync();
+        await SpinUntilAsync(() => commit.Submitted.Count == 1, "latest mutation submitted");
+        Assert.Equal(new[] { 65 }, commit.Submitted);
+
+        commit.CompleteNext(SuccessResult(65));
+        await flush;
+        delay.Elapse();
+        await Task.Delay(30);
+        Assert.Single(commit.Submitted);
+    }
+
+    [Fact]
+    public async Task Flush_while_current_generation_is_in_flight_awaits_it_without_duplicate_submission()
+    {
+        var delay = new ManualDelay();
+        var commit = new GatedCommit();
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, delay.Func);
+        helper.Schedule(Intent(55), Delay);
+        delay.Elapse();
+        await SpinUntilAsync(() => commit.Submitted.Count == 1, "mutation in flight");
+
+        var flush = helper.FlushAsync();
+        Assert.False(flush.IsCompleted);
+        Assert.Single(commit.Submitted);
+
+        commit.CompleteNext(SuccessResult(55));
+        await flush;
+        Assert.Single(commit.Submitted);
+    }
+
+    [Fact]
+    public async Task Flush_without_a_draft_completes_without_submitting()
+    {
+        var delay = new ManualDelay();
+        var commit = new GatedCommit();
+        using var helper = new OverlayDelayedSliderCommit(commit.Func, (_, _) => { }, delay.Func);
+
+        await helper.FlushAsync();
+
+        Assert.Empty(commit.Submitted);
+        Assert.False(helper.HasPendingDraft);
     }
 
     [Fact]
