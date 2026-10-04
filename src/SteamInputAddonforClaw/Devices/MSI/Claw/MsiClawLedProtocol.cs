@@ -12,7 +12,7 @@ internal static class MsiClawLedProtocol
         address = firmwareVersion switch
         {
             0x0163 or 0x0211 => 0x01FA,
-            0x0166 or 0x0167 or 0x0217 or 0x0219 or 0x0308 or 0x0411 or 0x0414 => 0x024A,
+            0x0166 or 0x0167 or 0x0217 or 0x0219 or 0x0308 or 0x0411 or 0x0414 or 0x0419 => 0x024A,
             _ => 0
         };
         return address != 0;

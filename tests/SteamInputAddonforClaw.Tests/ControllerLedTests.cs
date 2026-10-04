@@ -59,6 +59,7 @@ public sealed class ControllerLedTests : IDisposable
     [InlineData(0x0308, 0x024A)]
     [InlineData(0x0411, 0x024A)]
     [InlineData(0x0414, 0x024A)]
+    [InlineData(0x0419, 0x024A)]
     public void Exact_known_firmware_builds_the_four_static_frame_writes(int firmwareVersion, int expectedBase)
     {
         var settings = new ControllerLedSettings(true, 63, 0x12, 0x34, 0x56);
