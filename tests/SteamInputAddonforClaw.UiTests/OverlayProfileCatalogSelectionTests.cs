@@ -6,23 +6,24 @@ namespace SteamInputAddonforClaw.UiTests;
 public sealed class OverlayProfileCatalogSelectionTests
 {
     [Fact]
-    public void Three_column_selection_is_bounded_and_handles_an_incomplete_last_row()
+    public void Two_column_selection_is_bounded_and_handles_an_incomplete_last_row()
     {
         var selection = new OverlayProfileCatalogSelection();
         selection.Reset(5);
 
         Assert.Equal(0, selection.SelectedIndex);
         Assert.True(selection.MoveRight());
-        Assert.True(selection.MoveRight());
         Assert.False(selection.MoveRight());
+        Assert.True(selection.MoveDown());
+        Assert.Equal(3, selection.SelectedIndex);
         Assert.True(selection.MoveDown());
         Assert.Equal(4, selection.SelectedIndex);
         Assert.False(selection.MoveDown());
-        Assert.True(selection.MoveLeft());
-        Assert.Equal(3, selection.SelectedIndex);
         Assert.True(selection.MoveUp());
-        Assert.Equal(0, selection.SelectedIndex);
-        Assert.False(selection.MoveUp());
+        Assert.Equal(2, selection.SelectedIndex);
+        Assert.False(selection.MoveLeft());
+        Assert.True(selection.MoveRight());
+        Assert.Equal(3, selection.SelectedIndex);
     }
 
     [Fact]

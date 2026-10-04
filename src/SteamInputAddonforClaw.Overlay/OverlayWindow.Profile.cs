@@ -35,7 +35,7 @@ public sealed partial class OverlayWindow
             ColumnSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
             RowSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
         };
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < 2; i++)
             _profileCatalogGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         Grid.SetRow(_profileCatalogGrid, 0);
@@ -145,7 +145,7 @@ public sealed partial class OverlayWindow
         _profileCatalogGrid.Children.Clear();
         _profileCatalogGrid.RowDefinitions.Clear();
         _profileCatalogCards.Clear();
-        var rowCount = (_profileCatalog.Count + 2) / 3;
+        var rowCount = (_profileCatalog.Count + 1) / 2;
         for (var row = 0; row < rowCount; row++)
             _profileCatalogGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -163,6 +163,7 @@ public sealed partial class OverlayWindow
                 VerticalAlignment = VerticalAlignment.Center,
             };
             OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
+            title.FontSize = 15;
 
             var card = new Button
             {
@@ -172,8 +173,8 @@ public sealed partial class OverlayWindow
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             card.Click += OnProfileCatalogCardClick;
-            Grid.SetRow(card, index / 3);
-            Grid.SetColumn(card, index % 3);
+            Grid.SetRow(card, index / 2);
+            Grid.SetColumn(card, index % 2);
             _profileCatalogGrid.Children.Add(card);
             _profileCatalogCards.Add(card);
         }

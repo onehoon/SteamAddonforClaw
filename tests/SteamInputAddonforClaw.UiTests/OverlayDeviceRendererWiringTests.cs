@@ -346,6 +346,17 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Profile_catalog_uses_two_columns_for_visual_placement()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+
+        Assert.Contains("for (var i = 0; i < 2; i++)", source);
+        Assert.Contains("var rowCount = (_profileCatalog.Count + 1) / 2;", source);
+        Assert.Contains("Grid.SetRow(card, index / 2);", source);
+        Assert.Contains("Grid.SetColumn(card, index % 2);", source);
+    }
+
+    [Fact]
     public void Profile_catalog_titles_are_bounded_to_two_wrapped_lines()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
@@ -355,6 +366,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("TextWrapping = TextWrapping.Wrap", source);
         Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", source);
         Assert.Contains("MaxLines = 2", source);
+        Assert.Contains("OverlayQamResources.ApplyTextStyle(title, \"QamTileTitleTextStyle\");", source);
+        Assert.Contains("title.FontSize = 15;", source);
         Assert.DoesNotContain("Content = entry.Name", source);
     }
 
@@ -541,6 +554,27 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Profile_resolution_row_uses_the_shared_detail_indent_in_the_generic_renderer()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var buildStart = quickSettings.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal);
+        var buildEnd = quickSettings.IndexOf("private static void RemoveQuickSettingsSection", buildStart, StringComparison.Ordinal);
+        var buildSection = quickSettings[buildStart..buildEnd];
+
+        Assert.Contains("var detailStack = usesFeatureHeader", buildSection);
+        Assert.Contains("Margin = OverlayQamResources.Get(\"QamDetailIndent\", new Thickness(16, 0, 0, 0))", buildSection);
+        var indentPageCondition = buildSection.IndexOf("surface.PageId == QuickSettingsPageId.Profile", StringComparison.Ordinal);
+        var indentConditionStart = buildSection.LastIndexOf("if (", indentPageCondition, StringComparison.Ordinal);
+        var indentConditionEnd = buildSection.IndexOf(")", indentPageCondition, StringComparison.Ordinal);
+        var indentCondition = buildSection[indentConditionStart..indentConditionEnd];
+        Assert.Contains("surface.PageId == QuickSettingsPageId.Profile", indentCondition);
+        Assert.Contains("section.SectionId == QuickSettingsSectionId.ProfileResolution", indentCondition);
+        Assert.Contains("rowStack.Margin = OverlayQamResources.Get(", buildSection);
+        Assert.Contains("\"QamDetailIndent\"", buildSection);
+        Assert.Equal(1, CountOccurrences(buildSection, "rowStack.Margin = OverlayQamResources.Get("));
+    }
+
+    [Fact]
     public void Setting_cards_expand_inline_and_render_the_claw_hud_rows()
     {
         var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
@@ -564,6 +598,21 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("OverlayRowChrome.Create(grid)", valueRow);
         Assert.DoesNotContain("CreateOverlaySectionCard(BuildShortcutPage())", shell);
         Assert.DoesNotContain("CreateOverlaySectionCard(BuildProfilePage())", shell);
+    }
+
+    [Fact]
+    public void ClawHud_detail_rows_use_the_existing_logical_selection_capabilities()
+    {
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var wrapperStart = clawHud.IndexOf("private OverlayRow CreateSettingDetailRow(", StringComparison.Ordinal);
+        var wrapperEnd = clawHud.IndexOf("private void ToggleSettingCard(", wrapperStart, StringComparison.Ordinal);
+        var wrapper = clawHud[wrapperStart..wrapperEnd];
+
+        Assert.Contains("IsSelectable: () => _expandedSettingCard == card && capabilities.IsSelectable()", wrapper);
+        Assert.Contains("Activate: capabilities.Activate", wrapper);
+        Assert.Contains("Adjust: capabilities.Adjust", wrapper);
+        Assert.DoesNotContain("rowIndex", clawHud);
+        Assert.DoesNotContain("CanInvokeSettingDetailAction", clawHud);
     }
 
     [Fact]

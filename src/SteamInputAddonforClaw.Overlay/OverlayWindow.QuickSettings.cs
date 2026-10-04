@@ -310,6 +310,15 @@ public sealed partial class OverlayWindow
 
         var rows = new List<OverlayRow>();
         var rowStack = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
+        if (!usesFeatureHeader &&
+            surface.PageId == QuickSettingsPageId.Profile &&
+            section.SectionId == QuickSettingsSectionId.ProfileResolution)
+        {
+            rowStack.Margin = OverlayQamResources.Get(
+                "QamDetailIndent",
+                new Thickness(16, 0, 0, 0));
+        }
+
         if (usesFeatureHeader && TryCreateQuickSettingsRow(surface, featureHeaderToggle, out var headerRow, section.Label, strongLabel: true))
         {
             rows.Add(headerRow);

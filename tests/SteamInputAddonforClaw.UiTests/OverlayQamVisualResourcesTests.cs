@@ -214,8 +214,8 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", valueRow);
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
 
-        Assert.Contains("for (var i = 0; i < 3; i++)", profile);
-        Assert.Contains("Grid.SetColumn(card, index % 3)", profile);
+        Assert.Contains("for (var i = 0; i < 2; i++)", profile);
+        Assert.Contains("Grid.SetColumn(card, index % 2)", profile);
         Assert.Contains("Math.Min(2, _shortcutSnapshot.Tiles.Count)", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs")));
     }
 
@@ -246,6 +246,32 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
         Assert.DoesNotContain("ToggleSwitchFillOn", app);
         Assert.DoesNotContain("SliderTrackValueFill", app);
+    }
+
+    [Fact]
+    public void Qam_toggle_and_value_controls_opt_out_of_native_focus()
+    {
+        var resources = XDocument.Load(Path.Combine(
+            RepoRoot(), "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var focusProperties = new[]
+        {
+            "IsTabStop",
+            "IsFocusEngagementEnabled",
+            "AllowFocusOnInteraction",
+            "UseSystemFocusVisuals",
+        };
+
+        foreach (var styleKey in new[] { "QamToggleStyle", "QamValueButtonStyle" })
+        {
+            var style = resources.Descendants().Single(element =>
+                element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == styleKey);
+            foreach (var property in focusProperties)
+            {
+                var setter = style.Elements().Single(element =>
+                    element.Name.LocalName == "Setter" && (string?)element.Attribute("Property") == property);
+                Assert.Equal("False", (string?)setter.Attribute("Value"));
+            }
+        }
     }
 
     [Fact]

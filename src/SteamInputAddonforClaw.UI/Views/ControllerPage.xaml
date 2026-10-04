@@ -120,7 +120,7 @@
                     <SymbolIcon Symbol="Volume" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard Header="Left Motor" ContentAlignment="Vertical">
+                    <ctcontrols:SettingsCard Header="Left Motor">
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -147,7 +147,7 @@
                                 Click="LeftVibrationTestButton_Click" />
                         </Grid>
                     </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard Header="Right Motor" ContentAlignment="Vertical">
+                    <ctcontrols:SettingsCard Header="Right Motor">
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
