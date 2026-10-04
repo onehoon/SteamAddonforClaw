@@ -115,8 +115,22 @@ public sealed class OverlayControllerRendererTests
 
         Assert.Contains("new OverlayToggleRow(\"Enabled\", RequestControllerLedEnabled)", controller);
         Assert.Contains("new OverlayValueRow(\"Brightness\"", controller);
-        Assert.Contains("new TextBlock { Text = \"Choose color\"", controller);
-        Assert.Contains("_controllerLed with { Red = color.R, Green = color.G, Blue = color.B }", controller);
+        Assert.Contains("new TextBlock { Text = \"Color\"", controller);
+        Assert.Contains("new OverlayValueRow(\"Red\"", controller);
+        Assert.Contains("new OverlayValueRow(\"Green\"", controller);
+        Assert.Contains("new OverlayValueRow(\"Blue\"", controller);
+        Assert.Contains("_controllerLedRedRow.Container, _controllerLedRedRow.Capabilities", controller);
+        Assert.Contains("_controllerLedGreenRow.Container, _controllerLedGreenRow.Capabilities", controller);
+        Assert.Contains("_controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities", controller);
+        Assert.Contains("RequestControllerLedRgb(int? red, int? green, int? blue)", controller);
+        Assert.Contains("Red = (byte)(red ?? _controllerLed.Red)", controller);
+        Assert.Contains("Green = (byte)(green ?? _controllerLed.Green)", controller);
+        Assert.Contains("Blue = (byte)(blue ?? _controllerLed.Blue)", controller);
+        Assert.Contains("_controllerLedRedRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Red)", controller);
+        Assert.Contains("_controllerLedGreenRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Green)", controller);
+        Assert.Contains("_controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Blue)", controller);
+        Assert.DoesNotContain("ColorPicker", controller);
+        Assert.DoesNotContain("ColorChanged", controller);
         Assert.Contains("ControllerLedEditRequested?.Invoke(settings)", controller);
         Assert.Contains("new OverlayValueRow(\"Left Motor\"", controller);
         Assert.Contains("new OverlayValueRow(\"Right Motor\"", controller);

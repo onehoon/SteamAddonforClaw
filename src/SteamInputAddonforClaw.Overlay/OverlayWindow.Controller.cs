@@ -18,20 +18,17 @@ public sealed partial class OverlayWindow
     private OverlayValueRow? _m1MappingRow;
     private OverlayValueRow? _m2MappingRow;
     private FrontendSettingsSnapshot? _frontendSettingsSnapshot;
-    private bool _frontendSettingsAvailable;
     private bool _controllerLedAvailable;
     private bool _controllerLedMutationInFlight;
     private bool _controllerVibrationMutationInFlight;
     private ControllerLedSettings _controllerLed = ControllerLedSettings.Default;
     private OverlayToggleRow? _controllerLedEnabledRow;
     private OverlayValueRow? _controllerLedBrightnessRow;
+    private OverlayValueRow? _controllerLedRedRow;
+    private OverlayValueRow? _controllerLedGreenRow;
+    private OverlayValueRow? _controllerLedBlueRow;
     private Border? _controllerLedColorSwatch;
-    private Button? _controllerLedColorButton;
     private Border? _controllerLedSectionCard;
-    private ColorPicker? _controllerLedColorPicker;
-    private Flyout? _controllerLedColorFlyout;
-    private bool _controllerLedColorDraftChanged;
-    private Color _controllerLedColorDraft;
     private OverlayValueRow? _leftVibrationRow;
     private OverlayValueRow? _rightVibrationRow;
     private FrontendControllerVibrationStrengthSnapshot _vibrationSnapshot = FrontendControllerVibrationStrengthSnapshot.Unavailable();
@@ -90,6 +87,14 @@ public sealed partial class OverlayWindow
             value => RequestControllerLedBrightness((int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
         AddControllerRow(section, rows, _controllerLedBrightnessRow.Container, _controllerLedBrightnessRow.Capabilities);
 
+        var colorPreview = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        colorPreview.Children.Add(new TextBlock { Text = "Color", VerticalAlignment = VerticalAlignment.Center });
         var swatch = new Border
         {
             Width = 26,
@@ -100,48 +105,18 @@ public sealed partial class OverlayWindow
             VerticalAlignment = VerticalAlignment.Center,
         };
         _controllerLedColorSwatch = swatch;
-        var colorContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-        colorContent.Children.Add(swatch);
-        colorContent.Children.Add(new TextBlock { Text = "Choose color", VerticalAlignment = VerticalAlignment.Center });
-        var colorButton = new Button
-        {
-            Content = colorContent,
-            Style = OverlayQamResources.Style("QamValueButtonStyle"),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0),
-            Padding = new Thickness(10, 0, 10, 0),
-            BorderThickness = new Thickness(0),
-            IsTabStop = false,
-        };
-        _controllerLedColorButton = colorButton;
-        var picker = new ColorPicker { IsAlphaEnabled = false, IsColorPreviewVisible = false };
-        _controllerLedColorPicker = picker;
-        var flyout = new Flyout { Content = picker };
-        _controllerLedColorFlyout = flyout;
-        colorButton.Flyout = flyout;
-        flyout.Opened += (_, _) =>
-        {
-            _controllerLedColorDraftChanged = false;
-            _controllerLedColorDraft = Color.FromArgb(255, _controllerLed.Red, _controllerLed.Green, _controllerLed.Blue);
-            picker.Color = _controllerLedColorDraft;
-        };
-        picker.ColorChanged += (_, args) =>
-        {
-            _controllerLedColorDraft = args.NewColor;
-            _controllerLedColorDraftChanged = args.NewColor.R != _controllerLed.Red || args.NewColor.G != _controllerLed.Green || args.NewColor.B != _controllerLed.Blue;
-            RenderControllerLedColor(args.NewColor);
-        };
-        flyout.Closed += (_, _) =>
-        {
-            if (!_controllerLedColorDraftChanged || !_controllerLedAvailable || _controllerLedMutationInFlight) return;
-            _controllerLedColorDraftChanged = false;
-            RequestControllerLedColor(_controllerLedColorDraft);
-        };
-        var colorContainer = OverlayRowChrome.Create(colorButton);
-        AddControllerRow(section, rows, colorContainer, new OverlayRowCapabilities(
-            IsSelectable: () => _controllerLedAvailable && _controllerLed.Enabled,
-            Activate: () => flyout.ShowAt(colorButton)));
+        colorPreview.Children.Add(swatch);
+        section.Children.Add(colorPreview);
+
+        _controllerLedRedRow = new OverlayValueRow("Red", OverlayValueRow.FormatInteger,
+            value => RequestControllerLedRgb(red: (int)Math.Round(value), green: null, blue: null), OverlayValueButtonKind.NumericStepper);
+        _controllerLedGreenRow = new OverlayValueRow("Green", OverlayValueRow.FormatInteger,
+            value => RequestControllerLedRgb(red: null, green: (int)Math.Round(value), blue: null), OverlayValueButtonKind.NumericStepper);
+        _controllerLedBlueRow = new OverlayValueRow("Blue", OverlayValueRow.FormatInteger,
+            value => RequestControllerLedRgb(red: null, green: null, blue: (int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
+        AddControllerRow(section, rows, _controllerLedRedRow.Container, _controllerLedRedRow.Capabilities);
+        AddControllerRow(section, rows, _controllerLedGreenRow.Container, _controllerLedGreenRow.Capabilities);
+        AddControllerRow(section, rows, _controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities);
         RenderControllerLedRows();
     }
 
@@ -234,7 +209,6 @@ public sealed partial class OverlayWindow
     internal void ApplyFrontendSettingsState(FrontendSettingsSnapshot settings, bool controllerLedAvailable, bool settingsAvailable)
     {
         _frontendSettingsSnapshot = settings;
-        _frontendSettingsAvailable = settingsAvailable;
         _controllerLedAvailable = settingsAvailable && controllerLedAvailable;
         _controllerLed = settings.ControllerLed;
         RenderControllerLedRows();
@@ -268,10 +242,16 @@ public sealed partial class OverlayWindow
         RequestControllerLedMutation(_controllerLed with { Brightness = brightness });
     }
 
-    private void RequestControllerLedColor(Color color)
+    private void RequestControllerLedRgb(int? red, int? green, int? blue)
     {
         if (!_controllerLedAvailable || _controllerLedMutationInFlight || !_controllerLed.Enabled || _frontendSettingsSnapshot is null) return;
-        RequestControllerLedMutation(_controllerLed with { Red = color.R, Green = color.G, Blue = color.B });
+        if (red is < 0 or > 255 || green is < 0 or > 255 || blue is < 0 or > 255) return;
+        RequestControllerLedMutation(_controllerLed with
+        {
+            Red = (byte)(red ?? _controllerLed.Red),
+            Green = (byte)(green ?? _controllerLed.Green),
+            Blue = (byte)(blue ?? _controllerLed.Blue),
+        });
     }
 
     private void RequestControllerLedMutation(ControllerLedSettings settings)
@@ -288,8 +268,10 @@ public sealed partial class OverlayWindow
         var available = _controllerLedAvailable && !_controllerLedMutationInFlight;
         _controllerLedEnabledRow?.ApplyState(available, _controllerLed.Enabled);
         _controllerLedBrightnessRow?.ApplyState(available && _controllerLed.Enabled, 0, 100, 1, _controllerLed.Brightness);
-        if (_controllerLedColorButton is not null)
-            _controllerLedColorButton.IsEnabled = available && _controllerLed.Enabled;
+        var colorAvailable = available && _controllerLed.Enabled;
+        _controllerLedRedRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Red);
+        _controllerLedGreenRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Green);
+        _controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Blue);
         if (_controllerLedColorSwatch is not null)
             RenderControllerLedColor(Color.FromArgb(255, _controllerLed.Red, _controllerLed.Green, _controllerLed.Blue));
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)

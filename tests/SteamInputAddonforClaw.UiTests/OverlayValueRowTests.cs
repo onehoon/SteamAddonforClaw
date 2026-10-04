@@ -153,6 +153,22 @@ public sealed class OverlayValueRowTests
     }
 
     [Fact]
+    public void Controller_led_rgb_semantic_row_supports_exact_byte_range_and_step()
+    {
+        var model = Model(out var requests);
+        model.ApplyState(isAvailable: true, minimum: 0, maximum: 255, step: 1, value: 254);
+
+        model.RequestAdjust(+1);
+        model.RequestAdjust(+1);
+        model.RequestAdjust(-1);
+
+        Assert.Equal(new[] { 255.0, 254.0 }, requests);
+        Assert.Equal(254, model.PreviewValue);
+        Assert.True(model.CanDecrease);
+        Assert.True(model.CanIncrease);
+    }
+
+    [Fact]
     public void AuthoritativeApplyStateReplacesTheLocalPreviewWithoutEmitting()
     {
         var model = Available(out var requests);
