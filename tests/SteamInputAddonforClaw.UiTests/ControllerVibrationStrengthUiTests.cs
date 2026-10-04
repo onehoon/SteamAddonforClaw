@@ -178,6 +178,7 @@ public sealed class ControllerVibrationStrengthUiTests
     {
         var card = expander.Descendants().Single(element => element.Name.LocalName == "SettingsCard"
             && (string?)element.Attribute("Header") == header);
+        Assert.Null((string?)card.Attribute("ContentAlignment"));
         var slider = card.Descendants().Single(element => element.Name.LocalName == "Slider"
             && (string?)element.Attribute(x + "Name") == sliderName);
         Assert.Equal("0", (string?)slider.Attribute("Minimum"));
