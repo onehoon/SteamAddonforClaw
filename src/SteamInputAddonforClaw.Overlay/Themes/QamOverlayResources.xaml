@@ -15,7 +15,7 @@
     <SolidColorBrush x:Key="QamHoverFillBrush" Color="#26FFFFFF" />
     <SolidColorBrush x:Key="QamPressedFillBrush" Color="#26FFFFFF" />
     <SolidColorBrush x:Key="QamFocusBorderBrush" Color="#00000000" />
-    <SolidColorBrush x:Key="QamSeparatorBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="QamSeparatorBrush" Color="#1AFFFFFF" />
     <SolidColorBrush x:Key="QamSectionBrush" Color="#00000000" />
     <SolidColorBrush x:Key="QamTileBrush" Color="#FF0E141B" />
     <SolidColorBrush x:Key="QamTileSelectedBrush" Color="#26FFFFFF" />
@@ -38,7 +38,7 @@
     <StaticResource x:Key="QamValueButtonHoverFill" ResourceKey="QamHoverFillBrush" />
     <StaticResource x:Key="QamValueButtonPressedFill" ResourceKey="QamPressedFillBrush" />
 
-    <Thickness x:Key="QamPageTitleMargin">16,16,16,8</Thickness>
+    <Thickness x:Key="QamPageTitleMargin">16,20,16,16</Thickness>
     <Thickness x:Key="QamBodyContentPadding">16,0,16,12</Thickness>
     <x:Double x:Key="QamSectionSpacing">24</x:Double>
     <Thickness x:Key="QamSectionPadding">0</Thickness>
@@ -49,6 +49,7 @@
     <x:Double x:Key="QamRowSpacing">0</x:Double>
     <Thickness x:Key="QamRowPadding">16,10,16,10</Thickness>
     <Thickness x:Key="QamRowMargin">-16,0,-16,0</Thickness>
+    <Thickness x:Key="QamRowSeparatorThickness">0,0,0,1</Thickness>
     <x:Double x:Key="QamRowMinHeight">42</x:Double>
     <CornerRadius x:Key="QamRowCornerRadius">2</CornerRadius>
     <Thickness x:Key="QamSelectionBorderThickness">0</Thickness>

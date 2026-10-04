@@ -17,7 +17,6 @@ public sealed partial class OverlayWindow
     private readonly Dictionary<AddonQuickSettingsTabId, IReadOnlyList<OverlayRow>> _pageRows = new();
     private readonly OverlayRowSelection _rowSelection = new();
     private readonly Brush _rowSelectedFillBrush;
-    private static readonly Brush RowUnselectedBrush = OverlayQamResources.Brush("QamFocusBorderBrush");
     private static readonly Brush RowUnselectedFillBrush = OverlayQamResources.Brush("QamSectionBrush");
 
     // The Runtime-owned Shortcut projection uses one transient 2D selection model.
@@ -156,7 +155,6 @@ public sealed partial class OverlayWindow
         {
             var selected = i == selectedIndex;
             rows[i].Container.Background = selected ? _rowSelectedFillBrush : RowUnselectedFillBrush;
-            rows[i].Container.BorderBrush = selected ? _rowSelectedBrush : RowUnselectedBrush;
         }
     }
 
