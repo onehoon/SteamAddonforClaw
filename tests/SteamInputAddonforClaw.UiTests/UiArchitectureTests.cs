@@ -57,24 +57,27 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void UI_and_overlay_use_framework_dependent_windows_app_runtime_contract()
+    public void UI_keeps_meta_package_and_overlay_uses_framework_dependent_component_contract()
     {
         var root = FindRepositoryRoot();
-        foreach (var relativePath in new[]
+        var uiProject = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/SteamInputAddonforClaw.UI.csproj"));
+        var overlayProject = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Overlay/SteamInputAddonforClaw.Overlay.csproj"));
+
+        foreach (var project in new[] { uiProject, overlayProject })
         {
-            "src/SteamInputAddonforClaw.UI/SteamInputAddonforClaw.UI.csproj",
-            "src/SteamInputAddonforClaw.Overlay/SteamInputAddonforClaw.Overlay.csproj",
-        })
-        {
-            var project = File.ReadAllText(Path.Combine(root, relativePath));
             Assert.Contains("<WindowsPackageType>None</WindowsPackageType>", project, StringComparison.Ordinal);
             Assert.Contains("<UseWinUI>true</UseWinUI>", project, StringComparison.Ordinal);
             Assert.Contains("<SelfContained>false</SelfContained>", project, StringComparison.Ordinal);
             Assert.Contains("<WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>", project, StringComparison.Ordinal);
             Assert.Contains("<RuntimeIdentifier>win-x64</RuntimeIdentifier>", project, StringComparison.Ordinal);
-            Assert.Contains("<PackageReference Include=\"Microsoft.WindowsAppSDK\" Version=\"2.5.1\"", project, StringComparison.Ordinal);
             Assert.DoesNotContain("Bootstrap.Initialize", project, StringComparison.Ordinal);
         }
+
+        Assert.Contains("<PackageReference Include=\"Microsoft.WindowsAppSDK\" Version=\"2.5.1\"", uiProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("<PackageReference Include=\"Microsoft.WindowsAppSDK\" ", overlayProject, StringComparison.Ordinal);
+        Assert.Contains("<PackageReference Include=\"Microsoft.WindowsAppSDK.Runtime\" Version=\"2.5.1\"", overlayProject, StringComparison.Ordinal);
+        Assert.Contains("<PackageReference Include=\"Microsoft.WindowsAppSDK.WinUI\" Version=\"2.3.9\"", overlayProject, StringComparison.Ordinal);
+        Assert.Contains("<PackageReference Include=\"Microsoft.WindowsAppSDK.InteractiveExperiences\" Version=\"2.1.9\"", overlayProject, StringComparison.Ordinal);
     }
 
     [Fact]
