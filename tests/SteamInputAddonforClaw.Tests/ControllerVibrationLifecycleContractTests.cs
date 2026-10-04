@@ -82,7 +82,8 @@ public sealed class ControllerVibrationLifecycleContractTests
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
             directory = directory.Parent;
         Assert.NotNull(directory);
-        return File.ReadAllText(Path.Combine(directory!.FullName, "src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs"));
+        return File.ReadAllText(Path.Combine(directory!.FullName, "src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
     private static string Method(string source, string startToken, string endToken)
