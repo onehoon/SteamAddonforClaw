@@ -887,6 +887,33 @@ public sealed class OverlayQuickSettingsPageBindingTests
         Assert.Equal(570u, binding.AuthoritativePage.AppId);
     }
 
+    [Fact]
+    public void Profile_loading_page_retires_old_game_rows_and_drafts_before_new_game_snapshot()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, delay.Func);
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsValue.Integer(29));
+
+        var loading = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile,
+            message: "Loading the active game profile.");
+        binding.ApplyAuthoritativePage(loading);
+
+        Assert.Empty(binding.PendingKeys);
+        Assert.False(binding.BuildEffectivePage().Available);
+        Assert.Empty(binding.BuildEffectivePage().Sections);
+
+        binding.ApplyAuthoritativePage(ProfilePage(570, pl1Ac: 26));
+        var currentGamePage = binding.BuildEffectivePage();
+        Assert.Equal(570u, currentGamePage.AppId);
+        var currentGameRow = Assert.Single(
+            currentGamePage.Sections.SelectMany(section => section.Rows),
+            row => row.RowId == QuickSettingsRowId.ProfileTdpAcPl1);
+        Assert.Equal(26, currentGameRow.Value?.IntegerValue);
+        Assert.Empty(mutate.Calls);
+    }
+
     // --- Hide / teardown (section 39/40) -----------------------------------------------------------
 
     [Fact]

@@ -11,7 +11,7 @@ public sealed class AddonProcessHostOverlayShowFailureContractTests
     {
         var hostSource = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
         var coordinateShow = ExtractMethod(hostSource, "private async Task CoordinateOverlayToggleAsync");
-        var showFailure = ExtractBlockAfter(coordinateShow, "if (!await _overlayController.ShowAsync().ConfigureAwait(false))");
+        var showFailure = ExtractBlockAfter(coordinateShow, "if (!await _overlayController.ShowAsync(preferActiveProfile).ConfigureAwait(false))");
 
         Assert.Contains("Overlay Show did not acknowledge Visible; controller stays live.", showFailure, StringComparison.Ordinal);
         Assert.Contains("return;", showFailure, StringComparison.Ordinal);
@@ -19,11 +19,13 @@ public sealed class AddonProcessHostOverlayShowFailureContractTests
         Assert.DoesNotContain("OverlayControllerInputRouter", showFailure, StringComparison.Ordinal);
         Assert.DoesNotContain("_overlayCaptureActive = true", showFailure, StringComparison.Ordinal);
 
-        var showAcknowledgement = coordinateShow.IndexOf("_overlayController.ShowAsync()", StringComparison.Ordinal);
+        var activeAppId = coordinateShow.IndexOf("var activeAppId = _runtimeHost?.ActualRunningAppId ?? 0;", StringComparison.Ordinal);
+        var preferActiveProfile = coordinateShow.IndexOf("var preferActiveProfile = activeAppId != 0;", StringComparison.Ordinal);
+        var showAcknowledgement = coordinateShow.IndexOf("_overlayController.ShowAsync(preferActiveProfile)", StringComparison.Ordinal);
         var pause = coordinateShow.IndexOf("presentation.PauseForOverlayAsync(", StringComparison.Ordinal);
         var routerStart = coordinateShow.IndexOf("router.Start();", StringComparison.Ordinal);
         var captureCommit = coordinateShow.IndexOf("_overlayCaptureActive = true;", StringComparison.Ordinal);
-        Assert.True(showAcknowledgement >= 0 && showAcknowledgement < pause);
+        Assert.True(activeAppId >= 0 && activeAppId < preferActiveProfile && preferActiveProfile < showAcknowledgement && showAcknowledgement < pause);
         Assert.True(pause < routerStart && routerStart < captureCommit);
 
         var controllerSource = ReadSource("src", "SteamInputAddonforClaw", "Lifecycle", "OverlayProcessController.cs");

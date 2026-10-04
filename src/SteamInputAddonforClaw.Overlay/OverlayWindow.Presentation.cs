@@ -26,11 +26,11 @@ public sealed partial class OverlayWindow
 
     internal void PrepareHidden() => ConfigureWindow();
 
-    internal async Task ShowForPocAsync()
+    internal async Task ShowForPocAsync(bool preferActiveProfile = false)
     {
         // Commit the startup tab before any visual work so a warm process that was previously
         // showing another tab never flashes it for a frame during the reveal (OQ5-UI-01 s.6).
-        ResetUiForShow();
+        ResetUiForShow(preferActiveProfile);
         ConfigureWindow();
         var initialStatePrepared = true;
         try

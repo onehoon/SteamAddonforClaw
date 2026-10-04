@@ -5,6 +5,24 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
 
+internal static class OverlayCommandWireValidation
+{
+    internal static bool IsValidCommand(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.Command
+        && message.Command is { } command && Enum.IsDefined(command)
+        && message.Navigation is null && message.State is null && message.Error is null
+        && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null
+        && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null
+        && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null
+        && message.ProfileCatalogState is null && message.ProfilePageRequest is null && message.ProfilePageResult is null
+        && message.ShortcutState is null && message.ShortcutExecuteRequest is null && message.ShortcutExecuteResult is null
+        && message.BackButtonMappingState is null && message.BackButtonMappingMutationRequest is null && message.BackButtonMappingMutationResponse is null
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null
+        && message.FrontendSettingsMutationRequest is null && message.FrontendSettingsMutationResponse is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null;
+}
+
 internal static class OverlayProductionControlsWireValidation
 {
     internal static bool HasPayload(OverlayWireMessage message) =>

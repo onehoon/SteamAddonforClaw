@@ -83,6 +83,33 @@ public sealed class OverlayTabStateTests
     }
 
     [Fact]
+    public void ActiveProfileStartupSelectionPreservesConfiguredTabOrderAndTraversal()
+    {
+        AddonQuickSettingsTabId[] configuredOrder =
+        [
+            AddonQuickSettingsTabId.Controller,
+            AddonQuickSettingsTabId.Device,
+            AddonQuickSettingsTabId.Profile,
+            AddonQuickSettingsTabId.Shortcut,
+            AddonQuickSettingsTabId.Setting,
+        ];
+        var state = new OverlayTabState(configuredOrder);
+
+        state.ResetForShow();
+        state.Select(AddonQuickSettingsTabId.Profile);
+
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
+        Assert.Equal(configuredOrder, state.Order);
+        Assert.True(state.SelectNext());
+        Assert.Equal(AddonQuickSettingsTabId.Shortcut, state.SelectedTab);
+        Assert.True(state.SelectPrevious());
+        Assert.Equal(AddonQuickSettingsTabId.Profile, state.SelectedTab);
+        Assert.True(state.SelectPrevious());
+        Assert.Equal(AddonQuickSettingsTabId.Device, state.SelectedTab);
+        Assert.Equal(configuredOrder, state.Order);
+    }
+
+    [Fact]
     public void InvalidOrderFallsBackToTheFrozenDefault()
     {
         AddonQuickSettingsTabId[][] invalidOrders =

@@ -331,12 +331,12 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     pending?.TrySetResult(message.ClawHudMutationResponse);
                     continue;
                 }
-                if (message.Kind != OverlayWireMessageKind.Command || message.Command is null || message.Navigation is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
+                if (!OverlayCommandWireValidation.IsValidCommand(message) || message.Command is not { } command)
                     throw new FrontendProtocolException("Invalid Overlay command message.");
-                await commandHandler(message.Command.Value).ConfigureAwait(false);
-                if (message.Command == OverlayCommand.Show)
+                await commandHandler(command).ConfigureAwait(false);
+                if (command is OverlayCommand.Show or OverlayCommand.ShowActiveProfile)
                     await SendStateAsync(pipe, OverlayState.Visible, linked.Token).ConfigureAwait(false);
-                else if (message.Command == OverlayCommand.Hide)
+                else if (command == OverlayCommand.Hide)
                     await SendStateAsync(pipe, OverlayState.Hidden, linked.Token).ConfigureAwait(false);
                 else
                     return;
