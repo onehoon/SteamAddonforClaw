@@ -107,7 +107,8 @@ public sealed class QuickSettingsMutationAdapterTests
             ToggleIntent(QuickSettingsRowId.DeviceBatteryChargeLimitEnabled, true), CancellationToken.None);
 
         Assert.Equal(["BatteryEnabled:True"], control.Calls);
-        Assert.Equal(70, result.Page.Sections[0].Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitPercent).Value!.IntegerValue);
+        var batterySection = result.Page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.DeviceBatteryChargeLimit);
+        Assert.Equal(70, batterySection.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitPercent).Value!.IntegerValue);
     }
 
     [Fact]

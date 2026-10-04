@@ -15,6 +15,9 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("AddonQuickSettingsTabId.Controller => BuildControllerPage(rows)", shell);
         Assert.DoesNotContain("AddonQuickSettingsTabId.Controller => CreatePlaceholderPage", shell);
         Assert.Equal(3, CountOccurrences(controller, "CreateOverlaySectionCard("));
+        Assert.Contains("CreateControllerSection(\"M1 / M2\")", controller);
+        Assert.Contains("CreateControllerSection(\"Vibration Strength\")", controller);
+        Assert.DoesNotContain("CreateControllerSection(\"Joystick LED\")", controller);
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M1\""));
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M2\""));
         Assert.Equal(2, CountOccurrences(controller, "OverlayValueButtonKind.DiscreteChoice"));
@@ -97,7 +100,6 @@ public sealed class OverlayControllerRendererTests
             controller.IndexOf("private void AddBackButtonMappingRow", StringComparison.Ordinal)];
 
         Assert.Contains("CreateControllerSection(\"M1 / M2\")", build);
-        Assert.Contains("CreateControllerSection(\"Joystick LED\")", build);
         Assert.Contains("CreateControllerSection(\"Vibration Strength\")", build);
         Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m1Row)", build);
         Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m2Row)", build);
@@ -113,7 +115,11 @@ public sealed class OverlayControllerRendererTests
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
 
-        Assert.Contains("new OverlayToggleRow(\"Enabled\", RequestControllerLedEnabled)", controller);
+        Assert.Contains("new OverlayToggleRow(\"Joystick LED\", RequestControllerLedEnabled)", controller);
+        Assert.DoesNotContain("new OverlayToggleRow(\"Enabled\", RequestControllerLedEnabled)", controller);
+        Assert.Contains("private StackPanel? _controllerLedDetailStack", controller);
+        Assert.Contains("Margin = OverlayQamResources.Get(\"QamDetailIndent\", new Thickness(16, 0, 0, 0))", controller);
+        Assert.Contains("_controllerLedDetailStack.Visibility = _controllerLed.Enabled ? Visibility.Visible : Visibility.Collapsed", controller);
         Assert.Contains("new OverlayValueRow(\"Brightness\"", controller);
         Assert.Contains("new TextBlock { Text = \"Color\"", controller);
         Assert.Contains("new OverlayValueRow(\"Red\"", controller);
@@ -129,6 +135,12 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("_controllerLedRedRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Red)", controller);
         Assert.Contains("_controllerLedGreenRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Green)", controller);
         Assert.Contains("_controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Blue)", controller);
+        Assert.Contains("_controllerLedBrightnessRow?.ApplyState(available && _controllerLed.Enabled", controller);
+        Assert.Contains("private void BuildControllerVibrationRows", controller);
+        Assert.Contains("new OverlayValueRow(\"Left Motor\"", controller);
+        Assert.Contains("new OverlayValueRow(\"Right Motor\"", controller);
+        Assert.Contains("AddControllerRow(details, rows, _leftVibrationRow.Container", controller);
+        Assert.Contains("AddControllerRow(details, rows, _rightVibrationRow.Container", controller);
         Assert.DoesNotContain("ColorPicker", controller);
         Assert.DoesNotContain("ColorChanged", controller);
         Assert.Contains("ControllerLedEditRequested?.Invoke(settings)", controller);

@@ -11,14 +11,22 @@ public sealed class ControllerLedUiContractTests
         var xaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml"));
         var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "ControllerPage.xaml.cs"));
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var ledExpanders = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander"
+            && (string?)element.Attribute("Header") == "Joystick LED").ToArray();
         var expanders = xaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander"
             && (string?)element.Attribute(x + "Name") == "ControllerLedExpander").ToArray();
 
+        Assert.Single(ledExpanders);
         Assert.Single(expanders);
         Assert.Equal("Joystick LED", (string?)expanders[0].Attribute("Header"));
-        Assert.Contains("Header=\"Enabled\"", xaml.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Header=\"Brightness\"", xaml.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Header=\"Color\"", xaml.ToString(), StringComparison.Ordinal);
+        var directHeaderToggle = expanders[0].Elements().SingleOrDefault(element => element.Name.LocalName == "ToggleSwitch"
+            && (string?)element.Attribute(x + "Name") == "ControllerLedEnabledToggle");
+        Assert.NotNull(directHeaderToggle);
+        var expanderItems = expanders[0].Elements().Single(element => element.Name.LocalName == "SettingsExpander.Items");
+        var itemHeaders = expanderItems.Elements().Where(element => element.Name.LocalName == "SettingsCard")
+            .Select(element => (string?)element.Attribute("Header")).ToArray();
+        Assert.Equal(new[] { "Brightness", "Color" }, itemHeaders);
+        Assert.DoesNotContain("Enabled", itemHeaders);
         Assert.Contains("IsAlphaEnabled=\"False\"", xaml.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Battery", xaml.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Breathing", xaml.ToString(), StringComparison.OrdinalIgnoreCase);

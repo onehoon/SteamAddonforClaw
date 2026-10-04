@@ -82,10 +82,8 @@
                     IsExpanded="False"
                     Visibility="Collapsed">
                     <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Setting" /></ctcontrols:SettingsExpander.HeaderIcon>
+                    <ToggleSwitch x:Name="ControllerLedEnabledToggle" OffContent="" OnContent="" Toggled="ControllerLedEnabled_Toggled" />
                     <ctcontrols:SettingsExpander.Items>
-                        <ctcontrols:SettingsCard Header="Enabled">
-                            <ToggleSwitch x:Name="ControllerLedEnabledToggle" OffContent="" OnContent="" Toggled="ControllerLedEnabled_Toggled" />
-                        </ctcontrols:SettingsCard>
                         <ctcontrols:SettingsCard Header="Brightness">
                             <StackPanel MinWidth="260" Orientation="Horizontal" Spacing="12">
                                 <Slider x:Name="ControllerLedBrightnessSlider" Minimum="0" Maximum="100" Width="220" ValueChanged="ControllerLedBrightness_ValueChanged" />

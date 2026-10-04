@@ -86,16 +86,16 @@ internal static class QuickSettingsPresentation
     internal static readonly IReadOnlyList<QuickSettingsDiscreteOption> PowerModeDiscreteOptions =
         [.. PowerModeOptions.Select(o => new QuickSettingsDiscreteOption((int)o.Mode, o.Label))];
 
-    /// <summary>Frozen Device section/row order: Battery Charge Limit, TDP, CPU Boost, then Windows
-    /// Power Mode. One child being unavailable never affects the others.</summary>
+    /// <summary>Frozen Device section/row order: TDP, CPU Boost, Windows Power Mode, then Battery
+    /// Charge Limit. One child being unavailable never affects the others.</summary>
     internal static QuickSettingsPageSnapshot BuildDevice(FrontendDeviceQuickSettingsSnapshot snapshot)
     {
         IReadOnlyList<QuickSettingsSection> sections =
         [
-            BuildBatteryChargeLimitSection(snapshot.BatteryChargeLimit),
             BuildTdpSection(snapshot.Tdp),
             BuildCpuBoostSection(snapshot.CpuBoost),
             BuildPowerModeSection(snapshot.PowerMode),
+            BuildBatteryChargeLimitSection(snapshot.BatteryChargeLimit),
         ];
 
         return new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, AppId: null, Available: true, Message: null, sections, BuildDeviceTdpLinkedConstraints(snapshot.Tdp));
