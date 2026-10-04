@@ -93,6 +93,93 @@ public sealed class QuickSettingsMutationAdapterTests
     }
 
     [Fact]
+    public async Task Battery_enabled_toggle_dispatches_once_and_returns_fresh_authoritative_page()
+    {
+        var control = new RecordingFrontendControl
+        {
+            NextCaptureResult = FrontendDeviceQuickSettingsSnapshot.Unavailable with
+            {
+                BatteryChargeLimit = new(true, true, true, false, 70, false, 70, null),
+            },
+        };
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control,
+            ToggleIntent(QuickSettingsRowId.DeviceBatteryChargeLimitEnabled, true), CancellationToken.None);
+
+        Assert.Equal(["BatteryEnabled:True"], control.Calls);
+        Assert.Equal(70, result.Page.Sections[0].Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitPercent).Value!.IntegerValue);
+    }
+
+    [Fact]
+    public async Task Battery_supported_limit_dispatches_once()
+    {
+        var control = new RecordingFrontendControl();
+
+        await QuickSettingsMutationAdapter.MutateAsync(control,
+            IntegerIntent(QuickSettingsRowId.DeviceBatteryChargeLimitPercent, 85), CancellationToken.None);
+
+        Assert.Equal(["BatteryPercent:85"], control.Calls);
+    }
+
+    [Theory]
+    [InlineData(59)]
+    [InlineData(61)]
+    [InlineData(101)]
+    public async Task Battery_invalid_limit_invokes_zero_mutations(int percent)
+    {
+        var control = new RecordingFrontendControl();
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control,
+            IntegerIntent(QuickSettingsRowId.DeviceBatteryChargeLimitPercent, percent), CancellationToken.None);
+
+        Assert.Empty(control.Calls);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Battery_limit_with_wrong_value_kind_invokes_zero_mutations()
+    {
+        var control = new RecordingFrontendControl();
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Device, null,
+            QuickSettingsRowId.DeviceBatteryChargeLimitPercent,
+            [new(QuickSettingsRowId.DeviceBatteryChargeLimitPercent, QuickSettingsValue.Boolean(true))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.Calls);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Battery_limit_with_duplicate_values_invokes_zero_mutations()
+    {
+        var control = new RecordingFrontendControl();
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Device, null,
+            QuickSettingsRowId.DeviceBatteryChargeLimitPercent,
+            [new(QuickSettingsRowId.DeviceBatteryChargeLimitPercent, QuickSettingsValue.Integer(80)),
+                new(QuickSettingsRowId.DeviceBatteryChargeLimitPercent, QuickSettingsValue.Integer(85))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.Calls);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Battery_enabled_with_wrong_value_kind_invokes_zero_mutations()
+    {
+        var control = new RecordingFrontendControl();
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Device, null,
+            QuickSettingsRowId.DeviceBatteryChargeLimitEnabled,
+            [new(QuickSettingsRowId.DeviceBatteryChargeLimitEnabled, QuickSettingsValue.Integer(1))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.Calls);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
     public async Task Toggle_with_wrong_value_kind_invokes_zero_mutations()
     {
         var control = new RecordingFrontendControl();
@@ -579,7 +666,8 @@ public sealed class QuickSettingsMutationAdapterTests
                     new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled),
                     Enabled: true, PersistenceWritable: true, LastFailure: "Windows apply failed."),
                 FrontendTdpSnapshot.Unavailable,
-                FrontendPowerModeSnapshot.Unavailable),
+                FrontendPowerModeSnapshot.Unavailable,
+                FrontendBatteryChargeLimitSnapshot.Unavailable),
         };
         var intent = IntegerIntent(QuickSettingsRowId.DeviceCpuBoostAc, (int)CpuBoostMode.EfficientEnabled);
 
@@ -614,6 +702,9 @@ public sealed class QuickSettingsMutationAdapterTests
         public int CaptureCount { get; private set; }
         public FrontendDeviceQuickSettingsSnapshot NextCaptureResult { get; set; } = FrontendDeviceQuickSettingsSnapshot.Unavailable;
         public FrontendTdpConfiguration? LastTdpConfiguration { get; private set; }
+        public FrontendBatteryChargeLimitMutationResult BatteryMutationResult { get; set; } = new(
+            FrontendBatteryChargeLimitMutationOutcome.Succeeded, null,
+            new FrontendBatteryChargeLimitSnapshot(true, true, true, true, 70, true, 70, null));
 
         // ---- SF-V2-08: Profile dispatch test seam ----
         public List<string> ProfileCalls { get; } = [];
@@ -705,6 +796,12 @@ public sealed class QuickSettingsMutationAdapterTests
 
         public Task<FrontendPowerModeMutationResult> SetDevicePowerModeDcAsync(WindowsPowerMode mode, CancellationToken t = default)
         { Calls.Add($"PowerModeDc:{mode}"); return Task.FromResult(new FrontendPowerModeMutationResult(FrontendPowerModeMutationOutcome.Succeeded, null, FrontendPowerModeSnapshot.Unavailable)); }
+
+        public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken t = default)
+        { Calls.Add($"BatteryEnabled:{enabled}"); return Task.FromResult(BatteryMutationResult); }
+
+        public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken t = default)
+        { Calls.Add($"BatteryPercent:{percent}"); return Task.FromResult(BatteryMutationResult); }
 
         public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) => throw new NotSupportedException();
         public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) => throw new NotSupportedException();

@@ -24,6 +24,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Shortcuts;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.ControllerVibration;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -655,6 +656,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _overlayController.BindBackButtonMappingAuthority(
             capture: CaptureOverlayBackButtonMappingAsync,
             mutate: MutateOverlayBackButtonMappingAsync);
+        _overlayController.BindProductionControlsAuthority(
+            captureSettings: CaptureOverlayFrontendSettingsAsync,
+            mutateSettings: MutateOverlayFrontendSettingsAsync,
+            captureVibration: token => _frontendControl!.CaptureControllerVibrationStrengthAsync(token),
+            mutateVibration: MutateOverlayControllerVibrationAsync);
         // SF-V2-02 section 17: refresh a currently visible/captured Overlay on ordinary Runtime
         // feature invalidation. Unsubscribed in BeginProcessShutdown so no new publish work is
         // scheduled once shutdown admission closes.
@@ -685,6 +691,63 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             bootstrap.BackButtonMappingAvailable,
             bootstrap.Settings.BackButtonMapping,
             bootstrap.BackButtonMappingAvailable ? null : "M1 / M2 mapping is unavailable.");
+    }
+
+    private async Task<OverlayFrontendSettingsMutationResponse> CaptureOverlayFrontendSettingsAsync(CancellationToken token)
+    {
+        var bootstrap = await _frontendControl!.GetBootstrapAsync(token).ConfigureAwait(false);
+        return new(0, true, null, bootstrap.Settings, bootstrap.ControllerLedAvailable, true);
+    }
+
+    private async Task<OverlayFrontendSettingsMutationResponse> MutateOverlayFrontendSettingsAsync(
+        OverlayFrontendSettingsMutationRequest request,
+        CancellationToken token)
+    {
+        var control = _frontendControl;
+        if (control is null || Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive)
+        {
+            var current = await CaptureOverlayFrontendSettingsSafelyAsync(token).ConfigureAwait(false);
+            return current with { RequestId = request.RequestId, Succeeded = false, FailureMessage = "The Overlay is not active." };
+        }
+
+        try
+        {
+            FrontendSettingsSnapshot settings = request.ControllerLed is { } led
+                ? await control.SetControllerLedSettingsAsync(led, token).ConfigureAwait(false)
+                : await control.SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value, token).ConfigureAwait(false);
+            var bootstrap = await control.GetBootstrapAsync(token).ConfigureAwait(false);
+            return new(request.RequestId, true, null, settings, bootstrap.ControllerLedAvailable);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch
+        {
+            var current = await CaptureOverlayFrontendSettingsSafelyAsync(token).ConfigureAwait(false);
+            return current with { RequestId = request.RequestId, Succeeded = false, FailureMessage = "Settings update failed." };
+        }
+    }
+
+    private async Task<OverlayFrontendSettingsMutationResponse> CaptureOverlayFrontendSettingsSafelyAsync(CancellationToken token)
+    {
+        try { return await CaptureOverlayFrontendSettingsAsync(token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch { return new(0, false, "Settings are unavailable.", new FrontendSettingsSnapshot(FrontendLogLevel.Off, false, FrontButtonMappingSettings.Default) { BackButtonMapping = BackButtonMappingSettings.Default }, false, false); }
+    }
+
+    private async Task<FrontendControllerVibrationStrengthMutationResult> MutateOverlayControllerVibrationAsync(
+        OverlayControllerVibrationMutationRequest request,
+        CancellationToken token)
+    {
+        var control = _frontendControl;
+        if (control is null || Volatile.Read(ref _processShutdownStarted) != 0 || !_overlayCaptureActive)
+            return new(FrontendControllerVibrationStrengthMutationOutcome.Unavailable,
+                await CaptureOverlayControllerVibrationSafelyAsync(token).ConfigureAwait(false), "The Overlay is not active.");
+        return await control.SetControllerVibrationStrengthAsync(request.LeftPercent, request.RightPercent, token).ConfigureAwait(false);
+    }
+
+    private async Task<FrontendControllerVibrationStrengthSnapshot> CaptureOverlayControllerVibrationSafelyAsync(CancellationToken token)
+    {
+        try { return _frontendControl is null ? FrontendControllerVibrationStrengthSnapshot.Unavailable() : await _frontendControl.CaptureControllerVibrationStrengthAsync(token).ConfigureAwait(false); }
+        catch { return FrontendControllerVibrationStrengthSnapshot.Unavailable(); }
     }
 
     private async Task<OverlayBackButtonMappingMutationOutcome> MutateOverlayBackButtonMappingAsync(
@@ -1445,6 +1508,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _ = _overlayController.RefreshClawHudAsync();
             _ = _overlayController.RefreshShortcutAsync();
             _ = _overlayController.RefreshBackButtonMappingAsync();
+            _ = _overlayController.RefreshFrontendSettingsAsync();
+            _ = _overlayController.RefreshControllerVibrationAsync();
         }
         catch (Exception exception)
         {
@@ -1474,6 +1539,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (!_overlayController.IsVisible) return;
         _ = _overlayController.RefreshShortcutAsync();
         _ = _overlayController.RefreshBackButtonMappingAsync();
+        _ = _overlayController.RefreshFrontendSettingsAsync();
+        _ = _overlayController.RefreshControllerVibrationAsync();
         // Section 23: an admitted Overlay mutation already returns a fresh authoritative page; a
         // redundant refresh here could otherwise race/overwrite that result (including erasing a
         // typed Succeeded=false + FailureMessage) with an older/less-complete page. Section 10's

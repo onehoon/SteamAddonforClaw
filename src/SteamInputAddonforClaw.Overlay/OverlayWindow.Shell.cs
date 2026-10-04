@@ -170,6 +170,10 @@ public sealed partial class OverlayWindow
         var settingVisible = _tabState.SelectedTab == AddonQuickSettingsTabId.Setting;
         var selectedSettingIndex = settingVisible ? _rowSelection.SelectedIndex : null;
         var previousOrder = _tabState.Order;
+        var previousSettingRows = _pageRows.TryGetValue(AddonQuickSettingsTabId.Setting, out var currentSettingRows) ? currentSettingRows : [];
+        var tabOrderEditorStartIndex = previousOrder.Count > 0 && _tabOrderRows.TryGetValue(previousOrder[0], out var firstPreviousEditor)
+            ? FindSettingRowIndex(previousSettingRows, firstPreviousEditor.Container)
+            : null;
 
         if (!state.Available || state.Rows.Count != 5)
         {
@@ -222,7 +226,7 @@ public sealed partial class OverlayWindow
         {
             var preferredIndex = ResolvePreferredSettingRowIndex(
                 selectedSettingIndex,
-                _clawHudRows.Count,
+                tabOrderEditorStartIndex,
                 previousOrder,
                 applied);
             _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
@@ -232,25 +236,26 @@ public sealed partial class OverlayWindow
         OverlayLog.Info("Shell", "Authoritative Overlay tab order applied.", ("SelectedTab", _tabState.SelectedTab));
     }
 
-    // Keep the ClawHUD rows anchored by their local index and remap only tab-order rows by identity.
-    // This is a pure calculation so the selection contract can be regression-tested without a XAML
-    // host. A selected ClawHUD row must not be treated as an invalid tab-order index.
+    // Keep the fixed Setting rows anchored by their local index and remap only tab-order rows by
+    // identity. The caller finds the actual first editor row from its retained row container, so
+    // adding a card cannot silently shift an arithmetic header offset.
     internal static int? ResolvePreferredSettingRowIndex(
         int? selectedSettingIndex,
-        int clawHudRowCount,
+        int? editorRowStart,
         IReadOnlyList<AddonQuickSettingsTabId> previousOrder,
         IReadOnlyList<AddonQuickSettingsTabId> appliedOrder)
     {
+        if (editorRowStart is not { } start)
+            return selectedSettingIndex;
         AddonQuickSettingsTabId? selectedEditorTab = null;
-        var editorRowStart = clawHudRowCount + 2; // ClawHUD detail rows plus the two card headers.
         if (selectedSettingIndex is { } selected &&
-            selected >= editorRowStart &&
-            selected - editorRowStart < previousOrder.Count)
+            selected >= start &&
+            selected - start < previousOrder.Count)
         {
-            selectedEditorTab = previousOrder[selected - editorRowStart];
+            selectedEditorTab = previousOrder[selected - start];
         }
 
-        int? preferredIndex = selectedSettingIndex is { } index && index >= 0 && index < editorRowStart
+        int? preferredIndex = selectedSettingIndex is { } index && index >= 0 && index < start
             ? index
             : null;
 
@@ -260,7 +265,7 @@ public sealed partial class OverlayWindow
             {
                 if (appliedOrder[i] == tab)
                 {
-                    preferredIndex = editorRowStart + i;
+                    preferredIndex = start + i;
                     break;
                 }
             }

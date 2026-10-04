@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Linq;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
@@ -694,6 +696,51 @@ public sealed class OverlayTransportTests
                 Assert.Equal(QuickSettingsPageId.Profile, frames[1].PageId);
                 Assert.Equal("profile-ok", frames[1].Message);
             }
+
+            await controller.DisposeAsync();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Frontend_settings_capture_failure_does_not_suppress_vibration_publication()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
+        var overlayDirectory = Path.Combine(root, "overlay");
+        Directory.CreateDirectory(overlayDirectory);
+        File.WriteAllText(Path.Combine(overlayDirectory, "SteamInputAddonforClaw.Overlay.exe"), "test payload");
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        var vibration = new FrontendControllerVibrationStrengthSnapshot(true, true, false, 35, 70, "Ready");
+
+        try
+        {
+            await using var controller = new OverlayProcessController(root, Path.Combine(root, "logs"),
+                StartLongRunningTestProcess, _ => new NamedPipeOverlayServer(pipeName));
+            controller.BindProductionControlsAuthority(
+                captureSettings: _ => throw new InvalidOperationException("settings capture boom"),
+                mutateSettings: (_, _) => Task.FromResult(new OverlayFrontendSettingsMutationResponse(1, false, "unused",
+                    new FrontendSettingsSnapshot(FrontendLogLevel.Off, false, FrontButtonMappingSettings.Default), false)),
+                captureVibration: _ => Task.FromResult(vibration),
+                mutateVibration: (_, _) => Task.FromResult(new FrontendControllerVibrationStrengthMutationResult(
+                    FrontendControllerVibrationStrengthMutationOutcome.Unavailable, vibration, "unused")));
+
+            var settingsReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var vibrationReceived = new TaskCompletionSource<FrontendControllerVibrationStrengthSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using var client = new NamedPipeOverlayClient(pipeName);
+            client.FrontendSettingsStateReceived += (_, _, available) => settingsReceived.TrySetResult(available);
+            client.ControllerVibrationStateReceived += snapshot => vibrationReceived.TrySetResult(snapshot);
+            var run = client.RunAsync(_ => Task.CompletedTask);
+
+            Assert.True(await controller.ShowAsync());
+            await controller.RefreshFrontendSettingsAsync();
+            await controller.RefreshControllerVibrationAsync();
+
+            Assert.False(await settingsReceived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(vibration, await vibrationReceived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
 
             await controller.DisposeAsync();
             try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }

@@ -5,7 +5,7 @@ namespace SteamInputAddonforClaw.Frontend;
 
 /// <summary>Shared Quick Settings Device mutation adapter (Shared Frontend V2, SF-V2-03 section 24):
 /// validates a closed <see cref="QuickSettingsMutationIntent"/> and dispatches it onto exactly one of
-/// the eight existing typed <see cref="IAddonFrontendControl"/> Device mutation methods via an
+/// existing typed <see cref="IAddonFrontendControl"/> Device mutation methods via an
 /// explicit switch -- never reflection. A malformed intent invokes zero typed mutations. Every valid
 /// attempt returns a freshly re-projected Device page (section 28); the underlying typed operation
 /// remains the final validity/hardware authority and keeps sole ownership of
@@ -28,6 +28,21 @@ internal static class QuickSettingsMutationAdapter
 
         switch (intent.EditedRowId)
         {
+            case QuickSettingsRowId.DeviceBatteryChargeLimitEnabled:
+            {
+                if (!TryGetSingleBoolean(intent, QuickSettingsRowId.DeviceBatteryChargeLimitEnabled, out var enabled))
+                    return await FailWithoutMutatingAsync(control, "Malformed battery charge-limit toggle intent.", cancellationToken).ConfigureAwait(false);
+                var result = await control.SetDeviceBatteryChargeLimitEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
+                return await FinishAsync(control, result.Succeeded, result.FailureMessage, cancellationToken).ConfigureAwait(false);
+            }
+            case QuickSettingsRowId.DeviceBatteryChargeLimitPercent:
+            {
+                if (!TryGetSingleIntegerInRange(intent, QuickSettingsRowId.DeviceBatteryChargeLimitPercent, 60, 100, out var percent)
+                    || (percent - 60) % 5 != 0)
+                    return await FailWithoutMutatingAsync(control, "Malformed battery charge-limit value.", cancellationToken).ConfigureAwait(false);
+                var result = await control.SetDeviceBatteryChargeLimitPercentAsync(percent, cancellationToken).ConfigureAwait(false);
+                return await FinishAsync(control, result.Succeeded, result.FailureMessage, cancellationToken).ConfigureAwait(false);
+            }
             case QuickSettingsRowId.DeviceCpuBoostEnabled:
             {
                 if (!TryGetSingleBoolean(intent, QuickSettingsRowId.DeviceCpuBoostEnabled, out var enabled))

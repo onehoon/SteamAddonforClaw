@@ -1,8 +1,84 @@
 using System.Linq;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
+
+internal static class OverlayProductionControlsWireValidation
+{
+    internal static bool HasPayload(OverlayWireMessage message) =>
+        message.FrontendSettingsState is not null || message.ControllerLedAvailable is not null || message.FrontendSettingsAvailable is not null
+        || message.FrontendSettingsMutationRequest is not null || message.FrontendSettingsMutationResponse is not null
+        || message.ControllerVibrationState is not null || message.ControllerVibrationMutationRequest is not null
+        || message.ControllerVibrationMutationResult is not null;
+
+    internal static bool IsValidSettingsState(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.FrontendSettingsState
+        && message.FrontendSettingsState is not null && message.ControllerLedAvailable is not null && message.FrontendSettingsAvailable is not null
+        && message.FrontendSettingsMutationRequest is null && message.FrontendSettingsMutationResponse is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidSettingsMutationRequest(OverlayWireMessage message, bool led) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == (led ? OverlayWireMessageKind.ControllerLedMutationRequest : OverlayWireMessageKind.CurrentPowerSourceMutationRequest)
+        && message.FrontendSettingsMutationRequest is { RequestId: > 0 } request
+        && (led
+            ? request.ControllerLed is not null && request.CurrentPowerSourceOnly is null && ControllerLedSettingsValidation.Validate(request.ControllerLed) is null
+            : request.ControllerLed is null && request.CurrentPowerSourceOnly is not null)
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationResponse is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidSettingsMutationResult(OverlayWireMessage message, bool led) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == (led ? OverlayWireMessageKind.ControllerLedMutationResult : OverlayWireMessageKind.CurrentPowerSourceMutationResult)
+        && message.FrontendSettingsMutationResponse is { RequestId: > 0, Settings: not null } response
+        && ControllerLedSettingsValidation.Validate(response.Settings.ControllerLed) is null
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null
+        && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidVibrationState(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.ControllerVibrationState
+        && IsStructurallyValid(message.ControllerVibrationState)
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null
+        && message.FrontendSettingsMutationResponse is null && message.ControllerVibrationMutationRequest is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidVibrationRequest(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.ControllerVibrationMutationRequest
+        && message.ControllerVibrationMutationRequest is { RequestId: > 0, LeftPercent: >= 0 and <= 100, RightPercent: >= 0 and <= 100 }
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null
+        && message.FrontendSettingsMutationResponse is null && message.ControllerVibrationState is null && message.ControllerVibrationMutationResult is null
+        && HasNoLegacyPayload(message);
+
+    internal static bool IsValidVibrationResult(OverlayWireMessage message) =>
+        message.ProtocolVersion == OverlayTransportProtocol.CurrentVersion
+        && message.Kind == OverlayWireMessageKind.ControllerVibrationMutationResult
+        && message.ControllerVibrationMutationResult is { RequestId: > 0, Result: { Snapshot: not null } } response
+        && Enum.IsDefined(response.Result.Outcome) && IsStructurallyValid(response.Result.Snapshot)
+        && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null && message.FrontendSettingsMutationRequest is null
+        && message.FrontendSettingsMutationResponse is null && message.ControllerVibrationState is null && message.ControllerVibrationMutationRequest is null
+        && HasNoLegacyPayload(message);
+
+    private static bool IsStructurallyValid(FrontendControllerVibrationStrengthSnapshot? snapshot) =>
+        snapshot is not null && snapshot.Status is not null
+        && (!snapshot.Available || snapshot.LeftPercent is >= 0 and <= 100 && snapshot.RightPercent is >= 0 and <= 100);
+
+    private static bool HasNoLegacyPayload(OverlayWireMessage message) =>
+        message.Command is null && message.Navigation is null && message.State is null && message.Error is null
+        && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null
+        && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null
+        && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null
+        && message.ProfileCatalogState is null && message.ProfilePageRequest is null && message.ProfilePageResult is null
+        && message.ShortcutState is null && message.ShortcutExecuteRequest is null && message.ShortcutExecuteResult is null
+        && message.BackButtonMappingState is null && message.BackButtonMappingMutationRequest is null && message.BackButtonMappingMutationResponse is null;
+}
 
 internal static class OverlayBackButtonMappingWireValidation
 {

@@ -1,6 +1,10 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI;
+using Windows.UI;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 
@@ -13,17 +17,38 @@ public sealed partial class OverlayWindow
     private bool _backButtonMutationInFlight;
     private OverlayValueRow? _m1MappingRow;
     private OverlayValueRow? _m2MappingRow;
+    private FrontendSettingsSnapshot? _frontendSettingsSnapshot;
+    private bool _frontendSettingsAvailable;
+    private bool _controllerLedAvailable;
+    private bool _controllerLedMutationInFlight;
+    private bool _controllerVibrationMutationInFlight;
+    private ControllerLedSettings _controllerLed = ControllerLedSettings.Default;
+    private OverlayToggleRow? _controllerLedEnabledRow;
+    private OverlayValueRow? _controllerLedBrightnessRow;
+    private Border? _controllerLedColorSwatch;
+    private Button? _controllerLedColorButton;
+    private Border? _controllerLedSectionCard;
+    private ColorPicker? _controllerLedColorPicker;
+    private Flyout? _controllerLedColorFlyout;
+    private bool _controllerLedColorDraftChanged;
+    private Color _controllerLedColorDraft;
+    private OverlayValueRow? _leftVibrationRow;
+    private OverlayValueRow? _rightVibrationRow;
+    private FrontendControllerVibrationStrengthSnapshot _vibrationSnapshot = FrontendControllerVibrationStrengthSnapshot.Unavailable();
+    private int? _vibrationDraftLeft;
+    private int? _vibrationDraftRight;
+    private CancellationTokenSource? _vibrationCommitDelay;
 
     internal event Action<BackButtonMappingSettings>? BackButtonMappingEditRequested;
+    internal event Action<ControllerLedSettings>? ControllerLedEditRequested;
+    internal event Action<int, int>? ControllerVibrationStrengthEditRequested;
 
     private FrameworkElement BuildControllerPage(List<OverlayRow> rows)
     {
-        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
-        var heading = new TextBlock { Text = "M1 / M2" };
-        OverlayQamResources.ApplyTextStyle(heading, "QamBodyStrongTextStyle");
-        section.Children.Add(heading);
-        var rowsPanel = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
-        section.Children.Add(rowsPanel);
+        var page = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
+        var mappingSection = CreateControllerSection("M1 / M2");
+        var ledSection = CreateControllerSection("Joystick LED");
+        var vibrationSection = CreateControllerSection("Vibration Strength");
 
         var m1Row = new OverlayValueRow("M1", FormatBackButtonTarget,
             value => RequestBackButtonMappingChange(isM1: true, value),
@@ -34,10 +59,108 @@ public sealed partial class OverlayWindow
         _m1MappingRow = m1Row;
         _m2MappingRow = m2Row;
 
-        AddBackButtonMappingRow(rowsPanel, rows, m1Row);
-        AddBackButtonMappingRow(rowsPanel, rows, m2Row);
+        AddBackButtonMappingRow(mappingSection, rows, m1Row);
+        AddBackButtonMappingRow(mappingSection, rows, m2Row);
         RenderBackButtonMappingRows();
-        return CreateOverlaySectionCard(section);
+
+        BuildControllerLedRows(ledSection, rows);
+        BuildControllerVibrationRows(vibrationSection, rows);
+        page.Children.Add(CreateOverlaySectionCard(mappingSection));
+        _controllerLedSectionCard = CreateOverlaySectionCard(ledSection);
+        page.Children.Add(_controllerLedSectionCard);
+        page.Children.Add(CreateOverlaySectionCard(vibrationSection));
+        RenderControllerLedRows();
+        return page;
+    }
+
+    private static StackPanel CreateControllerSection(string title)
+    {
+        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
+        var heading = new TextBlock { Text = title };
+        OverlayQamResources.ApplyTextStyle(heading, "QamBodyStrongTextStyle");
+        section.Children.Add(heading);
+        return section;
+    }
+
+    private void BuildControllerLedRows(StackPanel section, List<OverlayRow> rows)
+    {
+        _controllerLedEnabledRow = new OverlayToggleRow("Enabled", RequestControllerLedEnabled);
+        AddControllerRow(section, rows, _controllerLedEnabledRow.Container, _controllerLedEnabledRow.Capabilities);
+        _controllerLedBrightnessRow = new OverlayValueRow("Brightness", OverlayValueRow.FormatInteger,
+            value => RequestControllerLedBrightness((int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
+        AddControllerRow(section, rows, _controllerLedBrightnessRow.Container, _controllerLedBrightnessRow.Capabilities);
+
+        var swatch = new Border
+        {
+            Width = 26,
+            Height = 20,
+            CornerRadius = new CornerRadius(4),
+            BorderThickness = new Thickness(1),
+            BorderBrush = OverlayQamResources.Brush("QamSubtleStrokeBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _controllerLedColorSwatch = swatch;
+        var colorContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        colorContent.Children.Add(swatch);
+        colorContent.Children.Add(new TextBlock { Text = "Choose color", VerticalAlignment = VerticalAlignment.Center });
+        var colorButton = new Button
+        {
+            Content = colorContent,
+            Style = OverlayQamResources.Style("QamValueButtonStyle"),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0),
+            Padding = new Thickness(10, 0, 10, 0),
+            BorderThickness = new Thickness(0),
+            IsTabStop = false,
+        };
+        _controllerLedColorButton = colorButton;
+        var picker = new ColorPicker { IsAlphaEnabled = false, IsColorPreviewVisible = false };
+        _controllerLedColorPicker = picker;
+        var flyout = new Flyout { Content = picker };
+        _controllerLedColorFlyout = flyout;
+        colorButton.Flyout = flyout;
+        flyout.Opened += (_, _) =>
+        {
+            _controllerLedColorDraftChanged = false;
+            _controllerLedColorDraft = Color.FromArgb(255, _controllerLed.Red, _controllerLed.Green, _controllerLed.Blue);
+            picker.Color = _controllerLedColorDraft;
+        };
+        picker.ColorChanged += (_, args) =>
+        {
+            _controllerLedColorDraft = args.NewColor;
+            _controllerLedColorDraftChanged = args.NewColor.R != _controllerLed.Red || args.NewColor.G != _controllerLed.Green || args.NewColor.B != _controllerLed.Blue;
+            RenderControllerLedColor(args.NewColor);
+        };
+        flyout.Closed += (_, _) =>
+        {
+            if (!_controllerLedColorDraftChanged || !_controllerLedAvailable || _controllerLedMutationInFlight) return;
+            _controllerLedColorDraftChanged = false;
+            RequestControllerLedColor(_controllerLedColorDraft);
+        };
+        var colorContainer = OverlayRowChrome.Create(colorButton);
+        AddControllerRow(section, rows, colorContainer, new OverlayRowCapabilities(
+            IsSelectable: () => _controllerLedAvailable && _controllerLed.Enabled,
+            Activate: () => flyout.ShowAt(colorButton)));
+        RenderControllerLedRows();
+    }
+
+    private void BuildControllerVibrationRows(StackPanel section, List<OverlayRow> rows)
+    {
+        _leftVibrationRow = new OverlayValueRow("Left Motor", FormatPercent,
+            value => RequestVibrationEdit(left: (int)Math.Round(value), right: null), OverlayValueButtonKind.NumericStepper);
+        _rightVibrationRow = new OverlayValueRow("Right Motor", FormatPercent,
+            value => RequestVibrationEdit(left: null, right: (int)Math.Round(value)), OverlayValueButtonKind.NumericStepper);
+        AddControllerRow(section, rows, _leftVibrationRow.Container, _leftVibrationRow.Capabilities);
+        AddControllerRow(section, rows, _rightVibrationRow.Container, _rightVibrationRow.Capabilities);
+        RenderControllerVibrationRows();
+    }
+
+    private void AddControllerRow(StackPanel section, List<OverlayRow> rows, Border container, OverlayRowCapabilities capabilities)
+    {
+        section.Children.Add(container);
+        rows.Add(new(container, capabilities));
+        RegisterRowPointerSelection(container);
     }
 
     private void AddBackButtonMappingRow(StackPanel section, List<OverlayRow> rows, OverlayValueRow row)
@@ -102,7 +225,155 @@ public sealed partial class OverlayWindow
         if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
         {
             var preferredIndex = _rowSelection.SelectedIndex;
-            if (!_backButtonMutationInFlight)
+            if (!_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)
+                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
+            ApplyRowSelectionVisual();
+        }
+    }
+
+    internal void ApplyFrontendSettingsState(FrontendSettingsSnapshot settings, bool controllerLedAvailable, bool settingsAvailable)
+    {
+        _frontendSettingsSnapshot = settings;
+        _frontendSettingsAvailable = settingsAvailable;
+        _controllerLedAvailable = settingsAvailable && controllerLedAvailable;
+        _controllerLed = settings.ControllerLed;
+        RenderControllerLedRows();
+        ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable);
+    }
+
+    internal void ApplyFrontendSettingsMutationResult(OverlayFrontendSettingsMutationResponse response, bool led)
+    {
+        if (led) _controllerLedMutationInFlight = false;
+        else SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
+        ApplyFrontendSettingsState(response.Settings, response.ControllerLedAvailable, response.SettingsAvailable);
+    }
+
+    internal void ApplyFrontendSettingsMutationFailure(bool led)
+    {
+        if (led) _controllerLedMutationInFlight = false;
+        else SetQuickSettingsCurrentPowerSourceMutationInFlight(false);
+        RenderControllerLedRows();
+        RenderQuickSettingsCurrentPowerSourceRow();
+    }
+
+    private void RequestControllerLedEnabled(bool enabled)
+    {
+        if (!_controllerLedAvailable || _controllerLedMutationInFlight || _frontendSettingsSnapshot is null) return;
+        RequestControllerLedMutation(_controllerLed with { Enabled = enabled });
+    }
+
+    private void RequestControllerLedBrightness(int brightness)
+    {
+        if (!_controllerLedAvailable || _controllerLedMutationInFlight || !_controllerLed.Enabled || _frontendSettingsSnapshot is null || brightness is < 0 or > 100) return;
+        RequestControllerLedMutation(_controllerLed with { Brightness = brightness });
+    }
+
+    private void RequestControllerLedColor(Color color)
+    {
+        if (!_controllerLedAvailable || _controllerLedMutationInFlight || !_controllerLed.Enabled || _frontendSettingsSnapshot is null) return;
+        RequestControllerLedMutation(_controllerLed with { Red = color.R, Green = color.G, Blue = color.B });
+    }
+
+    private void RequestControllerLedMutation(ControllerLedSettings settings)
+    {
+        _controllerLedMutationInFlight = true;
+        RenderControllerLedRows();
+        ControllerLedEditRequested?.Invoke(settings);
+    }
+
+    private void RenderControllerLedRows()
+    {
+        if (_controllerLedSectionCard is not null)
+            _controllerLedSectionCard.Visibility = _controllerLedAvailable ? Visibility.Visible : Visibility.Collapsed;
+        var available = _controllerLedAvailable && !_controllerLedMutationInFlight;
+        _controllerLedEnabledRow?.ApplyState(available, _controllerLed.Enabled);
+        _controllerLedBrightnessRow?.ApplyState(available && _controllerLed.Enabled, 0, 100, 1, _controllerLed.Brightness);
+        if (_controllerLedColorButton is not null)
+            _controllerLedColorButton.IsEnabled = available && _controllerLed.Enabled;
+        if (_controllerLedColorSwatch is not null)
+            RenderControllerLedColor(Color.FromArgb(255, _controllerLed.Red, _controllerLed.Green, _controllerLed.Blue));
+        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
+        {
+            var preferredIndex = _rowSelection.SelectedIndex;
+            if (!_controllerLedMutationInFlight && !_backButtonMutationInFlight && !_controllerVibrationMutationInFlight)
+                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
+            ApplyRowSelectionVisual();
+        }
+    }
+
+    private void RenderControllerLedColor(Color color)
+    {
+        if (_controllerLedColorSwatch is not null)
+            _controllerLedColorSwatch.Background = new SolidColorBrush(color);
+    }
+
+    private static string FormatPercent(double value) => $"{OverlayValueRow.FormatInteger(value)}%";
+
+    private void RequestVibrationEdit(int? left, int? right)
+    {
+        if (!_vibrationSnapshot.Available || !_vibrationSnapshot.Writable || _controllerVibrationMutationInFlight) return;
+        _vibrationDraftLeft = left ?? _vibrationDraftLeft ?? _vibrationSnapshot.LeftPercent;
+        _vibrationDraftRight = right ?? _vibrationDraftRight ?? _vibrationSnapshot.RightPercent;
+        if (_vibrationDraftLeft is not { } targetLeft || _vibrationDraftRight is not { } targetRight) return;
+        RenderControllerVibrationRows();
+        _vibrationCommitDelay?.Cancel();
+        _vibrationCommitDelay?.Dispose();
+        var delay = new CancellationTokenSource();
+        _vibrationCommitDelay = delay;
+        _ = CommitVibrationAfterDelayAsync(targetLeft, targetRight, delay.Token);
+    }
+
+    private async Task CommitVibrationAfterDelayAsync(int left, int right, CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(500, token);
+            _controllerVibrationMutationInFlight = true;
+            RenderControllerVibrationRows();
+            ControllerVibrationStrengthEditRequested?.Invoke(left, right);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+    }
+
+    internal void ApplyControllerVibrationState(FrontendControllerVibrationStrengthSnapshot snapshot)
+    {
+        if (!_controllerVibrationMutationInFlight)
+        {
+            _vibrationSnapshot = snapshot;
+            _vibrationDraftLeft = snapshot.LeftPercent;
+            _vibrationDraftRight = snapshot.RightPercent;
+        }
+        RenderControllerVibrationRows();
+    }
+
+    internal void ApplyControllerVibrationMutationResult(FrontendControllerVibrationStrengthMutationResult result)
+    {
+        _controllerVibrationMutationInFlight = false;
+        _vibrationSnapshot = result.Snapshot;
+        _vibrationDraftLeft = result.Snapshot.LeftPercent;
+        _vibrationDraftRight = result.Snapshot.RightPercent;
+        RenderControllerVibrationRows();
+    }
+
+    internal void ApplyControllerVibrationMutationFailure()
+    {
+        _controllerVibrationMutationInFlight = false;
+        _vibrationDraftLeft = _vibrationSnapshot.LeftPercent;
+        _vibrationDraftRight = _vibrationSnapshot.RightPercent;
+        RenderControllerVibrationRows();
+    }
+
+    private void RenderControllerVibrationRows()
+    {
+        var enabled = _vibrationSnapshot.Available && _vibrationSnapshot.Writable && !_controllerVibrationMutationInFlight;
+        var left = _vibrationDraftLeft ?? _vibrationSnapshot.LeftPercent;
+        var right = _vibrationDraftRight ?? _vibrationSnapshot.RightPercent;
+        _leftVibrationRow?.ApplyState(enabled && left is not null, 0, 100, 1, left ?? double.NaN);
+        _rightVibrationRow?.ApplyState(enabled && right is not null, 0, 100, 1, right ?? double.NaN);
+        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Controller)
+        {
+            var preferredIndex = _rowSelection.SelectedIndex;
+            if (!_controllerVibrationMutationInFlight && !_backButtonMutationInFlight && !_controllerLedMutationInFlight)
                 _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);
             ApplyRowSelectionVisual();
         }

@@ -14,7 +14,7 @@ namespace SteamInputAddonforClaw.Tests;
 /// <summary>Shared Frontend V2, SF-V2-01: <see cref="FrontendDeviceQuickSettingsSnapshot"/> and
 /// <see cref="InProcessAddonFrontendControl.CaptureDeviceQuickSettingsAsync"/> must reuse the
 /// existing Runtime authorities/mappers exactly, stay read-only, and isolate one child's failure
-/// from healthy siblings (work order sections 6/8/13.1/13.2). TDP is left null (unconfigured) in
+    /// from healthy siblings (work order sections 6/8/13.1/13.2). TDP is left null (unconfigured) in
 /// every aggregate test here rather than standing up a full hardware-backed <c>TdpRuntime</c> --
 /// that already exercises the "missing authority -> only that child Unavailable" path, which is
 /// the same shape a real TDP hardware failure would take.</summary>
@@ -24,13 +24,14 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
     private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
 
     [Fact]
-    public void Unavailable_aggregate_contains_all_three_unavailable_children()
+    public void Unavailable_aggregate_contains_all_four_unavailable_children()
     {
         var snapshot = FrontendDeviceQuickSettingsSnapshot.Unavailable;
 
         Assert.Equal(FrontendCpuBoostSnapshot.Unavailable, snapshot.CpuBoost);
         Assert.Equal(FrontendTdpSnapshot.Unavailable, snapshot.Tdp);
         Assert.Equal(FrontendPowerModeSnapshot.Unavailable, snapshot.PowerMode);
+        Assert.Equal(FrontendBatteryChargeLimitSnapshot.Unavailable, snapshot.BatteryChargeLimit);
     }
 
     [Fact]
@@ -47,6 +48,7 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
         Assert.Equal(await control.CapturePowerModeAsync(), aggregate.PowerMode);
         // No TdpRuntime was configured -- this is the "missing TDP authority" case (section 13.2).
         Assert.Equal(FrontendTdpSnapshot.Unavailable, aggregate.Tdp);
+        Assert.Equal(FrontendBatteryChargeLimitSnapshot.Unavailable, aggregate.BatteryChargeLimit);
     }
 
     [Fact]

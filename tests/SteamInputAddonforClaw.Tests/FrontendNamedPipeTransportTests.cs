@@ -59,7 +59,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(49, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -95,7 +95,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(49, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -148,7 +148,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(49, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -168,7 +168,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(49, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -192,7 +192,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(49, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -227,7 +227,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(49, FrontendTransportProtocol.CurrentVersion);
         var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
         var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
@@ -595,7 +595,7 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task A_v47_frontend_peer_is_rejected_by_the_v48_server()
+    public async Task A_v48_frontend_peer_is_rejected_by_the_v49_server()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
@@ -1488,13 +1488,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 48 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 49 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":48,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":48,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":48,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":49,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":49,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":49,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1905,7 +1905,8 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendDeviceQuickSettingsSnapshot DeviceQuickSettingsSnapshot { get; } = new(
             new(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), true, true, null),
             new(true, true, new(true, new(20, 30), new(15, 25)), new(8, 30, 8, 40)),
-            new(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null));
+            new(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null),
+            new(true, true, true, true, 70, true, 70, null));
         public int CaptureDeviceQuickSettingsCount { get; private set; }
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) { TotalCalls++; CaptureDeviceQuickSettingsCount++; return Task.FromResult(DeviceQuickSettingsSnapshot); }
         public AddonQuickSettingsShellSnapshot ShellSnapshot { get; } = AddonQuickSettingsShellContract.Create([AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting]);

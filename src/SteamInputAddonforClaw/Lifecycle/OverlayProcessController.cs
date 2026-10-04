@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.FrontendTransport;
@@ -41,6 +42,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     private Func<Guid, CancellationToken, Task<OverlayShortcutExecutionOutcome>>? _executeShortcut;
     private Func<CancellationToken, Task<OverlayBackButtonMappingState>>? _captureBackButtonMapping;
     private Func<BackButtonMappingSettings, CancellationToken, Task<OverlayBackButtonMappingMutationOutcome>>? _mutateBackButtonMapping;
+    private Func<CancellationToken, Task<OverlayFrontendSettingsMutationResponse>>? _captureFrontendSettings;
+    private Func<OverlayFrontendSettingsMutationRequest, CancellationToken, Task<OverlayFrontendSettingsMutationResponse>>? _mutateFrontendSettings;
+    private Func<CancellationToken, Task<FrontendControllerVibrationStrengthSnapshot>>? _captureControllerVibration;
+    private Func<OverlayControllerVibrationMutationRequest, CancellationToken, Task<FrontendControllerVibrationStrengthMutationResult>>? _mutateControllerVibration;
     private NamedPipeOverlayServer? _server;
     private Process? _process;
     private bool _visible;
@@ -65,7 +70,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         // always runs after AddonProcessHost has bound its Runtime authorities.
         _serverFactory = serverFactory ?? (pipeName => new NamedPipeOverlayServer(pipeName, _captureTabOrder, _moveTabOrder, _mutateQuickSettings,
             _captureClawHud, _setClawHudEnabled, _mutateClawHudSetting, _scanProfileGames, _captureSelectedProfilePage,
-            _captureShortcut, _executeShortcut, _captureBackButtonMapping, _mutateBackButtonMapping));
+            _captureShortcut, _executeShortcut, _captureBackButtonMapping, _mutateBackButtonMapping,
+            _captureFrontendSettings, _mutateFrontendSettings, _captureControllerVibration, _mutateControllerVibration));
     }
 
     // OQ5-UI-09: wire the Overlay tab-order transport to the Runtime settings authority. Must be
@@ -124,6 +130,18 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     {
         _captureBackButtonMapping = capture ?? throw new ArgumentNullException(nameof(capture));
         _mutateBackButtonMapping = mutate ?? throw new ArgumentNullException(nameof(mutate));
+    }
+
+    internal void BindProductionControlsAuthority(
+        Func<CancellationToken, Task<OverlayFrontendSettingsMutationResponse>> captureSettings,
+        Func<OverlayFrontendSettingsMutationRequest, CancellationToken, Task<OverlayFrontendSettingsMutationResponse>> mutateSettings,
+        Func<CancellationToken, Task<FrontendControllerVibrationStrengthSnapshot>> captureVibration,
+        Func<OverlayControllerVibrationMutationRequest, CancellationToken, Task<FrontendControllerVibrationStrengthMutationResult>> mutateVibration)
+    {
+        _captureFrontendSettings = captureSettings ?? throw new ArgumentNullException(nameof(captureSettings));
+        _mutateFrontendSettings = mutateSettings ?? throw new ArgumentNullException(nameof(mutateSettings));
+        _captureControllerVibration = captureVibration ?? throw new ArgumentNullException(nameof(captureVibration));
+        _mutateControllerVibration = mutateVibration ?? throw new ArgumentNullException(nameof(mutateVibration));
     }
 
     internal string ExecutablePath => _executablePath;
@@ -299,6 +317,32 @@ internal sealed class OverlayProcessController : IAsyncDisposable
                 AppLog.Warn("Overlay", "Overlay M1 / M2 mapping state publish was not accepted.");
         }
         catch (Exception exception) { AppLog.Warn("Overlay", "Overlay M1 / M2 mapping state publish failed.", exception); }
+    }
+
+    internal async Task RefreshFrontendSettingsAsync()
+    {
+        NamedPipeOverlayServer? server;
+        var capture = _captureFrontendSettings;
+        lock (_sync) server = _server;
+        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+        OverlayFrontendSettingsMutationResponse state;
+        try { state = await capture(CancellationToken.None).ConfigureAwait(false); }
+        catch { state = new(0, false, "Settings are unavailable.", new FrontendSettingsSnapshot(FrontendLogLevel.Off, false, FrontButtonMappingSettings.Default) { BackButtonMapping = BackButtonMappingSettings.Default }, false, false); }
+        try { await server.SendFrontendSettingsStateAsync(state).ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("Overlay", "Overlay frontend settings publish failed.", exception); }
+    }
+
+    internal async Task RefreshControllerVibrationAsync()
+    {
+        NamedPipeOverlayServer? server;
+        var capture = _captureControllerVibration;
+        lock (_sync) server = _server;
+        if (server is null || capture is null || !server.IsReady || server.State != OverlayState.Visible) return;
+        FrontendControllerVibrationStrengthSnapshot state;
+        try { state = await capture(CancellationToken.None).ConfigureAwait(false); }
+        catch { state = FrontendControllerVibrationStrengthSnapshot.Unavailable(); }
+        try { await server.SendControllerVibrationStateAsync(state).ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Warn("Overlay", "Overlay controller vibration publish failed.", exception); }
     }
 
     private static async Task PublishQuickSettingsPageAsync(

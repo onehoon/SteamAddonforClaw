@@ -70,7 +70,7 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
 
         var preferredIndex = OverlayWindow.ResolvePreferredSettingRowIndex(
             selection.SelectedIndex,
-            clawHudRowCount,
+            clawHudRowCount + 4,
             previousOrder,
             state.Order);
         selection.SetRows(rows, preferredIndex);
@@ -84,7 +84,8 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
         var state = new OverlayTabState();
         const int clawHudRowCount = 3;
         var previousOrder = state.Order.ToArray();
-        var selectedIndex = clawHudRowCount + 2 + 2; // Two card headers, then the Controller editor row.
+        var editorRowStart = clawHudRowCount + 4; // Three Setting card headers and the Quick Settings detail row.
+        var selectedIndex = editorRowStart + 2; // Controller editor row.
         IReadOnlyList<AddonQuickSettingsTabId> appliedOrder =
         [
             AddonQuickSettingsTabId.Device,
@@ -96,12 +97,12 @@ public sealed class AddonQuickSettingsTabOrderEditorTests
 
         var preferredIndex = OverlayWindow.ResolvePreferredSettingRowIndex(
             selectedIndex,
-            clawHudRowCount,
+            editorRowStart,
             previousOrder,
             appliedOrder);
 
-        Assert.Equal(clawHudRowCount + 2 + 3, preferredIndex);
-        Assert.Equal(AddonQuickSettingsTabId.Controller, appliedOrder[preferredIndex!.Value - clawHudRowCount - 2]);
+        Assert.Equal(editorRowStart + 3, preferredIndex);
+        Assert.Equal(AddonQuickSettingsTabId.Controller, appliedOrder[preferredIndex!.Value - editorRowStart]);
     }
 
     [Fact]

@@ -131,7 +131,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 47: add firmware-backed Left/Right Controller Vibration Strength capture/mutation and
 // physical motor-test RPCs. A v46 peer cannot safely invoke these operations or deserialize their contracts.
 // Version 48: add the closed developer-only CG3EM 0/100 profile-write probe and explicit 50/50 restore RPC.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 48; }
+// Version 49: include Battery Charge Limit in the existing Device Quick Settings aggregate.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 49; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

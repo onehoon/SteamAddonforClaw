@@ -23,6 +23,7 @@ public sealed class QuickSettingsPresentationTests
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
 
         Assert.Collection(page.Sections,
+            s => Assert.Equal(QuickSettingsSectionId.DeviceBatteryChargeLimit, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.DeviceTdp, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.DeviceCpuBoost, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.DevicePowerMode, s.SectionId));
@@ -97,13 +98,68 @@ public sealed class QuickSettingsPresentationTests
         var snapshot = new FrontendDeviceQuickSettingsSnapshot(
             new FrontendCpuBoostSnapshot(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), Enabled: false, PersistenceWritable: true, LastFailure: null),
             new FrontendTdpSnapshot(true, true, new FrontendTdpConfiguration(false, new(20, 25), new(20, 25)), GapOneLimits),
-            new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), Enabled: false, PersistenceWritable: true, LastFailure: null));
+            new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), Enabled: false, PersistenceWritable: true, LastFailure: null),
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
         Assert.Equal([QuickSettingsRowId.DeviceTdpEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DeviceTdp).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.DeviceCpuBoostEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DeviceCpuBoost).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.DevicePowerModeEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DevicePowerMode).Rows.Select(r => r.RowId).ToArray());
+    }
+
+    [Fact]
+    public void Battery_rows_use_production_value_priority_and_supported_range()
+    {
+        var battery = new FrontendBatteryChargeLimitSnapshot(true, true, true,
+            CurrentEnabled: false, CurrentLimitPercent: 65, DesiredEnabled: true, DesiredLimitPercent: 80, LastFailure: null);
+        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with { BatteryChargeLimit = battery });
+        var section = page.Sections[0];
+        var enabled = section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitEnabled);
+        var percent = section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitPercent);
+
+        Assert.Equal("Battery Charge Limit", section.Label);
+        Assert.Equal(QuickSettingsControlKind.Toggle, enabled.ControlKind);
+        Assert.True(enabled.Available);
+        Assert.True(enabled.Writable);
+        Assert.True(enabled.Value!.BooleanValue);
+        Assert.Equal(QuickSettingsControlKind.Slider, percent.ControlKind);
+        Assert.True(percent.Writable);
+        Assert.Equal(80, percent.Value!.IntegerValue);
+        Assert.Equal((60, 100, 5, "%"), (percent.SliderSpec!.Minimum, percent.SliderSpec.Maximum, percent.SliderSpec.Step, percent.SliderSpec.Suffix));
+    }
+
+    [Fact]
+    public void Battery_limit_remains_editable_before_initialization_and_uses_current_then_presentation_fallback()
+    {
+        var uninitialized = new FrontendBatteryChargeLimitSnapshot(true, true, false,
+            CurrentEnabled: null, CurrentLimitPercent: 75, DesiredEnabled: null, DesiredLimitPercent: null, LastFailure: null);
+        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with { BatteryChargeLimit = uninitialized });
+        var enabled = FindRow(page, QuickSettingsRowId.DeviceBatteryChargeLimitEnabled);
+        var percent = FindRow(page, QuickSettingsRowId.DeviceBatteryChargeLimitPercent);
+
+        Assert.False(enabled.Writable);
+        Assert.True(percent.Writable);
+        Assert.Equal(75, percent.Value!.IntegerValue);
+
+        page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with { BatteryChargeLimit = uninitialized with { CurrentLimitPercent = 76 } });
+        Assert.Equal(60, FindRow(page, QuickSettingsRowId.DeviceBatteryChargeLimitPercent).Value!.IntegerValue);
+    }
+
+    [Fact]
+    public void Battery_failure_is_section_local_and_rows_ignore_power_source_visibility()
+    {
+        var battery = new FrontendBatteryChargeLimitSnapshot(true, false, false,
+            CurrentEnabled: null, CurrentLimitPercent: null, DesiredEnabled: null, DesiredLimitPercent: null,
+            LastFailure: "Battery settings unavailable.");
+        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with { BatteryChargeLimit = battery });
+        var projected = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.DC);
+        var section = projected.Sections[0];
+
+        Assert.Equal("Battery settings unavailable.", section.Message);
+        Assert.All(section.Rows, row => Assert.True(row.Visible));
+        Assert.False(section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitEnabled).Writable);
+        Assert.False(section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitPercent).Writable);
     }
 
     [Fact]
@@ -197,7 +253,8 @@ public sealed class QuickSettingsPresentationTests
         var snapshot = new FrontendDeviceQuickSettingsSnapshot(
             EnabledSnapshot().CpuBoost,
             FrontendTdpSnapshot.Unavailable,
-            EnabledSnapshot().PowerMode);
+            EnabledSnapshot().PowerMode,
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -212,7 +269,8 @@ public sealed class QuickSettingsPresentationTests
         var snapshot = new FrontendDeviceQuickSettingsSnapshot(
             FrontendCpuBoostSnapshot.Unavailable,
             EnabledSnapshot().Tdp,
-            EnabledSnapshot().PowerMode);
+            EnabledSnapshot().PowerMode,
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -227,7 +285,8 @@ public sealed class QuickSettingsPresentationTests
         var snapshot = new FrontendDeviceQuickSettingsSnapshot(
             EnabledSnapshot().CpuBoost,
             EnabledSnapshot().Tdp,
-            FrontendPowerModeSnapshot.Unavailable);
+            FrontendPowerModeSnapshot.Unavailable,
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -248,7 +307,8 @@ public sealed class QuickSettingsPresentationTests
             new FrontendPowerModeSnapshot(
                 new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.BestPerformance),
                 new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.BestPowerEfficiency),
-                Enabled: true, PersistenceWritable: true, LastFailure: null));
+                Enabled: true, PersistenceWritable: true, LastFailure: null),
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -267,7 +327,8 @@ public sealed class QuickSettingsPresentationTests
                 new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, null),
                 Enabled: true, PersistenceWritable: true, LastFailure: null),
             EnabledSnapshot().Tdp,
-            EnabledSnapshot().PowerMode);
+            EnabledSnapshot().PowerMode,
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -284,7 +345,8 @@ public sealed class QuickSettingsPresentationTests
                 new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, null),
                 Enabled: true, PersistenceWritable: true, LastFailure: null),
             EnabledSnapshot().Tdp,
-            EnabledSnapshot().PowerMode);
+            EnabledSnapshot().PowerMode,
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -300,7 +362,8 @@ public sealed class QuickSettingsPresentationTests
         var snapshot = new FrontendDeviceQuickSettingsSnapshot(
             EnabledSnapshot().CpuBoost,
             new FrontendTdpSnapshot(true, true, Configuration: null, Limits: GapOneLimits),
-            EnabledSnapshot().PowerMode);
+            EnabledSnapshot().PowerMode,
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -316,7 +379,8 @@ public sealed class QuickSettingsPresentationTests
             new FrontendPowerModeSnapshot(
                 new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, null),
                 new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced),
-                Enabled: true, PersistenceWritable: true, LastFailure: null));
+                Enabled: true, PersistenceWritable: true, LastFailure: null),
+            FrontendBatteryChargeLimitSnapshot.Unavailable);
 
         var page = QuickSettingsPresentation.BuildDevice(snapshot);
 
@@ -539,5 +603,6 @@ public sealed class QuickSettingsPresentationTests
         new FrontendPowerModeSnapshot(
             new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced),
             new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced),
-            Enabled: true, PersistenceWritable: true, LastFailure: null));
+            Enabled: true, PersistenceWritable: true, LastFailure: null),
+        new FrontendBatteryChargeLimitSnapshot(true, true, true, false, 70, true, 70, null));
 }
