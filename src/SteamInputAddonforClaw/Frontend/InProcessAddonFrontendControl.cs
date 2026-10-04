@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
+using SteamInputAddonforClaw.Contracts.ControllerVibration;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.CenterMStartup;
@@ -35,6 +36,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly bool _frontButtonMappingAvailable;
     private readonly bool _controllerLedAvailable;
     private readonly Func<ControllerLedSettings, CancellationToken, Task>? _applyControllerLedSettings;
+    private readonly Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? _applyControllerVibrationSettings;
     private int _shutdownStarted;
     private readonly object _clawSensorProbeGate = new();
     private ClawSensorProbeSession? _clawSensorProbe;
@@ -103,7 +105,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null, Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null, Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null, Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null, ShortcutRuntime? shortcutRuntime = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? captureXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? startXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? stopXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? runPid1902InputCadenceDiagnostic = null, MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null, Func<bool>? controllerVibrationTestAvailable = null, Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? testControllerVibrationMotor = null, bool controllerLedAvailable = false, Func<ControllerLedSettings, CancellationToken, Task>? applyControllerLedSettings = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null, Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null, Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null, Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null, ShortcutRuntime? shortcutRuntime = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? captureXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? startXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? stopXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? runPid1902InputCadenceDiagnostic = null, MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null, Func<bool>? controllerVibrationTestAvailable = null, Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? testControllerVibrationMotor = null, bool controllerLedAvailable = false, Func<ControllerLedSettings, CancellationToken, Task>? applyControllerLedSettings = null, Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? applyControllerVibrationSettings = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -133,6 +135,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _stopXbox360RumbleLoopDiagnostic = stopXbox360RumbleLoopDiagnostic;
         _runPid1902InputCadenceDiagnostic = runPid1902InputCadenceDiagnostic;
         _controllerVibrationStrengthClient = controllerVibrationStrengthClient;
+        _applyControllerVibrationSettings = applyControllerVibrationSettings;
         _controllerVibrationTestAvailable = controllerVibrationTestAvailable;
         _testControllerVibrationMotor = testControllerVibrationMotor;
         _settings = settings;
@@ -1304,32 +1307,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         new(snapshot.Available, snapshot.PersistenceWritable, snapshot.Initialized, snapshot.CurrentEnabled,
             snapshot.CurrentLimitPercent, snapshot.DesiredEnabled, snapshot.DesiredLimitPercent, snapshot.LastFailure);
 
-    public async Task<FrontendControllerVibrationStrengthSnapshot> CaptureControllerVibrationStrengthAsync(
+    public Task<FrontendControllerVibrationStrengthSnapshot> CaptureControllerVibrationStrengthAsync(
         CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
-        var testAvailable = IsControllerVibrationTestAvailable();
-        if (_controllerVibrationStrengthClient is null)
-            return UnavailableControllerVibrationSnapshot("Controller vibration firmware access is unavailable.", testAvailable);
-
-        var result = await _controllerVibrationStrengthClient.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        if (!result.Succeeded || result.Values is null)
-        {
-            AppLog.Info("ControllerVibration", "ControllerVibrationCaptureUnavailable", ("Reason", result.Reason));
-            return UnavailableControllerVibrationSnapshot(DescribeControllerVibrationFailure(result.Reason), testAvailable);
-        }
-
-        var writable = IsCenterMExactlyDisabled();
-        return new FrontendControllerVibrationStrengthSnapshot(
-            Available: true,
-            Writable: writable,
-            TestAvailable: testAvailable,
-            LeftPercent: result.Values.Value.LeftPercent,
-            RightPercent: result.Values.Value.RightPercent,
-            Status: writable
-                ? "Firmware values read successfully."
-                : "Firmware values are read-only while MSI Center M owns controller authority.");
+        return Task.FromResult(CaptureControllerVibrationSnapshot());
     }
 
     public async Task<FrontendControllerVibrationStrengthMutationResult> SetControllerVibrationStrengthAsync(
@@ -1339,34 +1322,50 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
-        if (_controllerVibrationStrengthClient is null)
+        var current = CaptureControllerVibrationSnapshot();
+        var requested = new ControllerVibrationSettings(leftPercent, rightPercent);
+        var invalid = ControllerVibrationSettingsValidation.Validate(requested);
+        if (invalid is not null)
+            return new(FrontendControllerVibrationStrengthMutationOutcome.Failed, current,
+                "Motor strength must be between 0% and 100%.");
+        if (!current.Available)
+            return new(FrontendControllerVibrationStrengthMutationOutcome.Unavailable, current,
+                "Production vibration strength is not enabled for this MSI Claw model.");
+        if (!current.Writable)
+            return new(FrontendControllerVibrationStrengthMutationOutcome.Unavailable, current,
+                "Vibration strength can be changed only while the Addon owns the controller.");
+
+        if (!_settings.ChangeControllerVibrationSettings(requested))
+            return new(FrontendControllerVibrationStrengthMutationOutcome.Failed, CaptureControllerVibrationSnapshot(),
+                "The vibration setting could not be saved.");
+
+        var savedSnapshot = CaptureControllerVibrationSnapshot();
+        bool applied;
+        try
         {
-            var unavailable = UnavailableControllerVibrationSnapshot(
-                "Controller vibration firmware access is unavailable.", IsControllerVibrationTestAvailable());
-            return new(FrontendControllerVibrationStrengthMutationOutcome.Unavailable, unavailable,
-                "Controller vibration firmware access is unavailable.");
+            applied = _applyControllerVibrationSettings is not null
+                && await _applyControllerVibrationSettings(requested, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerVibration", "Saved vibration pair could not be applied immediately.", exception,
+                ("Event", "ControllerVibrationSettingsApplyFailed"));
+            applied = false;
         }
 
-        var result = await _controllerVibrationStrengthClient.SetAsync(
-            leftPercent,
-            rightPercent,
-            IsCenterMExactlyDisabled,
-            cancellationToken).ConfigureAwait(false);
-        var snapshot = CreateControllerVibrationSnapshot(
-            result.Values,
-            IsCenterMExactlyDisabled(),
-            IsControllerVibrationTestAvailable(),
-            result.Reason);
-        var outcome = result.Outcome switch
+        if (!applied)
         {
-            MsiClawVibrationStrengthMutationOutcome.Succeeded => FrontendControllerVibrationStrengthMutationOutcome.Succeeded,
-            MsiClawVibrationStrengthMutationOutcome.Unavailable => FrontendControllerVibrationStrengthMutationOutcome.Unavailable,
-            _ => FrontendControllerVibrationStrengthMutationOutcome.Failed,
-        };
-        var failureMessage = result.Succeeded ? null : DescribeControllerVibrationFailure(result.Reason);
-        if (!result.Succeeded)
-            AppLog.Info("ControllerVibration", "ControllerVibrationMutationFailed", ("Reason", result.Reason));
-        return new(outcome, snapshot, failureMessage);
+            const string status = "Saved, but not applied now. It will be retried on the next controller lifecycle.";
+            return new(FrontendControllerVibrationStrengthMutationOutcome.Failed,
+                savedSnapshot with { Status = status }, status);
+        }
+
+        return new(FrontendControllerVibrationStrengthMutationOutcome.Succeeded,
+            savedSnapshot with { Status = "Saved and applied while the Addon owns the controller." }, null);
     }
 
     public async Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(
@@ -1427,9 +1426,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var status = outcome switch
         {
             FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded when mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred =>
-                "HID transport write succeeded; physical effect is not validated. Press Left Test once, then Right Test once.",
+                "HID transport write succeeded. This pair was physically validated on CG3EM firmware 0x0419. Press Left Test once, then Right Test once.",
             FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded =>
-                "Restore 50/50 HID transport write succeeded; physical state is not validated.",
+                "Restore 50/50 HID transport write succeeded. The pair was physically validated on CG3EM firmware 0x0419.",
             FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable when mode == FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty =>
                 "Restore was unavailable and no restore write was sent; the motors may remain at test values. " + DescribeVibrationProfileProbeUnavailable(result.Reason) + " Retry only after the stated condition is resolved.",
             FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable => DescribeVibrationProfileProbeUnavailable(result.Reason),
@@ -1440,23 +1439,19 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return new(mode, outcome, status);
     }
 
-    private FrontendControllerVibrationStrengthSnapshot CreateControllerVibrationSnapshot(
-        MsiClawVibrationStrengthValues? values,
-        bool centerMDisabled,
-        bool testAvailable,
-        string reason) => values is { } actual
-        ? new FrontendControllerVibrationStrengthSnapshot(
-            Available: true,
-            Writable: centerMDisabled,
-            TestAvailable: testAvailable,
-            LeftPercent: actual.LeftPercent,
-            RightPercent: actual.RightPercent,
-            Status: centerMDisabled ? "Firmware values read successfully." : "Firmware values are read-only while MSI Center M owns controller authority.")
-        : UnavailableControllerVibrationSnapshot(DescribeControllerVibrationFailure(reason), testAvailable);
-
-    private static FrontendControllerVibrationStrengthSnapshot UnavailableControllerVibrationSnapshot(
-        string status,
-        bool testAvailable) => new(false, false, testAvailable, null, null, status);
+    private FrontendControllerVibrationStrengthSnapshot CaptureControllerVibrationSnapshot()
+    {
+        var settings = _settings.ControllerVibration;
+        var available = _controllerVibrationStrengthClient?.IsProductionPairWriteVerified == true;
+        var writable = available && IsCenterMExactlyDisabled();
+        var status = !available
+            ? "Saved vibration strength is not yet applied on this model."
+            : writable
+                ? "Set the vibration strength applied while the Addon owns the controller."
+                : "Saved vibration strength is read-only while MSI Center M owns the controller.";
+        return new(available, writable, IsControllerVibrationTestAvailable(),
+            settings.LeftPercent, settings.RightPercent, status);
+    }
 
     private bool IsCenterMExactlyDisabled() =>
         _centerMStartup?.Capture().State == FrontendCenterMStartupState.Disabled;
@@ -1466,15 +1461,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         try { return _controllerVibrationTestAvailable?.Invoke() == true; }
         catch { return false; }
     }
-
-    private static string DescribeControllerVibrationFailure(string reason) => reason switch
-    {
-        "FirmwareAddressMappingUnverified" => "Vibration firmware mapping is not verified for this MSI Claw model.",
-        "CenterMIsNotExactlyDisabled" => "Firmware values are read-only unless MSI Center M is disabled.",
-        "CommandHidNotUniquelyResolved" => "The MSI Claw command interface is unavailable or ambiguous.",
-        "InvalidPercent" => "Motor strength must be between 0% and 100%.",
-        _ => "Firmware values could not be fully written and verified.",
-    };
 
     private static string DescribeVibrationProfileProbeUnavailable(string reason) => reason switch
     {

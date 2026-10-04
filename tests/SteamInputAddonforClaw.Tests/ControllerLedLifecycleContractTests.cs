@@ -44,8 +44,8 @@ public sealed class ControllerLedLifecycleContractTests
 
         Assert.DoesNotContain("ApplyOwnedControllerLedSettingsAsync", presentation, StringComparison.Ordinal);
         Assert.DoesNotContain("ApplyOwnedControllerLedSettingsAsync", resume, StringComparison.Ordinal);
-        Assert.Equal(1, resume.Split("ReapplyControllerLedAfterResumeAsync(", StringSplitOptions.None).Length - 1);
-        var reapply = Method(host, "private async Task ReapplyControllerLedAfterResumeAsync(", "private void OnAcDcPowerSourceChanged()");
+        Assert.Equal(1, resume.Split("ReapplyOwnedControllerHardwareSettingsAfterResumeAsync(", StringSplitOptions.None).Length - 1);
+        var reapply = Method(host, "private async Task ReapplyOwnedControllerHardwareSettingsAfterResumeAsync(", "private void OnAcDcPowerSourceChanged()");
         Assert.Contains("Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken)", reapply, StringComparison.Ordinal);
         Assert.Equal(1, reapply.Split("ApplyOwnedControllerLedSettingsAsync(", StringSplitOptions.None).Length - 1);
         Assert.Contains("_runtimeStartupSettings?.ControllerLed ?? ControllerLedSettings.Default", reapply, StringComparison.Ordinal);

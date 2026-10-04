@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
+using SteamInputAddonforClaw.Contracts.ControllerVibration;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
@@ -37,6 +38,9 @@ public sealed record AppSettings(
 
     /// <summary>One global Static controller LED preference. Older settings files default to Off.</summary>
     public ControllerLedSettings ControllerLed { get; init; } = ControllerLedSettings.Default;
+
+    /// <summary>One global desired controller vibration pair. Older settings files default to 50/50.</summary>
+    public ControllerVibrationSettings ControllerVibration { get; init; } = ControllerVibrationSettings.Default;
 
     /// <summary>
     /// The order of the five fixed top-level Overlay tabs. Same init-only compatibility pattern as

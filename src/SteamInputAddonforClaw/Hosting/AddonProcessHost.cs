@@ -23,6 +23,7 @@ using SteamInputAddonforClaw.ClawHud;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Shortcuts;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
+using SteamInputAddonforClaw.Contracts.ControllerVibration;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -123,6 +124,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // boot; owns one live DirectInput session which PR6 consumes.
     private SteamInputAddonforClaw.Devices.MSI.Claw.IMsiClawAddonPhysicalOwnership? _physicalOwnership;
     private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawLedController? _controllerLedController;
+    private SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationStrengthClient? _controllerVibrationStrengthClient;
     // The command-HID GamepadMode client is shared by the Disabled-mode physical owner and its
     // startup/recovery normalization path.
     private SteamInputAddonforClaw.Controllers.Detection.WindowsControllerDeviceEnumerator? _msiControllerDevices;
@@ -431,11 +433,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         // TDP / game-profile support is a supported-hardware/model capability, not a controller
         // authority state -- it applies in both Center M Enabled and Disabled boots.
-        SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null;
         if (!_headlessUninstallPreparation
             && startupResult.HardwareDeviceModel is { } vibrationModel)
         {
-            controllerVibrationStrengthClient = new(
+            _controllerVibrationStrengthClient = new(
                 vibrationModel,
                 GetMsiControllerDevices(),
                 new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
@@ -582,7 +583,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startXbox360RumbleLoopDiagnostic: StartXbox360RumbleLoopDiagnosticAsync,
             stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync,
             runPid1902InputCadenceDiagnostic: RunPid1902InputCadenceDiagnosticAsync,
-            controllerVibrationStrengthClient: controllerVibrationStrengthClient,
+            controllerVibrationStrengthClient: _controllerVibrationStrengthClient,
             controllerVibrationTestAvailable: () => _presentationOwnership?.IsVibrationTestAvailable == true,
             testControllerVibrationMotor: (motor, token) => _presentationOwnership is { } presentation
                 ? presentation.TestVibrationMotorAsync(motor, token)
@@ -593,7 +594,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // startup authority facts. The apply callback re-checks live authority and ownership.
             controllerLedAvailable: startupResult.HardwareSupported
                 && startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled,
-            applyControllerLedSettings: ApplyOwnedControllerLedSettingsAsync);
+            applyControllerLedSettings: ApplyOwnedControllerLedSettingsAsync,
+            applyControllerVibrationSettings: (settings, token) =>
+                ApplyOwnedControllerVibrationSettingsAsync(settings, "UserMutation", token));
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         _frontendServer.SetAfterResponse(() => _updateCoordinator?.CompleteInstallAfterResponseAsync() ?? Task.CompletedTask);
@@ -788,6 +791,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // persisted state once as soon as the normal owned DirectInput session is healthy,
             // including the default Off state.
             await ApplyOwnedControllerLedSettingsAsync(startupSettings.ControllerLed, _startupCancellationTokenSource.Token).ConfigureAwait(false);
+            await ApplyOwnedControllerVibrationSettingsAsync(
+                startupSettings.ControllerVibration, "Startup", _startupCancellationTokenSource.Token).ConfigureAwait(false);
 
             // Full1902 Policy B section 5.2/5.3: while the Addon owns the controller, native Win+G /
             // Xbox Game Bar must never surface. Arm suppression -- and PROVE it armed -- BEFORE the
@@ -1059,6 +1064,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 await ApplyOwnedControllerLedSettingsAsync(
                     _runtimeStartupSettings?.ControllerLed ?? ControllerLedSettings.Default,
                     cancellationToken).ConfigureAwait(false);
+                await ApplyOwnedControllerVibrationSettingsAsync(
+                    _runtimeStartupSettings?.ControllerVibration ?? ControllerVibrationSettings.Default,
+                    "PhysicalRecovery", cancellationToken).ConfigureAwait(false);
                 RequestControllerPresentationReconcile("PhysicalInputRecovered");
             }
         }
@@ -1119,6 +1127,71 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Warn("ControllerLed", "Static LED apply failed; Full1902 controller ownership remains active.", exception,
                 ("Event", "ControllerLedApplyFailed"));
+        }
+    }
+
+    private async Task<bool> ApplyOwnedControllerVibrationSettingsAsync(
+        ControllerVibrationSettings settings,
+        string trigger,
+        CancellationToken cancellationToken)
+    {
+        if (_centerMStartupControl?.Capture().State != FrontendCenterMStartupState.Disabled)
+        {
+            AppLog.Info("ControllerVibration", "Controller vibration apply skipped because Addon authority is not active.",
+                ("Event", "ControllerVibrationSettingsApplySkipped"), ("Trigger", trigger), ("Reason", "StockAuthorityOrUnavailable"));
+            return false;
+        }
+
+        var client = _controllerVibrationStrengthClient;
+        if (client is null || !client.IsProductionPairWriteVerified)
+        {
+            AppLog.Info("ControllerVibration", "Controller vibration apply skipped because this model is not production-enabled.",
+                ("Event", "ControllerVibrationSettingsApplySkipped"), ("Trigger", trigger),
+                ("Reason", "ProductionPairWriteNotVerifiedForModel"));
+            return false;
+        }
+
+        var physical = _physicalOwnership;
+        if (physical?.LiveInputSource is not { IsRunning: true }
+            || physical.OwnedPhysicalIdentity is not { } identity
+            || identity.Confidence != MsiClawIdentityConfidence.Strong)
+        {
+            AppLog.Info("ControllerVibration", "Controller vibration apply skipped because no healthy owned PID1902 session is available.",
+                ("Event", "ControllerVibrationSettingsApplySkipped"), ("Trigger", trigger),
+                ("Reason", "OwnedPhysicalSessionUnavailable"));
+            return false;
+        }
+
+        try
+        {
+            var succeeded = await client.ApplyAsync(settings, identity, cancellationToken).ConfigureAwait(false);
+            if (succeeded)
+            {
+                AppLog.Info("ControllerVibration", "Persisted controller vibration settings applied to the owned PID1902 control HID.",
+                    ("Event", "ControllerVibrationSettingsApplied"),
+                    ("Model", client.ModelId), ("Left", settings.LeftPercent), ("Right", settings.RightPercent),
+                    ("Trigger", trigger), ("SyncToRom", false));
+            }
+            else
+            {
+                AppLog.Warn("ControllerVibration", "Persisted controller vibration settings were not applied; ownership remains unchanged.", null,
+                    ("Event", "ControllerVibrationSettingsApplyFailed"),
+                    ("Model", client.ModelId), ("Left", settings.LeftPercent), ("Right", settings.RightPercent),
+                    ("Trigger", trigger), ("Reason", "PairApplyRejectedOrFailed"));
+            }
+            return succeeded;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("ControllerVibration", "Persisted controller vibration settings could not be applied; ownership remains unchanged.", exception,
+                ("Event", "ControllerVibrationSettingsApplyFailed"),
+                ("Model", client.ModelId), ("Left", settings.LeftPercent), ("Right", settings.RightPercent),
+                ("Trigger", trigger), ("Reason", exception.GetType().Name));
+            return false;
         }
     }
 
@@ -2229,7 +2302,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // A healthy DirectInput source can survive the controller's hibernate power-cycle, so the
         // physical-recovery path may not run even though firmware has restored its LED state.
         // Reapply the latest desired state once after the control HID has had a bounded settle.
-        _ = ReapplyControllerLedAfterResumeAsync(_startupCancellationTokenSource.Token);
+        _ = ReapplyOwnedControllerHardwareSettingsAfterResumeAsync(_startupCancellationTokenSource.Token);
 
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.NotifyQuickSettingsPowerSourceChanged();
@@ -2289,7 +2362,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
-    private async Task ReapplyControllerLedAfterResumeAsync(CancellationToken cancellationToken)
+    private async Task ReapplyOwnedControllerHardwareSettingsAfterResumeAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -2299,6 +2372,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             await ApplyOwnedControllerLedSettingsAsync(
                 _runtimeStartupSettings?.ControllerLed ?? ControllerLedSettings.Default,
                 cancellationToken).ConfigureAwait(false);
+            await ApplyOwnedControllerVibrationSettingsAsync(
+                _runtimeStartupSettings?.ControllerVibration ?? ControllerVibrationSettings.Default,
+                "PowerResume", cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

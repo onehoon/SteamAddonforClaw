@@ -20,6 +20,7 @@ public sealed class ControllerVibrationStrengthUiTests
 
         Assert.Equal("Vibration Strength", (string?)expander.Attribute("Header"));
         Assert.Equal("False", (string?)expander.Attribute("IsExpanded"));
+        Assert.Equal("Set the vibration strength applied while the Addon owns the controller.", (string?)expander.Attribute("Description"));
         Assert.Contains(expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon");
         var ledExpander = document.Descendants().Single(element =>
             element.Name.LocalName == "SettingsExpander"
@@ -81,7 +82,7 @@ public sealed class ControllerVibrationStrengthUiTests
     }
 
     [Fact]
-    public void Page_wires_value_changed_to_draft_only_and_renders_returned_firmware_values()
+    public void Page_wires_value_changed_to_draft_only_and_renders_returned_desired_values()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs"))
@@ -120,21 +121,24 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("TryStartVibrationMotorTest(", testHandler, StringComparison.Ordinal);
         Assert.Contains("frontend.TestControllerVibrationMotorAsync(motor)", testHandler, StringComparison.Ordinal);
 
+        Assert.DoesNotContain("Firmware values read successfully", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("persistent firmware ceiling", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml")), StringComparison.OrdinalIgnoreCase);
+
         var unavailable = FrontendControllerVibrationStrengthSnapshot.Unavailable(
-            "Vibration firmware mapping is not verified for this MSI Claw model.") with { TestAvailable = true };
+            "Production vibration strength is not enabled for this model.") with { TestAvailable = true };
         Assert.False(unavailable.Available);
         Assert.False(unavailable.Writable);
         Assert.True(unavailable.TestAvailable);
         Assert.Null(unavailable.LeftPercent);
         Assert.Null(unavailable.RightPercent);
-        Assert.Equal("Vibration firmware mapping is not verified for this MSI Claw model.", unavailable.Status);
+        Assert.Equal("Production vibration strength is not enabled for this model.", unavailable.Status);
     }
 
     [Fact]
-    public async Task Physical_test_dispatches_once_when_firmware_readback_is_unavailable_but_test_is_available()
+    public async Task Physical_test_dispatches_once_when_strength_capability_is_unavailable_but_test_is_available()
     {
         var unavailable = FrontendControllerVibrationStrengthSnapshot.Unavailable(
-            "Vibration firmware mapping is not verified for this MSI Claw model.") with { TestAvailable = true };
+            "Production vibration strength is not enabled for this model.") with { TestAvailable = true };
         Assert.False(unavailable.Available);
         Assert.False(unavailable.Writable);
         Assert.True(unavailable.TestAvailable);

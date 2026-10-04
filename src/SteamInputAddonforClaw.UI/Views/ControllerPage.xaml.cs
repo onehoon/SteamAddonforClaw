@@ -250,7 +250,7 @@ public sealed partial class ControllerPage : UserControl
             ApplyVibrationStrengthSnapshot(result.Snapshot, preserveDraft: false);
             if (!result.Succeeded)
             {
-                ShowVibrationMessage(result.FailureMessage ?? "Firmware vibration values could not be verified.", InfoBarSeverity.Error);
+                ShowVibrationMessage(result.FailureMessage ?? "The saved vibration setting could not be applied now.", InfoBarSeverity.Error);
                 await RefreshVibrationStrengthAsync(preserveFailure: true);
                 return;
             }
@@ -262,8 +262,8 @@ public sealed partial class ControllerPage : UserControl
         }
         catch (Exception exception)
         {
-            AppLog.Warn("ControllerVibration", "Controller vibration firmware mutation transport failed.", exception);
-            ShowVibrationMessage("The firmware result is uncertain. Reading the current values again.", InfoBarSeverity.Error);
+            AppLog.Warn("ControllerVibration", "Controller vibration setting update transport failed.", exception);
+            ShowVibrationMessage("The saved setting could not be confirmed. Refreshing the current setting.", InfoBarSeverity.Error);
             await RefreshVibrationStrengthAsync(preserveFailure: true);
         }
         finally
@@ -307,7 +307,7 @@ public sealed partial class ControllerPage : UserControl
         {
             AppLog.Warn("ControllerVibration", "Controller vibration test transport failed.", exception,
                 ("Motor", motor));
-            ShowVibrationMessage("The test result is uncertain. Refreshing firmware values.", InfoBarSeverity.Error);
+            ShowVibrationMessage("The test result is uncertain. Refreshing the saved strength values.", InfoBarSeverity.Error);
             await RefreshVibrationStrengthAsync(preserveFailure: true);
         }
         finally
@@ -366,12 +366,12 @@ public sealed partial class ControllerPage : UserControl
         }
         catch (Exception exception)
         {
-            AppLog.Warn("ControllerVibration", "Controller vibration firmware capture transport failed.", exception);
+            AppLog.Warn("ControllerVibration", "Controller vibration setting capture transport failed.", exception);
             _vibrationDebounce?.CancelPending();
             ApplyVibrationStrengthSnapshot(
-                FrontendControllerVibrationStrengthSnapshot.Unavailable("The firmware vibration values could not be read."),
+                FrontendControllerVibrationStrengthSnapshot.Unavailable("The saved vibration setting could not be loaded."),
                 preserveDraft: false);
-            ShowVibrationMessage("The firmware vibration values could not be read.", InfoBarSeverity.Error);
+            ShowVibrationMessage("The saved vibration setting could not be loaded.", InfoBarSeverity.Error);
         }
     }
 

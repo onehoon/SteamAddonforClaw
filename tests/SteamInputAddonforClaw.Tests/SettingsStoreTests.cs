@@ -1,4 +1,6 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
+using SteamInputAddonforClaw.Contracts.ControllerVibration;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using Xunit;
@@ -51,6 +53,93 @@ public sealed class SettingsStoreTests : IDisposable
         store.Save(new AppSettings(SuppressDeveloperMenuWarning: true));
 
         Assert.True(store.Load().SuppressDeveloperMenuWarning);
+    }
+
+    [Fact]
+    public void ControllerVibration_defaults_to_fifty_fifty_and_missing_legacy_property_uses_that_default()
+    {
+        Assert.Equal(new ControllerVibrationSettings(50, 50), new AppSettings().ControllerVibration);
+
+        var path = Path.Combine(_testDirectory, "legacy-settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LogLevel\":\"Debug\",\"DeveloperMenuEnabled\":true}");
+        var loaded = new SettingsStore(path).Load();
+
+        Assert.Equal(new ControllerVibrationSettings(50, 50), loaded.ControllerVibration);
+        Assert.Equal(AppLogPreference.Debug, loaded.LogLevel);
+        Assert.True(loaded.DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void ControllerVibration_custom_pair_round_trips_through_settings_json()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "vibration-settings.json"));
+        store.Save(new AppSettings { ControllerVibration = new ControllerVibrationSettings(0, 100) });
+
+        Assert.Equal(new ControllerVibrationSettings(0, 100), store.Load().ControllerVibration);
+    }
+
+    [Theory]
+    [InlineData(-1, 70)]
+    [InlineData(101, 70)]
+    [InlineData(30, -1)]
+    [InlineData(30, 101)]
+    public void Malformed_ControllerVibration_falls_back_feature_locally(int left, int right)
+    {
+        var path = Path.Combine(_testDirectory, "malformed-vibration-settings.json");
+        var led = new ControllerLedSettings(true, 65, 1, 2, 3);
+        var store = new SettingsStore(path);
+        store.Save(new AppSettings(LogLevel: AppLogPreference.Debug)
+        {
+            DeveloperMenuEnabled = true,
+            ControllerLed = led,
+            ControllerVibration = new ControllerVibrationSettings(25, 75)
+        });
+
+        var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        root["ControllerVibration"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["LeftPercent"] = left,
+            ["RightPercent"] = right
+        };
+        File.WriteAllText(path, root.ToJsonString());
+
+        var loaded = store.Load();
+
+        Assert.Equal(ControllerVibrationSettings.Default, loaded.ControllerVibration);
+        Assert.Equal(led, loaded.ControllerLed);
+        Assert.Equal(AppLogPreference.Debug, loaded.LogLevel);
+        Assert.True(loaded.DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void ChangeControllerVibrationSettings_saves_before_publishing_current_state()
+    {
+        var path = Path.Combine(_testDirectory, "vibration-coordinator", "settings.json");
+        var settings = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(path), new FakeStartupManager());
+        var custom = new ControllerVibrationSettings(20, 80);
+
+        Assert.True(settings.ChangeControllerVibrationSettings(custom));
+
+        Assert.Equal(custom, settings.ControllerVibration);
+        Assert.Equal(custom, new SettingsStore(path).Load().ControllerVibration);
+    }
+
+    [Fact]
+    public void Failed_vibration_persistence_does_not_publish_the_new_pair()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var blockingFile = Path.Combine(_testDirectory, "not-a-directory");
+        File.WriteAllText(blockingFile, "blocked");
+        var settings = new StartupSettingsCoordinator(
+            new AppSettings(),
+            new SettingsStore(Path.Combine(blockingFile, "settings.json")),
+            new FakeStartupManager());
+
+        Assert.ThrowsAny<IOException>(() =>
+            settings.ChangeControllerVibrationSettings(new ControllerVibrationSettings(20, 80)));
+
+        Assert.Equal(ControllerVibrationSettings.Default, settings.ControllerVibration);
     }
 
     [Fact]
@@ -592,6 +681,10 @@ public sealed class SettingsStoreTests : IDisposable
         if (Directory.Exists(_testDirectory))
         {
             Directory.Delete(_testDirectory, recursive: true);
+        }
+        else if (File.Exists(_testDirectory))
+        {
+            File.Delete(_testDirectory);
         }
     }
 

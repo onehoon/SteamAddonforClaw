@@ -1962,10 +1962,10 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
         public Task<FrontendBatteryChargeLimitMutationResult> SetDeviceBatteryChargeLimitPercentAsync(int percent, CancellationToken t = default) { TotalCalls++; return Task.FromResult(ProductionBatteryMutationResult); }
         public FrontendControllerVibrationStrengthSnapshot ControllerVibrationSnapshot { get; } =
-            new(true, true, true, 35, 70, "Firmware values read successfully.");
+            new(true, true, true, 35, 70, "Set the vibration strength applied while the Addon owns the controller.");
         public FrontendControllerVibrationStrengthMutationResult ControllerVibrationMutationResult { get; } = new(
             FrontendControllerVibrationStrengthMutationOutcome.Succeeded,
-            new(true, true, true, 70, 35, "Firmware values read successfully."), null);
+            new(true, true, true, 70, 35, "Set the vibration strength applied while the Addon owns the controller."), null);
         public (int Left, int Right)? LastControllerVibrationPair { get; private set; }
         public int ControllerVibrationMutationCount { get; private set; }
         public List<FrontendControllerVibrationMotor> ControllerVibrationTestMotors { get; } = [];
@@ -1977,7 +1977,7 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor motor, CancellationToken t = default)
         { TotalCalls++; ControllerVibrationTestMotors.Add(motor); return Task.FromResult(new FrontendControllerVibrationTestResult(FrontendControllerVibrationTestOutcome.Succeeded, null)); }
         public FrontendControllerVibrationProfileWriteProbeResult ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode mode) =>
-            new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded, "Transport write succeeded; physical effect is not validated.");
+            new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded, "HID transport write succeeded. This pair was physically validated on CG3EM firmware 0x0419.");
         public Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken t = default)
         { TotalCalls++; ProfileWriteProbeModes.Add(mode); return Task.FromResult(ProfileWriteProbeResult(mode)); }

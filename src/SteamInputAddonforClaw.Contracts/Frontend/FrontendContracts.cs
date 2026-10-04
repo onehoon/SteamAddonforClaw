@@ -206,8 +206,7 @@ public enum FrontendControllerVibrationTestOutcome { Succeeded, Unavailable, Fai
 public enum FrontendControllerVibrationProfileWriteProbeMode { ApplyZeroHundred, RestoreFiftyFifty }
 public enum FrontendControllerVibrationProfileWriteProbeOutcome { Succeeded, Unavailable, Failed }
 
-/// <summary>The actual firmware-backed Left/Right motor ceiling readback. These values are not App
-/// settings; <see cref="Available"/> is independent from live physical-rumble test availability.</summary>
+/// <summary>The persisted desired Left/Right pair and the current production-write capability projection.</summary>
 public sealed record FrontendControllerVibrationStrengthSnapshot(
     bool Available,
     bool Writable,
@@ -216,7 +215,7 @@ public sealed record FrontendControllerVibrationStrengthSnapshot(
     int? RightPercent,
     string Status)
 {
-    public static FrontendControllerVibrationStrengthSnapshot Unavailable(string status = "Firmware vibration values are unavailable.") =>
+    public static FrontendControllerVibrationStrengthSnapshot Unavailable(string status = "Saved vibration strength is unavailable.") =>
         new(false, false, false, null, null, status);
 }
 
