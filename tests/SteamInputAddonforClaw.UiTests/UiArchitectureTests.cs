@@ -816,6 +816,29 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Vibration_test_page_exposes_only_explicit_apply_restore_probe_actions()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml"));
+        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
+        var activateStart = code.IndexOf("internal void Activate()", StringComparison.Ordinal);
+        var deactivateStart = code.IndexOf("internal void Deactivate()", activateStart, StringComparison.Ordinal);
+        Assert.True(activateStart >= 0 && deactivateStart > activateStart);
+
+        Assert.Contains("Vibration Profile 0/100 Probe", page, StringComparison.Ordinal);
+        Assert.Contains("Developer-only physical hardware mutation. No SyncToROM is sent.", page, StringComparison.Ordinal);
+        Assert.Contains("press Left Test once, then Right Test once", page, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Apply Left 0 / Right 100\"", page, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Restore 50 / 50\"", page, StringComparison.Ordinal);
+        Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred", code, StringComparison.Ordinal);
+        Assert.Contains("FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty", code, StringComparison.Ordinal);
+        Assert.Contains("ApplyVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy", code, StringComparison.Ordinal);
+        Assert.Contains("RestoreVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy", code, StringComparison.Ordinal);
+        Assert.Contains("the motors may remain at test values", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("RunControllerVibrationProfileWriteProbeAsync", code[activateStart..deactivateStart], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Battery_charge_limit_test_page_reports_terminal_failure_results()
     {
         var root = FindRepositoryRoot();

@@ -59,7 +59,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -95,7 +95,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -148,7 +148,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -168,7 +168,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -192,7 +192,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(47, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -219,9 +219,34 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(FrontendControllerVibrationTestOutcome.Succeeded, rightTest.Outcome);
     }
 
+    [Fact]
+    public async Task Developer_vibration_profile_probe_round_trips_only_apply_and_restore_modes()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
+        var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
+            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
+        var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
+            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty);
+
+        Assert.Equal(fake.ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred), applied);
+        Assert.Equal(fake.ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty), restored);
+        Assert.Equal([
+            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred,
+            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty], fake.ProfileWriteProbeModes);
+    }
+
     [Theory]
     [InlineData("SetControllerVibrationStrength", "{\"LeftPercent\":101,\"RightPercent\":50}")]
     [InlineData("TestControllerVibrationMotor", "{\"Motor\":99}")]
+    [InlineData("RunControllerVibrationProfileWriteProbe", "{}")]
+    [InlineData("RunControllerVibrationProfileWriteProbe", "null")]
+    [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":\"Unknown\"}")]
+    [InlineData("RunControllerVibrationProfileWriteProbe", "{\"Mode\":99}")]
     public async Task Invalid_controller_vibration_payload_fails_closed_before_frontend_dispatch(string method, string payload)
     {
         var fake = new RecordingFrontendControl();
@@ -244,6 +269,7 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
         Assert.Equal(0, fake.ControllerVibrationMutationCount);
         Assert.Empty(fake.ControllerVibrationTestMotors);
+        Assert.Empty(fake.ProfileWriteProbeModes);
     }
 
     [Fact]
@@ -569,7 +595,7 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task A_v46_frontend_peer_is_rejected_by_the_v47_server()
+    public async Task A_v47_frontend_peer_is_rejected_by_the_v48_server()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
@@ -1462,13 +1488,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 47 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 48 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":47,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":47,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":47,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":48,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":48,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":48,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1943,12 +1969,18 @@ public sealed class FrontendNamedPipeTransportTests
         public (int Left, int Right)? LastControllerVibrationPair { get; private set; }
         public int ControllerVibrationMutationCount { get; private set; }
         public List<FrontendControllerVibrationMotor> ControllerVibrationTestMotors { get; } = [];
+        public List<FrontendControllerVibrationProfileWriteProbeMode> ProfileWriteProbeModes { get; } = [];
         public Task<FrontendControllerVibrationStrengthSnapshot> CaptureControllerVibrationStrengthAsync(CancellationToken t = default)
         { TotalCalls++; return Task.FromResult(ControllerVibrationSnapshot); }
         public Task<FrontendControllerVibrationStrengthMutationResult> SetControllerVibrationStrengthAsync(int left, int right, CancellationToken t = default)
         { TotalCalls++; ControllerVibrationMutationCount++; LastControllerVibrationPair = (left, right); return Task.FromResult(ControllerVibrationMutationResult); }
         public Task<FrontendControllerVibrationTestResult> TestControllerVibrationMotorAsync(FrontendControllerVibrationMotor motor, CancellationToken t = default)
         { TotalCalls++; ControllerVibrationTestMotors.Add(motor); return Task.FromResult(new FrontendControllerVibrationTestResult(FrontendControllerVibrationTestOutcome.Succeeded, null)); }
+        public FrontendControllerVibrationProfileWriteProbeResult ProfileWriteProbeResult(FrontendControllerVibrationProfileWriteProbeMode mode) =>
+            new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded, "Transport write succeeded; physical effect is not validated.");
+        public Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
+            FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken t = default)
+        { TotalCalls++; ProfileWriteProbeModes.Add(mode); return Task.FromResult(ProfileWriteProbeResult(mode)); }
         public FrontendXbox360RumbleLoopSnapshot RumbleLoopSnapshot { get; private set; } =
             new(true, FrontendXbox360RumbleLoopState.Ready, "Ready", null, 0, 0, 0, 0, null, null, null, null, null);
         public int RumbleLoopStartCount { get; private set; }

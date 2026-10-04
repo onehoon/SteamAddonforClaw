@@ -275,19 +275,29 @@ public sealed partial class ControllerPage : UserControl
 
     private async Task TestVibrationMotorAsync(FrontendControllerVibrationMotor motor)
     {
-        if (_frontend is null
-            || !_vibrationSnapshot.Available
-            || !_vibrationSnapshot.TestAvailable
-            || _vibrationDebounce?.HasPendingDraft == true
-            || _vibrationMutationInProgress
-            || _vibrationTestInProgress)
+        var frontend = _frontend;
+        if (frontend is null)
             return;
 
-        _vibrationTestInProgress = true;
-        UpdateVibrationControls();
+        var operationStarted = false;
         try
         {
-            var result = await _frontend.TestControllerVibrationMotorAsync(motor);
+            var request = TryStartVibrationMotorTest(
+                _vibrationSnapshot,
+                _vibrationDebounce?.HasPendingDraft == true,
+                _vibrationMutationInProgress,
+                _vibrationTestInProgress,
+                () =>
+                {
+                    operationStarted = true;
+                    _vibrationTestInProgress = true;
+                    UpdateVibrationControls();
+                },
+                () => frontend.TestControllerVibrationMotorAsync(motor));
+            if (request is null)
+                return;
+
+            var result = await request;
             if (result.Succeeded)
                 HideVibrationMessage();
             else
@@ -302,9 +312,37 @@ public sealed partial class ControllerPage : UserControl
         }
         finally
         {
-            _vibrationTestInProgress = false;
-            UpdateVibrationControls();
+            if (operationStarted)
+            {
+                _vibrationTestInProgress = false;
+                UpdateVibrationControls();
+            }
         }
+    }
+
+    internal static bool CanRunVibrationMotorTest(
+        FrontendControllerVibrationStrengthSnapshot snapshot,
+        bool hasPendingDraft,
+        bool mutationInProgress,
+        bool testInProgress) =>
+        snapshot.TestAvailable
+        && !hasPendingDraft
+        && !mutationInProgress
+        && !testInProgress;
+
+    internal static Task<FrontendControllerVibrationTestResult>? TryStartVibrationMotorTest(
+        FrontendControllerVibrationStrengthSnapshot snapshot,
+        bool hasPendingDraft,
+        bool mutationInProgress,
+        bool testInProgress,
+        Action markStarted,
+        Func<Task<FrontendControllerVibrationTestResult>> dispatch)
+    {
+        if (!CanRunVibrationMotorTest(snapshot, hasPendingDraft, mutationInProgress, testInProgress))
+            return null;
+
+        markStarted();
+        return dispatch();
     }
 
     private async Task RefreshVibrationStrengthAsync(bool preserveFailure = false)
@@ -374,9 +412,11 @@ public sealed partial class ControllerPage : UserControl
         RightVibrationStrengthSlider.IsEnabled = _vibrationSnapshot.Available
             && _vibrationSnapshot.Writable && !operationInProgress;
 
-        var testsEnabled = _vibrationSnapshot.TestAvailable
-            && _vibrationDebounce?.HasPendingDraft != true
-            && !operationInProgress;
+        var testsEnabled = CanRunVibrationMotorTest(
+            _vibrationSnapshot,
+            _vibrationDebounce?.HasPendingDraft == true,
+            _vibrationMutationInProgress,
+            _vibrationTestInProgress);
         LeftVibrationTestButton.IsEnabled = testsEnabled;
         RightVibrationTestButton.IsEnabled = testsEnabled;
     }

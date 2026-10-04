@@ -203,6 +203,8 @@ public sealed record FrontendBatteryChargeLimitMutationResult(
 public enum FrontendControllerVibrationMotor { Left, Right }
 public enum FrontendControllerVibrationStrengthMutationOutcome { Succeeded, Unavailable, Failed }
 public enum FrontendControllerVibrationTestOutcome { Succeeded, Unavailable, Failed }
+public enum FrontendControllerVibrationProfileWriteProbeMode { ApplyZeroHundred, RestoreFiftyFifty }
+public enum FrontendControllerVibrationProfileWriteProbeOutcome { Succeeded, Unavailable, Failed }
 
 /// <summary>The actual firmware-backed Left/Right motor ceiling readback. These values are not App
 /// settings; <see cref="Available"/> is independent from live physical-rumble test availability.</summary>
@@ -231,6 +233,14 @@ public sealed record FrontendControllerVibrationTestResult(
     string? FailureMessage)
 {
     public bool Succeeded => Outcome == FrontendControllerVibrationTestOutcome.Succeeded;
+}
+
+public sealed record FrontendControllerVibrationProfileWriteProbeResult(
+    FrontendControllerVibrationProfileWriteProbeMode Mode,
+    FrontendControllerVibrationProfileWriteProbeOutcome Outcome,
+    string Status)
+{
+    public bool Succeeded => Outcome == FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded;
 }
 
 public enum FrontendXbox360RumbleLoopState { Unavailable, Ready, Running, Stopped, Failed }
@@ -659,6 +669,11 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendControllerVibrationTestResult(
             FrontendControllerVibrationTestOutcome.Unavailable,
             "Physical controller vibration testing is unavailable."));
+    Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
+        FrontendControllerVibrationProfileWriteProbeMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendControllerVibrationProfileWriteProbeResult(
+            mode, FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
+            "The developer-only vibration profile write probe is unavailable."));
     Task<FrontendXbox360RumbleLoopSnapshot> CaptureXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
     Task<FrontendXbox360RumbleLoopSnapshot> StartXbox360RumbleLoopDiagnosticAsync(CancellationToken cancellationToken = default) =>

@@ -96,7 +96,7 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("_isRenderingVibration", handler, StringComparison.Ordinal);
         Assert.Contains("_vibrationSnapshot.Available", handler, StringComparison.Ordinal);
         Assert.Contains("_vibrationSnapshot.Writable", handler, StringComparison.Ordinal);
-        Assert.Contains("_vibrationDebounce?.HasPendingDraft != true", page, StringComparison.Ordinal);
+        Assert.Contains("_vibrationDebounce?.HasPendingDraft == true", page, StringComparison.Ordinal);
         Assert.Contains("ApplyVibrationStrengthSnapshot(result.Snapshot, preserveDraft: false)", page, StringComparison.Ordinal);
         Assert.Contains("snapshot.LeftPercent is { } left ? $\"{left}%\" : \"—\"", page, StringComparison.Ordinal);
         Assert.Contains("snapshot.RightPercent is { } right ? $\"{right}%\" : \"—\"", page, StringComparison.Ordinal);
@@ -105,10 +105,20 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("LeftVibrationStrengthSlider.Value = snapshot.LeftPercent ?? 0", page, StringComparison.Ordinal);
         Assert.Contains("RightVibrationStrengthSlider.Value = snapshot.RightPercent ?? 0", page, StringComparison.Ordinal);
         Assert.Contains("var operationInProgress = _vibrationMutationInProgress || _vibrationTestInProgress", page, StringComparison.Ordinal);
-        Assert.Contains("var testsEnabled = _vibrationSnapshot.TestAvailable", page, StringComparison.Ordinal);
+        Assert.Contains("var testsEnabled = CanRunVibrationMotorTest(", page, StringComparison.Ordinal);
         Assert.DoesNotContain("var testsEnabled = _vibrationSnapshot.Available", page, StringComparison.Ordinal);
+        Assert.Contains("LeftVibrationTestButton.IsEnabled = testsEnabled", page, StringComparison.Ordinal);
+        Assert.Contains("RightVibrationTestButton.IsEnabled = testsEnabled", page, StringComparison.Ordinal);
         Assert.Contains("&& !operationInProgress", page, StringComparison.Ordinal);
-        Assert.Contains("|| _vibrationMutationInProgress\n            || _vibrationTestInProgress", page, StringComparison.Ordinal);
+        Assert.Contains("&& !mutationInProgress\n        && !testInProgress", page, StringComparison.Ordinal);
+
+        var testHandlerStart = page.IndexOf("private async Task TestVibrationMotorAsync", StringComparison.Ordinal);
+        var testHandlerEnd = page.IndexOf("internal static bool CanRunVibrationMotorTest", testHandlerStart, StringComparison.Ordinal);
+        Assert.True(testHandlerStart >= 0 && testHandlerEnd > testHandlerStart);
+        var testHandler = page[testHandlerStart..testHandlerEnd];
+        Assert.DoesNotContain("_vibrationSnapshot.Available", testHandler, StringComparison.Ordinal);
+        Assert.Contains("TryStartVibrationMotorTest(", testHandler, StringComparison.Ordinal);
+        Assert.Contains("frontend.TestControllerVibrationMotorAsync(motor)", testHandler, StringComparison.Ordinal);
 
         var unavailable = FrontendControllerVibrationStrengthSnapshot.Unavailable(
             "Vibration firmware mapping is not verified for this MSI Claw model.") with { TestAvailable = true };
@@ -118,6 +128,40 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Null(unavailable.LeftPercent);
         Assert.Null(unavailable.RightPercent);
         Assert.Equal("Vibration firmware mapping is not verified for this MSI Claw model.", unavailable.Status);
+    }
+
+    [Fact]
+    public async Task Physical_test_dispatches_once_when_firmware_readback_is_unavailable_but_test_is_available()
+    {
+        var unavailable = FrontendControllerVibrationStrengthSnapshot.Unavailable(
+            "Vibration firmware mapping is not verified for this MSI Claw model.") with { TestAvailable = true };
+        Assert.False(unavailable.Available);
+        Assert.False(unavailable.Writable);
+        Assert.True(unavailable.TestAvailable);
+        Assert.True(ControllerPage.CanRunVibrationMotorTest(
+            unavailable, hasPendingDraft: false, mutationInProgress: false, testInProgress: false));
+
+        var dispatchCount = 0;
+        var startedCount = 0;
+        var expected = new FrontendControllerVibrationTestResult(
+            FrontendControllerVibrationTestOutcome.Succeeded,
+            "Physical vibration test completed.");
+        var request = ControllerPage.TryStartVibrationMotorTest(
+            unavailable,
+            hasPendingDraft: false,
+            mutationInProgress: false,
+            testInProgress: false,
+            markStarted: () => startedCount++,
+            dispatch: () =>
+            {
+                dispatchCount++;
+                return Task.FromResult(expected);
+            });
+
+        Assert.NotNull(request);
+        Assert.Same(expected, await request!);
+        Assert.Equal(1, startedCount);
+        Assert.Equal(1, dispatchCount);
     }
 
     private static void AssertSliderRow(

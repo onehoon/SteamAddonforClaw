@@ -13,6 +13,7 @@ public sealed partial class VibrationTestPage : UserControl
     private Task? _stopTask;
     private bool _active;
     private bool _busy;
+    private bool _profileProbeBusy;
 
     public event EventHandler? BackRequested;
 
@@ -89,6 +90,46 @@ public sealed partial class VibrationTestPage : UserControl
 
     private async void Stop_Click(object sender, RoutedEventArgs e) => await StopIfRunningAsync();
 
+    private async void ApplyVibrationProfileProbe_Click(object sender, RoutedEventArgs e) =>
+        await RunVibrationProfileProbeAsync(FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
+
+    private async void RestoreVibrationProfileProbe_Click(object sender, RoutedEventArgs e) =>
+        await RunVibrationProfileProbeAsync(FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty);
+
+    private async Task RunVibrationProfileProbeAsync(FrontendControllerVibrationProfileWriteProbeMode mode)
+    {
+        if (_frontend is null || _busy || _profileProbeBusy)
+            return;
+        if (_snapshot.State == FrontendXbox360RumbleLoopState.Running)
+        {
+            VibrationProfileProbeStatusText.Text = "Stop the Xbox360 terminal STOP loop before running the profile probe.";
+            return;
+        }
+
+        SetProfileProbeBusy(true);
+        VibrationProfileProbeStatusText.Text = "Running one developer-only profile write...";
+        try
+        {
+            var result = await _frontend.RunControllerVibrationProfileWriteProbeAsync(mode);
+            VibrationProfileProbeStatusText.Text = result.Status;
+            if (!result.Succeeded)
+                AppLog.Info("ControllerVibration", "ControllerVibrationProfileWriteProbeUiResult",
+                    ("Mode", result.Mode), ("Outcome", result.Outcome));
+        }
+        catch (Exception exception)
+        {
+            VibrationProfileProbeStatusText.Text = mode == FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty
+                ? "Restore request failed; the motors may remain at test values. Press Restore 50 / 50 again manually."
+                : "The profile write request failed. Physical effect is unknown; see the application log.";
+            AppLog.Warn("ControllerVibration", "ControllerVibrationProfileWriteProbeUiFailed", exception,
+                ("Mode", mode), ("Reason", exception.GetType().Name));
+        }
+        finally
+        {
+            SetProfileProbeBusy(false);
+        }
+    }
+
     private async Task StopIfRunningAsync()
     {
         _refreshTimer?.Stop();
@@ -122,8 +163,10 @@ public sealed partial class VibrationTestPage : UserControl
             ? snapshot.Slot is int readySlot ? $"XInput slot: {readySlot}" : string.Empty
             : $"Run: {snapshot.RunId}\nSlot: {snapshot.Slot?.ToString() ?? "Unavailable"}    Cycle: {snapshot.Cycle}    Step: {snapshot.Step}/{snapshot.StepCount}\nCurrent: {(snapshot.CurrentValue8 is int value ? $"{value}/0x{value:X2}" : "—")}    Last callback: {FormatCallback(snapshot)}";
         FailureText.Text = snapshot.FailureReason is null ? string.Empty : $"Failure: {snapshot.FailureReason}";
-        StartButton.IsEnabled = !_busy && snapshot.Available && snapshot.State != FrontendXbox360RumbleLoopState.Running;
-        StopButton.IsEnabled = !_busy && snapshot.State == FrontendXbox360RumbleLoopState.Running;
+        StartButton.IsEnabled = !_busy && !_profileProbeBusy && snapshot.Available && snapshot.State != FrontendXbox360RumbleLoopState.Running;
+        StopButton.IsEnabled = !_busy && !_profileProbeBusy && snapshot.State == FrontendXbox360RumbleLoopState.Running;
+        ApplyVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
+        RestoreVibrationProfileProbeButton.IsEnabled = !_profileProbeBusy && !_busy && snapshot.State != FrontendXbox360RumbleLoopState.Running;
     }
 
     private static string FormatCallback(FrontendXbox360RumbleLoopSnapshot snapshot) =>
@@ -134,6 +177,12 @@ public sealed partial class VibrationTestPage : UserControl
     private void SetBusy(bool busy)
     {
         _busy = busy;
+        Render(_snapshot);
+    }
+
+    private void SetProfileProbeBusy(bool busy)
+    {
+        _profileProbeBusy = busy;
         Render(_snapshot);
     }
 
