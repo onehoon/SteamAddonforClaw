@@ -51,7 +51,7 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
 
         Assert.True(OverlayQuickSettingsSectionRendering.HasSameShape(before, valueOnly));
         Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before, before with { Label = "TDP Control" }));
-        Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before, before with { Message = "Changed status" }));
+        Assert.True(OverlayQuickSettingsSectionRendering.HasSameShape(before, before with { Message = "Changed status" }));
         Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before,
             before with { Rows = [toggle with { Visible = false }] }));
         Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before,

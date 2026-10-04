@@ -36,7 +36,6 @@ internal static class OverlayQuickSettingsSectionRendering
     {
         if (previous.SectionId != current.SectionId ||
             !string.Equals(previous.Label, current.Label, StringComparison.Ordinal) ||
-            !string.Equals(previous.Message, current.Message, StringComparison.Ordinal) ||
             previous.Rows.Count != current.Rows.Count)
             return false;
 
@@ -98,14 +97,12 @@ public sealed partial class OverlayWindow
         internal required QuickSettingsPageId PageId { get; init; }
         internal required AddonQuickSettingsTabId TabId { get; init; }
         internal required StackPanel Content { get; init; }
-        internal required TextBlock FailureText { get; init; }
         internal OverlayQuickSettingsPageBinding? Binding { get; set; }
         internal Dictionary<QuickSettingsRowId, OverlayToggleRow> ToggleRows { get; } = new();
         internal Dictionary<QuickSettingsRowId, OverlayNumericSliderRow> NumericSliderRows { get; } = new();
         internal Dictionary<QuickSettingsRowId, OverlayValueRow> ValueRows { get; } = new();
         internal Dictionary<QuickSettingsSectionId, RenderedQuickSettingsSection> RenderedSections { get; } = new();
         internal bool? RenderedAvailable { get; set; }
-        internal TextBlock? UnavailableText { get; set; }
     }
 
     private readonly Dictionary<QuickSettingsPageId, QuickSettingsSurface> _quickSettingsSurfaces = new();
@@ -147,24 +144,17 @@ public sealed partial class OverlayWindow
         RenderQuickSettingsPage(surface);
     }
 
-    // Root holds the local failure banner above the actual row content; the surface is populated or
-    // updated after ConfigureQuickSettings/ApplyQuickSettingsPage runs.
+    // The surface is populated or updated after ConfigureQuickSettings/ApplyQuickSettingsPage runs.
     private FrameworkElement BuildQuickSettingsPage(AddonQuickSettingsTabId tabId, QuickSettingsPageId pageId)
     {
-        var failureText = CreateQuickSettingsMessageText(string.Empty, "QamCaptionTextStyle");
-        failureText.Visibility = Visibility.Collapsed;
         var content = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
-        var root = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
-        root.Children.Add(failureText);
-        root.Children.Add(content);
         _quickSettingsSurfaces[pageId] = new QuickSettingsSurface
         {
             PageId = pageId,
             TabId = tabId,
             Content = content,
-            FailureText = failureText,
         };
-        return root;
+        return content;
     }
 
     // Render the binder's current effective page. Stable sections update their existing controls;
@@ -176,27 +166,13 @@ public sealed partial class OverlayWindow
 
         if (!page.Available)
         {
-            if (surface.RenderedAvailable == false && surface.UnavailableText is not null)
-                surface.UnavailableText.Text = page.Message ?? "Quick Settings are unavailable.";
-            else
+            if (surface.RenderedAvailable != false)
                 RebuildQuickSettingsContent(surface, page);
         }
         else if (surface.RenderedAvailable == true)
             ReconcileQuickSettingsSections(surface, page);
         else
             RebuildQuickSettingsContent(surface, page);
-
-        ApplyQuickSettingsLocalFailure(surface);
-    }
-
-    // A typed failure or operation/transport failure remains visible until the binder's own failure
-    // fact clears. Device and Profile banners remain independent because each owns its surface.
-    private static void ApplyQuickSettingsLocalFailure(QuickSettingsSurface surface)
-    {
-        if (surface.Binding is null) return;
-        var message = surface.Binding.LastLocalFailureMessage;
-        surface.FailureText.Text = message ?? string.Empty;
-        surface.FailureText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     // Value-only updates change neither the section container nor any row control instance.
@@ -259,13 +235,10 @@ public sealed partial class OverlayWindow
         surface.NumericSliderRows.Clear();
         surface.ValueRows.Clear();
         surface.RenderedSections.Clear();
-        surface.UnavailableText = null;
         surface.Content.Children.Clear();
 
         if (!page.Available)
         {
-            surface.UnavailableText = CreateQuickSettingsMessageText(page.Message ?? "Quick Settings are unavailable.", "QamBodyTextStyle");
-            surface.Content.Children.Add(surface.UnavailableText);
             surface.RenderedAvailable = false;
         }
         else
@@ -329,9 +302,11 @@ public sealed partial class OverlayWindow
         var sectionPanel = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
         var usesFeatureHeader = OverlayQuickSettingsSectionRendering.TryGetFeatureHeaderToggle(section, out var featureHeaderToggle);
         if (!usesFeatureHeader && !string.IsNullOrEmpty(section.Label))
-            sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Label, "QamBodyStrongTextStyle"));
-        if (!string.IsNullOrEmpty(section.Message))
-            sectionPanel.Children.Add(CreateQuickSettingsMessageText(section.Message, "QamCaptionTextStyle"));
+        {
+            var label = new TextBlock { Text = section.Label, TextWrapping = TextWrapping.Wrap };
+            OverlayQamResources.ApplyTextStyle(label, "QamBodyStrongTextStyle");
+            sectionPanel.Children.Add(label);
+        }
 
         var rows = new List<OverlayRow>();
         var rowStack = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
@@ -451,14 +426,6 @@ public sealed partial class OverlayWindow
                 : null;
         if (bringIntoView || selectedIndex != previousSelection || selectedRowId != preferredRowId)
             BringSelectedRowIntoView();
-    }
-
-    private static TextBlock CreateQuickSettingsMessageText(string text, string styleKey)
-    {
-        var block = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap };
-        if (Application.Current.Resources.TryGetValue(styleKey, out var style) && style is Style textStyle)
-            block.Style = textStyle;
-        return block;
     }
 
     private static Border CreateOverlaySectionCard(UIElement child)

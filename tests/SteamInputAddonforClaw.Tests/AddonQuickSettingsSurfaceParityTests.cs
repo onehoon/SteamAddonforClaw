@@ -101,7 +101,8 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.DoesNotContain(Enum.GetNames<QuickSettingsPageId>(), name => name == "Controller");
 
         var overlay = ReadOverlayWindowSources();
-        Assert.Contains("_ => CreatePlaceholderPage(id)", overlay);
+        Assert.Contains("AddonQuickSettingsTabId.Controller => BuildControllerPage(rows)", overlay);
+        Assert.Contains("_ => new Grid()", overlay);
         Assert.DoesNotContain("TemporaryShortcutTiles", overlay);
         Assert.DoesNotContain("AddonQuickSettingsShortcutSlotId", overlay);
         Assert.Contains("FrontendShortcutDashboardSnapshot", overlay);

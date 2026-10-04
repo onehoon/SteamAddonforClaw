@@ -91,30 +91,15 @@ public sealed partial class OverlayWindow
             AddonQuickSettingsTabId.Controller => BuildControllerPage(rows),
             AddonQuickSettingsTabId.Device => BuildQuickSettingsPage(id, QuickSettingsPageId.Device),
             AddonQuickSettingsTabId.Profile => BuildProfilePage(),
-            _ => CreatePlaceholderPage(id),
+            _ => new Grid(),
         };
 
-        return CreateQamPage(id, content);
-    }
-
-    private static FrameworkElement CreateQamPage(AddonQuickSettingsTabId id, FrameworkElement content)
-    {
-        var page = new StackPanel
-        {
-            Spacing = OverlayQamResources.Get("QamPageContentSpacing", 8.0),
-        };
-        var title = new TextBlock { Text = LabelFor(id) };
-        OverlayQamResources.ApplyTextStyle(title, "QamPageTitleTextStyle");
-        page.Children.Add(title);
-        page.Children.Add(content);
-        return page;
+        return content;
     }
 
     private StackPanel BuildTabOrderEditorPage()
     {
         var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
-        section.Children.Add(CreateStatusText("Use Left and Right to move the selected tab."));
-
         var grid = new Grid { RowSpacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
         var order = _tabState.Order;
         for (var i = 0; i < order.Count; i++)
@@ -143,17 +128,6 @@ public sealed partial class OverlayWindow
     }
 
     private static string LabelFor(AddonQuickSettingsTabId id) => AddonQuickSettingsShellContract.LabelFor(id);
-
-    private static FrameworkElement CreatePlaceholderPage(AddonQuickSettingsTabId id)
-    {
-        var page = new TextBlock
-        {
-            Text = LabelFor(id),
-            TextWrapping = TextWrapping.Wrap,
-        };
-        OverlayQamResources.ApplyTextStyle(page, "QamCaptionTextStyle");
-        return page;
-    }
 
     private void OnTabHeaderClick(object sender, RoutedEventArgs args)
     {
@@ -237,7 +211,6 @@ public sealed partial class OverlayWindow
         if (_tabOrderRows.Count == applied.Count)
         {
             _pageRows[AddonQuickSettingsTabId.Setting] = BuildSettingRows(applied);
-            UpdateTabOrderCardSummary(applied);
         }
 
         ApplySelectedHeaderVisual();
@@ -317,6 +290,7 @@ public sealed partial class OverlayWindow
     private void ApplySelectedTabVisualState()
     {
         var selected = _tabState.SelectedTab;
+        PageTitle.Text = LabelFor(selected);
         ApplySelectedHeaderVisual();
         foreach (var (id, page) in _tabPages)
             page.Visibility = id == selected ? Visibility.Visible : Visibility.Collapsed;

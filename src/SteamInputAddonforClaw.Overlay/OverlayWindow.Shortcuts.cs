@@ -11,35 +11,23 @@ namespace SteamInputAddonforClaw.Overlay;
 public sealed partial class OverlayWindow
 {
     private FrontendShortcutDashboardSnapshot _shortcutSnapshot =
-        FrontendShortcutDashboardSnapshot.Unavailable("Loading shortcuts...");
+        FrontendShortcutDashboardSnapshot.Unavailable();
     private readonly Dictionary<Guid, Border> _shortcutTiles = new();
     private Grid? _shortcutGrid;
-    private TextBlock? _shortcutStatus;
     private bool _shortcutExecutionInFlight;
     private bool _isVisible;
-    private string? _shortcutFeedbackMessage;
 
     internal event Func<Guid, Task>? ShortcutExecutionRequested;
 
     private FrameworkElement BuildShortcutPage()
     {
-        var page = new StackPanel { Spacing = OverlayQamResources.Get("QamTileSpacing", 8.0) };
-        _shortcutStatus = new TextBlock
-        {
-            TextWrapping = TextWrapping.Wrap,
-            Visibility = Visibility.Collapsed,
-        };
-        OverlayQamResources.ApplyTextStyle(_shortcutStatus, "QamCaptionTextStyle");
-        page.Children.Add(_shortcutStatus);
-
         _shortcutGrid = new Grid
         {
             ColumnSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
             RowSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
         };
-        page.Children.Add(_shortcutGrid);
         RenderShortcutSnapshot();
-        return page;
+        return _shortcutGrid;
     }
 
     internal void ApplyShortcutState(FrontendShortcutDashboardSnapshot snapshot)
@@ -49,7 +37,6 @@ public sealed partial class OverlayWindow
             OverlayLog.Warn("Shortcut", "Ignored a malformed Shortcut dashboard snapshot.");
             return;
         }
-        _shortcutFeedbackMessage = null;
         RefreshShortcutSelection(snapshot);
     }
 
@@ -60,29 +47,22 @@ public sealed partial class OverlayWindow
             ApplyShortcutExecutionFailure();
             return;
         }
-        _shortcutFeedbackMessage = null;
         RefreshShortcutSelection(response.Snapshot);
-        if (!response.Succeeded && _isVisible)
-            _shortcutFeedbackMessage = response.FailureMessage ?? "Shortcut could not be executed.";
-        UpdateShortcutMessage();
     }
 
     internal void ApplyShortcutExecutionFailure()
     {
-        if (_isVisible)
-            _shortcutFeedbackMessage = "Shortcut could not be executed.";
-        UpdateShortcutMessage();
+        // The calling transport path records failures; this surface intentionally renders no status text.
     }
 
     private void ResetShortcutForShow()
     {
-        _shortcutFeedbackMessage = null;
-        RefreshShortcutSelection(FrontendShortcutDashboardSnapshot.Unavailable("Loading shortcuts..."));
+        RefreshShortcutSelection(FrontendShortcutDashboardSnapshot.Unavailable());
     }
 
     private void RenderShortcutSnapshot()
     {
-        if (_shortcutGrid is null || _shortcutStatus is null) return;
+        if (_shortcutGrid is null) return;
 
         _shortcutTiles.Clear();
         _shortcutGrid.Children.Clear();
@@ -90,12 +70,7 @@ public sealed partial class OverlayWindow
         _shortcutGrid.ColumnDefinitions.Clear();
 
         if (!_shortcutSnapshot.Available || _shortcutSnapshot.Tiles.Count == 0)
-        {
-            UpdateShortcutMessage();
             return;
-        }
-
-        UpdateShortcutMessage();
         var columnCount = Math.Min(2, _shortcutSnapshot.Tiles.Count);
         for (var column = 0; column < columnCount; column++)
             _shortcutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -106,28 +81,16 @@ public sealed partial class OverlayWindow
                 _shortcutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var tile = _shortcutSnapshot.Tiles[index];
-            var content = new StackPanel { Spacing = 3 };
             var title = new TextBlock
             {
                 Text = tile.Title,
                 TextWrapping = TextWrapping.Wrap,
             };
             OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
-            content.Children.Add(title);
-            if (tile.StatusText is { } statusText)
-            {
-                var status = new TextBlock
-                {
-                    Text = statusText,
-                    TextWrapping = TextWrapping.Wrap,
-                };
-                OverlayQamResources.ApplyTextStyle(status, "QamCaptionTextStyle");
-                content.Children.Add(status);
-            }
 
             var border = new Border
             {
-                Child = content,
+                Child = title,
                 Padding = OverlayQamResources.Get("QamTilePadding", new Thickness(12)),
                 MinHeight = OverlayQamResources.Get("QamTileMinHeight", 58.0),
                 CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
@@ -165,8 +128,6 @@ public sealed partial class OverlayWindow
         if (tile is not { Enabled: true }) return;
 
         _shortcutExecutionInFlight = true;
-        _shortcutFeedbackMessage = null;
-        UpdateShortcutMessage();
         _ = ExecuteShortcutIntentAsync(request, tileId);
     }
 
@@ -182,7 +143,6 @@ public sealed partial class OverlayWindow
         finally
         {
             _shortcutExecutionInFlight = false;
-            UpdateShortcutMessage();
         }
     }
 
@@ -190,17 +150,6 @@ public sealed partial class OverlayWindow
     {
         if (GetSelectedShortcutTile() is { Enabled: true } tile)
             RequestShortcutExecution(tile.TileId);
-    }
-
-    private void UpdateShortcutMessage()
-    {
-        if (_shortcutStatus is null) return;
-        var message = _shortcutFeedbackMessage
-            ?? (!_shortcutSnapshot.Available ? _shortcutSnapshot.FailureMessage ?? "Shortcut settings are unavailable."
-                : _shortcutSnapshot.Tiles.Count == 0 ? "No shortcuts configured. Add shortcuts in the Main App."
-                : null);
-        _shortcutStatus.Text = message ?? string.Empty;
-        _shortcutStatus.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private static bool IsShortcutSnapshotValid(FrontendShortcutDashboardSnapshot? snapshot) =>

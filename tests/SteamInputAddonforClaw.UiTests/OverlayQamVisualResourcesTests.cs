@@ -49,7 +49,7 @@ public sealed class OverlayQamVisualResourcesTests
     }
 
     [Fact]
-    public void Overlay_root_is_dark_and_uses_the_wider_shell_without_changing_the_rail()
+    public void Overlay_root_has_a_fixed_title_and_preserves_the_full_width_scroll_viewport()
     {
         var root = RepoRoot();
         var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml"));
@@ -60,37 +60,64 @@ public sealed class OverlayQamVisualResourcesTests
         var columns = shell.Elements().Single(element => element.Name.LocalName == "Grid.ColumnDefinitions").Elements().ToArray();
         var rightContentHost = xaml.Descendants().Single(element =>
             element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1");
+        var pageTitle = xaml.Descendants().Single(element =>
+            (string?)element.Attribute(Xaml + "Name") == "PageTitle");
         var bodyScroll = xaml.Descendants().Single(element =>
             element.Name.LocalName == "ScrollViewer" && (string?)element.Attribute(Xaml + "Name") == "BodyScroll");
         var insetHost = bodyScroll.Descendants().Single(element =>
-            (string?)element.Attribute("Padding") == "{StaticResource QamContentPadding}");
+            (string?)element.Attribute("Padding") == "{StaticResource QamBodyContentPadding}");
         var tabBody = insetHost.Descendants().Single(element =>
             (string?)element.Attribute(Xaml + "Name") == "TabBody");
+        var rowChrome = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs"));
+        var rightRows = rightContentHost.Elements().Single(element => element.Name.LocalName == "Grid.RowDefinitions")
+            .Elements().Select(element => (string?)element.Attribute("Height")).ToArray();
 
         Assert.Equal("Dark", (string?)viewport.Attribute("RequestedTheme"));
         Assert.Equal("432", (string?)panel.Attribute("MaxWidth"));
         Assert.Equal("52", (string?)columns[0].Attribute("Width"));
         Assert.Equal("*", (string?)columns[1].Attribute("Width"));
+        Assert.Same(rightContentHost, pageTitle.Parent);
+        Assert.Equal("0", (string?)pageTitle.Attribute("Grid.Row"));
+        Assert.Equal("1", (string?)bodyScroll.Attribute("Grid.Row"));
+        Assert.Equal(new[] { "Auto", "*" }, rightRows);
         Assert.Same(rightContentHost, bodyScroll.Parent);
         Assert.Null(rightContentHost.Attribute("Margin"));
+        Assert.DoesNotContain(bodyScroll.DescendantsAndSelf(), element => ReferenceEquals(element, pageTitle));
         Assert.Contains(bodyScroll, insetHost.Ancestors());
         Assert.Contains(insetHost, tabBody.Ancestors());
         Assert.Equal("Stretch", (string?)insetHost.Attribute("HorizontalAlignment"));
         Assert.Equal("Hidden", (string?)bodyScroll.Attribute("VerticalScrollBarVisibility"));
         Assert.Equal("Disabled", (string?)bodyScroll.Attribute("HorizontalScrollBarVisibility"));
         Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "ScrollViewer");
+        Assert.Single(xaml.Descendants(), element => (string?)element.Attribute(Xaml + "Name") == "PageTitle");
         Assert.DoesNotContain(xaml.Descendants(), element =>
             element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1" &&
-            (string?)element.Attribute("Margin") == "{StaticResource QamContentPadding}");
+            (string?)element.Attribute("Margin") == "{StaticResource QamBodyContentPadding}");
 
-        AssertResourceValue(resources, "QamContentPadding", "16,16,16,12");
+        AssertResourceValue(resources, "QamPageTitleMargin", "16,16,16,8");
+        AssertResourceValue(resources, "QamBodyContentPadding", "16,0,16,12");
         AssertResourceValue(resources, "QamRowPadding", "16,10,16,10");
         AssertResourceValue(resources, "QamRowMargin", "-16,0,-16,0");
+        Assert.Contains("Margin = OverlayQamResources.Get(\"QamRowMargin\", new Thickness(-16, 0, -16, 0))", rowChrome);
         AssertResourceValue(resources, "QamRowMinHeight", "42");
         AssertResourceValue(resources, "QamRowCornerRadius", "2");
         AssertResourceValue(resources, "QamRailButtonSize", "52");
         AssertResourceValue(resources, "QamRailItemHeight", "64");
         AssertResourceValue(resources, "QamRailIconSize", "24");
+        AssertResourceValue(resources, "QamSectionSpacing", "24");
+        AssertResourceValue(resources, "QamSectionHeaderSpacing", "4");
+        AssertResourceValue(resources, "QamRowSpacing", "0");
+        AssertResourceValue(resources, "QamSliderHeight", "22");
+        AssertResourceValue(resources, "QamSliderTrackHeight", "4");
+        AssertResourceValue(resources, "QamSliderThumbWidth", "12");
+        AssertResourceValue(resources, "QamSliderThumbHeight", "12");
+        AssertResourceValue(resources, "QamValueButtonWidth", "40");
+        AssertResourceValue(resources, "QamValueButtonHeight", "22");
+        AssertResourceValue(resources, "QamToggleMinHeight", "22");
+        AssertResourceValue(resources, "QamTogglePreContentMargin", "1");
+        AssertResourceValue(resources, "QamTogglePostContentMargin", "1");
+        Assert.Equal("Segoe UI Variable", Resource(resources, "QamFontFamily").Value.Trim());
+        Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value is "QamContentPadding" or "QamPageContentSpacing");
         Assert.Equal("#26FFFFFF", Resource(resources, "QamSelectedFillBrush").Attribute("Color")?.Value);
         Assert.DoesNotContain("Footer", xaml.ToString());
     }
@@ -121,33 +148,33 @@ public sealed class OverlayQamVisualResourcesTests
     }
 
     [Fact]
-    public void Canonical_page_titles_are_added_once_around_each_existing_page_builder()
+    public void One_canonical_page_title_stays_outside_the_scroll_body()
     {
         var root = RepoRoot();
         var shell = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs"));
+        var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml"));
         var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
         var pageTitle = resources.Descendants().Single(element =>
             element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == "QamPageTitleTextStyle");
-        var buildPage = SliceMethod(shell, "private FrameworkElement BuildPage(", "private static FrameworkElement CreateQamPage(");
-        var createPage = SliceMethod(shell, "private static FrameworkElement CreateQamPage(", "private StackPanel BuildTabOrderEditorPage(");
+        var buildPage = SliceMethod(shell, "private FrameworkElement BuildPage(", "private StackPanel BuildTabOrderEditorPage(");
+        var selectedStateStart = shell.IndexOf("private void ApplySelectedTabVisualState()", StringComparison.Ordinal);
+        Assert.True(selectedStateStart >= 0);
+        var selectedState = shell[selectedStateStart..];
+        var titleElement = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "PageTitle");
 
         Assert.Equal("{StaticResource QamSectionHeaderTextStyle}", (string?)pageTitle.Attribute("BasedOn"));
-        Assert.Equal("QamPageContentSpacing", Assert.Single(
-            resources.Descendants().Attributes(Xaml + "Key"),
-            attribute => attribute.Value == "QamPageContentSpacing").Value);
-        Assert.Equal(1, CountOccurrences(buildPage, "CreateQamPage("));
         Assert.Contains("var content = id switch", buildPage);
         Assert.Contains("BuildQuickSettingsPage(id, QuickSettingsPageId.Device)", buildPage);
         Assert.Contains("BuildProfilePage()", buildPage);
         Assert.Contains("BuildControllerPage(rows)", buildPage);
         Assert.Contains("BuildShortcutPage()", buildPage);
         Assert.Contains("BuildSettingPage(rows)", buildPage);
-        Assert.Contains("return CreateQamPage(id, content);", buildPage);
-        Assert.Contains("Text = LabelFor(id)", createPage);
-        Assert.Contains("QamPageContentSpacing", createPage);
-        Assert.Contains("QamPageTitleTextStyle", createPage);
-        Assert.DoesNotContain("Quick Settings", createPage);
-        Assert.Equal(1, CountOccurrences(shell, "QamPageTitleTextStyle"));
+        Assert.Contains("return content;", buildPage);
+        Assert.DoesNotContain("CreateQamPage", shell);
+        Assert.Equal("{StaticResource QamPageTitleTextStyle}", (string?)titleElement.Attribute("Style"));
+        Assert.Equal("{StaticResource QamPageTitleMargin}", (string?)titleElement.Attribute("Margin"));
+        Assert.Contains("PageTitle.Text = LabelFor(selected);", selectedState);
+        Assert.Equal(1, CountOccurrences(xaml.ToString(), "x:Name=\"PageTitle\""));
     }
 
     [Fact]
@@ -208,6 +235,8 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("x:Key=\"QamValueButtonStyle\" TargetType=\"primitives:ButtonBase\"", resources);
         Assert.Contains("_toggle.Style = toggleStyle", toggle);
         Assert.Contains("toggle.Resources[key] = brush is", toggle);
+        Assert.Contains("toggle.Resources[\"ToggleSwitchPreContentMargin\"]", toggle);
+        Assert.Contains("toggle.Resources[\"ToggleSwitchPostContentMargin\"]", toggle);
         Assert.Contains("_suppress = true", toggle);
         Assert.Contains("_model.RequestToggle", toggle);
         Assert.Contains("_model.RequestSet(_toggle.IsOn)", toggle);
@@ -217,6 +246,47 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
         Assert.DoesNotContain("ToggleSwitchFillOn", app);
         Assert.DoesNotContain("SliderTrackValueFill", app);
+    }
+
+    [Fact]
+    public void Overlay_pages_render_only_minimal_text_and_keep_state_and_interaction_paths()
+    {
+        var root = RepoRoot();
+        var sources = ReadOverlayVisualSources(root);
+        var joined = string.Join(Environment.NewLine, sources.Values);
+        var quickSettings = sources["OverlayWindow.QuickSettings.cs"];
+        var controller = sources["OverlayWindow.Controller.cs"];
+        var clawHud = sources["OverlayWindow.ClawHud.cs"];
+        var profile = sources["OverlayWindow.Profile.cs"];
+        var shortcuts = sources["OverlayWindow.Shortcuts.cs"];
+
+        string[] forbidden =
+        [
+            "Waiting for ClawHUD state.", "Enabled · Ready", "VRR:",
+            "Already using the native VRR range", "Use Left and Right to move the selected tab.",
+            "Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4.",
+            "Updating M1 / M2 mapping", "M1 / M2 mapping is unavailable.",
+            "Loading games", "No games found.", "Loading shortcuts", "No shortcuts configured",
+            "Loading Profile settings", "Shortcut settings are unavailable.", "Shortcut could not be executed.",
+            "Quick Settings are unavailable.",
+        ];
+        foreach (var phrase in forbidden)
+            Assert.DoesNotContain(phrase, joined, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("page.Message", quickSettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("section.Message", quickSettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("LastLocalFailureMessage", quickSettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("tile.StatusText", shortcuts, StringComparison.Ordinal);
+        Assert.Contains("Text = tile.Title", shortcuts, StringComparison.Ordinal);
+        Assert.Contains("tile.Enabled ? 1.0", shortcuts, StringComparison.Ordinal);
+        Assert.Contains("_shortcutExecutionInFlight", shortcuts, StringComparison.Ordinal);
+        Assert.Contains("_clawHudSnapshot = snapshot", clawHud, StringComparison.Ordinal);
+        Assert.Contains("RenderClawHudControls();", clawHud, StringComparison.Ordinal);
+        Assert.Contains("state.Error", profile, StringComparison.Ordinal);
+        Assert.Contains("OverlayLog.Warn(\"Profile\", state.Error)", profile, StringComparison.Ordinal);
+        Assert.Contains("FailureMessage = response.Succeeded", controller, StringComparison.Ordinal);
+        Assert.Contains("RenderBackButtonMappingRows();", controller, StringComparison.Ordinal);
+        Assert.Contains("QamCaptionTextStyle", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml")));
     }
 
     [Fact]
@@ -267,7 +337,6 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.DoesNotContain("CaptionTextBlockStyle", programmatic);
         Assert.Contains("QamBodyTextStyle", programmatic);
         Assert.Contains("QamBodyStrongTextStyle", programmatic);
-        Assert.Contains("QamCaptionTextStyle", programmatic);
         Assert.Contains("QamValueTextStyle", programmatic);
         Assert.Contains("QamTileTitleTextStyle", programmatic);
     }

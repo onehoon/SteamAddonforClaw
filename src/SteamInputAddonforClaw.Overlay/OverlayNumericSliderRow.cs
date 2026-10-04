@@ -169,7 +169,7 @@ internal sealed class OverlayNumericSliderRow
         SetBrush(slider, "SliderOuterThumbBackground", transparent);
         slider.Resources["SliderTrackThemeHeight"] = OverlayQamResources.Get("QamSliderTrackHeight", 4.0);
         slider.Resources["SliderThumbCornerRadius"] = OverlayQamResources.Get("QamSliderThumbCornerRadius", new CornerRadius(6));
-        slider.Resources["SliderHorizontalHeight"] = OverlayQamResources.Get("QamSliderHeight", 32.0);
+        slider.Resources["SliderHorizontalHeight"] = OverlayQamResources.Get("QamSliderHeight", 22.0);
         slider.Resources["SliderHorizontalThumbWidth"] = OverlayQamResources.Get("QamSliderThumbWidth", 12.0);
         slider.Resources["SliderHorizontalThumbHeight"] = OverlayQamResources.Get("QamSliderThumbHeight", 12.0);
         slider.Resources["SliderInnerThumbWidth"] = OverlayQamResources.Get("QamSliderThumbWidth", 12.0);
