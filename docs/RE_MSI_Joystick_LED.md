@@ -1,10 +1,12 @@
 # RE: MSI Claw Joystick LED Control
 
 Status: this document retains the historical protocol/reverse-engineering notes and
-records the current production references. HHC's current firmware map includes EX
-`0x0411` and `0x0414`; SteamAddon's Basic Static implementation uses exact table
-matches and fails closed for unknown versions. This does not claim that the SteamAddon
-implementation has passed physical hardware acceptance.
+records the current production references. HHC's current exact firmware map includes EX
+`0x0411` and `0x0414`; CG3EM/MS-1T91 field firmware `0x0419` is now an explicit
+SteamAddon exact entry resolving to the same `0x024A` RGB base. SteamAddon's Basic
+Static implementation still uses exact table matches and fails closed for every other
+unknown version. This does not claim that the `0x0419` SteamAddon path has passed
+physical hardware acceptance.
 
 ## Transport and packet
 
@@ -74,9 +76,15 @@ current table, superseding the older note that `0x0411` was absent.
 | `0x0308` | `0x024A` |
 | EX `0x0411` | `0x024A` |
 | EX `0x0414` | `0x024A` |
+| EX `0x0419` | `0x024A` |
 
 Source: [Handheld Companion `ClawA1M.cs`](https://github.com/Valkirie/HandheldCompanion/blob/master/HandheldCompanion/Devices/MSI/ClawA1M.cs).
-SteamAddon does not infer or probe an address for any other version.
+HHC's exact MS-1T91 table currently ends at `0x0414`. The tested CG3EM/MS-1T91
+reports controller firmware `0x0419`; CTW's deployed production resolver selects the
+nearest EX entry (`0x0414`) and therefore `0x024A` for that firmware. SteamAddon does
+not adopt CTW's general nearest-match policy: `0x0419` is promoted to one explicit
+known entry, while every other unknown version still fails closed with zero profile
+writes. Physical SteamAddon LED acceptance for `0x0419` remains pending.
 
 ## Historical device-specific RE notes
 
@@ -86,9 +94,12 @@ SteamAddon does not infer or probe an address for any other version.
 | A2VM `0x308` | device control-surface RE | `02 4A` |
 | EX `0x0411` | current HHC table | `02 4A` |
 | EX `0x0414` | current HHC table | `02 4A` |
+| EX `0x0419` | CG3EM/MS-1T91 field firmware; CTW nearest-match resolves to EX `0x0414` | `02 4A` |
 
 The table is evidence for address selection, not a SteamAddon hardware acceptance
-result. Unknown versions remain unsupported; do not probe arbitrary EEPROM addresses.
+result. `0x0419` is an explicit exact SteamAddon entry but still awaits physical LED
+smoke-test confirmation. All other unknown versions remain unsupported; do not probe
+arbitrary EEPROM addresses or generalize CTW's nearest-match behavior.
 
 ## CTW production Static reference
 
