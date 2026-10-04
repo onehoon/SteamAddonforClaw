@@ -64,10 +64,37 @@ No currently supported model is enabled for production access to the direct
 
 On 2026-10-04, the tested CG3EM/MS-1T91 reported Left/Right `50% / 50%` in the
 Center M UI, while the Addon's `0x22`/`0x23` read path presented `100% / 100%`
-before any Addon mutation in that log session. Subsequent Addon mutations were
-observed, so do not infer or automatically restore a presumed stock value.
-This mismatch means those bytes cannot currently be presented as authoritative
-Center M motor settings on this model.
+before any Addon mutation in that log session. The Center M values were local UI
+profile values, not device readback, so this was not a direct comparison between
+two hardware reads. Subsequent Addon mutations were observed, so do not infer or
+automatically restore a presumed stock value. These bytes cannot currently be
+presented as authoritative Center M motor settings on this model.
+
+### Static Center M profile-flow findings
+
+The following findings are **PROVEN within the individually inspected binaries**:
+
+| Finding | Evidence |
+| --- | --- |
+| The vibration UI values are loaded from Center M's local `ControlProfile` / `profile.rec` state (`MP.LM` / `MP.RM`), not from device profile readback. | `UC_ControlMode.dll` UI/profile path |
+| `MotorModule.LeftMotorValue` and `RightMotorValue` serialize at profile-relative offsets `0x22` and `0x23`. | `API_ControlMode.dll` profile serialization |
+| An inspected profile write uses index `1`; when the cached profile changes only LM/RM, it can write the contiguous two-byte range at offset `0x22`. | `API_ControlMode.dll` profile save path |
+| The inspected whole-profile read requests index `0`. | `API_ControlMode.dll` profile load path |
+| Center M queues `SyncToROM` (`0x22`) after its profile write request. | `API_ControlMode.dll` command queue path |
+
+The inspected versions were `UC_ControlMode.dll 1.0.2608.1201` and
+`API_ControlMode.dll 1.0.2606.2401`; they do not match. These are static findings
+within the inspected files and do not prove cross-assembly runtime compatibility.
+If Center M's cached profile is absent, its save path may send multiple bounded
+chunks rather than the two-byte LM/RM range.
+
+The following remain **UNKNOWN**:
+
+- firmware meaning of profile index `0` versus `1`;
+- whether response byte `[5]` echoes the request index;
+- whether CG3EM firmware `0x0419` maps both requests to the same profile state;
+- whether a successful Center M save request proves persistent device acceptance;
+- whether PID1901 and PID1902 share the same firmware profile bank.
 
 ## Historical vendor-HID command evidence
 
@@ -96,49 +123,50 @@ address, one-byte length, and a value in `0..100`. Keep those checks strict.
 Historical command shape and parser success do not establish that the value is
 the Center M motor setting for a particular current model.
 
-The hotfix's diagnostic capture may issue bounded reads for `0x22` and `0x23` on
-an unverified model. It logs a short response prefix and parse result at Info level
-for explicit Controller-page capture only. It does not log a complete HID report,
-does not mutate the profile, and never returns those raw values as production
-percentages. Every probe is marked `VerifiedForProduction=False`.
+The diagnostic capture on an unverified model issues exactly two bounded pair
+reads: index `0`, offset `0x22`, length `2`, followed by index `1` with the same
+offset and length. It logs up to the first 11 response bytes, response-index and
+echo evidence, address/length fields, and structurally valid candidate LM/RM
+bytes at Info level for explicit Controller-page capture only. It does not log a
+complete HID report, mutate the profile, or return those candidates as production
+percentages. Every probe is marked `VerifiedForProduction=False`; the production
+single-byte parser remains strict about its historical index-1 response shape.
 
 ## Model-specific validation procedure
 
 Do not enable production writes until the exact model's direct mapping is proven.
 
-### Phase A — stock authority / PID1901
+### First diagnostic — Addon authority / PID1902
 
-Boot with Center M Enabled and MSI authority. Record model, board ID, PID,
-usage page/usage, Center M Left/Right values, and the diagnostic events for both
-addresses. If safe, change Center M to a clearly asymmetric pair such as Left
-`40%` / Right `70%`, close or settle the UI, then capture again. A single matching
-default pair is not sufficient evidence.
+On CG3EM/MS-1T91 firmware `0x0419`, use the normal reboot-bound Full1902
+authority flow and verify physical PID1902. In Center M, set a clearly
+asymmetric local profile pair such as Left `30%` / Right `70%`, allow its normal
+save/debounce path to settle, then open the Addon Controller page once. Collect
+both `ControllerVibrationProfileIndexProbe` events and record the request index,
+response index/echo, response address/length, candidate bytes, and structural
+parse result. This comparison is diagnostic only; it does not prove that Center
+M's local profile was accepted by firmware.
 
-Required candidate evidence:
-
-```text
-Center M 40/70 -> PID1901 diagnostic values 40/70
-```
-
-### Phase B — Addon authority / PID1902
-
-Use the normal reboot-bound Disable Center M and Restart path. Do not perform a
-same-session authority handoff. After Full1902 PID1902 ownership is established,
-open Controller > Vibration Strength to collect the same bounded diagnostic
-probe and compare with the last stock values.
+Compare the two results without treating either as authoritative. For example:
 
 ```text
-PID1901 tracks the asymmetric Center M values
-PID1902 tracks the same values
--> strong model/firmware-specific direct-mapping evidence candidate
-
-PID1902 differs, returns 100/100, or has a different response shape
--> keep production writes disabled and investigate the mode-specific behavior
+index 0 -> 30/70; index 1 -> 50/50
+index 0 -> 30/70; index 1 -> 30/70
+index 0 -> 50/50; index 1 -> 50/50
 ```
 
-If PID1901 does not track Center M, the offsets are not the direct Center M
-setting on that model or another translation layer exists. Any ambiguous or
-incomplete result remains unverified.
+All outcomes keep production writes disabled. A malformed or missing response is
+also evidence and must not be converted into a guessed percentage.
+
+### Follow-up only if index behavior remains ambiguous — PID1901
+
+PID1901 comparison is a separate later investigation, not a prerequisite for the
+first PID1902 diagnostic. If needed, use the normal reboot-bound Center M
+authority transition; do not perform same-session PID switching. Record whether
+the same two index probes track the asymmetric Center M local values.
+
+Whether PID1901 and PID1902 share the same bank remains unknown. Any ambiguous,
+incomplete, or mode-dependent result remains unverified.
 
 ### Phase C — separate enablement change
 

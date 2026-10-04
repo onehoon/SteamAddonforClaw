@@ -139,11 +139,11 @@ internal sealed class MsiClawVibrationStrengthClient
 
             if (!MsiClawVibrationFirmwarePolicy.IsDirectMotorProfileAddressVerified(_modelId))
             {
-                var diagnosticValues = await TryReadDiagnosticPairAsync(device, cancellationToken).ConfigureAwait(false);
+                var diagnosticReadSucceeded = await TryReadDiagnosticPairAsync(device, cancellationToken).ConfigureAwait(false);
                 AppLog.Info("ControllerVibration", "ControllerVibrationCaptureUnavailable",
                     ("Model", _modelId.Value),
                     ("Reason", "FirmwareAddressMappingUnverified"),
-                    ("DiagnosticReadSucceeded", diagnosticValues is not null));
+                    ("DiagnosticReadSucceeded", diagnosticReadSucceeded));
                 return new(false, null, "FirmwareAddressMappingUnverified");
             }
 
@@ -348,20 +348,18 @@ internal sealed class MsiClawVibrationStrengthClient
         return right is null ? null : new(left.Value, right.Value);
     }
 
-    private async Task<MsiClawVibrationStrengthValues?> TryReadDiagnosticPairAsync(
+    private async Task<bool> TryReadDiagnosticPairAsync(
         MsiClawControlHidDevice device,
         CancellationToken cancellationToken)
     {
-        var left = await TryReadDiagnosticValueAsync(
-            device, MsiClawVibrationProfileCommand.LeftMotorAddress, cancellationToken).ConfigureAwait(false);
-        var right = await TryReadDiagnosticValueAsync(
-            device, MsiClawVibrationProfileCommand.RightMotorAddress, cancellationToken).ConfigureAwait(false);
-        return left is null || right is null ? null : new(left.Value, right.Value);
+        var index0Succeeded = await TryReadDiagnosticIndexAsync(device, 0x00, cancellationToken).ConfigureAwait(false);
+        var index1Succeeded = await TryReadDiagnosticIndexAsync(device, 0x01, cancellationToken).ConfigureAwait(false);
+        return index0Succeeded && index1Succeeded;
     }
 
-    private async Task<int?> TryReadDiagnosticValueAsync(
+    private async Task<bool> TryReadDiagnosticIndexAsync(
         MsiClawControlHidDevice device,
-        ushort address,
+        byte profileIndex,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<byte[]>? reports;
@@ -369,7 +367,10 @@ internal sealed class MsiClawVibrationStrengthClient
         {
             reports = await _io.WriteAndReadAsync(
                 device,
-                MsiClawVibrationProfileCommand.BuildReadProfile(address),
+                MsiClawVibrationProfileCommand.BuildDiagnosticReadProfile(
+                    profileIndex,
+                    MsiClawVibrationProfileCommand.LeftMotorAddress,
+                    length: 0x02),
                 ReadTimeout,
                 cancellationToken).ConfigureAwait(false);
         }
@@ -379,47 +380,74 @@ internal sealed class MsiClawVibrationStrengthClient
         }
         catch (Exception exception)
         {
-            LogDiagnosticProbe(device, address, null, null, parseSucceeded: false, exception.GetType().Name);
-            return null;
+            LogDiagnosticIndexProbe(device, profileIndex, null, null, structuralParseSucceeded: false, exception.GetType().Name);
+            return false;
         }
 
         if (reports is null || reports.Count == 0)
         {
-            LogDiagnosticProbe(device, address, null, null, parseSucceeded: false, "NoResponse");
-            return null;
+            LogDiagnosticIndexProbe(device, profileIndex, null, null, structuralParseSucceeded: false, "NoResponse");
+            return false;
         }
 
-        int? parsedValue = null;
+        var structuralParseSucceeded = false;
         foreach (var report in reports.Take(4))
         {
-            var parsed = MsiClawVibrationProfileCommand.TryParseReadProfileResponse(report, address, out var value);
-            LogDiagnosticProbe(device, address, report, parsed ? value : null, parsed, null);
-            if (parsed && parsedValue is null)
-                parsedValue = value;
+            var parsed = MsiClawVibrationProfileCommand.TryParseDiagnosticReadProfileResponse(
+                report,
+                profileIndex,
+                MsiClawVibrationProfileCommand.LeftMotorAddress,
+                requestedLength: 0x02,
+                out var diagnosticResponse);
+            LogDiagnosticIndexProbe(
+                device,
+                profileIndex,
+                report,
+                parsed ? diagnosticResponse : null,
+                parsed,
+                probeFailure: null);
+            structuralParseSucceeded |= parsed;
         }
-        return parsedValue;
+        return structuralParseSucceeded;
     }
 
-    private void LogDiagnosticProbe(
+    private void LogDiagnosticIndexProbe(
         MsiClawControlHidDevice device,
-        ushort address,
+        byte requestedProfileIndex,
         byte[]? response,
-        int? parsedValue,
-        bool parseSucceeded,
+        MsiClawVibrationProfileDiagnosticResponse? parsedResponse,
+        bool structuralParseSucceeded,
         string? probeFailure)
     {
         var responsePrefix = response is null
             ? string.Empty
-            : string.Join("-", response.Take(10).Select(value => value.ToString("X2")));
-        AppLog.Info("ControllerVibration", "ControllerVibrationProfileProbe",
+            : string.Join("-", response.Take(11).Select(value => value.ToString("X2")));
+        byte? responseIndex = response is { Length: > 5 } ? response[5] : null;
+        var responseAddress = response is { Length: > 7 }
+            ? $"0x{((response[6] << 8) | response[7]):X4}"
+            : null;
+        byte? responseLength = response is { Length: > 8 } ? response[8] : null;
+        bool? indexEchoMatched = responseIndex is { } actualIndex
+            ? actualIndex == requestedProfileIndex
+            : null;
+
+        AppLog.Info("ControllerVibration", "ControllerVibrationProfileIndexProbe",
             ("Model", _modelId.Value),
             ("ProductId", device.Device.ProductId is { } productId ? $"0x{productId:X4}" : null),
             ("UsagePage", $"0x{device.UsagePage:X4}"),
             ("Usage", $"0x{device.Usage:X4}"),
-            ("Address", $"0x{address:X4}"),
+            ("RequestIndex", requestedProfileIndex),
+            ("Address", $"0x{MsiClawVibrationProfileCommand.LeftMotorAddress:X4}"),
+            ("RequestedLength", 2),
             ("ResponsePrefix", responsePrefix),
-            ("ParsedValue", parsedValue),
-            ("ParseSucceeded", parseSucceeded),
+            ("ResponseReportLength", response?.Length),
+            ("ResponseIndex", responseIndex),
+            ("IndexEchoMatched", indexEchoMatched),
+            ("ResponseAddress", responseAddress),
+            ("ResponseLength", responseLength),
+            ("CandidateLeft", parsedResponse?.CandidateLeft),
+            ("CandidateRight", parsedResponse?.CandidateRight),
+            ("StructuralParseSucceeded", structuralParseSucceeded),
             ("VerifiedForProduction", false),
             ("ProbeFailure", probeFailure));
     }
