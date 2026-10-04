@@ -57,7 +57,7 @@ For the Korean label 모서리에 FPS 표시, DevTools reported platform fonts M
 | Hover/pressed fill uses the measured focused-row fill | Hover and pressed states were not captured. The resource values are provisional and centralized. |
 | Section header spacing 4px | The selected page did not expose a comparable labeled section header; provisional. |
 | Shortcut/Profile tile surface and selected fill | Steam QAM has no equivalent product tile in this capture. Overlay uses the measured surface and selection palette provisionally. |
-| Neutral QAM accent resource | No distinct blue accent or selected indicator was visible. The resource reuses the measured neutral rail-icon color (#8B929A), not the Windows accent. |
+| Neutral QAM accent resource | No distinct blue accent or selected indicator was visible. `QamAccentBrush` reuses the measured neutral rail-icon color (#8B929A), not the Windows accent. |
 | Shortcut disabled opacity 0.48 | No disabled tile was visible in QAM; the Overlay retains its existing disabled-state opacity centrally. |
 
 ## PR B control inspection — 2026-10-02
@@ -71,11 +71,11 @@ The retained `QuickAccess_uid17` target was present during this follow-up, but i
 | `.HqVrl-7SIPNdZd1uHcMK1 .SliderHandle` | 12 × 12px; `rgb(238,238,238)` | Raw rule only; hover declares 14 × 14px |
 | `.pKqdj8AMVbHjzLei06ytQ` slider rules | 4px track; active fill `rgba(255,255,255,0.533)`; 12px handle; `rgb(184,188,191)` handle | Separate raw rule group; its live role/state was not identified |
 
-No corresponding live ToggleField rules or finite ordered choice field were identified. The existing PR B control resource values are therefore provisional: Slider track/handle candidates are drawn from the stylesheet declarations above, toggle colors reuse the already measured neutral QAM palette, and the discrete buttons reuse measured row/text colors. The native WinUI ToggleSwitch template is retained rather than asserting an unmeasured Steam toggle geometry. These choices are not a claim of exact control parity.
+No corresponding live ToggleField rules or finite ordered choice field were identified. Slider track/handle candidates are drawn from the stylesheet declarations above, and discrete buttons reuse measured row/text colors. Toggle ON color is addressed separately below; its selected blue remains source/theme evidence, not a live computed ToggleField measurement. The native WinUI ToggleSwitch template is retained rather than asserting an unmeasured Steam toggle geometry. These choices are not a claim of exact control parity.
 
 Before treating these control constants as final, reopen the current Steam QAM Performance page and capture read-only computed geometry/styles for an actual SliderField and ToggleField; capture a finite ordered field if one is available. The PR B implementation can be reviewed and built independently, but its visual-acceptance gate remains pending that live capture and MSI Claw 1920 × 1200 / 150% comparison.
 
-The Overlay intentionally retains the work-order's 416 DIP surface and 52 DIP structural rail. Only the internal visual treatment uses the measurements above; the 48 CSS px Steam rail does not change Overlay geometry.
+At the time of this capture, the Overlay used a 416 DIP surface and 52 DIP structural rail. The subsequent 2026-10-04 hardware polish work order widens the surface to 432 DIP while retaining the 52 DIP rail; the extra 16 DIP belongs to the content column. The 48 CSS px Steam rail does not determine Overlay geometry.
 
 ## PR C page polish — 2026-10-02
 
@@ -84,6 +84,13 @@ The Overlay intentionally retains the work-order's 416 DIP surface and 52 DIP st
 - `QamFlatButtonStyle` removes the default WinUI Button visual template from the rail, Profile catalog cards, and Setting expandable headers while preserving native Button activation/accessibility semantics.
 - Profile and Shortcut tile layouts remain Overlay-specific and are not claimed to be Steam-native equivalents.
 - Profile 3-column and Shortcut 2-column density remains deferred to MSI Claw hardware acceptance.
+
+## OQ hardware polish — 2026-10-04
+
+- The supported Overlay shell target is now 432 DIP total width with its 52 DIP left rail unchanged; the right content area grows from 364 to 380 DIP. This is a hardware-informed Addon layout adjustment, not a measurement copied from Steam QAM.
+- Steam's shared stylesheet defines `--gpColor-Blue` as `#1A9FFF` ([SteamTracking `shared_global.css`](https://github.com/SteamTracking/SteamTracking/blob/master/steamcommunity.com/public/shared/css/shared_global.css)). The [Colored Toggles Desktop stylesheet](https://github.com/Tormak9970/SteamDeckThemes/blob/main/Desktop/ColoredTogglesDesktop/shared.css) applies its configured main-color variable to the enabled `gamepaddialog_ToggleRail`; its comment identifies `#1a9fff` as the intended default. This supports using the Steam blue token for the Addon Toggle ON rail.
+- This source/theme evidence does **not** establish the current Steam QAM's live computed ToggleField color, geometry, or state styling. No live ToggleField was available during the cited DevTools capture; a current computed-style capture remains outstanding. The Overlay's `#1A9FFF` ON rail is therefore an evidence-backed design direction, not an observed live QAM measurement.
+- Toggle OFF, thumb, and Slider resources remain unchanged by this hardware polish.
 
 ## Deferred to PR B or hardware acceptance
 

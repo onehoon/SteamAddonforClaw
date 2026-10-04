@@ -10,6 +10,7 @@
     <SolidColorBrush x:Key="QamDisabledTextBrush" Color="#FF969696" />
     <SolidColorBrush x:Key="QamErrorTextBrush" Color="#FF969696" />
     <SolidColorBrush x:Key="QamAccentBrush" Color="#FF8B929A" />
+    <SolidColorBrush x:Key="QamSteamBlueBrush" Color="#FF1A9FFF" />
     <SolidColorBrush x:Key="QamSelectedFillBrush" Color="#26FFFFFF" />
     <SolidColorBrush x:Key="QamHoverFillBrush" Color="#26FFFFFF" />
     <SolidColorBrush x:Key="QamPressedFillBrush" Color="#26FFFFFF" />
@@ -28,7 +29,7 @@
     <StaticResource x:Key="QamSliderDisabledTrackBrush" ResourceKey="QamSliderTrackBrush" />
     <StaticResource x:Key="QamSliderDisabledThumbBrush" ResourceKey="QamDisabledTextBrush" />
     <StaticResource x:Key="QamToggleOffBrush" ResourceKey="QamSliderTrackBrush" />
-    <StaticResource x:Key="QamToggleOnBrush" ResourceKey="QamAccentBrush" />
+    <StaticResource x:Key="QamToggleOnBrush" ResourceKey="QamSteamBlueBrush" />
     <StaticResource x:Key="QamToggleDisabledBrush" ResourceKey="QamDisabledTextBrush" />
     <StaticResource x:Key="QamToggleThumbBrush" ResourceKey="QamSliderThumbBrush" />
     <StaticResource x:Key="QamToggleThumbDisabledBrush" ResourceKey="QamDisabledTextBrush" />
