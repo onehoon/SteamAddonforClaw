@@ -9,7 +9,7 @@
             SizeChanged="OnSurfaceHostSizeChanged">
         <Border
             x:Name="OpaquePanel"
-            MaxWidth="416"
+            MaxWidth="432"
             HorizontalAlignment="Stretch">
             <Grid x:Name="AnimatedContent">
                 <Grid x:Name="QamShell">
@@ -29,16 +29,19 @@
                             RowSpacing="{StaticResource QamRailSpacing}" />
                     </Border>
 
-                    <Grid Grid.Column="1" Margin="{StaticResource QamContentPadding}">
+                    <Grid Grid.Column="1">
                         <ScrollViewer
                             x:Name="BodyScroll"
                             VerticalScrollBarVisibility="Hidden"
                             HorizontalScrollBarVisibility="Disabled"
                             HorizontalContentAlignment="Stretch">
-                            <Grid
-                                x:Name="TabBody"
-                                HorizontalAlignment="Stretch"
-                                Width="{Binding ElementName=BodyScroll, Path=ViewportWidth}" />
+                            <Border
+                                Padding="{StaticResource QamContentPadding}"
+                                HorizontalAlignment="Stretch">
+                                <Grid
+                                    x:Name="TabBody"
+                                    HorizontalAlignment="Stretch" />
+                            </Border>
                         </ScrollViewer>
                     </Grid>
                 </Grid>

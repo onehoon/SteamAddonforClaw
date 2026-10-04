@@ -576,7 +576,7 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
         Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
-        Assert.Contains("MaxWidth=\"416\"", xaml);
+        Assert.Contains("MaxWidth=\"432\"", xaml);
         Assert.Contains("x:Name=\"QamShell\"", xaml);
         Assert.Contains("<ColumnDefinition Width=\"52\" />", xaml);
         Assert.Contains("<ColumnDefinition Width=\"*\" />", xaml);
@@ -587,7 +587,9 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("RowSpacing=\"{StaticResource QamRailSpacing}\"", tabRail);
         Assert.DoesNotContain("ColumnDefinitions", tabRail);
         Assert.DoesNotContain("Grid.ColumnDefinitions", bodyColumn);
-        Assert.Contains("Grid.Column=\"1\" Margin=\"{StaticResource QamContentPadding}\"", bodyColumn);
+        Assert.Contains("Grid.Column=\"1\"", bodyColumn);
+        Assert.DoesNotContain("Margin=\"{StaticResource QamContentPadding}\"", bodyColumn);
+        Assert.Contains("Padding=\"{StaticResource QamContentPadding}\"", bodyColumn);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(xaml, "<ScrollViewer\\b"));
         Assert.Contains("x:Name=\"BodyScroll\"", xaml);
         Assert.Contains("x:Name=\"TabBody\"", xaml);

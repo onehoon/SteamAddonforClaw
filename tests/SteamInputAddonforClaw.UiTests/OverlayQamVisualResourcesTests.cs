@@ -11,7 +11,7 @@ public sealed class OverlayQamVisualResourcesTests
     [
         "QamSurfaceBrush", "QamRailBrush", "QamContentBrush",
         "QamPrimaryTextBrush", "QamSecondaryTextBrush", "QamDisabledTextBrush", "QamErrorTextBrush",
-        "QamAccentBrush", "QamSelectedFillBrush", "QamHoverFillBrush", "QamPressedFillBrush",
+        "QamAccentBrush", "QamSteamBlueBrush", "QamSelectedFillBrush", "QamHoverFillBrush", "QamPressedFillBrush",
         "QamFocusBorderBrush", "QamSeparatorBrush", "QamSectionBrush", "QamTileBrush",
         "QamTileSelectedBrush", "QamRailIconBrush", "QamRailIconSelectedBrush", "QamRailSelectedFillBrush",
         "QamToggleOffBrush", "QamToggleOnBrush", "QamToggleDisabledBrush", "QamToggleThumbBrush",
@@ -49,22 +49,64 @@ public sealed class OverlayQamVisualResourcesTests
     }
 
     [Fact]
-    public void Overlay_root_is_dark_and_keeps_the_frozen_shell_geometry()
+    public void Overlay_root_is_dark_and_uses_the_wider_shell_without_changing_the_rail()
     {
         var root = RepoRoot();
         var xaml = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml"));
         var viewport = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "AnimationViewport");
-        var source = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml"));
-        var resources = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var panel = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "OpaquePanel");
+        var shell = xaml.Descendants().Single(element => (string?)element.Attribute(Xaml + "Name") == "QamShell");
+        var columns = shell.Elements().Single(element => element.Name.LocalName == "Grid.ColumnDefinitions").Elements().ToArray();
+        var rightContentHost = xaml.Descendants().Single(element =>
+            element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1");
+        var bodyScroll = xaml.Descendants().Single(element =>
+            element.Name.LocalName == "ScrollViewer" && (string?)element.Attribute(Xaml + "Name") == "BodyScroll");
+        var insetHost = bodyScroll.Descendants().Single(element =>
+            (string?)element.Attribute("Padding") == "{StaticResource QamContentPadding}");
+        var tabBody = insetHost.Descendants().Single(element =>
+            (string?)element.Attribute(Xaml + "Name") == "TabBody");
 
         Assert.Equal("Dark", (string?)viewport.Attribute("RequestedTheme"));
-        Assert.Contains("MaxWidth=\"416\"", source);
-        Assert.Contains("<ColumnDefinition Width=\"52\" />", source);
-        Assert.Contains("QamContentPadding", source);
-        Assert.Contains("<Thickness x:Key=\"QamContentPadding\">16,16,16,12</Thickness>", resources);
-        Assert.Single(System.Text.RegularExpressions.Regex.Matches(source, "<ScrollViewer\\b"));
-        Assert.Contains("VerticalScrollBarVisibility=\"Hidden\"", source);
-        Assert.DoesNotContain("Footer", source);
+        Assert.Equal("432", (string?)panel.Attribute("MaxWidth"));
+        Assert.Equal("52", (string?)columns[0].Attribute("Width"));
+        Assert.Equal("*", (string?)columns[1].Attribute("Width"));
+        Assert.Same(rightContentHost, bodyScroll.Parent);
+        Assert.Null(rightContentHost.Attribute("Margin"));
+        Assert.Contains(bodyScroll, insetHost.Ancestors());
+        Assert.Contains(insetHost, tabBody.Ancestors());
+        Assert.Equal("Stretch", (string?)insetHost.Attribute("HorizontalAlignment"));
+        Assert.Equal("Hidden", (string?)bodyScroll.Attribute("VerticalScrollBarVisibility"));
+        Assert.Equal("Disabled", (string?)bodyScroll.Attribute("HorizontalScrollBarVisibility"));
+        Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "ScrollViewer");
+        Assert.DoesNotContain(xaml.Descendants(), element =>
+            element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1" &&
+            (string?)element.Attribute("Margin") == "{StaticResource QamContentPadding}");
+
+        AssertResourceValue(resources, "QamContentPadding", "16,16,16,12");
+        AssertResourceValue(resources, "QamRowPadding", "16,10,16,10");
+        AssertResourceValue(resources, "QamRowMargin", "-16,0,-16,0");
+        AssertResourceValue(resources, "QamRowMinHeight", "42");
+        AssertResourceValue(resources, "QamRowCornerRadius", "2");
+        AssertResourceValue(resources, "QamRailButtonSize", "52");
+        AssertResourceValue(resources, "QamRailItemHeight", "64");
+        AssertResourceValue(resources, "QamRailIconSize", "24");
+        Assert.Equal("#26FFFFFF", Resource(resources, "QamSelectedFillBrush").Attribute("Color")?.Value);
+        Assert.DoesNotContain("Footer", xaml.ToString());
+    }
+
+    [Fact]
+    public void Toggle_on_uses_the_evidence_backed_steam_blue_resource()
+    {
+        var root = RepoRoot();
+        var resources = XDocument.Load(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var steamBlue = Resource(resources, "QamSteamBlueBrush");
+        var toggleOn = Resource(resources, "QamToggleOnBrush");
+
+        Assert.Equal("SolidColorBrush", steamBlue.Name.LocalName);
+        Assert.Equal("#FF1A9FFF", (string?)steamBlue.Attribute("Color"));
+        Assert.Equal("StaticResource", toggleOn.Name.LocalName);
+        Assert.Equal("QamSteamBlueBrush", (string?)toggleOn.Attribute("ResourceKey"));
     }
 
     [Fact]
@@ -253,6 +295,12 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.NotNull(directory);
         return directory!.FullName;
     }
+
+    private static XElement Resource(XDocument document, string key) => document.Descendants()
+        .Single(element => (string?)element.Attribute(Xaml + "Key") == key);
+
+    private static void AssertResourceValue(XDocument document, string key, string value) =>
+        Assert.Equal(value, Resource(document, key).Value.Trim());
 
     private static string SliceMethod(string source, string start, string end)
     {

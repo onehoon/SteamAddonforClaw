@@ -16,7 +16,7 @@ internal readonly record struct OverlayGeometryMetrics(
 internal static class OverlayWindowGeometry
 {
     internal const double FloatingGapDip = 4.0;
-    internal const double MaxSurfaceWidthDip = 416.0;
+    internal const double MaxSurfaceWidthDip = 432.0;
     private const uint DefaultDpi = 96;
 
     internal static OverlayRect Calculate(
