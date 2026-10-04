@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using Windows.Devices.HumanInterfaceDevice;
 
@@ -94,22 +95,25 @@ internal sealed class WindowsMsiClawVibrationProfileIo : IMsiClawVibrationProfil
     }
 }
 
-/// <summary>Reads and writes only the two MSI firmware motor-ceiling profile bytes. Each public
-/// operation resolves a fresh, strongly identified command HID and serializes its complete profile
-/// transaction; no device path or firmware value is cached.</summary>
+/// <summary>Probes candidate MSI profile bytes for diagnostics and permits writes only when the
+/// model-specific firmware-address policy verifies their meaning. Each operation resolves a fresh,
+/// strongly identified command HID; no device path or firmware value is cached.</summary>
 internal sealed class MsiClawVibrationStrengthClient
 {
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromMilliseconds(300);
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
     private readonly MsiClawControlHidResolver _resolver;
     private readonly IMsiClawVibrationProfileIo _io;
+    private readonly HandheldDeviceModelId _modelId;
     private readonly SemaphoreSlim _transactionGate = new(1, 1);
 
     internal MsiClawVibrationStrengthClient(
+        HandheldDeviceModelId modelId,
         IControllerDeviceEnumerator deviceEnumerator,
         MsiClawControlHidResolver resolver,
         IMsiClawVibrationProfileIo io)
     {
+        _modelId = modelId;
         _deviceEnumerator = deviceEnumerator ?? throw new ArgumentNullException(nameof(deviceEnumerator));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _io = io ?? throw new ArgumentNullException(nameof(io));
@@ -123,7 +127,25 @@ internal sealed class MsiClawVibrationStrengthClient
             cancellationToken.ThrowIfCancellationRequested();
             var device = ResolveCurrentCommandHid();
             if (device is null)
-                return new(false, null, "CommandHidNotUniquelyResolved");
+            {
+                var reason = MsiClawVibrationFirmwarePolicy.IsDirectMotorProfileAddressVerified(_modelId)
+                    ? "CommandHidNotUniquelyResolved"
+                    : "FirmwareAddressMappingUnverified";
+                if (reason == "FirmwareAddressMappingUnverified")
+                    AppLog.Info("ControllerVibration", "ControllerVibrationProfileProbeUnavailable",
+                        ("Model", _modelId.Value), ("Reason", "CommandHidNotUniquelyResolved"), ("VerifiedForProduction", false));
+                return new(false, null, reason);
+            }
+
+            if (!MsiClawVibrationFirmwarePolicy.IsDirectMotorProfileAddressVerified(_modelId))
+            {
+                var diagnosticValues = await TryReadDiagnosticPairAsync(device, cancellationToken).ConfigureAwait(false);
+                AppLog.Info("ControllerVibration", "ControllerVibrationCaptureUnavailable",
+                    ("Model", _modelId.Value),
+                    ("Reason", "FirmwareAddressMappingUnverified"),
+                    ("DiagnosticReadSucceeded", diagnosticValues is not null));
+                return new(false, null, "FirmwareAddressMappingUnverified");
+            }
 
             var values = await TryReadPairAsync(device, cancellationToken).ConfigureAwait(false);
             if (values is null)
@@ -157,6 +179,9 @@ internal sealed class MsiClawVibrationStrengthClient
     {
         if (leftPercent is < 0 or > 100 || rightPercent is < 0 or > 100)
             return new(MsiClawVibrationStrengthMutationOutcome.Failed, null, "InvalidPercent");
+
+        if (!MsiClawVibrationFirmwarePolicy.IsDirectMotorProfileAddressVerified(_modelId))
+            return new(MsiClawVibrationStrengthMutationOutcome.Unavailable, null, "FirmwareAddressMappingUnverified");
 
         await _transactionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         MsiClawControlHidDevice? transactionDevice = null;
@@ -321,6 +346,82 @@ internal sealed class MsiClawVibrationStrengthClient
             return null;
         var right = await TryReadValueAsync(device, MsiClawVibrationProfileCommand.RightMotorAddress, cancellationToken).ConfigureAwait(false);
         return right is null ? null : new(left.Value, right.Value);
+    }
+
+    private async Task<MsiClawVibrationStrengthValues?> TryReadDiagnosticPairAsync(
+        MsiClawControlHidDevice device,
+        CancellationToken cancellationToken)
+    {
+        var left = await TryReadDiagnosticValueAsync(
+            device, MsiClawVibrationProfileCommand.LeftMotorAddress, cancellationToken).ConfigureAwait(false);
+        var right = await TryReadDiagnosticValueAsync(
+            device, MsiClawVibrationProfileCommand.RightMotorAddress, cancellationToken).ConfigureAwait(false);
+        return left is null || right is null ? null : new(left.Value, right.Value);
+    }
+
+    private async Task<int?> TryReadDiagnosticValueAsync(
+        MsiClawControlHidDevice device,
+        ushort address,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<byte[]>? reports;
+        try
+        {
+            reports = await _io.WriteAndReadAsync(
+                device,
+                MsiClawVibrationProfileCommand.BuildReadProfile(address),
+                ReadTimeout,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            LogDiagnosticProbe(device, address, null, null, parseSucceeded: false, exception.GetType().Name);
+            return null;
+        }
+
+        if (reports is null || reports.Count == 0)
+        {
+            LogDiagnosticProbe(device, address, null, null, parseSucceeded: false, "NoResponse");
+            return null;
+        }
+
+        int? parsedValue = null;
+        foreach (var report in reports.Take(4))
+        {
+            var parsed = MsiClawVibrationProfileCommand.TryParseReadProfileResponse(report, address, out var value);
+            LogDiagnosticProbe(device, address, report, parsed ? value : null, parsed, null);
+            if (parsed && parsedValue is null)
+                parsedValue = value;
+        }
+        return parsedValue;
+    }
+
+    private void LogDiagnosticProbe(
+        MsiClawControlHidDevice device,
+        ushort address,
+        byte[]? response,
+        int? parsedValue,
+        bool parseSucceeded,
+        string? probeFailure)
+    {
+        var responsePrefix = response is null
+            ? string.Empty
+            : string.Join("-", response.Take(10).Select(value => value.ToString("X2")));
+        AppLog.Info("ControllerVibration", "ControllerVibrationProfileProbe",
+            ("Model", _modelId.Value),
+            ("ProductId", device.Device.ProductId is { } productId ? $"0x{productId:X4}" : null),
+            ("UsagePage", $"0x{device.UsagePage:X4}"),
+            ("Usage", $"0x{device.Usage:X4}"),
+            ("Address", $"0x{address:X4}"),
+            ("ResponsePrefix", responsePrefix),
+            ("ParsedValue", parsedValue),
+            ("ParseSucceeded", parseSucceeded),
+            ("VerifiedForProduction", false),
+            ("ProbeFailure", probeFailure));
     }
 
     private async Task<int?> TryReadValueAsync(

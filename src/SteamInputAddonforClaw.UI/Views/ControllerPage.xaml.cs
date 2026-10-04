@@ -374,8 +374,7 @@ public sealed partial class ControllerPage : UserControl
         RightVibrationStrengthSlider.IsEnabled = _vibrationSnapshot.Available
             && _vibrationSnapshot.Writable && !operationInProgress;
 
-        var testsEnabled = _vibrationSnapshot.Available
-            && _vibrationSnapshot.TestAvailable
+        var testsEnabled = _vibrationSnapshot.TestAvailable
             && _vibrationDebounce?.HasPendingDraft != true
             && !operationInProgress;
         LeftVibrationTestButton.IsEnabled = testsEnabled;

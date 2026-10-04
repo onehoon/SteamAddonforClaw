@@ -1,48 +1,92 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Diagnostics;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-public sealed class MsiClawVibrationStrengthClientTests
+[Collection("AppLog")]
+public sealed class MsiClawVibrationStrengthClientTests : IDisposable
 {
-    [Theory]
-    [InlineData(50, 50)]
-    [InlineData(35, 70)]
-    public async Task Capture_returns_actual_pair_without_mutating_firmware(int left, int right)
+    private readonly string _logDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+    public MsiClawVibrationStrengthClientTests()
     {
-        var io = new FakeProfileIo(left, right);
-        var (client, _) = CreateClient(io);
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        AppLog.DirectoryOverride = _logDirectory;
+    }
+
+    [Fact]
+    public async Task Unverified_capture_reads_both_addresses_for_diagnostics_but_returns_no_firmware_values()
+    {
+        var io = new FakeProfileIo(40, 70);
+        var (client, _) = CreateClient(io, "msi.claw.cg3em");
 
         var result = await client.CaptureAsync(default);
 
-        Assert.True(result.Succeeded);
-        Assert.Equal(new MsiClawVibrationStrengthValues(left, right), result.Values);
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Values);
+        Assert.Equal("FirmwareAddressMappingUnverified", result.Reason);
+        Assert.Equal(new ushort[] { 0x0022, 0x0023 }, io.ReadAddresses);
         Assert.Empty(io.WriteFrames);
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("ControllerVibrationProfileProbe", log);
+        Assert.Contains("Model=msi.claw.cg3em", log);
+        Assert.Contains("ProductId=0x1902", log);
+        Assert.Contains("UsagePage=0xFFF0", log);
+        Assert.Contains("Usage=0x0040", log);
+        Assert.Contains("Address=0x0022", log);
+        Assert.Contains("Address=0x0023", log);
+        Assert.Contains("ResponsePrefix=10-00-00-3C-05-01-00-22-01-28", log);
+        Assert.Contains("ResponsePrefix=10-00-00-3C-05-01-00-23-01-46", log);
+        Assert.Contains("ParsedValue=40", log);
+        Assert.Contains("ParsedValue=70", log);
+        Assert.Contains("ParseSucceeded=True", log);
+        Assert.Contains("VerifiedForProduction=False", log);
+    }
+
+    [Fact]
+    public async Task Unverified_diagnostic_logs_rejected_response_and_still_probes_the_other_address()
+    {
+        var io = new FakeProfileIo(40, 70);
+        io.InvalidResponseAddresses.Add(0x0022);
+        var (client, _) = CreateClient(io, "msi.claw.cg3em");
+
+        var result = await client.CaptureAsync(default);
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Values);
+        Assert.Equal("FirmwareAddressMappingUnverified", result.Reason);
+        Assert.Equal(new ushort[] { 0x0022, 0x0023 }, io.ReadAddresses);
+        Assert.Empty(io.WriteFrames);
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Address=0x0022", log);
+        Assert.Contains("ParseSucceeded=False", log);
+        Assert.Contains("Address=0x0023", log);
+        Assert.Contains("ParseSucceeded=True", log);
     }
 
     [Theory]
-    [InlineData(50, 50, 0, 0)]
-    [InlineData(70, 50, 0x0022, 0)]
-    [InlineData(50, 70, 0, 0x0023)]
-    [InlineData(70, 80, 0x0022, 0x0023)]
-    public async Task Set_commits_only_changed_channels_in_order_and_returns_final_pair(
-        int requestedLeft, int requestedRight, int expectedLeftAddress, int expectedRightAddress)
+    [InlineData(50, 50)]
+    [InlineData(70, 35)]
+    public async Task Valid_mutation_on_unverified_model_is_rejected_before_any_hid_io(int left, int right)
     {
         var io = new FakeProfileIo(50, 50);
-        var (client, _) = CreateClient(io);
+        var (client, devices) = CreateClient(io, "msi.claw.cg3em");
 
-        var result = await client.SetAsync(requestedLeft, requestedRight, () => true, default);
+        var result = await client.SetAsync(left, right, () => true, default);
 
-        Assert.True(result.Succeeded);
-        Assert.Equal(new MsiClawVibrationStrengthValues(requestedLeft, requestedRight), result.Values);
-        var profileAddresses = io.WriteFrames.Where(frame => frame[4] == 0x21)
-            .Select(frame => (frame[6] << 8) | frame[7]).ToArray();
-        var expected = new[] { expectedLeftAddress, expectedRightAddress }.Where(address => address != 0).ToArray();
-        Assert.Equal(expected, profileAddresses);
-        var expectedCommands = Enumerable.Range(0, expected.Length)
-            .SelectMany(_ => new byte[] { 0x21, 0x22 }).ToArray();
-        Assert.Equal(expectedCommands, io.WriteFrames.Select(frame => frame[4]));
+        Assert.Equal(MsiClawVibrationStrengthMutationOutcome.Unavailable, result.Outcome);
+        Assert.Null(result.Values);
+        Assert.Equal("FirmwareAddressMappingUnverified", result.Reason);
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.Empty(io.ReadAddresses);
+        Assert.Empty(io.WriteFrames);
     }
 
     [Theory]
@@ -64,90 +108,43 @@ public sealed class MsiClawVibrationStrengthClientTests
     }
 
     [Fact]
-    public async Task CenterM_must_be_exactly_disabled_before_profile_mutation()
+    public async Task Verified_centerM_authority_cannot_bypass_unverified_firmware_address_guard()
     {
         var io = new FakeProfileIo(50, 50);
-        var (client, _) = CreateClient(io);
+        var (client, devices) = CreateClient(io, "msi.claw.cg3em");
 
-        var result = await client.SetAsync(70, 50, () => false, default);
+        var result = await client.SetAsync(70, 50, () => true, default);
 
         Assert.Equal(MsiClawVibrationStrengthMutationOutcome.Unavailable, result.Outcome);
-        Assert.Equal(new MsiClawVibrationStrengthValues(50, 50), result.Values);
+        Assert.Equal("FirmwareAddressMappingUnverified", result.Reason);
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.Empty(io.ReadAddresses);
         Assert.Empty(io.WriteFrames);
-    }
-
-    [Fact]
-    public async Task Profile_write_failure_returns_observed_values_and_never_reports_success()
-    {
-        var io = new FakeProfileIo(50, 50) { FailProfileWriteAtOrdinal = 1 };
-        var (client, _) = CreateClient(io);
-
-        var result = await client.SetAsync(70, 50, () => true, default);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(new MsiClawVibrationStrengthValues(50, 50), result.Values);
-        Assert.Equal(new byte[] { 0x21 }, io.WriteFrames.Select(frame => frame[4]));
-    }
-
-    [Fact]
-    public async Task Sync_failure_does_not_report_success_or_fabricate_requested_value()
-    {
-        var io = new FakeProfileIo(50, 50) { FailSyncAtOrdinal = 1 };
-        var (client, _) = CreateClient(io);
-
-        var result = await client.SetAsync(70, 50, () => true, default);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(new MsiClawVibrationStrengthValues(50, 50), result.Values);
-        Assert.Equal(new byte[] { 0x21, 0x22 }, io.WriteFrames.Select(frame => frame[4]));
-    }
-
-    [Fact]
-    public async Task Readback_mismatch_fails_and_returns_the_final_observed_pair()
-    {
-        var io = new FakeProfileIo(50, 50);
-        io.OverrideRead(0x0022, readNumber: 2, value: 50);
-        var (client, _) = CreateClient(io);
-
-        var result = await client.SetAsync(70, 50, () => true, default);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(new MsiClawVibrationStrengthValues(70, 50), result.Values);
-        Assert.Equal("LeftMotorCommitFailed", result.Reason);
-    }
-
-    [Fact]
-    public async Task Partial_pair_failure_keeps_the_first_commit_and_reports_actual_pair_without_rollback()
-    {
-        var io = new FakeProfileIo(50, 50) { FailProfileWriteAtOrdinal = 2 };
-        var (client, _) = CreateClient(io);
-
-        var result = await client.SetAsync(70, 80, () => true, default);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(new MsiClawVibrationStrengthValues(70, 50), result.Values);
-        Assert.Equal("RightMotorCommitFailed", result.Reason);
     }
 
     [Fact]
     public async Task Each_operation_reenumerates_instead_of_reusing_a_removed_command_device()
     {
         var io = new FakeProfileIo(50, 50);
-        var (client, devices) = CreateClient(io);
+        var (client, devices) = CreateClient(io, "msi.claw.cg3em");
 
-        Assert.True((await client.CaptureAsync(default)).Succeeded);
+        var beforeRemoval = await client.CaptureAsync(default);
+        Assert.Equal("FirmwareAddressMappingUnverified", beforeRemoval.Reason);
         devices.Devices = [];
         var afterRemoval = await client.CaptureAsync(default);
 
         Assert.False(afterRemoval.Succeeded);
         Assert.Null(afterRemoval.Values);
+        Assert.Equal("FirmwareAddressMappingUnverified", afterRemoval.Reason);
         Assert.Equal(2, devices.EnumerationCount);
     }
 
-    private static (MsiClawVibrationStrengthClient Client, FakeEnumerator Devices) CreateClient(FakeProfileIo io)
+    private static (MsiClawVibrationStrengthClient Client, FakeEnumerator Devices) CreateClient(
+        FakeProfileIo io,
+        string modelId = "msi.claw.cg3em")
     {
         var devices = new FakeEnumerator([CreateCommandDevice()]);
-        return (new MsiClawVibrationStrengthClient(devices, new MsiClawControlHidResolver(), io), devices);
+        return (new MsiClawVibrationStrengthClient(new HandheldDeviceModelId(modelId), devices, new MsiClawControlHidResolver(), io), devices);
     }
 
     private static ControllerDeviceInfo CreateCommandDevice()
@@ -188,40 +185,14 @@ public sealed class MsiClawVibrationStrengthClientTests
     private sealed class FakeProfileIo(int left, int right) : IMsiClawVibrationProfileIo
     {
         private readonly Dictionary<ushort, int> _values = new() { [0x0022] = left, [0x0023] = right };
-        private readonly Dictionary<ushort, int> _readCounts = [];
-        private readonly Dictionary<(ushort Address, int ReadNumber), int> _readOverrides = [];
-        private readonly Dictionary<ushort, int> _staged = [];
-        private int _profileWriteCount;
-        private int _syncCount;
 
         internal List<byte[]> WriteFrames { get; } = [];
-        internal int FailProfileWriteAtOrdinal { get; init; }
-        internal int FailSyncAtOrdinal { get; init; }
-
-        internal void OverrideRead(ushort address, int readNumber, int value) =>
-            _readOverrides[(address, readNumber)] = value;
+        internal List<ushort> ReadAddresses { get; } = [];
+        internal HashSet<ushort> InvalidResponseAddresses { get; } = [];
 
         public Task<bool> WriteAsync(MsiClawControlHidDevice device, ReadOnlyMemory<byte> report, CancellationToken cancellationToken)
         {
-            var frame = report.ToArray();
-            WriteFrames.Add(frame);
-            if (frame[4] == 0x21)
-            {
-                _profileWriteCount++;
-                if (_profileWriteCount == FailProfileWriteAtOrdinal)
-                    return Task.FromResult(false);
-                _staged[Address(frame)] = frame[9];
-            }
-            else if (frame[4] == 0x22)
-            {
-                _syncCount++;
-                if (_syncCount == FailSyncAtOrdinal)
-                    return Task.FromResult(false);
-                foreach (var staged in _staged)
-                    _values[staged.Key] = staged.Value;
-                _staged.Clear();
-            }
-
+            WriteFrames.Add(report.ToArray());
             return Task.FromResult(true);
         }
 
@@ -232,14 +203,22 @@ public sealed class MsiClawVibrationStrengthClientTests
             CancellationToken cancellationToken)
         {
             var address = Address(report.Span);
-            var readNumber = _readCounts.GetValueOrDefault(address) + 1;
-            _readCounts[address] = readNumber;
-            var value = _readOverrides.TryGetValue((address, readNumber), out var overridden)
-                ? overridden
-                : _values[address];
-            return Task.FromResult<IReadOnlyList<byte[]>?>([MsiClawVibrationProfileCommandTests.Response(address, value)]);
+            ReadAddresses.Add(address);
+            var response = MsiClawVibrationProfileCommandTests.Response(address, _values[address]);
+            if (InvalidResponseAddresses.Contains(address))
+                response[0] = 0xFF;
+            return Task.FromResult<IReadOnlyList<byte[]>?>([response]);
         }
 
         private static ushort Address(ReadOnlySpan<byte> frame) => (ushort)((frame[6] << 8) | frame[7]);
+    }
+
+    public void Dispose()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
+        if (Directory.Exists(_logDirectory))
+            Directory.Delete(_logDirectory, recursive: true);
     }
 }

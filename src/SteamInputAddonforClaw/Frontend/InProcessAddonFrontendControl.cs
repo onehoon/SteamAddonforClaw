@@ -1317,7 +1317,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (!result.Succeeded || result.Values is null)
         {
             AppLog.Info("ControllerVibration", "ControllerVibrationCaptureUnavailable", ("Reason", result.Reason));
-            return UnavailableControllerVibrationSnapshot("The firmware vibration values could not be read.", testAvailable);
+            return UnavailableControllerVibrationSnapshot(DescribeControllerVibrationFailure(result.Reason), testAvailable);
         }
 
         var writable = IsCenterMExactlyDisabled();
@@ -1426,6 +1426,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     private static string DescribeControllerVibrationFailure(string reason) => reason switch
     {
+        "FirmwareAddressMappingUnverified" => "Vibration firmware mapping is not verified for this MSI Claw model.",
         "CenterMIsNotExactlyDisabled" => "Firmware values are read-only unless MSI Center M is disabled.",
         "CommandHidNotUniquelyResolved" => "The MSI Claw command interface is unavailable or ambiguous.",
         "InvalidPercent" => "Motor strength must be between 0% and 100%.",
