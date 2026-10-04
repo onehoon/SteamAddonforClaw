@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
@@ -166,6 +167,149 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
         Assert.Empty(io.WriteFrames);
     }
 
+    [Theory]
+    [InlineData(FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred, 0x00, 0x64)]
+    [InlineData(FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty, 0x32, 0x32)]
+    public async Task Developer_pair_write_probe_sends_exactly_one_contiguous_pid1902_write_without_readback_or_sync(
+        FrontendControllerVibrationProfileWriteProbeMode mode,
+        byte left,
+        byte right)
+    {
+        var io = new FakeProfileIo(50, 50);
+        var (client, devices) = CreateClient(io);
+        var clientMode = mode switch
+        {
+            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred => MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred,
+            _ => MsiClawVibrationProfileWriteProbeMode.RestoreFiftyFifty
+        };
+
+        var result = await client.RunDiagnosticMotorPairWriteAsync(clientMode, () => true, default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Succeeded, result.Outcome);
+        Assert.Equal(clientMode, result.Mode);
+        Assert.Equal(1, devices.EnumerationCount);
+        var report = Assert.Single(io.WriteFrames);
+        Assert.Equal(64, report.Length);
+        Assert.Equal(new byte[] { 0x0F, 0x00, 0x00, 0x3C, 0x21, 0x01, 0x00, 0x22, 0x02, left, right }, report[..11]);
+        Assert.Empty(io.ReadFrames);
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("ControllerVibrationProfileWriteProbeStarted", log);
+        Assert.Contains("ControllerVibrationProfileWriteProbeCompleted", log);
+        Assert.Contains("Model=msi.claw.cg3em", log);
+        Assert.Contains("ProductId=0x1902", log);
+        Assert.Contains("ProfileIndex=1", log);
+        Assert.Contains("Address=0x0022", log);
+        Assert.Contains("Length=2", log);
+        Assert.Contains("SyncToRom=False", log);
+        Assert.Contains("VerifiedForProduction=False", log);
+        Assert.Contains("TransportSucceeded=True", log);
+    }
+
+    [Theory]
+    [InlineData(FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred, 0, 100)]
+    [InlineData(FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty, 50, 50)]
+    public async Task Developer_pair_write_probe_transport_failure_is_not_retried_or_read_back(
+        FrontendControllerVibrationProfileWriteProbeMode mode,
+        byte left,
+        byte right)
+    {
+        var io = new FakeProfileIo(50, 50) { WriteResult = false };
+        var (client, _) = CreateClient(io);
+        var clientMode = mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred
+            ? MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred
+            : MsiClawVibrationProfileWriteProbeMode.RestoreFiftyFifty;
+
+        var result = await client.RunDiagnosticMotorPairWriteAsync(
+            clientMode, () => true, default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Failed, result.Outcome);
+        Assert.Equal("TransportWriteFailed", result.Reason);
+        var report = Assert.Single(io.WriteFrames);
+        Assert.Equal(new byte[] { 0x0F, 0x00, 0x00, 0x3C, 0x21, 0x01, 0x00, 0x22, 0x02, left, right }, report[..11]);
+        Assert.Empty(io.ReadFrames);
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("ControllerVibrationProfileWriteProbeCompleted", log);
+        Assert.Contains("TransportSucceeded=False", log);
+        Assert.Contains("SyncToRom=False", log);
+    }
+
+    [Theory]
+    [InlineData("msi.claw.cg3em", 0x1901, 0xFFA0, 0x0001, true)]
+    [InlineData("msi.claw.cg3em", 0x1902, 0x0001, 0x0005, true)]
+    [InlineData("msi.claw.cg3em", 0x1902, 0xFFF0, 0x0040, false)]
+    public async Task Developer_pair_write_probe_rejects_wrong_pid_endpoint_or_weak_identity_before_write(
+        string modelId,
+        int productId,
+        int usagePage,
+        int usage,
+        bool strongIdentity)
+    {
+        var io = new FakeProfileIo(50, 50);
+        var device = CreateCommandDevice((ushort)productId, (ushort)usagePage, (ushort)usage, strongIdentity);
+        var (client, _) = CreateClient(io, modelId, [device]);
+
+        var result = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => true, default);
+
+        Assert.NotEqual(MsiClawVibrationProfileWriteProbeOutcome.Succeeded, result.Outcome);
+        Assert.Empty(io.WriteFrames);
+        Assert.Empty(io.ReadFrames);
+    }
+
+    [Fact]
+    public async Task Developer_pair_write_probe_rejects_non_CG3EM_model_before_enumeration()
+    {
+        var io = new FakeProfileIo(50, 50);
+        var (client, devices) = CreateClient(io, "msi.claw.a2vm.7");
+
+        var result = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => true, default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, result.Outcome);
+        Assert.Equal("UnsupportedModel", result.Reason);
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.Empty(io.WriteFrames);
+        Assert.Empty(io.ReadFrames);
+    }
+
+    [Fact]
+    public async Task Developer_pair_write_probe_requires_exact_centerM_disabled_state_before_enumeration()
+    {
+        var io = new FakeProfileIo(50, 50);
+        var (client, devices) = CreateClient(io);
+
+        var enabled = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => false, default);
+        var unavailable = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.RestoreFiftyFifty, () => throw new InvalidOperationException(), default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, enabled.Outcome);
+        Assert.Equal("CenterMIsNotExactlyDisabled", enabled.Reason);
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, unavailable.Outcome);
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.Empty(io.WriteFrames);
+    }
+
+    [Fact]
+    public async Task Developer_pair_write_probe_rejects_ambiguous_pid1902_control_hids()
+    {
+        var io = new FakeProfileIo(50, 50);
+        var first = CreateCommandDevice();
+        var duplicate = first with { InstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL02\\SECOND" };
+        var (client, _) = CreateClient(io, configuredDevices: [first, duplicate]);
+
+        var result = await client.RunDiagnosticMotorPairWriteAsync(
+            MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred, () => true, default);
+
+        Assert.Equal(MsiClawVibrationProfileWriteProbeOutcome.Unavailable, result.Outcome);
+        Assert.Equal("Pid1902ControlHidNotUniquelyResolved", result.Reason);
+        Assert.Empty(io.WriteFrames);
+    }
+
     [Fact]
     public async Task Each_operation_reenumerates_instead_of_reusing_a_removed_command_device()
     {
@@ -187,21 +331,27 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
 
     private static (MsiClawVibrationStrengthClient Client, FakeEnumerator Devices) CreateClient(
         FakeProfileIo io,
-        string modelId = "msi.claw.cg3em")
+        string modelId = "msi.claw.cg3em",
+        IReadOnlyList<ControllerDeviceInfo>? configuredDevices = null)
     {
-        var devices = new FakeEnumerator([CreateCommandDevice()]);
+        var devices = new FakeEnumerator(configuredDevices ?? [CreateCommandDevice()]);
         return (new MsiClawVibrationStrengthClient(new HandheldDeviceModelId(modelId), devices, new MsiClawControlHidResolver(), io), devices);
     }
 
-    private static ControllerDeviceInfo CreateCommandDevice()
+    private static ControllerDeviceInfo CreateCommandDevice(
+        ushort productId = 0x1902,
+        ushort usagePage = 0xFFF0,
+        ushort usage = 0x0040,
+        bool strongIdentity = true)
     {
-        var container = Guid.NewGuid();
-        const string root = "USB\\VID_0DB0&PID_1902\\CLAW";
+        Guid? container = strongIdentity ? Guid.NewGuid() : null;
+        string? root = strongIdentity ? "USB\\VID_0DB0&PID_1902\\CLAW" : null;
+        IReadOnlyList<string> ancestors = root is null ? [] : [root];
         return new ControllerDeviceInfo(
             "HID\\VID_0DB0&PID_1902&MI_00&COL02\\CLAW",
             container,
             root,
-            [root],
+            ancestors,
             "HID",
             [],
             [],
@@ -209,11 +359,11 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
             null,
             null,
             0x0DB0,
-            0x1902,
+            productId,
             true,
             "MSI Claw Control",
-            0xFFF0,
-            0x0040);
+            usagePage,
+            usage);
     }
 
     private sealed class FakeEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
@@ -244,11 +394,12 @@ public sealed class MsiClawVibrationStrengthClientTests : IDisposable
         internal List<byte[]> ReadFrames { get; } = [];
         internal HashSet<byte> InvalidResponseIndexes { get; } = [];
         internal Dictionary<byte, byte> ResponseIndexOverrides { get; } = [];
+        internal bool WriteResult { get; init; } = true;
 
         public Task<bool> WriteAsync(MsiClawControlHidDevice device, ReadOnlyMemory<byte> report, CancellationToken cancellationToken)
         {
             WriteFrames.Add(report.ToArray());
-            return Task.FromResult(true);
+            return Task.FromResult(WriteResult);
         }
 
         public Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(

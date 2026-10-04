@@ -1397,6 +1397,49 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
+    public async Task<FrontendControllerVibrationProfileWriteProbeResult> RunControllerVibrationProfileWriteProbeAsync(
+        FrontendControllerVibrationProfileWriteProbeMode mode,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Enum.IsDefined(mode))
+            return new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Failed,
+                "The selected developer probe operation is invalid.");
+        if (_controllerVibrationStrengthClient is null)
+            return new(mode, FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
+                "The developer-only vibration profile write probe is unavailable.");
+
+        var clientMode = mode switch
+        {
+            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred => MsiClawVibrationProfileWriteProbeMode.ApplyZeroHundred,
+            FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty => MsiClawVibrationProfileWriteProbeMode.RestoreFiftyFifty,
+            _ => throw new InvalidOperationException("The developer probe operation is invalid.")
+        };
+        var result = await _controllerVibrationStrengthClient.RunDiagnosticMotorPairWriteAsync(
+            clientMode, IsCenterMExactlyDisabled, cancellationToken).ConfigureAwait(false);
+        var outcome = result.Outcome switch
+        {
+            MsiClawVibrationProfileWriteProbeOutcome.Succeeded => FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded,
+            MsiClawVibrationProfileWriteProbeOutcome.Unavailable => FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable,
+            _ => FrontendControllerVibrationProfileWriteProbeOutcome.Failed,
+        };
+        var status = outcome switch
+        {
+            FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded when mode == FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred =>
+                "HID transport write succeeded; physical effect is not validated. Press Left Test once, then Right Test once.",
+            FrontendControllerVibrationProfileWriteProbeOutcome.Succeeded =>
+                "Restore 50/50 HID transport write succeeded; physical state is not validated.",
+            FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable when mode == FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty =>
+                "Restore was unavailable and no restore write was sent; the motors may remain at test values. " + DescribeVibrationProfileProbeUnavailable(result.Reason) + " Retry only after the stated condition is resolved.",
+            FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable => DescribeVibrationProfileProbeUnavailable(result.Reason),
+            _ when mode == FrontendControllerVibrationProfileWriteProbeMode.RestoreFiftyFifty =>
+                "Restore failed; the motors may remain at test values. Press Restore 50 / 50 again manually.",
+            _ => "The profile write failed. See the application log; physical effect is unknown."
+        };
+        return new(mode, outcome, status);
+    }
+
     private FrontendControllerVibrationStrengthSnapshot CreateControllerVibrationSnapshot(
         MsiClawVibrationStrengthValues? values,
         bool centerMDisabled,
@@ -1431,6 +1474,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         "CommandHidNotUniquelyResolved" => "The MSI Claw command interface is unavailable or ambiguous.",
         "InvalidPercent" => "Motor strength must be between 0% and 100%.",
         _ => "Firmware values could not be fully written and verified.",
+    };
+
+    private static string DescribeVibrationProfileProbeUnavailable(string reason) => reason switch
+    {
+        "UnsupportedModel" => "Unavailable: this developer probe is restricted to MSI Claw 8 EX AI+ CG3EM.",
+        "CenterMIsNotExactlyDisabled" => "Unavailable: MSI Center M startup authority is not exactly Disabled.",
+        "Pid1902ControlHidNotUniquelyResolved" => "Unavailable: a unique, strongly identified PID1902 control HID was not found.",
+        _ => "Unavailable: the developer-only vibration profile write probe could not run."
     };
 
     private FrontendCpuBoostMutationResult MutateCpuBoost(bool ac, CpuBoostMode mode)

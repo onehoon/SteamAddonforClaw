@@ -11,5 +11,13 @@
       <Button x:Name="StartButton" Content="Start Validation" Click="Start_Click" IsEnabled="False" />
       <Button x:Name="StopButton" Content="Stop" Click="Stop_Click" IsEnabled="False" />
     </StackPanel>
+    <TextBlock Text="Vibration Profile 0/100 Probe" FontSize="18" FontWeight="SemiBold" Margin="0,16,0,0" />
+    <TextBlock Text="Developer-only physical hardware mutation. No SyncToROM is sent." TextWrapping="Wrap" Foreground="OrangeRed" />
+    <TextBlock Text="After Apply succeeds, open Controller &gt; Vibration Strength and press Left Test once, then Right Test once. Return here and press Restore 50 / 50." TextWrapping="Wrap" Opacity="0.75" />
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <Button x:Name="ApplyVibrationProfileProbeButton" Content="Apply Left 0 / Right 100" Click="ApplyVibrationProfileProbe_Click" />
+      <Button x:Name="RestoreVibrationProfileProbeButton" Content="Restore 50 / 50" Click="RestoreVibrationProfileProbe_Click" />
+    </StackPanel>
+    <TextBlock x:Name="VibrationProfileProbeStatusText" TextWrapping="Wrap" Foreground="OrangeRed" />
   </StackPanel></ScrollViewer>
 </UserControl>

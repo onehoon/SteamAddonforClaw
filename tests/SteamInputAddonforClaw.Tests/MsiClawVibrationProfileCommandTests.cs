@@ -35,6 +35,37 @@ public sealed class MsiClawVibrationProfileCommandTests
         Assert.Equal(expected, MsiClawVibrationProfileCommand.BuildWriteProfile(address, 70));
     }
 
+    [Theory]
+    [InlineData(0, 100, 0x00, 0x64)]
+    [InlineData(50, 50, 0x32, 0x32)]
+    public void Diagnostic_motor_pair_write_builds_exact_contiguous_64_byte_frame(
+        int left,
+        int right,
+        byte expectedLeft,
+        byte expectedRight)
+    {
+        var expected = Expected(0x21, 0x01, 0x0022, 0x02);
+        expected[9] = expectedLeft;
+        expected[10] = expectedRight;
+
+        var actual = MsiClawVibrationProfileCommand.BuildDiagnosticMotorPairWrite(left, right);
+
+        Assert.Equal(64, actual.Length);
+        Assert.Equal(expected, actual);
+        Assert.Equal(new byte[] { 0x0F, 0x00, 0x00, 0x3C, 0x21, 0x01, 0x00, 0x22, 0x02, expectedLeft, expectedRight }, actual[..11]);
+    }
+
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(0, -1)]
+    [InlineData(101, 0)]
+    [InlineData(0, 101)]
+    public void Diagnostic_motor_pair_write_rejects_values_outside_zero_to_hundred(int left, int right)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            MsiClawVibrationProfileCommand.BuildDiagnosticMotorPairWrite(left, right));
+    }
+
     [Fact]
     public void Sync_to_rom_builds_exact_frame()
     {

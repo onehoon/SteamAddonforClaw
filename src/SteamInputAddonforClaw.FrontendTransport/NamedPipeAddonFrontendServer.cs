@@ -215,6 +215,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     && pair.RightPercent is >= 0 and <= 100,
                 FrontendRpcMethod.TestControllerVibrationMotor =>
                     Enum.IsDefined(FrontendWireCodec.Decode<TestControllerVibrationMotorRequest>(payload).Motor),
+                FrontendRpcMethod.RunControllerVibrationProfileWriteProbe =>
+                    Enum.IsDefined(FrontendWireCodec.Decode<RunControllerVibrationProfileWriteProbeRequest>(payload).Mode),
                 _ => true,
             };
         }
@@ -316,6 +318,10 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         : m == FrontendRpcMethod.TestControllerVibrationMotor
         ? FrontendWireCodec.Payload(await _inner.TestControllerVibrationMotorAsync(
             FrontendWireCodec.Decode<TestControllerVibrationMotorRequest>(p).Motor,
+            t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.RunControllerVibrationProfileWriteProbe
+        ? FrontendWireCodec.Payload(await _inner.RunControllerVibrationProfileWriteProbeAsync(
+            FrontendWireCodec.Decode<RunControllerVibrationProfileWriteProbeRequest>(p).Mode,
             t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetDeviceBatteryChargeLimitEnabled
         ? FrontendWireCodec.Payload(await _inner.SetDeviceBatteryChargeLimitEnabledAsync(FrontendWireCodec.Decode<SetDeviceBatteryChargeLimitEnabledRequest>(p).Enabled, t).ConfigureAwait(false))

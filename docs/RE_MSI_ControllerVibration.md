@@ -175,6 +175,38 @@ separate focused change enable that model's direct-address capability. Then run
 the existing bounded write/readback acceptance test. Do not combine a plausible
 byte value or one successful parse with production enablement.
 
+### Developer-only CG3EM runtime pair-write probe — 2026-10-04
+
+The 2026-10-04 MSI Center M runtime log records `SyncToMotors` values of Left
+`50` / Right `100`, followed by Left / Right `50` / `50`, with `Save To Profile`
+logged for those operations. This proves that Center M processed and queued the
+local profile values; it does not prove that firmware accepted or persisted them.
+On the tested CG3EM, fully exiting and relaunching Center M was observed to
+return its UI to `50` / `50`. That is local UI/profile behavior, not a universal
+MSI default or hardware readback.
+
+The Addon's Developer Menu → Vibration Test page now exposes two explicit
+operations, restricted to CG3EM with Center M startup authority exactly
+`Disabled` and one strongly identified PID1902 control HID (`0xFFF0` / `0x0040`):
+
+| Action | Single profile write | Follow-up |
+| --- | --- | --- |
+| Apply Left `0` / Right `100` | index `1`, relative offset `0x22`, length `2`, bytes `00 64` | User presses the existing physical Left Test once and Right Test once |
+| Restore `50` / `50` | index `1`, relative offset `0x22`, length `2`, bytes `32 32` | Explicit user action; no automatic retry |
+
+Each action sends one contiguous `0x21` report. It sends no `SyncToROM`, performs
+no automatic readback, and does not change PID, HidHide, VIIPER, or controller
+ownership. `TransportSucceeded=True` means only that the HID transport accepted
+the write; physical effect remains **UNKNOWN until the CG3EM firmware `0x0419`
+hardware acceptance procedure is completed and recorded**. The 50/50 restore is
+the observed target-unit baseline for this experiment, not a universal stock
+value. A failed restore must be surfaced to the developer and retried only by
+another explicit button press.
+
+Production vibration-strength mutation remains fail-closed for every currently
+supported model. The Developer probe is not production verification and must not
+be used to mark CG3EM's direct-address mapping as production-capable.
+
 ## Safety and current production policy
 
 - All currently supported models fail closed for production `0x22`/`0x23` writes.
@@ -183,12 +215,16 @@ byte value or one successful parse with production enablement.
 - Unverified capture returns no Left/Right percentages; the UI displays `—` and
   disables/hides the strength sliders. The live physical rumble Test remains a
   separate capability.
-- A valid Set request on an unverified model returns unavailable before HID
-  enumeration/read/write. `WriteProfile` and `SyncToROM` are never issued.
+- A valid production Set request on an unverified model returns unavailable
+  before HID enumeration/read/write. Production `SetAsync` never issues
+  `WriteProfile` or `SyncToROM` for these models.
 - Do not automatically restore `50/50` or any other presumed prior values.
-- Do not test with sustained motor stress or repeated slider movement. A future
-  explicitly authorized write test must preserve/read back both channels and
-  report restoration failure rather than guessing.
+- The separate Developer-only CG3EM probe is the sole bounded write experiment:
+  it sends one `0/100` pair and offers an explicit `50/50` restore. Neither
+  operation reads back values or changes production write permission.
+- Do not test with sustained motor stress or repeated slider movement. If the
+  explicit restore transport fails, report that fact; do not retry automatically
+  or guess another value.
 - Do not conflate a persistent firmware ceiling with a live game-rumble test.
 
 ## Evidence sources

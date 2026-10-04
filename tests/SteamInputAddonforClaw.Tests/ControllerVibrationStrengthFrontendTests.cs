@@ -52,6 +52,30 @@ public sealed class ControllerVibrationStrengthFrontendTests
         Assert.Equal(1, testInvocations);
     }
 
+    [Fact]
+    public async Task Developer_profile_probe_does_not_assume_centerM_is_disabled_when_no_startup_authority_is_available()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.VibrationProbeFrontend.{Guid.NewGuid():N}");
+        var settings = new StartupSettingsCoordinator(
+            new AppSettings(),
+            new SettingsStore(Path.Combine(directory, "settings.json")),
+            new NoOpStartupManager());
+        var devices = new CountingControllerDeviceEnumerator();
+        var io = new NoOpVibrationProfileIo();
+        var client = new MsiClawVibrationStrengthClient(
+            new HandheldDeviceModelId("msi.claw.cg3em"), devices, new MsiClawControlHidResolver(), io);
+        var control = new InProcessAddonFrontendControl(
+            settings, new ThrowingSystemStatusProvider(), null,
+            controllerVibrationStrengthClient: client);
+
+        var result = await control.RunControllerVibrationProfileWriteProbeAsync(
+            FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
+
+        Assert.Equal(FrontendControllerVibrationProfileWriteProbeOutcome.Unavailable, result.Outcome);
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.Equal(0, io.WriteCount);
+    }
+
     private sealed class EmptyControllerDeviceEnumerator : IControllerDeviceEnumerator
     {
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => [];
@@ -59,8 +83,13 @@ public sealed class ControllerVibrationStrengthFrontendTests
 
     private sealed class NoOpVibrationProfileIo : IMsiClawVibrationProfileIo
     {
+        public int WriteCount { get; private set; }
+
         public Task<bool> WriteAsync(MsiClawControlHidDevice device, ReadOnlyMemory<byte> report, CancellationToken cancellationToken)
-            => Task.FromResult(false);
+        {
+            WriteCount++;
+            return Task.FromResult(false);
+        }
 
         public Task<IReadOnlyList<byte[]>?> WriteAndReadAsync(
             MsiClawControlHidDevice device,
@@ -68,6 +97,17 @@ public sealed class ControllerVibrationStrengthFrontendTests
             TimeSpan timeout,
             CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<byte[]>?>(null);
+    }
+
+    private sealed class CountingControllerDeviceEnumerator : IControllerDeviceEnumerator
+    {
+        public int EnumerationCount { get; private set; }
+
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            EnumerationCount++;
+            return [];
+        }
     }
 
     private sealed class NoOpStartupManager : IWindowsStartupManager
