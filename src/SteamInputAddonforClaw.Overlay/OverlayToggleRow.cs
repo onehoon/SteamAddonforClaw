@@ -164,6 +164,8 @@ internal sealed class OverlayToggleRow
         SetBrush(toggle, "ToggleSwitchContentForegroundDisabled", OverlayQamResources.Brush("QamDisabledTextBrush"));
         SetBrush(toggle, "ToggleSwitchHeaderForeground", OverlayQamResources.Brush("QamPrimaryTextBrush"));
         SetBrush(toggle, "ToggleSwitchHeaderForegroundDisabled", OverlayQamResources.Brush("QamDisabledTextBrush"));
+        toggle.Resources["ToggleSwitchPreContentMargin"] = OverlayQamResources.Get("QamTogglePreContentMargin", 1.0);
+        toggle.Resources["ToggleSwitchPostContentMargin"] = OverlayQamResources.Get("QamTogglePostContentMargin", 1.0);
     }
 
     private static void SetBrush(ToggleSwitch toggle, string key, Microsoft.UI.Xaml.Media.Brush brush)

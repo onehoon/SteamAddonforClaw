@@ -200,8 +200,8 @@ internal sealed class OverlayValueRow
 
         button.Content = icon;
         button.Style = OverlayQamResources.Style("QamValueButtonStyle");
-        button.MinWidth = OverlayQamResources.Get("QamValueButtonSize", 40.0);
-        button.MinHeight = OverlayQamResources.Get("QamValueButtonSize", 40.0);
+        button.MinWidth = OverlayQamResources.Get("QamValueButtonWidth", 40.0);
+        button.MinHeight = OverlayQamResources.Get("QamValueButtonHeight", 22.0);
         button.Padding = new Thickness(0);
         button.CornerRadius = OverlayQamResources.Get("QamValueButtonCornerRadius", new CornerRadius(6));
         button.BorderThickness = new Thickness(0);

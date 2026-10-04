@@ -23,15 +23,16 @@ public sealed class OverlayShortcutRendererTests
     }
 
     [Fact]
-    public void Shortcut_renderer_covers_loading_empty_unavailable_and_disabled_tiles()
+    public void Shortcut_renderer_shows_only_titles_and_keeps_empty_unavailable_and_disabled_states()
     {
         var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
 
-        Assert.Contains("Loading shortcuts", renderer, StringComparison.Ordinal);
-        Assert.Contains("No shortcuts configured", renderer, StringComparison.Ordinal);
+        Assert.Contains("FrontendShortcutDashboardSnapshot.Unavailable()", renderer, StringComparison.Ordinal);
         Assert.Contains("if (!_shortcutSnapshot.Available", renderer, StringComparison.Ordinal);
         Assert.Contains("tile.Enabled", renderer, StringComparison.Ordinal);
-        Assert.Contains("StatusText", renderer, StringComparison.Ordinal);
+        Assert.Contains("Text = tile.Title", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("tile.StatusText", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("_shortcutStatus", renderer, StringComparison.Ordinal);
         Assert.Contains("ResetShortcutForShow", renderer, StringComparison.Ordinal);
     }
 
@@ -57,14 +58,11 @@ public sealed class OverlayShortcutRendererTests
         var renderer = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs");
         var request = renderer[renderer.IndexOf("private void RequestShortcutExecution(Guid tileId)", StringComparison.Ordinal)..
             renderer.IndexOf("private async Task ExecuteShortcutIntentAsync", StringComparison.Ordinal)];
-        var update = renderer[renderer.IndexOf("private void UpdateShortcutMessage()", StringComparison.Ordinal)..
-            renderer.IndexOf("private static bool IsShortcutSnapshotValid", StringComparison.Ordinal)];
-
         Assert.Contains("_shortcutExecutionInFlight", request, StringComparison.Ordinal);
         Assert.DoesNotContain("Running shortcut...", renderer, StringComparison.Ordinal);
-        Assert.Contains("_shortcutFeedbackMessage", update, StringComparison.Ordinal);
-        Assert.Contains("!_shortcutSnapshot.Available", update, StringComparison.Ordinal);
-        Assert.Contains("No shortcuts configured", update, StringComparison.Ordinal);
+        Assert.DoesNotContain("UpdateShortcutMessage", renderer, StringComparison.Ordinal);
+        Assert.DoesNotContain("_shortcutFeedbackMessage", renderer, StringComparison.Ordinal);
+        Assert.Contains("finally", renderer, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,7 +75,7 @@ public sealed class OverlayShortcutRendererTests
         Assert.Contains("ResetShortcutForShow();", shell, StringComparison.Ordinal);
         Assert.Contains("selectedTileId", navigation, StringComparison.Ordinal);
         Assert.Contains("FirstOrDefault", renderer, StringComparison.Ordinal);
-        Assert.Contains("Loading shortcuts", renderer, StringComparison.Ordinal);
+        Assert.Contains("FrontendShortcutDashboardSnapshot.Unavailable()", renderer, StringComparison.Ordinal);
     }
 
     [Fact]

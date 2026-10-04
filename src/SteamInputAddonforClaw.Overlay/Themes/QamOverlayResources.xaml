@@ -38,13 +38,12 @@
     <StaticResource x:Key="QamValueButtonHoverFill" ResourceKey="QamHoverFillBrush" />
     <StaticResource x:Key="QamValueButtonPressedFill" ResourceKey="QamPressedFillBrush" />
 
-    <Thickness x:Key="QamContentPadding">16,16,16,12</Thickness>
+    <Thickness x:Key="QamPageTitleMargin">16,16,16,8</Thickness>
+    <Thickness x:Key="QamBodyContentPadding">16,0,16,12</Thickness>
     <x:Double x:Key="QamSectionSpacing">24</x:Double>
     <Thickness x:Key="QamSectionPadding">0</Thickness>
     <CornerRadius x:Key="QamSectionCornerRadius">0</CornerRadius>
     <x:Double x:Key="QamSectionHeaderSpacing">4</x:Double>
-    <!-- Provisional title-to-content spacing; this distance has not been measured on live Steam QAM. -->
-    <x:Double x:Key="QamPageContentSpacing">8</x:Double>
     <Thickness x:Key="QamDetailIndent">16,0,0,0</Thickness>
     <Thickness x:Key="QamDetailMargin">16,0,16,0</Thickness>
     <x:Double x:Key="QamRowSpacing">0</x:Double>
@@ -67,8 +66,12 @@
     <x:Double x:Key="QamSliderThumbWidth">12</x:Double>
     <x:Double x:Key="QamSliderThumbHeight">12</x:Double>
     <CornerRadius x:Key="QamSliderThumbCornerRadius">6</CornerRadius>
-    <x:Double x:Key="QamSliderHeight">32</x:Double>
-    <x:Double x:Key="QamValueButtonSize">40</x:Double>
+    <x:Double x:Key="QamSliderHeight">22</x:Double>
+    <x:Double x:Key="QamValueButtonWidth">40</x:Double>
+    <x:Double x:Key="QamValueButtonHeight">22</x:Double>
+    <x:Double x:Key="QamToggleMinHeight">22</x:Double>
+    <x:Double x:Key="QamTogglePreContentMargin">1</x:Double>
+    <x:Double x:Key="QamTogglePostContentMargin">1</x:Double>
     <CornerRadius x:Key="QamValueButtonCornerRadius">6</CornerRadius>
     <x:Double x:Key="QamDiscreteValueMinWidth">88</x:Double>
     <FontFamily x:Key="QamFontFamily">Segoe UI Variable</FontFamily>
@@ -187,7 +190,7 @@
          applied by OverlayToggleRow so these colors never affect unrelated app controls. -->
     <Style x:Key="QamToggleStyle" TargetType="ToggleSwitch" BasedOn="{StaticResource DefaultToggleSwitchStyle}">
         <Setter Property="MinWidth" Value="0" />
-        <Setter Property="MinHeight" Value="40" />
+        <Setter Property="MinHeight" Value="{StaticResource QamToggleMinHeight}" />
     </Style>
 
     <!-- The native Slider template remains in charge of pointer/touch range interaction. -->
@@ -202,8 +205,8 @@
 
     <!-- Shared by Button and RepeatButton without changing either control's activation behavior. -->
     <Style x:Key="QamValueButtonStyle" TargetType="primitives:ButtonBase">
-        <Setter Property="MinWidth" Value="{StaticResource QamValueButtonSize}" />
-        <Setter Property="MinHeight" Value="{StaticResource QamValueButtonSize}" />
+        <Setter Property="MinWidth" Value="{StaticResource QamValueButtonWidth}" />
+        <Setter Property="MinHeight" Value="{StaticResource QamValueButtonHeight}" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="CornerRadius" Value="{StaticResource QamValueButtonCornerRadius}" />
         <Setter Property="BorderThickness" Value="0" />

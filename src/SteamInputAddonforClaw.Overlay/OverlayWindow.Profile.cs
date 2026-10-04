@@ -15,8 +15,6 @@ public sealed partial class OverlayWindow
     private readonly List<FrontendProfileGameCatalogEntry> _profileCatalog = [];
     private readonly List<Button> _profileCatalogCards = [];
     private Grid? _profileCatalogGrid;
-    private StackPanel? _profileCatalogPanel;
-    private TextBlock? _profileCatalogStatus;
     private FrameworkElement? _profileDetailRoot;
     private ProfilePresentationMode _profileMode = ProfilePresentationMode.Catalog;
     private uint? _selectedCatalogAppId;
@@ -32,8 +30,6 @@ public sealed partial class OverlayWindow
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        _profileCatalogStatus = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        OverlayQamResources.ApplyTextStyle(_profileCatalogStatus, "QamCaptionTextStyle");
         _profileCatalogGrid = new Grid
         {
             ColumnSpacing = OverlayQamResources.Get("QamTileSpacing", 8.0),
@@ -42,11 +38,8 @@ public sealed partial class OverlayWindow
         for (var i = 0; i < 3; i++)
             _profileCatalogGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        _profileCatalogPanel = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
-        _profileCatalogPanel.Children.Add(_profileCatalogStatus);
-        _profileCatalogPanel.Children.Add(_profileCatalogGrid);
-        Grid.SetRow(_profileCatalogPanel, 0);
-        root.Children.Add(_profileCatalogPanel);
+        Grid.SetRow(_profileCatalogGrid, 0);
+        root.Children.Add(_profileCatalogGrid);
 
         _profileDetailRoot = BuildQuickSettingsPage(AddonQuickSettingsTabId.Profile, QuickSettingsPageId.Profile);
         _profileDetailRoot.Visibility = Visibility.Collapsed;
@@ -66,9 +59,8 @@ public sealed partial class OverlayWindow
             .ToArray());
         _profileCatalogSelection.Reset(_profileCatalog.Count);
         RebuildProfileCatalogCards();
-        _profileCatalogStatus!.Text = state.Error is not null
-            ? state.Error
-            : _profileCatalog.Count == 0 ? "No games found." : string.Empty;
+        if (state.Error is not null)
+            OverlayLog.Warn("Profile", state.Error);
         ApplyProfileCatalogSelectionVisual();
     }
 
@@ -93,7 +85,7 @@ public sealed partial class OverlayWindow
         _quickSettingsSurfaces[QuickSettingsPageId.Profile].Binding?.CancelUnsubmittedDrafts();
         _selectedCatalogAppId = null;
         _profileMode = ProfilePresentationMode.Catalog;
-        ShowProfileCatalog("Loading games…");
+        ShowProfileCatalog();
         ProfileCatalogRequestRequested?.Invoke();
         return true;
     }
@@ -119,7 +111,7 @@ public sealed partial class OverlayWindow
         else
         {
             _profileMode = ProfilePresentationMode.Catalog;
-            ShowProfileCatalog("Loading games…");
+            ShowProfileCatalog();
             ProfileCatalogRequestRequested?.Invoke();
         }
     }
@@ -132,19 +124,18 @@ public sealed partial class OverlayWindow
         ShowProfileDetail();
     }
 
-    private void ShowProfileCatalog(string status)
+    private void ShowProfileCatalog()
     {
-        if (_profileCatalogPanel is null || _profileDetailRoot is null) return;
-        _profileCatalogPanel.Visibility = Visibility.Visible;
+        if (_profileCatalogGrid is null || _profileDetailRoot is null) return;
+        _profileCatalogGrid.Visibility = Visibility.Visible;
         _profileDetailRoot.Visibility = Visibility.Collapsed;
-        if (_profileCatalogStatus is not null) _profileCatalogStatus.Text = status;
         RebuildProfileCatalogCards();
     }
 
     private void ShowProfileDetail()
     {
-        if (_profileCatalogPanel is null || _profileDetailRoot is null) return;
-        _profileCatalogPanel.Visibility = Visibility.Collapsed;
+        if (_profileCatalogGrid is null || _profileDetailRoot is null) return;
+        _profileCatalogGrid.Visibility = Visibility.Collapsed;
         _profileDetailRoot.Visibility = Visibility.Visible;
     }
 
@@ -216,7 +207,7 @@ public sealed partial class OverlayWindow
         _selectedCatalogAppId = entry.AppId;
         _profileMode = ProfilePresentationMode.SelectedDetail;
         ShowProfileDetail();
-        var loading = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, entry.AppId, "Loading Profile settings…");
+        var loading = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, entry.AppId);
         ApplyProfileDetailPage(loading);
         ProfilePageRequestRequested?.Invoke(entry.AppId);
     }
@@ -275,7 +266,7 @@ public sealed partial class OverlayWindow
             _profileMode = ProfilePresentationMode.Catalog;
             if (_profileTabSelected)
             {
-                ShowProfileCatalog("Loading games…");
+                ShowProfileCatalog();
                 ProfileCatalogRequestRequested?.Invoke();
             }
         }

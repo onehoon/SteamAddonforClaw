@@ -8,15 +8,11 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow
 {
-    private const string BackButtonMappingCaption =
-        "Xbox 360 mode only. Steam Game / Big Picture keeps M1 as R4 and M2 as L4.";
-
     private BackButtonMappingSettings _backButtonMapping = BackButtonMappingSettings.Default;
     private bool _backButtonMappingAvailable;
     private bool _backButtonMutationInFlight;
     private OverlayValueRow? _m1MappingRow;
     private OverlayValueRow? _m2MappingRow;
-    private TextBlock? _backButtonStatusText;
 
     internal event Action<BackButtonMappingSettings>? BackButtonMappingEditRequested;
 
@@ -26,8 +22,8 @@ public sealed partial class OverlayWindow
         var heading = new TextBlock { Text = "M1 / M2" };
         OverlayQamResources.ApplyTextStyle(heading, "QamBodyStrongTextStyle");
         section.Children.Add(heading);
-        _backButtonStatusText = CreateStatusText(BackButtonMappingCaption);
-        section.Children.Add(_backButtonStatusText);
+        var rowsPanel = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
+        section.Children.Add(rowsPanel);
 
         var m1Row = new OverlayValueRow("M1", FormatBackButtonTarget,
             value => RequestBackButtonMappingChange(isM1: true, value),
@@ -38,8 +34,8 @@ public sealed partial class OverlayWindow
         _m1MappingRow = m1Row;
         _m2MappingRow = m2Row;
 
-        AddBackButtonMappingRow(section, rows, m1Row);
-        AddBackButtonMappingRow(section, rows, m2Row);
+        AddBackButtonMappingRow(rowsPanel, rows, m1Row);
+        AddBackButtonMappingRow(rowsPanel, rows, m2Row);
         RenderBackButtonMappingRows();
         return CreateOverlaySectionCard(section);
     }
@@ -65,7 +61,6 @@ public sealed partial class OverlayWindow
 
         var candidate = CreateBackButtonMappingCandidate(_backButtonMapping, isM1, target);
         _backButtonMutationInFlight = true;
-        if (_backButtonStatusText is not null) _backButtonStatusText.Text = "Updating M1 / M2 mapping…";
         RenderBackButtonMappingRows();
         BackButtonMappingEditRequested?.Invoke(candidate);
     }
@@ -76,11 +71,6 @@ public sealed partial class OverlayWindow
         _backButtonMappingAvailable = state.Available;
         // A StateInvalidated snapshot may arrive before the correlated mutation result. Keep the
         // controls disabled until that result settles the one outstanding whole-record request.
-        var mutationPending = _backButtonMutationInFlight;
-        if (_backButtonStatusText is not null)
-            _backButtonStatusText.Text = state.FailureMessage
-                ?? (mutationPending ? "Updating M1 / M2 mapping…"
-                    : state.Available ? BackButtonMappingCaption : "M1 / M2 mapping is unavailable.");
         RenderBackButtonMappingRows();
     }
 
@@ -98,10 +88,6 @@ public sealed partial class OverlayWindow
     internal void ApplyBackButtonMappingFailure(string message)
     {
         _backButtonMutationInFlight = false;
-        if (_backButtonStatusText is not null)
-            _backButtonStatusText.Text = string.IsNullOrWhiteSpace(message)
-                ? "M1 / M2 mapping update failed."
-                : message;
         RenderBackButtonMappingRows();
     }
 

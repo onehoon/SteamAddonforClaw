@@ -30,13 +30,23 @@
                     </Border>
 
                     <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock
+                            x:Name="PageTitle"
+                            Grid.Row="0"
+                            Style="{StaticResource QamPageTitleTextStyle}"
+                            Margin="{StaticResource QamPageTitleMargin}" />
                         <ScrollViewer
                             x:Name="BodyScroll"
+                            Grid.Row="1"
                             VerticalScrollBarVisibility="Hidden"
                             HorizontalScrollBarVisibility="Disabled"
                             HorizontalContentAlignment="Stretch">
                             <Border
-                                Padding="{StaticResource QamContentPadding}"
+                                Padding="{StaticResource QamBodyContentPadding}"
                                 HorizontalAlignment="Stretch">
                                 <Grid
                                     x:Name="TabBody"

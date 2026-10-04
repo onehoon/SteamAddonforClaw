@@ -216,25 +216,44 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     // OverlayWindow itself cannot be constructed/exercised here (WinUI needs a XAML host), so this
-    // is a source/composition regression -- mirroring the retired frontend contract checks
-    // assertions -- proving RenderQuickSettingsPage() actually consumes and clears the binder's local
-    // failure fact in BOTH the fast (value-only) path and the structural-rebuild path, per the PR
-    // #508 review that flagged a mutation failure being retained in the binder but never surfaced.
+    // source/composition regression verifies local failure facts remain in the binding while the
+    // compact Overlay intentionally does not render them as extra text.
     [Fact]
-    public void RenderQuickSettingsPage_surfaces_and_clears_the_binder_local_failure_message_on_both_paths()
+    public void RenderQuickSettingsPage_keeps_failure_state_in_the_binding_without_rendering_a_banner()
     {
         var source = ReadOverlayWindowSource();
+        var binding = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayQuickSettingsPageBinding.cs");
 
-        Assert.Contains("private static void ApplyQuickSettingsLocalFailure(QuickSettingsSurface surface)", source);
-        Assert.Contains("surface.Binding.LastLocalFailureMessage", source);
-        // Cleared, not just shown: no message collapses the banner again.
-        Assert.Contains("Visibility.Collapsed", source);
+        Assert.Contains("LastLocalFailureMessage", binding);
+        Assert.DoesNotContain("LastLocalFailureMessage", source);
+        Assert.DoesNotContain("FailureText", source);
+        Assert.DoesNotContain("UnavailableText", source);
 
         var renderQuickSettingsPage = source[source.IndexOf("private void RenderQuickSettingsPage(QuickSettingsSurface surface)", StringComparison.Ordinal)..
-            source.IndexOf("private static void ApplyQuickSettingsLocalFailure", StringComparison.Ordinal)];
+            source.IndexOf("private static void UpdateQuickSettingsRowValues", StringComparison.Ordinal)];
         Assert.Contains("ReconcileQuickSettingsSections(surface, page);", renderQuickSettingsPage);
         Assert.Contains("RebuildQuickSettingsContent(surface, page);", renderQuickSettingsPage);
-        Assert.Contains("ApplyQuickSettingsLocalFailure(surface);", renderQuickSettingsPage);
+    }
+
+    [Fact]
+    public void Unavailable_quick_settings_page_clears_controls_without_adding_a_message_element()
+    {
+        var source = ReadOverlayWindowSource();
+        var build = source[source.IndexOf("private FrameworkElement BuildQuickSettingsPage(", StringComparison.Ordinal)..
+            source.IndexOf("private void RenderQuickSettingsPage(", StringComparison.Ordinal)];
+        var rebuild = source[source.IndexOf("private void RebuildQuickSettingsContent(", StringComparison.Ordinal)..
+            source.IndexOf("private void ReconcileQuickSettingsSections(", StringComparison.Ordinal)];
+        var unavailable = rebuild[rebuild.IndexOf("if (!page.Available)", StringComparison.Ordinal)..
+            rebuild.IndexOf("else", rebuild.IndexOf("if (!page.Available)", StringComparison.Ordinal), StringComparison.Ordinal)];
+
+        Assert.Contains("Content = content", build);
+        Assert.Contains("return content", build);
+        Assert.DoesNotContain("TextBlock", build);
+        Assert.Contains("surface.Content.Children.Clear()", rebuild);
+        Assert.Contains("surface.RenderedAvailable = false", unavailable);
+        Assert.DoesNotContain("TextBlock", unavailable);
+        Assert.DoesNotContain("Children.Add", unavailable);
+        Assert.DoesNotContain("page.Message", source);
     }
 
     // SectionId is the local view identity. A structural update replaces only the changed section;
@@ -271,7 +290,7 @@ public sealed class OverlayDeviceRendererWiringTests
     {
         var source = ReadOverlayWindowSource();
         var selection = source[source.IndexOf("private void UpdateQuickSettingsPageRows", StringComparison.Ordinal)..
-            source.IndexOf("private static TextBlock CreateQuickSettingsMessageText", StringComparison.Ordinal)];
+            source.IndexOf("private static Border CreateOverlaySectionCard", StringComparison.Ordinal)];
 
         Assert.Contains("oldRows[selectedIndex].QuickSettingsRowId", selection);
         Assert.Contains("_pageRows[surface.TabId] = rows;", selection);
@@ -294,7 +313,7 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("string? NumericSuffix", shape);
         Assert.Contains("QuickSettingsDiscreteOption[]? DiscreteOptions", shape);
         Assert.Contains("previous.Label", comparer);
-        Assert.Contains("previous.Message", comparer);
+        Assert.DoesNotContain("previous.Message", comparer);
         Assert.Contains("oldShape.Visible != newShape.Visible", comparer);
         Assert.Contains("oldShape.Label", comparer);
         Assert.Contains("oldShape.NumericSuffix", comparer);
@@ -424,7 +443,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("FontIcon", source);
         Assert.Contains("CreateIconButton", source);
         Assert.Contains("QamValueButtonStyle", source);
-        Assert.Contains("QamValueButtonSize", source);
+        Assert.Contains("QamValueButtonWidth", source);
+        Assert.Contains("QamValueButtonHeight", source);
         Assert.Contains("QamValueButtonCornerRadius", source);
         Assert.Contains("button.Click += click", source);
         Assert.Contains("_model.RequestAdjust(-1)", source);
@@ -588,8 +608,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("ColumnDefinitions", tabRail);
         Assert.DoesNotContain("Grid.ColumnDefinitions", bodyColumn);
         Assert.Contains("Grid.Column=\"1\"", bodyColumn);
-        Assert.DoesNotContain("Margin=\"{StaticResource QamContentPadding}\"", bodyColumn);
-        Assert.Contains("Padding=\"{StaticResource QamContentPadding}\"", bodyColumn);
+        Assert.DoesNotContain("Margin=\"{StaticResource QamBodyContentPadding}\"", bodyColumn);
+        Assert.Contains("Padding=\"{StaticResource QamBodyContentPadding}\"", bodyColumn);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(xaml, "<ScrollViewer\\b"));
         Assert.Contains("x:Name=\"BodyScroll\"", xaml);
         Assert.Contains("x:Name=\"TabBody\"", xaml);

@@ -17,7 +17,6 @@ public sealed partial class OverlayWindow
         StackPanel Details,
         Button HeaderButton,
         TextBlock Chevron,
-        TextBlock Summary,
         OverlayRow Row);
 
     private readonly List<OverlayRow> _clawHudRows = new();
@@ -29,8 +28,6 @@ public sealed partial class OverlayWindow
     private OverlayValueRow? _clawHudBackgroundRow;
     private OverlayValueRow? _clawHudOpacityRow;
     private OverlayToggleRow? _clawHudVrrRow;
-    private TextBlock? _clawHudStatusText;
-    private TextBlock? _clawHudVrrStatusText;
     private SettingCardView? _clawHudCard;
     private SettingCardView? _tabOrderCard;
     private SettingCardId? _expandedSettingCard;
@@ -47,9 +44,8 @@ public sealed partial class OverlayWindow
         var clawHudDetails = BuildClawHudPage();
         var tabOrderDetails = BuildTabOrderEditorPage();
 
-        _clawHudCard = CreateSettingCard(SettingCardId.ClawHud, "ClawHUD", "Loading ClawHUD status…", clawHudDetails);
-        _tabOrderCard = CreateSettingCard(SettingCardId.TabOrder, "Tab Order", string.Empty, tabOrderDetails);
-        UpdateTabOrderCardSummary(_tabState.Order);
+        _clawHudCard = CreateSettingCard(SettingCardId.ClawHud, "ClawHUD", clawHudDetails);
+        _tabOrderCard = CreateSettingCard(SettingCardId.TabOrder, "Tab Order", tabOrderDetails);
 
         var root = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
         root.Children.Add(_clawHudCard.Container);
@@ -58,21 +54,10 @@ public sealed partial class OverlayWindow
         return root;
     }
 
-    private SettingCardView CreateSettingCard(SettingCardId id, string title, string summary, FrameworkElement detailsContent)
+    private SettingCardView CreateSettingCard(SettingCardId id, string title, FrameworkElement detailsContent)
     {
         var titleText = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap };
         OverlayQamResources.ApplyTextStyle(titleText, "QamBodyStrongTextStyle");
-
-        var summaryText = new TextBlock
-        {
-            Text = summary,
-            TextWrapping = TextWrapping.Wrap,
-        };
-        OverlayQamResources.ApplyTextStyle(summaryText, "QamCaptionTextStyle");
-
-        var text = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
-        text.Children.Add(titleText);
-        text.Children.Add(summaryText);
 
         var chevron = new TextBlock
         {
@@ -90,7 +75,7 @@ public sealed partial class OverlayWindow
                 new ColumnDefinition { Width = GridLength.Auto },
             },
         };
-        headerGrid.Children.Add(text);
+        headerGrid.Children.Add(titleText);
         Grid.SetColumn(chevron, 1);
         headerGrid.Children.Add(chevron);
 
@@ -126,7 +111,7 @@ public sealed partial class OverlayWindow
         content.Children.Add(header);
         content.Children.Add(details);
 
-        return new SettingCardView(id, title, CreateOverlaySectionCard(content), details, headerButton, chevron, summaryText, row);
+        return new SettingCardView(id, title, CreateOverlaySectionCard(content), details, headerButton, chevron, row);
     }
 
     private List<OverlayRow> BuildSettingRows(IReadOnlyList<AddonQuickSettingsTabId> tabOrder)
@@ -229,10 +214,7 @@ public sealed partial class OverlayWindow
 
     private StackPanel BuildClawHudPage()
     {
-        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
-
-        _clawHudStatusText = CreateStatusText("Waiting for ClawHUD state.");
-        section.Children.Add(_clawHudStatusText);
+        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
 
         _clawHudEnabledRow = new OverlayToggleRow("Enable HUD", RequestClawHudEnabled);
         AddClawHudRow(section, _clawHudEnabledRow);
@@ -267,8 +249,6 @@ public sealed partial class OverlayWindow
             RequestClawHudSetting(new(FrontendClawHudMutationKind.IntelVrrRangeFixEnabled, IntelVrrRangeFixEnabled: desired)));
         AddClawHudRow(section, _clawHudVrrRow);
 
-        _clawHudVrrStatusText = CreateStatusText(string.Empty);
-        section.Children.Add(_clawHudVrrStatusText);
         return section;
     }
 
@@ -299,13 +279,6 @@ public sealed partial class OverlayWindow
         }, request, OverlayValueButtonKind.DiscreteChoice);
     }
 
-    private static TextBlock CreateStatusText(string text)
-    {
-        var block = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap };
-        OverlayQamResources.ApplyTextStyle(block, "QamCaptionTextStyle");
-        return block;
-    }
-
     internal void ApplyClawHudSnapshot(FrontendClawHudSnapshot snapshot)
     {
         _clawHudSnapshot = snapshot;
@@ -316,10 +289,6 @@ public sealed partial class OverlayWindow
     internal void ApplyClawHudFailure(string message)
     {
         _clawHudMutationInFlight = false;
-        if (_clawHudStatusText is not null)
-            _clawHudStatusText.Text = message;
-        if (_clawHudCard is not null)
-            _clawHudCard.Summary.Text = message;
         RenderClawHudControls();
     }
 
@@ -341,31 +310,7 @@ public sealed partial class OverlayWindow
 
     private void RenderClawHud()
     {
-        if (_clawHudStatusText is not null)
-            _clawHudStatusText.Text = _clawHudSnapshot?.StatusMessage ?? "Waiting for ClawHUD state.";
-        if (_clawHudVrrStatusText is not null)
-        {
-            var result = _clawHudSnapshot?.Settings?.IntelVrrLastResult;
-            _clawHudVrrStatusText.Text = result is null ? string.Empty : $"VRR: {result.Status} — {result.Message}";
-        }
-        UpdateClawHudCardSummary();
         RenderClawHudControls();
-    }
-
-    private void UpdateClawHudCardSummary()
-    {
-        if (_clawHudCard is null)
-            return;
-
-        _clawHudCard.Summary.Text = _clawHudSnapshot is { } snapshot
-            ? $"{(snapshot.DesiredEnabled ? "Enabled" : "Disabled")} · {snapshot.RuntimeState}"
-            : "Loading ClawHUD status…";
-    }
-
-    private void UpdateTabOrderCardSummary(IReadOnlyList<AddonQuickSettingsTabId> order)
-    {
-        if (_tabOrderCard is not null)
-            _tabOrderCard.Summary.Text = string.Join("  ›  ", order.Select(LabelFor));
     }
 
     private void RenderClawHudControls()

@@ -18,8 +18,8 @@ public sealed class OverlayControllerRendererTests
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M1\""));
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M2\""));
         Assert.Equal(2, CountOccurrences(controller, "OverlayValueButtonKind.DiscreteChoice"));
-        Assert.Contains("AddBackButtonMappingRow(section, rows, m1Row)", controller);
-        Assert.Contains("AddBackButtonMappingRow(section, rows, m2Row)", controller);
+        Assert.Contains("AddBackButtonMappingRow(rowsPanel, rows, m1Row)", controller);
+        Assert.Contains("AddBackButtonMappingRow(rowsPanel, rows, m2Row)", controller);
         Assert.Contains("RegisterRowPointerSelection(row.Container)", controller);
         Assert.Contains("rows.Add(new(row.Container, row.Capabilities))", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
@@ -35,7 +35,6 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("private bool _backButtonMappingAvailable", controller);
         Assert.Contains("private bool _backButtonMutationInFlight", controller);
         Assert.Contains("_backButtonMappingAvailable && !_backButtonMutationInFlight", controller);
-        Assert.Contains("var mutationPending = _backButtonMutationInFlight", controller);
         Assert.Contains("_backButtonMutationInFlight = false", controller);
         Assert.Contains("var minimum = (double)Xbox360BackButtonTarget.Disabled", controller);
         Assert.Contains("var maximum = (double)Xbox360BackButtonTarget.XboxGuide", controller);
@@ -91,14 +90,21 @@ public sealed class OverlayControllerRendererTests
     }
 
     [Fact]
-    public void Controller_caption_preserves_xbox360_only_and_native_steamdeck_rear_button_meaning()
+    public void Controller_keeps_the_M1_M2_heading_and_zero_gap_rows_without_auxiliary_text()
     {
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var build = controller[controller.IndexOf("private FrameworkElement BuildControllerPage", StringComparison.Ordinal)..
+            controller.IndexOf("private void AddBackButtonMappingRow", StringComparison.Ordinal)];
 
-        Assert.Contains("Xbox 360 mode only.", controller);
-        Assert.Contains("Steam Game / Big Picture", controller);
-        Assert.Contains("M1 as R4", controller);
-        Assert.Contains("M2 as L4", controller);
+        Assert.Contains("Text = \"M1 / M2\"", build);
+        Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionHeaderSpacing\", 4.0)", build);
+        Assert.Contains("var rowsPanel = new StackPanel { Spacing = OverlayQamResources.Get(\"QamRowSpacing\", 0.0) }", build);
+        Assert.Contains("AddBackButtonMappingRow(rowsPanel, rows, m1Row)", build);
+        Assert.Contains("AddBackButtonMappingRow(rowsPanel, rows, m2Row)", build);
+        Assert.DoesNotContain("_backButtonStatusText", controller);
+        Assert.DoesNotContain("BackButtonMappingCaption", controller);
+        Assert.Contains("FailureMessage = response.Succeeded", controller);
+        Assert.Contains("RenderBackButtonMappingRows();", controller);
     }
 
     private static string ReadSource(params string[] parts)
