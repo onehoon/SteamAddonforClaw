@@ -136,14 +136,37 @@ public sealed partial class OverlayWindow
         return rows;
     }
 
-    private OverlayRow CreateSettingDetailRow(OverlayRow row, SettingCardId card)
+    private OverlayRow CreateSettingDetailRow(OverlayRow row, SettingCardId card, int? rowIndex = null)
     {
         var capabilities = row.Capabilities;
+        Action? activate = capabilities.Activate is { } activateAction
+            ? () =>
+            {
+                if (CanInvokeSettingDetailAction(card))
+                    activateAction();
+            }
+            : null;
+        Action<int>? adjust = capabilities.Adjust is { } adjustAction
+            ? delta =>
+            {
+                if (CanInvokeSettingDetailAction(card))
+                    adjustAction(delta);
+            }
+            : null;
+
         return new OverlayRow(row.Container, new OverlayRowCapabilities(
-            IsSelectable: () => _expandedSettingCard == card && capabilities.IsSelectable(),
-            Activate: capabilities.Activate,
-            Adjust: capabilities.Adjust));
+            IsSelectable: () => _expandedSettingCard == card
+                && (capabilities.IsSelectable()
+                    || (card == SettingCardId.ClawHud
+                        && _clawHudMutationInFlight
+                        && rowIndex is { } index
+                        && _rowSelection.SelectedIndex == index)),
+            Activate: activate,
+            Adjust: adjust));
     }
+
+    private bool CanInvokeSettingDetailAction(SettingCardId card) =>
+        card != SettingCardId.ClawHud || !_clawHudMutationInFlight;
 
     private void ToggleSettingCard(SettingCardId id)
     {
@@ -255,18 +278,22 @@ public sealed partial class OverlayWindow
     private void AddClawHudRow(StackPanel section, OverlayToggleRow row)
     {
         section.Children.Add(row.Container);
+        var rowIndex = _clawHudRows.Count + 1; // The ClawHUD card header is Setting row zero.
         _clawHudRows.Add(CreateSettingDetailRow(
             new OverlayRow(row.Container, row.Capabilities),
-            SettingCardId.ClawHud));
+            SettingCardId.ClawHud,
+            rowIndex));
         RegisterRowPointerSelection(row.Container);
     }
 
     private void AddClawHudRow(StackPanel section, OverlayValueRow row)
     {
         section.Children.Add(row.Container);
+        var rowIndex = _clawHudRows.Count + 1; // The ClawHUD card header is Setting row zero.
         _clawHudRows.Add(CreateSettingDetailRow(
             new OverlayRow(row.Container, row.Capabilities),
-            SettingCardId.ClawHud));
+            SettingCardId.ClawHud,
+            rowIndex));
         RegisterRowPointerSelection(row.Container);
     }
 
