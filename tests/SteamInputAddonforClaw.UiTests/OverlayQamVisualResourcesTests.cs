@@ -249,6 +249,32 @@ public sealed class OverlayQamVisualResourcesTests
     }
 
     [Fact]
+    public void Qam_toggle_and_value_controls_opt_out_of_native_focus()
+    {
+        var resources = XDocument.Load(Path.Combine(
+            RepoRoot(), "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var focusProperties = new[]
+        {
+            "IsTabStop",
+            "IsFocusEngagementEnabled",
+            "AllowFocusOnInteraction",
+            "UseSystemFocusVisuals",
+        };
+
+        foreach (var styleKey in new[] { "QamToggleStyle", "QamValueButtonStyle" })
+        {
+            var style = resources.Descendants().Single(element =>
+                element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == styleKey);
+            foreach (var property in focusProperties)
+            {
+                var setter = style.Elements().Single(element =>
+                    element.Name.LocalName == "Setter" && (string?)element.Attribute("Property") == property);
+                Assert.Equal("False", (string?)setter.Attribute("Value"));
+            }
+        }
+    }
+
+    [Fact]
     public void Overlay_pages_render_only_minimal_text_and_keep_state_and_interaction_paths()
     {
         var root = RepoRoot();

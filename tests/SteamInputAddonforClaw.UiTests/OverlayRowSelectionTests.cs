@@ -64,43 +64,6 @@ public sealed class OverlayRowSelectionTests
     }
 
     [Fact]
-    public void SelectedClawHudRowStaysSelectedDuringMutationButIntentionalNavigationIsKept()
-    {
-        var mutationPending = false;
-        var mutationRequests = 0;
-        var selection = new OverlayRowSelection();
-        var rows = new[]
-        {
-            new OverlayRowCapabilities(() => true), // ClawHUD card header
-            new OverlayRowCapabilities(
-                () => !mutationPending || selection.SelectedIndex == 1,
-                Activate: () => { if (!mutationPending) mutationRequests++; },
-                Adjust: _ => { if (!mutationPending) mutationRequests++; }), // Selected detail row
-            new OverlayRowCapabilities(() => false), // Other details are unavailable
-            new OverlayRowCapabilities(() => true), // Tab Order card header
-        };
-        selection.SetRows(rows, preferredIndex: 1);
-
-        mutationPending = true;
-        Assert.False(selection.AdjustSelected(+1));
-        Assert.False(selection.ActivateSelected());
-        Assert.Equal(1, selection.SelectedIndex);
-        Assert.Equal(0, mutationRequests);
-
-        mutationPending = false;
-        selection.SetRows(rows, preferredIndex: selection.SelectedIndex);
-        Assert.Equal(1, selection.SelectedIndex);
-
-        mutationPending = true;
-        Assert.True(selection.MoveNext());
-        Assert.Equal(3, selection.SelectedIndex);
-
-        mutationPending = false;
-        selection.SetRows(rows, preferredIndex: selection.SelectedIndex);
-        Assert.Equal(3, selection.SelectedIndex);
-    }
-
-    [Fact]
     public void SetRowsWithAnInvalidOrUnselectablePreferredIndexFallsBackToFirstSelectable()
     {
         var selection = new OverlayRowSelection();

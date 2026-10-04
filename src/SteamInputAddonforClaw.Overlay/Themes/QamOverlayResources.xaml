@@ -191,6 +191,10 @@
     <Style x:Key="QamToggleStyle" TargetType="ToggleSwitch" BasedOn="{StaticResource DefaultToggleSwitchStyle}">
         <Setter Property="MinWidth" Value="0" />
         <Setter Property="MinHeight" Value="{StaticResource QamToggleMinHeight}" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="IsFocusEngagementEnabled" Value="False" />
+        <Setter Property="AllowFocusOnInteraction" Value="False" />
+        <Setter Property="UseSystemFocusVisuals" Value="False" />
     </Style>
 
     <!-- The native Slider template remains in charge of pointer/touch range interaction. -->
@@ -215,7 +219,10 @@
         <Setter Property="Foreground" Value="{StaticResource QamValueButtonForeground}" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
-        <Setter Property="UseSystemFocusVisuals" Value="True" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="IsFocusEngagementEnabled" Value="False" />
+        <Setter Property="AllowFocusOnInteraction" Value="False" />
+        <Setter Property="UseSystemFocusVisuals" Value="False" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="primitives:ButtonBase">

@@ -601,20 +601,18 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void ClawHud_mutation_preserves_the_selected_detail_row_and_guards_row_actions()
+    public void ClawHud_detail_rows_use_the_existing_logical_selection_capabilities()
     {
         var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
         var wrapperStart = clawHud.IndexOf("private OverlayRow CreateSettingDetailRow(", StringComparison.Ordinal);
-        var wrapperEnd = clawHud.IndexOf("private bool CanInvokeSettingDetailAction(", wrapperStart, StringComparison.Ordinal);
+        var wrapperEnd = clawHud.IndexOf("private void ToggleSettingCard(", wrapperStart, StringComparison.Ordinal);
         var wrapper = clawHud[wrapperStart..wrapperEnd];
 
-        Assert.Contains("card == SettingCardId.ClawHud", wrapper);
-        Assert.Contains("_clawHudMutationInFlight", wrapper);
-        Assert.Contains("rowIndex is { } index", wrapper);
-        Assert.Contains("_rowSelection.SelectedIndex == index", wrapper);
-        Assert.Contains("CanInvokeSettingDetailAction(card)", wrapper);
-        Assert.Contains("private bool CanInvokeSettingDetailAction(SettingCardId card)", clawHud);
-        Assert.Contains("_clawHudRows.Count + 1", clawHud);
+        Assert.Contains("IsSelectable: () => _expandedSettingCard == card && capabilities.IsSelectable()", wrapper);
+        Assert.Contains("Activate: capabilities.Activate", wrapper);
+        Assert.Contains("Adjust: capabilities.Adjust", wrapper);
+        Assert.DoesNotContain("rowIndex", clawHud);
+        Assert.DoesNotContain("CanInvokeSettingDetailAction", clawHud);
     }
 
     [Fact]
