@@ -94,13 +94,20 @@ public sealed class OverlayQamVisualResourcesTests
             element.Name.LocalName == "Grid" && (string?)element.Attribute("Grid.Column") == "1" &&
             (string?)element.Attribute("Margin") == "{StaticResource QamBodyContentPadding}");
 
-        AssertResourceValue(resources, "QamPageTitleMargin", "16,16,16,8");
+        AssertResourceValue(resources, "QamPageTitleMargin", "16,20,16,16");
         AssertResourceValue(resources, "QamBodyContentPadding", "16,0,16,12");
         AssertResourceValue(resources, "QamRowPadding", "16,10,16,10");
         AssertResourceValue(resources, "QamRowMargin", "-16,0,-16,0");
         Assert.Contains("Margin = OverlayQamResources.Get(\"QamRowMargin\", new Thickness(-16, 0, -16, 0))", rowChrome);
         AssertResourceValue(resources, "QamRowMinHeight", "42");
         AssertResourceValue(resources, "QamRowCornerRadius", "2");
+        Assert.Equal("#1AFFFFFF", Resource(resources, "QamSeparatorBrush").Attribute("Color")?.Value);
+        AssertResourceValue(resources, "QamRowSeparatorThickness", "0,0,0,1");
+        Assert.Contains("BorderThickness = OverlayQamResources.Get(\"QamRowSeparatorThickness\", new Thickness(0, 0, 0, 1))", rowChrome);
+        Assert.Contains("BorderBrush = OverlayQamResources.Brush(\"QamSeparatorBrush\")", rowChrome);
+        Assert.Contains("QamRowPadding", rowChrome);
+        Assert.Contains("QamRowMinHeight", rowChrome);
+        Assert.Contains("QamRowCornerRadius", rowChrome);
         AssertResourceValue(resources, "QamRailButtonSize", "52");
         AssertResourceValue(resources, "QamRailItemHeight", "64");
         AssertResourceValue(resources, "QamRailIconSize", "24");
@@ -175,6 +182,27 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Equal("{StaticResource QamPageTitleMargin}", (string?)titleElement.Attribute("Margin"));
         Assert.Contains("PageTitle.Text = LabelFor(selected);", selectedState);
         Assert.Equal(1, CountOccurrences(xaml.ToString(), "x:Name=\"PageTitle\""));
+    }
+
+    [Fact]
+    public void Ordinary_row_selection_changes_only_fill_and_keeps_tile_selection_border()
+    {
+        var root = RepoRoot();
+        var navigation = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"));
+        var profile = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"));
+        var window = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"));
+        var selectionVisual = SliceMethod(
+            navigation,
+            "private void ApplyRowSelectionVisual()",
+            "// Resolve against the current page order at interaction time.");
+
+        Assert.Contains("_rowSelectedFillBrush = OverlayQamResources.Brush(\"QamSelectedFillBrush\")", window);
+        Assert.Contains("selected ? _rowSelectedFillBrush : RowUnselectedFillBrush", selectionVisual);
+        Assert.Contains("rows[i].Container.Background", selectionVisual);
+        Assert.DoesNotContain("rows[i].Container.BorderBrush", selectionVisual);
+
+        Assert.Contains("tile.BorderBrush = _rowSelectedBrush", navigation);
+        Assert.Contains("_profileCatalogCards[index].BorderBrush = _rowSelectedBrush", profile);
     }
 
     [Fact]

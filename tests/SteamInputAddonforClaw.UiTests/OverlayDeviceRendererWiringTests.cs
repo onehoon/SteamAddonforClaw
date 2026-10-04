@@ -781,7 +781,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("QamRowPadding", chrome);
         Assert.Contains("QamRowMinHeight", chrome);
         Assert.Contains("QamRowCornerRadius", chrome);
-        Assert.Contains("QamSelectionBorderThickness", chrome);
+        Assert.Contains("QamRowSeparatorThickness", chrome);
+        Assert.Contains("QamSeparatorBrush", chrome);
         Assert.Contains("QamSelectedFillBrush", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"));
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));
