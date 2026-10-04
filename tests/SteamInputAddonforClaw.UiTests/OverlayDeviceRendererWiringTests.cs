@@ -346,6 +346,17 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Profile_catalog_uses_two_columns_for_visual_placement()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+
+        Assert.Contains("for (var i = 0; i < 2; i++)", source);
+        Assert.Contains("var rowCount = (_profileCatalog.Count + 1) / 2;", source);
+        Assert.Contains("Grid.SetRow(card, index / 2);", source);
+        Assert.Contains("Grid.SetColumn(card, index % 2);", source);
+    }
+
+    [Fact]
     public void Profile_catalog_titles_are_bounded_to_two_wrapped_lines()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
@@ -355,6 +366,8 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("TextWrapping = TextWrapping.Wrap", source);
         Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", source);
         Assert.Contains("MaxLines = 2", source);
+        Assert.Contains("OverlayQamResources.ApplyTextStyle(title, \"QamTileTitleTextStyle\");", source);
+        Assert.Contains("title.FontSize = 15;", source);
         Assert.DoesNotContain("Content = entry.Name", source);
     }
 
@@ -538,6 +551,27 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("section.Label.Contains", quickSettings);
         Assert.DoesNotContain("section.Label == \"TDP\"", quickSettings);
         Assert.DoesNotContain("section.Label == \"CPU Boost\"", quickSettings);
+    }
+
+    [Fact]
+    public void Profile_resolution_row_uses_the_shared_detail_indent_in_the_generic_renderer()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var buildStart = quickSettings.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal);
+        var buildEnd = quickSettings.IndexOf("private static void RemoveQuickSettingsSection", buildStart, StringComparison.Ordinal);
+        var buildSection = quickSettings[buildStart..buildEnd];
+
+        Assert.Contains("var detailStack = usesFeatureHeader", buildSection);
+        Assert.Contains("Margin = OverlayQamResources.Get(\"QamDetailIndent\", new Thickness(16, 0, 0, 0))", buildSection);
+        var indentPageCondition = buildSection.IndexOf("surface.PageId == QuickSettingsPageId.Profile", StringComparison.Ordinal);
+        var indentConditionStart = buildSection.LastIndexOf("if (", indentPageCondition, StringComparison.Ordinal);
+        var indentConditionEnd = buildSection.IndexOf(")", indentPageCondition, StringComparison.Ordinal);
+        var indentCondition = buildSection[indentConditionStart..indentConditionEnd];
+        Assert.Contains("surface.PageId == QuickSettingsPageId.Profile", indentCondition);
+        Assert.Contains("section.SectionId == QuickSettingsSectionId.ProfileResolution", indentCondition);
+        Assert.Contains("rowStack.Margin = OverlayQamResources.Get(", buildSection);
+        Assert.Contains("\"QamDetailIndent\"", buildSection);
+        Assert.Equal(1, CountOccurrences(buildSection, "rowStack.Margin = OverlayQamResources.Get("));
     }
 
     [Fact]

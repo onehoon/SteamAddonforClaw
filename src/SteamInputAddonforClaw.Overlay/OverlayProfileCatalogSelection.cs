@@ -1,10 +1,10 @@
 namespace SteamInputAddonforClaw.Overlay;
 
-/// <summary>Bounded three-column selection for the Overlay Profile catalog. It owns only local
+/// <summary>Bounded two-column selection for the Overlay Profile catalog. It owns only local
 /// presentation selection; catalog identity and Profile mutation remain Runtime-owned.</summary>
 internal sealed class OverlayProfileCatalogSelection
 {
-    private const int Columns = 3;
+    private const int Columns = 2;
     private int _count;
     private int _selectedIndex = -1;
 

@@ -83,11 +83,13 @@ At the time of this capture, the Overlay used a 416 DIP surface and 52 DIP struc
 - `QamPageContentSpacing` is currently 8 DIP and remains provisional; title-to-content spacing was not measured on the live Steam QAM.
 - `QamFlatButtonStyle` removes the default WinUI Button visual template from the rail, Profile catalog cards, and Setting expandable headers while preserving native Button activation/accessibility semantics.
 - Profile and Shortcut tile layouts remain Overlay-specific and are not claimed to be Steam-native equivalents.
-- Profile 3-column and Shortcut 2-column density remains deferred to MSI Claw hardware acceptance.
+- Profile catalog density was later set to two columns for the 432 DIP shell by an Addon-specific product decision; Shortcut remains at a maximum of two columns.
 
 ## OQ hardware polish — 2026-10-04
 
 - The supported Overlay shell target is now 432 DIP total width with its 52 DIP left rail unchanged; the right content area grows from 364 to 380 DIP. This is a hardware-informed Addon layout adjustment, not a measurement copied from Steam QAM.
+- The Overlay Profile catalog uses two columns in the 432 DIP shell. This is an Addon-specific hardware/UI decision, not a claim that Steam QAM has an equivalent game-card layout.
+- Profile catalog titles use a local 15 DIP font-size override while retaining the shared QAM tile-title family, weight, and color. Shortcut layout and typography are unchanged.
 - Steam's shared stylesheet defines `--gpColor-Blue` as `#1A9FFF` ([SteamTracking `shared_global.css`](https://github.com/SteamTracking/SteamTracking/blob/master/steamcommunity.com/public/shared/css/shared_global.css)). The [Colored Toggles Desktop stylesheet](https://github.com/Tormak9970/SteamDeckThemes/blob/main/Desktop/ColoredTogglesDesktop/shared.css) applies its configured main-color variable to the enabled `gamepaddialog_ToggleRail`; its comment identifies `#1a9fff` as the intended default. This supports using the Steam blue token for the Addon Toggle ON rail.
 - This source/theme evidence does **not** establish the current Steam QAM's live computed ToggleField color, geometry, or state styling. No live ToggleField was available during the cited DevTools capture; a current computed-style capture remains outstanding. The Overlay's `#1A9FFF` ON rail is therefore an evidence-backed design direction, not an observed live QAM measurement.
 - Toggle OFF, thumb, and Slider resources remain unchanged by this hardware polish.
@@ -98,4 +100,4 @@ At the time of this capture, the Overlay used a 416 DIP surface and 52 DIP struc
 - Steam disabled, hover, pressed, warning/error, and distinct caption roles.
 - Text letter-spacing/opacity, ordinary value typography, bottom content padding, and labeled section-header-to-row distance were not separately measured in this capture.
 - 1920 × 1200 / 150% MSI Claw side-by-side visual acceptance, including WinUI's rendered Korean fallback and the effect of the expected per-monitor scaling.
-- Any Profile/Shortcut tile parity claim; these are Overlay-specific surfaces.
+- Profile two-column density and the local 15 DIP title override are product decisions, not measured Steam QAM parity; supported-device visual acceptance remains necessary. Shortcut remains an Overlay-specific surface with a maximum two-column layout.

@@ -214,8 +214,8 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", valueRow);
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
 
-        Assert.Contains("for (var i = 0; i < 3; i++)", profile);
-        Assert.Contains("Grid.SetColumn(card, index % 3)", profile);
+        Assert.Contains("for (var i = 0; i < 2; i++)", profile);
+        Assert.Contains("Grid.SetColumn(card, index % 2)", profile);
         Assert.Contains("Math.Min(2, _shortcutSnapshot.Tiles.Count)", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs")));
     }
 
