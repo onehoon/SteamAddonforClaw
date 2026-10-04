@@ -105,12 +105,19 @@ public sealed class ControllerVibrationStrengthUiTests
         Assert.Contains("LeftVibrationStrengthSlider.Value = snapshot.LeftPercent ?? 0", page, StringComparison.Ordinal);
         Assert.Contains("RightVibrationStrengthSlider.Value = snapshot.RightPercent ?? 0", page, StringComparison.Ordinal);
         Assert.Contains("var operationInProgress = _vibrationMutationInProgress || _vibrationTestInProgress", page, StringComparison.Ordinal);
+        Assert.Contains("var testsEnabled = _vibrationSnapshot.TestAvailable", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("var testsEnabled = _vibrationSnapshot.Available", page, StringComparison.Ordinal);
         Assert.Contains("&& !operationInProgress", page, StringComparison.Ordinal);
         Assert.Contains("|| _vibrationMutationInProgress\n            || _vibrationTestInProgress", page, StringComparison.Ordinal);
 
-        var unavailable = FrontendControllerVibrationStrengthSnapshot.Unavailable();
+        var unavailable = FrontendControllerVibrationStrengthSnapshot.Unavailable(
+            "Vibration firmware mapping is not verified for this MSI Claw model.") with { TestAvailable = true };
+        Assert.False(unavailable.Available);
+        Assert.False(unavailable.Writable);
+        Assert.True(unavailable.TestAvailable);
         Assert.Null(unavailable.LeftPercent);
         Assert.Null(unavailable.RightPercent);
+        Assert.Equal("Vibration firmware mapping is not verified for this MSI Claw model.", unavailable.Status);
     }
 
     private static void AssertSliderRow(

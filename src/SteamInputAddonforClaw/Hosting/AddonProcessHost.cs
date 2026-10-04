@@ -433,6 +433,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // authority state -- it applies in both Center M Enabled and Disabled boots.
         SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null;
         if (!_headlessUninstallPreparation
+            && startupResult.HardwareDeviceModel is { } vibrationModel)
+        {
+            controllerVibrationStrengthClient = new(
+                vibrationModel,
+                GetMsiControllerDevices(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
+                new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawVibrationProfileIo());
+        }
+
+        if (!_headlessUninstallPreparation
             && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
         {
@@ -442,10 +452,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel, tdpHardware);
             _batteryChargeLimitHardware = new MsiClawBatteryChargeLimitHardware(_tdpTransport);
             _batteryChargeLimitRuntime = new(_profileStore, _profileMutationGate, tdpModel, _batteryChargeLimitHardware);
-            controllerVibrationStrengthClient = new(
-                GetMsiControllerDevices(),
-                new SteamInputAddonforClaw.Devices.MSI.Claw.MsiClawControlHidResolver(),
-                new SteamInputAddonforClaw.Devices.MSI.Claw.WindowsMsiClawVibrationProfileIo());
             _tdpRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
