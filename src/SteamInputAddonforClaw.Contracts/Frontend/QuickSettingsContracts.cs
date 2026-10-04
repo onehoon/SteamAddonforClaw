@@ -103,10 +103,9 @@ public sealed record QuickSettingsCommitPolicy(QuickSettingsCommitMode Mode, int
 {
     public static readonly QuickSettingsCommitPolicy Immediate = new(QuickSettingsCommitMode.Immediate, 0);
 
-    /// <summary>The one shared slider commit policy (work order section 11): every current Device
-    /// Quick Settings slider uses a 2000 ms trailing debounce. Defined once here rather than repeating
-    /// the literal per row.</summary>
-    public static readonly QuickSettingsCommitPolicy TrailingDebounce2000 = new(QuickSettingsCommitMode.TrailingDebounce, 2000);
+    /// <summary>The shared compact Quick Settings slider policy for current Device and Profile rows.
+    /// Defined once here rather than repeating the literal per row.</summary>
+    public static readonly QuickSettingsCommitPolicy TrailingDebounce300 = new(QuickSettingsCommitMode.TrailingDebounce, 300);
 }
 
 public sealed record QuickSettingsDiscreteOption(int Value, string Label);

@@ -40,7 +40,7 @@ public sealed class AddonQuickSettingsSurfaceParityTests
             true,
             QuickSettingsValue.Integer(20),
             new(QuickSettingsSliderKind.Numeric, Minimum: 5, Maximum: 30, Step: 1, Suffix: " W"),
-            QuickSettingsCommitPolicy.TrailingDebounce2000,
+            QuickSettingsCommitPolicy.TrailingDebounce300,
             QuickSettingsCommitGroupId.DeviceTdpConfiguration);
         var discrete = new QuickSettingsRow(
             QuickSettingsRowId.DevicePowerModeAc,
@@ -50,7 +50,7 @@ public sealed class AddonQuickSettingsSurfaceParityTests
             true,
             QuickSettingsValue.Integer(1),
             new(QuickSettingsSliderKind.Discrete, Options: [new(0, "Best power efficiency"), new(1, "Balanced")]),
-            QuickSettingsCommitPolicy.TrailingDebounce2000);
+            QuickSettingsCommitPolicy.TrailingDebounce300);
         var upper = numeric with
         {
             RowId = QuickSettingsRowId.DeviceTdpAcPl2,
@@ -85,7 +85,7 @@ public sealed class AddonQuickSettingsSurfaceParityTests
         Assert.Equal(QuickSettingsSliderKind.Discrete, rows[3].SliderSpec?.Kind);
         Assert.Equal(["Best power efficiency", "Balanced"], rows[3].SliderSpec?.Options?.Select(option => option.Label));
         Assert.All(rows.Where(row => row.ControlKind == QuickSettingsControlKind.Slider), row =>
-            Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce2000, row.CommitPolicy));
+            Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, row.CommitPolicy));
         Assert.Single(page.LinkedSliderConstraints);
 
         var overlay = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayQuickSettingsPageBinding.cs");

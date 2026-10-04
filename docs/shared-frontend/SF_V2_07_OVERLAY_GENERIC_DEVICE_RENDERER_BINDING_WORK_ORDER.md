@@ -1473,9 +1473,11 @@ shared tab/navigation shell
 
 ---
 
-## 39. Hide / dismiss must never wait for debounce
+## 39. Normal user dismiss flushes; forced Hide cancels
 
-At the start of the existing Overlay hide path:
+Normal user Back/outside-click dismissal flushes valid pending Device/Profile edits through the existing binding and mutation transport before sending the existing `DismissRequested`. The pipe reader remains free while the App awaits the correlated mutation result.
+
+At the start of a Runtime/lifecycle-forced Hide that was not preceded by that user-dismiss flow:
 
 ```text
 cancel all current UN-SUBMITTED Device delayed drafts
@@ -1483,11 +1485,11 @@ cancel all current UN-SUBMITTED Device delayed drafts
 
 Then continue normal OQ4 hide immediately.
 
-Required:
+Required for forced Hide:
 
 ```text
 pending timer exists
-→ B / outside click / Runtime Hide
+→ Runtime Hide without a prior user-dismiss flush
 → timer canceled
 → Hidden acknowledgement is not delayed
 → OQ4 capture retirement continues

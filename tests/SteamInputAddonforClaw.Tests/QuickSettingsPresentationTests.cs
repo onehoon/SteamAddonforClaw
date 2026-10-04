@@ -61,8 +61,8 @@ public sealed class QuickSettingsPresentationTests
     {
         var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, 42, true, null,
         [new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP", [
-            new(QuickSettingsRowId.ProfileTdpAcPl1, "AC", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(20), new(QuickSettingsSliderKind.Numeric, 8, 30), QuickSettingsCommitPolicy.TrailingDebounce2000, QuickSettingsCommitGroupId.ProfileTdpConfiguration),
-            new(QuickSettingsRowId.ProfileTdpDcPl1, "DC", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(10), new(QuickSettingsSliderKind.Numeric, 8, 30), QuickSettingsCommitPolicy.TrailingDebounce2000, QuickSettingsCommitGroupId.ProfileTdpConfiguration),
+            new(QuickSettingsRowId.ProfileTdpAcPl1, "AC", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(20), new(QuickSettingsSliderKind.Numeric, 8, 30), QuickSettingsCommitPolicy.TrailingDebounce300, QuickSettingsCommitGroupId.ProfileTdpConfiguration),
+            new(QuickSettingsRowId.ProfileTdpDcPl1, "DC", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(10), new(QuickSettingsSliderKind.Numeric, 8, 30), QuickSettingsCommitPolicy.TrailingDebounce300, QuickSettingsCommitGroupId.ProfileTdpConfiguration),
         ])], []);
 
         var projected = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.DC);
@@ -187,15 +187,19 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
-    public void Toggles_are_immediate_and_sliders_are_two_second_trailing_debounce()
+    public void Toggles_are_immediate_and_sliders_use_the_shared_300ms_trailing_debounce()
     {
-        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
+        var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with
+        {
+            BatteryChargeLimit = new FrontendBatteryChargeLimitSnapshot(true, true, true,
+                CurrentEnabled: true, CurrentLimitPercent: 70, DesiredEnabled: true, DesiredLimitPercent: 70, LastFailure: null),
+        });
 
-        foreach (var toggleId in new[] { QuickSettingsRowId.DeviceTdpEnabled, QuickSettingsRowId.DeviceCpuBoostEnabled, QuickSettingsRowId.DevicePowerModeEnabled })
+        foreach (var toggleId in new[] { QuickSettingsRowId.DeviceBatteryChargeLimitEnabled, QuickSettingsRowId.DeviceTdpEnabled, QuickSettingsRowId.DeviceCpuBoostEnabled, QuickSettingsRowId.DevicePowerModeEnabled })
             Assert.Equal(QuickSettingsCommitPolicy.Immediate, FindRow(page, toggleId).CommitPolicy);
 
-        foreach (var sliderId in new[] { QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsRowId.DeviceTdpDcPl2, QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsRowId.DeviceCpuBoostDc, QuickSettingsRowId.DevicePowerModeAc, QuickSettingsRowId.DevicePowerModeDc })
-            Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce2000, FindRow(page, sliderId).CommitPolicy);
+        foreach (var sliderId in new[] { QuickSettingsRowId.DeviceBatteryChargeLimitPercent, QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, QuickSettingsRowId.DeviceTdpDcPl1, QuickSettingsRowId.DeviceTdpDcPl2, QuickSettingsRowId.DeviceCpuBoostAc, QuickSettingsRowId.DeviceCpuBoostDc, QuickSettingsRowId.DevicePowerModeAc, QuickSettingsRowId.DevicePowerModeDc })
+            Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, FindRow(page, sliderId).CommitPolicy);
     }
 
     [Fact]
@@ -539,7 +543,7 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
-    public void Profile_toggles_are_immediate_and_sliders_are_two_second_trailing_debounce()
+    public void Profile_toggles_are_immediate_and_sliders_use_the_shared_300ms_trailing_debounce()
     {
         var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
 
@@ -547,7 +551,7 @@ public sealed class QuickSettingsPresentationTests
             Assert.Equal(QuickSettingsCommitPolicy.Immediate, FindRow(page, toggleId).CommitPolicy);
 
         foreach (var sliderId in new[] { QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsRowId.ProfileFpsLimitDc, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc })
-            Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce2000, FindRow(page, sliderId).CommitPolicy);
+            Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, FindRow(page, sliderId).CommitPolicy);
     }
 
     [Fact]
@@ -570,12 +574,13 @@ public sealed class QuickSettingsPresentationTests
 
         var fps = FindRow(page, QuickSettingsRowId.ProfileFpsLimitAc);
         Assert.Equal((40, 120, 1), (fps.SliderSpec!.Minimum, fps.SliderSpec.Maximum, fps.SliderSpec.Step));
-        Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce2000, fps.CommitPolicy);
+        Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, fps.CommitPolicy);
 
         var resolution = FindRow(page, QuickSettingsRowId.ProfileResolution);
         Assert.Equal([(0, "Do not change"), (1, "1920 × 1200"), (2, "1920 × 1080"), (3, "1680 × 1050"), (4, "1440 × 900")],
             resolution.SliderSpec!.Options!.Select(option => (option.Value, option.Label)).ToArray());
         Assert.Equal(0, resolution.Value!.IntegerValue);
+        Assert.Equal(QuickSettingsCommitPolicy.Immediate, resolution.CommitPolicy);
     }
 
     private static FrontendGameProfileSnapshot EnabledProfileSnapshot() => new(

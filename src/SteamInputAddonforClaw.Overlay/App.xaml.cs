@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
+using System.Threading;
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -13,6 +14,8 @@ public partial class App : Application
     private OverlayWindow? _window;
     private DispatcherQueue? _dispatcherQueue;
     private NamedPipeOverlayClient? _client;
+    private Task? _controllerVibrationMutationTask;
+    private int _userDismissInProgress;
 
     public App() => InitializeComponent();
 
@@ -23,6 +26,8 @@ public partial class App : Application
         OverlayLog.Info("App", "DispatcherQueue acquired.");
         _window = new OverlayWindow();
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
+        _window.ProfileSelectedDetailBackRequested += OnProfileSelectedDetailBackRequested;
+        _window.ProfileSelectedDetailTabLeaveRequested += OnProfileSelectedDetailTabLeaveRequested;
         _window.TabOrderMoveRequested += OnTabOrderMoveRequested;
         _window.BackButtonMappingEditRequested += OnBackButtonMappingEditRequested;
         _window.ControllerLedEditRequested += OnControllerLedEditRequested;
@@ -43,28 +48,57 @@ public partial class App : Application
 
     private void OnOutsideClickDismissRequested(OverlayOutsideClick outsideClick)
     {
-        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() => _ = SendDismissRequestedAsync(outsideClick)))
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() => BeginUserDismiss(outsideClick)))
             OverlayLog.Warn("Input", "Could not enqueue outside-click dismissal request.");
     }
 
-    private async Task SendDismissRequestedAsync(OverlayOutsideClick outsideClick)
+    private void BeginUserDismiss(OverlayOutsideClick? outsideClick)
     {
-        OverlayLog.Info("Input", "Outside click dismissal requested",
-            ("OverlayHwnd", _window?.HandleForDiagnostics),
-            ("Message", outsideClick.MessageName),
-            ("PointerX", outsideClick.PointerX), ("PointerY", outsideClick.PointerY),
-            ("WindowLeft", outsideClick.WindowBounds.X), ("WindowTop", outsideClick.WindowBounds.Y),
-            ("WindowRight", outsideClick.WindowBounds.X + outsideClick.WindowBounds.Width),
-            ("WindowBottom", outsideClick.WindowBounds.Y + outsideClick.WindowBounds.Height),
-            ("ForegroundHwnd", outsideClick.ForegroundHwnd));
+        if (Interlocked.CompareExchange(ref _userDismissInProgress, 1, 0) != 0)
+        {
+            OverlayLog.Debug("Input", "Ignored a repeated user dismissal while the current dismissal is pending.");
+            return;
+        }
+
+        _ = SendUserDismissAsync(outsideClick);
+    }
+
+    private async Task SendUserDismissAsync(OverlayOutsideClick? outsideClick)
+    {
+        var dismissalSent = false;
         try
         {
             if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+
+            if (outsideClick is { } click)
+                OverlayLog.Info("Input", "Outside click dismissal requested",
+                    ("OverlayHwnd", _window?.HandleForDiagnostics),
+                    ("Message", click.MessageName),
+                    ("PointerX", click.PointerX), ("PointerY", click.PointerY),
+                    ("WindowLeft", click.WindowBounds.X), ("WindowTop", click.WindowBounds.Y),
+                    ("WindowRight", click.WindowBounds.X + click.WindowBounds.Width),
+                    ("WindowBottom", click.WindowBounds.Y + click.WindowBounds.Height),
+                    ("ForegroundHwnd", click.ForegroundHwnd));
+            else
+                OverlayLog.Info("Navigation", "Back requested root dismissal.");
+
+            _window?.FlushPendingControllerVibrationEdit();
+            var quickSettingsFlush = _window?.FlushPendingUserEditsAsync() ?? Task.CompletedTask;
+            var vibrationMutation = _controllerVibrationMutationTask ?? Task.CompletedTask;
+            await Task.WhenAll(quickSettingsFlush, vibrationMutation).ConfigureAwait(false);
             await _client.SendDismissRequestedAsync().ConfigureAwait(false);
+            dismissalSent = true;
         }
         catch (Exception exception)
         {
-            OverlayLog.Error("Transport", "Outside click dismissal request failed; Overlay remains Runtime-owned.", exception);
+            OverlayLog.Error("Transport", "User dismissal request failed; Overlay remains Runtime-owned.", exception);
+        }
+        finally
+        {
+            // Keep duplicate Back/outside-click requests coalesced until Runtime sends its Hide.
+            // A failed flush or request releases admission so the user can retry.
+            if (!dismissalSent)
+                Interlocked.Exchange(ref _userDismissInProgress, 0);
         }
     }
 
@@ -250,7 +284,7 @@ public partial class App : Application
     }
 
     private void OnControllerVibrationStrengthEditRequested(int leftPercent, int rightPercent) =>
-        _ = SendControllerVibrationMutationAsync(leftPercent, rightPercent);
+        _controllerVibrationMutationTask = SendControllerVibrationMutationAsync(leftPercent, rightPercent);
 
     private async Task SendControllerVibrationMutationAsync(int leftPercent, int rightPercent)
     {
@@ -426,7 +460,7 @@ public partial class App : Application
                 {
                     case OverlayNavigationAction.Back:
                         if (_window?.TryHandleBack() != true)
-                            _ = SendBackDismissAsync();
+                            BeginUserDismiss(outsideClick: null);
                         break;
                     case OverlayNavigationAction.PreviousTab:
                         _window?.SelectPreviousTab();
@@ -462,18 +496,29 @@ public partial class App : Application
         return Task.CompletedTask;
     }
 
-    private async Task SendBackDismissAsync()
+    private void OnProfileSelectedDetailBackRequested() => _ = FlushProfileEditsThenCompleteNavigationAsync(tabLeave: false);
+
+    private void OnProfileSelectedDetailTabLeaveRequested() => _ = FlushProfileEditsThenCompleteNavigationAsync(tabLeave: true);
+
+    private async Task FlushProfileEditsThenCompleteNavigationAsync(bool tabLeave)
     {
         try
         {
-            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
-            OverlayLog.Info("Navigation", "Back requested root dismissal.");
-            await _client.SendDismissRequestedAsync().ConfigureAwait(false);
+            await (_window?.FlushProfilePendingUserEditsAsync() ?? Task.CompletedTask).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            OverlayLog.Error("Transport", "Back dismissal request failed; Overlay remains Runtime-owned.", exception);
+            OverlayLog.Warn("Profile", "Profile navigation flush failed; continuing the requested navigation.", exception);
         }
+
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            if (tabLeave)
+                _window?.CompleteProfileSelectedDetailTabLeave();
+            else
+                _window?.CompleteProfileSelectedDetailBack();
+        }))
+            OverlayLog.Warn("Profile", "Could not complete Profile navigation after its pending edit settled.");
     }
 
     private void OnProfileCatalogRequestRequested() => _ = SendProfileCatalogRequestAsync();
@@ -512,6 +557,7 @@ public partial class App : Application
                         await _window.ShowForPocAsync();
                         break;
                     case OverlayCommand.Hide:
+                        Interlocked.Exchange(ref _userDismissInProgress, 0);
                         await _window.HideForPocAsync();
                         break;
                     case OverlayCommand.Shutdown:

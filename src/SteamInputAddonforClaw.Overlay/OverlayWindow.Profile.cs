@@ -20,6 +20,7 @@ public sealed partial class OverlayWindow
     private uint? _selectedCatalogAppId;
     private uint? _activeProfileAppId;
     private bool _profileTabSelected;
+    private bool _profileDetailNavigationInProgress;
 
     internal event Action? ProfileCatalogRequestRequested;
     internal event Action<uint>? ProfilePageRequestRequested;
@@ -82,12 +83,31 @@ public sealed partial class OverlayWindow
 
         if (_tabState.SelectedTab != AddonQuickSettingsTabId.Profile || _profileMode != ProfilePresentationMode.SelectedDetail)
             return false;
-        _quickSettingsSurfaces[QuickSettingsPageId.Profile].Binding?.CancelUnsubmittedDrafts();
+        if (_profileDetailNavigationInProgress) return true;
+        _profileDetailNavigationInProgress = true;
+        ProfileSelectedDetailBackRequested?.Invoke();
+        return true;
+    }
+
+    internal void CompleteProfileSelectedDetailBack()
+    {
+        _profileDetailNavigationInProgress = false;
+        if (_profileMode != ProfilePresentationMode.SelectedDetail) return;
         _selectedCatalogAppId = null;
         _profileMode = ProfilePresentationMode.Catalog;
-        ShowProfileCatalog();
-        ProfileCatalogRequestRequested?.Invoke();
-        return true;
+        if (_profileTabSelected)
+        {
+            ShowProfileCatalog();
+            ProfileCatalogRequestRequested?.Invoke();
+        }
+    }
+
+    internal void CompleteProfileSelectedDetailTabLeave()
+    {
+        _profileDetailNavigationInProgress = false;
+        if (_profileTabSelected || _profileMode != ProfilePresentationMode.SelectedDetail) return;
+        _selectedCatalogAppId = null;
+        _profileMode = _activeProfileAppId is not null ? ProfilePresentationMode.ActiveDetail : ProfilePresentationMode.Catalog;
     }
 
     private void OnProfileTabSelectionChanged(bool selected)
@@ -95,7 +115,15 @@ public sealed partial class OverlayWindow
         if (!selected)
         {
             if (_profileMode == ProfilePresentationMode.SelectedDetail)
-                _quickSettingsSurfaces[QuickSettingsPageId.Profile].Binding?.CancelUnsubmittedDrafts();
+            {
+                _profileTabSelected = false;
+                if (!_profileDetailNavigationInProgress)
+                {
+                    _profileDetailNavigationInProgress = true;
+                    ProfileSelectedDetailTabLeaveRequested?.Invoke();
+                }
+                return;
+            }
             _profileTabSelected = false;
             _selectedCatalogAppId = null;
             _profileMode = _activeProfileAppId is not null ? ProfilePresentationMode.ActiveDetail : ProfilePresentationMode.Catalog;
@@ -103,6 +131,11 @@ public sealed partial class OverlayWindow
         }
 
         _profileTabSelected = true;
+        if (_profileDetailNavigationInProgress && _profileMode == ProfilePresentationMode.SelectedDetail)
+        {
+            ShowProfileDetail();
+            return;
+        }
         if (_activeProfileAppId is not null)
         {
             _profileMode = ProfilePresentationMode.ActiveDetail;

@@ -34,6 +34,7 @@ public sealed partial class OverlayWindow
     private FrontendControllerVibrationStrengthSnapshot _vibrationSnapshot = FrontendControllerVibrationStrengthSnapshot.Unavailable();
     private int? _vibrationDraftLeft;
     private int? _vibrationDraftRight;
+    private bool _vibrationDraftDirty;
     private CancellationTokenSource? _vibrationCommitDelay;
 
     internal event Action<BackButtonMappingSettings>? BackButtonMappingEditRequested;
@@ -297,31 +298,84 @@ public sealed partial class OverlayWindow
         _vibrationDraftLeft = left ?? _vibrationDraftLeft ?? _vibrationSnapshot.LeftPercent;
         _vibrationDraftRight = right ?? _vibrationDraftRight ?? _vibrationSnapshot.RightPercent;
         if (_vibrationDraftLeft is not { } targetLeft || _vibrationDraftRight is not { } targetRight) return;
+        _vibrationDraftDirty = true;
         RenderControllerVibrationRows();
-        _vibrationCommitDelay?.Cancel();
-        _vibrationCommitDelay?.Dispose();
+        CancelVibrationCommitDelay();
         var delay = new CancellationTokenSource();
         _vibrationCommitDelay = delay;
         _ = CommitVibrationAfterDelayAsync(targetLeft, targetRight, delay.Token);
+    }
+
+    internal void FlushPendingControllerVibrationEdit()
+    {
+        if (!_vibrationDraftDirty || _controllerVibrationMutationInFlight) return;
+        if (!_vibrationSnapshot.Available || !_vibrationSnapshot.Writable
+            || _vibrationDraftLeft is not { } left || _vibrationDraftRight is not { } right)
+        {
+            CancelPendingControllerVibrationDraft();
+            return;
+        }
+
+        CancelVibrationCommitDelay();
+        SubmitControllerVibrationPair(left, right);
+    }
+
+    internal void CancelPendingControllerVibrationDraft()
+    {
+        if (!_vibrationDraftDirty) return;
+        CancelVibrationCommitDelay();
+        _vibrationDraftDirty = false;
+        _vibrationDraftLeft = _vibrationSnapshot.LeftPercent;
+        _vibrationDraftRight = _vibrationSnapshot.RightPercent;
+        RenderControllerVibrationRows();
+    }
+
+    private void CancelVibrationCommitDelay()
+    {
+        _vibrationCommitDelay?.Cancel();
+        _vibrationCommitDelay?.Dispose();
+        _vibrationCommitDelay = null;
     }
 
     private async Task CommitVibrationAfterDelayAsync(int left, int right, CancellationToken token)
     {
         try
         {
-            await Task.Delay(500, token);
-            _controllerVibrationMutationInFlight = true;
-            RenderControllerVibrationRows();
-            ControllerVibrationStrengthEditRequested?.Invoke(left, right);
+            await Task.Delay(300, token);
+            if (token.IsCancellationRequested || !_vibrationDraftDirty || _controllerVibrationMutationInFlight)
+                return;
+            if (!_vibrationSnapshot.Available || !_vibrationSnapshot.Writable)
+            {
+                CancelPendingControllerVibrationDraft();
+                return;
+            }
+
+            CancelVibrationCommitDelay();
+            SubmitControllerVibrationPair(left, right);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
 
+    private void SubmitControllerVibrationPair(int left, int right)
+    {
+        if (!_vibrationDraftDirty || _controllerVibrationMutationInFlight) return;
+        _vibrationDraftDirty = false;
+        _controllerVibrationMutationInFlight = true;
+        RenderControllerVibrationRows();
+        ControllerVibrationStrengthEditRequested?.Invoke(left, right);
+    }
+
     internal void ApplyControllerVibrationState(FrontendControllerVibrationStrengthSnapshot snapshot)
     {
-        if (!_controllerVibrationMutationInFlight)
+        if (_controllerVibrationMutationInFlight)
         {
-            _vibrationSnapshot = snapshot;
+            RenderControllerVibrationRows();
+            return;
+        }
+
+        _vibrationSnapshot = snapshot;
+        if (!_vibrationDraftDirty)
+        {
             _vibrationDraftLeft = snapshot.LeftPercent;
             _vibrationDraftRight = snapshot.RightPercent;
         }
@@ -331,6 +385,7 @@ public sealed partial class OverlayWindow
     internal void ApplyControllerVibrationMutationResult(FrontendControllerVibrationStrengthMutationResult result)
     {
         _controllerVibrationMutationInFlight = false;
+        _vibrationDraftDirty = false;
         _vibrationSnapshot = result.Snapshot;
         _vibrationDraftLeft = result.Snapshot.LeftPercent;
         _vibrationDraftRight = result.Snapshot.RightPercent;
@@ -340,6 +395,7 @@ public sealed partial class OverlayWindow
     internal void ApplyControllerVibrationMutationFailure()
     {
         _controllerVibrationMutationInFlight = false;
+        _vibrationDraftDirty = false;
         _vibrationDraftLeft = _vibrationSnapshot.LeftPercent;
         _vibrationDraftRight = _vibrationSnapshot.RightPercent;
         RenderControllerVibrationRows();

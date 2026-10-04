@@ -135,7 +135,7 @@ hold _visibleSurfaceTransition
 
 The new Profile capture/publication must never delay or become a prerequisite for neutral controller capture.
 
-Hide/Dismiss/Back/outside click must never wait for a 2-second slider debounce or page capture.
+Normal user Back/outside-click flushes valid pending edits immediately and waits only for their existing mutation settlement before sending `DismissRequested`; it never waits for the 300 ms debounce. Runtime-forced Hide and context replacement remain cancellation-oriented.
 
 ---
 
@@ -1248,7 +1248,7 @@ Do not create one global Overlay pending dictionary solely to imitate QAM.
 
 ## 23. Hide / Back / outside-click / teardown
 
-Current Hide calls:
+Runtime-forced Hide calls:
 
 ```csharp
 _deviceBinding?.CancelUnsubmittedDrafts();
@@ -1261,11 +1261,11 @@ cancel unsubmitted drafts for Device binding
 cancel unsubmitted drafts for Profile binding
 ```
 
-Then continue OQ4 Hide immediately.
+Normal user dismissal performs the flush before `DismissRequested`; incoming Runtime Hide only cancels any still-unsubmitted drafts and continues OQ4 Hide immediately.
 
 Requirements:
 
-- never await debounce;
+- never await debounce in `HideForPocAsync()`;
 - never await an already-submitted feature mutation before hiding;
 - already-submitted Runtime operation may finish independently;
 - process/window teardown disposes both bindings and suppresses obsolete callbacks;
@@ -1830,11 +1830,12 @@ Expected:
 
 ### 34.10 Hide during pending/submitted Profile mutation
 
-For both unsubmitted debounce and already-submitted mutation:
+For normal user dismissal with an unsubmitted draft and for Runtime-forced Hide during a submitted mutation:
 
-- B/Back hides immediately;
-- outside click hides immediately;
-- no 2-second close delay;
+- B/outside click submits the pending valid edit immediately before dismissing;
+- `DismissRequested` follows the existing mutation result;
+- no 300 ms debounce wait is added to the close path;
+- Runtime-forced Hide still proceeds without waiting for a submitted operation;
 - controller publisher/capture lifecycle remains correct;
 - reopen shows Runtime truth.
 

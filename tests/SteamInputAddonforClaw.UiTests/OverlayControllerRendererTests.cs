@@ -134,7 +134,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("ControllerLedEditRequested?.Invoke(settings)", controller);
         Assert.Contains("new OverlayValueRow(\"Left Motor\"", controller);
         Assert.Contains("new OverlayValueRow(\"Right Motor\"", controller);
-        Assert.Contains("await Task.Delay(500, token)", controller);
+        Assert.Contains("await Task.Delay(300, token)", controller);
         Assert.Contains("ControllerVibrationStrengthEditRequested?.Invoke(left, right)", controller);
         Assert.Contains("SendControllerLedMutationAsync", app);
         Assert.Contains("SendControllerVibrationMutationAsync", app);
