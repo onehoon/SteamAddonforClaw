@@ -1,6 +1,8 @@
 using System.IO.Pipes;
 using System.Text;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
@@ -8,7 +10,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-// Overlay v13 carries typed tab order, ClawHUD, Profile, Shortcut, and M1/M2 mapping wires alongside the
+// Overlay v14 carries typed tab order, ClawHUD, Profile, Shortcut, M1/M2, and shared production-control wires alongside the
 // QuickSettingsPageSnapshot / QuickSettingsMutationIntent / QuickSettingsMutationResult contract
 // already consumed by the Main UI / Overlay (SF-V2-04/05), inside narrow transport correlation wrappers.
 // OQ4/lifecycle regression coverage lives in OverlayTransportTests/AddonQuickSettingsTabOrderTransportTests and
@@ -23,22 +25,41 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     private static readonly QuickSettingsPageSnapshot SamplePage = QuickSettingsPresentation.BuildDevice(new FrontendDeviceQuickSettingsSnapshot(
         new FrontendCpuBoostSnapshot(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), true, true, null),
         new FrontendTdpSnapshot(true, true, new(true, new(20, 25), new(20, 25)), new(8, 30, 8, 37)),
-        new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null)));
+        new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null),
+        new FrontendBatteryChargeLimitSnapshot(true, true, true, true, 70, true, 70, null)));
 
     private static readonly QuickSettingsPageSnapshot PartialPage = QuickSettingsPresentation.BuildDevice(new FrontendDeviceQuickSettingsSnapshot(
         new FrontendCpuBoostSnapshot(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), true, true, null),
         FrontendTdpSnapshot.Unavailable,
-        new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null)));
+        new FrontendPowerModeSnapshot(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null),
+        FrontendBatteryChargeLimitSnapshot.Unavailable));
 
     // ---- Protocol / handshake -----------------------------------------------------------------
 
     [Fact]
-    public void Protocol_is_v13_and_frontend_transport_is_current()
+    public void Protocol_is_v14_and_frontend_transport_is_current()
     {
-        Assert.Equal(13, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(14, OverlayTransportProtocol.CurrentVersion);
         // The desktop frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(48, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(49, FrontendTransportProtocol.CurrentVersion);
+    }
+
+    [Fact]
+    public void Frontend_settings_mutation_result_rejects_invalid_shared_led_settings()
+    {
+        var validSettings = new FrontendSettingsSnapshot(FrontendLogLevel.Off, false, FrontButtonMappingSettings.Default);
+        var valid = new OverlayWireMessage(OverlayTransportProtocol.CurrentVersion,
+            OverlayWireMessageKind.ControllerLedMutationResult,
+            FrontendSettingsMutationResponse: new(1, true, null, validSettings, true));
+        var invalid = valid with
+        {
+            FrontendSettingsMutationResponse = new(1, true, null,
+                validSettings with { ControllerLed = new ControllerLedSettings(true, 101, 0, 0, 0) }, true),
+        };
+
+        Assert.True(OverlayProductionControlsWireValidation.IsValidSettingsMutationResult(valid, led: true));
+        Assert.False(OverlayProductionControlsWireValidation.IsValidSettingsMutationResult(invalid, led: true));
     }
 
     [Fact]
@@ -86,7 +107,7 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     }
 
     [Fact]
-    public async Task A_v7_peer_is_rejected_by_the_v8_server()
+    public async Task A_v13_peer_is_rejected_by_the_v14_server()
     {
         var pipeName = Pipe();
         await using var server = new NamedPipeOverlayServer(pipeName);
@@ -95,10 +116,115 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         await client.ConnectAsync(5000);
         using var writeGate = new SemaphoreSlim(1, 1);
 
-        await OverlayWireCodec.WriteAsync(client, new(7, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(client, new(13, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
         var response = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
 
         Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);
+    }
+
+    [Fact]
+    public async Task Existing_shared_settings_and_vibration_contracts_round_trip_for_controller_and_setting_controls()
+    {
+        var pipeName = Pipe();
+        var led = new ControllerLedSettings(true, 37, 1, 2, 254);
+        var settings = new FrontendSettingsSnapshot(FrontendLogLevel.Info, false, FrontButtonMappingSettings.Default)
+        {
+            ControllerLed = led,
+            QuickSettingsCurrentPowerSourceOnly = true,
+        };
+        var vibration = new FrontendControllerVibrationStrengthSnapshot(true, true, false, 35, 70, "Ready");
+        var settingsRequests = new List<OverlayFrontendSettingsMutationRequest>();
+        var vibrationRequests = new List<OverlayControllerVibrationMutationRequest>();
+        await using var server = new NamedPipeOverlayServer(
+            pipeName,
+            captureFrontendSettings: _ => Task.FromResult(new OverlayFrontendSettingsMutationResponse(0, true, null, settings, true)),
+            mutateFrontendSettings: (request, _) =>
+            {
+                settingsRequests.Add(request);
+                settings = request.ControllerLed is { } nextLed
+                    ? settings with { ControllerLed = nextLed }
+                    : settings with { QuickSettingsCurrentPowerSourceOnly = request.CurrentPowerSourceOnly!.Value };
+                return Task.FromResult(new OverlayFrontendSettingsMutationResponse(request.RequestId, true, null, settings, true));
+            },
+            captureControllerVibration: _ => Task.FromResult(vibration),
+            mutateControllerVibration: (request, _) =>
+            {
+                vibrationRequests.Add(request);
+                vibration = vibration with { LeftPercent = request.LeftPercent, RightPercent = request.RightPercent };
+                return Task.FromResult(new FrontendControllerVibrationStrengthMutationResult(
+                    FrontendControllerVibrationStrengthMutationOutcome.Succeeded, vibration, null));
+            });
+        await server.StartAsync();
+
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var settingsReceived = new TaskCompletionSource<(FrontendSettingsSnapshot, bool, bool)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vibrationReceived = new TaskCompletionSource<FrontendControllerVibrationStrengthSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.FrontendSettingsStateReceived += (snapshot, available, settingsAvailable) => settingsReceived.TrySetResult((snapshot, available, settingsAvailable));
+        client.ControllerVibrationStateReceived += snapshot => vibrationReceived.TrySetResult(snapshot);
+        var run = client.RunAsync(_ => Task.CompletedTask);
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        Assert.True(await server.SendFrontendSettingsStateAsync(new(0, true, null, settings, true)));
+        Assert.True(await server.SendControllerVibrationStateAsync(vibration));
+        var receivedSettings = await settingsReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(led, receivedSettings.Item1.ControllerLed);
+        Assert.True(receivedSettings.Item1.QuickSettingsCurrentPowerSourceOnly);
+        Assert.True(receivedSettings.Item2);
+        Assert.True(receivedSettings.Item3);
+        Assert.Equal(vibration, await vibrationReceived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        var nextLed = new ControllerLedSettings(false, 37, 1, 2, 254);
+        var ledResult = await client.SendControllerLedMutationAsync(nextLed);
+        Assert.Equal(nextLed, ledResult.Settings.ControllerLed);
+        var settingResult = await client.SendCurrentPowerSourceMutationAsync(false);
+        Assert.False(settingResult.Settings.QuickSettingsCurrentPowerSourceOnly);
+        var vibrationResult = await client.SendControllerVibrationMutationAsync(40, 70);
+        Assert.Equal(40, vibrationResult.Snapshot.LeftPercent);
+        Assert.Equal(70, vibrationResult.Snapshot.RightPercent);
+        Assert.Equal(nextLed, settingsRequests[0].ControllerLed);
+        Assert.Null(settingsRequests[0].CurrentPowerSourceOnly);
+        Assert.Null(settingsRequests[1].ControllerLed);
+        Assert.False(settingsRequests[1].CurrentPowerSourceOnly);
+        Assert.Equal((40, 70), (vibrationRequests.Single().LeftPercent, vibrationRequests.Single().RightPercent));
+
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Malformed_controller_led_mutation_is_rejected_before_runtime_delegate()
+    {
+        var pipeName = Pipe();
+        var mutationCount = 0;
+        await using var server = new NamedPipeOverlayServer(pipeName,
+            mutateFrontendSettings: (request, _) =>
+            {
+                Interlocked.Increment(ref mutationCount);
+                return Task.FromResult(new OverlayFrontendSettingsMutationResponse(request.RequestId, true, null,
+                    new FrontendSettingsSnapshot(FrontendLogLevel.Off, false, FrontButtonMappingSettings.Default), true));
+            });
+        await server.StartAsync();
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(OverlayWireMessageKind.HandshakeAccepted, (await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+        Assert.Equal(OverlayWireMessageKind.TabOrderState, (await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.State, State: OverlayState.Ready), writeGate, CancellationToken.None);
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        var generation = server.ReadyGeneration!.Value;
+
+        var showTask = server.SendCommandAsync(OverlayCommand.Show);
+        var show = await OverlayWireCodec.ReadAsync(pipe, CancellationToken.None);
+        Assert.Equal(OverlayCommand.Show, show.Command);
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.State, State: OverlayState.Visible), writeGate, CancellationToken.None);
+        Assert.True(await showTask);
+
+        await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ControllerLedMutationRequest,
+            FrontendSettingsMutationRequest: new(1, ControllerLed: new ControllerLedSettings(true, 101, 0, 0, 0))), writeGate, CancellationToken.None);
+        Assert.True(await server.WaitForDisconnectedAsync(generation, TimeSpan.FromSeconds(5)));
+        Assert.Equal(0, Volatile.Read(ref mutationCount));
     }
 
     [Fact]

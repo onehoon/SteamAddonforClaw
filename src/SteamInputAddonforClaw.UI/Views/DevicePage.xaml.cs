@@ -106,7 +106,7 @@ public sealed partial class DevicePage : UserControl
         if (_frontend is null) return;
         // Shared Frontend V2 (SF-V2-01): one aggregate read replaces the three separate Device
         // captures. A failed child capture is isolated server-side into that child's Unavailable
-        // snapshot (Render/RenderTdp/RenderPowerMode already render Unavailable correctly), so only
+        // snapshot (all four render methods handle Unavailable), so only
         // a whole-transport failure needs to be handled here -- and it must fail closed rather than
         // leave stale editable controls (work order section 10.4).
         FrontendDeviceQuickSettingsSnapshot snapshot;
@@ -123,14 +123,7 @@ public sealed partial class DevicePage : UserControl
         Render(snapshot.CpuBoost);
         RenderTdp(snapshot.Tdp);
         RenderPowerMode(snapshot.PowerMode);
-        FrontendBatteryChargeLimitSnapshot battery;
-        try { battery = await _frontend.CaptureBatteryChargeLimitAsync(); }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Device", "Battery charge-limit snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
-            battery = FrontendBatteryChargeLimitSnapshot.Unavailable;
-        }
-        RenderBatteryChargeLimit(battery);
+        RenderBatteryChargeLimit(snapshot.BatteryChargeLimit);
     }
 
     private void RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot snapshot, bool preserveDirtyDraft = true)

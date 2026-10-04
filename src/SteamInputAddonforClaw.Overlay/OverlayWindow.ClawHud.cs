@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow
 {
-    private enum SettingCardId { ClawHud, TabOrder }
+    private enum SettingCardId { ClawHud, QuickSettings, TabOrder }
 
     private sealed record SettingCardView(
         SettingCardId Id,
@@ -20,6 +20,7 @@ public sealed partial class OverlayWindow
         OverlayRow Row);
 
     private readonly List<OverlayRow> _clawHudRows = new();
+    private readonly List<OverlayRow> _quickSettingsRows = new();
     private OverlayToggleRow? _clawHudEnabledRow;
     private OverlayValueRow? _clawHudDisplayModeRow;
     private OverlayValueRow? _clawHudSizeRow;
@@ -30,25 +31,35 @@ public sealed partial class OverlayWindow
     private OverlayToggleRow? _clawHudVrrRow;
     private SettingCardView? _clawHudCard;
     private SettingCardView? _tabOrderCard;
+    private SettingCardView? _quickSettingsCard;
+    private OverlayToggleRow? _quickSettingsCurrentPowerSourceOnlyRow;
+    private bool _quickSettingsCurrentPowerSourceOnly;
+    private bool _quickSettingsSettingsAvailable;
+    private bool _quickSettingsMutationInFlight;
     private SettingCardId? _expandedSettingCard;
     private FrontendClawHudSnapshot? _clawHudSnapshot;
     private bool _clawHudMutationInFlight;
 
     internal event Action<bool>? ClawHudEnabledRequested;
     internal event Action<FrontendClawHudMutationIntent>? ClawHudSettingMutationRequested;
+    internal event Action<bool>? QuickSettingsCurrentPowerSourceOnlyRequested;
 
     private FrameworkElement BuildSettingPage(List<OverlayRow> rows)
     {
         _clawHudRows.Clear();
+        _quickSettingsRows.Clear();
 
         var clawHudDetails = BuildClawHudPage();
+        var quickSettingsDetails = BuildQuickSettingsPage();
         var tabOrderDetails = BuildTabOrderEditorPage();
 
         _clawHudCard = CreateSettingCard(SettingCardId.ClawHud, "ClawHUD", clawHudDetails);
+        _quickSettingsCard = CreateSettingCard(SettingCardId.QuickSettings, "Quick Settings", quickSettingsDetails);
         _tabOrderCard = CreateSettingCard(SettingCardId.TabOrder, "Tab Order", tabOrderDetails);
 
         var root = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
         root.Children.Add(_clawHudCard.Container);
+        root.Children.Add(_quickSettingsCard.Container);
         root.Children.Add(_tabOrderCard.Container);
         rows.AddRange(BuildSettingRows(_tabState.Order));
         return root;
@@ -120,6 +131,9 @@ public sealed partial class OverlayWindow
         if (_clawHudCard is not null)
             rows.Add(_clawHudCard.Row);
         rows.AddRange(_clawHudRows);
+        if (_quickSettingsCard is not null)
+            rows.Add(_quickSettingsCard.Row);
+        rows.AddRange(_quickSettingsRows);
         if (_tabOrderCard is not null)
             rows.Add(_tabOrderCard.Row);
 
@@ -155,6 +169,7 @@ public sealed partial class OverlayWindow
     {
         _expandedSettingCard = id;
         UpdateSettingCardVisual(_clawHudCard);
+        UpdateSettingCardVisual(_quickSettingsCard);
         UpdateSettingCardVisual(_tabOrderCard);
 
         if (_tabState.SelectedTab != AddonQuickSettingsTabId.Setting)
@@ -181,9 +196,12 @@ public sealed partial class OverlayWindow
             $"{card.Title}, {(expanded ? "collapse" : "expand")} settings");
     }
 
-    private SettingCardView GetSettingCard(SettingCardId id) => id == SettingCardId.ClawHud
-        ? _clawHudCard ?? throw new InvalidOperationException("ClawHUD settings card has not been built.")
-        : _tabOrderCard ?? throw new InvalidOperationException("Tab Order settings card has not been built.");
+    private SettingCardView GetSettingCard(SettingCardId id) => id switch
+    {
+        SettingCardId.ClawHud => _clawHudCard ?? throw new InvalidOperationException("ClawHUD settings card has not been built."),
+        SettingCardId.QuickSettings => _quickSettingsCard ?? throw new InvalidOperationException("Quick Settings card has not been built."),
+        _ => _tabOrderCard ?? throw new InvalidOperationException("Tab Order settings card has not been built."),
+    };
 
     private int? FindSettingRowIndex(IReadOnlyList<OverlayRow> rows, Border container)
     {
@@ -209,7 +227,56 @@ public sealed partial class OverlayWindow
 
         _expandedSettingCard = null;
         UpdateSettingCardVisual(_clawHudCard);
+        UpdateSettingCardVisual(_quickSettingsCard);
         UpdateSettingCardVisual(_tabOrderCard);
+    }
+
+    private StackPanel BuildQuickSettingsPage()
+    {
+        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
+        _quickSettingsCurrentPowerSourceOnlyRow = new OverlayToggleRow(
+            "Show only current power source", RequestQuickSettingsCurrentPowerSourceOnly);
+        section.Children.Add(_quickSettingsCurrentPowerSourceOnlyRow.Container);
+        _quickSettingsRows.Add(CreateSettingDetailRow(
+            new OverlayRow(_quickSettingsCurrentPowerSourceOnlyRow.Container, _quickSettingsCurrentPowerSourceOnlyRow.Capabilities),
+            SettingCardId.QuickSettings));
+        RegisterRowPointerSelection(_quickSettingsCurrentPowerSourceOnlyRow.Container);
+        return section;
+    }
+
+    internal void ApplyQuickSettingsCurrentPowerSourceOnly(bool enabled, bool available)
+    {
+        _quickSettingsCurrentPowerSourceOnly = enabled;
+        _quickSettingsSettingsAvailable = available;
+        RenderQuickSettingsCurrentPowerSourceRow();
+    }
+
+    private void RequestQuickSettingsCurrentPowerSourceOnly(bool enabled)
+    {
+        if (!_quickSettingsSettingsAvailable || _quickSettingsMutationInFlight) return;
+        _quickSettingsMutationInFlight = true;
+        RenderQuickSettingsCurrentPowerSourceRow();
+        QuickSettingsCurrentPowerSourceOnlyRequested?.Invoke(enabled);
+    }
+
+    private void SetQuickSettingsCurrentPowerSourceMutationInFlight(bool inFlight)
+    {
+        _quickSettingsMutationInFlight = inFlight;
+        RenderQuickSettingsCurrentPowerSourceRow();
+    }
+
+    internal void RenderQuickSettingsCurrentPowerSourceRow()
+    {
+        _quickSettingsCurrentPowerSourceOnlyRow?.ApplyState(
+            _quickSettingsSettingsAvailable && !_quickSettingsMutationInFlight,
+            _quickSettingsCurrentPowerSourceOnly);
+        if (_tabState.SelectedTab == AddonQuickSettingsTabId.Setting)
+        {
+            var preferredIndex = _rowSelection.SelectedIndex;
+            if (!_quickSettingsMutationInFlight)
+                _rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Setting), preferredIndex);
+            ApplyRowSelectionVisual();
+        }
     }
 
     private StackPanel BuildClawHudPage()

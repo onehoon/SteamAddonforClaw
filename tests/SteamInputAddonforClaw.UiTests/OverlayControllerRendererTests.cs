@@ -7,19 +7,19 @@ namespace SteamInputAddonforClaw.UiTests;
 public sealed class OverlayControllerRendererTests
 {
     [Fact]
-    public void Controller_tab_renders_exactly_two_runtime_owned_discrete_mapping_rows()
+    public void Controller_tab_keeps_two_runtime_owned_mapping_rows_and_adds_existing_shared_controls()
     {
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
 
         Assert.Contains("AddonQuickSettingsTabId.Controller => BuildControllerPage(rows)", shell);
         Assert.DoesNotContain("AddonQuickSettingsTabId.Controller => CreatePlaceholderPage", shell);
-        Assert.Equal(1, CountOccurrences(controller, "CreateOverlaySectionCard("));
+        Assert.Equal(3, CountOccurrences(controller, "CreateOverlaySectionCard("));
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M1\""));
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M2\""));
         Assert.Equal(2, CountOccurrences(controller, "OverlayValueButtonKind.DiscreteChoice"));
-        Assert.Contains("AddBackButtonMappingRow(rowsPanel, rows, m1Row)", controller);
-        Assert.Contains("AddBackButtonMappingRow(rowsPanel, rows, m2Row)", controller);
+        Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m1Row)", controller);
+        Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m2Row)", controller);
         Assert.Contains("RegisterRowPointerSelection(row.Container)", controller);
         Assert.Contains("rows.Add(new(row.Container, row.Capabilities))", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
@@ -41,7 +41,7 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("_m1MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M1)", controller);
         Assert.Contains("_m2MappingRow?.ApplyState(enabled, minimum, maximum, 1, (double)_backButtonMapping.M2)", controller);
         Assert.Contains("var preferredIndex = _rowSelection.SelectedIndex;", controller);
-        Assert.Contains("if (!_backButtonMutationInFlight)", controller);
+        Assert.Contains("if (!_backButtonMutationInFlight && !_controllerLedMutationInFlight && !_controllerVibrationMutationInFlight)", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
         Assert.Contains("HandleBackButtonMappingStateAsync", app);
         Assert.Contains("BackButtonMappingEditRequested", app);
@@ -96,15 +96,52 @@ public sealed class OverlayControllerRendererTests
         var build = controller[controller.IndexOf("private FrameworkElement BuildControllerPage", StringComparison.Ordinal)..
             controller.IndexOf("private void AddBackButtonMappingRow", StringComparison.Ordinal)];
 
-        Assert.Contains("Text = \"M1 / M2\"", build);
-        Assert.Contains("Spacing = OverlayQamResources.Get(\"QamSectionHeaderSpacing\", 4.0)", build);
-        Assert.Contains("var rowsPanel = new StackPanel { Spacing = OverlayQamResources.Get(\"QamRowSpacing\", 0.0) }", build);
-        Assert.Contains("AddBackButtonMappingRow(rowsPanel, rows, m1Row)", build);
-        Assert.Contains("AddBackButtonMappingRow(rowsPanel, rows, m2Row)", build);
+        Assert.Contains("CreateControllerSection(\"M1 / M2\")", build);
+        Assert.Contains("CreateControllerSection(\"Joystick LED\")", build);
+        Assert.Contains("CreateControllerSection(\"Vibration Strength\")", build);
+        Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m1Row)", build);
+        Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m2Row)", build);
         Assert.DoesNotContain("_backButtonStatusText", controller);
         Assert.DoesNotContain("BackButtonMappingCaption", controller);
         Assert.Contains("FailureMessage = response.Succeeded", controller);
         Assert.Contains("RenderBackButtonMappingRows();", controller);
+    }
+
+    [Fact]
+    public void Controller_shared_LED_and_vibration_use_existing_authority_without_test_operations()
+    {
+        var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+
+        Assert.Contains("new OverlayToggleRow(\"Enabled\", RequestControllerLedEnabled)", controller);
+        Assert.Contains("new OverlayValueRow(\"Brightness\"", controller);
+        Assert.Contains("new TextBlock { Text = \"Color\"", controller);
+        Assert.Contains("new OverlayValueRow(\"Red\"", controller);
+        Assert.Contains("new OverlayValueRow(\"Green\"", controller);
+        Assert.Contains("new OverlayValueRow(\"Blue\"", controller);
+        Assert.Contains("_controllerLedRedRow.Container, _controllerLedRedRow.Capabilities", controller);
+        Assert.Contains("_controllerLedGreenRow.Container, _controllerLedGreenRow.Capabilities", controller);
+        Assert.Contains("_controllerLedBlueRow.Container, _controllerLedBlueRow.Capabilities", controller);
+        Assert.Contains("RequestControllerLedRgb(int? red, int? green, int? blue)", controller);
+        Assert.Contains("Red = (byte)(red ?? _controllerLed.Red)", controller);
+        Assert.Contains("Green = (byte)(green ?? _controllerLed.Green)", controller);
+        Assert.Contains("Blue = (byte)(blue ?? _controllerLed.Blue)", controller);
+        Assert.Contains("_controllerLedRedRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Red)", controller);
+        Assert.Contains("_controllerLedGreenRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Green)", controller);
+        Assert.Contains("_controllerLedBlueRow?.ApplyState(colorAvailable, 0, 255, 1, _controllerLed.Blue)", controller);
+        Assert.DoesNotContain("ColorPicker", controller);
+        Assert.DoesNotContain("ColorChanged", controller);
+        Assert.Contains("ControllerLedEditRequested?.Invoke(settings)", controller);
+        Assert.Contains("new OverlayValueRow(\"Left Motor\"", controller);
+        Assert.Contains("new OverlayValueRow(\"Right Motor\"", controller);
+        Assert.Contains("await Task.Delay(500, token)", controller);
+        Assert.Contains("ControllerVibrationStrengthEditRequested?.Invoke(left, right)", controller);
+        Assert.Contains("SendControllerLedMutationAsync", app);
+        Assert.Contains("SendControllerVibrationMutationAsync", app);
+        Assert.DoesNotContain("TestControllerVibrationMotorAsync", controller);
+        Assert.DoesNotContain("TestControllerVibrationMotorAsync", app);
+        Assert.DoesNotContain("RunControllerVibrationProfileWriteProbeAsync", controller);
+        Assert.DoesNotContain("MsiClaw", controller);
     }
 
     private static string ReadSource(params string[] parts)

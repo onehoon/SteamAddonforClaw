@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
@@ -39,8 +40,22 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     private long _pendingBackButtonMappingRequestId;
     private BackButtonMappingSettings? _pendingBackButtonMapping;
     private TaskCompletionSource<OverlayBackButtonMappingMutationResponse>? _pendingBackButtonMappingMutation;
+    private readonly SemaphoreSlim _productionSettingsMutationGate = new(1, 1);
+    private readonly object _productionSettingsMutationSync = new();
+    private long _productionSettingsRequestSequence;
+    private long _pendingProductionSettingsRequestId;
+    private bool _pendingProductionSettingsIsLed;
+    private TaskCompletionSource<OverlayFrontendSettingsMutationResponse>? _pendingProductionSettingsMutation;
+    private readonly SemaphoreSlim _controllerVibrationMutationGate = new(1, 1);
+    private readonly object _controllerVibrationMutationSync = new();
+    private long _controllerVibrationRequestSequence;
+    private long _pendingControllerVibrationRequestId;
+    private TaskCompletionSource<OverlayControllerVibrationMutationResponse>? _pendingControllerVibrationMutation;
     private NamedPipeClientStream? _pipe;
     private int _disposed;
+
+    internal event Action<FrontendSettingsSnapshot, bool, bool>? FrontendSettingsStateReceived;
+    internal event Action<FrontendControllerVibrationStrengthSnapshot>? ControllerVibrationStateReceived;
 
     internal NamedPipeOverlayClient(string pipeName) => _pipeName = pipeName;
 
@@ -119,13 +134,13 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.Handshake), _writeGate, linked.Token).ConfigureAwait(false);
         var accepted = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
         if (accepted.Kind != OverlayWireMessageKind.HandshakeAccepted || accepted.ProtocolVersion != OverlayTransportProtocol.CurrentVersion ||
-            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(accepted))
+            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(accepted) || OverlayProductionControlsWireValidation.HasPayload(accepted))
             throw new FrontendProtocolException("Overlay handshake was rejected.");
 
         // OQ5-UI-09 section 6: apply the mandatory initial authoritative order BEFORE reporting Ready.
         var initial = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
         if (initial.ProtocolVersion != OverlayTransportProtocol.CurrentVersion || initial.Kind != OverlayWireMessageKind.TabOrderState ||
-            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(initial))
+            OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(initial) || OverlayProductionControlsWireValidation.HasPayload(initial))
             throw new FrontendProtocolException("Overlay did not receive an initial tab-order state.");
         var initialOrder = ValidateTabOrderMessage(initial);
         if (tabOrderHandler is not null)
@@ -139,6 +154,11 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 var message = await OverlayWireCodec.ReadAsync(pipe, linked.Token).ConfigureAwait(false);
                 if (message.ProtocolVersion != OverlayTransportProtocol.CurrentVersion)
                     throw new FrontendProtocolException("Invalid Overlay message.");
+                if (OverlayProductionControlsWireValidation.HasPayload(message) && message.Kind is not (
+                        OverlayWireMessageKind.FrontendSettingsState or OverlayWireMessageKind.ControllerLedMutationResult
+                        or OverlayWireMessageKind.CurrentPowerSourceMutationResult or OverlayWireMessageKind.ControllerVibrationState
+                        or OverlayWireMessageKind.ControllerVibrationMutationResult))
+                    throw new FrontendProtocolException("Unexpected Overlay production-controls payload.");
                 if (message.Kind == OverlayWireMessageKind.TabOrderState)
                 {
                     var order = ValidateTabOrderMessage(message);
@@ -232,6 +252,47 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     pending?.TrySetResult(response);
                     continue;
                 }
+                if (message.Kind == OverlayWireMessageKind.FrontendSettingsState)
+                {
+                    if (!OverlayProductionControlsWireValidation.IsValidSettingsState(message))
+                        throw new FrontendProtocolException("Invalid Overlay frontend settings state.");
+                    FrontendSettingsStateReceived?.Invoke(message.FrontendSettingsState!, message.ControllerLedAvailable!.Value, message.FrontendSettingsAvailable!.Value);
+                    continue;
+                }
+                if (message.Kind == OverlayWireMessageKind.ControllerVibrationState)
+                {
+                    if (!OverlayProductionControlsWireValidation.IsValidVibrationState(message))
+                        throw new FrontendProtocolException("Invalid Overlay controller vibration state.");
+                    ControllerVibrationStateReceived?.Invoke(message.ControllerVibrationState!);
+                    continue;
+                }
+                if (message.Kind is OverlayWireMessageKind.ControllerLedMutationResult or OverlayWireMessageKind.CurrentPowerSourceMutationResult)
+                {
+                    var led = message.Kind == OverlayWireMessageKind.ControllerLedMutationResult;
+                    if (!OverlayProductionControlsWireValidation.IsValidSettingsMutationResult(message, led))
+                        throw new FrontendProtocolException("Invalid Overlay frontend settings mutation result.");
+                    var response = message.FrontendSettingsMutationResponse!;
+                    TaskCompletionSource<OverlayFrontendSettingsMutationResponse>? pending;
+                    lock (_productionSettingsMutationSync)
+                    {
+                        if (response.RequestId == _pendingProductionSettingsRequestId && led != _pendingProductionSettingsIsLed)
+                            throw new FrontendProtocolException("Overlay frontend settings mutation correlation mismatch.");
+                        pending = response.RequestId == _pendingProductionSettingsRequestId ? _pendingProductionSettingsMutation : null;
+                    }
+                    pending?.TrySetResult(response);
+                    continue;
+                }
+                if (message.Kind == OverlayWireMessageKind.ControllerVibrationMutationResult)
+                {
+                    if (!OverlayProductionControlsWireValidation.IsValidVibrationResult(message))
+                        throw new FrontendProtocolException("Invalid Overlay controller vibration mutation result.");
+                    var response = message.ControllerVibrationMutationResult!;
+                    TaskCompletionSource<OverlayControllerVibrationMutationResponse>? pending;
+                    lock (_controllerVibrationMutationSync)
+                        pending = response.RequestId == _pendingControllerVibrationRequestId ? _pendingControllerVibrationMutation : null;
+                    pending?.TrySetResult(response);
+                    continue;
+                }
                 if (message.Kind == OverlayWireMessageKind.ProfileCatalogState)
                 {
                     if (message.ProfileCatalogState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message) || !OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfileCatalogState))
@@ -285,6 +346,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         {
             CancelPendingShortcutExecution();
             CancelPendingBackButtonMappingMutation();
+            CancelPendingProductionControlMutations();
         }
     }
 
@@ -524,6 +586,102 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         }
     }
 
+    internal Task<OverlayFrontendSettingsMutationResponse> SendControllerLedMutationAsync(ControllerLedSettings settings, CancellationToken token = default) =>
+        SendFrontendSettingsMutationAsync(new OverlayFrontendSettingsMutationRequest(0, ControllerLed: settings), led: true, token);
+
+    internal Task<OverlayFrontendSettingsMutationResponse> SendCurrentPowerSourceMutationAsync(bool enabled, CancellationToken token = default) =>
+        SendFrontendSettingsMutationAsync(new OverlayFrontendSettingsMutationRequest(0, CurrentPowerSourceOnly: enabled), led: false, token);
+
+    private async Task<OverlayFrontendSettingsMutationResponse> SendFrontendSettingsMutationAsync(OverlayFrontendSettingsMutationRequest request, bool led, CancellationToken token)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        if (led && ControllerLedSettingsValidation.Validate(request.ControllerLed) is not null)
+            throw new FrontendProtocolException("Invalid Overlay controller LED settings.");
+        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
+        await _productionSettingsMutationGate.WaitAsync(token).ConfigureAwait(false);
+        var requestId = Interlocked.Increment(ref _productionSettingsRequestSequence);
+        try
+        {
+            var completion = new TaskCompletionSource<OverlayFrontendSettingsMutationResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_productionSettingsMutationSync)
+            {
+                _pendingProductionSettingsRequestId = requestId;
+                _pendingProductionSettingsIsLed = led;
+                _pendingProductionSettingsMutation = completion;
+            }
+            var kind = led ? OverlayWireMessageKind.ControllerLedMutationRequest : OverlayWireMessageKind.CurrentPowerSourceMutationRequest;
+            var correlated = request with { RequestId = requestId };
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, kind, FrontendSettingsMutationRequest: correlated), _writeGate, linked.Token).ConfigureAwait(false);
+            return await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_productionSettingsMutationSync)
+            {
+                if (_pendingProductionSettingsRequestId == requestId)
+                {
+                    _pendingProductionSettingsRequestId = 0;
+                    _pendingProductionSettingsMutation = null;
+                }
+            }
+            _productionSettingsMutationGate.Release();
+        }
+    }
+
+    internal async Task<FrontendControllerVibrationStrengthMutationResult> SendControllerVibrationMutationAsync(int leftPercent, int rightPercent, CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        if (leftPercent is < 0 or > 100 || rightPercent is < 0 or > 100)
+            throw new FrontendProtocolException("Invalid Overlay controller vibration values.");
+        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
+        await _controllerVibrationMutationGate.WaitAsync(token).ConfigureAwait(false);
+        var requestId = Interlocked.Increment(ref _controllerVibrationRequestSequence);
+        try
+        {
+            var completion = new TaskCompletionSource<OverlayControllerVibrationMutationResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_controllerVibrationMutationSync)
+            {
+                _pendingControllerVibrationRequestId = requestId;
+                _pendingControllerVibrationMutation = completion;
+            }
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            var request = new OverlayControllerVibrationMutationRequest(requestId, leftPercent, rightPercent);
+            await OverlayWireCodec.WriteAsync(pipe, new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ControllerVibrationMutationRequest,
+                ControllerVibrationMutationRequest: request), _writeGate, linked.Token).ConfigureAwait(false);
+            var response = await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+            return response.Result;
+        }
+        finally
+        {
+            lock (_controllerVibrationMutationSync)
+            {
+                if (_pendingControllerVibrationRequestId == requestId)
+                {
+                    _pendingControllerVibrationRequestId = 0;
+                    _pendingControllerVibrationMutation = null;
+                }
+            }
+            _controllerVibrationMutationGate.Release();
+        }
+    }
+
+    private void CancelPendingProductionControlMutations()
+    {
+        lock (_productionSettingsMutationSync)
+        {
+            _pendingProductionSettingsMutation?.TrySetCanceled();
+            _pendingProductionSettingsMutation = null;
+            _pendingProductionSettingsRequestId = 0;
+        }
+        lock (_controllerVibrationMutationSync)
+        {
+            _pendingControllerVibrationMutation?.TrySetCanceled();
+            _pendingControllerVibrationMutation = null;
+            _pendingControllerVibrationRequestId = 0;
+        }
+    }
+
     private void CancelPendingBackButtonMappingMutation()
     {
         TaskCompletionSource<OverlayBackButtonMappingMutationResponse>? pending;
@@ -594,6 +752,10 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
             _shortcutExecutionGate.Release();
             await _backButtonMappingMutationGate.WaitAsync().ConfigureAwait(false);
             _backButtonMappingMutationGate.Release();
+            await _productionSettingsMutationGate.WaitAsync().ConfigureAwait(false);
+            _productionSettingsMutationGate.Release();
+            await _controllerVibrationMutationGate.WaitAsync().ConfigureAwait(false);
+            _controllerVibrationMutationGate.Release();
 
             _writeGate.Dispose();
             _quickSettingsMutationGate.Dispose();
@@ -601,6 +763,8 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
             _tabOrderMoveGate.Dispose();
             _shortcutExecutionGate.Dispose();
             _backButtonMappingMutationGate.Dispose();
+            _productionSettingsMutationGate.Dispose();
+            _controllerVibrationMutationGate.Dispose();
             _lifetime.Dispose();
         }
     }

@@ -24,6 +24,8 @@ public enum QuickSettingsSectionId
     ProfilePowerMode,
     ProfileFpsLimit,
     ProfileResolution,
+
+    DeviceBatteryChargeLimit,
 }
 
 public enum QuickSettingsRowId
@@ -62,6 +64,9 @@ public enum QuickSettingsRowId
     ProfileFpsLimitAc,
     ProfileFpsLimitDc,
     ProfileResolution,
+
+    DeviceBatteryChargeLimitEnabled,
+    DeviceBatteryChargeLimitPercent,
 }
 
 public enum QuickSettingsControlKind { Toggle, Slider }

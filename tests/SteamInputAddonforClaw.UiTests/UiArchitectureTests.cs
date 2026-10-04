@@ -171,11 +171,14 @@ public sealed class UiArchitectureTests
         Assert.Contains("Render(snapshot.CpuBoost);", refresh, StringComparison.Ordinal);
         Assert.Contains("RenderTdp(snapshot.Tdp);", refresh, StringComparison.Ordinal);
         Assert.Contains("RenderPowerMode(snapshot.PowerMode);", refresh, StringComparison.Ordinal);
+        Assert.Contains("RenderBatteryChargeLimit(snapshot.BatteryChargeLimit);", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureBatteryChargeLimitAsync()", refresh, StringComparison.Ordinal);
         // Whole-transport failure fails closed: all three children render Unavailable and the TDP
         // dirty draft is not preserved as if it were still authoritative/editable (section 10.4).
         Assert.Contains("Render(FrontendCpuBoostSnapshot.Unavailable);", refresh, StringComparison.Ordinal);
         Assert.Contains("RenderTdp(FrontendTdpSnapshot.Unavailable, preserveDirtyDraft: false);", refresh, StringComparison.Ordinal);
         Assert.Contains("RenderPowerMode(FrontendPowerModeSnapshot.Unavailable);", refresh, StringComparison.Ordinal);
+        Assert.Contains("RenderBatteryChargeLimit(FrontendBatteryChargeLimitSnapshot.Unavailable, preserveDirtyDraft: false);", refresh, StringComparison.Ordinal);
 
         // Center M keeps its own separate, reboot-bound page-entry refresh.
         Assert.Contains("_ = RefreshCenterMStartupAsync();", page, StringComparison.Ordinal);
@@ -264,7 +267,10 @@ public sealed class UiArchitectureTests
         Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\" Grid.Column=\"2\" VerticalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Grid.Row=\"1\" Grid.Column=\"1\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsExpander x:Name=\"BatteryChargeLimitCard\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("CaptureBatteryChargeLimitAsync", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("RenderBatteryChargeLimit(snapshot.BatteryChargeLimit)", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureBatteryChargeLimitAsync", codeBehind, StringComparison.Ordinal);
+        var frontendContracts = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Contracts/Frontend/FrontendContracts.cs"));
+        Assert.Contains("CaptureBatteryChargeLimitAsync", frontendContracts, StringComparison.Ordinal);
         Assert.Contains("SetDeviceBatteryChargeLimitPercentAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PointerCaptureLost", xaml, StringComparison.Ordinal);
         Assert.Contains("KeyUp", xaml, StringComparison.Ordinal);

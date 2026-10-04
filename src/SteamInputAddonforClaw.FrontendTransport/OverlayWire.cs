@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
@@ -36,11 +37,12 @@ internal static class OverlayTransportProtocol
     // correlated execution results. A v11 peer must fail the handshake; no compatibility shim.
     // Version 13: adds Runtime-owned global Xbox360 M1/M2 mapping state and one correlated
     // whole-record mutation. A v12 peer must fail the handshake; no compatibility shim.
-    internal const int CurrentVersion = 13;
+    // Version 14 adds shared settings and vibration state/mutation frames.
+    internal const int CurrentVersion = 14;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ProfileCatalogRequest, ProfileCatalogState, ProfilePageRequest, ProfilePageResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ProfileCatalogRequest, ProfileCatalogState, ProfilePageRequest, ProfilePageResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult }
 internal enum OverlayCommand { Show, Hide, Shutdown }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
@@ -91,6 +93,11 @@ internal sealed record OverlayBackButtonMappingMutationResponse(
     string? FailureMessage,
     OverlayBackButtonMappingState State);
 
+internal sealed record OverlayFrontendSettingsMutationRequest(long RequestId, ControllerLedSettings? ControllerLed = null, bool? CurrentPowerSourceOnly = null);
+internal sealed record OverlayFrontendSettingsMutationResponse(long RequestId, bool Succeeded, string? FailureMessage, FrontendSettingsSnapshot Settings, bool ControllerLedAvailable, bool SettingsAvailable = true);
+internal sealed record OverlayControllerVibrationMutationRequest(long RequestId, int LeftPercent, int RightPercent);
+internal sealed record OverlayControllerVibrationMutationResponse(long RequestId, FrontendControllerVibrationStrengthMutationResult Result);
+
 internal sealed record OverlayWireMessage(
     int ProtocolVersion,
     OverlayWireMessageKind Kind,
@@ -115,4 +122,12 @@ internal sealed record OverlayWireMessage(
     OverlayShortcutExecuteResponse? ShortcutExecuteResult = null,
     OverlayBackButtonMappingState? BackButtonMappingState = null,
     OverlayBackButtonMappingMutationRequest? BackButtonMappingMutationRequest = null,
-    OverlayBackButtonMappingMutationResponse? BackButtonMappingMutationResponse = null);
+    OverlayBackButtonMappingMutationResponse? BackButtonMappingMutationResponse = null,
+    FrontendSettingsSnapshot? FrontendSettingsState = null,
+    bool? ControllerLedAvailable = null,
+    bool? FrontendSettingsAvailable = null,
+    OverlayFrontendSettingsMutationRequest? FrontendSettingsMutationRequest = null,
+    OverlayFrontendSettingsMutationResponse? FrontendSettingsMutationResponse = null,
+    FrontendControllerVibrationStrengthSnapshot? ControllerVibrationState = null,
+    OverlayControllerVibrationMutationRequest? ControllerVibrationMutationRequest = null,
+    OverlayControllerVibrationMutationResponse? ControllerVibrationMutationResult = null);

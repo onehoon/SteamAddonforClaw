@@ -86,12 +86,13 @@ internal static class QuickSettingsPresentation
     internal static readonly IReadOnlyList<QuickSettingsDiscreteOption> PowerModeDiscreteOptions =
         [.. PowerModeOptions.Select(o => new QuickSettingsDiscreteOption((int)o.Mode, o.Label))];
 
-    /// <summary>Frozen Device section/row order (work order section 15): TDP, then CPU Boost, then
-    /// Windows Power Mode. One child being unavailable never affects the others (section 19).</summary>
+    /// <summary>Frozen Device section/row order: Battery Charge Limit, TDP, CPU Boost, then Windows
+    /// Power Mode. One child being unavailable never affects the others.</summary>
     internal static QuickSettingsPageSnapshot BuildDevice(FrontendDeviceQuickSettingsSnapshot snapshot)
     {
         IReadOnlyList<QuickSettingsSection> sections =
         [
+            BuildBatteryChargeLimitSection(snapshot.BatteryChargeLimit),
             BuildTdpSection(snapshot.Tdp),
             BuildCpuBoostSection(snapshot.CpuBoost),
             BuildPowerModeSection(snapshot.PowerMode),
@@ -99,6 +100,35 @@ internal static class QuickSettingsPresentation
 
         return new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, AppId: null, Available: true, Message: null, sections, BuildDeviceTdpLinkedConstraints(snapshot.Tdp));
     }
+
+    private static QuickSettingsSection BuildBatteryChargeLimitSection(FrontendBatteryChargeLimitSnapshot snapshot)
+    {
+        var enabled = snapshot.DesiredEnabled ?? snapshot.CurrentEnabled ?? false;
+        var percent = IsSupportedBatteryChargeLimit(snapshot.DesiredLimitPercent)
+            ? snapshot.DesiredLimitPercent!.Value
+            : IsSupportedBatteryChargeLimit(snapshot.CurrentLimitPercent)
+                ? snapshot.CurrentLimitPercent!.Value
+                : 60;
+        var rows = new QuickSettingsRow[]
+        {
+            new(QuickSettingsRowId.DeviceBatteryChargeLimitEnabled, "Enabled", QuickSettingsControlKind.Toggle,
+                Available: snapshot.Available,
+                Writable: snapshot.Available && snapshot.PersistenceWritable && snapshot.Initialized,
+                Value: snapshot.Available ? QuickSettingsValue.Boolean(enabled) : null,
+                SliderSpec: null,
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+            new(QuickSettingsRowId.DeviceBatteryChargeLimitPercent, "Limit", QuickSettingsControlKind.Slider,
+                Available: snapshot.Available,
+                Writable: snapshot.Available && snapshot.PersistenceWritable,
+                Value: snapshot.Available ? QuickSettingsValue.Integer(percent) : null,
+                SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, 60, 100, Step: 5, Suffix: "%"),
+                CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce2000),
+        };
+        return new QuickSettingsSection(QuickSettingsSectionId.DeviceBatteryChargeLimit, "Battery Charge Limit", rows, snapshot.LastFailure);
+    }
+
+    private static bool IsSupportedBatteryChargeLimit(int? percent) =>
+        percent is >= 60 and <= 100 && (percent.Value - 60) % 5 == 0;
 
     /// <summary>Shared Quick Settings Profile page projection (SF-V2-08 section 6): the exact current
     /// visible Overlay Profile product. Called only for a valid target -- an unavailable/stale Profile

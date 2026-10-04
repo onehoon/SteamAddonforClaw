@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.BackButtons;
+using SteamInputAddonforClaw.Contracts.ControllerLed;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
@@ -24,6 +25,9 @@ public partial class App : Application
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
         _window.TabOrderMoveRequested += OnTabOrderMoveRequested;
         _window.BackButtonMappingEditRequested += OnBackButtonMappingEditRequested;
+        _window.ControllerLedEditRequested += OnControllerLedEditRequested;
+        _window.ControllerVibrationStrengthEditRequested += OnControllerVibrationStrengthEditRequested;
+        _window.QuickSettingsCurrentPowerSourceOnlyRequested += OnQuickSettingsCurrentPowerSourceOnlyRequested;
         _window.ProfileCatalogRequestRequested += OnProfileCatalogRequestRequested;
         _window.ProfilePageRequestRequested += OnProfilePageRequestRequested;
         _window.ClawHudEnabledRequested += OnClawHudEnabledRequested;
@@ -69,6 +73,8 @@ public partial class App : Application
         try
         {
             _client = new NamedPipeOverlayClient(FrontendPipeEndpoint.CreateOverlayForCurrentUser());
+            _client.FrontendSettingsStateReceived += OnFrontendSettingsStateReceived;
+            _client.ControllerVibrationStateReceived += OnControllerVibrationStateReceived;
             // SF-V2-07/09 section 10.2/12.1: App owns the transport client; the Window's Device and
             // Profile bindings receive only this narrow mutation delegate, never the client itself.
             _window?.ConfigureQuickSettings(intent => _client.SendQuickSettingsMutationAsync(intent));
@@ -208,6 +214,69 @@ public partial class App : Application
             catch (Exception exception) { completion.TrySetException(exception); }
         }))
             completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for M1 / M2 mapping application."));
+        return completion.Task;
+    }
+
+    private void OnFrontendSettingsStateReceived(FrontendSettingsSnapshot settings, bool ledAvailable, bool settingsAvailable)
+    {
+        _dispatcherQueue?.TryEnqueue(() => _window?.ApplyFrontendSettingsState(settings, ledAvailable, settingsAvailable));
+    }
+
+    private void OnControllerVibrationStateReceived(FrontendControllerVibrationStrengthSnapshot snapshot)
+    {
+        _dispatcherQueue?.TryEnqueue(() => _window?.ApplyControllerVibrationState(snapshot));
+    }
+
+    private void OnControllerLedEditRequested(ControllerLedSettings settings) => _ = SendFrontendSettingsMutationAsync(
+        () => _client!.SendControllerLedMutationAsync(settings), led: true);
+
+    private void OnQuickSettingsCurrentPowerSourceOnlyRequested(bool enabled) => _ = SendFrontendSettingsMutationAsync(
+        () => _client!.SendCurrentPowerSourceMutationAsync(enabled), led: false);
+
+    private async Task SendFrontendSettingsMutationAsync(Func<Task<OverlayFrontendSettingsMutationResponse>> send, bool led)
+    {
+        try
+        {
+            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+            var result = await send().ConfigureAwait(false);
+            await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationResult(result, led)).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Controller", "Frontend settings mutation failed.", null, ("ExceptionType", exception.GetType().Name));
+            try { await DispatchControllerUiAsync(() => _window?.ApplyFrontendSettingsMutationFailure(led)).ConfigureAwait(false); }
+            catch { OverlayLog.Warn("Controller", "Could not enqueue frontend settings failure state."); }
+        }
+    }
+
+    private void OnControllerVibrationStrengthEditRequested(int leftPercent, int rightPercent) =>
+        _ = SendControllerVibrationMutationAsync(leftPercent, rightPercent);
+
+    private async Task SendControllerVibrationMutationAsync(int leftPercent, int rightPercent)
+    {
+        try
+        {
+            if (_client is null) throw new InvalidOperationException("Overlay transport client is unavailable.");
+            var result = await _client.SendControllerVibrationMutationAsync(leftPercent, rightPercent).ConfigureAwait(false);
+            await DispatchControllerUiAsync(() => _window?.ApplyControllerVibrationMutationResult(result)).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            OverlayLog.Warn("Controller", "Vibration strength mutation failed.", null, ("ExceptionType", exception.GetType().Name));
+            try { await DispatchControllerUiAsync(() => _window?.ApplyControllerVibrationMutationFailure()).ConfigureAwait(false); }
+            catch { OverlayLog.Warn("Controller", "Could not enqueue vibration failure state."); }
+        }
+    }
+
+    private Task DispatchControllerUiAsync(Action apply)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
+        {
+            try { apply(); completion.TrySetResult(); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+        }))
+            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for controller settings application."));
         return completion.Task;
     }
 

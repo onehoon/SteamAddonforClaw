@@ -588,7 +588,12 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("QamSectionCornerRadius", quickSettings);
         Assert.Contains("QamSectionBrush", quickSettings);
         Assert.Contains("CreateSettingCard(SettingCardId.ClawHud", clawHud);
+        Assert.Contains("CreateSettingCard(SettingCardId.QuickSettings", clawHud);
         Assert.Contains("CreateSettingCard(SettingCardId.TabOrder", clawHud);
+        Assert.Contains("Quick Settings", clawHud);
+        Assert.Contains("Show only current power source", clawHud);
+        Assert.Contains("ApplyQuickSettingsCurrentPowerSourceOnly(settings.QuickSettingsCurrentPowerSourceOnly, settingsAvailable)",
+            ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs"));
         Assert.Contains("section.Children.Add(row.Container);", clawHud);
         Assert.Contains("_expandedSettingCard == card", clawHud);
         Assert.Contains("ToggleSettingCard", clawHud);
@@ -598,6 +603,28 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("OverlayRowChrome.Create(grid)", valueRow);
         Assert.DoesNotContain("CreateOverlaySectionCard(BuildShortcutPage())", shell);
         Assert.DoesNotContain("CreateOverlaySectionCard(BuildProfilePage())", shell);
+    }
+
+    [Fact]
+    public void Quick_settings_setting_card_uses_the_existing_runtime_preference_and_dynamic_row_remap()
+    {
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var overlayApp = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var host = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+
+        Assert.True(clawHud.IndexOf("CreateSettingCard(SettingCardId.ClawHud", StringComparison.Ordinal)
+            < clawHud.IndexOf("CreateSettingCard(SettingCardId.QuickSettings", StringComparison.Ordinal));
+        Assert.True(clawHud.IndexOf("CreateSettingCard(SettingCardId.QuickSettings", StringComparison.Ordinal)
+            < clawHud.IndexOf("CreateSettingCard(SettingCardId.TabOrder", StringComparison.Ordinal));
+        Assert.Contains("SetQuickSettingsCurrentPowerSourceOnlyAsync(request.CurrentPowerSourceOnly!.Value", host);
+        Assert.Contains("SendCurrentPowerSourceMutationAsync", overlayApp);
+        Assert.Contains("QuickSettingsCurrentPowerSourceOnlyRequested", clawHud);
+        Assert.Contains("request.CurrentPowerSourceOnly!.Value", host);
+        Assert.Contains("FindSettingRowIndex(previousSettingRows, firstPreviousEditor.Container)", shell);
+        Assert.DoesNotContain("_clawHudRows.Count + 2", shell);
+        Assert.Contains("GetSettingCard(expanded).Row.Container", clawHud);
+        Assert.Contains("UpdateSettingCardVisual(_quickSettingsCard)", clawHud);
     }
 
     [Fact]

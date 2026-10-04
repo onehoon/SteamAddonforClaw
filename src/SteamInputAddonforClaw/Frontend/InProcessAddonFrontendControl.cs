@@ -1558,7 +1558,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     /// <summary>Shared Device Quick Settings aggregate read (Shared Frontend V2, SF-V2-01 section
-    /// 8): reuses the existing Runtime authorities/mappers, performs the three reads sequentially
+    /// 8): reuses the existing Runtime authorities/mappers, performs the four reads sequentially
     /// (no cross-feature lock/epoch/parallelization), and isolates a real capture failure to that
     /// child so healthy siblings are still returned. Read-only: never persists, mutates, reconciles,
     /// or raises <see cref="StateInvalidated"/> merely because state was requested.</summary>
@@ -1582,7 +1582,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) { AppLog.Warn("Device", "Power Mode snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
 
-        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode);
+        var batteryChargeLimit = FrontendBatteryChargeLimitSnapshot.Unavailable;
+        try { batteryChargeLimit = await CaptureBatteryChargeLimitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) { AppLog.Warn("Device", "Battery charge-limit snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
+
+        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, batteryChargeLimit);
     }
 
     /// <summary>Shared Quick Settings product seam (Shared Frontend V2, SF-V2-03 section 22/23,
