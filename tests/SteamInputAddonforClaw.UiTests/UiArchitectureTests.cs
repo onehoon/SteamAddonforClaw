@@ -267,6 +267,10 @@ public sealed class UiArchitectureTests
         Assert.Contains("ToggleSwitch x:Name=\"BatteryChargeLimitEnabledToggleSwitch\" Grid.Column=\"2\" VerticalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Grid.Row=\"1\" Grid.Column=\"1\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsExpander x:Name=\"BatteryChargeLimitCard\"", xaml, StringComparison.Ordinal);
+        Assert.True(xaml.IndexOf("x:Name=\"PowerModeExpander\"", StringComparison.Ordinal)
+            < xaml.IndexOf("x:Name=\"BatteryChargeLimitInfoBar\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("x:Name=\"BatteryChargeLimitInfoBar\"", StringComparison.Ordinal)
+            < xaml.IndexOf("x:Name=\"BatteryChargeLimitCard\"", StringComparison.Ordinal));
         Assert.Contains("RenderBatteryChargeLimit(snapshot.BatteryChargeLimit)", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureBatteryChargeLimitAsync", codeBehind, StringComparison.Ordinal);
         var frontendContracts = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.Contracts/Frontend/FrontendContracts.cs"));
@@ -638,7 +642,7 @@ public sealed class UiArchitectureTests
         var cards = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsCard").ToArray();
         var expanders = controllerXaml.Descendants().Where(element => element.Name.LocalName == "SettingsExpander").ToArray();
 
-        Assert.Equal(15, cards.Length);
+        Assert.Equal(14, cards.Length);
         Assert.Equal(5, expanders.Length);
         Assert.All(expanders, expander => Assert.Single(
             expander.Elements(), element => element.Name.LocalName == "SettingsExpander.HeaderIcon"));

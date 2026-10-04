@@ -24,6 +24,23 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public void Active_profile_show_is_a_narrow_overlay_v15_command()
+    {
+        Assert.Equal(15, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(49, FrontendTransportProtocol.CurrentVersion);
+
+        var command = new OverlayWireMessage(
+            OverlayTransportProtocol.CurrentVersion,
+            OverlayWireMessageKind.Command,
+            Command: OverlayCommand.ShowActiveProfile);
+
+        Assert.True(OverlayCommandWireValidation.IsValidCommand(command));
+        Assert.False(OverlayCommandWireValidation.IsValidCommand(command with { Navigation = OverlayNavigationAction.NavigateDown }));
+        Assert.False(OverlayCommandWireValidation.IsValidCommand(command with { ProtocolVersion = OverlayTransportProtocol.CurrentVersion - 1 }));
+        Assert.False(OverlayCommandWireValidation.IsValidCommand(command with { Command = (OverlayCommand)99 }));
+    }
+
+    [Fact]
     public async Task Oversized_overlay_frame_is_rejected()
     {
         await using var stream = new MemoryStream();
@@ -319,6 +336,34 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
+    public async Task Active_profile_show_reaches_overlay_handler_and_settles_visible()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeOverlayServer(pipeName);
+        await server.StartAsync();
+        await using var client = new NamedPipeOverlayClient(pipeName);
+        var commands = new List<OverlayCommand>();
+        var run = client.RunAsync(command =>
+        {
+            lock (commands) commands.Add(command);
+            return Task.CompletedTask;
+        });
+
+        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await server.SendCommandAsync(OverlayCommand.ShowActiveProfile));
+        Assert.Equal(OverlayState.Visible, server.State);
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
+        Assert.Equal(OverlayState.Visible, server.State);
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Hide));
+        Assert.Equal(OverlayState.Hidden, server.State);
+        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+
+        lock (commands)
+            Assert.Equal([OverlayCommand.ShowActiveProfile, OverlayCommand.Show, OverlayCommand.Hide, OverlayCommand.Shutdown], commands);
+    }
+
+    [Fact]
     public async Task Dismiss_requested_does_not_complete_an_in_flight_show_acknowledgement()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
@@ -476,13 +521,13 @@ public sealed class OverlayTransportTests
 
             Assert.False(controller.IsVisible);
             Assert.True(await controller.EnsureHiddenAsync()); // idempotent while already hidden
-            Assert.True(await controller.ShowAsync());
+            Assert.True(await controller.ShowAsync(preferActiveProfile: true));
             Assert.True(controller.IsVisible);
             Assert.True(await controller.ShowAsync()); // idempotent while already visible
             Assert.True(await controller.EnsureHiddenAsync());
             Assert.False(controller.IsVisible);
             await Task.Delay(100);
-            lock (commands) Assert.Equal([OverlayCommand.Show, OverlayCommand.Hide], commands);
+            lock (commands) Assert.Equal([OverlayCommand.ShowActiveProfile, OverlayCommand.Hide], commands);
 
             await controller.DisposeAsync();
             try { await run.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { }

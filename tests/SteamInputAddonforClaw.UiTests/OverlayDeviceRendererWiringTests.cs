@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay;
 using Xunit;
@@ -381,6 +382,52 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("ProfilePageRequestRequested?.Invoke(selectedAppId);", applyActivePage);
         Assert.Contains("_profileMode = ProfilePresentationMode.ActiveDetail;", applyActivePage);
         Assert.Contains("_profileMode = ProfilePresentationMode.Catalog;", applyActivePage);
+    }
+
+    [Fact]
+    public void ActiveProfileFirstShowClearsStaleDetailBeforeSelectingProfile()
+    {
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        shell = shell.ReplaceLineEndings("\n");
+        profile = profile.ReplaceLineEndings("\n");
+        var prepareStart = profile.IndexOf("private void PrepareActiveProfileFirstShow()", StringComparison.Ordinal);
+        Assert.True(prepareStart >= 0);
+        var prepareEnd = profile.IndexOf("private void ApplyProfileDetailPage(", prepareStart, StringComparison.Ordinal);
+        Assert.True(prepareEnd > prepareStart);
+        var prepare = profile[prepareStart..prepareEnd];
+        var selectionStart = profile.IndexOf("private void OnProfileTabSelectionChanged(bool selected)", StringComparison.Ordinal);
+        Assert.True(selectionStart >= 0);
+        var selectionEnd = profile.IndexOf("private void PrepareActiveProfileFirstShow()", selectionStart, StringComparison.Ordinal);
+        Assert.True(selectionEnd > selectionStart);
+        var selection = profile[selectionStart..selectionEnd];
+
+        Assert.Contains("if (preferActiveProfile) PrepareActiveProfileFirstShow();\n        _tabState.ResetForShow();\n        if (preferActiveProfile) _tabState.Select(AddonQuickSettingsTabId.Profile);", shell);
+        Assert.Contains("_selectedCatalogAppId = null;", prepare);
+        Assert.Contains("_activeProfileAppId = null;", prepare);
+        Assert.Contains("_profileDetailNavigationInProgress = false;", prepare);
+        Assert.Contains("_profileMode = ProfilePresentationMode.ActiveDetail;", prepare);
+        Assert.Contains("QuickSettingsPageSnapshot.Unavailable(\n            QuickSettingsPageId.Profile,\n            message: \"Loading the active game profile.\")", prepare);
+        Assert.Contains("if (_profileMode == ProfilePresentationMode.ActiveDetail)\n        {\n            ShowProfileDetail();\n            return;", selection);
+
+        var applyStart = profile.IndexOf("internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)", StringComparison.Ordinal);
+        Assert.True(applyStart >= 0);
+        var apply = profile[applyStart..];
+        Assert.Contains("if (page.Available && page.AppId is > 0)", apply);
+        Assert.Contains("_activeProfileAppId = page.AppId;", apply);
+        Assert.Contains("_profileMode = ProfilePresentationMode.ActiveDetail;", apply);
+        Assert.Contains("ApplyProfileDetailPage(page);", apply);
+        Assert.Contains("_activeProfileAppId = null;", apply);
+        Assert.Contains("_profileMode = ProfilePresentationMode.Catalog;", apply);
+        Assert.Contains("ShowProfileCatalog();", apply);
+        Assert.Contains("ProfileCatalogRequestRequested?.Invoke();", apply);
+
+        var loading = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile,
+            message: "Loading the active game profile.");
+        Assert.False(loading.Available);
+        Assert.Null(loading.AppId);
+        Assert.Empty(loading.Sections);
     }
 
     // SF-V2-09 section 32/13.1: exactly one page-local surface type/dictionary backs both pages --

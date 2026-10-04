@@ -126,11 +126,19 @@ public sealed partial class OverlayWindow
             }
             _profileTabSelected = false;
             _selectedCatalogAppId = null;
-            _profileMode = _activeProfileAppId is not null ? ProfilePresentationMode.ActiveDetail : ProfilePresentationMode.Catalog;
+            if (_activeProfileAppId is not null || _profileMode == ProfilePresentationMode.ActiveDetail)
+                _profileMode = ProfilePresentationMode.ActiveDetail;
+            else
+                _profileMode = ProfilePresentationMode.Catalog;
             return;
         }
 
         _profileTabSelected = true;
+        if (_profileMode == ProfilePresentationMode.ActiveDetail)
+        {
+            ShowProfileDetail();
+            return;
+        }
         if (_profileDetailNavigationInProgress && _profileMode == ProfilePresentationMode.SelectedDetail)
         {
             ShowProfileDetail();
@@ -147,6 +155,17 @@ public sealed partial class OverlayWindow
             ShowProfileCatalog();
             ProfileCatalogRequestRequested?.Invoke();
         }
+    }
+
+    private void PrepareActiveProfileFirstShow()
+    {
+        _selectedCatalogAppId = null;
+        _activeProfileAppId = null;
+        _profileDetailNavigationInProgress = false;
+        _profileMode = ProfilePresentationMode.ActiveDetail;
+        ApplyProfileDetailPage(QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile,
+            message: "Loading the active game profile."));
     }
 
     private void ApplyProfileDetailPage(QuickSettingsPageSnapshot page)

@@ -183,7 +183,8 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     internal Task ToggleForPocAsync() => SetVisibilityAsync(requestedShow: null);
 
     // OQ3-A: explicit Show, for the coordinated Main UI -> Overlay path.
-    internal Task<bool> ShowAsync() => SetVisibilityAsync(requestedShow: true);
+    internal Task<bool> ShowAsync(bool preferActiveProfile = false) =>
+        SetVisibilityAsync(requestedShow: true, preferActiveProfile: preferActiveProfile);
 
     // OQ3-A: explicit Hide/retire, for the coordinated Overlay -> Main UI path. Idempotent when the
     // Overlay is already hidden. A failed Hide reuses the existing bounded session retirement.
@@ -366,7 +367,7 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         }
     }
 
-    private async Task<bool> SetVisibilityAsync(bool? requestedShow)
+    private async Task<bool> SetVisibilityAsync(bool? requestedShow, bool preferActiveProfile = false)
     {
         await _transition.WaitAsync().ConfigureAwait(false);
         try
@@ -383,7 +384,9 @@ internal sealed class OverlayProcessController : IAsyncDisposable
                 show = requestedShow ?? !_visible;
             }
             if (server is null) return false;
-            var command = show ? OverlayCommand.Show : OverlayCommand.Hide;
+            var command = show
+                ? preferActiveProfile ? OverlayCommand.ShowActiveProfile : OverlayCommand.Show
+                : OverlayCommand.Hide;
             var pid = GetProcessId(process: null);
             var requested = Stopwatch.StartNew();
             AppLog.Info("Overlay", "Overlay command requested.", ("Command", command), ("PID", pid));

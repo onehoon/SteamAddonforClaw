@@ -38,12 +38,13 @@ internal static class OverlayTransportProtocol
     // Version 13: adds Runtime-owned global Xbox360 M1/M2 mapping state and one correlated
     // whole-record mutation. A v12 peer must fail the handshake; no compatibility shim.
     // Version 14 adds shared settings and vibration state/mutation frames.
-    internal const int CurrentVersion = 14;
+    // Version 15 adds the Runtime-authorized active-game Profile-first Show command.
+    internal const int CurrentVersion = 15;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
 internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ProfileCatalogRequest, ProfileCatalogState, ProfilePageRequest, ProfilePageResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult }
-internal enum OverlayCommand { Show, Hide, Shutdown }
+internal enum OverlayCommand { Show, Hide, Shutdown, ShowActiveProfile }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
 

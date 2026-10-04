@@ -175,7 +175,7 @@ internal sealed class NamedPipeOverlayServer : IAsyncDisposable
 
             var expected = command switch
             {
-                OverlayCommand.Show => OverlayState.Visible,
+                OverlayCommand.Show or OverlayCommand.ShowActiveProfile => OverlayState.Visible,
                 OverlayCommand.Hide => OverlayState.Hidden,
                 OverlayCommand.Shutdown => OverlayState.Hidden,
                 _ => throw new ArgumentOutOfRangeException(nameof(command))

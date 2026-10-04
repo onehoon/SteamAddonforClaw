@@ -1475,7 +1475,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return;
             }
 
-            if (!await _overlayController.ShowAsync().ConfigureAwait(false))
+            var activeAppId = _runtimeHost?.ActualRunningAppId ?? 0;
+            var preferActiveProfile = activeAppId != 0;
+            if (!await _overlayController.ShowAsync(preferActiveProfile).ConfigureAwait(false))
             {
                 AppLog.Warn("OverlayCapture", "Overlay Show did not acknowledge Visible; controller stays live.", null, ("Event", "OverlayShowFailed"));
                 return;

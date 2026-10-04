@@ -23,10 +23,10 @@ public sealed class QuickSettingsPresentationTests
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot());
 
         Assert.Collection(page.Sections,
-            s => Assert.Equal(QuickSettingsSectionId.DeviceBatteryChargeLimit, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.DeviceTdp, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.DeviceCpuBoost, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.DevicePowerMode, s.SectionId));
+            s => Assert.Equal(QuickSettingsSectionId.DevicePowerMode, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.DeviceBatteryChargeLimit, s.SectionId));
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public sealed class QuickSettingsPresentationTests
         var battery = new FrontendBatteryChargeLimitSnapshot(true, true, true,
             CurrentEnabled: false, CurrentLimitPercent: 65, DesiredEnabled: true, DesiredLimitPercent: 80, LastFailure: null);
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with { BatteryChargeLimit = battery });
-        var section = page.Sections[0];
+        var section = page.Sections.Single(candidate => candidate.SectionId == QuickSettingsSectionId.DeviceBatteryChargeLimit);
         var enabled = section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitEnabled);
         var percent = section.Rows.Single(row => row.RowId == QuickSettingsRowId.DeviceBatteryChargeLimitPercent);
 
@@ -154,7 +154,7 @@ public sealed class QuickSettingsPresentationTests
             LastFailure: "Battery settings unavailable.");
         var page = QuickSettingsPresentation.BuildDevice(EnabledSnapshot() with { BatteryChargeLimit = battery });
         var projected = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, true, AcDcPowerSource.DC);
-        var section = projected.Sections[0];
+        var section = projected.Sections.Single(candidate => candidate.SectionId == QuickSettingsSectionId.DeviceBatteryChargeLimit);
 
         Assert.Equal("Battery settings unavailable.", section.Message);
         Assert.All(section.Rows, row => Assert.True(row.Visible));
