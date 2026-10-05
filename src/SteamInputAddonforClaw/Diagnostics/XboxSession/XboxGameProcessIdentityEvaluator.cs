@@ -3,6 +3,71 @@ using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
 
 namespace SteamInputAddonforClaw.Diagnostics.XboxSession;
 
+internal sealed record XboxGamePackageConfigLocation(string Kind, string RootPath);
+
+internal sealed record XboxGamePackageConfigMetadata(
+    Func<string?> EffectiveLocationPath,
+    Func<string?> InstalledLocationPath);
+
+internal sealed record XboxGamePackageConfigLocationResolution(
+    IReadOnlyList<XboxGamePackageConfigLocation> Locations,
+    string? FailureReason);
+
+internal static class XboxGamePackageConfigLocationResolver
+{
+    internal static XboxGamePackageConfigLocationResolution ResolveCurrentUserPackage(
+        string packageFullName,
+        Func<string, string, XboxGamePackageConfigMetadata?> findPackageForUser)
+    {
+        XboxGamePackageConfigMetadata? package;
+        try
+        {
+            package = findPackageForUser(string.Empty, packageFullName);
+        }
+        catch (Exception exception)
+        {
+            return new([], $"PackageManager did not resolve the live PackageFullName: {MicrosoftGameConfigReader.Describe(exception)}");
+        }
+
+        if (package is null)
+            return new([], "PackageManager did not resolve the live PackageFullName.");
+
+        var locations = new List<XboxGamePackageConfigLocation>(2);
+        var failures = new List<string>(2);
+        AddLocation("Effective", package.EffectiveLocationPath, locations, failures);
+        AddLocation("Installed", package.InstalledLocationPath, locations, failures);
+
+        if (locations.Count == 0)
+        {
+            var reason = "Package metadata exposed no usable Effective/Installed location.";
+            if (failures.Count > 0)
+                reason += " " + string.Join("; ", failures);
+            return new([], reason);
+        }
+
+        return new(locations, failures.Count == 0 ? null : string.Join("; ", failures));
+    }
+
+    private static void AddLocation(
+        string kind,
+        Func<string?> getPath,
+        List<XboxGamePackageConfigLocation> locations,
+        List<string> failures)
+    {
+        try
+        {
+            var path = getPath();
+            if (!string.IsNullOrWhiteSpace(path)
+                && !locations.Any(location => string.Equals(location.RootPath, path, StringComparison.OrdinalIgnoreCase)))
+                locations.Add(new(kind, path));
+        }
+        catch (Exception exception)
+        {
+            failures.Add($"{kind} location: {MicrosoftGameConfigReader.Describe(exception)}");
+        }
+    }
+}
+
 internal sealed record XboxGameProcessIdentityEvidence(
     int ImageResultCode,
     string? RunningProcessPath,
@@ -18,6 +83,8 @@ internal sealed record XboxGameProcessIdentityEvidence(
     string? PackageIdentityResourceId,
     string? PackageIdentityArchitecture,
     string? PackageIdentityVersion,
+    IReadOnlyList<XboxGamePackageConfigLocation> ConfigLocations,
+    string? ConfigLocationFailure,
     IReadOnlyList<FrontendXboxSessionDiagnosticPackagePath> PackagePaths);
 
 /// <summary>Applies the XBOX package/config/executable identity contract to live-process evidence.
@@ -50,18 +117,19 @@ internal static class XboxGameProcessIdentityEvaluator
         if (evidence.PackageFamilyNameResultCode != ErrorSuccess || string.IsNullOrWhiteSpace(evidence.PackageFamilyName))
             return Negative(XboxGameProcessInspectionDisposition.PackageIdentityFailure,
                 $"GetPackageFamilyName failed with result {evidence.PackageFamilyNameResultCode}.");
-        var configFailure = "MicrosoftGame.config was not found in the package paths returned by Windows.";
+        var configFailure = "MicrosoftGame.config was not found in the Package object's Effective/Installed locations.";
+        if (!string.IsNullOrWhiteSpace(evidence.ConfigLocationFailure))
+            configFailure += " " + evidence.ConfigLocationFailure;
         var sawExecutableMismatch = false;
         var checkedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var packagePath in evidence.PackagePaths)
+        foreach (var configLocation in evidence.ConfigLocations)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (packagePath.ResultCode != ErrorSuccess || string.IsNullOrWhiteSpace(packagePath.Path)
-                || !checkedPaths.Add(packagePath.Path))
+            if (string.IsNullOrWhiteSpace(configLocation.RootPath) || !checkedPaths.Add(configLocation.RootPath))
                 continue;
 
-            var configPath = Path.Combine(packagePath.Path, "MicrosoftGame.config");
+            var configPath = Path.Combine(configLocation.RootPath, "MicrosoftGame.config");
             FileStream stream;
             try
             {
@@ -132,15 +200,39 @@ internal static class XboxGameProcessIdentityEvaluator
                     matchedExecutable.Name,
                     configPath,
                     evidence.PackagePaths);
+                LogConfigResolution(generation, evidence, configPath, null);
                 return new(XboxGameProcessInspectionDisposition.Matched, null, game);
             }
         }
 
         if (sawExecutableMismatch)
-            return Negative(XboxGameProcessInspectionDisposition.ExecutableMismatch,
-                $"Running executable '{runningExecutableName}' did not exactly match MicrosoftGame.config ExecutableList.");
+        {
+            var mismatchReason = $"Running executable '{runningExecutableName}' did not exactly match MicrosoftGame.config ExecutableList.";
+            LogConfigResolution(generation, evidence, null, mismatchReason);
+            return Negative(XboxGameProcessInspectionDisposition.ExecutableMismatch, mismatchReason);
+        }
+        LogConfigResolution(generation, evidence, null, configFailure);
         return Negative(XboxGameProcessInspectionDisposition.ConfigNegative, configFailure);
     }
+
+    private static void LogConfigResolution(
+        IXboxGameProcessGeneration generation,
+        XboxGameProcessIdentityEvidence evidence,
+        string? selectedConfigPath,
+        string? failureReason)
+    {
+        AppLog.Debug("XboxSessionDiagnostic", "Resolved live process MicrosoftGame.config location.",
+            ("PID", generation.ProcessId),
+            ("PackageFullName", evidence.PackageFullName),
+            ("RunningProcessPath", evidence.RunningProcessPath),
+            ("ConfigLocation.Effective", LocationPath(evidence.ConfigLocations, "Effective")),
+            ("ConfigLocation.Installed", LocationPath(evidence.ConfigLocations, "Installed")),
+            ("SelectedConfigPath", selectedConfigPath),
+            ("Failure", failureReason));
+    }
+
+    private static string? LocationPath(IReadOnlyList<XboxGamePackageConfigLocation> locations, string kind) =>
+        locations.FirstOrDefault(location => string.Equals(location.Kind, kind, StringComparison.OrdinalIgnoreCase))?.RootPath;
 
     private static XboxGameProcessInspection Negative(XboxGameProcessInspectionDisposition disposition, string reason) =>
         new(disposition, reason, null);
