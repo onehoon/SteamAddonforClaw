@@ -42,6 +42,10 @@ public sealed class Full1902WinGSuppressionAuthorityTests
         // WM_RUNTIME_READY callback (RuntimeProcessApplication), i.e. on the actively-pumping thread.
         var watchers = Method(source, "internal void StartRuntimeEventWatchers()");
         Assert.Contains("_winGSuppressionGuard.Start();", watchers);
+        Assert.True(
+            watchers.IndexOf("_winGSuppressionGuard.Start();", StringComparison.Ordinal)
+                < watchers.IndexOf("GameBarStateDiagnosticObserver.Start()", StringComparison.Ordinal),
+            "the GameBar observer must be scheduled only after the hook is installed");
 
         // InitializeRuntimeAsync (runs before the loop starts) must NOT install the hook.
         var init = Method(source, "internal async Task InitializeRuntimeAsync()");
