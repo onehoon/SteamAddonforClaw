@@ -38,16 +38,24 @@ public sealed class GameInputSystemButtonProbeTests
     }
 
     [Fact]
-    public void Debug_logging_is_required_before_native_registration()
+    public void Start_can_be_retried_after_debug_logging_is_enabled()
     {
         var factory = new FakeSessionFactory();
-        var probe = new GameInputSystemButtonProbe(() => false, factory);
+        var debugLoggingEnabled = false;
+        var probe = new GameInputSystemButtonProbe(() => debugLoggingEnabled, factory);
 
-        var result = probe.Start();
+        var refused = probe.Start();
 
-        Assert.Equal(FrontendGameInputSystemButtonProbeState.Unavailable, result.State);
-        Assert.Contains("Debug", result.Status, StringComparison.Ordinal);
+        Assert.Equal(FrontendGameInputSystemButtonProbeState.Ready, refused.State);
+        Assert.True(refused.Available);
+        Assert.Contains("Debug", refused.Status, StringComparison.Ordinal);
         Assert.Equal(0, factory.RegisterCount);
+
+        debugLoggingEnabled = true;
+        var started = probe.Start();
+
+        Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, started.State);
+        Assert.Equal(1, factory.RegisterCount);
     }
 
     [Theory]

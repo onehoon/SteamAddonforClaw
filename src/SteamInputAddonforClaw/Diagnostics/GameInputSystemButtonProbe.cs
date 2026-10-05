@@ -67,11 +67,15 @@ internal sealed class GameInputSystemButtonProbe
             AppLog.Info("GameInput.SystemButton", "ProbeStartRequested");
             if (!_debugLoggingEnabled())
             {
-                var unavailable = FrontendGameInputSystemButtonProbeSnapshot.Unavailable(
-                    "Enable Debug logging before starting this diagnostic.");
-                Publish(unavailable);
+                var retryable = new FrontendGameInputSystemButtonProbeSnapshot(
+                    true,
+                    FrontendGameInputSystemButtonProbeState.Ready,
+                    "Enable Debug logging before starting this diagnostic.",
+                    current.EventCount,
+                    current.LastEvent);
+                Publish(retryable);
                 AppLog.Info("GameInput.SystemButton", "ProbeUnavailable", ("Reason", "DebugLoggingRequired"));
-                return unavailable;
+                return retryable;
             }
 
             Volatile.Write(ref _acceptEvents, 1);
