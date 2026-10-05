@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
@@ -343,6 +344,58 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
         Assert.Equal("Sample.exe", game.Game?.MatchedExecutableName);
         Assert.Null(game.Game?.ApplicationUserModelId);
         Assert.Null(game.Game?.PackageIdentityName);
+    }
+
+    [Fact]
+    public void Package_id_native_layout_and_projection_match_appmodel_contract()
+    {
+        Assert.Equal(0, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageVersion>(nameof(WindowsXboxGameProcessIdentityProbe.PackageVersion.Revision)).ToInt32());
+        Assert.Equal(2, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageVersion>(nameof(WindowsXboxGameProcessIdentityProbe.PackageVersion.Build)).ToInt32());
+        Assert.Equal(4, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageVersion>(nameof(WindowsXboxGameProcessIdentityProbe.PackageVersion.Minor)).ToInt32());
+        Assert.Equal(6, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageVersion>(nameof(WindowsXboxGameProcessIdentityProbe.PackageVersion.Major)).ToInt32());
+
+        const int pointerOffset = 16;
+        Assert.Equal(0, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageIdNative>(nameof(WindowsXboxGameProcessIdentityProbe.PackageIdNative.Reserved)).ToInt32());
+        Assert.Equal(4, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageIdNative>(nameof(WindowsXboxGameProcessIdentityProbe.PackageIdNative.ProcessorArchitecture)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageIdNative>(nameof(WindowsXboxGameProcessIdentityProbe.PackageIdNative.Version)).ToInt32());
+        Assert.Equal(pointerOffset, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageIdNative>(nameof(WindowsXboxGameProcessIdentityProbe.PackageIdNative.Name)).ToInt32());
+        Assert.Equal(pointerOffset + IntPtr.Size, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageIdNative>(nameof(WindowsXboxGameProcessIdentityProbe.PackageIdNative.Publisher)).ToInt32());
+        Assert.Equal(pointerOffset + 2 * IntPtr.Size, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageIdNative>(nameof(WindowsXboxGameProcessIdentityProbe.PackageIdNative.ResourceId)).ToInt32());
+        Assert.Equal(pointerOffset + 3 * IntPtr.Size, Marshal.OffsetOf<WindowsXboxGameProcessIdentityProbe.PackageIdNative>(nameof(WindowsXboxGameProcessIdentityProbe.PackageIdNative.PublisherId)).ToInt32());
+
+        var name = Marshal.StringToHGlobalUni("Example.Package");
+        var publisher = Marshal.StringToHGlobalUni("CN=Example");
+        var resourceId = Marshal.StringToHGlobalUni("resource-id");
+        var publisherId = Marshal.StringToHGlobalUni("publisher-id");
+        try
+        {
+            var projected = WindowsXboxGameProcessIdentityProbe.ProjectPackageId(
+                new WindowsXboxGameProcessIdentityProbe.PackageIdNative
+                {
+                    ProcessorArchitecture = 9,
+                    Version = new() { Revision = 4, Build = 3, Minor = 2, Major = 1 },
+                    Name = name,
+                    Publisher = publisher,
+                    ResourceId = resourceId,
+                    PublisherId = publisherId,
+                },
+                0);
+
+            Assert.Equal("Example.Package", projected.Name);
+            Assert.Equal("CN=Example", projected.Publisher);
+            Assert.Equal("publisher-id", projected.PublisherId);
+            Assert.Equal("resource-id", projected.ResourceId);
+            Assert.Equal("X64", projected.Architecture);
+            Assert.Equal("1.2.3.4", projected.Version);
+            Assert.Equal(0, projected.ResultCode);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(name);
+            Marshal.FreeHGlobal(publisher);
+            Marshal.FreeHGlobal(resourceId);
+            Marshal.FreeHGlobal(publisherId);
+        }
     }
 
     [Fact]

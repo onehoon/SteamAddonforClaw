@@ -164,29 +164,34 @@ internal sealed class WindowsXboxGameProcessIdentityProbe : IXboxGameProcessIden
                 return new(null, null, null, null, null, null, result);
 
             var id = Marshal.PtrToStructure<PackageIdNative>(buffer);
-            var architecture = id.ProcessorArchitecture switch
-            {
-                0 => "X86",
-                5 => "Arm",
-                9 => "X64",
-                11 => "Neutral",
-                12 => "Arm64",
-                _ => id.ProcessorArchitecture.ToString(),
-            };
-            var version = $"{id.Version.Major}.{id.Version.Minor}.{id.Version.Build}.{id.Version.Revision}";
-            return new(
-                Marshal.PtrToStringUni(id.Name),
-                Marshal.PtrToStringUni(id.Publisher),
-                Marshal.PtrToStringUni(id.PublisherId),
-                Marshal.PtrToStringUni(id.ResourceId),
-                architecture,
-                version,
-                result);
+            return ProjectPackageId(id, result);
         }
         finally
         {
             Marshal.FreeHGlobal(buffer);
         }
+    }
+
+    internal static PackageIdentityFields ProjectPackageId(PackageIdNative id, int resultCode)
+    {
+        var architecture = id.ProcessorArchitecture switch
+        {
+            0 => "X86",
+            5 => "Arm",
+            9 => "X64",
+            11 => "Neutral",
+            12 => "Arm64",
+            _ => id.ProcessorArchitecture.ToString(),
+        };
+        var version = $"{id.Version.Major}.{id.Version.Minor}.{id.Version.Build}.{id.Version.Revision}";
+        return new(
+            Marshal.PtrToStringUni(id.Name),
+            Marshal.PtrToStringUni(id.Publisher),
+            Marshal.PtrToStringUni(id.PublisherId),
+            Marshal.PtrToStringUni(id.ResourceId),
+            architecture,
+            version,
+            resultCode);
     }
 
     private static IReadOnlyList<FrontendXboxSessionDiagnosticPackagePath> QueryPackagePaths(string packageFullName)
@@ -217,7 +222,7 @@ internal sealed class WindowsXboxGameProcessIdentityProbe : IXboxGameProcessIden
         return result;
     }
 
-    private sealed record PackageIdentityFields(
+    internal sealed record PackageIdentityFields(
         string? Name,
         string? Publisher,
         string? PublisherId,
@@ -236,24 +241,24 @@ internal sealed class WindowsXboxGameProcessIdentityProbe : IXboxGameProcessIden
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct PackageVersion
+    internal struct PackageVersion
     {
-        public ushort Major;
-        public ushort Minor;
-        public ushort Build;
         public ushort Revision;
+        public ushort Build;
+        public ushort Minor;
+        public ushort Major;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct PackageIdNative
+    internal struct PackageIdNative
     {
         public uint Reserved;
         public uint ProcessorArchitecture;
         public PackageVersion Version;
         public nint Name;
         public nint Publisher;
-        public nint PublisherId;
         public nint ResourceId;
+        public nint PublisherId;
     }
 
     private sealed class WindowsXboxGameProcessGeneration : IXboxGameProcessGeneration
