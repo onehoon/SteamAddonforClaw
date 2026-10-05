@@ -13,6 +13,7 @@ using WinRT.Interop;
 using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw;
 
@@ -330,7 +331,20 @@ public sealed partial class MainWindow : Window
             return;
         }
         try { RenderSystemStatus(await _frontend.CaptureStatusAsync()); }
-        catch (Exception exception) { AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed")); }
+        catch (Exception exception)
+        {
+            if (exception is FrontendTransportException
+                && exception is not FrontendProtocolException
+                && exception is not FrontendRemoteException)
+            {
+                AppLog.Debug("Status", "System status refresh skipped because Runtime transport is unavailable.",
+                    ("Reason", exception.Message));
+            }
+            else
+            {
+                AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed"));
+            }
+        }
         finally
         {
             Volatile.Write(ref _isRefreshingStatus, 0);

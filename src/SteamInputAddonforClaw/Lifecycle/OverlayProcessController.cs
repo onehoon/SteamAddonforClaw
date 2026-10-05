@@ -512,13 +512,20 @@ internal sealed class OverlayProcessController : IAsyncDisposable
             try { pid = process?.Id; } catch { }
             try { exitCode = process?.HasExited == true ? process.ExitCode : null; } catch { }
         }
-        AppLog.Warn("Overlay", "Overlay process exited; Overlay POC is disabled until the next explicit toggle.", null,
-            ("PID", pid), ("ExitCode", exitCode), ("WasVisible", visible), ("Stopping", stopping));
         // OQ4 section 10.1: an unexpected exit while the surface was visible -- the Runtime must
         // retire any active capture (no Hide needed, the surface is gone). A normal StopCurrentAsync
         // detaches this handler first, so this only fires for real crash/disconnect.
         if (visible && !stopping)
+        {
+            AppLog.Warn("Overlay", "Visible Overlay process exited unexpectedly; active capture will be retired.", null,
+                ("PID", pid), ("ExitCode", exitCode), ("WasVisible", true), ("Stopping", false));
             VisibleSessionLost?.Invoke();
+        }
+        else
+        {
+            AppLog.Info("Overlay", "Hidden Overlay process exited; the next explicit Overlay request may start a new process.",
+                ("PID", pid), ("ExitCode", exitCode), ("WasVisible", visible), ("Stopping", stopping));
+        }
         await _transition.WaitAsync().ConfigureAwait(false);
         try { await StopCurrentAsync().ConfigureAwait(false); }
         finally { _transition.Release(); }

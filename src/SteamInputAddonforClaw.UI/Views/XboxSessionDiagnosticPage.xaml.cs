@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -56,14 +57,19 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
 
     private async void StartButton_Click(object sender, RoutedEventArgs args)
     {
-        if (_frontend is null || _requestPending)
+        var frontend = _frontend;
+        if (!_isActive || frontend is null || _requestPending)
             return;
 
         var request = BeginRequest();
         StatusText.Text = "Starting hooks and checking the foreground process…";
         try
         {
-            Render(await _frontend.StartXboxSessionDiagnosticAsync().ConfigureAwait(true));
+            var snapshot = await frontend.StartXboxSessionDiagnosticAsync().ConfigureAwait(true);
+            if (!_isActive)
+                return;
+
+            Render(snapshot);
         }
         catch (Exception exception)
         {
@@ -77,21 +83,25 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
 
     private async void StopButton_Click(object sender, RoutedEventArgs args)
     {
-        if (_frontend is null || _requestPending)
+        if (!_isActive || _frontend is null || _requestPending)
             return;
         await StopAndRenderAsync().ConfigureAwait(true);
     }
 
     private async void CaptureReportButton_Click(object sender, RoutedEventArgs args)
     {
-        if (_frontend is null || _requestPending)
+        var frontend = _frontend;
+        if (!_isActive || frontend is null || _requestPending)
             return;
 
         var request = BeginRequest();
         StatusText.Text = "Capturing the current diagnostic evidence…";
         try
         {
-            var result = await _frontend.GenerateXboxSessionDiagnosticReportAsync().ConfigureAwait(true);
+            var result = await frontend.GenerateXboxSessionDiagnosticReportAsync().ConfigureAwait(true);
+            if (!_isActive)
+                return;
+
             Render(result.Snapshot);
             _reportPath = result.ReportPath;
             OpenReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_reportPath);
@@ -113,8 +123,15 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
     {
         try
         {
-            if (_frontend is not null && _isActive && !_requestPending)
-                Render(await _frontend.CaptureXboxSessionDiagnosticAsync().ConfigureAwait(true));
+            var frontend = _frontend;
+            if (frontend is null || !_isActive || _requestPending)
+                return;
+
+            var snapshot = await frontend.CaptureXboxSessionDiagnosticAsync().ConfigureAwait(true);
+            if (!_isActive)
+                return;
+
+            Render(snapshot);
         }
         catch (Exception exception)
         {
@@ -134,15 +151,34 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
 
     private async Task StopAndRenderAsync(bool forceStop = false)
     {
-        if (_frontend is null)
+        var frontend = _frontend;
+        if (frontend is null)
             return;
         await WaitForPendingRequestAsync().ConfigureAwait(true);
-        if (!forceStop && !_observerRunning)
+        if (!forceStop && (!_isActive || !_observerRunning))
             return;
+        if (forceStop)
+        {
+            try
+            {
+                var snapshot = await frontend.StopXboxSessionDiagnosticAsync().ConfigureAwait(true);
+                _observerRunning = snapshot.State == FrontendXboxSessionDiagnosticState.Running;
+            }
+            catch (Exception exception)
+            {
+                LogRequestFailure("stop", exception);
+            }
+            return;
+        }
+
         var request = BeginRequest();
         try
         {
-            Render(await _frontend.StopXboxSessionDiagnosticAsync().ConfigureAwait(true));
+            var snapshot = await frontend.StopXboxSessionDiagnosticAsync().ConfigureAwait(true);
+            if (!_isActive)
+                return;
+
+            Render(snapshot);
         }
         catch (Exception exception)
         {
@@ -169,7 +205,8 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
         if (ReferenceEquals(_requestCompletion, completion))
             _requestCompletion = null;
         completion.TrySetResult();
-        UpdateButtons();
+        if (_isActive)
+            UpdateButtons();
     }
 
     private Task WaitForPendingRequestAsync() => _requestCompletion?.Task ?? Task.CompletedTask;
@@ -262,6 +299,15 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
 
     private static void LogRequestFailure(string action, Exception exception)
     {
+        if (exception is FrontendTransportException
+            && exception is not FrontendProtocolException
+            && exception is not FrontendRemoteException)
+        {
+            AppLog.Debug("XboxSessionDiagnostic", $"Main UI diagnostic {action} request skipped because Runtime transport is unavailable.",
+                ("Reason", exception.Message));
+            return;
+        }
+
         AppLog.Warn("XboxSessionDiagnostic", $"Main UI diagnostic {action} request failed.", exception,
             ("Reason", exception.GetType().Name));
     }

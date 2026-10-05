@@ -485,7 +485,12 @@ internal sealed class MsiClawAddonPhysicalOwnership : IMsiClawAddonPhysicalOwner
         try
         {
             if (Volatile.Read(ref _disposed) != 0) return RecoveryFail("OwnerDisposed");
-            if (_releasedForEnable) return RecoveryFail("ReleasedForCenterMEnable");
+            if (_releasedForEnable)
+            {
+                AppLog.Info("ControllerOwnership", "Owned physical input recovery skipped because controller authority was already released for Center M enable.",
+                    ("Event", "OwnedPhysicalRecoverySkipped"), ("Reason", "ReleasedForCenterMEnable"), ("ModeWriteIssued", false));
+                return new(MsiClawPhysicalOwnershipOutcome.Failed, "ReleasedForCenterMEnable", false, _ownedHiddenTargets);
+            }
             return await RecoverLostInputCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }

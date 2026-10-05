@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 using Windows.System;
 
 namespace SteamInputAddonforClaw.Views;
@@ -43,7 +44,17 @@ public sealed partial class OverlayPage : UserControl
         }
         catch (Exception exception)
         {
-            AppLog.Warn("ClawHUD.UI", "Main UI ClawHUD state refresh failed.", exception);
+            if (exception is FrontendTransportException
+                && exception is not FrontendProtocolException
+                && exception is not FrontendRemoteException)
+            {
+                AppLog.Debug("ClawHUD.UI", "Main UI ClawHUD state refresh skipped because Runtime transport is unavailable.",
+                    ("Reason", exception.Message));
+            }
+            else
+            {
+                AppLog.Warn("ClawHUD.UI", "Main UI ClawHUD state refresh failed.", exception);
+            }
         }
     }
 
