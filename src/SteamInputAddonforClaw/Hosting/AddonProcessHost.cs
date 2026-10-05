@@ -78,6 +78,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // result page. Never held across the debounce window -- only around the actual Runtime call.
     private int _overlayQuickSettingsMutationInFlight;
     private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
+    private GameBarStateDiagnosticObserver? _gameBarStateDiagnosticObserver;
 
     // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
     // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
@@ -1718,6 +1719,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // long-running Disabled-mode controller acquisition + arm check runs afterwards, OFF this
         // thread, in StartDeferredRuntimeStartup.
         _winGSuppressionGuard.Start();
+        _gameBarStateDiagnosticObserver ??= GameBarStateDiagnosticObserver.Start();
     }
 
     /// <summary>Full1902 Policy B section 5.2/13: arm native Win+G / Xbox Game Bar suppression for the
@@ -2131,6 +2133,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _clawHudRuntimeAcquirer = null;
         _clawHudHttpClient?.Dispose();
         _clawHudHttpClient = null;
+        if (_gameBarStateDiagnosticObserver is not null)
+        {
+            await _gameBarStateDiagnosticObserver.DisposeAsync().ConfigureAwait(false);
+            _gameBarStateDiagnosticObserver = null;
+        }
         // The Win+G suppression hook lives for the whole process lifetime under Full1902 Policy B;
         // it is released here at process shutdown regardless of controller-authority state.
         _winGSuppressionGuard.Dispose();
