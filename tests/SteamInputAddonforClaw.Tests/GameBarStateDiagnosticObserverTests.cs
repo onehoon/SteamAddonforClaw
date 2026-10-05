@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using SteamInputAddonforClaw.GameBar;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -54,12 +56,43 @@ public sealed class GameBarStateDiagnosticObserverTests
         Assert.Contains("GameBarApi.VisibilityChanged -= OnVisibilityChanged;", remove);
         Assert.Contains("GameBarApi.IsInputRedirectedChanged -= OnIsInputRedirectedChanged;", remove);
         Assert.Equal(2, remove.Split("catch (Exception exception)", StringSplitOptions.None).Length - 1);
-        Assert.Contains("await _initialization.ConfigureAwait(false)", Method(source, "public async ValueTask DisposeAsync()"));
+        var dispose = Method(source, "public async ValueTask DisposeAsync()");
+        Assert.Contains("Task.Run(CleanupAfterInitializationAsync)", dispose);
+        Assert.Contains("WaitForTaskWithinShutdownBudgetAsync(cleanup)", dispose);
+        Assert.DoesNotContain("await _initialization.ConfigureAwait(false)", dispose);
+        Assert.Contains("WaitForTaskWithinShutdownBudgetAsync(_initialization)", Method(source, "private async Task CleanupAfterInitializationAsync()"));
         Assert.Contains("(\"Operation\", \"Unsubscribe\")", remove);
 
         Assert.DoesNotContain("TryRequestSteamPulse", source);
         Assert.DoesNotContain("AttachInitialAsync", source);
         Assert.DoesNotContain("WingActionDispatcher", source);
+    }
+
+    [Fact]
+    public async Task Observer_shutdown_wait_is_bounded_for_a_stalled_initialization()
+    {
+        var stalledInitialization = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopwatch = Stopwatch.StartNew();
+
+        var completed = await GameBarStateDiagnosticObserver.WaitForTaskWithinShutdownBudgetAsync(stalledInitialization.Task);
+
+        Assert.False(completed);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Bounded wait took {stopwatch.Elapsed}.");
+    }
+
+    [Fact]
+    public void Observer_checks_for_shutdown_after_each_event_subscription()
+    {
+        var initialize = Method(ObserverSource(), "private void Initialize()");
+        var visibleSubscription = initialize.IndexOf("GameBarApi.VisibilityChanged += OnVisibilityChanged;", StringComparison.Ordinal);
+        var redirectedSubscription = initialize.IndexOf("GameBarApi.IsInputRedirectedChanged += OnIsInputRedirectedChanged;", StringComparison.Ordinal);
+        var firstDisposeCheck = initialize.IndexOf("if (Volatile.Read(ref _disposeRequested) != 0)", visibleSubscription, StringComparison.Ordinal);
+        var secondDisposeCheck = initialize.IndexOf("if (Volatile.Read(ref _disposeRequested) != 0)", redirectedSubscription, StringComparison.Ordinal);
+
+        Assert.True(visibleSubscription >= 0 && firstDisposeCheck > visibleSubscription && firstDisposeCheck < redirectedSubscription);
+        Assert.True(redirectedSubscription >= 0 && secondDisposeCheck > redirectedSubscription);
+        Assert.Contains("ReadAndLogState(\"ObserverStarted\");", initialize);
+        Assert.Contains("if (Volatile.Read(ref _disposeRequested) != 0)\n            RemoveSubscriptions();", initialize);
     }
 
     [Fact]

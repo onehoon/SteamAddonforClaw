@@ -6,6 +6,7 @@ namespace SteamInputAddonforClaw.GameBar;
 internal sealed class GameBarStateDiagnosticObserver : IAsyncDisposable
 {
     private const string Category = "GameBar.State";
+    private static readonly TimeSpan ShutdownWait = TimeSpan.FromMilliseconds(250);
     private readonly Task _initialization;
     private int _disposeRequested;
     private int _visibilityChangedSubscribed;
@@ -41,8 +42,19 @@ internal sealed class GameBarStateDiagnosticObserver : IAsyncDisposable
         {
             GameBarApi.VisibilityChanged += OnVisibilityChanged;
             Volatile.Write(ref _visibilityChangedSubscribed, 1);
+            if (Volatile.Read(ref _disposeRequested) != 0)
+            {
+                RemoveSubscriptions();
+                return;
+            }
+
             GameBarApi.IsInputRedirectedChanged += OnIsInputRedirectedChanged;
             Volatile.Write(ref _inputRedirectedChangedSubscribed, 1);
+            if (Volatile.Read(ref _disposeRequested) != 0)
+            {
+                RemoveSubscriptions();
+                return;
+            }
         }
         catch (Exception exception)
         {
@@ -54,6 +66,8 @@ internal sealed class GameBarStateDiagnosticObserver : IAsyncDisposable
         }
 
         ReadAndLogState("ObserverStarted");
+        if (Volatile.Read(ref _disposeRequested) != 0)
+            RemoveSubscriptions();
     }
 
     private void OnVisibilityChanged(object? sender, object args) => ReadAndLogState("VisibilityChanged");
@@ -112,13 +126,39 @@ internal sealed class GameBarStateDiagnosticObserver : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Interlocked.Exchange(ref _disposeRequested, 1);
-        try { await _initialization.ConfigureAwait(false); }
-        catch (Exception exception)
+
+        var cleanup = Task.Run(CleanupAfterInitializationAsync);
+        if (!await WaitForTaskWithinShutdownBudgetAsync(cleanup).ConfigureAwait(false))
         {
             AppLog.Debug(Category, "ObserverUnavailable",
-                ("Operation", "Initialize"),
-                ("Exception", exception.GetType().Name));
+                ("Operation", "DisposeTimeout"));
         }
+    }
+
+    private async Task CleanupAfterInitializationAsync()
+    {
+        if (await WaitForTaskWithinShutdownBudgetAsync(_initialization).ConfigureAwait(false))
+        {
+            try { await _initialization.ConfigureAwait(false); }
+            catch (Exception exception)
+            {
+                AppLog.Debug(Category, "ObserverUnavailable",
+                    ("Operation", "Initialize"),
+                    ("Exception", exception.GetType().Name));
+            }
+        }
+        else
+        {
+            AppLog.Debug(Category, "ObserverUnavailable",
+                ("Operation", "InitializeTimeout"));
+        }
+
         RemoveSubscriptions();
+    }
+
+    internal static async Task<bool> WaitForTaskWithinShutdownBudgetAsync(Task task)
+    {
+        var completed = await Task.WhenAny(task, Task.Delay(ShutdownWait)).ConfigureAwait(false);
+        return ReferenceEquals(completed, task);
     }
 }
