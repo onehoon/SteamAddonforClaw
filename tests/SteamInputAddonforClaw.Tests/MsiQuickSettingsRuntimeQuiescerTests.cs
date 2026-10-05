@@ -99,11 +99,12 @@ public sealed class MsiQuickSettingsRuntimeQuiescerTests
         var body = Method(host, "private async Task TryStartDisabledModeControllerAsync(");
 
         var authorityGate = body.IndexOf("startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled", StringComparison.Ordinal);
-        var quiesce = body.IndexOf("MsiQuickSettingsRuntimeQuiescer.Quiesce()", StringComparison.Ordinal);
+        var watcher = body.IndexOf("StartMsiQuickSettingsProcessStartWatcher()", StringComparison.Ordinal);
+        var quiesce = body.IndexOf("MsiQuickSettingsRuntimeQuiescer.QuiesceExisting()", StringComparison.Ordinal);
         var owner = body.IndexOf("CreatePhysicalOwnership(startupComposition)", StringComparison.Ordinal);
         var admission = body.IndexOf("startupResult.DisabledBootAdmission?.IsReady != true", StringComparison.Ordinal);
 
-        Assert.True(authorityGate >= 0 && authorityGate < quiesce);
+        Assert.True(authorityGate >= 0 && authorityGate < watcher && watcher < quiesce);
         Assert.True(quiesce < owner && owner < admission);
 
         var cleanupBoundary = body[quiesce..owner];

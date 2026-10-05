@@ -23,7 +23,7 @@ internal static class MsiQuickSettingsRuntimeQuiescer
     private const int AppModelErrorNoPackage = 15700;
     private const uint MaximumPackageFullNameLength = 32768;
 
-    internal static MsiQuickSettingsRuntimeQuiesceResult Quiesce()
+    internal static MsiQuickSettingsRuntimeQuiesceResult QuiesceExisting()
     {
         Process[] candidates;
         try
@@ -39,23 +39,22 @@ internal static class MsiQuickSettingsRuntimeQuiescer
 
         if (candidates.Length == 0)
         {
-            AppLog.Info("MsiQuickSettings", "MSI Quick Settings packaged runtime is not running.",
+            AppLog.Debug("MsiQuickSettings", "MSI Quick Settings packaged runtime is not running.",
                 ("Event", "MsiQuickSettingsQuiesceNotRunning"));
             return new(0, 0, 0, 0, 0);
         }
 
-        var packageNames = new List<string?>();
-        var processIdsByPackage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var processIds = new List<uint>(candidates.Length);
         var identityUnavailableCount = 0;
 
         foreach (var candidate in candidates)
         {
             using (candidate)
             {
-                int processId;
+                uint processId;
                 try
                 {
-                    processId = candidate.Id;
+                    processId = checked((uint)candidate.Id);
                 }
                 catch (Exception exception)
                 {
@@ -66,31 +65,51 @@ internal static class MsiQuickSettingsRuntimeQuiescer
                     continue;
                 }
 
-                if (!TryGetPackageFullName(processId, out var packageFullName, out var errorCode))
-                {
-                    identityUnavailableCount++;
-                    AppLog.Debug("MsiQuickSettings", "Candidate package identity could not be proven; candidate was skipped.",
-                        ("Event", "MsiQuickSettingsIdentityUnavailable"), ("ProcessId", processId),
-                        ("Win32Error", errorCode),
-                        ("Reason", errorCode == AppModelErrorNoPackage ? "NoPackageIdentity" : "PackageIdentityReadFailed"));
-                    continue;
-                }
-
-                if (!IsExactMsiQuickSettingsPackageFullName(packageFullName))
-                {
-                    AppLog.Debug("MsiQuickSettings", "Widget candidate belongs to another package and was skipped.",
-                        ("ProcessId", processId), ("PackageFullName", packageFullName));
-                    continue;
-                }
-
-                packageNames.Add(packageFullName);
-                processIdsByPackage.TryAdd(packageFullName!, processId);
+                processIds.Add(processId);
             }
+        }
+
+        return QuiesceProcessIds(processIds, candidates.Length, identityUnavailableCount);
+    }
+
+    internal static MsiQuickSettingsRuntimeQuiesceResult QuiesceStartedProcess(uint processId) =>
+        processId == 0
+            ? new(0, 0, 0, 0, 0)
+            : QuiesceProcessIds([processId], 1, 0);
+
+    private static MsiQuickSettingsRuntimeQuiesceResult QuiesceProcessIds(
+        IReadOnlyList<uint> processIds,
+        int candidateCount,
+        int identityUnavailableCount)
+    {
+        var packageNames = new List<string?>();
+        var processIdsByPackage = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+        foreach (var processId in processIds)
+        {
+            if (!TryGetPackageFullName(processId, out var packageFullName, out var errorCode))
+            {
+                identityUnavailableCount++;
+                AppLog.Debug("MsiQuickSettings", "Candidate package identity could not be proven; candidate was skipped.",
+                    ("Event", "MsiQuickSettingsIdentityUnavailable"), ("ProcessId", processId),
+                    ("Win32Error", errorCode),
+                    ("Reason", errorCode == AppModelErrorNoPackage ? "NoPackageIdentity" : "PackageIdentityReadFailed"));
+                continue;
+            }
+
+            if (!IsExactMsiQuickSettingsPackageFullName(packageFullName))
+            {
+                AppLog.Debug("MsiQuickSettings", "Widget candidate belongs to another package and was skipped.",
+                    ("ProcessId", processId), ("PackageFullName", packageFullName));
+                continue;
+            }
+
+            packageNames.Add(packageFullName);
+            processIdsByPackage.TryAdd(packageFullName!, processId);
         }
 
         var targetPackages = GetDistinctTargetPackageFullNames(packageNames);
         if (targetPackages.Count == 0)
-            return new(candidates.Length, identityUnavailableCount, 0, 0, 0);
+            return new(candidateCount, identityUnavailableCount, 0, 0, 0);
 
         foreach (var packageFullName in targetPackages)
         {
@@ -99,7 +118,7 @@ internal static class MsiQuickSettingsRuntimeQuiescer
                 ("ProcessId", processIdsByPackage[packageFullName]), ("PackageFullName", packageFullName));
         }
 
-        return TerminateExactPackageProcesses(candidates.Length, identityUnavailableCount, targetPackages);
+        return TerminateExactPackageProcesses(candidateCount, identityUnavailableCount, targetPackages);
     }
 
     internal static bool IsExactMsiQuickSettingsPackageFullName(string? packageFullName) =>
@@ -115,10 +134,10 @@ internal static class MsiQuickSettingsRuntimeQuiescer
     internal static bool IsExactPackageFullNameMatch(string? candidate, string target) =>
         string.Equals(candidate, target, StringComparison.OrdinalIgnoreCase);
 
-    private static bool TryGetPackageFullName(int processId, out string? packageFullName, out int errorCode)
+    private static bool TryGetPackageFullName(uint processId, out string? packageFullName, out int errorCode)
     {
         packageFullName = null;
-        using var processHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)processId);
+        using var processHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
         if (processHandle.IsInvalid)
         {
             errorCode = Marshal.GetLastWin32Error();
@@ -189,7 +208,7 @@ internal static class MsiQuickSettingsRuntimeQuiescer
                     continue;
                 }
 
-                if (!TryGetPackageFullName(processId, out var packageFullName, out _))
+                if (!TryGetPackageFullName(checked((uint)processId), out var packageFullName, out _))
                     continue;
 
                 var targetPackageFullName = targetPackageFullNames.FirstOrDefault(
