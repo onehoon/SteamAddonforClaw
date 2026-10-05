@@ -90,6 +90,7 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
         IOem1GestureDelay? oem1GestureDelay = null,
         IOem1GestureClock? oem1GestureClock = null,
         Action? launchBigPictureOverride = null,
+        Action? launchXboxAppOverride = null,
         Action<Contracts.FrontButtons.FrontButtonHotkeyBinding>? sendHotkeyOverride = null,
         Action<Contracts.FrontButtons.FrontButtonLaunchApplicationBinding>? launchApplicationOverride = null,
         IOem1GestureDelay? wingGestureDelay = null,
@@ -113,13 +114,14 @@ internal sealed class MsiClawFrontButtonRuntime : IAsyncDisposable
 
         // §2 (addendum): one stateless executor shared by both physical-button dispatchers so the
         // action switch is not hand-copied. It reaches every seam a domain can legally resolve --
-        // coordinated Overlay toggle, Big Picture launcher, both system-button pulses, hotkey, and
-        // application launcher.
+        // coordinated Overlay toggle, Big Picture and Xbox app launchers, both system-button
+        // pulses, hotkey, and application launcher.
         var actionExecutor = new CenterM.FrontButtonActionExecutor(
             requestOverlayToggle: requestOverlayToggle,
             launchBigPicture: launchBigPictureOverride ?? Oem1BigPictureLauncher.Launch,
             tryRequestSteamPulse: tryRequestSteamPulse,
             tryRequestQuickAccessPulse: tryRequestQuickAccessPulse,
+            launchXboxApp: launchXboxAppOverride ?? FrontButtonXboxAppLauncher.Launch,
             sendHotkey: sendHotkeyOverride,
             launchApplication: launchApplicationOverride);
 

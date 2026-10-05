@@ -521,6 +521,7 @@ public sealed partial class ControllerPage : UserControl
         FrontButtonAction.SteamQuickAccess => "Steam Quick Access",
         FrontButtonAction.KeyboardHotkey => "Keyboard / Hotkey",
         FrontButtonAction.LaunchApplication => "Launch Application",
+        FrontButtonAction.XboxApp => "Xbox",
         _ => action.ToString()
     };
 

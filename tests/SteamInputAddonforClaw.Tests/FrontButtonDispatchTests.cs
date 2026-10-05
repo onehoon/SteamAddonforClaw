@@ -12,7 +12,7 @@ public sealed class FrontButtonDispatchTests
 {
     private sealed class Seams
     {
-        public int Overlay, BigPicture, SteamPulse, QuickAccess;
+        public int Overlay, BigPicture, SteamPulse, QuickAccess, Xbox;
         public FrontButtonHotkeyBinding? Hotkey;
         public FrontButtonLaunchApplicationBinding? Launch;
 
@@ -21,6 +21,7 @@ public sealed class FrontButtonDispatchTests
             launchBigPicture: () => BigPicture++,
             tryRequestSteamPulse: () => { SteamPulse++; return true; },
             tryRequestQuickAccessPulse: () => { QuickAccess++; return true; },
+            launchXboxApp: () => Xbox++,
             sendHotkey: h => Hotkey = h,
             launchApplication: l => Launch = l);
     }
@@ -92,6 +93,56 @@ public sealed class FrontButtonDispatchTests
 
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
         Assert.Equal(0, seams.SteamPulse);
+    }
+
+    [Fact]
+    public void Gamebar_normal_xbox_action_uses_the_shared_launcher_once_without_other_actions()
+    {
+        var mapping = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.Gamebar, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.XboxApp));
+        var seams = new Seams();
+
+        new WingActionDispatcher(() => mapping, () => false, seams.Executor()).Dispatch(WingGesture.Single);
+
+        Assert.Equal(1, seams.Xbox);
+        Assert.Equal(0, seams.Overlay);
+        Assert.Equal(0, seams.BigPicture);
+        Assert.Equal(0, seams.SteamPulse);
+        Assert.Equal(0, seams.QuickAccess);
+    }
+
+    [Fact]
+    public void Center_m_normal_xbox_action_uses_the_shared_launcher_once_without_other_actions()
+    {
+        var mapping = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.XboxApp));
+        var seams = new Seams();
+
+        new Oem1ActionDispatcher(() => mapping, () => false, seams.Executor())
+            .Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
+
+        Assert.Equal(1, seams.Xbox);
+        Assert.Equal(0, seams.Overlay);
+        Assert.Equal(0, seams.BigPicture);
+        Assert.Equal(0, seams.SteamPulse);
+        Assert.Equal(0, seams.QuickAccess);
+    }
+
+    [Fact]
+    public void Steam_domain_xbox_action_bypassing_mapping_validation_is_refused()
+    {
+        var mapping = FrontButtonMappingSettings.Default.With(
+            FrontButtonKind.CenterM, FrontButtonDomain.Steam, FrontButtonBinding.Of(FrontButtonAction.XboxApp));
+        var seams = new Seams();
+
+        Assert.True(new Oem1ActionDispatcher(() => mapping, () => true, seams.Executor())
+            .Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
+
+        Assert.Equal(0, seams.Xbox);
+        Assert.Equal(0, seams.Overlay);
+        Assert.Equal(0, seams.BigPicture);
+        Assert.Equal(0, seams.SteamPulse);
+        Assert.Equal(0, seams.QuickAccess);
     }
 
     [Fact]

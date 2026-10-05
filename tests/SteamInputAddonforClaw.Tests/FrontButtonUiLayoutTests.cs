@@ -58,6 +58,15 @@ public sealed class FrontButtonUiLayoutTests
     }
 
     [Fact]
+    public void Xbox_is_labeled_and_both_domain_editors_use_the_shared_capability_catalog()
+    {
+        var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
+
+        Assert.Contains("FrontButtonAction.XboxApp => \"Xbox\"", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("FrontButtonActionCapabilities.ActionsFor(domain)", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_center_m_button_detail_page_is_gone()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
