@@ -67,7 +67,7 @@ public sealed class SteamFsePackagingContractTests
     }
 
     [Fact]
-    public void Runtime_does_not_provision_fse_and_first_enable_uses_the_fixed_elevated_entrypoint()
+    public void Runtime_does_not_provision_fse_and_first_enable_uses_the_fixed_worker_entrypoint()
     {
         var host = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
         var program = ReadSource("src", "SteamInputAddonforClaw", "Program.cs");
@@ -75,7 +75,7 @@ public sealed class SteamFsePackagingContractTests
         var registration = ReadSource("src", "SteamInputAddonforClaw", "WindowsGaming", "SteamFseRegistration.cs");
 
         Assert.DoesNotContain("EnsureProvisioned", host, StringComparison.Ordinal);
-        Assert.Contains("SteamFseElevatedRegistration.Argument", program, StringComparison.Ordinal);
+        Assert.Contains("SteamFseRegistrationWorker.Argument", program, StringComparison.Ordinal);
         Assert.Contains("--register-fse-home", registration, StringComparison.Ordinal);
         Assert.Contains("PackageRelativePath", registration, StringComparison.Ordinal);
         Assert.Contains("SteamInputAddonforClaw.FseHome.msix", configuration, StringComparison.Ordinal);
@@ -84,6 +84,8 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("SetEnabledAsync", configuration, StringComparison.Ordinal);
         Assert.Contains("cancellationToken.ThrowIfCancellationRequested();", registration, StringComparison.Ordinal);
         Assert.Contains("WaitForExitAsync(CancellationToken.None)", registration, StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = false", registration, StringComparison.Ordinal);
+        Assert.DoesNotContain("Verb = \"runas\"", registration, StringComparison.Ordinal);
         Assert.DoesNotContain("TryTerminate", registration, StringComparison.Ordinal);
         Assert.DoesNotContain("Kill(entireProcessTree", registration, StringComparison.Ordinal);
     }

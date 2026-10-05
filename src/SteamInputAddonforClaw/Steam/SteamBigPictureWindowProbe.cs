@@ -4,7 +4,7 @@ using System.Text;
 
 namespace SteamInputAddonforClaw.Steam;
 
-// Kept for ElevatedPrerequisiteSetup's safety-gate probe (SteamBigPictureWindowProbe.Capture), which is
+// Kept for PrerequisiteSetupWorker's safety-gate probe (SteamBigPictureWindowProbe.Capture), which is
 // unrelated to BPM session detection and must keep its existing fail-closed-on-any-unreliable-window
 // behavior unchanged.
 internal sealed record SteamBigPictureProbeResult(bool IsActive, bool IsReliable, string Reason);
@@ -80,7 +80,7 @@ internal sealed class SteamBigPictureWindowProbe : ISteamBigPictureWindowProbe
     }
 
     /// <summary>
-    /// Legacy full-scan probe used only by the elevated Steam safety gate (ElevatedPrerequisiteSetup). Not
+    /// Legacy full-scan probe used only by the prerequisite setup safety gate (PrerequisiteSetupWorker). Not
     /// part of the BPM watcher's detection path and intentionally left as fail-closed on any unreliable window.
     /// </summary>
     public SteamBigPictureProbeResult Capture()

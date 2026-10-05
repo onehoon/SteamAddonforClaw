@@ -29,7 +29,7 @@ internal sealed class SteamFseRegistrationClient : ISteamFseRegistrationClient
 
         var processPath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(processPath))
-            return new(false, "The Addon executable path could not be determined for elevated registration.");
+            return new(false, "The Addon executable path could not be determined for registration.");
 
         Process? process = null;
         try
@@ -38,15 +38,15 @@ internal sealed class SteamFseRegistrationClient : ISteamFseRegistrationClient
             process = Process.Start(new ProcessStartInfo
             {
                 FileName = processPath,
-                Arguments = SteamFseElevatedRegistration.Argument,
-                UseShellExecute = true,
-                Verb = "runas",
+                Arguments = SteamFseRegistrationWorker.Argument,
+                UseShellExecute = false,
+                CreateNoWindow = true,
                 WorkingDirectory = AppContext.BaseDirectory,
             });
             if (process is null)
-                return new(false, "Windows did not start the elevated Gaming Home registration.");
+                return new(false, "Windows did not start the Gaming Home registration worker.");
 
-            // The elevated child owns temporary Developer Mode and certificate cleanup.
+            // The worker owns temporary Developer Mode and certificate cleanup.
             // Once it has started, do not let request cancellation terminate it before its finally runs.
             await process.WaitForExitAsync(CancellationToken.None)
                 .WaitAsync(RegistrationTimeout, CancellationToken.None)
@@ -61,13 +61,13 @@ internal sealed class SteamFseRegistrationClient : ISteamFseRegistrationClient
         }
         catch (TimeoutException)
         {
-            AppLog.Warn("SteamFSE", "Elevated Gaming Home registration timed out; the child was left running for self-cleanup.");
+            AppLog.Warn("SteamFSE", "Gaming Home registration timed out; the worker was left running for self-cleanup.");
             return new(false, "The Gaming Home registration timed out.");
         }
         catch (Exception exception)
         {
-            AppLog.Warn("SteamFSE", "Elevated Gaming Home registration could not be started.", exception);
-            return new(false, "The Gaming Home registration could not be started. UAC may have been cancelled.");
+            AppLog.Warn("SteamFSE", "Gaming Home registration worker could not be started.", exception);
+            return new(false, "The Gaming Home registration worker could not be started.");
         }
         finally
         {
@@ -76,7 +76,7 @@ internal sealed class SteamFseRegistrationClient : ISteamFseRegistrationClient
     }
 }
 
-internal static class SteamFseElevatedRegistration
+internal static class SteamFseRegistrationWorker
 {
     internal const string Argument = "--register-fse-home";
     private const string DeveloperModeKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock";

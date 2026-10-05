@@ -874,7 +874,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 rumbleSink,
                 backButtonMappingProvider: () => startupSettings.BackButtonMapping,
                 rumbleLoopUsbTraceCaptureFactory: () => new SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture(
-                    new SteamInputAddonforClaw.HidHide.ElevatedProcessRunner(
+                    new SteamInputAddonforClaw.Processes.ChildProcessRunner(
                         SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture.CommandTimeout)),
                 physicalRumbleTestAvailabilityProvider: () =>
                     owner.LiveInputSource is { IsRunning: true } && owner.CurrentIdentity is not null);

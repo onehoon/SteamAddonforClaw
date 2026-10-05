@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Processes;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -52,13 +53,13 @@ public sealed class PrerequisiteSetupPromptPolicyTests
         Assert.Equal(1, runner.CallCount);
     }
 
-    private sealed class FakeRunner : IElevatedProcessRunner
+    private sealed class FakeRunner : IChildProcessRunner
     {
         public int CallCount { get; private set; }
-        public Task<ElevatedProcessResult> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
+        public Task<ChildProcessResult> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
         {
             CallCount++;
-            return Task.FromResult(new ElevatedProcessResult(ElevatedProcessResultKind.Completed, 0, null));
+            return Task.FromResult(new ChildProcessResult(ChildProcessResultKind.Completed, 0));
         }
     }
 }

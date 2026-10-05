@@ -673,9 +673,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var executable = _processPath() ?? throw new InvalidOperationException("The executable path is unavailable.");
         var result = await _setupExecutor.RunAsync(setup, executable, cancellationToken).ConfigureAwait(false);
         // RunIfInstallableAsync returns null only when its safety policy declines to launch.
-        // Preserve that distinction from an elevated helper that actually returns Blocked.
+        // Preserve that distinction from a setup worker that actually returns Blocked.
         if (result is null) return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
-        var resultKind = MapResultKind(ElevatedPrerequisiteSetup.TranslateExitCode(result));
+        var resultKind = MapResultKind(PrerequisiteSetupWorker.TranslateExitCode(result));
         // No OEM1 reconcile here: HidHide/usbip setup no longer mutates any OEM1 prerequisite. OEM1
         // arming is owned entirely by the mapping-change/startup lifecycle plus the coordinator's own
         // environment/Launcher/Server/process/helper reconciliation.
@@ -692,14 +692,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return new(resultKind, postStatus);
     }
 
-    private static FrontendPrerequisiteSetupResultKind MapResultKind(ElevatedPrerequisiteSetup.ResultKind kind) => kind switch
+    private static FrontendPrerequisiteSetupResultKind MapResultKind(PrerequisiteSetupWorker.ResultKind kind) => kind switch
     {
-        ElevatedPrerequisiteSetup.ResultKind.Ready => FrontendPrerequisiteSetupResultKind.Ready,
-        ElevatedPrerequisiteSetup.ResultKind.Installed => FrontendPrerequisiteSetupResultKind.Installed,
-        ElevatedPrerequisiteSetup.ResultKind.RebootRequired => FrontendPrerequisiteSetupResultKind.RebootRequired,
-        ElevatedPrerequisiteSetup.ResultKind.Cancelled => FrontendPrerequisiteSetupResultKind.Cancelled,
-        ElevatedPrerequisiteSetup.ResultKind.Blocked => FrontendPrerequisiteSetupResultKind.Blocked,
-        ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress => FrontendPrerequisiteSetupResultKind.AlreadyInProgress,
+        PrerequisiteSetupWorker.ResultKind.Ready => FrontendPrerequisiteSetupResultKind.Ready,
+        PrerequisiteSetupWorker.ResultKind.Installed => FrontendPrerequisiteSetupResultKind.Installed,
+        PrerequisiteSetupWorker.ResultKind.RebootRequired => FrontendPrerequisiteSetupResultKind.RebootRequired,
+        PrerequisiteSetupWorker.ResultKind.Blocked => FrontendPrerequisiteSetupResultKind.Blocked,
+        PrerequisiteSetupWorker.ResultKind.AlreadyInProgress => FrontendPrerequisiteSetupResultKind.AlreadyInProgress,
         _ => FrontendPrerequisiteSetupResultKind.Failed
     };
 

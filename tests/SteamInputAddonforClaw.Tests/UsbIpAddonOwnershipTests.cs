@@ -8,7 +8,7 @@ public sealed class UsbIpAddonOwnershipTests
     [Fact]
     public void MissingPackage_IsOwnedWhenAddonStartsInstallation()
     {
-        Assert.True(ElevatedPrerequisiteSetup.ShouldMarkUsbIpInstalledByAddon(
+        Assert.True(PrerequisiteSetupWorker.ShouldMarkUsbIpInstalledByAddon(
             null, ComponentInstallationStatus.Missing, null));
     }
 
@@ -24,7 +24,7 @@ public sealed class UsbIpAddonOwnershipTests
             ObservedInstalledVersion = "0.9.8.1"
         };
 
-        Assert.True(ElevatedPrerequisiteSetup.ShouldMarkUsbIpInstalledByAddon(
+        Assert.True(PrerequisiteSetupWorker.ShouldMarkUsbIpInstalledByAddon(
             receipt, ComponentInstallationStatus.UpdateRequired, "0.9.8.1"));
     }
 
@@ -41,7 +41,7 @@ public sealed class UsbIpAddonOwnershipTests
             ObservedInstalledVersion = "0.9.8.1"
         };
 
-        Assert.False(ElevatedPrerequisiteSetup.ShouldMarkUsbIpInstalledByAddon(
+        Assert.False(PrerequisiteSetupWorker.ShouldMarkUsbIpInstalledByAddon(
             receipt, ComponentInstallationStatus.UpdateRequired, "0.9.8.1"));
     }
 
@@ -52,7 +52,7 @@ public sealed class UsbIpAddonOwnershipTests
     {
         var receipt = Receipt() with { InstalledByAddon = owned, ObservedInstalledVersion = "0.9.8.1" };
 
-        Assert.False(ElevatedPrerequisiteSetup.ShouldMarkUsbIpInstalledByAddon(
+        Assert.False(PrerequisiteSetupWorker.ShouldMarkUsbIpInstalledByAddon(
             receipt, ComponentInstallationStatus.UpdateRequired, currentVersion));
     }
 

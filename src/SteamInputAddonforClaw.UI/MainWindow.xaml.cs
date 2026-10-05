@@ -32,7 +32,6 @@ public sealed partial class MainWindow : Window
     private bool _prerequisiteSetupPendingActivation;
     private bool _prerequisiteSetupInProgress;
     private bool _prerequisiteSetupAttemptedForCurrentProcess;
-    private bool _prerequisiteSetupCancelledForCurrentProcess;
 
     // App UI PR-C: the single ordered mutation path for the WHOLE front-button mapping. The
     // cross-button same-domain uniqueness rule belongs to one whole mapping, so there is one save
@@ -368,7 +367,7 @@ public sealed partial class MainWindow : Window
 
     private async Task RunPrerequisiteSetupAsync()
     {
-        if (_prerequisiteSetupAttemptedForCurrentProcess || _prerequisiteSetupCancelledForCurrentProcess || _prerequisiteSetupInProgress) return;
+        if (_prerequisiteSetupAttemptedForCurrentProcess || _prerequisiteSetupInProgress) return;
         if (Content.XamlRoot is null)
         {
             _prerequisiteSetupPendingActivation = true;
@@ -381,16 +380,9 @@ public sealed partial class MainWindow : Window
         try
         {
             var result = await _frontend.RunPrerequisiteSetupAsync();
-            AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", result.Result));
+            AppLog.Info("PrerequisiteSetup", "Prerequisite setup worker finished.", ("Result", result.Result));
             if (result.Status is not null)
                 RenderSystemStatus(result.Status);
-            if (result.Result == FrontendPrerequisiteSetupResultKind.Cancelled)
-            {
-                _prerequisiteSetupCancelledForCurrentProcess = true;
-                AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup was cancelled; automatic setup is suppressed for this process.", ("Action", "NoRetry"));
-                return;
-            }
-
             await HandlePrerequisiteSetupResultAsync(result.Result);
         }
         catch (Exception exception) { AppLog.Warn("PrerequisiteSetup", "Automatic prerequisite setup failed.", exception); }

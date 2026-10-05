@@ -31,7 +31,7 @@ public enum FrontendSetupStatus { Complete, Required, Blocked, RestartRequired, 
 public enum FrontendHardwareStatus { Supported, Unsupported, Indeterminate }
 public enum FrontendSteamSource { Actual, BigPicture, Indeterminate }
 public enum FrontendPrerequisiteStatus { Ready, Missing, Present, Unusable, Incompatible, Indeterminate }
-public enum FrontendPrerequisiteSetupResultKind { Ready, Installed, RebootRequired, Cancelled, NotInstallable, Blocked, Failed, AlreadyInProgress }
+public enum FrontendPrerequisiteSetupResultKind { Ready, Installed, RebootRequired, NotInstallable, Blocked, Failed, AlreadyInProgress }
 public enum FrontendAddonOperationalStatus
 {
     Ready,

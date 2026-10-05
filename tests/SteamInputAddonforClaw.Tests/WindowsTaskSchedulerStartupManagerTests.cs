@@ -4,12 +4,6 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-/// <summary>PR11 sections 11-13 / 18: the Addon-owned Task Scheduler startup task is verified
-/// read-only first (no rewrite / no UAC when compliant). A missing/materially-drifted task in the
-/// production Runtime goes DIRECTLY to one bounded elevated child -- no known-denied parent
-/// RegisterTaskDefinition first -- then an independent, bounded-settle normal-process read-back must
-/// prove the exact task. The elevated `--ensure-startup-task` child (a manager with no elevated
-/// invoker) writes directly and read-back verifies.</summary>
 [Collection("AppLog")]
 public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
 {
@@ -21,57 +15,39 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     public void Dispose() { try { File.Delete(_exe); } catch { } }
 
     private OwnedStartupTaskState Compliant() =>
-        new(Enabled: true, ActionPath: _exe, ActionArguments: "--background",
-            LogonTriggerUserId: User, LogonType: 3, RunLevel: WindowsTaskSchedulerStartupManager.TaskRunLevelHighest,
+        new(true, _exe, "--background", User, 3, WindowsTaskSchedulerStartupManager.TaskRunLevelHighest,
             DisallowStartIfOnBatteries: false, StopIfGoingOnBatteries: false, ExecutionTimeLimit: "PT0S");
 
-    // Deterministic bounded settle: no-op sleep, 4 read attempts (30ms / 10ms).
-    private WindowsTaskSchedulerStartupManager Manager(FakeTaskStore store, FakeElevated? elevated) =>
-        new(() => _exe, () => User, store, elevated,
+    private WindowsTaskSchedulerStartupManager Manager(FakeTaskStore store) =>
+        new(() => _exe, () => User, store,
             sleep: _ => { }, readbackSettleWindow: TimeSpan.FromMilliseconds(30), readbackSettleInterval: TimeSpan.FromMilliseconds(10));
 
-    // ---- steady state ----
-
     [Fact]
-    public void Existing_compliant_task_is_verified_without_a_rewrite_or_elevation()
+    public void Existing_compliant_task_is_read_only()
     {
         var store = new FakeTaskStore { Current = Compliant() };
-        var elevated = new FakeElevated();
 
-        var result = Manager(store, elevated).Synchronize(true);
-
-        Assert.True(result.Success);
+        Assert.True(Manager(store).Synchronize(true).Success);
         Assert.Equal(0, store.RegisterCalls);
-        Assert.Equal(0, elevated.Calls);
+        Assert.Equal(0, store.DeleteCalls);
     }
 
     [Fact]
-    public void Repeated_synchronize_after_a_compliant_task_never_registers_or_elevates()
+    public void Missing_task_is_registered_directly_once_and_exact_contract_is_verified()
     {
-        var store = new FakeTaskStore { Current = Compliant() };
-        var elevated = new FakeElevated();
-        var manager = Manager(store, elevated);
+        var store = new FakeTaskStore();
 
-        Assert.True(manager.Synchronize(true).Success);
-        Assert.True(manager.Synchronize(true).Success);
+        Assert.True(Manager(store).Synchronize(true).Success);
 
-        Assert.Equal(0, store.RegisterCalls);
-        Assert.Equal(0, elevated.Calls);
-    }
-
-    // ---- production manager: missing / drifted go straight to elevated ----
-
-    [Fact] // PR11 section 11: NO known-denied parent RegisterTaskDefinition first
-    public void Missing_task_in_the_production_manager_goes_straight_to_the_elevated_child()
-    {
-        var store = new FakeTaskStore { Current = null };
-        var elevated = new FakeElevated { Store = store, OnInvoke = s => s.Current = Compliant() };
-
-        var result = Manager(store, elevated).Synchronize(true);
-
-        Assert.True(result.Success);
-        Assert.Equal(1, elevated.Calls);
-        Assert.Equal(0, store.RegisterCalls);
+        Assert.Equal(1, store.RegisterCalls);
+        Assert.NotNull(store.LastConfiguration);
+        Assert.Equal(_exe, store.LastConfiguration!.ExecutablePath);
+        Assert.Equal(User, store.LastConfiguration.UserId);
+        Assert.Equal("--background", store.Current!.ActionArguments);
+        Assert.Equal(WindowsTaskSchedulerStartupManager.TaskRunLevelHighest, store.Current.RunLevel);
+        Assert.False(store.Current.DisallowStartIfOnBatteries);
+        Assert.False(store.Current.StopIfGoingOnBatteries);
+        Assert.Equal("PT0S", store.Current.ExecutionTimeLimit);
     }
 
     [Theory]
@@ -84,170 +60,142 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     [InlineData("battery-disallow")]
     [InlineData("battery-stop")]
     [InlineData("execution-limit")]
-    public void A_drifted_task_in_the_production_manager_is_repaired_via_the_elevated_child(string drift)
+    public void Drifted_task_is_repaired_with_one_direct_write(string drift)
     {
-        var c = Compliant();
-        var drifted = drift switch
+        var compliant = Compliant();
+        var changed = drift switch
         {
-            "args" => c with { ActionArguments = "--foreground" },
-            "disabled" => c with { Enabled = false },
-            "path" => c with { ActionPath = @"C:\Windows\other.exe" },
-            "runlevel" => c with { RunLevel = 0 },
-            "logontype" => c with { LogonType = 2 },
-            "battery-disallow" => c with { DisallowStartIfOnBatteries = true },
-            "battery-stop" => c with { StopIfGoingOnBatteries = true },
-            "execution-limit" => c with { ExecutionTimeLimit = "PT72H" },
-            _ => c with { LogonTriggerUserId = @"OTHER\user" },
+            "args" => compliant with { ActionArguments = "--foreground" },
+            "disabled" => compliant with { Enabled = false },
+            "path" => compliant with { ActionPath = @"C:\Windows\other.exe" },
+            "runlevel" => compliant with { RunLevel = 0 },
+            "logontype" => compliant with { LogonType = 2 },
+            "trigger-user" => compliant with { LogonTriggerUserId = @"OTHER\user" },
+            "battery-disallow" => compliant with { DisallowStartIfOnBatteries = true },
+            "battery-stop" => compliant with { StopIfGoingOnBatteries = true },
+            _ => compliant with { ExecutionTimeLimit = "PT72H" },
         };
-        var store = new FakeTaskStore { Current = drifted };
-        var elevated = new FakeElevated { Store = store, OnInvoke = s => s.Current = Compliant() };
+        var store = new FakeTaskStore { Current = changed };
 
-        var result = Manager(store, elevated).Synchronize(true);
-
-        Assert.True(result.Success);
-        Assert.Equal(1, elevated.Calls);
-        Assert.Equal(0, store.RegisterCalls);
+        Assert.True(Manager(store).Synchronize(true).Success);
+        Assert.Equal(1, store.RegisterCalls);
+        Assert.True(WindowsTaskSchedulerStartupManager.IsCompliant(store.Current!,
+            WindowsTaskSchedulerStartupManager.CreateTaskConfiguration(_exe, User)));
     }
 
-    // ---- elevated child / direct-write manager (no elevated invoker) ----
-
-    [Fact]
-    public void The_elevated_child_writes_directly_and_readback_verifies()
+    [Theory]
+    [InlineData((int)StartupTaskWriteOutcome.AccessDenied)]
+    [InlineData((int)StartupTaskWriteOutcome.Failed)]
+    public void Direct_registration_failure_fails_without_any_secondary_elevation_attempt(int outcome)
     {
-        var store = new FakeTaskStore { Current = null, NextRegister = StartupTaskWriteOutcome.Registered };
+        var store = new FakeTaskStore { NextRegister = (StartupTaskWriteOutcome)outcome };
 
-        var result = Manager(store, elevated: null).Synchronize(true);
-
-        Assert.True(result.Success);
+        Assert.False(Manager(store).Synchronize(true).Success);
         Assert.Equal(1, store.RegisterCalls);
     }
 
     [Fact]
-    public void The_elevated_child_direct_write_that_reads_back_drifted_fails()
+    public void Direct_registration_that_does_not_read_back_as_compliant_fails()
     {
         var store = new FakeTaskStore
         {
-            Current = null,
-            NextRegister = StartupTaskWriteOutcome.Registered,
-            RegisteredReadback = new OwnedStartupTaskState(true, @"C:\wrong.exe", "--background", User, 3, 0, false, false, "PT0S"),
+            RegisteredReadback = new(true, @"C:\wrong.exe", "--background", User, 3, 0, false, false, "PT0S")
         };
 
-        Assert.False(Manager(store, elevated: null).Synchronize(true).Success);
+        Assert.False(Manager(store).Synchronize(true).Success);
         Assert.Equal(1, store.RegisterCalls);
     }
 
     [Fact]
-    public void A_direct_write_access_denied_with_no_elevated_path_fails()
-        => Assert.False(Manager(new FakeTaskStore { Current = null, NextRegister = StartupTaskWriteOutcome.AccessDenied }, elevated: null).Synchronize(true).Success);
-
-    // ---- bounded post-elevation readback settle (PR11 section 12) ----
-
-    [Fact] // read #1 lags, a later read within the bounded window verifies
-    public void A_lagging_readback_within_the_bounded_window_still_succeeds()
+    public void A_lagging_readback_can_settle_without_repeating_the_write()
     {
-        var store = new FakeTaskStore { Current = null, CompliantOnReadNumber = 3 }; // 1st verify-read + 2 settle reads
-        store.CompliantValue = Compliant();
-        var elevated = new FakeElevated { Store = store, Outcome = ElevatedStartupTaskOutcome.Created };
+        var store = new FakeTaskStore { CompliantOnReadNumber = 3, CompliantValue = Compliant() };
 
-        var result = Manager(store, elevated).Synchronize(true);
-
-        Assert.True(result.Success);
-        Assert.Equal(1, elevated.Calls); // no repeated elevation
+        Assert.True(Manager(store).Synchronize(true).Success);
+        Assert.Equal(1, store.RegisterCalls);
     }
 
-    [Fact] // all reads stay non-compliant until the window expires
-    public void A_readback_that_never_verifies_within_the_bounded_window_fails()
+    [Fact]
+    public void Readback_that_never_becomes_compliant_fails_after_one_write()
     {
-        var store = new FakeTaskStore { Current = null }; // never becomes compliant
-        var elevated = new FakeElevated { Outcome = ElevatedStartupTaskOutcome.Created };
+        var store = new FakeTaskStore
+        {
+            RegisteredReadback = new(false, _exe, "--background", User, 3, 1, false, false, "PT0S")
+        };
 
-        Assert.False(Manager(store, elevated).Synchronize(true).Success);
-        Assert.Equal(1, elevated.Calls);
+        Assert.False(Manager(store).Synchronize(true).Success);
+        Assert.Equal(1, store.RegisterCalls);
     }
 
-    // ---- failure cases ----
-
     [Fact]
-    public void A_cancelled_uac_prompt_is_a_registration_failure()
-        => Assert.False(Manager(new FakeTaskStore { Current = null }, new FakeElevated { Outcome = ElevatedStartupTaskOutcome.Cancelled }).Synchronize(true).Success);
-
-    [Fact]
-    public void An_elevated_child_that_failed_is_a_registration_failure()
-        => Assert.False(Manager(new FakeTaskStore { Current = null }, new FakeElevated { Outcome = ElevatedStartupTaskOutcome.Failed }).Synchronize(true).Success);
-
-    [Fact]
-    public void Missing_stable_executable_is_not_installed()
+    public void Missing_stable_executable_does_not_write_a_task()
     {
         File.Delete(_exe);
-        var store = new FakeTaskStore { Current = null };
-        var elevated = new FakeElevated();
+        var store = new FakeTaskStore();
 
-        Assert.False(Manager(store, elevated).Synchronize(true).Success);
-        Assert.Equal(0, elevated.Calls);
+        Assert.False(Manager(store).Synchronize(true).Success);
         Assert.Equal(0, store.RegisterCalls);
     }
 
-    [Fact] // PR11 section 13: the newly registered desired task is battery-safe with no execution limit
-    public void A_newly_registered_task_records_battery_safe_settings_and_no_execution_limit()
-    {
-        var store = new FakeTaskStore { Current = null, NextRegister = StartupTaskWriteOutcome.Registered };
-
-        Assert.True(Manager(store, elevated: null).Synchronize(true).Success);
-
-        Assert.NotNull(store.LastRegistered);
-        Assert.False(store.LastRegistered!.DisallowStartIfOnBatteries);
-        Assert.False(store.LastRegistered.StopIfGoingOnBatteries);
-        Assert.Equal("PT0S", store.LastRegistered.ExecutionTimeLimit);
-    }
-
-    // ---- Disable / removal (PR12 section 11) ----
-
     [Fact]
-    public void Disable_when_the_task_is_already_absent_is_a_read_only_success()
+    public void Disable_when_task_is_absent_is_read_only_success()
     {
-        var store = new FakeTaskStore { Current = null };
-        var elevated = new FakeElevated();
+        var store = new FakeTaskStore();
 
-        var result = Manager(store, elevated).Synchronize(false);
-
-        Assert.True(result.Success);
-        Assert.Equal(0, elevated.RemoveCalls);
+        Assert.True(Manager(store).Synchronize(false).Success);
         Assert.Equal(0, store.DeleteCalls);
     }
 
     [Fact]
-    public void Disable_in_the_production_manager_removes_the_task_via_the_elevated_child_then_verifies_absence()
+    public void Disable_deletes_directly_once_and_verifies_absence()
     {
         var store = new FakeTaskStore { Current = Compliant() };
-        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
 
-        var result = Manager(store, elevated).Synchronize(false);
-
-        Assert.True(result.Success);
-        Assert.Equal(1, elevated.RemoveCalls);
-        Assert.Equal(0, store.DeleteCalls);
+        Assert.True(Manager(store).Synchronize(false).Success);
+        Assert.Equal(1, store.DeleteCalls);
         Assert.Null(store.Current);
     }
 
     [Fact]
-    public void Disable_succeeds_when_post_delete_readback_reports_exact_file_not_found_hresult()
+    public void Disable_aborts_delete_when_current_task_cannot_be_read()
     {
-        var store = new FakeTaskStore { Current = Compliant(), MissingTaskOnReadNumber = 2 };
-        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 1 };
 
-        var result = Manager(store, elevated).Synchronize(false);
+        Assert.False(Manager(store).Synchronize(false).Success);
+        Assert.Equal(0, store.DeleteCalls);
+    }
 
-        Assert.True(result.Success);
-        Assert.Equal(1, elevated.RemoveCalls);
-        Assert.Equal(2, store.ReadCalls);
-        Assert.Null(store.Current);
+    [Fact]
+    public void Disable_fails_when_absence_cannot_be_proven_after_delete()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 2 };
+
+        Assert.False(Manager(store).Synchronize(false).Success);
+        Assert.Equal(1, store.DeleteCalls);
+    }
+
+    [Fact]
+    public void Disable_fails_when_direct_delete_throws()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), DeleteException = new UnauthorizedAccessException() };
+
+        Assert.False(Manager(store).Synchronize(false).Success);
+        Assert.Equal(1, store.DeleteCalls);
+    }
+
+    [Fact]
+    public void Disable_fails_when_readback_still_finds_the_task()
+    {
+        var store = new FakeTaskStore { Current = Compliant(), KeepTaskOnDelete = true };
+
+        Assert.False(Manager(store).Synchronize(false).Success);
+        Assert.Equal(1, store.DeleteCalls);
     }
 
     [Fact]
     public void Exact_com_missing_task_hresult_is_classified_as_absent()
     {
         var exception = new COMException("Task not found.", unchecked((int)0x80070002));
-
         Assert.True(WindowsOwnedStartupTaskStore.IsExactMissingTaskException(exception));
     }
 
@@ -256,7 +204,6 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     {
         var exception = new FileNotFoundException("Task not found.");
         Assert.Equal(unchecked((int)0x80070002), exception.HResult);
-
         Assert.True(WindowsOwnedStartupTaskStore.IsExactMissingTaskException(exception));
     }
 
@@ -264,87 +211,7 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
     public void File_not_found_with_a_different_hresult_remains_a_read_failure()
     {
         var exception = new FileNotFoundExceptionWithHResult(unchecked((int)0x80070005));
-
         Assert.False(WindowsOwnedStartupTaskStore.IsExactMissingTaskException(exception));
-    }
-
-    [Fact]
-    public void Disable_fails_when_post_delete_file_not_found_has_a_different_hresult()
-    {
-        var exception = new FileNotFoundExceptionWithHResult(unchecked((int)0x80070005));
-        var store = new FakeTaskStore
-        {
-            Current = Compliant(),
-            ReadException = exception,
-            ReadExceptionNumber = 2,
-        };
-        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
-
-        Assert.False(Manager(store, elevated).Synchronize(false).Success);
-        Assert.Equal(1, elevated.RemoveCalls);
-    }
-
-    [Fact]
-    public void Disable_fails_when_the_elevated_removal_leaves_the_task_present()
-    {
-        var store = new FakeTaskStore { Current = Compliant() };
-        var elevated = new FakeElevated { Store = store, RemoveOutcome = ElevatedStartupTaskOutcome.Removed }; // child claims success but task stays
-
-        Assert.False(Manager(store, elevated).Synchronize(false).Success);
-        Assert.Equal(1, elevated.RemoveCalls);
-    }
-
-    [Theory]
-    [InlineData("Cancelled")]
-    [InlineData("Failed")]
-    public void Disable_fails_when_the_elevated_removal_does_not_report_removed(string outcome)
-    {
-        var store = new FakeTaskStore { Current = Compliant() };
-        var elevated = new FakeElevated { Store = store, RemoveOutcome = Enum.Parse<ElevatedStartupTaskOutcome>(outcome) };
-
-        Assert.False(Manager(store, elevated).Synchronize(false).Success);
-    }
-
-    [Fact] // PR12 review [P1]: a Task Scheduler read failure before deletion is NOT verified absence.
-    public void Disable_fails_when_the_task_cannot_be_read_before_removal()
-    {
-        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 1 };
-        var elevated = new FakeElevated { Store = store };
-
-        Assert.False(Manager(store, elevated).Synchronize(false).Success);
-        Assert.Equal(0, elevated.RemoveCalls);
-        Assert.Equal(0, store.DeleteCalls);
-    }
-
-    [Fact] // PR12 review [P1]: a read failure during post-elevated-delete verification is NOT absence.
-    public void Disable_fails_when_absence_cannot_be_read_back_after_the_elevated_removal()
-    {
-        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 2 };
-        var elevated = new FakeElevated { Store = store, OnRemove = s => s.Current = null };
-
-        Assert.False(Manager(store, elevated).Synchronize(false).Success);
-        Assert.Equal(1, elevated.RemoveCalls); // removal ran; absence just could not be proven
-    }
-
-    [Fact] // same distinction on the direct-write (elevated child) path
-    public void The_elevated_child_disable_fails_when_absence_cannot_be_read_back_after_delete()
-    {
-        var store = new FakeTaskStore { Current = Compliant(), FailReadsFrom = 2 };
-
-        Assert.False(Manager(store, elevated: null).Synchronize(false).Success);
-        Assert.Equal(1, store.DeleteCalls);
-    }
-
-    [Fact]
-    public void The_elevated_child_disable_deletes_directly_and_verifies_absence()
-    {
-        var store = new FakeTaskStore { Current = Compliant() };
-
-        var result = Manager(store, elevated: null).Synchronize(false);
-
-        Assert.True(result.Success);
-        Assert.Equal(1, store.DeleteCalls);
-        Assert.Null(store.Current);
     }
 
     private sealed class FakeTaskStore : IOwnedStartupTaskStore
@@ -352,38 +219,21 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         public OwnedStartupTaskState? Current;
         public StartupTaskWriteOutcome NextRegister = StartupTaskWriteOutcome.Registered;
         public OwnedStartupTaskState? RegisteredReadback;
-        // Read lag: from the Nth Read() onward, Current becomes CompliantValue.
         public int CompliantOnReadNumber;
         public OwnedStartupTaskState? CompliantValue;
-        // Task Scheduler read failure: from the Nth Read() onward, Read() throws (0 == never).
         public int FailReadsFrom;
-        // Models the dynamic COM/binder exception classified by the production read boundary.
-        public int MissingTaskOnReadNumber;
-        public Exception? ReadException;
-        public int ReadExceptionNumber;
         public int RegisterCalls;
         public int DeleteCalls;
         public int ReadCalls;
-        public OwnedStartupTaskState? LastRegistered;
+        public ScheduledTaskConfiguration? LastConfiguration;
+        public Exception? DeleteException;
+        public bool KeepTaskOnDelete;
 
         public OwnedStartupTaskState? Read()
         {
             ReadCalls++;
             if (FailReadsFrom > 0 && ReadCalls >= FailReadsFrom)
                 throw new InvalidOperationException("Simulated Task Scheduler read failure.");
-            if (MissingTaskOnReadNumber > 0 && ReadCalls == MissingTaskOnReadNumber)
-            {
-                var exception = new FileNotFoundException("Simulated missing Task Scheduler task.");
-                if (WindowsOwnedStartupTaskStore.IsExactMissingTaskException(exception))
-                    return null;
-                throw exception;
-            }
-            if (ReadException is not null && ReadCalls >= ReadExceptionNumber)
-            {
-                if (WindowsOwnedStartupTaskStore.IsExactMissingTaskException(ReadException))
-                    return null;
-                throw ReadException;
-            }
             if (CompliantOnReadNumber > 0 && ReadCalls >= CompliantOnReadNumber && CompliantValue is not null)
                 Current = CompliantValue;
             return Current;
@@ -392,38 +242,20 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         public StartupTaskWriteOutcome Register(ScheduledTaskConfiguration configuration)
         {
             RegisterCalls++;
-            LastRegistered = new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId, 3, WindowsTaskSchedulerStartupManager.TaskRunLevelHighest,
-                DisallowStartIfOnBatteries: false, StopIfGoingOnBatteries: false, ExecutionTimeLimit: "PT0S");
+            LastConfiguration = configuration;
+            var intended = new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId,
+                WindowsTaskSchedulerStartupManager.TaskLogonInteractiveToken, WindowsTaskSchedulerStartupManager.TaskRunLevelHighest,
+                false, false, WindowsTaskSchedulerStartupManager.NoExecutionTimeLimit);
             if (NextRegister == StartupTaskWriteOutcome.Registered)
-                Current = RegisteredReadback ?? LastRegistered;
+                Current = RegisteredReadback ?? intended;
             return NextRegister;
         }
 
-        public void Delete() { DeleteCalls++; Current = null; }
-    }
-
-    private sealed class FakeElevated : IElevatedStartupTaskInvoker
-    {
-        public ElevatedStartupTaskOutcome Outcome = ElevatedStartupTaskOutcome.Created;
-        public ElevatedStartupTaskOutcome RemoveOutcome = ElevatedStartupTaskOutcome.Removed;
-        public int Calls;
-        public int RemoveCalls;
-        public Action<FakeTaskStore>? OnInvoke;
-        public Action<FakeTaskStore>? OnRemove;
-        public FakeTaskStore? Store;
-
-        public ElevatedStartupTaskOutcome EnsureOwnedTask()
+        public void Delete()
         {
-            Calls++;
-            if (Store is not null) OnInvoke?.Invoke(Store);
-            return Outcome;
-        }
-
-        public ElevatedStartupTaskOutcome RemoveOwnedTask()
-        {
-            RemoveCalls++;
-            if (Store is not null) OnRemove?.Invoke(Store);
-            return RemoveOutcome;
+            DeleteCalls++;
+            if (DeleteException is not null) throw DeleteException;
+            if (!KeepTaskOnDelete) Current = null;
         }
     }
 

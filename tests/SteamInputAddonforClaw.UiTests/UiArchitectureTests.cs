@@ -474,9 +474,8 @@ public sealed class UiArchitectureTests
         Assert.Contains("RunPrerequisiteSetupAsync()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("RequestPrerequisiteSetupActivation()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_prerequisiteSetupInProgress", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("_prerequisiteSetupCancelledForCurrentProcess", mainWindow, StringComparison.Ordinal);
         Assert.Contains("_prerequisiteSetupAttemptedForCurrentProcess", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("result.Result == FrontendPrerequisiteSetupResultKind.Cancelled", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("FrontendPrerequisiteSetupResultKind.Cancelled", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("Setup required", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("Not now", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("Restart required", mainWindow, StringComparison.Ordinal);

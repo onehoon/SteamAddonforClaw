@@ -6,6 +6,7 @@ using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Processes;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
@@ -45,7 +46,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
     {
         var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
         {
-            Result = new(ElevatedProcessResultKind.Completed, exitCode)
+            Result = new(ChildProcessResultKind.Completed, exitCode)
         };
         var control = CreateControl([Snapshot("pre"), Snapshot("post")], executor);
 
@@ -62,7 +63,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
     {
         var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
         {
-            Result = new(ElevatedProcessResultKind.Completed, 0)
+            Result = new(ChildProcessResultKind.Completed, 0)
         };
         var control = CreateControl([Snapshot("pre"), Snapshot("post")], executor);
 
@@ -86,7 +87,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
             AllowPrerequisiteRepairWhileRecoveryUnsafe: true));
         var executor = new FakeExecutor(setup)
         {
-            Result = new(ElevatedProcessResultKind.Completed, 3010)
+            Result = new(ChildProcessResultKind.Completed, 3010)
         };
         var snapshot = Snapshot("pre") with
         {
@@ -129,7 +130,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
             AllowPrerequisiteRepairWhileRecoveryUnsafe: allowPrerequisiteRepair));
         var executor = new FakeExecutor(setup)
         {
-            Result = new(ElevatedProcessResultKind.Completed, 0)
+            Result = new(ChildProcessResultKind.Completed, 0)
         };
         var firstInstall = Snapshot("first-install") with
         {
@@ -158,7 +159,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
     {
         var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
         {
-            Result = new(ElevatedProcessResultKind.Completed, exitCode)
+            Result = new(ChildProcessResultKind.Completed, exitCode)
         };
         var control = CreateControl(new ThrowingStatusProvider(Snapshot("pre")), executor);
 
@@ -217,7 +218,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
 
     private sealed class FakeExecutor(FirstTimeSetupAssessment assessment) : IFrontendPrerequisiteSetupExecutor
     {
-        public ElevatedProcessResult? Result { get; init; }
+        public ChildProcessResult? Result { get; init; }
         public int EvaluateCallCount { get; private set; }
         public int RunCallCount { get; private set; }
         public string? ExecutablePath { get; private set; }
@@ -229,7 +230,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
             return assessment;
         }
 
-        public Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment suppliedAssessment, string executablePath, CancellationToken cancellationToken)
+        public Task<ChildProcessResult?> RunAsync(FirstTimeSetupAssessment suppliedAssessment, string executablePath, CancellationToken cancellationToken)
         {
             RunCallCount++;
             SuppliedAssessment = suppliedAssessment;
