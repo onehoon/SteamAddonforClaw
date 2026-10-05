@@ -54,6 +54,14 @@ Those work orders remain useful historical records of the implementation sequenc
 
 This revision does **not** supersede strong physical-identity rules, exact PID1902 target rules, fail-close behavior on real operation failure, or the PR10 rule that a changed owned PID1902 target after physical re-enumeration is not silently migrated.
 
+### Process privilege and startup-task RunLevel
+
+The accepted `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` supersedes this document's former least-privilege primary-Runtime and non-elevated startup-task assumptions. Hardware/log diagnosis showed that the medium-integrity Runtime did not receive the relevant WING keyboard sequence from an administrator-elevated foreground game, so native Xbox Game Bar could activate. The existing Full1902 Runtime must run elevated for that supported case.
+
+The supported interactive Windows user must itself be an administrator. UAC consent may elevate that same user, but a Runtime started under a different administrator identity is unsupported and must fail closed before controller ownership.
+
+This process-privilege decision does not change this document's startup-task ownership, identity, trigger, or bounded repair/readback contract.
+
 ---
 
 ## 3. Authority model remains unchanged
@@ -500,18 +508,18 @@ Executable  = stable current SteamInputAddonforClaw.exe
 Arguments   = --background
 Trigger     = current-user interactive logon
 Logon type  = InteractiveToken
-Run level   = least privilege / non-elevated Runtime
+Run level   = highest / elevated Full1902 Runtime (per elevated-Runtime architecture)
 ```
 
 ### Missing or drifted task
 
-If the task is missing or materially drifted and normal creation/repair is denied:
+If the task is missing or materially drifted and the Runtime's direct write is denied:
 
 ```text
 → use one bounded elevated write path
 → create/repair only the fixed Addon-owned startup task
 → elevated helper exits
-→ normal Runtime reads task back independently
+→ Runtime reads task back independently
 → success only if exact contract verifies
 ```
 
@@ -521,11 +529,12 @@ Do not expose a generic administrator Task Scheduler API such as `CreateAnyTask(
 
 Do not add:
 
-- a permanent elevated Runtime;
 - a Windows service solely for this;
 - a long-lived privileged broker;
 - a Task Scheduler manager hierarchy;
 - a second startup authority database.
+
+The primary Full1902 Runtime is the single elevated owner required by the elevated-Runtime architecture; these exclusions prohibit adding another long-lived privileged owner.
 
 If UAC is cancelled or the repair/readback fails, leave Center M Enabled and report the transition failure.
 

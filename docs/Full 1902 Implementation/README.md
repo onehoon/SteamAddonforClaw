@@ -11,10 +11,10 @@ For controller ownership work, use the following precedence when statements conf
    - required official `HidHideCLI.exe` / `HidHideClient.exe` registrations;
    - Disabled-boot HidHide reconciliation;
    - Center M Enable HidHide cleanup semantics;
-   - mandatory Addon startup-task first-create/repair semantics.
+   - mandatory Addon startup-task identity, trigger, and first-create/repair semantics. The task's required RunLevel is governed by item 4.
 2. `REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md` for the reboot-bound authority/lifecycle design except where item 1 explicitly revises its older foreign-HidHide policy.
 3. `FULL_1902_IMPLEMENTATION_ARCHITECTURE.md` for the overall Full1902 controller architecture except where item 1 explicitly revises its older foreign-HidHide policy.
-4. `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` for the Full1902 process-privilege model. Where older documents assume a medium-integrity / `asInvoker` primary Runtime, the elevated-Runtime architecture is the current target. It does not change the controller-authority rules in items 1–3.
+4. `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` for the Full1902 process-privilege model and startup-task RunLevel. It supersedes conflicting least-privilege / non-elevated Runtime and RunLevel statements in items 1–3. It does not change their controller-authority, task identity, trigger, or repair/readback semantics.
 5. Historical `docs/work-order/*` files describe the implementation contract at the time each PR was prepared. Later policy revisions and the active work order/addendum take precedence for new implementation work.
 
 ## Related process-privilege architecture
@@ -22,11 +22,13 @@ For controller ownership work, use the following precedence when statements conf
 `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` records the accepted direction for administrator-game compatibility:
 
 - the primary Full1902 Runtime becomes the elevated platform process;
+- elevation is required because the medium-integrity Runtime did not receive the relevant low-level WING keyboard sequence from an administrator-elevated foreground game, allowing native Game Bar activation;
+- the supported interactive Windows user is itself an administrator; elevation must retain that user's identity;
 - Main UI and Overlay are not intentionally de-elevated and may inherit the Runtime token;
 - the existing Runtime-owned `WinGSuppressionGuard` remains the one WING / Game Bar suppression owner;
 - the existing mandatory startup task must launch the Runtime at the required elevated run level;
 - Sleep/Hibernate/Resume, PID1902/HidHide/VIIPER ownership, and Full1902 fail-close policy remain unchanged;
-- existing privileged helpers, including the TDP helper, stay unchanged during the first elevation migration;
+- existing privileged helpers, including the TDP helper, stay unchanged during the first elevation implementation;
 - user EXE / PowerShell privilege-boundary cleanup and helper consolidation are explicitly deferred to a later focused design.
 
 This is a process-privilege decision, not a new controller authority.

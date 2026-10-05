@@ -87,6 +87,8 @@ Center M Enabled
 
 Elevation changes process privilege, not controller-authority policy.
 
+The supported interactive Windows user must itself be a member of Administrators. Manual UAC is for consent under that same user identity; credentials for a different administrator account are unsupported.
+
 ---
 
 ## 3. Velopack constraint: keep the packaged main EXE asInvoker
@@ -174,7 +176,7 @@ already High
 
 not High
 => relaunch the same current executable with ShellExecute "runas"
-=> preserve the original arguments
+=> preserve the original arguments and originating interactive user's SID
 => exit the medium bootstrap process
 
 runas cancelled/failed
@@ -188,11 +190,14 @@ Then the elevated process starts from \`Main\` again:
 ~~~text
 VelopackApp.Run()
 => special-mode checks
+=> verify the current user SID matches the originating interactive user SID, when this is a self-elevation relaunch
 => elevation check passes
 => SingleInstanceGate
 => pending-update check
 => RuntimeProcessApplication
 ~~~
+
+The elevated replacement must retain the originating interactive user's SID. If the SID differs, it logs and exits before `SingleInstanceGate` or controller ownership. Carry the expected SID through a minimal bootstrap handoff; do not add cross-user IPC, alternate-credential launch support, a service/broker, or multi-user ownership handling.
 
 This means the entire normal application lifecycle, including single-instance ownership, runs at High integrity.
 
@@ -619,6 +624,10 @@ Verb = runas
 original args preserved
 ~~~
 
+Also verify the fail-closed outcome: if `runas` is cancelled (including Win32 error 1223) or process creation otherwise fails, the medium bootstrap logs the outcome and exits before acquiring `SingleInstanceGate` or entering `RuntimeProcessApplication` / controller ownership. Use a focused source/architecture guard if the native process-start result is not directly testable; do not add an interface/service solely for this test.
+
+Verify that the elevated replacement receives and matches the originating interactive user's SID; a different SID must exit before `SingleInstanceGate`.
+
 Do not add an interface/service solely for unit testing.
 
 ### 15.4 Startup ordering
@@ -653,7 +662,7 @@ From a clean install:
 ~~~text
 install
 => first normal launch
-=> one UAC prompt
+=> one UAC consent prompt for the same administrator user
 => Runtime High
 => Main UI works
 => Overlay works
@@ -744,6 +753,17 @@ Smoke-test existing behavior:
 
 No helper refactor is part of this PR.
 
+### G. Manual launch with UAC cancellation
+
+With no Runtime already active, launch the Addon manually and cancel the UAC prompt. Verify:
+
+- the medium bootstrap exits;
+- no Runtime, AddonProcessHost, or controller-authority startup occurs;
+- PID, HidHide, VIIPER, and WinG ownership state is unchanged;
+- the log records the cancelled/failed elevation outcome.
+
+Also verify that a replacement launched under a different administrator SID (for example, over-the-shoulder credentials from a standard account) is rejected before normal Runtime/controller ownership. The supported same-user administrator consent path must continue normally.
+
 ---
 
 ## 17. Expected production changes
@@ -781,8 +801,8 @@ If substantial production changes appear outside the expected files, re-check sc
 The PR is complete when:
 
 1. The packaged main EXE remains \`asInvoker\` for Velopack compatibility.
-2. Every normal application Runtime reaches High integrity before single-instance/Runtime ownership begins.
-3. Elevation cancellation/failure exits without controller mutation.
+2. Every normal application Runtime reaches High integrity under the originating interactive administrator user before single-instance/Runtime ownership begins.
+3. Elevation cancellation/failure or a different elevated user SID exits without controller mutation.
 4. The owned startup task uses \`TASK_RUNLEVEL_HIGHEST\`.
 5. Windows logon starts the Runtime High without UAC.
 6. Controlled Runtime restart remains High without UAC.

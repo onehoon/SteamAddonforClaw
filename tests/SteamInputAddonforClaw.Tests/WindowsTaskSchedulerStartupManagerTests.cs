@@ -22,7 +22,7 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
 
     private OwnedStartupTaskState Compliant() =>
         new(Enabled: true, ActionPath: _exe, ActionArguments: "--background",
-            LogonTriggerUserId: User, LogonType: 3, RunLevel: 0,
+            LogonTriggerUserId: User, LogonType: 3, RunLevel: WindowsTaskSchedulerStartupManager.TaskRunLevelHighest,
             DisallowStartIfOnBatteries: false, StopIfGoingOnBatteries: false, ExecutionTimeLimit: "PT0S");
 
     // Deterministic bounded settle: no-op sleep, 4 read attempts (30ms / 10ms).
@@ -92,7 +92,7 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
             "args" => c with { ActionArguments = "--foreground" },
             "disabled" => c with { Enabled = false },
             "path" => c with { ActionPath = @"C:\Windows\other.exe" },
-            "runlevel" => c with { RunLevel = 1 },
+            "runlevel" => c with { RunLevel = 0 },
             "logontype" => c with { LogonType = 2 },
             "battery-disallow" => c with { DisallowStartIfOnBatteries = true },
             "battery-stop" => c with { StopIfGoingOnBatteries = true },
@@ -392,7 +392,7 @@ public sealed class WindowsTaskSchedulerStartupManagerTests : IDisposable
         public StartupTaskWriteOutcome Register(ScheduledTaskConfiguration configuration)
         {
             RegisterCalls++;
-            LastRegistered = new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId, 3, 0,
+            LastRegistered = new OwnedStartupTaskState(true, configuration.ExecutablePath, "--background", configuration.UserId, 3, WindowsTaskSchedulerStartupManager.TaskRunLevelHighest,
                 DisallowStartIfOnBatteries: false, StopIfGoingOnBatteries: false, ExecutionTimeLimit: "PT0S");
             if (NextRegister == StartupTaskWriteOutcome.Registered)
                 Current = RegisteredReadback ?? LastRegistered;

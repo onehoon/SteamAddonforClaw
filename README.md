@@ -31,6 +31,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 ## Requirements
 
 - Windows 11 x64
+- The interactive Windows user must be an administrator. The normal Addon Runtime must run elevated (High integrity) so WING / Xbox Game Bar suppression also works when the foreground game is administrator-elevated. A manual launch may prompt for UAC consent under that same user; do not start it using another administrator's credentials from a standard account. The configured logon task starts the Runtime at the highest run level under the same user.
 - A supported MSI Claw model listed above
 - Steam installed and running for Steam Deck controller presentation, per-game Steam profiles, and Quick Access Menu integration
 - The stock MSI controller environment with MSI Center M installed and available

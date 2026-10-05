@@ -18,8 +18,8 @@ public sealed class StartupUpdateContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw", "Program.cs");
         var secondaryActivation = source.IndexOf("singleInstanceGate.ActivatePrimaryInstance()", StringComparison.Ordinal);
         var primaryBoundary = source.IndexOf("using (singleInstanceGate)", StringComparison.Ordinal);
-        var pendingApply = source.IndexOf("TrySchedulePendingUpdateApply(args)", StringComparison.Ordinal);
-        var runtimeStart = source.IndexOf("new RuntimeProcessApplication(args, singleInstanceGate)", StringComparison.Ordinal);
+        var pendingApply = source.IndexOf("TrySchedulePendingUpdateApply(runtimeArgs)", StringComparison.Ordinal);
+        var runtimeStart = source.IndexOf("new RuntimeProcessApplication(runtimeArgs, singleInstanceGate)", StringComparison.Ordinal);
 
         Assert.True(secondaryActivation >= 0);
         Assert.True(primaryBoundary > secondaryActivation);
