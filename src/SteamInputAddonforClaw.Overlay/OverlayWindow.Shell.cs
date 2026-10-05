@@ -2,6 +2,7 @@ using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Overlay.Diagnostics;
 
@@ -32,9 +33,11 @@ public sealed partial class OverlayWindow
 
             var button = new Button
             {
-                Content = new SymbolIcon
+                Content = new FontIcon
                 {
-                    Symbol = SymbolFor(id),
+                    FontFamily = new FontFamily("Segoe Fluent Icons"),
+                    Glyph = GlyphFor(id),
+                    FontSize = OverlayQamResources.Get("QamRailIconSize", 24.0),
                     Width = OverlayQamResources.Get("QamRailIconSize", 24.0),
                     Height = OverlayQamResources.Get("QamRailIconSize", 24.0),
                 },
@@ -70,13 +73,13 @@ public sealed partial class OverlayWindow
         ApplySelectedTabVisualState();
     }
 
-    private static Symbol SymbolFor(AddonQuickSettingsTabId id) => id switch
+    private static string GlyphFor(AddonQuickSettingsTabId id) => id switch
     {
-        AddonQuickSettingsTabId.Device => Symbol.CellPhone,
-        AddonQuickSettingsTabId.Profile => Symbol.Contact,
-        AddonQuickSettingsTabId.Controller => Symbol.XboxOneConsole,
-        AddonQuickSettingsTabId.Shortcut => Symbol.ViewAll,
-        AddonQuickSettingsTabId.Setting => Symbol.Setting,
+        AddonQuickSettingsTabId.Device => "\uE945",
+        AddonQuickSettingsTabId.Profile => "\uE71D",
+        AddonQuickSettingsTabId.Controller => "\uE7FC",
+        AddonQuickSettingsTabId.Shortcut => "\uE75F",
+        AddonQuickSettingsTabId.Setting => "\uE713",
         _ => throw new ArgumentOutOfRangeException(nameof(id), id, "Unknown Overlay tab identity."),
     };
 
