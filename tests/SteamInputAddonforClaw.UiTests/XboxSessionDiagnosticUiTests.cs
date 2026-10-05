@@ -49,14 +49,62 @@ public sealed class XboxSessionDiagnosticUiTests
         Assert.True(forceStart >= 0 && requestStart > forceStart);
 
         var forceStopPath = method[forceStart..requestStart];
-        Assert.Contains("_frontend.StopXboxSessionDiagnosticAsync()", forceStopPath, StringComparison.Ordinal);
+        Assert.Contains("frontend.StopXboxSessionDiagnosticAsync()", forceStopPath, StringComparison.Ordinal);
         Assert.Contains("_observerRunning = snapshot.State == FrontendXboxSessionDiagnosticState.Running;", forceStopPath, StringComparison.Ordinal);
         foreach (var forbidden in new[] { "Render(", "BeginRequest(", "EndRequest(", "UpdateButtons(" })
             Assert.DoesNotContain(forbidden, forceStopPath, StringComparison.Ordinal);
 
         var activePath = method[requestStart..];
-        Assert.Contains("Render(await _frontend.StopXboxSessionDiagnosticAsync()", activePath, StringComparison.Ordinal);
+        Assert.Contains("await frontend.StopXboxSessionDiagnosticAsync()", activePath, StringComparison.Ordinal);
         Assert.Contains("EndRequest(request);", activePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void In_flight_user_requests_skip_XAML_updates_after_page_deactivation()
+    {
+        var diagnosticCode = Read("src/SteamInputAddonforClaw.UI/Views/XboxSessionDiagnosticPage.xaml.cs");
+
+        var startHandlerStart = diagnosticCode.IndexOf("private async void StartButton_Click", StringComparison.Ordinal);
+        var startHandlerEnd = diagnosticCode.IndexOf("private async void StopButton_Click", startHandlerStart, StringComparison.Ordinal);
+        Assert.True(startHandlerStart >= 0 && startHandlerEnd > startHandlerStart);
+        var startHandler = diagnosticCode[startHandlerStart..startHandlerEnd];
+        Assert.Contains("if (!_isActive || frontend is null || _requestPending)", startHandler, StringComparison.Ordinal);
+        AssertGuardPrecedes(startHandler, "await frontend.StartXboxSessionDiagnosticAsync().ConfigureAwait(true)", "Render(snapshot);");
+
+        var reportHandlerStart = diagnosticCode.IndexOf("private async void CaptureReportButton_Click", StringComparison.Ordinal);
+        var reportHandlerEnd = diagnosticCode.IndexOf("private async Task RefreshAsync()", reportHandlerStart, StringComparison.Ordinal);
+        Assert.True(reportHandlerStart >= 0 && reportHandlerEnd > reportHandlerStart);
+        var reportHandler = diagnosticCode[reportHandlerStart..reportHandlerEnd];
+        Assert.Contains("if (!_isActive || frontend is null || _requestPending)", reportHandler, StringComparison.Ordinal);
+        var reportAwait = reportHandler.IndexOf("await frontend.GenerateXboxSessionDiagnosticReportAsync().ConfigureAwait(true)", StringComparison.Ordinal);
+        Assert.True(reportAwait >= 0);
+        var reportGuard = reportHandler.IndexOf("if (!_isActive)", reportAwait, StringComparison.Ordinal);
+        Assert.True(reportGuard > reportAwait);
+        foreach (var controlUpdate in new[] { "Render(result.Snapshot);", "_reportPath = result.ReportPath;", "OpenReportButton.IsEnabled =", "StatusText.Text = result.Outcome" })
+            Assert.True(reportHandler.IndexOf(controlUpdate, reportGuard, StringComparison.Ordinal) > reportGuard, controlUpdate);
+
+        var stopMethodStart = diagnosticCode.IndexOf("private async Task StopAndRenderAsync(bool forceStop = false)", StringComparison.Ordinal);
+        var stopMethodEnd = diagnosticCode.IndexOf("private TaskCompletionSource BeginRequest()", stopMethodStart, StringComparison.Ordinal);
+        Assert.True(stopMethodStart >= 0 && stopMethodEnd > stopMethodStart);
+        var stopMethod = diagnosticCode[stopMethodStart..stopMethodEnd];
+        var wait = stopMethod.IndexOf("await WaitForPendingRequestAsync().ConfigureAwait(true)", StringComparison.Ordinal);
+        var stopBegin = stopMethod.IndexOf("var request = BeginRequest();", wait, StringComparison.Ordinal);
+        Assert.True(wait >= 0 && stopBegin > wait);
+        Assert.Contains("if (!forceStop && (!_isActive || !_observerRunning))", stopMethod[wait..stopBegin], StringComparison.Ordinal);
+        var normalStop = stopMethod[stopBegin..];
+        AssertGuardPrecedes(normalStop, "await frontend.StopXboxSessionDiagnosticAsync().ConfigureAwait(true)", "Render(snapshot);");
+
+        var endRequestStart = diagnosticCode.IndexOf("private void EndRequest(TaskCompletionSource completion)", StringComparison.Ordinal);
+        var endRequestEnd = diagnosticCode.IndexOf("private Task WaitForPendingRequestAsync()", endRequestStart, StringComparison.Ordinal);
+        Assert.True(endRequestStart >= 0 && endRequestEnd > endRequestStart);
+        var endRequest = diagnosticCode[endRequestStart..endRequestEnd];
+        var signal = endRequest.IndexOf("completion.TrySetResult();", StringComparison.Ordinal);
+        Assert.True(signal >= 0);
+        var activeGuard = endRequest.IndexOf("if (_isActive)", signal, StringComparison.Ordinal);
+        Assert.True(activeGuard > signal);
+        var updateButtons = endRequest.IndexOf("UpdateButtons();", activeGuard, StringComparison.Ordinal);
+        Assert.True(updateButtons > activeGuard);
+        Assert.DoesNotContain("UpdateButtons();", endRequest[..activeGuard], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,6 +125,17 @@ public sealed class XboxSessionDiagnosticUiTests
         Assert.Contains("var frontend = _frontend;", method, StringComparison.Ordinal);
         Assert.Contains("if (frontend is null || !_isActive || _requestPending)", method, StringComparison.Ordinal);
         Assert.Contains("return;", method[activeCheck..render], StringComparison.Ordinal);
+    }
+
+    private static void AssertGuardPrecedes(string method, string awaitedOperation, string controlUpdate)
+    {
+        var awaitIndex = method.IndexOf(awaitedOperation, StringComparison.Ordinal);
+        Assert.True(awaitIndex >= 0, awaitedOperation);
+        var guardIndex = method.IndexOf("if (!_isActive)", awaitIndex, StringComparison.Ordinal);
+        Assert.True(guardIndex > awaitIndex);
+        var updateIndex = method.IndexOf(controlUpdate, guardIndex, StringComparison.Ordinal);
+        Assert.True(updateIndex > guardIndex);
+        Assert.Contains("return;", method[guardIndex..updateIndex], StringComparison.Ordinal);
     }
 
     [Fact]
