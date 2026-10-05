@@ -60,6 +60,20 @@ public sealed class FrontendContractTests
         Assert.Equal(FrontendXbox360RumbleLoopSnapshot.Unavailable(), stopped);
     }
 
+    [Fact]
+    public async Task GameInput_system_button_probe_default_frontend_methods_fail_closed_as_unavailable()
+    {
+        IAddonFrontendControl control = new MinimalFrontendControl();
+
+        var captured = await control.CaptureGameInputSystemButtonProbeAsync();
+        var started = await control.StartGameInputSystemButtonProbeAsync();
+        var stopped = await control.StopGameInputSystemButtonProbeAsync();
+
+        Assert.Equal(FrontendGameInputSystemButtonProbeSnapshot.Unavailable(), captured);
+        Assert.Equal(FrontendGameInputSystemButtonProbeSnapshot.Unavailable(), started);
+        Assert.Equal(FrontendGameInputSystemButtonProbeSnapshot.Unavailable(), stopped);
+    }
+
     private sealed class MinimalFrontendControl : IAddonFrontendControl
     {
         public event EventHandler? StateInvalidated

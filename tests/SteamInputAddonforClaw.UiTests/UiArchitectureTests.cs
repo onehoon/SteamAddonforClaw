@@ -142,6 +142,34 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void GameInput_system_button_probe_is_a_developer_frontend_page_without_ui_native_interop()
+    {
+        var root = FindRepositoryRoot();
+        var developerXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
+        var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
+        var pageXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/GameInputSystemButtonProbePage.xaml"));
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/GameInputSystemButtonProbePage.xaml.cs"));
+        var mainWindowXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
+        var overlayRoot = Path.Combine(root, "src/SteamInputAddonforClaw.Overlay");
+
+        Assert.Contains("GameInput System Button Probe", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("GameInputSystemButtonProbeRequested", developerCode, StringComparison.Ordinal);
+        Assert.Contains("GameInputSystemButtonProbePage", mainWindowXaml, StringComparison.Ordinal);
+        Assert.Contains("IAddonFrontendControl", page, StringComparison.Ordinal);
+        Assert.Contains("CaptureGameInputSystemButtonProbeAsync", page, StringComparison.Ordinal);
+        Assert.Contains("StartGameInputSystemButtonProbeAsync", page, StringComparison.Ordinal);
+        Assert.Contains("StopGameInputSystemButtonProbeAsync", page, StringComparison.Ordinal);
+        Assert.Contains("GameInput System Button Probe", pageXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DllImport", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("IGameInput", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("GameInput.dll", page, StringComparison.Ordinal);
+
+        foreach (var file in Directory.EnumerateFiles(overlayRoot, "*", SearchOption.AllDirectories)
+                     .Where(path => Path.GetExtension(path) is ".cs" or ".xaml"))
+            Assert.DoesNotContain("GameInputSystemButtonProbe", File.ReadAllText(file), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Tdp_toggle_disables_editors_while_the_first_enable_is_in_flight()
     {
         var root = FindRepositoryRoot();

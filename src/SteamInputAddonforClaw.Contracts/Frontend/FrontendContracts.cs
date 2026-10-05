@@ -731,6 +731,12 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendXbox360RumbleLoopSnapshot.Unavailable());
     Task<FrontendPid1902InputCadenceResult> RunPid1902InputCadenceDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
+    Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
+    Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
+    Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
     Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));
