@@ -123,18 +123,16 @@ public sealed class MsiQuickSettingsProcessStartWatcherTests
         Assert.True(restored >= 0 && restoredStop > restored && restoredStop < restoredDisarm);
 
         var shutdown = Method(host, "internal void BeginProcessShutdown()");
-        var shutdownGate = shutdown.IndexOf("lock (_msiQuickSettingsWatcherGate)", StringComparison.Ordinal);
         var shutdownFlag = shutdown.IndexOf("Interlocked.Exchange(ref _processShutdownStarted, 1)", StringComparison.Ordinal);
         var shutdownStop = shutdown.IndexOf("StopMsiQuickSettingsProcessStartWatcher();", StringComparison.Ordinal);
-        Assert.True(shutdownGate >= 0 && shutdownGate < shutdownFlag && shutdownStop > shutdownFlag
+        Assert.True(shutdownFlag >= 0 && shutdownStop > shutdownFlag
             && shutdownStop < shutdown.IndexOf("PrepareRuntimeForShutdown();", StringComparison.Ordinal));
 
         var handler = Method(host, "private void OnMsiQuickSettingsProcessStarted(");
         var admissionClosed = handler.IndexOf("Volatile.Read(ref _processShutdownStarted)", StringComparison.Ordinal);
         var quiesce = handler.IndexOf("MsiQuickSettingsRuntimeQuiescer.QuiesceStartedProcess(started.ProcessId)", StringComparison.Ordinal);
-        var callbackGate = handler.IndexOf("lock (_msiQuickSettingsWatcherGate)", StringComparison.Ordinal);
-        Assert.True(admissionClosed >= 0 && callbackGate > admissionClosed && callbackGate < quiesce);
-        Assert.Contains("_msiQuickSettingsQuiescingAllowed", handler, StringComparison.Ordinal);
+        Assert.True(admissionClosed >= 0 && admissionClosed < quiesce);
+        Assert.DoesNotContain("lock (_msiQuickSettingsWatcherGate)", handler, StringComparison.Ordinal);
         Assert.Contains("ParentProcessId", handler, StringComparison.Ordinal);
         Assert.Contains("SessionId", handler, StringComparison.Ordinal);
 
@@ -148,9 +146,32 @@ public sealed class MsiQuickSettingsProcessStartWatcherTests
         Assert.True(sharedPath.IndexOf("IsExactMsiQuickSettingsPackageFullName(packageFullName)", StringComparison.Ordinal)
             < sharedPath.IndexOf("TerminateExactPackageProcesses(", StringComparison.Ordinal));
 
+        Assert.Equal(1, host.Split("private MsiQuickSettingsProcessStartWatcher? _msiQuickSettingsProcessStartWatcher;", StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("_msiQuickSettingsQuiescingAllowed", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("_msiQuickSettingsWatcherRetired", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("_msiQuickSettingsWatcherStopInProgress", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("_msiQuickSettingsWatcherStopCompleted", host, StringComparison.Ordinal);
+
+        var start = Method(host, "private void StartMsiQuickSettingsProcessStartWatcher()");
+        Assert.Contains("lock (_msiQuickSettingsWatcherGate)", start, StringComparison.Ordinal);
+        Assert.True(start.IndexOf("watcher.Start()", StringComparison.Ordinal)
+            < start.IndexOf("_msiQuickSettingsProcessStartWatcher = watcher", StringComparison.Ordinal));
+
         var stop = Method(host, "private void StopMsiQuickSettingsProcessStartWatcher()");
-        Assert.Contains("_msiQuickSettingsWatcherRetired = true", stop, StringComparison.Ordinal);
-        Assert.Contains("_msiQuickSettingsWatcherStopCompleted.Wait()", stop, StringComparison.Ordinal);
+        Assert.Contains("lock (_msiQuickSettingsWatcherGate)", stop, StringComparison.Ordinal);
+        Assert.True(stop.IndexOf("_msiQuickSettingsProcessStartWatcher = null", StringComparison.Ordinal)
+            < stop.IndexOf("watcher.Dispose()", StringComparison.Ordinal));
+
+        var watcherSource = File.ReadAllText(SourcePath("src/SteamInputAddonforClaw/GameBar/MsiQuickSettingsProcessStartWatcher.cs"));
+        Assert.Contains("_activeCallbacks", watcherSource, StringComparison.Ordinal);
+        Assert.Contains("_callbacksDrained.Wait()", watcherSource, StringComparison.Ordinal);
+        var watcherDisposeStart = watcherSource.LastIndexOf("public void Dispose()", StringComparison.Ordinal);
+        Assert.True(watcherDisposeStart >= 0);
+        var watcherDispose = watcherSource[watcherDisposeStart..];
+        Assert.True(watcherDispose.IndexOf("_callbackAdmissionOpen = false", StringComparison.Ordinal)
+            < watcherDispose.IndexOf("_callbacksDrained.Wait()", StringComparison.Ordinal)
+            && watcherDispose.IndexOf("_callbacksDrained.Wait()", StringComparison.Ordinal)
+            < watcherDispose.IndexOf("_adapter.Dispose()", StringComparison.Ordinal));
     }
 
     private static string SourcePath(string relativePath)

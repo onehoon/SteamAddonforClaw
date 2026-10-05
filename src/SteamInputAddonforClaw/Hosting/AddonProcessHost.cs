@@ -158,13 +158,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // the strong MSI Claw identity itself. Disposed at BeginProcessShutdown before recovery drains.
     private Controllers.Detection.WindowsDeviceArrivalWatcher? _deviceArrivalWatcher;
     // Center M Disabled only: observes Gamebar_Widget starts and is stopped before stock authority
-    // restoration or process teardown. The gate serializes startup with both stop boundaries.
+    // restoration or process teardown. The gate serializes Start/Stop; callback drain belongs to watcher.
     private readonly Lock _msiQuickSettingsWatcherGate = new();
-    private readonly ManualResetEventSlim _msiQuickSettingsWatcherStopCompleted = new(true);
     private MsiQuickSettingsProcessStartWatcher? _msiQuickSettingsProcessStartWatcher;
-    private bool _msiQuickSettingsWatcherStopInProgress;
-    private bool _msiQuickSettingsWatcherRetired;
-    private bool _msiQuickSettingsQuiescingAllowed;
 
     internal AddonProcessHost(Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
         string? testOnlyDataRoot = null,
@@ -964,75 +960,36 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void StartMsiQuickSettingsProcessStartWatcher()
     {
-        MsiQuickSettingsProcessStartWatcher? failedStart = null;
         lock (_msiQuickSettingsWatcherGate)
         {
             if (Volatile.Read(ref _processShutdownStarted) != 0
-                || _msiQuickSettingsWatcherRetired
                 || _msiQuickSettingsProcessStartWatcher is not null)
                 return;
 
             var watcher = new MsiQuickSettingsProcessStartWatcher();
             watcher.ProcessStarted += OnMsiQuickSettingsProcessStarted;
-            _msiQuickSettingsProcessStartWatcher = watcher;
-            _msiQuickSettingsQuiescingAllowed = true;
             if (!watcher.Start())
             {
-                _msiQuickSettingsQuiescingAllowed = false;
-                _msiQuickSettingsProcessStartWatcher = null;
                 watcher.ProcessStarted -= OnMsiQuickSettingsProcessStarted;
-                failedStart = watcher;
+                watcher.Dispose();
+                return;
             }
-        }
 
-        failedStart?.Dispose();
+            _msiQuickSettingsProcessStartWatcher = watcher;
+        }
     }
 
     private void StopMsiQuickSettingsProcessStartWatcher()
     {
-        MsiQuickSettingsProcessStartWatcher? watcher;
-        bool waitForStop;
         lock (_msiQuickSettingsWatcherGate)
         {
-            _msiQuickSettingsQuiescingAllowed = false;
-            _msiQuickSettingsWatcherRetired = true;
-            watcher = _msiQuickSettingsProcessStartWatcher;
+            var watcher = _msiQuickSettingsProcessStartWatcher;
+            if (watcher is null)
+                return;
+
             _msiQuickSettingsProcessStartWatcher = null;
-            if (watcher is not null)
-            {
-                watcher.ProcessStarted -= OnMsiQuickSettingsProcessStarted;
-                _msiQuickSettingsWatcherStopInProgress = true;
-                _msiQuickSettingsWatcherStopCompleted.Reset();
-                waitForStop = false;
-            }
-            else
-            {
-                waitForStop = _msiQuickSettingsWatcherStopInProgress;
-            }
-        }
-
-        if (watcher is null)
-        {
-            if (waitForStop)
-                _msiQuickSettingsWatcherStopCompleted.Wait();
-            return;
-        }
-
-        try
-        {
+            watcher.ProcessStarted -= OnMsiQuickSettingsProcessStarted;
             watcher.Dispose();
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("MsiQuickSettings", "Best-effort process-start watcher stop failed.", exception,
-                ("Event", "MsiQuickSettingsProcessWatcherDisposeFailed"),
-                ("ExceptionType", exception.GetType().Name), ("HResult", exception.HResult));
-        }
-        finally
-        {
-            lock (_msiQuickSettingsWatcherGate)
-                _msiQuickSettingsWatcherStopInProgress = false;
-            _msiQuickSettingsWatcherStopCompleted.Set();
         }
     }
 
@@ -1049,21 +1006,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         try
         {
-            lock (_msiQuickSettingsWatcherGate)
-            {
-                if (!_msiQuickSettingsQuiescingAllowed
-                    || Volatile.Read(ref _processShutdownStarted) != 0)
-                    return;
-
-                var result = MsiQuickSettingsRuntimeQuiescer.QuiesceStartedProcess(started.ProcessId);
-                AppLog.Debug("MsiQuickSettings", "Process-start package quiesce attempt completed.",
-                    ("ProcessId", started.ProcessId),
-                    ("CandidateCount", result.CandidateCount),
-                    ("IdentityUnavailableCount", result.IdentityUnavailableCount),
-                    ("PackageCount", result.PackageCount),
-                    ("TerminatedProcessCount", result.TerminatedProcessCount),
-                    ("FailureCount", result.FailureCount));
-            }
+            var result = MsiQuickSettingsRuntimeQuiescer.QuiesceStartedProcess(started.ProcessId);
+            AppLog.Debug("MsiQuickSettings", "Process-start package quiesce attempt completed.",
+                ("ProcessId", started.ProcessId),
+                ("CandidateCount", result.CandidateCount),
+                ("IdentityUnavailableCount", result.IdentityUnavailableCount),
+                ("PackageCount", result.PackageCount),
+                ("TerminatedProcessCount", result.TerminatedProcessCount),
+                ("FailureCount", result.FailureCount));
         }
         catch (Exception exception)
         {
@@ -2186,11 +2136,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void BeginProcessShutdown()
     {
-        lock (_msiQuickSettingsWatcherGate)
-        {
-            if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
-            _msiQuickSettingsQuiescingAllowed = false;
-        }
+        if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
         StopMsiQuickSettingsProcessStartWatcher();
         if (_clawHudProcessController is not null)
             _clawHudShutdown = StopClawHudForProcessShutdownAsync();
