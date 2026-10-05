@@ -30,6 +30,18 @@ public sealed class FrontButtonMappingContractTests
         => Assert.DoesNotContain("None", Enum.GetNames<FrontButtonAction>());
 
     [Fact]
+    public void Adding_xbox_app_preserves_existing_action_values()
+    {
+        Assert.Equal(0, (int)FrontButtonAction.QuickSettingsOverlay);
+        Assert.Equal(1, (int)FrontButtonAction.SteamBigPicture);
+        Assert.Equal(2, (int)FrontButtonAction.SteamButton);
+        Assert.Equal(3, (int)FrontButtonAction.SteamQuickAccess);
+        Assert.Equal(4, (int)FrontButtonAction.KeyboardHotkey);
+        Assert.Equal(5, (int)FrontButtonAction.LaunchApplication);
+        Assert.Equal(6, (int)FrontButtonAction.XboxApp);
+    }
+
+    [Fact]
     public void Mapping_contract_carries_no_persisted_double_slots()
     {
         foreach (var type in new[] { typeof(FrontButtonMappingSettings), typeof(FrontButtonDomainMapping), typeof(FrontButtonBinding) })
@@ -52,7 +64,7 @@ public sealed class FrontButtonMappingContractTests
     [Fact]
     public void Normal_domain_offers_exactly_the_locked_set()
         => Assert.Equal(
-            [FrontButtonAction.QuickSettingsOverlay, FrontButtonAction.SteamBigPicture, FrontButtonAction.KeyboardHotkey, FrontButtonAction.LaunchApplication],
+            [FrontButtonAction.QuickSettingsOverlay, FrontButtonAction.SteamBigPicture, FrontButtonAction.XboxApp, FrontButtonAction.KeyboardHotkey, FrontButtonAction.LaunchApplication],
             FrontButtonActionCapabilities.ActionsFor(FrontButtonDomain.Normal));
 
     [Fact]
@@ -63,6 +75,7 @@ public sealed class FrontButtonMappingContractTests
 
     [Theory]
     [InlineData(FrontButtonAction.SteamBigPicture, true, false)]
+    [InlineData(FrontButtonAction.XboxApp, true, false)]
     [InlineData(FrontButtonAction.SteamButton, false, true)]
     [InlineData(FrontButtonAction.SteamQuickAccess, false, true)]
     [InlineData(FrontButtonAction.QuickSettingsOverlay, true, true)]
@@ -98,6 +111,16 @@ public sealed class FrontButtonMappingContractTests
     {
         var mapping = FrontButtonMappingSettings.Default.With(
             FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.SteamBigPicture));
+
+        Assert.NotNull(FrontButtonMappingValidation.Validate(mapping));
+    }
+
+    [Fact]
+    public void Xbox_app_cannot_be_assigned_to_both_normal_domain_buttons()
+    {
+        var mapping = FrontButtonMappingSettings.Default
+            .With(FrontButtonKind.Gamebar, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.XboxApp))
+            .With(FrontButtonKind.CenterM, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.XboxApp));
 
         Assert.NotNull(FrontButtonMappingValidation.Validate(mapping));
     }

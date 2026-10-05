@@ -21,6 +21,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
         Func<bool>? quickAccessPulse = null,
         Func<bool>? steamPulse = null,
         Action? launchBigPicture = null,
+        Action? launchXboxApp = null,
         bool suppressionReady = true) =>
         MsiClawFrontButtonRuntime.Create(
             hardwareSupported: true,
@@ -35,6 +36,7 @@ public sealed class MsiClawFrontButtonRuntimeTests
             oem1GestureDelay: new ImmediateDelay(),
             oem1GestureClock: new ZeroClock(),
             launchBigPictureOverride: launchBigPicture,
+            launchXboxAppOverride: launchXboxApp,
             wingGestureDelay: new ImmediateDelay());
 
     [Fact]
@@ -71,6 +73,26 @@ public sealed class MsiClawFrontButtonRuntimeTests
 
         wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
         Assert.Equal(1, bigPicture);  // Normal / Gamebar default = Steam Big Picture
+    }
+
+    [Theory]
+    [InlineData(FrontButtonKind.Gamebar)]
+    [InlineData(FrontButtonKind.CenterM)]
+    public async Task Normal_xbox_mapping_reaches_the_runtime_launcher_override(FrontButtonKind kind)
+    {
+        var xbox = 0;
+        var mapping = FrontButtonMappingSettings.Default.With(
+            kind, FrontButtonDomain.Normal, FrontButtonBinding.Of(FrontButtonAction.XboxApp));
+        var oem1 = new FakeEventSource();
+        var wing = new FakeEventSource();
+        await using var runtime = Create(mapping, oem1, wing, launchXboxApp: () => xbox++);
+
+        if (kind == FrontButtonKind.Gamebar)
+            wing.Emit(new MsiOemEvent(88, CenterMOemCode.Oem2));
+        else
+            oem1.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+
+        Assert.Equal(1, xbox);
     }
 
     [Fact]

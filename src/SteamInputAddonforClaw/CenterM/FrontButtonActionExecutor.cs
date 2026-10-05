@@ -21,6 +21,7 @@ internal sealed class FrontButtonActionExecutor
     private readonly Action _launchBigPicture;
     private readonly Func<bool> _tryRequestSteamPulse;
     private readonly Func<bool> _tryRequestQuickAccessPulse;
+    private readonly Action _launchXboxApp;
     private readonly Action<FrontButtonHotkeyBinding> _sendHotkey;
     private readonly Action<FrontButtonLaunchApplicationBinding> _launchApplication;
 
@@ -29,6 +30,7 @@ internal sealed class FrontButtonActionExecutor
         Action launchBigPicture,
         Func<bool> tryRequestSteamPulse,
         Func<bool> tryRequestQuickAccessPulse,
+        Action? launchXboxApp = null,
         Action<FrontButtonHotkeyBinding>? sendHotkey = null,
         Action<FrontButtonLaunchApplicationBinding>? launchApplication = null)
     {
@@ -36,6 +38,7 @@ internal sealed class FrontButtonActionExecutor
         _launchBigPicture = launchBigPicture ?? throw new ArgumentNullException(nameof(launchBigPicture));
         _tryRequestSteamPulse = tryRequestSteamPulse ?? throw new ArgumentNullException(nameof(tryRequestSteamPulse));
         _tryRequestQuickAccessPulse = tryRequestQuickAccessPulse ?? throw new ArgumentNullException(nameof(tryRequestQuickAccessPulse));
+        _launchXboxApp = launchXboxApp ?? FrontButtonXboxAppLauncher.Launch;
         _sendHotkey = sendHotkey ?? Oem1KeyboardHotkeyExecutor.Send;
         _launchApplication = launchApplication ?? Oem1ApplicationLauncher.Launch;
     }
@@ -81,6 +84,10 @@ internal sealed class FrontButtonActionExecutor
 
                 case FrontButtonAction.SteamQuickAccess:
                     _tryRequestQuickAccessPulse();
+                    return true;
+
+                case FrontButtonAction.XboxApp:
+                    _launchXboxApp();
                     return true;
 
                 case FrontButtonAction.KeyboardHotkey:

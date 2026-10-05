@@ -37,7 +37,8 @@ public enum FrontButtonAction
     SteamButton,
     SteamQuickAccess,
     KeyboardHotkey,
-    LaunchApplication
+    LaunchApplication,
+    XboxApp
 }
 
 /// <summary>Optional modifiers for the single keyboard hotkey a front-button binding may send.</summary>
@@ -205,6 +206,7 @@ public static class FrontButtonActionCapabilities
     [
         (FrontButtonAction.QuickSettingsOverlay, true, true),
         (FrontButtonAction.SteamBigPicture, true, false),
+        (FrontButtonAction.XboxApp, true, false),
         (FrontButtonAction.SteamButton, false, true),
         (FrontButtonAction.SteamQuickAccess, false, true),
         (FrontButtonAction.KeyboardHotkey, true, true),
