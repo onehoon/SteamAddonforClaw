@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.XboxSession;
 using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Install;
@@ -60,6 +61,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // stock-restoration operation.
     private SteamInputAddonforClaw.CenterMStartup.ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
     private NamedPipeAddonFrontendServer? _frontendServer;
+    private XboxGameSessionDiagnostic? _xboxSessionDiagnostic;
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly IWindowsAppRuntimePrerequisite _windowsAppRuntimePrerequisite;
     private readonly OverlayProcessController _overlayController;
@@ -564,6 +566,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             && startupResult.DisabledBootAdmission?.Outcome == DisabledBootAdmissionOutcome.PrerequisitesNotReady;
         var setupExecutor = new SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor(
             allowPrerequisiteRepairWhileRecoveryUnsafe);
+        _xboxSessionDiagnostic = new XboxGameSessionDiagnostic(
+            stateChanged: () =>
+            {
+                if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
+                    control.NotifyXboxSessionDiagnosticStateChanged();
+            });
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost,
             setupExecutor: setupExecutor,
@@ -596,6 +604,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             captureGameInputSystemButtonProbe: CaptureGameInputSystemButtonProbeAsync,
             startGameInputSystemButtonProbe: StartGameInputSystemButtonProbeAsync,
             stopGameInputSystemButtonProbe: StopGameInputSystemButtonProbeAsync,
+            captureXboxSessionDiagnostic: cancellationToken => _xboxSessionDiagnostic!.CaptureAsync(cancellationToken),
+            startXboxSessionDiagnostic: cancellationToken => _xboxSessionDiagnostic!.StartAsync(cancellationToken),
+            stopXboxSessionDiagnostic: cancellationToken => _xboxSessionDiagnostic!.StopAsync(cancellationToken),
+            generateXboxSessionDiagnosticReport: cancellationToken => _xboxSessionDiagnostic!.GenerateReportAsync(cancellationToken),
             controllerVibrationStrengthClient: _controllerVibrationStrengthClient,
             controllerVibrationTestAvailable: () => _presentationOwnership?.IsVibrationTestAvailable == true,
             testControllerVibrationMotor: (motor, token) => _presentationOwnership is { } presentation
@@ -2242,6 +2254,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
             _frontendServer = null;
         }
+        if (_xboxSessionDiagnostic is not null)
+        {
+            await _xboxSessionDiagnostic.DisposeAsync().ConfigureAwait(false);
+            _xboxSessionDiagnostic = null;
+        }
         try { _gameInputSystemButtonProbe.Dispose(); }
         catch (Exception exception)
         {
@@ -2505,6 +2522,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void OnPowerResumeObserved()
     {
         if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+
+        if (_xboxSessionDiagnostic is { } xboxSessionDiagnostic)
+            _ = xboxSessionDiagnostic.ReconcileAfterResumeAsync();
 
         // Full1902 Suspend/Resume section 11: request the Full1902 controller-presentation reconcile
         // immediately -- it carries the suspend-pause release pre-step and must not wait behind the

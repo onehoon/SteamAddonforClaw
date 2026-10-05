@@ -1,0 +1,25 @@
+<UserControl
+    x:Class="SteamInputAddonforClaw.Views.XboxSessionDiagnosticPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer Padding="32" HorizontalContentAlignment="Stretch" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="12">
+            <Button Content="Back to Developer Menu" Click="BackButton_Click" HorizontalAlignment="Left" />
+            <TextBlock FontSize="24" FontWeight="SemiBold" Text="XBOX Active Game Diagnostic" />
+            <TextBlock Opacity="0.7"
+                       Text="Read-only. Identifies an XBOX game from the live process, package identity, and MicrosoftGame.config. Does not apply profiles or change controller presentation."
+                       TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="StartButton" Content="Start" Click="StartButton_Click" />
+                <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" IsEnabled="False" />
+                <Button x:Name="CaptureReportButton" Content="Capture Report" Click="CaptureReportButton_Click" />
+                <Button x:Name="OpenReportButton" Content="Open Report" Click="OpenReportButton_Click" IsEnabled="False" />
+            </StackPanel>
+            <TextBlock x:Name="StatusText" Text="Observer: Stopped" TextWrapping="Wrap" />
+            <TextBlock x:Name="ActiveGameText" Text="Active XBOX game: &lt;none&gt;" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+            <TextBlock x:Name="PackagePathsText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+            <TextBlock x:Name="CountersText" TextWrapping="Wrap" />
+            <TextBlock x:Name="LifecycleText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

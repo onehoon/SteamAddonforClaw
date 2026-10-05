@@ -69,8 +69,8 @@ internal static class MicrosoftGameConfigReader
     {
         if (document.Root is not { } root)
             return new(true, false, null, "MicrosoftGame.config has no root element.");
-        if (!string.Equals(root.Name.LocalName, "Game", StringComparison.Ordinal))
-            return new(true, false, null, $"Unrecognized root element '{root.Name.LocalName}'. Expected 'Game'.");
+        if (!IsRecognizedRoot(root.Name.LocalName))
+            return new(true, false, null, $"Unrecognized root element '{root.Name.LocalName}'. Expected 'Game' or 'MicrosoftGame'.");
 
         var identity = Child(root, "Identity");
         var identityName = Attribute(identity, "Name");
@@ -104,6 +104,10 @@ internal static class MicrosoftGameConfigReader
 
     private static XElement? Child(XElement parent, string name) => parent.Elements()
         .FirstOrDefault(element => string.Equals(element.Name.LocalName, name, StringComparison.Ordinal));
+
+    private static bool IsRecognizedRoot(string name) =>
+        string.Equals(name, "Game", StringComparison.Ordinal)
+        || string.Equals(name, "MicrosoftGame", StringComparison.Ordinal);
 
     private static string? ElementValue(XElement parent, string name) =>
         Child(parent, name)?.Value.Trim() is { Length: > 0 } value ? value : null;

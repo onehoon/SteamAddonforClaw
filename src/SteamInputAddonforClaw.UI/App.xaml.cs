@@ -171,6 +171,7 @@ public partial class App : Application
         {
             await _mainWindow.CloseVibrationTestForUiShutdownAsync().ConfigureAwait(true);
             await _mainWindow.CloseGameInputSystemButtonProbeForUiShutdownAsync().ConfigureAwait(true);
+            await _mainWindow.CloseXboxSessionDiagnosticForUiShutdownAsync().ConfigureAwait(true);
             await _mainWindow.CloseClawSensorProbeForUiShutdownAsync().ConfigureAwait(true);
         }
         await ShutdownAndExitAsync("WindowClosed").ConfigureAwait(true);

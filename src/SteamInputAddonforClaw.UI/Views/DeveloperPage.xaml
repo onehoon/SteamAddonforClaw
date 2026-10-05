@@ -76,6 +76,11 @@
                 <Button Content="Open" Click="OpenXboxCatalogDiagnosticButton_Click" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard Header="XBOX Active Game Diagnostic" Description="Event-driven read-only XBOX/Game Pass process identity and lifetime evidence.">
+                <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Play" /></ctcontrols:SettingsCard.HeaderIcon>
+                <Button Content="Open" Click="OpenXboxSessionDiagnosticButton_Click" />
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsCard Header="GameInput System Button Probe" Description="Identify which GameInput device emits Guide/Share when WING is pressed.">
                 <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Keyboard" /></ctcontrols:SettingsCard.HeaderIcon>
                 <Button Content="Open" Click="OpenGameInputSystemButtonProbeButton_Click" />
