@@ -2078,11 +2078,28 @@ No production profile mutation yet.
 
 ### Phase X1 — XBOX identity/catalog foundation
 
+Implementation sequence is intentionally split so the validated PoC does not remain as a parallel owner:
+
+~~~text
+PR4
+→ promote PoC A parser / canonical identity / installed catalog into production code
+→ retire XBOX Catalog Diagnostic Runtime owner, report, frontend RPC/contracts, Developer page, and diagnostic-only tests
+→ keep the XBOX Active Game Session Diagnostic temporarily
+→ make that session diagnostic consume the production parser/key authority
+
+PR5
+→ expose the production installed catalog through XBOX-specific frontend contracts
+→ Main App top-level navigation rename Profile → Steam
+→ add separate XBOX page with read-only installed catalog
+~~~
+
+The XBOX Active Game Session Diagnostic is retired only when the later production `XboxGameSessionRuntime` is implemented in X3. Do not keep a production catalog and a separate catalog diagnostic scanner in parallel.
+
 - production XboxGameIdentity model;
-- Xbox catalog scan;
-- separate frontend catalog contracts;
-- Main App top-level navigation rename Profile → Steam;
-- add XBOX page with read-only catalog first if useful.
+- production installed-XBOX catalog scan;
+- separate frontend catalog contracts in the following focused PR;
+- Main App top-level navigation rename Profile → Steam in that frontend/UI PR;
+- add XBOX page with read-only catalog first.
 
 ### Phase X2 — XBOX profile persistence/editing
 
