@@ -96,6 +96,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _stopXbox360RumbleLoopDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? _runPid1902InputCadenceDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendXboxCatalogDiagnosticResult>> _runXboxCatalogDiagnostic;
+    private readonly Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? _captureXboxSessionDiagnostic;
+    private readonly Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? _startXboxSessionDiagnostic;
+    private readonly Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? _stopXboxSessionDiagnostic;
+    private readonly Func<CancellationToken, Task<FrontendXboxSessionDiagnosticReportResult>>? _generateXboxSessionDiagnosticReport;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _captureGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _startGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _stopGameInputSystemButtonProbe;
@@ -149,7 +153,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<FrontendXboxCatalogDiagnosticResult>>? runXboxCatalogDiagnostic = null,
         Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? captureGameInputSystemButtonProbe = null,
         Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? startGameInputSystemButtonProbe = null,
-        Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? stopGameInputSystemButtonProbe = null)
+        Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? stopGameInputSystemButtonProbe = null,
+        Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? captureXboxSessionDiagnostic = null,
+        Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? startXboxSessionDiagnostic = null,
+        Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? stopXboxSessionDiagnostic = null,
+        Func<CancellationToken, Task<FrontendXboxSessionDiagnosticReportResult>>? generateXboxSessionDiagnosticReport = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -182,6 +190,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _captureGameInputSystemButtonProbe = captureGameInputSystemButtonProbe;
         _startGameInputSystemButtonProbe = startGameInputSystemButtonProbe;
         _stopGameInputSystemButtonProbe = stopGameInputSystemButtonProbe;
+        _captureXboxSessionDiagnostic = captureXboxSessionDiagnostic;
+        _startXboxSessionDiagnostic = startXboxSessionDiagnostic;
+        _stopXboxSessionDiagnostic = stopXboxSessionDiagnostic;
+        _generateXboxSessionDiagnosticReport = generateXboxSessionDiagnosticReport;
         _controllerVibrationStrengthClient = controllerVibrationStrengthClient;
         _applyControllerVibrationSettings = applyControllerVibrationSettings;
         _controllerVibrationTestAvailable = controllerVibrationTestAvailable;
@@ -766,6 +778,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         StateInvalidated?.Invoke(this, EventArgs.Empty);
     }
 
+    internal void NotifyXboxSessionDiagnosticStateChanged()
+    {
+        if (Volatile.Read(ref _shutdownStarted) != 0) return;
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+    }
+
     private static string ReadFanProbeFirmwareIdentity()
     {
         try
@@ -1274,6 +1292,38 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
         return _runXboxCatalogDiagnostic(cancellationToken);
+    }
+
+    public Task<FrontendXboxSessionDiagnosticSnapshot> CaptureXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return _captureXboxSessionDiagnostic?.Invoke(cancellationToken)
+            ?? Task.FromResult(FrontendXboxSessionDiagnosticSnapshot.Unavailable("XBOX active game diagnostic is unavailable."));
+    }
+
+    public Task<FrontendXboxSessionDiagnosticSnapshot> StartXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return _startXboxSessionDiagnostic?.Invoke(cancellationToken)
+            ?? Task.FromResult(FrontendXboxSessionDiagnosticSnapshot.Unavailable("XBOX active game diagnostic is unavailable."));
+    }
+
+    public Task<FrontendXboxSessionDiagnosticSnapshot> StopXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return _stopXboxSessionDiagnostic?.Invoke(cancellationToken)
+            ?? Task.FromResult(FrontendXboxSessionDiagnosticSnapshot.Unavailable("XBOX active game diagnostic is unavailable."));
+    }
+
+    public Task<FrontendXboxSessionDiagnosticReportResult> GenerateXboxSessionDiagnosticReportAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return _generateXboxSessionDiagnosticReport?.Invoke(cancellationToken)
+            ?? Task.FromResult(FrontendXboxSessionDiagnosticReportResult.Unavailable("XBOX active game diagnostic is unavailable."));
     }
 
     private FrontendSettingsSnapshot MapSettings() => new FrontendSettingsSnapshot(_settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SuppressDeveloperMenuWarning, _settings.FrontButtonMapping) with { DeveloperMenuEnabled = _settings.Settings.DeveloperMenuEnabled, QuickSettingsCurrentPowerSourceOnly = _settings.QuickSettingsCurrentPowerSourceOnly, BackButtonMapping = _settings.BackButtonMapping, ControllerLed = _settings.ControllerLed };

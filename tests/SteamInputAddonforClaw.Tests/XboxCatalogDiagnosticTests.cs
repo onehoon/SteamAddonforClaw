@@ -61,6 +61,19 @@ public sealed class XboxCatalogDiagnosticTests : IDisposable
         Assert.Null(parsed.Config.TitleId);
     }
 
+    [Fact]
+    public void Config_parser_accepts_the_MicrosoftGame_root()
+    {
+        const string xml = "<MicrosoftGame><Identity Name=\"Game\" Publisher=\"Publisher\"/><ExecutableList><Executable Name=\"Game.exe\"/></ExecutableList></MicrosoftGame>";
+
+        var parsed = MicrosoftGameConfigReader.Parse(xml);
+
+        Assert.True(parsed.XmlParsed);
+        Assert.True(parsed.RecognizedRoot);
+        Assert.Equal("Game", parsed.Config?.IdentityName);
+        Assert.Equal("Game.exe", Assert.Single(parsed.Config!.Executables).Name);
+    }
+
     [Theory]
     [InlineData("<Game><ExecutableList><Executable Name=\"Game.exe\"/></ExecutableList></Game>", true, "Required Identity")]
     [InlineData("<Game><Identity Name=\"Game\" Publisher=\"Publisher\"/><ExecutableList><Executable /></ExecutableList></Game>", true, "usable Executable Name")]
