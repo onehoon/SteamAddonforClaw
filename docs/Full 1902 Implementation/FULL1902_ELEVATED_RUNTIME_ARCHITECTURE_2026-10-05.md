@@ -1,6 +1,6 @@
 # Full1902 Elevated Runtime Architecture
 
-> **Status:** Accepted architecture decision / implementation pending  
+> **Status:** Implemented process-privilege architecture / hardware validation partially pending  
 > **Date:** 2026-10-05  
 > **Scope:** Process privilege model for the standalone Full1902 application, including WING / Xbox Game Bar suppression  
 > **Product scope:** one interactive Windows user who is a member of Administrators, one interactive session; Fast User Switching, RDP, and multi-session are not supported
@@ -382,65 +382,70 @@ Do not inline or remove a retained helper solely to reduce process count. In par
 
 ---
 
-## 8. Temporarily accepted external-process inheritance
+## 8. Remaining external-process privilege boundary
 
 An elevated Runtime changes the token inherited by processes it directly launches.
 
-Current Runtime-owned user action paths include, among others:
+The internal helper/worker cleanup is complete: retained Addon-owned helpers now inherit the Runtime's High token intentionally, and redundant feature-local `runas` paths have been removed.
 
-- WING/OEM front-button LaunchApplication;
+The remaining open privilege question is limited to **user-launched external actions**, including:
+
+- WING/OEM front-button `LaunchApplication`;
 - Shortcut executable actions;
 - Shortcut PowerShell actions;
-- other Runtime-owned external action paths.
+- URL/shell actions where their launch semantics are relevant.
 
-For the elevation implementation, this consequence is **accepted temporarily**.
+Current behavior is accepted temporarily: a process launched directly by the High Runtime may inherit elevation.
 
-The first implementation must not widen into a generic process-launch privilege refactor.
+This is not a controller-safety blocker and must not be solved by introducing a new authority owner. A later focused change may establish a Medium user-action launch boundary if product testing confirms that arbitrary user-selected programs should not inherit Runtime High.
 
-Therefore:
-
-~~~text
-Runtime elevation implementation
-=> external action execution semantics remain as they are today
-=> if they inherit elevation from Runtime, that is a known temporary behavior
-=> do not block the elevation implementation on solving it
-~~~
-
-This is a deliberate scope decision, not an assertion that elevated external launches are the final product design.
+Do not pre-build a generic broker, Windows service, token manager, or shell-launch abstraction solely in anticipation.
 
 ---
 
-## 9. Deferred privileged-process cleanup
+## 9. Completed privilege-helper cleanup and remaining follow-up
 
-After the elevated Runtime architecture is hardware-proven, perform a separate focused cleanup/design pass covering the privilege consequences that were intentionally deferred.
+The post-elevation privilege-helper review is complete.
 
-That later work should evaluate together:
+Implemented decisions:
 
-### 9.1 User-launched application / PowerShell boundary
+~~~text
+Normal Runtime elevation
+=> KEEP as the one application privilege-escalation authority
 
-Decide the final policy for:
+Startup task self-elevation
+=> REMOVED
+=> High Runtime writes/verifies the owned task directly
 
-- front-button LaunchApplication;
-- Shortcut executable actions;
-- Shortcut PowerShell actions;
-- URL/shell actions where relevant.
+SafeUninstall prerequisite self-elevation
+=> REMOVED
+=> already-High SafeUninstall performs owned prerequisite cleanup directly
 
-The likely product goal is to avoid silently elevating arbitrary user-selected programs merely because the Addon Runtime is privileged, but that mechanism is **not part of the first Runtime elevation implementation**.
+TDP helper
+=> KEEP process boundary
+=> asInvoker
+=> inherits Runtime High
+=> WMI timeout / kill / reconnect containment retained
 
-Do not pre-build an unelevated launcher/broker before that follow-up has reviewed the actual supported action set.
+Center M startup helper
+=> KEEP process boundary
+=> asInvoker
+=> inherits Runtime High
+=> connect/response timeout, termination, helper readback and parent readback retained
 
-### 9.2 TDP helper consolidation
+FSE / prerequisite / Windows App Runtime workers
+=> KEEP bounded worker processes
+=> inherit Runtime High
+=> no feature-local UAC authority
+~~~
 
-The current architecture retains SteamInputAddonforClaw.TdpHelper as an MSI WMI fault-containment
-process. Do not absorb it into Runtime based on code-size reduction alone; revisit only if real
-operational evidence shows the existing process boundary is unnecessary.
+TDP helper consolidation is **not** an open item. It is intentionally retained because its separate process contains real MSI WMI timeout/failure behavior. Center M helper is likewise intentionally retained for bounded Task Scheduler/SCM mutation and stuck-helper containment.
 
-### 9.3 Other helper cleanup
+Remaining follow-up:
 
-Any remaining helper cleanup must be evidence-driven and preserve useful failure-isolation,
-packaging, uninstall, or bounded-operation boundaries.
-
-The goal is fewer redundant privilege boundaries without weakening lifecycle/failure safety.
+1. decide the final user EXE / PowerShell / shell-action privilege boundary;
+2. complete the physical elevated-WING and power-lifecycle validation matrix;
+3. do not revisit helper inlining without concrete operational evidence.
 
 ---
 
@@ -488,29 +493,41 @@ The first Runtime-elevation implementation must preserve these facts:
 
 ---
 
-## 12. Required hardware validation
+## 12. Hardware validation status and remaining matrix
 
-The elevation implementation is not complete from unit tests alone.
+The process-privilege implementation and helper cleanup are merged, but final product validation still requires physical MSI Claw coverage.
 
-Validate on a physical supported MSI Claw.
+### 12.1 Already evidenced on hardware/logs
 
-### 12.1 Privilege / startup
-
-Verify:
+The 2026-10-05 `Addon/Log/1005/06` validation established:
 
 ~~~text
-logon startup
-=> Runtime elevated
-=> Main UI launched by Runtime works
-=> Overlay launched by Runtime works
-=> no additional login-time UAC prompt from the already-configured startup task
+manual asInvoker bootstrap
+=> same-user elevation
+=> High Runtime starts
+
+reboot/logon
+=> Highest startup task
+=> High Runtime starts directly
+
+controlled Runtime restart
+=> replacement Runtime remains High
+
+Disabled-mode startup
+=> PID1901 -> PID1902 reconcile succeeds
+=> DirectInput / HidHide / VIIPER establish normally
+
+MSI Quick Settings process resurrection
+=> exact package is identified
+=> elevated Runtime can terminate the relevant processes
+=> FailureCount=0
 ~~~
 
-Verify controlled Runtime restart returns to the same elevated state.
+The same log set showed no material Runtime/UI/Overlay/VIIPER WARN/ERROR associated with the elevation change.
 
-### 12.2 WING suppression matrix
+### 12.2 Elevated WING suppression matrix — still required
 
-At minimum:
+At minimum validate:
 
 ~~~text
 Windows desktop
@@ -530,7 +547,9 @@ WING physical press
 => no stuck Win modifier
 ~~~
 
-### 12.3 Power lifecycle
+The pre-elevation `1005/04` A/B logs established the integrity-boundary cause, but the post-elevation build still needs the physical elevated-game WING press proof.
+
+### 12.3 Power lifecycle — still required
 
 Validate:
 
@@ -552,51 +571,76 @@ WING Event88 action remains functional
 
 Include at least one administrator-elevated foreground game after resume.
 
-### 12.4 Existing device features
+### 12.4 Retained helper smoke — required after helper cleanup
 
-Smoke-test existing helper-backed features without changing their implementation:
+Validate the merged inherited-High helper model:
 
 ~~~text
 TDP read/write
 fan-related helper operations currently exposed
 battery charge-limit path
+TdpHelper diagnostic Elevated=YES
+no helper-local UAC prompt
+
+Disable Center M and Restart
+Enable Center M and Restart
+no CenterM helper-local UAC prompt
+exact task/service readback remains correct
 ~~~
 
-The elevation implementation must not regress their behavior.
+### 12.5 Update / uninstall
+
+Before release, also exercise:
+
+- one steady-state Velopack update between builds using the new High Runtime model;
+- SafeUninstall from Addon authority through verified stock restoration and final uninstall handoff.
 
 ---
 
-## 13. Recommended implementation sequencing
+## 13. Implementation status and next work
 
-### Phase A — Elevated Runtime migration
+### Completed
 
-One focused implementation PR should cover only what is necessary to establish and verify the elevated Full1902 Runtime model:
-
-~~~text
-Runtime privilege requirement
-+ startup-task highest-run-level contract/readback
-+ elevation verification/fail-close as needed
-+ preserve UI/Overlay child launch
-+ preserve existing WinGSuppressionGuard
-+ tests
-+ physical lifecycle validation
-~~~
-
-Do not use Phase A as an excuse to clean every now-redundant helper or external-launch path.
-
-### Phase B — Privileged-process cleanup
-
-After Phase A is proven on hardware, prepare a separate architecture/work order for:
+The elevated Runtime implementation and privilege-helper cleanup are complete:
 
 ~~~text
-user EXE / PowerShell privilege boundary
-+ TDP helper keep-vs-inline decision
-+ any other now-redundant privileged helper review
+PR681
+=> central High Runtime model
+=> same-user elevation gate
+=> Highest startup task contract
+=> elevated Runtime owns existing WING suppression
+
+PR683
+=> redundant same-EXE / feature-local elevation cleanup
+=> startup task and SafeUninstall direct High operations
+=> retained setup/registration workers inherit High
+
+PR685
+=> TDP helper remains separate, asInvoker, inherits High
+=> Center M helper remains separate, asInvoker, inherits High
+=> helper-local UAC semantics removed
 ~~~
 
-Phase B must be evidence-driven and must preserve any useful process-failure isolation.
+The process architecture is therefore no longer in a "migration pending" state.
 
----
+### Remaining process-privilege work
+
+The only planned privilege-boundary design item is the user-launched external-action path:
+
+~~~text
+front-button LaunchApplication
+Shortcut executable
+Shortcut PowerShell
+relevant shell/URL launch semantics
+~~~
+
+Treat this as a separate user-process launch policy. It must not alter controller authority, helper fault-containment, HidHide/VIIPER ownership, or WING suppression.
+
+### Separate Full1902 reliability work
+
+Unexpected Runtime death auto-restart / lightweight keepalive remains a separate Full1902 reliability requirement defined by the controller authority documents. Do not conflate it with privilege-helper cleanup.
+
+
 
 ## 14. Relationship to existing Full1902 authority documents
 
