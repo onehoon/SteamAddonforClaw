@@ -40,6 +40,20 @@ public sealed class FrontButtonActionExecutorLauncherTests
         Assert.Throws<ArgumentNullException>(() => Oem1ApplicationLauncher.Launch(null!));
     }
 
+    [Fact]
+    public void Xbox_app_activation_is_delegated_to_the_interactive_shell()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SteamInputAddonforClaw.slnx"))) dir = dir.Parent;
+        var launcher = File.ReadAllText(Path.Combine(dir!.FullName,
+            "src/SteamInputAddonforClaw/CenterM/FrontButtonXboxAppLauncher.cs"));
+
+        Assert.Contains("FileName = \"explorer.exe\"", launcher, StringComparison.Ordinal);
+        Assert.Contains("shell:AppsFolder\\\\{XboxAppAumid}", launcher, StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = true", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("IApplicationActivationManager", launcher, StringComparison.Ordinal);
+    }
+
     // ---- Oem1KeyboardHotkeyExecutor (review fix, MAJOR: best-effort release cleanup) ----
 
     [Fact]
