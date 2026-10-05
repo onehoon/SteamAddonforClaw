@@ -46,24 +46,48 @@ public sealed class MsiQuickSettingsRuntimeQuiescerTests
         Assert.Equal(ExactPackageFullName, packageFullNames[0]);
     }
 
+    [Theory]
+    [InlineData(ExactPackageFullName, ExactPackageFullName, true)]
+    [InlineData("9426MICRO-STARINTERNATION.MSIQuickSettings_1.0.0.0_X64__F34EXAMPLEPUBLISHER", ExactPackageFullName, true)]
+    [InlineData("9426MICRO-STARINTERNATION.MSIQuickSettings_1.0.0.1_x64__f34examplepublisher", ExactPackageFullName, false)]
+    [InlineData("OtherPublisher.MSIQuickSettings_1.0.0.0_x64__publisher", ExactPackageFullName, false)]
+    public void Process_termination_requires_an_exact_proven_package_full_name_match(
+        string? candidatePackageFullName,
+        string targetPackageFullName,
+        bool expected)
+    {
+        Assert.Equal(expected,
+            MsiQuickSettingsRuntimeQuiescer.IsExactPackageFullNameMatch(candidatePackageFullName, targetPackageFullName));
+    }
+
     [Fact]
-    public void Implementation_uses_only_the_packaged_widget_candidate_and_package_termination()
+    public void Implementation_uses_proven_exact_package_identity_for_process_termination()
     {
         var source = File.ReadAllText(SourcePath("src/SteamInputAddonforClaw/GameBar/MsiQuickSettingsRuntimeQuiescer.cs"));
 
         Assert.Contains("CandidateProcessName = \"Gamebar_Widget\"", source, StringComparison.Ordinal);
         Assert.Contains("MsiQuickSettingsPackageName = \"9426MICRO-STARINTERNATION.MSIQuickSettings\"", source, StringComparison.Ordinal);
         Assert.Contains("Process.GetProcessesByName(CandidateProcessName)", source, StringComparison.Ordinal);
+        Assert.Contains("Process.GetProcesses()", source, StringComparison.Ordinal);
         Assert.Contains("GetPackageFullName", source, StringComparison.Ordinal);
         Assert.Contains("PROCESS_QUERY_LIMITED_INFORMATION", source, StringComparison.Ordinal);
-        Assert.Contains("TerminateAllProcesses", source, StringComparison.Ordinal);
+        Assert.Contains("PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION", source, StringComparison.Ordinal);
+        Assert.Contains("TerminateProcess", source, StringComparison.Ordinal);
+        Assert.Contains("IsExactPackageFullNameMatch", source, StringComparison.Ordinal);
         Assert.True(
             source.IndexOf("if (!IsExactMsiQuickSettingsPackageFullName(packageFullName))", StringComparison.Ordinal)
-            < source.IndexOf("return TerminatePackages(", StringComparison.Ordinal),
+            < source.IndexOf("return TerminateExactPackageProcesses(", StringComparison.Ordinal),
             "package identity must be proven before package termination is considered");
+        var termination = Method(source, "private static MsiQuickSettingsRuntimeQuiesceResult TerminateExactPackageProcesses(");
+        Assert.True(
+            termination.IndexOf("IsExactPackageFullNameMatch(terminationHandlePackageFullName, targetPackageFullName)", StringComparison.Ordinal)
+            < termination.IndexOf("TerminateProcess(terminationHandle, 0)", StringComparison.Ordinal),
+            "package identity must be revalidated on the termination handle before terminating the process");
         Assert.DoesNotContain("RuntimeBroker", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Process.Kill", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("TerminateProcess", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("TerminateAllProcesses", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("IPackageDebugSettings", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnableDebugging", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Remove-AppxPackage", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("StartServicing(", source, StringComparison.Ordinal);
     }

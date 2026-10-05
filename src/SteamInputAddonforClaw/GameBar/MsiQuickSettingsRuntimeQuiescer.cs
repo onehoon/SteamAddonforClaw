@@ -10,19 +10,18 @@ internal readonly record struct MsiQuickSettingsRuntimeQuiesceResult(
     int CandidateCount,
     int IdentityUnavailableCount,
     int PackageCount,
-    int TerminatedPackageCount,
-    int FailedPackageCount);
+    int TerminatedProcessCount,
+    int FailureCount);
 
 internal static class MsiQuickSettingsRuntimeQuiescer
 {
     private const string CandidateProcessName = "Gamebar_Widget";
     private const string MsiQuickSettingsPackageName = "9426MICRO-STARINTERNATION.MSIQuickSettings";
+    private const uint PROCESS_TERMINATE = 0x0001;
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     private const int ErrorInsufficientBuffer = 122;
     private const int AppModelErrorNoPackage = 15700;
     private const uint MaximumPackageFullNameLength = 32768;
-
-    private static readonly Guid PackageDebugSettingsClassId = new("B1AEC16F-2383-4852-B0E9-8F0B1DC66B4D");
 
     internal static MsiQuickSettingsRuntimeQuiesceResult Quiesce()
     {
@@ -100,7 +99,7 @@ internal static class MsiQuickSettingsRuntimeQuiescer
                 ("ProcessId", processIdsByPackage[packageFullName]), ("PackageFullName", packageFullName));
         }
 
-        return TerminatePackages(candidates.Length, identityUnavailableCount, targetPackages, processIdsByPackage);
+        return TerminateExactPackageProcesses(candidates.Length, identityUnavailableCount, targetPackages);
     }
 
     internal static bool IsExactMsiQuickSettingsPackageFullName(string? packageFullName) =>
@@ -113,6 +112,9 @@ internal static class MsiQuickSettingsRuntimeQuiescer
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+    internal static bool IsExactPackageFullNameMatch(string? candidate, string target) =>
+        string.Equals(candidate, target, StringComparison.OrdinalIgnoreCase);
+
     private static bool TryGetPackageFullName(int processId, out string? packageFullName, out int errorCode)
     {
         packageFullName = null;
@@ -123,6 +125,15 @@ internal static class MsiQuickSettingsRuntimeQuiescer
             return false;
         }
 
+        return TryReadPackageFullName(processHandle, out packageFullName, out errorCode);
+    }
+
+    private static bool TryReadPackageFullName(
+        SafeProcessHandle processHandle,
+        out string? packageFullName,
+        out int errorCode)
+    {
+        packageFullName = null;
         uint length = 0;
         var result = GetPackageFullName(processHandle, ref length, null);
         if (result != ErrorInsufficientBuffer || length == 0 || length > MaximumPackageFullNameLength)
@@ -144,107 +155,95 @@ internal static class MsiQuickSettingsRuntimeQuiescer
         return !string.IsNullOrWhiteSpace(packageFullName);
     }
 
-    private static MsiQuickSettingsRuntimeQuiesceResult TerminatePackages(
+    private static MsiQuickSettingsRuntimeQuiesceResult TerminateExactPackageProcesses(
         int candidateCount,
         int identityUnavailableCount,
-        IReadOnlyList<string> packageFullNames,
-        IReadOnlyDictionary<string, int> processIdsByPackage)
+        IReadOnlyList<string> targetPackageFullNames)
     {
-        object? packageDebugSettingsObject = null;
-        IPackageDebugSettings? packageDebugSettings;
+        Process[] processes;
         try
         {
-            var classType = Type.GetTypeFromCLSID(PackageDebugSettingsClassId, throwOnError: true)
-                ?? throw new COMException("PackageDebugSettings COM class is unavailable.");
-            packageDebugSettingsObject = Activator.CreateInstance(classType)
-                ?? throw new COMException("PackageDebugSettings COM activation returned no object.");
-            packageDebugSettings = packageDebugSettingsObject as IPackageDebugSettings
-                ?? throw new COMException("PackageDebugSettings does not expose IPackageDebugSettings.");
+            processes = Process.GetProcesses();
         }
         catch (Exception exception)
         {
-            foreach (var packageFullName in packageFullNames)
-                LogTerminationFailed(packageFullName, processIdsByPackage[packageFullName], exception.HResult, exception.GetType().Name);
-            ReleaseComObject(packageDebugSettingsObject);
-            return new(candidateCount, identityUnavailableCount, packageFullNames.Count, 0, packageFullNames.Count);
+            AppLog.Warn("MsiQuickSettings", "Could not enumerate processes for exact-package termination; startup continues.", exception,
+                ("Event", "MsiQuickSettingsTerminationFailed"), ("Reason", "ProcessEnumerationFailed"),
+                ("PackageCount", targetPackageFullNames.Count));
+            return new(candidateCount, identityUnavailableCount, targetPackageFullNames.Count, 0, 1);
         }
 
-        var terminatedCount = 0;
-        var failedCount = 0;
-        try
+        var terminatedProcessCount = 0;
+        var failedProcessCount = 0;
+        foreach (var process in processes)
         {
-            foreach (var packageFullName in packageFullNames)
+            using (process)
             {
-                var processId = processIdsByPackage[packageFullName];
+                int processId;
                 try
                 {
-                    var hresult = packageDebugSettings.TerminateAllProcesses(packageFullName);
-                    if (hresult >= 0)
-                    {
-                        terminatedCount++;
-                        AppLog.Info("MsiQuickSettings", "All processes for the exact MSI Quick Settings package were terminated.",
-                            ("Event", "MsiQuickSettingsPackageTerminated"), ("ProcessId", processId),
-                            ("PackageFullName", packageFullName), ("HResult", $"0x{hresult:X8}"));
-                    }
-                    else
-                    {
-                        failedCount++;
-                        LogTerminationFailed(packageFullName, processId, hresult, "TerminateAllProcessesFailed");
-                    }
+                    processId = process.Id;
                 }
-                catch (Exception exception)
+                catch (Exception)
                 {
-                    failedCount++;
-                    LogTerminationFailed(packageFullName, processId, exception.HResult, exception.GetType().Name);
+                    continue;
                 }
+
+                if (!TryGetPackageFullName(processId, out var packageFullName, out _))
+                    continue;
+
+                var targetPackageFullName = targetPackageFullNames.FirstOrDefault(
+                    target => IsExactPackageFullNameMatch(packageFullName, target));
+                if (targetPackageFullName is null)
+                    continue;
+
+                using var terminationHandle = OpenProcess(
+                    PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    false,
+                    (uint)processId);
+                if (terminationHandle.IsInvalid)
+                {
+                    failedProcessCount++;
+                    LogTerminationFailed(targetPackageFullName, processId, Marshal.GetLastWin32Error(), "OpenProcessForTerminationFailed");
+                    continue;
+                }
+
+                if (!TryReadPackageFullName(terminationHandle, out var terminationHandlePackageFullName, out _)
+                    || !IsExactPackageFullNameMatch(terminationHandlePackageFullName, targetPackageFullName))
+                {
+                    identityUnavailableCount++;
+                    continue;
+                }
+
+                if (!TerminateProcess(terminationHandle, 0))
+                {
+                    failedProcessCount++;
+                    LogTerminationFailed(targetPackageFullName, processId, Marshal.GetLastWin32Error(), "TerminateProcessFailed");
+                    continue;
+                }
+
+                terminatedProcessCount++;
+                AppLog.Info("MsiQuickSettings", "A process with the exact MSI Quick Settings package identity was terminated.",
+                    ("Event", "MsiQuickSettingsProcessTerminated"), ("ProcessId", processId),
+                    ("PackageFullName", targetPackageFullName));
             }
         }
-        finally
-        {
-            ReleaseComObject(packageDebugSettingsObject);
-        }
 
-        return new(candidateCount, identityUnavailableCount, packageFullNames.Count, terminatedCount, failedCount);
+        return new(candidateCount, identityUnavailableCount, targetPackageFullNames.Count, terminatedProcessCount, failedProcessCount);
     }
 
-    private static void LogTerminationFailed(string packageFullName, int processId, int hresult, string reason) =>
-        AppLog.Warn("MsiQuickSettings", "Exact MSI Quick Settings package termination failed; controller startup continues.", null,
+    private static void LogTerminationFailed(string packageFullName, int processId, int errorCode, string reason) =>
+        AppLog.Warn("MsiQuickSettings", "Exact MSI Quick Settings package process termination failed; controller startup continues.", null,
             ("Event", "MsiQuickSettingsTerminationFailed"), ("ProcessId", processId),
-            ("PackageFullName", packageFullName), ("HResult", $"0x{hresult:X8}"), ("Reason", reason));
-
-    private static void ReleaseComObject(object? packageDebugSettingsObject)
-    {
-        if (packageDebugSettingsObject is null || !Marshal.IsComObject(packageDebugSettingsObject))
-            return;
-
-        try { Marshal.FinalReleaseComObject(packageDebugSettingsObject); }
-        catch (Exception exception)
-        {
-            AppLog.Debug("MsiQuickSettings", "PackageDebugSettings COM reference release failed.",
-                ("ExceptionType", exception.GetType().Name), ("HResult", $"0x{exception.HResult:X8}"));
-        }
-    }
-
-    [ComImport]
-    [Guid("F27C3930-8029-4AD1-94E3-3DBA417810C1")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IPackageDebugSettings
-    {
-        [PreserveSig]
-        int EnableDebugging(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName,
-            [MarshalAs(UnmanagedType.LPWStr)] string? debuggerCommandLine,
-            nint environment);
-
-        [PreserveSig] int DisableDebugging([MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-        [PreserveSig] int Suspend([MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-        [PreserveSig] int Resume([MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-        [PreserveSig] int TerminateAllProcesses([MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-    }
+            ("PackageFullName", packageFullName), ("Win32Error", errorCode), ("Reason", reason));
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern SafeProcessHandle OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int GetPackageFullName(SafeProcessHandle process, ref uint packageFullNameLength, StringBuilder? packageFullName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TerminateProcess(SafeProcessHandle process, uint exitCode);
 }

@@ -801,8 +801,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ("CandidateCount", quiesceResult.CandidateCount),
                 ("IdentityUnavailableCount", quiesceResult.IdentityUnavailableCount),
                 ("PackageCount", quiesceResult.PackageCount),
-                ("TerminatedPackageCount", quiesceResult.TerminatedPackageCount),
-                ("FailedPackageCount", quiesceResult.FailedPackageCount));
+                ("TerminatedProcessCount", quiesceResult.TerminatedProcessCount),
+                ("FailureCount", quiesceResult.FailureCount));
         }
         catch (Exception exception)
         {
