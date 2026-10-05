@@ -603,6 +603,7 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
         Assert.Contains("GetApplicationUserModelId", probeSource, StringComparison.Ordinal);
         Assert.Contains("GetPackageId", probeSource, StringComparison.Ordinal);
         Assert.Contains("GetPackagePathByFullName2", probeSource, StringComparison.Ordinal);
+        Assert.Contains("[DllImport(\"kernelbase.dll\", EntryPoint = \"GetPackagePathByFullName2\"", probeSource, StringComparison.Ordinal);
         Assert.Contains("new PackageManager().FindPackageForUser(userSecurityId, packageFullName)", probeSource, StringComparison.Ordinal);
         Assert.Contains("package.EffectiveLocation?.Path", probeSource, StringComparison.Ordinal);
         Assert.Contains("package.InstalledLocation?.Path", probeSource, StringComparison.Ordinal);

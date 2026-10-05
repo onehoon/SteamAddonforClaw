@@ -352,7 +352,7 @@ internal sealed class WindowsXboxGameProcessIdentityProbe : IXboxGameProcessIden
     [DllImport("kernel32.dll", EntryPoint = "GetPackageId")]
     private static extern int GetPackageId(SafeProcessHandle process, ref uint length, nint buffer);
 
-    [DllImport("kernel32.dll", EntryPoint = "GetPackagePathByFullName2", CharSet = CharSet.Unicode)]
+    [DllImport("kernelbase.dll", EntryPoint = "GetPackagePathByFullName2", CharSet = CharSet.Unicode)]
     private static extern int GetPackagePathByFullName2(string packageFullName, uint pathType, ref uint length, StringBuilder? path);
 
     [DllImport("kernel32.dll")]
