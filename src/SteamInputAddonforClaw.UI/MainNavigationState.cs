@@ -15,6 +15,7 @@ internal enum MainNavigationPage
     VibrationTest,
     FanHardwareProbe,
     BatteryChargeLimitTest,
+    XboxCatalogDiagnostic,
 }
 
 internal sealed class MainNavigationState
@@ -64,6 +65,7 @@ internal sealed class MainNavigationState
     internal MainNavigationPage OpenVibrationTest() => CurrentPage = MainNavigationPage.VibrationTest;
     internal MainNavigationPage OpenFanHardwareProbe() => CurrentPage = MainNavigationPage.FanHardwareProbe;
     internal MainNavigationPage OpenBatteryChargeLimitTest() => CurrentPage = MainNavigationPage.BatteryChargeLimitTest;
+    internal MainNavigationPage OpenXboxCatalogDiagnostic() => CurrentPage = MainNavigationPage.XboxCatalogDiagnostic;
 
     internal MainNavigationPage? GetMouseBackDestination() => CurrentPage switch
     {
@@ -73,6 +75,7 @@ internal sealed class MainNavigationState
         MainNavigationPage.VibrationTest => MainNavigationPage.DeveloperMenu,
         MainNavigationPage.FanHardwareProbe => MainNavigationPage.DeveloperMenu,
         MainNavigationPage.BatteryChargeLimitTest => MainNavigationPage.DeveloperMenu,
+        MainNavigationPage.XboxCatalogDiagnostic => MainNavigationPage.DeveloperMenu,
         _ => null
     };
 }

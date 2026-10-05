@@ -100,6 +100,17 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void DeveloperMenu_opens_xbox_catalog_diagnostic_and_returns_to_developer_menu()
+    {
+        var navigation = new MainNavigationState();
+
+        navigation.OpenDeveloperMenu();
+        Assert.Equal(MainNavigationPage.XboxCatalogDiagnostic, navigation.OpenXboxCatalogDiagnostic());
+        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
+        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.ReturnToDeveloperMenu());
+    }
+
+    [Fact]
     public void MouseBack_destinations_match_developer_page_hierarchy()
     {
         var navigation = new MainNavigationState();
@@ -112,6 +123,9 @@ public sealed class MainNavigationStateTests
         Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
 
         navigation.OpenBatteryChargeLimitTest();
+        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
+
+        navigation.OpenXboxCatalogDiagnostic();
         Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
     }
 

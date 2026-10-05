@@ -368,6 +368,51 @@ public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings
 }
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
+
+public enum FrontendXboxCatalogDiagnosticOutcome { Completed, Unavailable, Failed }
+
+public sealed record FrontendXboxCatalogDiagnosticResult(
+    FrontendXboxCatalogDiagnosticOutcome Outcome,
+    string Status,
+    int EnumeratedPackageCount,
+    int AccessiblePackageCount,
+    int ConfigCandidateCount,
+    int ParsedConfigCount,
+    int ValidGameCount,
+    int SkippedOrFailedCount,
+    IReadOnlyList<FrontendXboxCatalogDiagnosticGame> Games,
+    IReadOnlyList<FrontendXboxCatalogDiagnosticFailure> Failures,
+    string? ReportPath,
+    int OmittedGameCount = 0,
+    int OmittedFailureCount = 0)
+{
+    public static FrontendXboxCatalogDiagnosticResult Unavailable(string status) => new(
+        FrontendXboxCatalogDiagnosticOutcome.Unavailable, status, 0, 0, 0, 0, 0, 0, [], [], null);
+}
+
+public sealed record FrontendXboxCatalogDiagnosticGame(
+    string CandidateKey,
+    string DisplayName,
+    string PackageFullName,
+    string PackageFamilyName,
+    string? StoreId,
+    string? TitleId,
+    string IdentityName,
+    string IdentityPublisher,
+    string? IdentityResourceId,
+    IReadOnlyList<FrontendXboxCatalogDiagnosticExecutable> Executables,
+    string PackageLocationKind,
+    string PackageRoot,
+    string ConfigPath,
+    int OmittedExecutableCount = 0);
+
+public sealed record FrontendXboxCatalogDiagnosticExecutable(
+    string Name,
+    string? Id,
+    string? TargetDeviceFamily,
+    string? Architecture);
+
+public sealed record FrontendXboxCatalogDiagnosticFailure(string Stage, string PackageIdentity, string Reason);
 public sealed record FrontendDeviceSnapshot(string Manufacturer, string Model, string BaseBoard, IReadOnlyList<string> GpuModels);
 public sealed record FrontendHardwareSnapshot(FrontendHardwareStatus Status, string? Family, string? Model, string Reason);
 public sealed record FrontendSteamSnapshot(bool Active, uint AppId, FrontendSteamSource Source);
@@ -577,6 +622,8 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable."));
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);
     Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default);
+    Task<FrontendXboxCatalogDiagnosticResult> RunXboxCatalogDiagnosticAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendXboxCatalogDiagnosticResult.Unavailable("XBOX catalog diagnostic is unavailable."));
     /// <summary>Captures the current CPU Boost frontend snapshot. Never mutates anything -- opening
     /// the Device page and capturing this snapshot must cause zero ProfileStore/Windows writes
     /// (work order section 8/21).</summary>

@@ -71,6 +71,11 @@
                 <Button Content="Open" Click="OpenBatteryChargeLimitTestButton_Click" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard Header="XBOX Catalog Diagnostic" Description="Read-only installed XBOX/Game Pass package and MicrosoftGame.config identity probe.">
+                <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Find" /></ctcontrols:SettingsCard.HeaderIcon>
+                <Button Content="Open" Click="OpenXboxCatalogDiagnosticButton_Click" />
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsCard Header="Logging" Description="Off by default. Info enables runtime diagnostics; Debug is verbose and for developer use only.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="List" />
