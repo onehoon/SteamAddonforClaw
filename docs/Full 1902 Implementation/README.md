@@ -19,17 +19,22 @@ For controller ownership work, use the following precedence when statements conf
 
 ## Related process-privilege architecture
 
-`FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` records the accepted direction for administrator-game compatibility:
+`FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` is the active process-privilege authority for administrator-game compatibility.
 
-- the primary Full1902 Runtime becomes the elevated platform process;
-- elevation is required because the medium-integrity Runtime did not receive the relevant low-level WING keyboard sequence from an administrator-elevated foreground game, allowing native Game Bar activation;
-- the supported interactive Windows user is itself an administrator; elevation must retain that user's identity;
-- Main UI and Overlay are not intentionally de-elevated and may inherit the Runtime token;
+Current implemented model:
+
+- the primary Full1902 Runtime is the elevated platform process;
+- the packaged main EXE remains `asInvoker` for Velopack/bootstrap compatibility, then the normal application path performs one same-user `runas` elevation before `SingleInstanceGate` or controller ownership;
+- the supported interactive Windows user is itself an administrator; over-the-shoulder elevation into a different administrator identity is unsupported and must fail closed before Runtime/controller ownership;
+- the mandatory startup task launches the Runtime at Highest run level;
+- Main UI and Overlay inherit the Runtime token and remain frontend-only;
 - the existing Runtime-owned `WinGSuppressionGuard` remains the one WING / Game Bar suppression owner;
-- the existing mandatory startup task must launch the Runtime at the required elevated run level;
-- Sleep/Hibernate/Resume, PID1902/HidHide/VIIPER ownership, and Full1902 fail-close policy remain unchanged;
-- existing privileged helpers, including the TDP helper, stay unchanged during the first elevation implementation;
-- user EXE / PowerShell privilege-boundary cleanup and helper consolidation are explicitly deferred to a later focused design.
+- TDP and Center M helpers are retained as separate fault-containment workers, but now use `asInvoker` manifests and inherit the High Runtime token instead of requesting their own elevation;
+- FSE registration, prerequisite setup, Windows App Runtime setup, and other retained workers likewise inherit Runtime High where applicable;
+- feature-local self-elevation for startup-task repair/removal and SafeUninstall prerequisite cleanup has been removed;
+- Sleep/Hibernate/Resume, PID1902/HidHide/VIIPER ownership, and Full1902 fail-close policy remain unchanged.
+
+Remaining process-privilege follow-up is limited to the user-launched external-process boundary (for example front-button/shortcut executable and PowerShell actions) and final hardware validation of the elevated WING/power lifecycle. TDP/Center M helper keep-vs-inline is no longer an open design question: both helpers are intentionally retained for practical operation-failure containment.
 
 This is a process-privilege decision, not a new controller authority.
 
