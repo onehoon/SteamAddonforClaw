@@ -1,5 +1,7 @@
 # Steam Addon for Claw — App UI Information Architecture
 
+> **XBOX architecture override (2026-10-05):** For Main App game-profile navigation and ownership, docs/XBOX_GAME_PROFILE_ARCHITECTURE_2026-10-05.md takes precedence over this document's older single Profile-page terminology. The user-facing top-level Profile item is renamed **Steam**, and a separate top-level **XBOX** page owns XBOX/Game Pass catalog and profile configuration. Do not implement Steam/XBOX as sub-tabs of one Profile page. Overlay remains context-driven and may continue to present one active Profile surface selected by Runtime.
+
 > **Current architecture note (2026-09-24):** Addon-owned Quick Settings are provided only by the WinUI3 Overlay. The Main App's `Shortcut` page is a separate editor for Runtime-owned user Shortcut definitions and Screenshot folder preference; it is not the Main App `Overlay` settings page or the WinUI3 Overlay Shortcut grid. Steam's native Quick Access Menu remains Steam-owned and is invoked through the existing Steam Deck Quick Access system-button pulse; there is no Addon QAM tab or QamHost/CDP/CEF integration.
 
 > **Date:** 2026-09-04  
