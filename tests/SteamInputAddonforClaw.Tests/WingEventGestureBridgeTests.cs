@@ -9,6 +9,23 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class WingEventGestureBridgeTests
 {
     [Fact]
+    public void Foreground_probe_captures_boundary_identity_before_queue_and_uses_it_as_first_snapshot()
+    {
+        var source = ProbeSource();
+        var timestamp = source.IndexOf("var triggerTimestamp = Stopwatch.GetTimestamp();", StringComparison.Ordinal);
+        var capture = source.IndexOf("initialIdentity = CaptureIdentity();", StringComparison.Ordinal);
+        var queue = source.IndexOf("Task.Run(() => ObserveAsync(probeId, triggerTimestamp, initialIdentity))", StringComparison.Ordinal);
+        var observe = source.IndexOf("private static async Task ObserveAsync(", StringComparison.Ordinal);
+        var initialSnapshot = source.IndexOf("var current = CaptureSnapshot(initialIdentity);", observe, StringComparison.Ordinal);
+        var nextSample = source.IndexOf("var identity = CaptureIdentity();", initialSnapshot, StringComparison.Ordinal);
+
+        Assert.True(timestamp >= 0 && timestamp < capture, "the trigger timestamp must be captured before the boundary identity");
+        Assert.True(capture < queue, "the HWND/PID boundary sample must happen before queuing background work");
+        Assert.True(queue < observe && observe < initialSnapshot && initialSnapshot < nextSample,
+            "the captured boundary identity must seed the first snapshot before later foreground samples");
+    }
+
+    [Fact]
     public void Accepted_event88_starts_diagnostic_and_still_delivers_gesture_when_diagnostic_throws()
     {
         using var source = new FakeMsiEventSource();
@@ -67,6 +84,13 @@ public sealed class WingEventGestureBridgeTests
         () => FrontButtonMappingSettings.Default,
         () => false,
         new FrontButtonActionExecutor(() => { }, () => { }, () => true, () => true));
+
+    private static string ProbeSource()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx"))) directory = directory.Parent;
+        return File.ReadAllText(Path.Combine(directory!.FullName, "src", "SteamInputAddonforClaw", "GameBar", "WingGameBarDiagnosticProbe.cs"));
+    }
 
     private sealed class FakeMsiEventSource : IMsiEventSource
     {

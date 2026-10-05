@@ -17,26 +17,34 @@ internal static class WingGameBarDiagnosticProbe
         if (!AppLog.IsEnabled(AppLogLevel.Debug)) return;
 
         var probeId = Interlocked.Increment(ref _nextProbeId);
+        var triggerTimestamp = Stopwatch.GetTimestamp();
+        WingGameBarForegroundIdentity initialIdentity;
         try
         {
-            _ = Task.Run(() => ObserveAsync(probeId));
+            initialIdentity = CaptureIdentity();
         }
+        catch (Exception exception)
+        {
+            AppLog.Debug(Category, "ProbeStartFailed", ("ProbeId", probeId), ("Exception", exception.GetType().Name));
+            return;
+        }
+
+        try { _ = Task.Run(() => ObserveAsync(probeId, triggerTimestamp, initialIdentity)); }
         catch (Exception exception)
         {
             AppLog.Debug(Category, "ProbeStartFailed", ("ProbeId", probeId), ("Exception", exception.GetType().Name));
         }
     }
 
-    private static async Task ObserveAsync(long probeId)
+    private static async Task ObserveAsync(long probeId, long triggerTimestamp, WingGameBarForegroundIdentity initialIdentity)
     {
         try
         {
-            var stopwatch = Stopwatch.StartNew();
-            var current = CaptureSnapshot(CaptureIdentity());
-            LogForeground("ForegroundSnapshot", probeId, stopwatch.ElapsedMilliseconds, current);
+            var current = CaptureSnapshot(initialIdentity);
+            LogForeground("ForegroundSnapshot", probeId, ElapsedMilliseconds(triggerTimestamp), current);
 
             var changeCount = 0;
-            while (stopwatch.Elapsed < Duration)
+            while (Stopwatch.GetElapsedTime(triggerTimestamp) < Duration)
             {
                 await Task.Delay(SampleInterval).ConfigureAwait(false);
                 var identity = CaptureIdentity();
@@ -44,13 +52,13 @@ internal static class WingGameBarDiagnosticProbe
 
                 current = CaptureSnapshot(identity);
                 changeCount++;
-                LogForeground("ForegroundChanged", probeId, stopwatch.ElapsedMilliseconds, current);
+                LogForeground("ForegroundChanged", probeId, ElapsedMilliseconds(triggerTimestamp), current);
             }
 
             AppLog.Debug(Category, "ProbeCompleted",
                 ("ProbeId", probeId),
                 ("Trigger", "Event88Accepted"),
-                ("DurationMs", stopwatch.ElapsedMilliseconds),
+                ("DurationMs", ElapsedMilliseconds(triggerTimestamp)),
                 ("ForegroundChangeCount", changeCount),
                 ("FinalHwnd", FormatHwnd(current.Identity.Hwnd)),
                 ("FinalPid", current.Identity.Pid),
@@ -134,6 +142,9 @@ internal static class WingGameBarDiagnosticProbe
             ("ProcessName", snapshot.ProcessName),
             ("WindowClass", snapshot.WindowClass),
             ("WindowTitle", snapshot.WindowTitle));
+
+    private static long ElapsedMilliseconds(long triggerTimestamp) =>
+        (long)Stopwatch.GetElapsedTime(triggerTimestamp).TotalMilliseconds;
 
     private static string FormatHwnd(IntPtr hwnd) => $"0x{unchecked((ulong)hwnd.ToInt64()):X16}";
 
