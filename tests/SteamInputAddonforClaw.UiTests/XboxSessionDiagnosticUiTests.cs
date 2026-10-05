@@ -37,6 +37,29 @@ public sealed class XboxSessionDiagnosticUiTests
     }
 
     [Fact]
+    public void Force_stop_does_not_render_or_mutate_controls_after_page_retirement()
+    {
+        var diagnosticCode = Read("src/SteamInputAddonforClaw.UI/Views/XboxSessionDiagnosticPage.xaml.cs");
+        var start = diagnosticCode.IndexOf("private async Task StopAndRenderAsync(bool forceStop = false)", StringComparison.Ordinal);
+        var end = diagnosticCode.IndexOf("private TaskCompletionSource BeginRequest()", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var method = diagnosticCode[start..end];
+        var forceStart = method.IndexOf("if (forceStop)", StringComparison.Ordinal);
+        var requestStart = method.IndexOf("var request = BeginRequest();", forceStart, StringComparison.Ordinal);
+        Assert.True(forceStart >= 0 && requestStart > forceStart);
+
+        var forceStopPath = method[forceStart..requestStart];
+        Assert.Contains("_frontend.StopXboxSessionDiagnosticAsync()", forceStopPath, StringComparison.Ordinal);
+        Assert.Contains("_observerRunning = snapshot.State == FrontendXboxSessionDiagnosticState.Running;", forceStopPath, StringComparison.Ordinal);
+        foreach (var forbidden in new[] { "Render(", "BeginRequest(", "EndRequest(", "UpdateButtons(" })
+            Assert.DoesNotContain(forbidden, forceStopPath, StringComparison.Ordinal);
+
+        var activePath = method[requestStart..];
+        Assert.Contains("Render(await _frontend.StopXboxSessionDiagnosticAsync()", activePath, StringComparison.Ordinal);
+        Assert.Contains("EndRequest(request);", activePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UI_does_not_query_process_package_or_config_identity()
     {
         var sources = string.Join("\n", [

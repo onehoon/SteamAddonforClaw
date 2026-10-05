@@ -140,6 +140,20 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
         await WaitForPendingRequestAsync().ConfigureAwait(true);
         if (!forceStop && !_observerRunning)
             return;
+        if (forceStop)
+        {
+            try
+            {
+                var snapshot = await _frontend.StopXboxSessionDiagnosticAsync().ConfigureAwait(true);
+                _observerRunning = snapshot.State == FrontendXboxSessionDiagnosticState.Running;
+            }
+            catch (Exception exception)
+            {
+                LogRequestFailure("stop", exception);
+            }
+            return;
+        }
+
         var request = BeginRequest();
         try
         {

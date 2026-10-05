@@ -16,6 +16,34 @@ public sealed class UiShutdownCoordinatorTests
     }
 
     [Fact]
+    public void Final_non_xaml_exit_fallback_is_info_while_shutdown_dispatch_failures_remain_errors()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "SteamInputAddonforClaw.slnx")))
+            root = root.Parent;
+        Assert.NotNull(root);
+
+        var app = File.ReadAllText(Path.Combine(root!.FullName, "src/SteamInputAddonforClaw.UI/App.xaml.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var methodStart = app.IndexOf("private void RequestExitOnUiThread()", StringComparison.Ordinal);
+        var methodEnd = app.IndexOf("\n    }\n}", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var exitMethod = app[methodStart..methodEnd];
+
+        Assert.Contains("AppLog.Info(\"Frontend\", \"UI dispatcher unavailable during final shutdown; terminating without XAML API.\"", exitMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppLog.Error(", exitMethod, StringComparison.Ordinal);
+
+        var disconnectedStart = app.IndexOf("private void OnFrontendDisconnected(", StringComparison.Ordinal);
+        var closeRequestedStart = app.IndexOf("private void OnFrontendCloseRequested(", disconnectedStart, StringComparison.Ordinal);
+        var closeRequestHandlerEnd = app.IndexOf("private void CloseForRuntimeRequestOnUiThread(", closeRequestedStart, StringComparison.Ordinal);
+        Assert.True(disconnectedStart >= 0 && closeRequestedStart > disconnectedStart && closeRequestHandlerEnd > closeRequestedStart);
+        var disconnectedHandler = app[disconnectedStart..closeRequestedStart];
+        var closeRequestedHandler = app[closeRequestedStart..closeRequestHandlerEnd];
+        Assert.Contains("AppLog.Error(\"Frontend\", \"Runtime disconnect shutdown dispatch failed", disconnectedHandler, StringComparison.Ordinal);
+        Assert.Contains("AppLog.Error(\"Frontend\", \"Runtime close request dispatch failed", closeRequestedHandler, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Ui_thread_exit_does_not_enqueue_or_use_fallback()
     {
         var enqueued = 0;

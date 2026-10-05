@@ -235,8 +235,8 @@ public partial class App : Application
             () => { AppLog.Info("Frontend", "UI Application.Exit executing."); Exit(); },
             () =>
             {
-                AppLog.Error("Frontend", "UI exit dispatch failed; terminating process without XAML API.",
-                    new InvalidOperationException("UI dispatcher was unavailable."));
+                AppLog.Info("Frontend", "UI dispatcher unavailable during final shutdown; terminating without XAML API.",
+                    ("Action", "EnvironmentExit"));
                 Environment.Exit(0);
             }).RequestExit();
     }
