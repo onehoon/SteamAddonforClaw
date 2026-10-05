@@ -22,6 +22,19 @@ For controller ownership work, use the following precedence when statements conf
 
 It does **not** modify the controller-ownership authority order above and must not introduce a new controller authority.
 
+## Related independent XBOX game/profile architecture
+
+docs/XBOX_GAME_PROFILE_ARCHITECTURE_2026-10-05.md defines the XBOX/Game Pass catalog, event-driven game identity, XBOX-specific profile persistence/UI, per-game M1/M2 policy, Overlay projection, and front-button Xbox app action.
+
+It is independent of the controller-ownership authority order above and does **not** change:
+
+- PID1902 physical ownership;
+- HidHide authority;
+- VIIPER ownership/teardown;
+- Steam/BPM Xbox360 ↔ SteamDeck presentation policy.
+
+For Main App navigation, its 2026-10-05 Steam/XBOX page split takes precedence over the older single-Profile terminology in docs/appui/APP_UI_INFORMATION_ARCHITECTURE_2026-09-04.md.
+
 ## Important 2026-09-01 correction
 
 Older Full1902 documents used a conservative admission rule:
