@@ -1238,8 +1238,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try
         {
             var result = await physical.RecoverLostInputAsync(cancellationToken).ConfigureAwait(false);
-            AppLog.Info("ControllerOwnership", "Owned physical input recovery completed.",
-                ("Trigger", trigger), ("Result", result.Outcome), ("Reason", result.Reason),
+            var logResult = result.Reason == "ReleasedForCenterMEnable" ? "Skipped" : result.Outcome.ToString();
+            AppLog.Info("ControllerOwnership", "Owned physical input recovery request completed.",
+                ("Trigger", trigger), ("Result", logResult), ("Reason", result.Reason),
                 ("PrimaryHiddenTarget", result.PrimaryHiddenTarget ?? "None"), ("HiddenTargetCount", result.HiddenTargets.Count));
             // 11: raw Steam/BPM state may have changed while input was down and PR7 correctly refused
             // forward mutation on a non-running source. Re-run the existing reconcile exactly once.

@@ -3,6 +3,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -40,7 +41,20 @@ public sealed partial class SettingsPage : UserControl
     {
         if (_frontend is null || Volatile.Read(ref _updateOperationInProgress) != 0) return;
         try { RenderAppUpdate(await _frontend.CaptureAppUpdateAsync().ConfigureAwait(true)); }
-        catch (Exception exception) { AppLog.Warn("Update", "Main UI update state refresh failed.", exception); }
+        catch (Exception exception)
+        {
+            if (exception is FrontendTransportException
+                && exception is not FrontendProtocolException
+                && exception is not FrontendRemoteException)
+            {
+                AppLog.Debug("Update", "Main UI update state refresh skipped because Runtime transport is unavailable.",
+                    ("Reason", exception.Message));
+            }
+            else
+            {
+                AppLog.Warn("Update", "Main UI update state refresh failed.", exception);
+            }
+        }
     }
 
     private void RenderAppUpdate(FrontendUpdateSnapshot snapshot)
@@ -57,7 +71,17 @@ public sealed partial class SettingsPage : UserControl
         try { RenderSteamFse(await _frontend.CaptureSteamFseAsync().ConfigureAwait(true)); }
         catch (Exception exception)
         {
-            AppLog.Warn("SteamFSE", "Main UI SteamFSE state refresh failed.", exception);
+            if (exception is FrontendTransportException
+                && exception is not FrontendProtocolException
+                && exception is not FrontendRemoteException)
+            {
+                AppLog.Debug("SteamFSE", "Main UI SteamFSE state refresh skipped because Runtime transport is unavailable.",
+                    ("Reason", exception.Message));
+            }
+            else
+            {
+                AppLog.Warn("SteamFSE", "Main UI SteamFSE state refresh failed.", exception);
+            }
             RenderSteamFse(FrontendSteamFseSnapshot.Unavailable("Steam Big Picture Full Screen Experience could not be verified."));
         }
     }

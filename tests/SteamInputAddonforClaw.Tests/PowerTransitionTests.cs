@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
@@ -223,19 +224,45 @@ public sealed class PowerTransitionTests
     [Fact]
     public async Task StartupUnsafeProcess_ResumeRemainsPassiveWithoutBaseline()
     {
-        var gate = new PowerMutationGate(false);
-        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
-        var baselineCalls = 0;
-        var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
-            establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); },
-            recoveryEnabled: false);
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousMinimumLevel = AppLog.MinimumLevelOverride;
+        var logDirectory = Path.Combine(Path.GetTempPath(), $"PowerTransitionTests-{Guid.NewGuid():N}");
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = logDirectory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
 
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, false));
+        try
+        {
+            var gate = new PowerMutationGate(false);
+            var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+            var baselineCalls = 0;
+            var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
+                establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); },
+                recoveryEnabled: false);
 
-        Assert.Equal(0, baselineCalls);
-        Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
-        Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
-        Assert.False(gate.IsOpen);
+            await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, false));
+
+            Assert.Equal(0, baselineCalls);
+            Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
+            Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
+            Assert.False(gate.IsOpen);
+            await coordinator.DisposeAsync();
+
+            var log = AppLog.ReadAllTextForTests(AppLog.CurrentLogFilePath);
+            var skippedLine = Assert.Single(log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries),
+                line => line.Contains("Event=GenericResumeRecoverySkipped", StringComparison.Ordinal));
+            Assert.Contains("[INFO]", skippedLine);
+            Assert.Contains("Generic stock resume recovery skipped because startup did not enable stock recovery.", skippedLine);
+            Assert.Contains("Action=RemainPassive", skippedLine);
+            Assert.DoesNotContain("Resume recovery is disabled because this process did not establish a safe startup boundary.", log);
+        }
+        finally
+        {
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousMinimumLevel;
+            if (Directory.Exists(logDirectory)) Directory.Delete(logDirectory, recursive: true);
+        }
     }
 
     [Fact] // Cleanup H section 11 / PR #483 review: an authoritative resume while Addon authority is

@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -262,6 +263,15 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
 
     private static void LogRequestFailure(string action, Exception exception)
     {
+        if (exception is FrontendTransportException
+            && exception is not FrontendProtocolException
+            && exception is not FrontendRemoteException)
+        {
+            AppLog.Debug("XboxSessionDiagnostic", $"Main UI diagnostic {action} request skipped because Runtime transport is unavailable.",
+                ("Reason", exception.Message));
+            return;
+        }
+
         AppLog.Warn("XboxSessionDiagnostic", $"Main UI diagnostic {action} request failed.", exception,
             ("Reason", exception.GetType().Name));
     }

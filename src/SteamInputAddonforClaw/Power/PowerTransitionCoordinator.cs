@@ -127,7 +127,8 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             {
                 State = PowerTransitionState.Unsafe;
                 _recovery.Set(RecoverySafety.Unsafe);
-                AppLog.Warn("Power.Recovery", "Resume recovery is disabled because this process did not establish a safe startup boundary.", null, ("Action", "RemainPassive"));
+                AppLog.Info("Power.Recovery", "Generic stock resume recovery skipped because startup did not enable stock recovery.",
+                    ("Event", "GenericResumeRecoverySkipped"), ("Action", "RemainPassive"));
                 return;
             }
             var resumeStartedUtc = DateTimeOffset.UtcNow;

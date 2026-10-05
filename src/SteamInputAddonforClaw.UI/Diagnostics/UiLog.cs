@@ -18,6 +18,9 @@ internal static class UiLog
         _directory = directory;
     }
 
+    internal static void Debug(string category, string message, params (string Key, object? Value)[] fields) =>
+        Write("DEBUG", category, message, null, fields);
+
     internal static void Info(string message) => Write("INFO", "App", message, null, []);
 
     internal static void Info(string category, string message, params (string Key, object? Value)[] fields) =>

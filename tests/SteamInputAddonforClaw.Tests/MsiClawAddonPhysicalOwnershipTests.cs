@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.Abstractions;
@@ -1279,17 +1280,54 @@ public sealed class MsiClawAddonPhysicalOwnershipTests
     [Fact] // section 9
     public async Task Recovery_is_refused_after_release_for_center_m_enable()
     {
-        var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
-        var owner = h.Build();
-        await owner.AcquireAsync(default);
-        await owner.ReleaseForCenterMEnableAsync(default);
-        h.InputSource.SimulateSessionLoss();
-        h.Recovering = true;
+        var previousDirectory = AppLog.DirectoryOverride;
+        var previousMinimumLevel = AppLog.MinimumLevelOverride;
+        var logDirectory = Path.Combine(Path.GetTempPath(), $"PhysicalOwnershipTests-{Guid.NewGuid():N}");
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = logDirectory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
 
-        var recovery = await owner.RecoverLostInputAsync(default);
+        try
+        {
+            var h = new Harness { InitialMode = MsiClawNativeMode.DirectInput };
+            var owner = h.Build();
+            await owner.AcquireAsync(default);
+            await owner.ReleaseForCenterMEnableAsync(default);
+            h.InputSource.SimulateSessionLoss();
+            h.Recovering = true;
+            h.Events.Clear();
+            var modeSwitchesAfterRelease = h.SwitchCalls;
+            var gamepadModeWritesAfterRelease = h.GamepadMode.SwitchTargets.Count;
+            var inputStartsAfterRelease = h.InputSource.StartCallCount;
+            var hidHideTargetsAfterRelease = h.HidHideApplied.Count;
 
-        Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
-        Assert.Contains("ReleasedForCenterMEnable", recovery.Reason);
+            var recovery = await owner.RecoverLostInputAsync(default);
+
+            Assert.Equal(MsiClawPhysicalOwnershipOutcome.Failed, recovery.Outcome);
+            Assert.False(recovery.IsOwned);
+            Assert.Equal("ReleasedForCenterMEnable", recovery.Reason);
+            Assert.False(recovery.ModeWriteIssued);
+            Assert.Equal(modeSwitchesAfterRelease, h.SwitchCalls);
+            Assert.Equal(gamepadModeWritesAfterRelease, h.GamepadMode.SwitchTargets.Count);
+            Assert.Equal(inputStartsAfterRelease, h.InputSource.StartCallCount);
+            Assert.Equal(hidHideTargetsAfterRelease, h.HidHideApplied.Count);
+            Assert.Empty(h.Events);
+
+            var log = AppLog.ReadAllTextForTests(AppLog.CurrentLogFilePath);
+            var skippedLine = Assert.Single(log.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries),
+                line => line.Contains("Event=OwnedPhysicalRecoverySkipped", StringComparison.Ordinal));
+            Assert.Contains("[INFO]", skippedLine);
+            Assert.Contains("Reason=ReleasedForCenterMEnable", skippedLine);
+            Assert.Contains("ModeWriteIssued=False", skippedLine);
+            Assert.DoesNotContain("OwnedPhysicalRecoveryFailed", log);
+        }
+        finally
+        {
+            AppLog.DrainForTests();
+            AppLog.DirectoryOverride = previousDirectory;
+            AppLog.MinimumLevelOverride = previousMinimumLevel;
+            if (Directory.Exists(logDirectory)) Directory.Delete(logDirectory, recursive: true);
+        }
     }
 
     [Fact] // section 9 -- recovery before ownership was ever committed
