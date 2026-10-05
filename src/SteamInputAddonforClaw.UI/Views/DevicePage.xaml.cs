@@ -761,19 +761,19 @@ public sealed partial class DevicePage : UserControl
             }
             else
             {
-                // A failed/cancelled Disable can leave verified startup/HidHide preparation behind
+                // A failed Disable can leave verified startup/HidHide preparation behind
                 // while the Center M roots are still Enabled. The backend explicitly offers
                 // "Enable and Restart" as the cleanup path, so expose it here even though a plain
                 // Enabled snapshot would normally disable the redundant Enable button.
-                if (!centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled)
+                if (result.Outcome == FrontendCenterMStartupMutationOutcome.Failed
+                    && !centerMEnabled && result.Snapshot.State == FrontendCenterMStartupState.Enabled)
                     CenterMStartupEnableButton.IsEnabled = true;
 
                 CenterMStartupInfoBar.Severity = result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
                     ? InfoBarSeverity.Informational
                     : InfoBarSeverity.Warning;
-                // Always prefer the backend's authoritative message: a cancelled elevation prompt on
-                // Disable/Enable can still have left verified startup/HidHide preparation in place, so
-                // the UI must not invent a "nothing changed" claim.
+                // Always prefer the backend's authoritative message so a failure after preparation
+                // does not imply that no persistent state changed.
                 CenterMStartupInfoBar.Message = result.FailureMessage
                     ?? (result.Outcome == FrontendCenterMStartupMutationOutcome.Cancelled
                         ? "The controller authority change was cancelled."

@@ -19,8 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\SteamInputAddonforClaw.Contracts\SteamInputAddonforClaw.Contracts.csproj" />
     <ProjectReference Include="..\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
-    <!-- Privileged MSI Center M startup Enable/Disable helper (work order PR1): not linked, built and
-         copied alongside this app's output so CenterMStartupHelperClient can spawn it with runas. -->
+    <!-- MSI Center M startup Enable/Disable helper (work order PR1): not linked, built and copied
+         alongside this app's output so CenterMStartupHelperClient can launch it as a child process. -->
     <ProjectReference Include="..\SteamInputAddonforClaw.CenterMStartupHelper\SteamInputAddonforClaw.CenterMStartupHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 

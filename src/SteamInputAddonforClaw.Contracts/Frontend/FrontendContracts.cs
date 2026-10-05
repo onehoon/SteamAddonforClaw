@@ -309,7 +309,7 @@ public sealed record FrontendSettingsSnapshot(FrontendLogLevel LogLevel, bool Su
 /// auto-repaired. <see cref="Unavailable"/> means a meaningful startup-configuration snapshot could
 /// not be produced (feature not applicable to the detected hardware, the startup components could not
 /// be identified, or Task Scheduler / SCM state could not be read) -- it is NOT used merely because a
-/// privileged mutation helper failed to start or its UAC prompt was cancelled (PR1 Addendum E).
+/// mutation helper failed to start or complete.
 /// A <see cref="Disabled"/> configuration does NOT imply Center M is absent from the current Windows
 /// session; the clean baseline only begins after a reboot (work order PR1 section 12).</summary>
 public enum FrontendCenterMStartupState { Enabled, Disabled, Partial, Unavailable }
@@ -332,8 +332,8 @@ public sealed record FrontendCenterMStartupSnapshot(
 }
 
 /// <summary>Outcome of one Enable/Disable action over the three startup roots (work order PR1
-/// section 8/9, PR1 Addendum E). Never collapsed to a bool -- <see cref="Cancelled"/> (the user
-/// dismissed the elevation prompt before the mutation completed) must be distinguishable from
+/// section 8/9, PR1 Addendum E). Never collapsed to a bool -- <see cref="Cancelled"/> (the caller
+/// cancelled before the ordered mutation began) must be distinguishable from
 /// <see cref="Failed"/> (the mutation was attempted but read-back did not verify the requested
 /// configuration) and from <see cref="Unavailable"/> (the feature itself cannot be operated).</summary>
 public enum FrontendCenterMStartupMutationOutcome { Succeeded, Cancelled, Failed, Unavailable }

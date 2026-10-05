@@ -451,20 +451,22 @@ internal sealed class CenterMRebootAuthorityTransition : ICenterMRebootAuthority
             "The controller authority configuration was changed, but Windows restart could not be started. Restart Windows manually to apply the change.");
     }
 
-    /// <summary>A Center M startup mutation that did not succeed (typically a cancelled Windows
-    /// elevation prompt) after the ordered persistent preparation already ran. PR3 deliberately
-    /// leaves the verified startup-registration / HidHide-baseline preparation in place (section 8),
-    /// so a <see cref="FrontendCenterMStartupMutationOutcome.Cancelled"/> result must not be allowed
-    /// to read as "nothing changed" -- give it the real partial-state context.</summary>
+    /// <summary>A Center M startup mutation failed after the ordered persistent preparation already
+    /// ran. The verified startup-registration / HidHide-baseline preparation remains in place, so
+    /// include that real partial-state context instead of implying that nothing changed.</summary>
     private static FrontendCenterMStartupMutationResult IncompleteMutation(FrontendCenterMStartupMutationResult mutation, bool centerMEnabled)
     {
-        if (mutation.Outcome != FrontendCenterMStartupMutationOutcome.Cancelled)
+        if (mutation.Outcome != FrontendCenterMStartupMutationOutcome.Failed)
             return mutation;
+
+        var failure = string.IsNullOrWhiteSpace(mutation.FailureMessage)
+            ? "The MSI Center M startup mutation could not be verified."
+            : mutation.FailureMessage;
         return mutation with
         {
             FailureMessage = centerMEnabled
-                ? "MSI Center M enable was cancelled at the Windows elevation prompt. The Addon HidHide controller baseline was already cleared and remains cleared; retry Enable and Restart."
-                : "MSI Center M disable was cancelled at the Windows elevation prompt. The Addon startup registration and HidHide controller baseline were already applied and remain in place; retry Disable and Restart, or choose Enable and Restart to revert.",
+                ? $"{failure} The Addon HidHide controller baseline was already cleared and remains cleared; retry Enable and Restart."
+                : $"{failure} The Addon startup registration and HidHide controller baseline were already applied and remain in place; retry Disable and Restart, or choose Enable and Restart to revert.",
         };
     }
 

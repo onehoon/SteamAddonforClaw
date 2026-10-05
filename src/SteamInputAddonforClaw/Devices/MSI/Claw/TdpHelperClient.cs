@@ -154,7 +154,12 @@ internal sealed class TdpHelperClient : IAsyncDisposable, IMsiFanDiagnosticTrans
         try
         {
             var path = Path.Combine(AppContext.BaseDirectory, "SteamInputAddonforClaw.TdpHelper.exe");
-            _process = Process.Start(new ProcessStartInfo(path, _pipeName) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory })
+            _process = Process.Start(new ProcessStartInfo(path, _pipeName)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = AppContext.BaseDirectory,
+            })
                 ?? throw new InvalidOperationException("TDP helper could not be started.");
             using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             _pipe.WaitForConnectionAsync(connectTimeout.Token).GetAwaiter().GetResult();

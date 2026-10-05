@@ -106,20 +106,6 @@ public sealed class CenterMStartupControlTests
         Assert.Equal(FrontendCenterMStartupState.Partial, result.Snapshot.State);
     }
 
-    // ---- Cancelled elevation never fabricates the requested state (Addendum E) ----
-    [Fact]
-    public async Task Cancelled_uac_returns_cancelled_with_the_last_real_snapshot()
-    {
-        var invoker = new FakeInvoker { Result = new(CenterMStartupHelperOutcome.Cancelled, false, false, false, false, NoService, null) };
-        var control = new CenterMStartupControl(available: true, Reader(_ => true, () => Auto), invoker);
-
-        var result = await control.SetEnabledAsync(false, CancellationToken.None);
-
-        Assert.Equal(FrontendCenterMStartupMutationOutcome.Cancelled, result.Outcome);
-        Assert.Equal(FrontendCenterMStartupState.Enabled, result.Snapshot.State);
-        Assert.NotNull(result.FailureMessage);
-    }
-
     [Fact]
     public async Task Helper_that_will_not_start_is_a_failure_not_a_success()
     {
@@ -135,7 +121,7 @@ public sealed class CenterMStartupControlTests
     public async Task Unreadable_root_plus_non_authoritative_helper_stays_unavailable_never_disabled()
     {
         // Helper could not observe a root (Ok=false, SnapshotAvailable=false, placeholder false
-        // fields) AND the non-elevated Runtime re-read also fails. The placeholder tuple must NOT be
+        // fields) AND the Runtime's independent re-read also fails. The placeholder tuple must NOT be
         // classified as Disabled (Addendum E / PR #430 review).
         var invoker = new FakeInvoker { Result = new(CenterMStartupHelperOutcome.Completed, false, false, false, false, NoService, "Unreadable: MSI_Center_M_Server") };
         var control = new CenterMStartupControl(available: true, Reader(_ => null, () => NoService), invoker);

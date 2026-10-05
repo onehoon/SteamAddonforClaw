@@ -23,7 +23,7 @@ SteamInputAddonforClaw.exe Runtime      High integrity / Administrator
     +-- HidHide / VIIPER ownership
     +-- MSI device-control coordination
     |
-    +-- existing privileged helpers    remain unchanged for now
+    +-- retained helper processes       inherit the Runtime's High token
 ~~~
 
 The Main UI and Overlay are **not intentionally de-elevated** in this architecture.
@@ -344,33 +344,41 @@ Do not change the Velopack package/NuGet version as part of the elevation implem
 
 ---
 
-## 7. Existing privileged helpers remain unchanged in this migration
+## 7. Retained helper processes inherit Runtime High
 
-This architecture decision does **not** require immediate helper consolidation.
+The initial Runtime elevation implementation kept existing helper processes and their protocols
+unchanged. The subsequent privilege-helper cleanup removes their feature-local elevation while
+preserving process boundaries that provide real operation-failure containment.
 
-In particular, keep the existing TDP helper in the first elevation implementation:
+The TDP helper remains a separate child process:
 
 ~~~text
 SteamInputAddonforClaw.TdpHelper.exe
-=> remains present
-=> existing protocol remains present
-=> existing WMI request/timeout behavior remains present
+=> remains present with an asInvoker manifest
+=> launched as an ordinary child of the High Runtime
+=> inherits the Runtime's High token
+=> existing protocol and WMI request/timeout behavior remain present
 => existing TDP/Fan/Battery behavior is not refactored
 ~~~
 
-Although an elevated Runtime makes the helper's privilege boundary partially redundant, the helper also currently provides process isolation around MSI WMI operations.
+The helper continues to provide process isolation around MSI WMI operations. Its diagnostic still
+reports the inherited High token in the supported Runtime launch path.
 
-That isolation and any future helper removal must be evaluated separately.
+The Center M startup helper is likewise retained as an asInvoker child inheriting High. Its fixed
+three-root mutation scope, helper and parent readback, 30-second connect/response bounds, and
+stuck-process termination remain unchanged.
 
-Do not combine the Runtime elevation implementation with:
+FSE registration, prerequisite setup, and Windows App Runtime setup also retain their bounded worker
+processes where those processes own installer or temporary-system-state cleanup contracts; they
+inherit the Runtime token rather than requesting another UAC elevation.
 
-- moving TDP/Fan/Battery WMI implementation into the Runtime;
-- changing TDP helper timeout/failure behavior;
-- renaming the helper;
-- converting the helper into a WING owner;
-- broad helper-process consolidation.
+Do not inline or remove a retained helper solely to reduce process count. In particular, do not:
 
-Other existing narrowly-scoped privileged setup helpers are likewise not required to be consolidated by this architecture migration.
+- move TDP/Fan/Battery WMI implementation into the Runtime;
+- change TDP helper timeout/failure behavior;
+- change Center M helper timeout/readback/termination behavior;
+- convert either helper into a WING owner;
+- perform broad helper-process consolidation.
 
 ---
 
@@ -423,18 +431,14 @@ Do not pre-build an unelevated launcher/broker before that follow-up has reviewe
 
 ### 9.2 TDP helper consolidation
 
-Re-evaluate whether SteamInputAddonforClaw.TdpHelper should:
-
-- remain as an MSI WMI fault-containment process; or
-- be absorbed into the elevated Runtime if real operational evidence shows the process isolation is unnecessary.
-
-This decision should consider real MSI WMI timeout/hang behavior, not code-size reduction alone.
+The current architecture retains SteamInputAddonforClaw.TdpHelper as an MSI WMI fault-containment
+process. Do not absorb it into Runtime based on code-size reduction alone; revisit only if real
+operational evidence shows the existing process boundary is unnecessary.
 
 ### 9.3 Other helper cleanup
 
-Only after the Runtime privilege model is stable should other existing privileged helpers be reviewed for redundancy.
-
-Do not remove helpers merely because the Runtime is now elevated if the helper still protects a useful failure-isolation, packaging, uninstall, or bounded-operation boundary.
+Any remaining helper cleanup must be evidence-driven and preserve useful failure-isolation,
+packaging, uninstall, or bounded-operation boundaries.
 
 The goal is fewer redundant privilege boundaries without weakening lifecycle/failure safety.
 
@@ -653,10 +657,11 @@ Windows logon
                                                 +-- Full1902 recovery
                                                 +-- Device/profile coordination
 
- Existing TDP helper
+ Retained helper processes [High inherited from Runtime]
     |
-    +-- retained unchanged for this implementation
-    +-- helper consolidation deferred
+    +-- TdpHelper [asInvoker; WMI fault containment retained]
+    +-- CenterMStartupHelper [asInvoker; bounded mutation/readback retained]
+    +-- setup/registration workers [existing transaction cleanup retained]
 
  External user actions
     |

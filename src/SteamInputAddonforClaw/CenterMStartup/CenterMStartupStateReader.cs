@@ -11,10 +11,9 @@ namespace SteamInputAddonforClaw.CenterMStartup;
 /// is serialised by name over the pipe.</summary>
 internal enum CenterMFoundationServiceMode { Automatic, Disabled, Other, Unavailable }
 
-/// <summary>Non-elevated, read-only inspection of the three MSI Center M startup roots (work order
-/// PR1 section 7). Reading Scheduled Task enabled state and the service's configured start type does
-/// not need administrator rights, so the Device page can always render a status without prompting for
-/// UAC -- elevation is required only to <em>change</em> them (that path lives in the helper).
+/// <summary>Read-only inspection of the three MSI Center M startup roots (work order PR1 section 7).
+/// The Device page can render a status without starting the helper process; the helper isolates the
+/// bounded write/readback operation from the Runtime.
 ///
 /// The service authority is the configured <c>StartMode</c>, never whether the service is currently
 /// Running (Addendum F).</summary>
