@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
@@ -585,6 +586,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startXbox360RumbleLoopDiagnostic: StartXbox360RumbleLoopDiagnosticAsync,
             stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync,
             runPid1902InputCadenceDiagnostic: RunPid1902InputCadenceDiagnosticAsync,
+            runXboxCatalogDiagnostic: cancellationToken => new XboxCatalogDiagnostic().RunAsync(cancellationToken),
             controllerVibrationStrengthClient: _controllerVibrationStrengthClient,
             controllerVibrationTestAvailable: () => _presentationOwnership?.IsVibrationTestAvailable == true,
             testControllerVibrationMotor: (motor, token) => _presentationOwnership is { } presentation
