@@ -1,6 +1,8 @@
 # Addon Quick Settings Overlay Architecture
 
-> **Current architecture override (2026-10-04):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. The Main App `Shortcut` page is a separate editor for Runtime-owned Shortcut definitions and the global Screenshot folder; it is not the Main App `Overlay` settings page or the WinUI3 Overlay Shortcut grid. The Overlay renders the Runtime's ordered `FrontendShortcutDashboardSnapshot` and sends only `TileId` to `ShortcutRuntime` for execution. Overlay protocol v14 carries the existing global Xbox360-only M1/M2 mapping state and adds shared production settings/vibration snapshots and mutations. Controller LED and vibration use the existing frontend authorities; Device battery state is part of the shared Device aggregate, and Setting reuses the existing current-power-source preference. SteamDeck rear-button behavior remains M1=R4 and M2=L4. The Overlay never receives Shortcut editor action configuration. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. Addon QAM tabs, QamHost, GamepadUI/CDP patching, and CEF debugging are retired. QAM-specific material below is historical and must not be used as an active implementation requirement.
+> **Current architecture override (2026-10-05):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. The Main App `Shortcut` page is a separate editor for Runtime-owned Shortcut definitions and the global Screenshot folder; it is not the Main App `Overlay` settings page or the WinUI3 Overlay Shortcut grid. The Overlay renders the Runtime's ordered `FrontendShortcutDashboardSnapshot` and sends only `TileId` to `ShortcutRuntime` for execution. Overlay protocol v14 carries the existing global Xbox360-only M1/M2 mapping state and adds shared production settings/vibration snapshots and mutations. Controller LED and vibration use the existing frontend authorities; Device battery state is part of the shared Device aggregate, and Setting reuses the existing current-power-source preference. SteamDeck rear-button behavior remains M1=R4 and M2=L4. The Overlay never receives Shortcut editor action configuration. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. Addon QAM tabs, QamHost, GamepadUI/CDP patching, and CEF debugging are retired. QAM-specific material below is historical and must not be used as an active implementation requirement.
+
+> **Current geometry policy (2026-10-05):** Overlay placement uses only the selected monitor's full `rcMonitor` bounds and DPI, with a 4-DIP edge gap and a maximum width of 432 DIP. Windows WorkArea/taskbar reservation is intentionally ignored; the transient Overlay may cover the taskbar. Foreground-monitor selection, provisional placement before `GetDpiForWindow`, final `HWND_TOPMOST`, and no-activate behavior remain unchanged.
 
 > **Shortcut supersession:** Older four-slot / `Unassigned` / QAM-parity descriptions in this document and the OQ5-UI-11 / Shared Surface PR4 work orders are historical. The active Shortcut contract is an ordered dynamic grid (up to two columns), enabled state from Runtime, and TileId-only execution. Existing Screenshot behavior continues to use the Runtime-owned Overlay capture-retirement path.
 
@@ -54,7 +56,7 @@ Game / Windows desktop
         ↓
 physical Quick Settings button
         ↓
-Addon Quick Settings panel appears on the left
+Addon Quick Settings panel appears at the right edge of the selected monitor
         ↓
 controller navigation changes TDP / CPU Boost / FPS / Power Mode / future controls
         ↓
@@ -226,38 +228,44 @@ If real supported-game evidence proves ordinary WinUI HWND behavior inadequate, 
 Target shape:
 
 ```text
-┌───────────────┬─────────────────────────────────────────────┐
-│               │                                             │
-│               │                                             │
-│     ADDON     │                                             │
-│     QUICK     │                  GAME                       │
-│   SETTINGS    │                                             │
-│               │                                             │
-│               │                                             │
-├───────────────┴─────────────────────────────────────────────┤
-│                    Windows taskbar                          │
+┌─────────────────────────────────────────────────────────────┐
+│                                             ┌──────────────┐│
+│                                             │    ADDON     ││
+│                                             │    QUICK     ││
+│                    GAME                     │   SETTINGS   ││
+│                                             │              ││
+│                                             │              ││
+│ Windows taskbar may be covered by Overlay   └──────────────┘│
 └─────────────────────────────────────────────────────────────┘
 ```
 
 Requirements:
 
-- left aligned;
+- right aligned within the selected monitor with a DPI-scaled floating edge gap;
 - opaque background;
 - rectangular window;
-- top = monitor working-area top;
-- bottom = monitor working-area bottom;
-- taskbar is never intentionally covered;
-- width determined later from actual icon/control layout;
+- top = monitor top + 4 DIP;
+- bottom = monitor bottom - 4 DIP;
+- width = min(432 DIP, monitor width minus both floating gaps);
+- Windows WorkArea/taskbar reservation is intentionally ignored, so the Overlay may cover the taskbar;
 - no transparency/acrylic/blur requirement.
 
-Use the selected monitor's current work area rather than hard-coding taskbar dimensions:
+Use only the selected monitor's full bounds and current DPI:
 
 ```text
-X      = WorkArea.Left
-Y      = WorkArea.Top
-Width  = OverlayPanelWidth
-Height = WorkArea.Bottom - WorkArea.Top
+gapPx          = DipToPixels(4, dpi)
+maxWidthPx     = DipToPixels(432, dpi)
+left           = Monitor.Left + gapPx
+top            = Monitor.Top + gapPx
+right          = Monitor.Right - gapPx
+bottom         = Monitor.Bottom - gapPx
+availableWidth = max(0, right - left)
+width          = min(availableWidth, maxWidthPx)
+x              = max(left, right - width)
+height         = max(0, bottom - top)
 ```
+
+At 1920 × 1200 and 144 DPI, the resulting rectangle is `(1266, 6, 648, 1188)`.
 
 Preferred monitor resolution on every Show:
 
@@ -423,7 +431,7 @@ retire another visible local control surface if required
         ↓
 Runtime sends Show + fresh snapshot
         ↓
-Overlay selects monitor/WorkArea and shows no-activate
+Overlay selects the foreground monitor, applies full-monitor/DPI geometry, and shows no-activate
         ↓
 Overlay acknowledges Visible
         ↓
@@ -1039,7 +1047,7 @@ capture canceled due to Overlay disconnect
 Steam QAM surface → Addon Overlay handoff
 Addon Overlay → Steam QAM surface handoff
 Main UI ↔ Overlay handoff
-selected WorkArea summary
+selected monitor bounds/DPI summary
 Runtime mutation failure
 ```
 
@@ -1092,13 +1100,13 @@ Do not block the window/input POC on complete feature-card design.
 Create a minimal `SteamInputAddonforClaw.Overlay.exe`:
 
 - WinUI 3;
-- one opaque left panel;
-- WorkArea positioning;
+- one opaque right-side panel;
+- full-monitor bounds + DPI positioning;
 - topmost/no-activate behavior;
 - Show/Hide;
 - hidden idle mode.
 
-Validate focus, taskbar avoidance, DPI, representative games, memory, CPU, and latency.
+Validate focus, full-monitor placement and intentional taskbar overlap, DPI, representative games, memory, CPU, and latency.
 
 No controller neutralization yet.
 
@@ -1218,9 +1226,9 @@ Keep one controller owner, one presentation owner, and one Runtime feature autho
 ### Window
 
 - [ ] correct display selected;
-- [ ] left aligned;
-- [ ] WorkArea height used;
-- [ ] taskbar not covered;
+- [ ] right aligned within the selected monitor with the 4-DIP edge gap;
+- [ ] full monitor height minus both gaps used;
+- [ ] taskbar/work area ignored and taskbar overlap allowed;
 - [ ] game foreground not intentionally stolen;
 - [ ] visible over representative borderless/fullscreen-optimized games;
 - [ ] repeated Show/Hide clean.
@@ -1290,7 +1298,7 @@ Keep one controller owner, one presentation owner, and one Runtime feature autho
 14. Current selected presentation is neutral while Overlay captures controller navigation.
 15. Release-to-resume prevents held input from leaking back into the game.
 16. Overlay process/IPC loss while active cancels capture safely.
-17. Panel is opaque, rectangular, left-side, and uses monitor WorkArea height.
+17. Panel is opaque, rectangular, right-side, and uses full monitor bounds with a 4-DIP gap; taskbar overlap is allowed.
 18. Use minimal Win32 HWND interop; do not build a custom compositor/HUD renderer initially.
 19. Game Bar foreground is not a presentation-selection event.
 20. The final physical button assigned to Addon Quick Settings must not simultaneously invoke Game Bar.
@@ -1302,7 +1310,6 @@ Keep one controller owner, one presentation owner, and one Runtime feature autho
 - whether Steam Quick Access remains directly user-mappable after Addon Overlay ships;
 - exact Steam-QAM panel visibility/close/open integration seam;
 - exact first-page card order;
-- exact panel width;
 - exact logical focus visuals;
 - touch/mouse priority;
 - exact physical-input-failure Overlay UX;
@@ -1393,7 +1400,7 @@ Overlay shown  → selected presentation neutral + controller navigates Addon Qu
 13. **Overlay crash must not strand a healthy controller in permanent neutral state.**
 14. **Main UI lifecycle stays unchanged.**
 15. **Use a normal opaque WinUI HWND; do not build a compositor/HUD engine without evidence.**
-16. **Use monitor WorkArea so the taskbar is not intentionally covered.**
+16. **Use full selected-monitor bounds and DPI with a 4-DIP gap; intentionally ignore WorkArea/taskbar reservation.**
 17. **Game Bar is not the Addon's Quick Settings host and not a presentation-selection event.**
 18. **Physical WING/OEM1 assignment remains a replaceable product policy above this architecture.**
 19. **Measure real hidden memory, idle CPU, show latency, focus behavior, and game compatibility before calling the renderer choice final.**

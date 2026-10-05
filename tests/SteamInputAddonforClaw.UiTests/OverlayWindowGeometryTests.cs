@@ -6,20 +6,13 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class OverlayWindowGeometryTests
 {
     [Fact]
-    public void UsesRightSide432DipSurfaceWithIndependentBottomTaskbarReservation()
+    public void UsesFullMonitorBoundsForTheReferenceDisplay()
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 1920, 1200,
-            0, 0, 1920, 1128,
-            144,
-            out var metrics);
+            144);
 
-        Assert.Equal(new OverlayRect(1266, 6, 648, 1116), result);
-        Assert.Equal(0, metrics.ReservedLeftPx);
-        Assert.Equal(0, metrics.ReservedTopPx);
-        Assert.Equal(0, metrics.ReservedRightPx);
-        Assert.Equal(72, metrics.ReservedBottomPx);
-        Assert.Equal(6, metrics.FloatingGapPx);
+        Assert.Equal(new OverlayRect(1266, 6, 648, 1188), result);
     }
 
     [Theory]
@@ -32,7 +25,6 @@ public sealed class OverlayWindowGeometryTests
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 1920, 1200,
-            0, 0, 1920, 1200,
             dpi);
 
         Assert.Equal(new OverlayRect(expectedX, expectedGap, expectedWidth, expectedHeight), result);
@@ -43,65 +35,9 @@ public sealed class OverlayWindowGeometryTests
     {
         var result = OverlayWindowGeometry.Calculate(
             100, 40, 2020, 1240,
-            100, 40, 2020, 1168,
             144);
 
-        Assert.Equal(new OverlayRect(1366, 46, 648, 1116), result);
-    }
-
-    [Fact]
-    public void RightTaskbarReservationMovesTheSurfaceLeftWithoutChangingTopOrBottomInsets()
-    {
-        var result = OverlayWindowGeometry.Calculate(
-            0, 0, 1920, 1200,
-            0, 0, 1848, 1200,
-            144);
-
-        Assert.Equal(new OverlayRect(1194, 6, 648, 1188), result);
-    }
-
-    [Fact]
-    public void LeftTaskbarReservationIsAppliedOnlyToTheLeftUsableBound()
-    {
-        var result = OverlayWindowGeometry.Calculate(
-            0, 0, 1920, 1200,
-            72, 0, 1920, 1200,
-            144);
-
-        Assert.Equal(new OverlayRect(1266, 6, 648, 1188), result);
-    }
-
-    [Fact]
-    public void TopTaskbarReservationIsAppliedOnlyToTheTopUsableBound()
-    {
-        var result = OverlayWindowGeometry.Calculate(
-            0, 0, 1920, 1200,
-            0, 72, 1920, 1200,
-            144);
-
-        Assert.Equal(new OverlayRect(1266, 78, 648, 1116), result);
-    }
-
-    [Fact]
-    public void BottomTaskbarReservationIsAppliedOnlyToTheBottomUsableBound()
-    {
-        var result = OverlayWindowGeometry.Calculate(
-            0, 0, 1920, 1200,
-            0, 0, 1920, 1128,
-            144);
-
-        Assert.Equal(new OverlayRect(1266, 6, 648, 1116), result);
-    }
-
-    [Fact]
-    public void UsesFloatingGapWhenWorkAreaHasNoReservedEdge()
-    {
-        var result = OverlayWindowGeometry.Calculate(
-            0, 0, 1920, 1200,
-            0, 0, 1920, 1200,
-            0);
-
-        Assert.Equal(new OverlayRect(1484, 4, 432, 1192), result);
+        Assert.Equal(new OverlayRect(1366, 46, 648, 1188), result);
     }
 
     [Fact]
@@ -109,7 +45,6 @@ public sealed class OverlayWindowGeometryTests
     {
         var result = OverlayWindowGeometry.Calculate(
             0, 0, 1920, 1200,
-            0, 0, 1920, 1128,
             144);
 
         Assert.Equal(648, result.Width);
@@ -120,10 +55,19 @@ public sealed class OverlayWindowGeometryTests
     }
 
     [Fact]
+    public void UsesFloatingGapWhenDpiIsZero()
+    {
+        var result = OverlayWindowGeometry.Calculate(
+            0, 0, 1920, 1200,
+            0);
+
+        Assert.Equal(new OverlayRect(1484, 4, 432, 1192), result);
+    }
+
+    [Fact]
     public void ClampsDimensionsForAnUnusuallySmallMonitor()
     {
         var result = OverlayWindowGeometry.Calculate(
-            0, 0, 10, 10,
             0, 0, 10, 10,
             192);
 
@@ -133,14 +77,13 @@ public sealed class OverlayWindowGeometryTests
     }
 
     [Fact]
-    public void NeverProducesNegativeDimensionsForAZeroSizedMonitor()
+    public void PreservesOriginForAZeroSizedMonitor()
     {
         var result = OverlayWindowGeometry.Calculate(
-            0, 0, 0, 0,
-            0, 0, 0, 0,
+            100, -50, 100, -50,
             96);
 
-        Assert.Equal(new OverlayRect(0, 0, 0, 0), result);
+        Assert.Equal(new OverlayRect(100, -50, 0, 0), result);
     }
 
     private static bool Contains(OverlayRect rect, int x, int y) =>
