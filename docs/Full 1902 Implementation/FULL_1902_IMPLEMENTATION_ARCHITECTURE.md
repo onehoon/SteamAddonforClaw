@@ -1,8 +1,8 @@
 # Full PID1902 Implementation — Controller Ownership Architecture
 
-> **Status:** Design / implementation planning document  
-> **Scope:** Future architecture for MSI Claw controller ownership and MSI Center M replacement  
-> **Implementation state:** This document does **not** claim that every described path is already implemented or hardware-validated.  
+> **Status:** Active Full1902 controller architecture / core ownership implemented  
+> **Scope:** MSI Claw controller ownership and MSI Center M replacement architecture  
+> **Implementation state:** Core reboot-bound authority, persistent PID1902 ownership, HidHide/VIIPER presentation, owned-state recovery, PnP recovery, suspend/resume, uninstall stock restoration, and legacy-routing cleanup are implemented. Unexpected Runtime death auto-restart/lightweight keepalive and final hardware validation remain open.  
 > **Important:** The application is pre-release. Existing Steam-session routing behavior is not a compatibility contract and must not constrain the new product direction.
 
 ---
@@ -817,165 +817,151 @@ It means desired controller state has one authority.
 
 ---
 
-## 24. Small-PR roadmap
+## 24. Current implementation status and remaining Full1902 work
 
-Prefer small, independently reviewable PRs. Roughly 100–400 LOC per PR is useful where practical, but not a hard correctness limit.
+The original PR1–PR10 ownership roadmap has been implemented and subsequently hardened/cleaned up.
 
-Current sequence:
+Current status:
 
-```text
-PR1  Persistent dual VIIPER devices                     [done]
-  ↓
-PR2  Persistent Addon-owned HidHide baseline
-  ↓
-PR3  Mandatory Runtime / startup contract
-  ↓
-PR4  Reboot-bound Center M authority transition
-  ↓
-PR5  Disabled-boot admission
-  ↓
-PR6  PID1902 + DirectInput ownership
-  ↓
-PR7  First presentation attach
-  ↓
-PR8  Runtime X360 ↔ SteamDeck switching
-  ↓
-PR9+ Owned-state recovery / keepalive hardening / cleanup
-```
+~~~text
+Persistent dual VIIPER devices                         DONE
+Persistent Addon-owned HidHide baseline                DONE
+Mandatory Runtime / startup contract                    DONE
+Reboot-bound Center M authority transition              DONE
+Disabled-boot admission                                 DONE
+PID1902 + DirectInput ownership                         DONE
+First virtual presentation attach                       DONE
+Runtime X360 <-> SteamDeck switching                    DONE
+Owned DirectInput session recovery                      DONE
+PID1902 -> PID1901 owned-state drift reclaim            DONE
+Physical loss / PnP return recovery                     DONE
+Suspend / Hibernate / Resume reconciliation             DONE
+Stock-safe uninstall / PID1901 restoration              DONE
+Legacy routing / recovery compatibility cleanup         DONE
+Elevated Runtime privilege model                        DONE
+Redundant helper elevation cleanup                      DONE
 
-### PR2 — HidHide baseline
+Unexpected Runtime death auto-restart / keepalive       OPEN
+Final elevated-WING + power/helper hardware matrix      OPEN
+User-launched external-process privilege boundary       OPEN, separate privilege follow-up
+~~~
 
-Foundation only.
+### Recovery status
 
-No PID/Center M/reboot/Runtime-lifetime/VIIPER presentation work.
+The current Runtime already has production paths for:
 
-### PR3 — Mandatory Runtime/startup contract
+- owned DirectInput session loss;
+- same-device PID1901 drift/reclaim;
+- physical disappearance and event-driven PnP return;
+- exact HidHide reconciliation during physical recovery;
+- presentation neutral/reconcile behavior;
+- Sleep/Hibernate/Resume through `PowerResumeObserved`;
+- targeted event-driven MSI Quick Settings re-quiesce for the currently observed resurrection path.
 
-Small product-lifetime foundation:
+Do not re-create these as new managers or parallel recovery authorities.
 
-- existing background Runtime startup can be forced/verified;
-- Disabled mode can require it;
-- frontend lifetime remains independent;
-- user cannot intentionally turn off required Runtime/startup once wiring reaches Disabled mode.
+### Remaining Full1902 controller reliability item
 
-No Windows service or supervisor yet.
+The remaining controller-architecture feature is **unexpected Runtime death auto-restart / lightweight keepalive**.
 
-No PID1902 work.
+The requirement remains:
 
-### PR4 — reboot-bound authority transition
+~~~text
+Center M Disabled
++ Runtime dies unexpectedly
+=> user must not remain indefinitely with hidden PID1902 and no virtual presentation
+=> restart the existing Runtime
+=> reuse the existing startup/recovery reconciliation paths
+~~~
 
-Compose:
+Design the smallest mechanism justified by the supported lifecycle. Do not assume that this requires a Windows service, permanent watchdog daemon, heartbeat protocol, epochs, or a generalized process supervisor.
 
-```text
-persistent HidHide baseline
-mandatory Runtime startup
-existing Center M startup control
-Disable and Restart / Enable and Restart UX
-```
+### Separate process-privilege follow-up
 
-No live PID takeover in Disable flow.
-
-### PR5 — Disabled-boot admission
-
-Facts/gate only. No physical mutation.
-
-### PR6 — PID1902 + DirectInput
-
-```text
-current 1902 → keep
-current 1901 → switch
-PnP settle
-DirectInput
-exact HidHide target
-physical isolation verify
-```
-
-Both virtual devices remain detached.
-
-### PR7 — first presentation attach
-
-Fresh Steam/BPM state immediately before attach.
-
-### PR8 — runtime presentation switching
-
-X360 ↔ SteamDeck with no PID/HidHide/DirectInput churn.
-
-### PR9+ — real lifecycle hardening
-
-Split by actual need:
-
-- unexpected Runtime death auto-restart/keepalive;
-- PID drift;
-- device loss/re-arrival;
-- DirectInput loss;
-- HidHide drift;
-- Center M resurrection;
-- suspend/resume;
-- legacy routing cleanup.
-
-Do not pre-build all recovery machinery into the first ownership PR.
+The user-launched executable / PowerShell privilege boundary is not controller ownership work. It is tracked by `FULL1902_ELEVATED_RUNTIME_ARCHITECTURE_2026-10-05.md` and must remain separate from crash keepalive.
 
 ---
 
 ## 25. Hardware validation priorities
 
-### Disabled boot
+Most core ownership/recovery paths now have implementation and prior hardware/log coverage. Remaining validation should focus on release-critical lifecycle boundaries rather than re-proving every historical PR independently.
 
-Validate both current states:
+### Elevated Runtime / WING
 
-```text
-boot/current PID1902 → no 1901 round-trip
-boot/current PID1901 → switch to PID1902
-```
+Required final matrix:
 
-Then verify:
+~~~text
+desktop
+normal game
+administrator-elevated game
+Steam BPM
+007FirstLight.exe elevated
+007FirstLight.exe non-elevated
+~~~
 
-- DirectInput acquisition;
-- exact HidHide isolation;
-- no physical + virtual double input;
-- correct initial X360/Deck presentation.
+For Addon authority:
 
-### Windows restart while Disabled
-
-Verify:
-
-- no intentional PID1901 command solely for shutdown/restart;
-- persistent HidHide baseline survives;
-- mandatory Runtime starts again;
-- current physical PID is reconciled to 1902;
-- controller becomes usable again.
-
-### Presentation switching
-
-Repeated X360 ↔ SteamDeck switching must not change:
-
-- PID1902;
-- DirectInput session;
-- HidHide state;
-- VIIPER server/bus.
+~~~text
+WING press
+=> native Game Bar does not surface
+=> configured WING/Event88 action still works
+=> no stuck Win modifier
+~~~
 
 ### Power lifecycle
 
-Validate suspend/resume and hibernate/resume from both presentations.
+Validate both:
 
-### Fault lifecycle
+~~~text
+Sleep -> Resume
+Hibernate -> Resume
+~~~
 
-Validate:
-
-- PID1902 → PID1901 drift;
-- physical PnP loss/re-arrival;
-- DirectInput failure;
-- Center M resurrection;
-- unexpected Runtime process death/restart.
-
-### Enable restoration
+with Center M Disabled, including at least one administrator-elevated foreground game after resume.
 
 Verify:
 
-- PID1901 restored;
-- Addon HidHide baseline removed;
-- Center M startup roots restored;
-- stock controller works after reboot.
+- PID1902 ownership/recovery;
+- DirectInput input resumes;
+- HidHide remains correct;
+- exactly one VIIPER presentation becomes live;
+- Win+G suppression still works;
+- no stale rumble/input state.
+
+### Retained helpers after elevated-Runtime cleanup
+
+Verify:
+
+- TDP read/write;
+- exposed fan operations;
+- battery charge-limit path;
+- TDP helper reports inherited elevation and causes no helper-local UAC;
+- Disable/Enable Center M and Restart cause no helper-local UAC;
+- exact task/service readback still succeeds.
+
+### Update / uninstall
+
+Before release validate:
+
+- controlled Runtime restart;
+- one steady-state Velopack update/restart under the High Runtime model;
+- SafeUninstall from Disabled/Add-on authority through verified PID1901/stock restoration.
+
+### Unexpected Runtime death
+
+This remains both an implementation and validation gap.
+
+After a keepalive/restart mechanism is implemented, validate a real forced Runtime termination while Center M is Disabled and prove:
+
+~~~text
+Runtime disappears
+=> replacement Runtime starts automatically
+=> current PID1902 or PID1901 is reconciled
+=> DirectInput / HidHide / VIIPER recover
+=> usable controller returns without requiring user logoff/reboot
+~~~
+
+Do not add extra recovery machinery solely to manufacture pathological timing tests.
 
 ---
 
