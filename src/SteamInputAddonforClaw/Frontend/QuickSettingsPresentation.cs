@@ -138,9 +138,9 @@ internal static class QuickSettingsPresentation
     {
         var sections = new List<QuickSettingsSection> { BuildProfileGeneralSection(snapshot) };
         if (snapshot.Limits is not null) sections.Add(BuildProfileTdpSection(snapshot));
-        if (snapshot.FpsLimit is not null) sections.Add(BuildProfileFpsLimitSection(snapshot));
         sections.Add(BuildProfileCpuBoostSection(snapshot));
         if (snapshot.PowerMode is not null) sections.Add(BuildProfilePowerModeSection(snapshot));
+        if (snapshot.FpsLimit is not null) sections.Add(BuildProfileFpsLimitSection(snapshot));
         sections.Add(BuildProfileResolutionSection(snapshot));
 
         var linkedConstraints = snapshot.Limits is { } limits ? BuildProfileTdpLinkedConstraints(limits) : [];
@@ -342,7 +342,7 @@ internal static class QuickSettingsPresentation
             rows.Add(BuildTdpSlider(QuickSettingsRowId.DeviceTdpDcPl2, "On battery · PL2", configuration.Dc.Pl2Watts, limits.Pl2MinimumWatts, limits.Pl2MaximumWatts, tdp.PersistenceWritable));
         }
 
-        return new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP", rows);
+        return new QuickSettingsSection(QuickSettingsSectionId.DeviceTdp, "TDP Control", rows);
     }
 
     private static QuickSettingsRow BuildTdpSlider(QuickSettingsRowId rowId, string label, int currentWatts, int minimumWatts, int maximumWatts, bool writable) =>

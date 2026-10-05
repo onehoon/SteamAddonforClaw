@@ -15,8 +15,8 @@ internal static class OverlayRowChrome
         Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
         MinHeight = OverlayQamResources.Get("QamRowMinHeight", 42.0),
         CornerRadius = OverlayQamResources.Get("QamRowCornerRadius", new CornerRadius(2)),
-        BorderThickness = OverlayQamResources.Get("QamRowSeparatorThickness", new Thickness(0, 0, 0, 1)),
-        BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush"),
+        BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
+        BorderBrush = OverlayQamResources.Brush("QamFocusBorderBrush"),
         Background = OverlayQamResources.Brush("QamContentBrush"),
     };
 }

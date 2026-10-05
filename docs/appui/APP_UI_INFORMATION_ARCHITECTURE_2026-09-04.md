@@ -124,10 +124,10 @@ Vibration Strength
 Examples already implemented:
 
 ```text
-TDP
-Intel FPS Limit
+TDP Control
 CPU Boost
 Windows Power Mode
+Intel FPS Limit
 Resolution
 ```
 
@@ -467,10 +467,10 @@ Current functionality is already aligned with that role.
 Keep the existing game catalog/detail flow and current overrides such as:
 
 ```text
-TDP
-Intel FPS Limit
+TDP Control
 CPU Boost
 Windows Power Mode
+Intel FPS Limit
 Resolution
 ```
 

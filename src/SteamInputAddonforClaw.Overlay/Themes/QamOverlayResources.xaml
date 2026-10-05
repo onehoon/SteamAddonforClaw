@@ -41,7 +41,7 @@
     <Thickness x:Key="QamPageTitleMargin">16,20,16,16</Thickness>
     <Thickness x:Key="QamBodyContentPadding">16,0,16,12</Thickness>
     <x:Double x:Key="QamSectionSpacing">24</x:Double>
-    <Thickness x:Key="QamSectionPadding">0</Thickness>
+    <Thickness x:Key="QamSectionPadding">16,0,16,0</Thickness>
     <CornerRadius x:Key="QamSectionCornerRadius">0</CornerRadius>
     <x:Double x:Key="QamSectionHeaderSpacing">4</x:Double>
     <Thickness x:Key="QamDetailIndent">16,0,0,0</Thickness>
@@ -49,7 +49,7 @@
     <x:Double x:Key="QamRowSpacing">0</x:Double>
     <Thickness x:Key="QamRowPadding">16,10,16,10</Thickness>
     <Thickness x:Key="QamRowMargin">-16,0,-16,0</Thickness>
-    <Thickness x:Key="QamRowSeparatorThickness">0,0,0,1</Thickness>
+    <Thickness x:Key="QamSectionSeparatorThickness">0,1,0,0</Thickness>
     <x:Double x:Key="QamRowMinHeight">42</x:Double>
     <CornerRadius x:Key="QamRowCornerRadius">2</CornerRadius>
     <Thickness x:Key="QamSelectionBorderThickness">0</Thickness>

@@ -264,6 +264,7 @@ public sealed partial class OverlayWindow
         }
 
         UpdateQuickSettingsPageRows(surface, page);
+        ApplyQuickSettingsSectionSeparators(surface, page);
         RestoreQuickSettingsSelection(surface, preferredRowId, previousSelection, bringIntoView: true);
     }
 
@@ -298,6 +299,7 @@ public sealed partial class OverlayWindow
         }
 
         ReorderQuickSettingsSectionCards(surface, page);
+        ApplyQuickSettingsSectionSeparators(surface, page);
         UpdateQuickSettingsPageRows(surface, page);
         RestoreQuickSettingsSelection(surface, preferredRowId, previousSelection, bringIntoView: false);
     }
@@ -318,15 +320,9 @@ public sealed partial class OverlayWindow
         }
 
         var rows = new List<OverlayRow>();
-        var rowStack = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
-        if (!usesFeatureHeader &&
-            surface.PageId == QuickSettingsPageId.Profile &&
-            section.SectionId == QuickSettingsSectionId.ProfileResolution)
-        {
-            rowStack.Margin = OverlayQamResources.Get(
-                "QamDetailIndent",
-                new Thickness(16, 0, 0, 0));
-        }
+        var rowStack = usesFeatureHeader
+            ? new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) }
+            : CreateOverlayDetailStack();
 
         if (usesFeatureHeader && TryCreateQuickSettingsRow(surface, featureHeaderToggle, out var headerRow, section.Label, strongLabel: true))
         {
@@ -335,13 +331,7 @@ public sealed partial class OverlayWindow
             rowStack.Children.Add(headerRow.Container);
         }
 
-        var detailStack = usesFeatureHeader
-            ? new StackPanel
-            {
-                Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0),
-                Margin = OverlayQamResources.Get("QamDetailIndent", new Thickness(16, 0, 0, 0)),
-            }
-            : rowStack;
+        var detailStack = usesFeatureHeader ? CreateOverlayDetailStack() : rowStack;
         foreach (var row in usesFeatureHeader ? visibleRows.Skip(1) : visibleRows)
         {
             if (!TryCreateQuickSettingsRow(surface, row, out var overlayRow)) continue;
@@ -446,12 +436,48 @@ public sealed partial class OverlayWindow
             BringSelectedRowIntoView();
     }
 
+    private static StackPanel CreateOverlayDetailStack() => new()
+    {
+        Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0),
+        Margin = OverlayQamResources.Get("QamDetailIndent", new Thickness(16, 0, 0, 0)),
+    };
+
+    private static void SetOverlaySectionSeparator(Border card, bool visible)
+    {
+        card.BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush");
+        card.BorderThickness = visible
+            ? OverlayQamResources.Get("QamSectionSeparatorThickness", new Thickness(0, 1, 0, 0))
+            : new Thickness(0);
+    }
+
+    private static void ApplyQuickSettingsSectionSeparators(QuickSettingsSurface surface, QuickSettingsPageSnapshot page)
+    {
+        var hasFeature = false;
+        foreach (var section in page.Sections)
+        {
+            if (!surface.RenderedSections.TryGetValue(section.SectionId, out var rendered) || rendered.Card is null)
+                continue;
+
+            if (surface.PageId == QuickSettingsPageId.Profile && section.SectionId == QuickSettingsSectionId.ProfileGeneral)
+            {
+                SetOverlaySectionSeparator(rendered.Card, visible: false);
+                continue;
+            }
+
+            SetOverlaySectionSeparator(rendered.Card, hasFeature);
+            hasFeature = true;
+        }
+    }
+
     private static Border CreateOverlaySectionCard(UIElement child)
     {
         return new Border
         {
             Child = child,
-            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(0)),
+            Margin = OverlayQamResources.Get("QamRowMargin", new Thickness(-16, 0, -16, 0)),
+            Padding = OverlayQamResources.Get("QamSectionPadding", new Thickness(16, 0, 16, 0)),
+            BorderBrush = OverlayQamResources.Brush("QamSeparatorBrush"),
+            BorderThickness = new Thickness(0),
             CornerRadius = OverlayQamResources.Get("QamSectionCornerRadius", new CornerRadius(0)),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Background = OverlayQamResources.Brush("QamSectionBrush"),

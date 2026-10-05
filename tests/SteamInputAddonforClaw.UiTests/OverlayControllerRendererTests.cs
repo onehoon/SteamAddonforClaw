@@ -21,8 +21,9 @@ public sealed class OverlayControllerRendererTests
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M1\""));
         Assert.Equal(1, CountOccurrences(controller, "new OverlayValueRow(\"M2\""));
         Assert.Equal(2, CountOccurrences(controller, "OverlayValueButtonKind.DiscreteChoice"));
-        Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m1Row)", controller);
-        Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m2Row)", controller);
+        Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m1Row)", controller);
+        Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m2Row)", controller);
+        Assert.Contains("CreateOverlayDetailStack()", controller);
         Assert.Contains("RegisterRowPointerSelection(row.Container)", controller);
         Assert.Contains("rows.Add(new(row.Container, row.Capabilities))", controller);
         Assert.Contains("_rowSelection.SetRows(CapabilitiesFor(AddonQuickSettingsTabId.Controller), preferredIndex);", controller);
@@ -101,8 +102,14 @@ public sealed class OverlayControllerRendererTests
 
         Assert.Contains("CreateControllerSection(\"M1 / M2\")", build);
         Assert.Contains("CreateControllerSection(\"Vibration Strength\")", build);
-        Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m1Row)", build);
-        Assert.Contains("AddBackButtonMappingRow(mappingSection, rows, m2Row)", build);
+        Assert.Contains("var mappingDetails = CreateOverlayDetailStack();", build);
+        Assert.Contains("mappingSection.Children.Add(mappingDetails);", build);
+        Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m1Row)", build);
+        Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m2Row)", build);
+        Assert.DoesNotContain("AddBackButtonMappingRow(mappingSection, rows,", build);
+        Assert.Contains("SetOverlaySectionSeparator(mappingCard, visible: false)", build);
+        Assert.Contains("SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true)", build);
+        Assert.Contains("SetOverlaySectionSeparator(vibrationCard, visible: true)", build);
         Assert.DoesNotContain("_backButtonStatusText", controller);
         Assert.DoesNotContain("BackButtonMappingCaption", controller);
         Assert.Contains("FailureMessage = response.Succeeded", controller);
@@ -118,7 +125,9 @@ public sealed class OverlayControllerRendererTests
         Assert.Contains("new OverlayToggleRow(\"Joystick LED\", RequestControllerLedEnabled)", controller);
         Assert.DoesNotContain("new OverlayToggleRow(\"Enabled\", RequestControllerLedEnabled)", controller);
         Assert.Contains("private StackPanel? _controllerLedDetailStack", controller);
-        Assert.Contains("Margin = OverlayQamResources.Get(\"QamDetailIndent\", new Thickness(16, 0, 0, 0))", controller);
+        Assert.Contains("_controllerLedDetailStack = details;", controller);
+        Assert.Contains("var details = CreateOverlayDetailStack();", controller);
+        Assert.Equal(2, CountOccurrences(controller, "var details = CreateOverlayDetailStack();"));
         Assert.Contains("_controllerLedDetailStack.Visibility = _controllerLed.Enabled ? Visibility.Visible : Visibility.Collapsed", controller);
         Assert.Contains("new OverlayValueRow(\"Brightness\"", controller);
         Assert.Contains("new TextBlock { Text = \"Color\"", controller);
