@@ -105,10 +105,20 @@ The Overlay tab rail uses the explicitly selected **Segoe Fluent Icons** glyphs 
 | Controller | `E7FC` | Game | Existing tab selection |
 | Shortcut | `E75F` | Dialpad | Existing tab selection |
 | Setting | `E713` | Settings | Existing tab selection |
-| Top rail hint | `F10C` | BumperLeft | Passive LB / previous-tab guidance |
-| Bottom rail hint | `F10D` | BumperRight | Passive RB / next-tab guidance |
+| LB hint | `F10C` | BumperLeft | Passive previous-tab guidance |
+| RB hint | `F10D` | BumperRight | Passive next-tab guidance |
 
-The two bumper glyphs are fixed, non-hit-testable rail chrome outside the reorderable `TabStrip`. They do not receive input or participate in selection; actual LB/RB behavior remains the existing controller-driven previous/next tab navigation. No SVG/PNG or other image assets are introduced.
+The rail presents one vertically centered visual cluster in this order:
+
+~~~text
+BumperLeft hint
+6 DIP gap
+five reorderable tab icons
+6 DIP gap
+BumperRight hint
+~~~
+
+The `QamRailHintGap = 6` resource is the single spacing authority between each passive hint and `TabStrip`; the five real tab rows keep their existing independent zero row spacing. Both bumper glyphs remain non-hit-testable siblings outside the reorderable `TabStrip`; they do not receive input or participate in selection. Actual LB/RB behavior remains the existing controller-driven previous/next tab navigation. No SVG/PNG or other image assets are introduced.
 
 ## Deferred to PR B or hardware acceptance
 

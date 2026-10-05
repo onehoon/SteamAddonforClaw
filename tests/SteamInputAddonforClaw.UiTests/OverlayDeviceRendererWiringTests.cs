@@ -835,10 +835,12 @@ public sealed class OverlayDeviceRendererWiringTests
         var document = XDocument.Parse(xaml);
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
         var railElement = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "TabRail");
-        var railLayout = Assert.Single(railElement.Elements(), element => element.Name.LocalName == "Grid");
-        var tabStrip = railLayout.Elements().Single(element => (string?)element.Attribute(x + "Name") == "TabStrip");
-        var previousHint = railLayout.Elements().Single(element => (string?)element.Attribute(x + "Name") == "PreviousTabBumperHint");
-        var nextHint = railLayout.Elements().Single(element => (string?)element.Attribute(x + "Name") == "NextTabBumperHint");
+        var railCluster = Assert.Single(railElement.Elements(), element =>
+            element.Name.LocalName == "StackPanel" && (string?)element.Attribute(x + "Name") == "TabRailCluster");
+        var clusterChildren = railCluster.Elements().ToArray();
+        var tabStrip = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "TabStrip");
+        var previousHint = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "PreviousTabBumperHint");
+        var nextHint = clusterChildren.Single(element => (string?)element.Attribute(x + "Name") == "NextTabBumperHint");
         var railFontIcons = railElement.Descendants().Where(element => element.Name.LocalName == "FontIcon").ToArray();
 
         Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
@@ -850,8 +852,17 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("x:Name=\"TabRail\"", tabRail);
         Assert.Contains("Grid.Column=\"0\"", tabRail);
         Assert.Contains("x:Name=\"TabStrip\"", tabRail);
-        Assert.Contains("VerticalAlignment=\"Center\"", tabRail);
-        Assert.Contains("RowSpacing=\"{StaticResource QamRailSpacing}\"", tabRail);
+        Assert.Contains("x:Name=\"TabRailCluster\"", tabRail);
+        Assert.Equal("Center", (string?)railCluster.Attribute("VerticalAlignment"));
+        Assert.Equal("Stretch", (string?)railCluster.Attribute("HorizontalAlignment"));
+        Assert.Equal("{StaticResource QamRailHintGap}", (string?)railCluster.Attribute("Spacing"));
+        Assert.Equal(
+            new[] { "PreviousTabBumperHint", "TabStrip", "NextTabBumperHint" },
+            clusterChildren.Select(element => (string?)element.Attribute(x + "Name")));
+        Assert.Equal("{StaticResource QamRailSpacing}", (string?)tabStrip.Attribute("RowSpacing"));
+        Assert.Null(previousHint.Attribute("Margin"));
+        Assert.Null(nextHint.Attribute("Margin"));
+        Assert.DoesNotContain("QamRailHintMargin", xaml);
         Assert.DoesNotContain("ColumnDefinitions", tabRail);
         Assert.DoesNotContain("Grid.ColumnDefinitions", bodyColumn);
         Assert.Contains("Grid.Column=\"1\"", bodyColumn);
@@ -872,20 +883,19 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Equal("{StaticResource QamRailHintIconSize}", (string?)nextHint.Attribute("FontSize"));
         Assert.Equal("{StaticResource QamDisabledTextBrush}", (string?)previousHint.Attribute("Foreground"));
         Assert.Equal("{StaticResource QamDisabledTextBrush}", (string?)nextHint.Attribute("Foreground"));
-        Assert.Equal("Top", (string?)previousHint.Attribute("VerticalAlignment"));
-        Assert.Equal("Bottom", (string?)nextHint.Attribute("VerticalAlignment"));
         Assert.Equal("False", (string?)previousHint.Attribute("IsHitTestVisible"));
         Assert.Equal("False", (string?)nextHint.Attribute("IsHitTestVisible"));
         Assert.Single(railFontIcons, element => (string?)element.Attribute("Glyph") == "\uF10C");
         Assert.Single(railFontIcons, element => (string?)element.Attribute("Glyph") == "\uF10D");
         Assert.Equal("LB, previous tab", (string?)previousHint.Attribute("AutomationProperties.Name"));
         Assert.Equal("RB, next tab", (string?)nextHint.Attribute("AutomationProperties.Name"));
-        Assert.Same(railLayout, tabStrip.Parent);
-        Assert.Same(railLayout, previousHint.Parent);
-        Assert.Same(railLayout, nextHint.Parent);
-        Assert.Equal("Center", (string?)tabStrip.Attribute("VerticalAlignment"));
-        Assert.Equal("{StaticResource QamRailSpacing}", (string?)tabStrip.Attribute("RowSpacing"));
+        Assert.Same(railCluster, tabStrip.Parent);
+        Assert.Same(railCluster, previousHint.Parent);
+        Assert.Same(railCluster, nextHint.Parent);
+        Assert.DoesNotContain(tabStrip.DescendantsAndSelf(), element => ReferenceEquals(element, previousHint));
+        Assert.DoesNotContain(tabStrip.DescendantsAndSelf(), element => ReferenceEquals(element, nextHint));
         Assert.Contains("Grid.SetRow(tabHost, position)", shell);
+        Assert.DoesNotContain("position + 1", shell);
         Assert.DoesNotContain("Grid.SetColumn(tabHost, position)", shell);
         Assert.Contains("TabStrip.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });", shell);
         Assert.Contains("AutomationProperties.SetName(button, label)", shell);

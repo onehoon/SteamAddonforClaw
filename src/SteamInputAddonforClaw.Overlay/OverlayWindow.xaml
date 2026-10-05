@@ -23,7 +23,11 @@
                         Grid.Column="0"
                         Background="{StaticResource QamRailBrush}"
                         CornerRadius="{StaticResource QamRailCornerRadius}">
-                        <Grid>
+                        <StackPanel
+                            x:Name="TabRailCluster"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Stretch"
+                            Spacing="{StaticResource QamRailHintGap}">
                             <FontIcon
                                 x:Name="PreviousTabBumperHint"
                                 Glyph="&#xF10C;"
@@ -31,13 +35,10 @@
                                 FontSize="{StaticResource QamRailHintIconSize}"
                                 Foreground="{StaticResource QamDisabledTextBrush}"
                                 HorizontalAlignment="Center"
-                                VerticalAlignment="Top"
-                                Margin="{StaticResource QamRailHintMargin}"
                                 IsHitTestVisible="False"
                                 AutomationProperties.Name="LB, previous tab" />
                             <Grid
                                 x:Name="TabStrip"
-                                VerticalAlignment="Center"
                                 RowSpacing="{StaticResource QamRailSpacing}" />
                             <FontIcon
                                 x:Name="NextTabBumperHint"
@@ -46,11 +47,9 @@
                                 FontSize="{StaticResource QamRailHintIconSize}"
                                 Foreground="{StaticResource QamDisabledTextBrush}"
                                 HorizontalAlignment="Center"
-                                VerticalAlignment="Bottom"
-                                Margin="{StaticResource QamRailHintMargin}"
                                 IsHitTestVisible="False"
                                 AutomationProperties.Name="RB, next tab" />
-                        </Grid>
+                        </StackPanel>
                     </Border>
 
                     <Grid Grid.Column="1">
