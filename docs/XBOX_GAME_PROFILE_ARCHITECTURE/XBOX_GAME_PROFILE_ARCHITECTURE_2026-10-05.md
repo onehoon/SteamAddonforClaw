@@ -2,6 +2,7 @@
 
 > **Date:** 2026-10-05  
 > **Status:** Architecture authority for the XBOX game/profile feature family  
+> **Field-validation status (2026-10-05):** PoC A installed catalog = PASS; PoC B event-driven active-game identity/lifecycle = PASS; PoC C Xbox app activation = pending  
 > **Product baseline:** Standalone Full1902 SteamAddonforClaw  
 > **Scope:** XBOX/Game Pass installed-game catalog, event-driven active-game detection, XBOX-specific per-game profiles, per-game M1/M2 mapping, Main App navigation, Overlay projection, and front-button Xbox app launch  
 > **Out of scope:** Xbox Game Bar integration, ClawHUD IPC/dependency, Steam profile redesign, Full1902 physical controller ownership redesign
@@ -492,7 +493,7 @@ Do not classify every Microsoft Store package as an XBOX game.
 
 ### 8.3 Enumeration API PoC gate
 
-Installed-package enumeration is the main API uncertainty that must be hardware/packaging validated before production implementation is frozen.
+Installed-package enumeration was the main API uncertainty and has now been field-validated on the target MSI Claw / Windows environment before production implementation is frozen.
 
 Microsoft exposes:
 
@@ -1456,6 +1457,8 @@ Pass condition:
 
 > Installed games can be enumerated without elevation, undocumented DB scraping, ACL modification, or periodic scanning.
 
+**Field status: PASS.** PR1 field validation was performed before the Runtime elevation change. The current product Runtime is elevated for an unrelated requirement, but XBOX catalog enumeration must not depend on elevation, ACL takeover, or private package databases.
+
 ### PoC B — event-driven active game identity
 
 With Xbox Game Bar disabled:
@@ -1485,6 +1488,8 @@ Pass condition:
 
 > The correct XBOX game identity is established and retired without periodic polling.
 
+**Field status: PASS.** Aniimo Legend and Minecraft for Windows were positively identified on the target device, launch helpers were rejected by exact executable matching, Alt+Tab retained the active identity, process exit cleared it, and bounded reconciliation recovered an already-running title after resume and after a controlled Runtime restart.
+
 ### PoC C — Xbox app activation
 
 Validate the current Xbox app package/AUMID and activation API.
@@ -1495,16 +1500,579 @@ Pass condition:
 
 ---
 
+## 22A. Field validation record — MSI Claw, 2026-10-05
+
+This section is the canonical handoff record for the XBOX PoC work completed on the real target device.
+
+Do not re-open the already-resolved questions below unless later field evidence contradicts them.
+
+### 22A.1 Environment and implementation history
+
+Field validation used the supported MSI Claw / Windows environment:
+
+~~~text
+OS:
+Microsoft Windows NT 10.0.26200.0
+build 26200
+
+Observed Addon builds:
+0.1.331.0
+0.1.332.0
+0.1.333.0
+~~~
+
+Relevant implementation history:
+
+~~~text
+PR #678
+→ installed XBOX catalog diagnostic PoC
+→ PoC A
+
+PR #682
+→ event-driven XBOX active-game session diagnostic PoC
+→ initial PoC B implementation
+
+PR #684
+→ PR2.1 MicrosoftGame.config location correction
+→ live PackageFullName
+→ PackageManager.FindPackageForUser("", packageFullName)
+→ Package.EffectiveLocation / InstalledLocation
+
+PR #686
+→ GetPackagePathByFullName2 import correction
+→ kernel32.dll → kernelbase.dll
+→ diagnostic PackagePathType evidence only
+~~~
+
+Runtime privilege history must remain explicit:
+
+- PR1 catalog field validation succeeded **before** the later Runtime elevation change.
+- The current product Runtime is elevated for an unrelated product requirement.
+- PR2/PR2.1 later field runs may therefore be elevated.
+- XBOX package/config architecture must still not depend on ACL takeover, WindowsApps ownership changes, PowerShell fallback, private package databases, or broad filesystem scans.
+
+### 22A.2 PoC A — installed catalog: PASS
+
+PR1 field validation proved that the shipped Runtime can enumerate current-user packages and locate valid GDK/XBOX metadata through documented WinRT package APIs.
+
+Initial field result:
+
+~~~text
+PackageManager.FindPackagesForUser("")
+Total packages: 170
+Accessible package locations: 170
+MicrosoftGame.config candidates: 2
+Recognized/parseable roots: 2
+Valid XBOX/GDK candidates: 2
+Failures: 0
+~~~
+
+A later 0.1.332.0 catalog capture returned 171 packages, with the same two valid game candidates and zero package/config failures.
+
+Validated titles:
+
+#### Aniimo Legend
+
+~~~text
+CandidateKey:
+store:9PK8PHLCQDF6
+
+PackageFullName:
+KingsgloryGames.AniimoLegend_1.0.18.0_x64__9d08hqzdedf04
+
+PackageFamilyName:
+KingsgloryGames.AniimoLegend_9d08hqzdedf04
+
+StoreId:
+9PK8PHLCQDF6
+
+TitleId:
+6B49108E
+
+ExecutableList:
+Aniimo.exe
+
+Effective config root:
+C:\Program Files\WindowsApps\KingsgloryGames.AniimoLegend_1.0.18.0_x64__9d08hqzdedf04
+~~~
+
+#### Minecraft for Windows
+
+~~~text
+CandidateKey:
+store:9NBLGGH2JHXJ
+
+PackageFullName:
+Microsoft.MinecraftUWP_1.26.5203.0_x64__8wekyb3d8bbwe
+
+PackageFamilyName:
+Microsoft.MinecraftUWP_8wekyb3d8bbwe
+
+StoreId:
+9NBLGGH2JHXJ
+
+TitleId:
+35760C07
+
+ExecutableList:
+Minecraft.Windows.exe
+
+Effective config root:
+C:\Program Files\WindowsApps\Microsoft.MinecraftUWP_1.26.5203.0_x64__8wekyb3d8bbwe
+~~~
+
+The games themselves were installed to the user's D: game drive.
+
+Therefore field evidence established an important architecture fact:
+
+~~~text
+actual game payload path
+!=
+package metadata / MicrosoftGame.config path
+~~~
+
+Do not require path-prefix equality between the live executable and the config metadata location.
+
+### 22A.3 Initial PoC B field failure — config lookup only
+
+The first PR2 field runs on Addon 0.1.331.0 did **not** fail at WinEvent, process opening, process image lookup, or package identity.
+
+Run 1:
+
+~~~text
+Accepted WinEvents: 331
+Unique process generations inspected: 47
+Process open failures: 0
+Process image failures: 0
+No-package candidates: 33
+Package identity failures: 0
+Config-negative candidates: 14
+Executable mismatches: 0
+Positive matches: 0
+Process exits: 9
+~~~
+
+Run 2:
+
+~~~text
+Accepted WinEvents: 107
+Unique process generations inspected: 44
+Process open failures: 0
+Process image failures: 0
+No-package candidates: 34
+Package identity failures: 0
+Config-negative candidates: 10
+Executable mismatches: 0
+Positive matches: 0
+Process exits: 7
+~~~
+
+The failure boundary was:
+
+~~~text
+WinEvent                       PASS
+process open                   PASS
+live process image             PASS
+process package identity       PASS
+MicrosoftGame.config lookup    FAIL
+exact executable match         not reached
+~~~
+
+The defect was that PR2 treated `GetPackagePathByFullName2` output as the config-location authority.
+
+PR2.1 corrected this to:
+
+~~~text
+live PackageFullName
+→ PackageManager.FindPackageForUser("", packageFullName)
+→ Package.EffectiveLocation / InstalledLocation
+→ MicrosoftGame.config
+→ exact current executable basename match
+~~~
+
+The six `GetPackagePathByFullName2` path types remain diagnostic evidence only.
+
+### 22A.4 PR2.1 normal launch validation — PASS
+
+Addon 0.1.332.0 field validation after PR #684 produced positive matches for both test games.
+
+#### Aniimo Legend
+
+Counters:
+
+~~~text
+Accepted WinEvents: 135
+Unique process generations inspected: 42
+Process open failures: 0
+Process image failures: 0
+No-package candidates: 32
+Package identity failures: 0
+Config-negative candidates: 8
+Executable mismatches: 1
+Positive matches: 1
+Process exits: 6
+~~~
+
+The launch helper was rejected first:
+
+~~~text
+D:\xbox\Aniimo Legend\Content\gamelaunchhelper.exe
+→ package identity resolved
+→ MicrosoftGame.config resolved
+→ not present in ExecutableList
+→ ExecutableMismatch
+~~~
+
+The real game then matched:
+
+~~~text
+PID:
+10752
+
+RunningProcessPath:
+D:\xbox\Aniimo Legend\Content\Aniimo.exe
+
+PackageFullName:
+KingsgloryGames.AniimoLegend_1.0.18.0_x64__9d08hqzdedf04
+
+ConfigPath:
+C:\Program Files\WindowsApps\KingsgloryGames.AniimoLegend_1.0.18.0_x64__9d08hqzdedf04\MicrosoftGame.config
+
+MatchedExecutable:
+Aniimo.exe
+
+CandidateKey:
+store:9PK8PHLCQDF6
+~~~
+
+#### Minecraft for Windows
+
+Counters:
+
+~~~text
+Accepted WinEvents: 104
+Unique process generations inspected: 42
+Process open failures: 0
+Process image failures: 0
+No-package candidates: 32
+Package identity failures: 0
+Config-negative candidates: 8
+Executable mismatches: 1
+Positive matches: 1
+Process exits: 7
+~~~
+
+Again, `gamelaunchhelper.exe` was rejected and the real game matched:
+
+~~~text
+PID:
+10928
+
+RunningProcessPath:
+D:\xbox\Minecraft for Windows\Content\Minecraft.Windows.exe
+
+PackageFullName:
+Microsoft.MinecraftUWP_1.26.5203.0_x64__8wekyb3d8bbwe
+
+ConfigPath:
+C:\Program Files\WindowsApps\Microsoft.MinecraftUWP_1.26.5203.0_x64__8wekyb3d8bbwe\MicrosoftGame.config
+
+MatchedExecutable:
+Minecraft.Windows.exe
+
+CandidateKey:
+store:9NBLGGH2JHXJ
+~~~
+
+This validates the intended strong classifier:
+
+~~~text
+live process
++ package identity
++ PackageManager config location
++ exact ExecutableList basename
+→ XBOX game
+~~~
+
+No path equality, title heuristic, fullscreen test, GPU activity, PresentMon, or fuzzy executable match is required.
+
+### 22A.5 Alt+Tab retention and process exit — PASS
+
+Aniimo lifecycle evidence:
+
+~~~text
+ActiveGameDetected
+→ ForegroundLeft
+→ ForegroundReturned
+→ ForegroundLeft
+→ ForegroundReturned
+→ active CandidateKey remains store:9PK8PHLCQDF6
+→ matched process exits
+→ active diagnostic state cleared
+~~~
+
+Minecraft showed the same behavior.
+
+Therefore:
+
+- foreground loss is not session loss;
+- window hide/destroy is not the retirement authority;
+- the retained matched process generation remains authoritative;
+- process exit is the normal retirement authority.
+
+This is field confirmation of the process-lifetime design in section 9.
+
+### 22A.6 PackagePathType diagnostic correction — PASS, non-authoritative
+
+Before PR #686, all six `GetPackagePathByFullName2` diagnostics returned result 127 because the P/Invoke imported the API from `kernel32.dll`.
+
+PR #686 changed only the import module to `kernelbase.dll`.
+
+Addon 0.1.333.0 field evidence then reported for Aniimo:
+
+~~~text
+Install:
+result=0
+path=C:\Program Files\WindowsApps\KingsgloryGames.AniimoLegend_1.0.18.0_x64__9d08hqzdedf04
+
+Effective:
+result=0
+path=C:\Program Files\WindowsApps\KingsgloryGames.AniimoLegend_1.0.18.0_x64__9d08hqzdedf04
+
+Mutable:
+result=15707
+path=<unavailable>
+
+MachineExternal:
+result=1168
+path=<unavailable>
+
+UserExternal:
+result=1168
+path=<unavailable>
+
+EffectiveExternal:
+result=1168
+path=<unavailable>
+~~~
+
+This closes the result-127 diagnostic defect.
+
+Architecture policy remains unchanged:
+
+> `GetPackagePathByFullName2` is diagnostic evidence only. It is not the MicrosoftGame.config authority and is not required for a positive XBOX game match.
+
+Do not add fallback machinery merely because optional path types return unavailable.
+
+### 22A.7 Suspend / resume recovery — PASS
+
+Addon 0.1.333.0 was tested with Aniimo already running across suspend/resume.
+
+Observed Runtime lifecycle:
+
+~~~text
+23:20:16
+Suspend
+→ Full1902 presentation paused safely
+
+23:21:01
+Resume
+→ same Xbox360 publisher resumed
+→ normal Runtime resume reconciliation completed
+~~~
+
+The XBOX diagnostic observer was intentionally started only **after** resume:
+
+~~~text
+23:21:22.543
+ObserverStarted
+
+23:21:22.710
+ActiveGameDetected
+CandidateKey=store:9PK8PHLCQDF6
+PID=17092
+Executable=Aniimo.exe
+~~~
+
+The startup reconcile result was:
+
+~~~text
+ForegroundProcessId=17396
+EnumeratedProcessCount=34
+ActiveCandidateKey=store:9PK8PHLCQDF6
+~~~
+
+The foreground process was not the game.
+
+Therefore the positive match did not depend on receiving the original launch event or on the game being foreground at observer start.
+
+The bounded one-shot reconciliation found the already-running game after resume and reconstructed exact package/config/executable identity.
+
+Counters:
+
+~~~text
+Accepted WinEvents: 1
+Unique process generations inspected: 9
+Process open failures: 0
+Process image failures: 0
+No-package candidates: 7
+Package identity failures: 0
+Config-negative candidates: 1
+Executable mismatches: 0
+Positive matches: 1
+Process exits: 0
+~~~
+
+This is sufficient field evidence for the architecture requirement:
+
+~~~text
+resume
+→ bounded current-state reconcile
+→ already-running XBOX game can be recovered
+~~~
+
+An observer-kept-running-across-the-entire-sleep variant was not separately required as a production blocker after this bounded-reconciliation path succeeded.
+
+### 22A.8 Controlled Runtime restart recovery — PASS
+
+Aniimo was left running while the Addon Runtime was restarted.
+
+After the new Runtime was available, the XBOX diagnostic observer was started.
+
+Field report:
+
+~~~text
+ObserverStarted:
+2026-10-05T14:28:27.4828838+00:00
+
+ActiveGameDetected:
+2026-10-05T14:28:27.5666335+00:00
+
+CandidateKey:
+store:9PK8PHLCQDF6
+
+PID:
+17136
+
+RunningProcessPath:
+D:\xbox\Aniimo Legend\Content\Aniimo.exe
+
+ConfigPath:
+C:\Program Files\WindowsApps\KingsgloryGames.AniimoLegend_1.0.18.0_x64__9d08hqzdedf04\MicrosoftGame.config
+
+MatchedExecutable:
+Aniimo.exe
+~~~
+
+The already-running game was re-established about 84 ms after observer start.
+
+Counters:
+
+~~~text
+Accepted WinEvents: 1
+Unique process generations inspected: 8
+Process open failures: 0
+Process image failures: 0
+No-package candidates: 7
+Package identity failures: 0
+Config-negative candidates: 0
+Executable mismatches: 0
+Positive matches: 1
+Process exits: 0
+~~~
+
+This confirms the controlled-restart requirement from section 9.5:
+
+~~~text
+new Runtime
+→ no historical game-launch event available
+→ install hooks
+→ bounded reconcile
+→ find existing game process
+→ exact identity
+→ ActiveXboxGame
+~~~
+
+No periodic process/window polling is needed.
+
+### 22A.9 PoC B final pass matrix
+
+The event-driven active-game identity PoC is considered complete for production architecture purposes.
+
+~~~text
+normal launch detection                 PASS
+process open / generation identity      PASS
+live executable path                    PASS
+package full/family identity            PASS
+MicrosoftGame.config resolution         PASS
+D: payload + C: metadata separation     PASS
+exact ExecutableList match              PASS
+gamelaunchhelper rejection              PASS
+unrelated packaged-process rejection    PASS
+Alt+Tab retention                       PASS
+matched process exit clear              PASS
+post-resume already-running recovery    PASS
+controlled Runtime restart recovery     PASS
+bounded startup reconciliation          PASS
+no production polling                   PASS
+~~~
+
+No field evidence justified adding:
+
+- timer polling;
+- ConfigNegative retry loops;
+- TTL/epoch retry policy;
+- path-prefix matching;
+- generic game scoring;
+- another detector manager/state machine.
+
+Keep the simpler process-generation cache + event-driven wake-up + bounded lifecycle reconcile architecture.
+
+### 22A.10 Current X0 gate
+
+As of the end of the 2026-10-05 field work:
+
+~~~text
+PoC A — installed XBOX catalog
+PASS
+
+PoC B — event-driven active XBOX identity/lifecycle
+PASS
+
+PoC C — Xbox app packaged activation
+PENDING
+~~~
+
+Production X1 catalog/identity work should not re-litigate PoC A or PoC B without contradictory new device evidence.
+
+The remaining X0 task is only PoC C:
+
+~~~text
+Xbox app package/AUMID
+→ packaged-app activation API
+→ no Win+G
+→ no Game Bar
+→ no hardcoded mutable WindowsApps executable path
+~~~
+
+---
+
 ## 23. Suggested implementation sequence
 
 This is architecture sequencing, not a set of already-approved work orders.
 
 ### Phase X0 — diagnostic PoCs
 
-- catalog enumeration;
-- identity/config parser;
-- WinEvent active-game detector;
-- Xbox app activation.
+Current field status:
+
+~~~text
+catalog enumeration / config parser   PASS
+WinEvent active-game detector         PASS
+resume/restart bounded recovery       PASS
+Xbox app activation                   PENDING
+~~~
+
+Remaining X0 scope is only the packaged Xbox app activation PoC.
 
 No production profile mutation yet.
 
