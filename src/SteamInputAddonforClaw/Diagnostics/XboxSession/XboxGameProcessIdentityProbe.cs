@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
+using Windows.Management.Deployment;
 
 namespace SteamInputAddonforClaw.Diagnostics.XboxSession;
 
@@ -100,6 +101,19 @@ internal sealed class WindowsXboxGameProcessIdentityProbe : IXboxGameProcessIden
         IReadOnlyList<FrontendXboxSessionDiagnosticPackagePath> paths = packageFullNameQuery.ResultCode == ErrorSuccess && !string.IsNullOrWhiteSpace(packageFullNameQuery.Value)
             ? QueryPackagePaths(packageFullNameQuery.Value)
             : [];
+        var configLocationResolution = packageFullNameQuery.ResultCode == ErrorSuccess && !string.IsNullOrWhiteSpace(packageFullNameQuery.Value)
+            ? XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage(
+                packageFullNameQuery.Value,
+                static (userSecurityId, packageFullName) =>
+                {
+                    var package = new PackageManager().FindPackageForUser(userSecurityId, packageFullName);
+                    return package is null
+                        ? null
+                        : new XboxGamePackageConfigMetadata(
+                            () => package.EffectiveLocation?.Path,
+                            () => package.InstalledLocation?.Path);
+                })
+            : new XboxGamePackageConfigLocationResolution([], null);
         return await XboxGameProcessIdentityEvaluator.InspectAsync(
             generation,
             new XboxGameProcessIdentityEvidence(
@@ -117,6 +131,8 @@ internal sealed class WindowsXboxGameProcessIdentityProbe : IXboxGameProcessIden
                 packageId.ResourceId,
                 packageId.Architecture,
                 packageId.Version,
+                configLocationResolution.Locations,
+                configLocationResolution.FailureReason,
                 paths),
             cancellationToken).ConfigureAwait(false);
     }

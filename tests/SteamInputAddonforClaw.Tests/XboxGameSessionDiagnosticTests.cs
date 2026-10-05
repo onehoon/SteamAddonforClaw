@@ -308,11 +308,11 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
         var imageFailure = await EvaluateAsync(generation, Evidence(imageResultCode: 5));
         var noPackage = await EvaluateAsync(generation, Evidence(packageFullNameResultCode: 15700));
         var packageFailure = await EvaluateAsync(generation, Evidence(packageFullNameResultCode: 5));
-        var missingConfig = await EvaluateAsync(generation, Evidence(paths: [new("Install", 0, root)]));
+        var missingConfig = await EvaluateAsync(generation, Evidence(configLocations: [new("Effective", root)]));
         await File.WriteAllTextAsync(Path.Combine(root, "MicrosoftGame.config"), "<Game>");
-        var malformedConfig = await EvaluateAsync(generation, Evidence(paths: [new("Install", 0, root)]));
+        var malformedConfig = await EvaluateAsync(generation, Evidence(configLocations: [new("Effective", root)]));
         await File.WriteAllTextAsync(Path.Combine(root, "MicrosoftGame.config"), ValidConfig);
-        var mismatch = await EvaluateAsync(generation, Evidence(runningPath: @"D:\Games\Launcher.exe", paths: [new("Install", 0, root)]));
+        var mismatch = await EvaluateAsync(generation, Evidence(runningPath: @"D:\Games\Launcher.exe", configLocations: [new("Effective", root)]));
 
         Assert.Equal(XboxGameProcessInspectionDisposition.ProcessImageFailure, imageFailure.Disposition);
         Assert.Equal(XboxGameProcessInspectionDisposition.NoPackage, noPackage.Disposition);
@@ -335,7 +335,8 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
             applicationUserModelId: null,
             applicationUserModelIdResultCode: 87,
             packageIdPresent: false,
-            paths: [new("EffectiveExternal", 0, root)]));
+            configLocations: [new("Effective", root)],
+            paths: [new("EffectiveExternal", 0, @"F:\NativePackagePathEvidence")]));
 
         Assert.Equal(XboxGameProcessInspectionDisposition.Matched, game.Disposition);
         Assert.Equal(@"D:\InstalledGames\sample.EXE", game.Game?.RunningProcessPath);
@@ -344,6 +345,166 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
         Assert.Equal("Sample.exe", game.Game?.MatchedExecutableName);
         Assert.Null(game.Game?.ApplicationUserModelId);
         Assert.Null(game.Game?.PackageIdentityName);
+        Assert.Equal([new FrontendXboxSessionDiagnosticPackagePath("EffectiveExternal", 0, @"F:\NativePackagePathEvidence")], game.Game?.PackagePaths);
+    }
+
+    [Fact]
+    public async Task Package_config_location_resolver_uses_the_exact_current_user_package()
+    {
+        var effectiveRoot = Path.Combine(_directory, "effective");
+        Directory.CreateDirectory(effectiveRoot);
+        await File.WriteAllTextAsync(Path.Combine(effectiveRoot, "MicrosoftGame.config"), ValidConfig);
+        const string packageFullName = "Sample_1.0.0.0_x64__test";
+        var lookupCount = 0;
+
+        var resolution = XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage(
+            packageFullName,
+            (userSecurityId, resolvedPackageFullName) =>
+            {
+                lookupCount++;
+                Assert.Equal(string.Empty, userSecurityId);
+                Assert.Equal(packageFullName, resolvedPackageFullName);
+                return new(() => effectiveRoot, () => null);
+            });
+        var game = await EvaluateAsync(new FakeProcessGeneration(93, 1), Evidence(
+            packageFullName: packageFullName,
+            configLocations: resolution.Locations,
+            configLocationFailure: resolution.FailureReason));
+
+        Assert.Equal(1, lookupCount);
+        Assert.Equal(XboxGameProcessInspectionDisposition.Matched, game.Disposition);
+        Assert.Equal(Path.Combine(effectiveRoot, "MicrosoftGame.config"), game.Game?.ConfigPath);
+    }
+
+    [Fact]
+    public async Task Package_config_location_resolver_uses_installed_when_effective_has_no_config()
+    {
+        var effectiveRoot = Path.Combine(_directory, "effective-missing");
+        var installedRoot = Path.Combine(_directory, "installed");
+        Directory.CreateDirectory(effectiveRoot);
+        Directory.CreateDirectory(installedRoot);
+        await File.WriteAllTextAsync(Path.Combine(installedRoot, "MicrosoftGame.config"), ValidConfig);
+
+        var resolution = XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage(
+            "Sample_1.0.0.0_x64__test",
+            (_, _) => new(() => effectiveRoot, () => installedRoot));
+        var game = await EvaluateAsync(new FakeProcessGeneration(94, 1), Evidence(
+            configLocations: resolution.Locations,
+            configLocationFailure: resolution.FailureReason));
+
+        Assert.Equal(["Effective", "Installed"], resolution.Locations.Select(location => location.Kind));
+        Assert.Equal(XboxGameProcessInspectionDisposition.Matched, game.Disposition);
+        Assert.Equal(Path.Combine(installedRoot, "MicrosoftGame.config"), game.Game?.ConfigPath);
+    }
+
+    [Fact]
+    public void Package_config_location_resolver_deduplicates_effective_and_installed_paths_case_insensitively()
+    {
+        var root = Path.Combine(_directory, "same-location");
+        var resolution = XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage(
+            "Sample_1.0.0.0_x64__test",
+            (_, _) => new(() => root, () => root.ToUpperInvariant()));
+
+        var location = Assert.Single(resolution.Locations);
+        Assert.Equal("Effective", location.Kind);
+        Assert.Equal(root, location.RootPath);
+    }
+
+    [Fact]
+    public async Task Package_config_location_resolver_continues_when_effective_location_throws()
+    {
+        var installedRoot = Path.Combine(_directory, "installed-after-effective-error");
+        Directory.CreateDirectory(installedRoot);
+        await File.WriteAllTextAsync(Path.Combine(installedRoot, "MicrosoftGame.config"), ValidConfig);
+        var resolution = XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage(
+            "Sample_1.0.0.0_x64__test",
+            (_, _) => new(
+                () => throw new UnauthorizedAccessException("effective unavailable"),
+                () => installedRoot));
+
+        var game = await EvaluateAsync(new FakeProcessGeneration(95, 1), Evidence(
+            configLocations: resolution.Locations,
+            configLocationFailure: resolution.FailureReason));
+
+        Assert.Contains("Effective location:", resolution.FailureReason, StringComparison.Ordinal);
+        Assert.Equal(XboxGameProcessInspectionDisposition.Matched, game.Disposition);
+        Assert.Equal(Path.Combine(installedRoot, "MicrosoftGame.config"), game.Game?.ConfigPath);
+    }
+
+    [Fact]
+    public async Task Package_config_location_lookup_null_is_a_config_negative()
+    {
+        var resolution = XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage("missing-package", (_, _) => null);
+        var result = await EvaluateAsync(new FakeProcessGeneration(96, 1), Evidence(
+            configLocations: resolution.Locations,
+            configLocationFailure: resolution.FailureReason));
+
+        Assert.Empty(resolution.Locations);
+        Assert.Equal(XboxGameProcessInspectionDisposition.ConfigNegative, result.Disposition);
+        Assert.Contains("PackageManager did not resolve", result.FailureReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Package_without_effective_or_installed_location_is_a_config_negative()
+    {
+        var resolution = XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage(
+            "locationless-package",
+            (_, _) => new(() => null, () => null));
+        var result = await EvaluateAsync(new FakeProcessGeneration(97, 1), Evidence(
+            configLocations: resolution.Locations,
+            configLocationFailure: resolution.FailureReason));
+
+        Assert.Empty(resolution.Locations);
+        Assert.Equal(XboxGameProcessInspectionDisposition.ConfigNegative, result.Disposition);
+        Assert.Contains("no usable Effective/Installed location", result.FailureReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Config_absent_from_both_package_locations_is_a_config_negative()
+    {
+        var effectiveRoot = Path.Combine(_directory, "effective-empty");
+        var installedRoot = Path.Combine(_directory, "installed-empty");
+        Directory.CreateDirectory(effectiveRoot);
+        Directory.CreateDirectory(installedRoot);
+        var resolution = XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage(
+            "Sample_1.0.0.0_x64__test",
+            (_, _) => new(() => effectiveRoot, () => installedRoot));
+        var result = await EvaluateAsync(new FakeProcessGeneration(98, 1), Evidence(
+            configLocations: resolution.Locations,
+            configLocationFailure: resolution.FailureReason));
+
+        Assert.Equal(XboxGameProcessInspectionDisposition.ConfigNegative, result.Disposition);
+        Assert.Contains("Package object's Effective/Installed locations", result.FailureReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Package_path_type_evidence_neither_supplies_nor_blocks_config_location()
+    {
+        var configRoot = Path.Combine(_directory, "metadata-on-c");
+        Directory.CreateDirectory(configRoot);
+        await File.WriteAllTextAsync(Path.Combine(configRoot, "MicrosoftGame.config"), ValidConfig);
+        FrontendXboxSessionDiagnosticPackagePath[] packagePaths =
+        [
+            new("Install", 2, @"D:\NativeInstall"),
+            new("Effective", 2, @"D:\NativeEffective"),
+            new("Mutable", 2, @"D:\NativeMutable"),
+            new("MachineExternal", 2, @"D:\NativeMachineExternal"),
+            new("UserExternal", 2, @"D:\NativeUserExternal"),
+            new("EffectiveExternal", 2, @"D:\NativeEffectiveExternal"),
+        ];
+        var matched = await EvaluateAsync(new FakeProcessGeneration(99, 1), Evidence(
+            runningPath: @"D:\Games\Sample.exe",
+            configLocations: [new("Effective", configRoot)],
+            paths: packagePaths));
+        var notSynthesized = await EvaluateAsync(new FakeProcessGeneration(100, 1), Evidence(
+            configLocations: [],
+            paths: [new("Install", 0, configRoot)]));
+
+        Assert.Equal(XboxGameProcessInspectionDisposition.Matched, matched.Disposition);
+        Assert.Equal(@"D:\Games\Sample.exe", matched.Game?.RunningProcessPath);
+        Assert.Equal(Path.Combine(configRoot, "MicrosoftGame.config"), matched.Game?.ConfigPath);
+        Assert.Equal(packagePaths, matched.Game?.PackagePaths);
+        Assert.Equal(XboxGameProcessInspectionDisposition.ConfigNegative, notSynthesized.Disposition);
     }
 
     [Fact]
@@ -442,6 +603,10 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
         Assert.Contains("GetApplicationUserModelId", probeSource, StringComparison.Ordinal);
         Assert.Contains("GetPackageId", probeSource, StringComparison.Ordinal);
         Assert.Contains("GetPackagePathByFullName2", probeSource, StringComparison.Ordinal);
+        Assert.Contains("new PackageManager().FindPackageForUser(userSecurityId, packageFullName)", probeSource, StringComparison.Ordinal);
+        Assert.Contains("package.EffectiveLocation?.Path", probeSource, StringComparison.Ordinal);
+        Assert.Contains("package.InstalledLocation?.Path", probeSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("foreach (var packagePath in evidence.PackagePaths)", File.ReadAllText(Path.Combine(sourceRoot, "XboxGameProcessIdentityEvaluator.cs")), StringComparison.Ordinal);
         foreach (var pathType in new[] { "Install", "Effective", "Mutable", "MachineExternal", "UserExternal", "EffectiveExternal" })
             Assert.Contains($"(\"{pathType}\"", probeSource, StringComparison.Ordinal);
         Assert.DoesNotContain("SearchOption.AllDirectories", sources, StringComparison.Ordinal);
@@ -501,6 +666,8 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
         string? applicationUserModelId = "Sample!App",
         int applicationUserModelIdResultCode = 0,
         bool packageIdPresent = true,
+        IReadOnlyList<XboxGamePackageConfigLocation>? configLocations = null,
+        string? configLocationFailure = null,
         IReadOnlyList<FrontendXboxSessionDiagnosticPackagePath>? paths = null) =>
         new(imageResultCode, runningPath,
             packageFullNameResultCode, packageFullName,
@@ -512,6 +679,8 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
             null,
             packageIdPresent ? "X64" : null,
             packageIdPresent ? "1.0.0.0" : null,
+            configLocations ?? [],
+            configLocationFailure,
             paths ?? [new("Install", 0, Path.Combine(Path.GetTempPath(), "missing-xbox-package"))]);
 
     private static string RepositoryRoot()
