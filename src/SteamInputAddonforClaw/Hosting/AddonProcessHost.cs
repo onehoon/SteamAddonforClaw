@@ -793,6 +793,25 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (startupResult.CenterMStartupState != FrontendCenterMStartupState.Disabled)
             return;
 
+        // Full1902 cleanup: the exact Center M Disabled authority fact is the sole product gate.
+        // This best-effort one-shot cleanup precedes admission so an orphaned MSI Quick Settings
+        // package does not keep running while controller startup is temporarily blocked.
+        try
+        {
+            var quiesceResult = MsiQuickSettingsRuntimeQuiescer.Quiesce();
+            AppLog.Debug("MsiQuickSettings", "Disabled-startup package quiesce attempt completed.",
+                ("CandidateCount", quiesceResult.CandidateCount),
+                ("IdentityUnavailableCount", quiesceResult.IdentityUnavailableCount),
+                ("PackageCount", quiesceResult.PackageCount),
+                ("TerminatedProcessCount", quiesceResult.TerminatedProcessCount),
+                ("FailureCount", quiesceResult.FailureCount));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("MsiQuickSettings", "Best-effort package quiesce threw; Disabled-mode controller startup continues.", exception,
+                ("Event", "MsiQuickSettingsTerminationFailed"), ("Reason", "UnexpectedQuiesceFailure"));
+        }
+
         // Construct the narrow PR5 owner on ANY exact Disabled boot -- even a Blocked one -- so
         // Enable-and-Restart can always release existing PID1902 / persisted PR5 HidHide ownership.
         var owner = CreatePhysicalOwnership(startupComposition);
