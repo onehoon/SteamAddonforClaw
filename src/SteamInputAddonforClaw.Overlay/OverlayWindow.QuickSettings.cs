@@ -310,19 +310,10 @@ public sealed partial class OverlayWindow
         if (visibleRows.Length == 0)
             return new RenderedQuickSettingsSection { Section = section, Rows = [] };
 
-        var sectionPanel = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
+        var sectionPanel = new StackPanel();
         var usesFeatureHeader = OverlayQuickSettingsSectionRendering.TryGetFeatureHeaderToggle(section, out var featureHeaderToggle);
-        if (!usesFeatureHeader && !string.IsNullOrEmpty(section.Label))
-        {
-            var label = new TextBlock { Text = section.Label, TextWrapping = TextWrapping.Wrap };
-            OverlayQamResources.ApplyTextStyle(label, "QamBodyStrongTextStyle");
-            sectionPanel.Children.Add(label);
-        }
-
         var rows = new List<OverlayRow>();
-        var rowStack = usesFeatureHeader
-            ? new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) }
-            : CreateOverlayDetailStack();
+        var rowStack = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
 
         if (usesFeatureHeader && TryCreateQuickSettingsRow(surface, featureHeaderToggle, out var headerRow, section.Label, strongLabel: true))
         {
@@ -330,8 +321,12 @@ public sealed partial class OverlayWindow
             RegisterRowPointerSelection(headerRow.Container);
             rowStack.Children.Add(headerRow.Container);
         }
+        else if (!usesFeatureHeader && !string.IsNullOrEmpty(section.Label))
+        {
+            rowStack.Children.Add(CreateOverlaySectionHeadingRow(section.Label));
+        }
 
-        var detailStack = usesFeatureHeader ? CreateOverlayDetailStack() : rowStack;
+        var detailStack = CreateOverlayDetailStack();
         foreach (var row in usesFeatureHeader ? visibleRows.Skip(1) : visibleRows)
         {
             if (!TryCreateQuickSettingsRow(surface, row, out var overlayRow)) continue;
@@ -340,7 +335,7 @@ public sealed partial class OverlayWindow
             detailStack.Children.Add(overlayRow.Container);
         }
 
-        if (usesFeatureHeader && detailStack.Children.Count > 0)
+        if (detailStack.Children.Count > 0)
             rowStack.Children.Add(detailStack);
 
         sectionPanel.Children.Add(rowStack);
@@ -434,6 +429,18 @@ public sealed partial class OverlayWindow
                 : null;
         if (bringIntoView || selectedIndex != previousSelection || selectedRowId != preferredRowId)
             BringSelectedRowIntoView();
+    }
+
+    private static Border CreateOverlaySectionHeadingRow(string title)
+    {
+        var heading = new TextBlock
+        {
+            Text = title,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        OverlayQamResources.ApplyTextStyle(heading, "QamBodyStrongTextStyle");
+        return OverlayRowChrome.Create(heading);
     }
 
     private static StackPanel CreateOverlayDetailStack() => new()

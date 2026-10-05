@@ -595,7 +595,7 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("var sectionPanel = new StackPanel", quickSettings);
         Assert.Contains("QamSectionSpacing", quickSettings);
-        Assert.Contains("var rowStack = usesFeatureHeader", quickSettings);
+        Assert.Contains("var rowStack = new StackPanel { Spacing = OverlayQamResources.Get(\"QamRowSpacing\", 0.0) }", quickSettings);
         Assert.Contains("sectionPanel.Children.Add(rowStack);", quickSettings);
         Assert.Contains("RegisterRowPointerSelection(overlayRow.Container);", quickSettings);
         Assert.Contains("RegisterRowPointerSelection(row.Container);", source);
@@ -632,14 +632,44 @@ public sealed class OverlayDeviceRendererWiringTests
         var buildEnd = quickSettings.IndexOf("private static void RemoveQuickSettingsSection", buildStart, StringComparison.Ordinal);
         var buildSection = quickSettings[buildStart..buildEnd];
 
-        Assert.Contains("var detailStack = usesFeatureHeader", buildSection);
-        Assert.Contains("CreateOverlayDetailStack()", buildSection);
+        Assert.Contains("var detailStack = CreateOverlayDetailStack();", buildSection);
+        Assert.Contains("detailStack.Children.Add(overlayRow.Container);", buildSection);
+        Assert.Contains("rowStack.Children.Add(detailStack);", buildSection);
         Assert.DoesNotContain("QamDetailIndent", buildSection);
         var detailStackStart = quickSettings.IndexOf("private static StackPanel CreateOverlayDetailStack()", StringComparison.Ordinal);
         var detailStackEnd = quickSettings.IndexOf("private static void SetOverlaySectionSeparator", detailStackStart, StringComparison.Ordinal);
         var detailStack = quickSettings[detailStackStart..detailStackEnd];
         Assert.Contains("QamRowSpacing", detailStack);
         Assert.Contains("QamDetailIndent", detailStack);
+    }
+
+    [Fact]
+    public void Heading_only_quick_settings_sections_use_shared_row_chrome_without_an_extra_header_gap()
+    {
+        var quickSettings = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs");
+        var helperStart = quickSettings.IndexOf("private static Border CreateOverlaySectionHeadingRow", StringComparison.Ordinal);
+        var helperEnd = quickSettings.IndexOf("private static StackPanel CreateOverlayDetailStack", helperStart, StringComparison.Ordinal);
+        var headingHelper = quickSettings[helperStart..helperEnd];
+        var buildStart = quickSettings.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal);
+        var buildEnd = quickSettings.IndexOf("private static void RemoveQuickSettingsSection", buildStart, StringComparison.Ordinal);
+        var build = quickSettings[buildStart..buildEnd];
+        var rowStackStart = build.IndexOf("var rowStack = new StackPanel", StringComparison.Ordinal);
+        var rowStackEnd = build.IndexOf("sectionPanel.Children.Add(rowStack);", rowStackStart, StringComparison.Ordinal);
+        var rowStack = build[rowStackStart..rowStackEnd];
+
+        Assert.True(helperStart >= 0);
+        Assert.True(helperEnd > helperStart);
+        Assert.Contains("QamBodyStrongTextStyle", headingHelper);
+        Assert.Contains("OverlayRowChrome.Create(heading)", headingHelper);
+        Assert.DoesNotContain("RegisterRowPointerSelection", headingHelper);
+        Assert.DoesNotContain("new OverlayRow", headingHelper);
+        Assert.DoesNotContain("_pageRows", headingHelper);
+        Assert.Contains("QamRowSpacing", rowStack);
+        Assert.Contains("rowStack.Children.Add(CreateOverlaySectionHeadingRow(section.Label));", rowStack);
+        Assert.Contains("var detailStack = CreateOverlayDetailStack();", rowStack);
+        Assert.Contains("rowStack.Children.Add(detailStack);", rowStack);
+        Assert.DoesNotContain("QamSectionHeaderSpacing", rowStack);
+        Assert.DoesNotContain("new TextBlock { Text = section.Label", build);
     }
 
     [Fact]

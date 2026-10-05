@@ -99,9 +99,16 @@ public sealed class OverlayControllerRendererTests
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
         var build = controller[controller.IndexOf("private FrameworkElement BuildControllerPage", StringComparison.Ordinal)..
             controller.IndexOf("private void AddBackButtonMappingRow", StringComparison.Ordinal)];
+        var sectionStart = controller.IndexOf("private static StackPanel CreateControllerSection", StringComparison.Ordinal);
+        var sectionEnd = controller.IndexOf("private void BuildControllerLedRows", sectionStart, StringComparison.Ordinal);
+        var sectionBuilder = controller[sectionStart..sectionEnd];
 
         Assert.Contains("CreateControllerSection(\"M1 / M2\")", build);
         Assert.Contains("CreateControllerSection(\"Vibration Strength\")", build);
+        Assert.Contains("section.Children.Add(CreateOverlaySectionHeadingRow(title));", sectionBuilder);
+        Assert.Contains("QamRowSpacing", sectionBuilder);
+        Assert.DoesNotContain("QamSectionHeaderSpacing", sectionBuilder);
+        Assert.DoesNotContain("new TextBlock { Text = title }", sectionBuilder);
         Assert.Contains("var mappingDetails = CreateOverlayDetailStack();", build);
         Assert.Contains("mappingSection.Children.Add(mappingDetails);", build);
         Assert.Contains("AddBackButtonMappingRow(mappingDetails, rows, m1Row)", build);
@@ -122,7 +129,7 @@ public sealed class OverlayControllerRendererTests
         var controller = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Controller.cs");
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
 
-        Assert.Contains("new OverlayToggleRow(\"Joystick LED\", RequestControllerLedEnabled)", controller);
+        Assert.Contains("new OverlayToggleRow(\"Joystick LED\", RequestControllerLedEnabled, strongLabel: true)", controller);
         Assert.DoesNotContain("new OverlayToggleRow(\"Enabled\", RequestControllerLedEnabled)", controller);
         Assert.Contains("private StackPanel? _controllerLedDetailStack", controller);
         Assert.Contains("_controllerLedDetailStack = details;", controller);
