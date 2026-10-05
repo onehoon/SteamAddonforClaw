@@ -45,6 +45,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string LegacyRunValueName = "SteamInputAddonforClaw";
     internal const int TaskLogonInteractiveToken = 3;
+    internal const int TaskRunLevelHighest = 1;
     internal const int StartupTaskPriority = 2;
 
     private readonly Func<string> _stableExecutablePathProvider;
@@ -247,7 +248,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         && PathEquals(state.ActionPath, configuration.ExecutablePath)
         && string.Equals(state.ActionArguments.Trim(), "--background", StringComparison.Ordinal)
         && state.LogonType == TaskLogonInteractiveToken
-        && state.RunLevel == 0
+        && state.RunLevel == TaskRunLevelHighest
         && string.Equals(state.LogonTriggerUserId, configuration.UserId, StringComparison.OrdinalIgnoreCase)
         // A battery-restricted or execution-time-limited task is NOT a valid persistent handheld
         // Runtime guarantee -- treat it as drift and repair it (review [P1]).
@@ -362,7 +363,7 @@ internal sealed class WindowsOwnedStartupTaskStore : IOwnedStartupTaskStore
             taskDefinition.RegistrationInfo.Description = "Starts Steam Input Addon for Claw after Windows logon.";
             taskDefinition.Principal.UserId = configuration.UserId;
             taskDefinition.Principal.LogonType = WindowsTaskSchedulerStartupManager.TaskLogonInteractiveToken;
-            taskDefinition.Principal.RunLevel = 0;
+            taskDefinition.Principal.RunLevel = WindowsTaskSchedulerStartupManager.TaskRunLevelHighest;
 
             // A persistent handheld Runtime must start and keep running on battery, with no scheduler
             // execution-time limit (review [P1]).

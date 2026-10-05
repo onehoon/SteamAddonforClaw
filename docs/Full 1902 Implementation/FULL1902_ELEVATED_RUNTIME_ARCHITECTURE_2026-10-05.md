@@ -3,7 +3,7 @@
 > **Status:** Accepted architecture decision / implementation pending  
 > **Date:** 2026-10-05  
 > **Scope:** Process privilege model for the standalone Full1902 application, including WING / Xbox Game Bar suppression  
-> **Product scope:** one Windows user, one interactive session; Fast User Switching, RDP, and multi-session are not supported
+> **Product scope:** one interactive Windows user who is a member of Administrators, one interactive session; Fast User Switching, RDP, and multi-session are not supported
 
 ---
 
@@ -598,12 +598,16 @@ Phase B must be evidence-driven and must preserve any useful process-failure iso
 
 This document changes the **process privilege model**, not the controller authority model.
 
-The following remain authoritative for their existing scopes:
+The following remain authoritative for controller authority and lifecycle rules within their existing scopes:
 
 - HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md;
 - REBOOT_BOUND_CONTROLLER_AUTHORITY_AND_HIDHIDE_DESIGN.md;
 - FULL_1902_IMPLEMENTATION_ARCHITECTURE.md;
 - the merged Full1902 WING / Game Bar Policy-B behavior represented by docs/work-order/FULL1902_POLICY_B_BIND_WING_GAMEBAR_SUPPRESSION_TO_ADDON_AUTHORITY_WORK_ORDER.md.
+
+For `HIDHIDE_AND_STARTUP_AUTHORITY_POLICY_REVISION_2026-09-01.md`, its startup-task owner, identity, trigger, and repair/readback contract remain authoritative. This architecture supersedes only the conflicting primary-Runtime privilege and startup-task RunLevel assumptions.
+
+The supported interactive Windows user must itself be an administrator. The elevation prompt is for consent under that same user identity; do not support over-the-shoulder elevation into a different administrator account. A replacement Runtime whose user SID differs from the originating interactive user must exit before `SingleInstanceGate` or controller ownership.
 
 Where an older document assumes that SteamInputAddonforClaw.exe is medium-integrity/asInvoker, this document establishes the new target:
 
