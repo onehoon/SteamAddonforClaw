@@ -230,7 +230,7 @@ Do not add a new resume epoch, hook watchdog, periodic re-install loop, or helpe
 
 If real hardware testing later proves that the Windows low-level hook is lost across a supported Sleep/Hibernate/Resume path, fix that concrete failure in the smallest appropriate follow-up.
 
-Required validation for the elevation migration includes actual Sleep and Hibernate cycles.
+Required validation for the elevation implementation includes actual Sleep and Hibernate cycles.
 
 ---
 
@@ -240,7 +240,7 @@ Required validation for the elevation migration includes actual Sleep and Hibern
 
 The existing mandatory Full1902 startup-task architecture remains the launch authority while Center M is Disabled.
 
-The task currently records/verifies least-privilege RunLevel. The elevation migration must change the owned startup-task contract so the Runtime starts at the required elevated run level.
+The task currently records/verifies least-privilege RunLevel. The elevation implementation must change the owned startup-task contract so the Runtime starts at the required elevated run level.
 
 Conceptually:
 
@@ -253,7 +253,7 @@ Windows logon
 => elevated persistent Runtime
 ~~~
 
-A task still configured for the old least-privilege run level must be treated as drift and repaired through the existing owned-task synchronization path.
+The owned-task compliance check must require the High run level. Any incorrect run level is ordinary configuration drift and may be reconciled by the existing owned-task synchronization path.
 
 Do not add a second startup task or startup service.
 
@@ -273,81 +273,74 @@ Do not create a second elevation-specific controller lifecycle.
 
 ### 6.3 Manual launch behavior
 
-The primary Runtime must reach the required elevated state even when started outside the normal logon task path.
+The product is pre-release. There is no requirement to preserve a historical medium-integrity production Runtime.
 
-The accepted bootstrap is:
+The supported normal application lifecycle is:
 
 ~~~text
 VelopackApp.Build().Run()
-=> allow Velopack fast hooks to execute/exit in the normal per-user process
-=> allow non-Runtime special command modes to keep their existing ownership/elevation behavior
-=> perform the existing single-instance check
-   - secondary launch: activate the already-running Runtime and exit without a new UAC prompt
-   - primary launch: continue
-=> if the primary normal-runtime process is not elevated:
-   release the single-instance gate
-   relaunch the same current executable with ShellExecute "runas" and the same arguments
-   exit the medium process
-=> elevated replacement reacquires the single-instance gate
-=> only then may normal Runtime startup / controller ownership continue
+=> existing special command handling
+=> normal application elevation gate
+=> if already High: continue
+=> if Medium: relaunch the same executable with ShellExecute "runas" and exit
+=> elevated replacement starts again
+=> elevation gate passes
+=> only then SingleInstanceGate / pending-update / Runtime startup
 ~~~
 
-A cancelled or failed elevation request must leave the medium process unable to enter normal Runtime/controller ownership.
+A cancelled or failed elevation request must leave the medium bootstrap unable to enter controller ownership.
 
-Do not add a permanent launcher executable solely to hide this behavior.
+The normal application's single-instance lifecycle is intentionally High-only. Do not add cross-integrity activation machinery solely to avoid a manual UAC prompt.
 
-### 6.4 Velopack compatibility is an architectural constraint
+### 6.4 Velopack compatibility boundary
 
-The main executable manifest must remain:
+The packaged main executable remains:
 
 ~~~text
 requestedExecutionLevel = asInvoker
 uiAccess = false
 ~~~
 
-Do **not** change the packaged main EXE to `requireAdministrator` for this migration.
+This is a packaging/bootstrap requirement, not the Runtime privilege model.
 
-Reason:
-
-- Velopack executes the configured `--mainExe` for install/update/uninstall fast hooks;
-- Velopack expects `VelopackApp.Build().Run()` to execute before normal application startup;
-- its Windows updater launches those hooks and the post-update restart as child processes;
-- the currently installed pre-migration version is still medium-integrity.
-
-A direct manifest switch to `requireAdministrator` therefore creates a migration hazard where the old medium updater can apply the new package but fail to launch the new main EXE/hook with elevation-required error 740.
-
-Keeping the manifest `asInvoker` avoids that transition break:
+Velopack owns the earliest process lifecycle and invokes the configured main executable for its own hooks. Therefore:
 
 ~~~text
-old medium Runtime
-=> medium Update.exe applies package
-=> new asInvoker hook executes normally
-=> new asInvoker main process restarts normally
-=> normal-runtime bootstrap requests elevation
-=> elevated Runtime becomes the real owner
+packaged EXE / Velopack bootstrap
+= asInvoker-compatible
+
+normal Full1902 Runtime
+= High integrity before Runtime ownership begins
 ~~~
 
-After migration, the steady-state path is:
+Do not change the packaged main EXE to `requireAdministrator`.
+
+Do not move the elevation gate ahead of `VelopackApp.Build().Run()`.
+
+Fresh install:
+
+~~~text
+Velopack install
+=> first normal app launch begins asInvoker
+=> normal-app elevation gate requests UAC
+=> elevated Full1902 Runtime starts
+~~~
+
+Steady-state update:
 
 ~~~text
 elevated Runtime
-=> Update.exe inherits the elevated token
+=> launches Update.exe
+=> updater inherits High
 => package apply
-=> asInvoker main EXE restarted by elevated updater inherits elevation
-=> no second self-elevation is needed
+=> updater starts asInvoker main EXE
+=> child inherits High
+=> Runtime continues without another UAC
 ~~~
 
-Fresh install also remains compatible:
+No historical Medium-to-High release migration or bridge release is required.
 
-~~~text
-per-user Velopack Setup
-=> install hook / first app launch may begin medium
-=> normal-runtime bootstrap performs the one required elevation
-~~~
-
-Do not move the elevation check ahead of `VelopackApp.Build().Run()`.
-
-Do not change the Velopack package/NuGet version as part of this Runtime-elevation PR. The current repository pins Velopack 1.2.158; privilege migration must not depend on a packaging-library upgrade.
+Do not change the Velopack package/NuGet version as part of the elevation implementation.
 
 ---
 
@@ -355,7 +348,7 @@ Do not change the Velopack package/NuGet version as part of this Runtime-elevati
 
 This architecture decision does **not** require immediate helper consolidation.
 
-In particular, keep the existing TDP helper in the first elevation migration:
+In particular, keep the existing TDP helper in the first elevation implementation:
 
 ~~~text
 SteamInputAddonforClaw.TdpHelper.exe
@@ -369,7 +362,7 @@ Although an elevated Runtime makes the helper's privilege boundary partially red
 
 That isolation and any future helper removal must be evaluated separately.
 
-Do not combine the Runtime-elevation migration with:
+Do not combine the Runtime elevation implementation with:
 
 - moving TDP/Fan/Battery WMI implementation into the Runtime;
 - changing TDP helper timeout/failure behavior;
@@ -392,17 +385,17 @@ Current Runtime-owned user action paths include, among others:
 - Shortcut PowerShell actions;
 - other Runtime-owned external action paths.
 
-For the elevation migration, this consequence is **accepted temporarily**.
+For the elevation implementation, this consequence is **accepted temporarily**.
 
-The first migration must not widen into a generic process-launch privilege refactor.
+The first implementation must not widen into a generic process-launch privilege refactor.
 
 Therefore:
 
 ~~~text
-Runtime elevation migration
+Runtime elevation implementation
 => external action execution semantics remain as they are today
 => if they inherit elevation from Runtime, that is a known temporary behavior
-=> do not block the elevation migration on solving it
+=> do not block the elevation implementation on solving it
 ~~~
 
 This is a deliberate scope decision, not an assertion that elevated external launches are the final product design.
@@ -424,7 +417,7 @@ Decide the final policy for:
 - Shortcut PowerShell actions;
 - URL/shell actions where relevant.
 
-The likely product goal is to avoid silently elevating arbitrary user-selected programs merely because the Addon Runtime is privileged, but that mechanism is **not part of the first Runtime-elevation migration**.
+The likely product goal is to avoid silently elevating arbitrary user-selected programs merely because the Addon Runtime is privileged, but that mechanism is **not part of the first Runtime elevation implementation**.
 
 Do not pre-build an unelevated launcher/broker before that follow-up has reviewed the actual supported action set.
 
@@ -447,7 +440,7 @@ The goal is fewer redundant privilege boundaries without weakening lifecycle/fai
 
 ---
 
-## 10. Explicit non-goals of the first elevation migration
+## 10. Explicit non-goals of the first elevation implementation
 
 Do not include these in the first implementation PR unless a strictly required compile/test fix forces a tiny mechanical change:
 
@@ -493,7 +486,7 @@ The first Runtime-elevation implementation must preserve these facts:
 
 ## 12. Required hardware validation
 
-The elevation migration is not complete from unit tests alone.
+The elevation implementation is not complete from unit tests alone.
 
 Validate on a physical supported MSI Claw.
 
@@ -565,7 +558,7 @@ fan-related helper operations currently exposed
 battery charge-limit path
 ~~~
 
-The elevation migration must not regress their behavior.
+The elevation implementation must not regress their behavior.
 
 ---
 
@@ -577,7 +570,7 @@ One focused implementation PR should cover only what is necessary to establish a
 
 ~~~text
 Runtime privilege requirement
-+ startup-task highest-run-level contract/readback/repair
++ startup-task highest-run-level contract/readback
 + elevation verification/fail-close as needed
 + preserve UI/Overlay child launch
 + preserve existing WinGSuppressionGuard
@@ -642,7 +635,7 @@ Windows logon
                     |
                     v
         SteamInputAddonforClaw Runtime [High]
-        (packaged EXE manifest remains asInvoker; normal Runtime bootstrap elevates)
+        (packaged EXE manifest remains asInvoker; normal app entry elevates before Runtime lifecycle)
                     |
         +-----------+-----------+-------------------+
         |                       |                   |
@@ -658,12 +651,12 @@ Windows logon
 
  Existing TDP helper
     |
-    +-- retained unchanged for first migration
+    +-- retained unchanged for this implementation
     +-- helper consolidation deferred
 
  External user actions
     |
-    +-- current behavior retained for first migration
+    +-- current behavior retained for this implementation
     +-- final privilege boundary deferred to Phase B
 ~~~
 
@@ -671,4 +664,4 @@ The key simplification is:
 
 > **Elevate the existing owner instead of creating another owner.**
 
-The elevation migration should solve the administrator-game WING suppression failure by making the existing Full1902 Runtime authority valid at the required Windows integrity level, while deliberately postponing unrelated privileged-process cleanup until the new model is proven.
+The elevation implementation should solve the administrator-game WING suppression failure by making the existing Full1902 Runtime authority valid at the required Windows integrity level, while deliberately postponing unrelated privileged-process cleanup until the new model is proven.
