@@ -124,6 +124,8 @@ public sealed class OverlayQamVisualResourcesTests
         AssertResourceValue(resources, "QamRailButtonSize", "52");
         AssertResourceValue(resources, "QamRailItemHeight", "64");
         AssertResourceValue(resources, "QamRailIconSize", "24");
+        AssertResourceValue(resources, "QamRailHintIconSize", "16");
+        AssertResourceValue(resources, "QamRailHintMargin", "0,12,0,12");
         AssertResourceValue(resources, "QamSectionSpacing", "24");
         AssertResourceValue(resources, "QamSectionHeaderSpacing", "4");
         AssertResourceValue(resources, "QamRowSpacing", "0");

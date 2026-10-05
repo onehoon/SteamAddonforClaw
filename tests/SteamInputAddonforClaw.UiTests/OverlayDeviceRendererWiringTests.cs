@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Xml.Linq;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Overlay;
@@ -817,7 +818,7 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Overlay_shell_uses_a_left_vertical_icon_rail_without_bumper_images()
+    public void Overlay_shell_uses_a_left_vertical_fluent_icon_rail_and_passive_bumper_hints()
     {
         var xaml = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml");
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
@@ -831,6 +832,14 @@ public sealed class OverlayDeviceRendererWiringTests
         var bodyStart = xaml.IndexOf("<Grid Grid.Column=\"1\"", StringComparison.Ordinal);
         var bodyEnd = xaml.IndexOf("</Grid>", bodyStart, StringComparison.Ordinal);
         var bodyColumn = xaml[bodyStart..bodyEnd];
+        var document = XDocument.Parse(xaml);
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var railElement = document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == "TabRail");
+        var railLayout = Assert.Single(railElement.Elements(), element => element.Name.LocalName == "Grid");
+        var tabStrip = railLayout.Elements().Single(element => (string?)element.Attribute(x + "Name") == "TabStrip");
+        var previousHint = railLayout.Elements().Single(element => (string?)element.Attribute(x + "Name") == "PreviousTabBumperHint");
+        var nextHint = railLayout.Elements().Single(element => (string?)element.Attribute(x + "Name") == "NextTabBumperHint");
+        var railFontIcons = railElement.Descendants().Where(element => element.Name.LocalName == "FontIcon").ToArray();
 
         Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
         Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
@@ -855,20 +864,52 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.DoesNotContain("Steam_RB.png", xaml);
         Assert.DoesNotContain("Assets\\Controller\\Steam_LB.png", project);
         Assert.DoesNotContain("Assets\\Controller\\Steam_RB.png", project);
-        Assert.DoesNotContain("PreviousTabHint", shell);
-        Assert.DoesNotContain("NextTabHint", shell);
+        Assert.Equal("\uF10C", (string?)previousHint.Attribute("Glyph"));
+        Assert.Equal("\uF10D", (string?)nextHint.Attribute("Glyph"));
+        Assert.Equal("Segoe Fluent Icons", (string?)previousHint.Attribute("FontFamily"));
+        Assert.Equal("Segoe Fluent Icons", (string?)nextHint.Attribute("FontFamily"));
+        Assert.Equal("{StaticResource QamRailHintIconSize}", (string?)previousHint.Attribute("FontSize"));
+        Assert.Equal("{StaticResource QamRailHintIconSize}", (string?)nextHint.Attribute("FontSize"));
+        Assert.Equal("{StaticResource QamDisabledTextBrush}", (string?)previousHint.Attribute("Foreground"));
+        Assert.Equal("{StaticResource QamDisabledTextBrush}", (string?)nextHint.Attribute("Foreground"));
+        Assert.Equal("Top", (string?)previousHint.Attribute("VerticalAlignment"));
+        Assert.Equal("Bottom", (string?)nextHint.Attribute("VerticalAlignment"));
+        Assert.Equal("False", (string?)previousHint.Attribute("IsHitTestVisible"));
+        Assert.Equal("False", (string?)nextHint.Attribute("IsHitTestVisible"));
+        Assert.Single(railFontIcons, element => (string?)element.Attribute("Glyph") == "\uF10C");
+        Assert.Single(railFontIcons, element => (string?)element.Attribute("Glyph") == "\uF10D");
+        Assert.Equal("LB, previous tab", (string?)previousHint.Attribute("AutomationProperties.Name"));
+        Assert.Equal("RB, next tab", (string?)nextHint.Attribute("AutomationProperties.Name"));
+        Assert.Same(railLayout, tabStrip.Parent);
+        Assert.Same(railLayout, previousHint.Parent);
+        Assert.Same(railLayout, nextHint.Parent);
+        Assert.Equal("Center", (string?)tabStrip.Attribute("VerticalAlignment"));
+        Assert.Equal("{StaticResource QamRailSpacing}", (string?)tabStrip.Attribute("RowSpacing"));
         Assert.Contains("Grid.SetRow(tabHost, position)", shell);
         Assert.DoesNotContain("Grid.SetColumn(tabHost, position)", shell);
         Assert.Contains("TabStrip.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });", shell);
         Assert.Contains("AutomationProperties.SetName(button, label)", shell);
         Assert.Contains("ToolTipService.SetToolTip(button, label)", shell);
-        Assert.Contains("Symbol.CellPhone", shell);
-        Assert.Contains("Symbol.Contact", shell);
-        Assert.Contains("Symbol.XboxOneConsole", shell);
-        Assert.Contains("Symbol.ViewAll", shell);
-        Assert.Contains("Symbol.Setting", shell);
+        Assert.Contains("Content = new FontIcon", shell);
+        Assert.Contains("FontFamily = new FontFamily(\"Segoe Fluent Icons\")", shell);
+        Assert.Contains("Glyph = GlyphFor(id)", shell);
+        Assert.Contains("FontSize = OverlayQamResources.Get(\"QamRailIconSize\", 24.0)", shell);
+        Assert.Contains("private static string GlyphFor(AddonQuickSettingsTabId id)", shell);
+        Assert.Contains("AddonQuickSettingsTabId.Device => \"\\uE945\"", shell);
+        Assert.Contains("AddonQuickSettingsTabId.Profile => \"\\uE71D\"", shell);
+        Assert.Contains("AddonQuickSettingsTabId.Controller => \"\\uE7FC\"", shell);
+        Assert.Contains("AddonQuickSettingsTabId.Shortcut => \"\\uE75F\"", shell);
+        Assert.Contains("AddonQuickSettingsTabId.Setting => \"\\uE713\"", shell);
+        Assert.DoesNotContain("SymbolIcon", shell);
+        Assert.DoesNotContain("SymbolFor(", shell);
         Assert.Contains("QamRailButtonStyle", shell);
         Assert.Contains("QamRailIconSize", shell);
+        Assert.DoesNotContain("Foreground =", shell[shell.IndexOf("Content = new FontIcon", StringComparison.Ordinal)..shell.IndexOf("Tag = id", StringComparison.Ordinal)]);
+        var selectedVisual = shell[shell.IndexOf("private void ApplySelectedHeaderVisual()", StringComparison.Ordinal)..
+            shell.IndexOf("// s.12: deterministic tab-change ordering", StringComparison.Ordinal)];
+        Assert.Contains("button.Background =", selectedVisual);
+        Assert.Contains("button.Foreground =", selectedVisual);
+        Assert.DoesNotContain("FontIcon", selectedVisual);
         Assert.DoesNotContain("_tabIndicators", shell);
         Assert.Contains("OpaquePanel.Width = Math.Max(0.0, args.NewSize.Width);", presentation);
         Assert.Contains("MinWidth = 0", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));

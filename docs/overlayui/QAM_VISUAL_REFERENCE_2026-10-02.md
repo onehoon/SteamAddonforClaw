@@ -94,6 +94,22 @@ At the time of this capture, the Overlay used a 416 DIP surface and 52 DIP struc
 - This source/theme evidence does **not** establish the current Steam QAM's live computed ToggleField color, geometry, or state styling. No live ToggleField was available during the cited DevTools capture; a current computed-style capture remains outstanding. The Overlay's `#1A9FFF` ON rail is therefore an evidence-backed design direction, not an observed live QAM measurement.
 - Toggle OFF, thumb, and Slider resources remain unchanged by this hardware polish.
 
+## Selected Overlay rail glyphs — 2026-10-05
+
+The Overlay tab rail uses the explicitly selected **Segoe Fluent Icons** glyphs below. This is an Addon product selection, not a measurement of Steam's current icon font or a claim of visual parity with Steam assets.
+
+| Rail item | Glyph | Fluent icon name | Behavior |
+| --- | --- | --- | --- |
+| Device | `E945` | LightningBolt | Existing tab selection |
+| Profile | `E71D` | AllApps | Existing tab selection |
+| Controller | `E7FC` | Game | Existing tab selection |
+| Shortcut | `E75F` | Dialpad | Existing tab selection |
+| Setting | `E713` | Settings | Existing tab selection |
+| Top rail hint | `F10C` | BumperLeft | Passive LB / previous-tab guidance |
+| Bottom rail hint | `F10D` | BumperRight | Passive RB / next-tab guidance |
+
+The two bumper glyphs are fixed, non-hit-testable rail chrome outside the reorderable `TabStrip`. They do not receive input or participate in selection; actual LB/RB behavior remains the existing controller-driven previous/next tab navigation. No SVG/PNG or other image assets are introduced.
+
 ## Deferred to PR B or hardware acceptance
 
 - Measured ToggleSwitch track/thumb, numeric slider, discrete selector, and stepper-button templates/states; PR B follow-up found stylesheet declarations only and no live control instance.

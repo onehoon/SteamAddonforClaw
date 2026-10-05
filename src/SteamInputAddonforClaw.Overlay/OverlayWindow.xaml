@@ -23,10 +23,34 @@
                         Grid.Column="0"
                         Background="{StaticResource QamRailBrush}"
                         CornerRadius="{StaticResource QamRailCornerRadius}">
-                        <Grid
-                            x:Name="TabStrip"
-                            VerticalAlignment="Center"
-                            RowSpacing="{StaticResource QamRailSpacing}" />
+                        <Grid>
+                            <FontIcon
+                                x:Name="PreviousTabBumperHint"
+                                Glyph="&#xF10C;"
+                                FontFamily="Segoe Fluent Icons"
+                                FontSize="{StaticResource QamRailHintIconSize}"
+                                Foreground="{StaticResource QamDisabledTextBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Top"
+                                Margin="{StaticResource QamRailHintMargin}"
+                                IsHitTestVisible="False"
+                                AutomationProperties.Name="LB, previous tab" />
+                            <Grid
+                                x:Name="TabStrip"
+                                VerticalAlignment="Center"
+                                RowSpacing="{StaticResource QamRailSpacing}" />
+                            <FontIcon
+                                x:Name="NextTabBumperHint"
+                                Glyph="&#xF10D;"
+                                FontFamily="Segoe Fluent Icons"
+                                FontSize="{StaticResource QamRailHintIconSize}"
+                                Foreground="{StaticResource QamDisabledTextBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Bottom"
+                                Margin="{StaticResource QamRailHintMargin}"
+                                IsHitTestVisible="False"
+                                AutomationProperties.Name="RB, next tab" />
+                        </Grid>
                     </Border>
 
                     <Grid Grid.Column="1">
