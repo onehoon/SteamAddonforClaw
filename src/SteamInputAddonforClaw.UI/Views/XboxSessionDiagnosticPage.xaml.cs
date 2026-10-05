@@ -114,8 +114,15 @@ public sealed partial class XboxSessionDiagnosticPage : UserControl
     {
         try
         {
-            if (_frontend is not null && _isActive && !_requestPending)
-                Render(await _frontend.CaptureXboxSessionDiagnosticAsync().ConfigureAwait(true));
+            var frontend = _frontend;
+            if (frontend is null || !_isActive || _requestPending)
+                return;
+
+            var snapshot = await frontend.CaptureXboxSessionDiagnosticAsync().ConfigureAwait(true);
+            if (!_isActive)
+                return;
+
+            Render(snapshot);
         }
         catch (Exception exception)
         {

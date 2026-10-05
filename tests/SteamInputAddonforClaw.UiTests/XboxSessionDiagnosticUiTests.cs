@@ -60,6 +60,26 @@ public sealed class XboxSessionDiagnosticUiTests
     }
 
     [Fact]
+    public void Refresh_does_not_render_a_capture_that_completes_after_deactivation()
+    {
+        var diagnosticCode = Read("src/SteamInputAddonforClaw.UI/Views/XboxSessionDiagnosticPage.xaml.cs");
+        var start = diagnosticCode.IndexOf("private async Task RefreshAsync()", StringComparison.Ordinal);
+        var end = diagnosticCode.IndexOf("private async Task StopAfterLeavingPageAsync()", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var method = diagnosticCode[start..end];
+
+        var capture = method.IndexOf("await frontend.CaptureXboxSessionDiagnosticAsync().ConfigureAwait(true)", StringComparison.Ordinal);
+        Assert.True(capture >= 0);
+        var activeCheck = method.IndexOf("if (!_isActive)", capture, StringComparison.Ordinal);
+        Assert.True(activeCheck > capture);
+        var render = method.IndexOf("Render(snapshot);", activeCheck, StringComparison.Ordinal);
+        Assert.True(render > activeCheck);
+        Assert.Contains("var frontend = _frontend;", method, StringComparison.Ordinal);
+        Assert.Contains("if (frontend is null || !_isActive || _requestPending)", method, StringComparison.Ordinal);
+        Assert.Contains("return;", method[activeCheck..render], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UI_does_not_query_process_package_or_config_identity()
     {
         var sources = string.Join("\n", [
