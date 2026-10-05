@@ -91,8 +91,10 @@ public sealed class GameBarStateDiagnosticObserverTests
 
         Assert.True(visibleSubscription >= 0 && firstDisposeCheck > visibleSubscription && firstDisposeCheck < redirectedSubscription);
         Assert.True(redirectedSubscription >= 0 && secondDisposeCheck > redirectedSubscription);
-        Assert.Contains("ReadAndLogState(\"ObserverStarted\");", initialize);
-        Assert.Contains("if (Volatile.Read(ref _disposeRequested) != 0)\n            RemoveSubscriptions();", initialize);
+        var initialStateRead = initialize.IndexOf("ReadAndLogState(\"ObserverStarted\");", StringComparison.Ordinal);
+        var postReadDisposeCheck = initialize.IndexOf("if (Volatile.Read(ref _disposeRequested) != 0)", initialStateRead, StringComparison.Ordinal);
+        var postReadCleanup = initialize.IndexOf("RemoveSubscriptions();", postReadDisposeCheck, StringComparison.Ordinal);
+        Assert.True(initialStateRead >= 0 && postReadDisposeCheck > initialStateRead && postReadCleanup > postReadDisposeCheck);
     }
 
     [Fact]
