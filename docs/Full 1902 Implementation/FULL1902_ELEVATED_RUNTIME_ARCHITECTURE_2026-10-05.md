@@ -273,13 +273,81 @@ Do not create a second elevation-specific controller lifecycle.
 
 ### 6.3 Manual launch behavior
 
-The final implementation work order must preserve the invariant that the primary Runtime reaches the required elevated state even when started outside the normal logon task path.
+The primary Runtime must reach the required elevated state even when started outside the normal logon task path.
 
-The exact bootstrap detail may be chosen during implementation, but the architecture must not permit a medium-integrity primary Runtime to continue into controller ownership.
+The accepted bootstrap is:
 
-A direct/manual launch may require UAC if no already-valid elevated Runtime/startup path can service the request.
+~~~text
+VelopackApp.Build().Run()
+=> allow Velopack fast hooks to execute/exit in the normal per-user process
+=> allow non-Runtime special command modes to keep their existing ownership/elevation behavior
+=> perform the existing single-instance check
+   - secondary launch: activate the already-running Runtime and exit without a new UAC prompt
+   - primary launch: continue
+=> if the primary normal-runtime process is not elevated:
+   release the single-instance gate
+   relaunch the same current executable with ShellExecute "runas" and the same arguments
+   exit the medium process
+=> elevated replacement reacquires the single-instance gate
+=> only then may normal Runtime startup / controller ownership continue
+~~~
 
-Avoid adding a new permanent launcher executable solely to hide this behavior.
+A cancelled or failed elevation request must leave the medium process unable to enter normal Runtime/controller ownership.
+
+Do not add a permanent launcher executable solely to hide this behavior.
+
+### 6.4 Velopack compatibility is an architectural constraint
+
+The main executable manifest must remain:
+
+~~~text
+requestedExecutionLevel = asInvoker
+uiAccess = false
+~~~
+
+Do **not** change the packaged main EXE to `requireAdministrator` for this migration.
+
+Reason:
+
+- Velopack executes the configured `--mainExe` for install/update/uninstall fast hooks;
+- Velopack expects `VelopackApp.Build().Run()` to execute before normal application startup;
+- its Windows updater launches those hooks and the post-update restart as child processes;
+- the currently installed pre-migration version is still medium-integrity.
+
+A direct manifest switch to `requireAdministrator` therefore creates a migration hazard where the old medium updater can apply the new package but fail to launch the new main EXE/hook with elevation-required error 740.
+
+Keeping the manifest `asInvoker` avoids that transition break:
+
+~~~text
+old medium Runtime
+=> medium Update.exe applies package
+=> new asInvoker hook executes normally
+=> new asInvoker main process restarts normally
+=> normal-runtime bootstrap requests elevation
+=> elevated Runtime becomes the real owner
+~~~
+
+After migration, the steady-state path is:
+
+~~~text
+elevated Runtime
+=> Update.exe inherits the elevated token
+=> package apply
+=> asInvoker main EXE restarted by elevated updater inherits elevation
+=> no second self-elevation is needed
+~~~
+
+Fresh install also remains compatible:
+
+~~~text
+per-user Velopack Setup
+=> install hook / first app launch may begin medium
+=> normal-runtime bootstrap performs the one required elevation
+~~~
+
+Do not move the elevation check ahead of `VelopackApp.Build().Run()`.
+
+Do not change the Velopack package/NuGet version as part of this Runtime-elevation PR. The current repository pins Velopack 1.2.158; privilege migration must not depend on a packaging-library upgrade.
 
 ---
 
@@ -574,6 +642,7 @@ Windows logon
                     |
                     v
         SteamInputAddonforClaw Runtime [High]
+        (packaged EXE manifest remains asInvoker; normal Runtime bootstrap elevates)
                     |
         +-----------+-----------+-------------------+
         |                       |                   |
