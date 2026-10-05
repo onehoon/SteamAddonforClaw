@@ -81,16 +81,14 @@ public sealed partial class OverlayWindow
 
     private static StackPanel CreateControllerSection(string title)
     {
-        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
-        var heading = new TextBlock { Text = title };
-        OverlayQamResources.ApplyTextStyle(heading, "QamBodyStrongTextStyle");
-        section.Children.Add(heading);
+        var section = new StackPanel { Spacing = OverlayQamResources.Get("QamRowSpacing", 0.0) };
+        section.Children.Add(CreateOverlaySectionHeadingRow(title));
         return section;
     }
 
     private void BuildControllerLedRows(StackPanel section, List<OverlayRow> rows)
     {
-        _controllerLedEnabledRow = new OverlayToggleRow("Joystick LED", RequestControllerLedEnabled);
+        _controllerLedEnabledRow = new OverlayToggleRow("Joystick LED", RequestControllerLedEnabled, strongLabel: true);
         AddControllerRow(section, rows, _controllerLedEnabledRow.Container, _controllerLedEnabledRow.Capabilities);
 
         var details = CreateOverlayDetailStack();

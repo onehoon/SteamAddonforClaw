@@ -143,6 +143,37 @@ public sealed class OverlayQamVisualResourcesTests
     }
 
     [Fact]
+    public void Passive_section_heading_uses_the_existing_strong_text_style_and_row_chrome()
+    {
+        var quickSettings = File.ReadAllText(Path.Combine(
+            RepoRoot(), "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
+        var rowChrome = File.ReadAllText(Path.Combine(
+            RepoRoot(), "src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs"));
+        var resources = XDocument.Load(Path.Combine(
+            RepoRoot(), "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var headingStart = quickSettings.IndexOf("private static Border CreateOverlaySectionHeadingRow", StringComparison.Ordinal);
+        var headingEnd = quickSettings.IndexOf("private static StackPanel CreateOverlayDetailStack", headingStart, StringComparison.Ordinal);
+        var heading = quickSettings[headingStart..headingEnd];
+        var strongStyle = resources.Descendants().Single(element =>
+            element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == "QamBodyStrongTextStyle");
+        var bodyStyle = resources.Descendants().Single(element =>
+            element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == "QamBodyTextStyle");
+        string? SetterValue(XElement style, string property) => style.Elements().Single(element =>
+            element.Name.LocalName == "Setter" && (string?)element.Attribute("Property") == property).Attribute("Value")?.Value;
+
+        Assert.True(headingStart >= 0);
+        Assert.True(headingEnd > headingStart);
+        Assert.Contains("QamBodyStrongTextStyle", heading);
+        Assert.Contains("OverlayRowChrome.Create(heading)", heading);
+        Assert.Equal("SemiBold", SetterValue(strongStyle, "FontWeight"));
+        Assert.Equal("{StaticResource QamPrimaryTextBrush}", SetterValue(strongStyle, "Foreground"));
+        Assert.Equal("{StaticResource QamSecondaryTextBrush}", SetterValue(bodyStyle, "Foreground"));
+        Assert.Contains("QamRowPadding", rowChrome);
+        Assert.Contains("QamRowMinHeight", rowChrome);
+        Assert.Contains("QamRowCornerRadius", rowChrome);
+    }
+
+    [Fact]
     public void Toggle_on_uses_the_evidence_backed_steam_blue_resource()
     {
         var root = RepoRoot();
