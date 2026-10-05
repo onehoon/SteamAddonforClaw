@@ -212,6 +212,7 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Expander.IsExpanded =", codeBehind, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsExpander.HeaderIcon>\n                    <FontIcon Glyph=\"&#xE83F;\" />\n                </ctcontrols:SettingsExpander.HeaderIcon>", normalizedXaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"TDP Control\"", xaml, StringComparison.Ordinal);
         Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
     }
@@ -721,11 +722,18 @@ public sealed class UiArchitectureTests
         var fpsDeclarationEnd = xaml.IndexOf('>', fpsDeclarationStart);
         Assert.True(fpsDeclarationStart >= 0 && fpsDeclarationEnd > fpsDeclarationStart);
         var fpsDeclaration = xaml[fpsDeclarationStart..fpsDeclarationEnd];
-        Assert.Contains("Visibility=\"Collapsed\"", fpsDeclaration, StringComparison.Ordinal);
-        Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("Visibility=\"Collapsed\"", fpsDeclaration, StringComparison.Ordinal);
+        Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Resolution\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Resolution\"", StringComparison.Ordinal));
+        foreach (var expanderName in new[] { "TdpExpander", "CpuBoostExpander", "PowerModeExpander", "IntelFpsExpander" })
+        {
+            var declarationStart = xaml.IndexOf($"x:Name=\"{expanderName}\"", StringComparison.Ordinal);
+            var declarationEnd = xaml.IndexOf('>', declarationStart);
+            Assert.True(declarationStart >= 0 && declarationEnd > declarationStart);
+            Assert.Contains("IsExpanded=\"False\"", xaml[declarationStart..declarationEnd], StringComparison.Ordinal);
+        }
         Assert.DoesNotContain("x:Name=\"DisplayExpander\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsExpanded=\"True\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsCard Header=\"Resolution\">", xaml, StringComparison.Ordinal);
@@ -733,8 +741,12 @@ public sealed class UiArchitectureTests
         Assert.Contains("new(null, null, \"Do not change\"), new(1920, 1200, \"1920 × 1200\"), new(1920, 1080, \"1920 × 1080\"), new(1680, 1050, \"1680 × 1050\"), new(1440, 900, \"1440 × 900\")", codeBehind, StringComparison.Ordinal);
         Assert.Contains("HeaderIcon", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xEC4A;\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xE945;\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Glyph=\"&#xEEA1;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE83F;\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Glyph=\"&#xE7F4;\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("snapshot.FpsLimit?.Available == true ? \"Uses Intel's official API. Some games may not support FPS limiting.\" : snapshot.FpsLimit?.UnavailableReason", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("<TextBlock Text=\"Profile\" VerticalAlignment=\"Center\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsCard Grid.Row=\"1\">", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SelectedGameNameText\"", xaml, StringComparison.Ordinal);

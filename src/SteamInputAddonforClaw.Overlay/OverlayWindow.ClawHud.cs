@@ -56,6 +56,9 @@ public sealed partial class OverlayWindow
         _clawHudCard = CreateSettingCard(SettingCardId.ClawHud, "ClawHUD", clawHudDetails);
         _quickSettingsCard = CreateSettingCard(SettingCardId.QuickSettings, "Quick Settings", quickSettingsDetails);
         _tabOrderCard = CreateSettingCard(SettingCardId.TabOrder, "Tab Order", tabOrderDetails);
+        SetOverlaySectionSeparator(_clawHudCard.Container, visible: false);
+        SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true);
+        SetOverlaySectionSeparator(_tabOrderCard.Container, visible: true);
 
         var root = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
         root.Children.Add(_clawHudCard.Container);

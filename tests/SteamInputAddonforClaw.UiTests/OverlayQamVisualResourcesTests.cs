@@ -69,6 +69,10 @@ public sealed class OverlayQamVisualResourcesTests
         var tabBody = insetHost.Descendants().Single(element =>
             (string?)element.Attribute(Xaml + "Name") == "TabBody");
         var rowChrome = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayRowChrome.cs"));
+        var quickSettings = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"));
+        var sectionCardStart = quickSettings.IndexOf("private static Border CreateOverlaySectionCard", StringComparison.Ordinal);
+        var sectionCardEnd = quickSettings.IndexOf("private bool TryCreateQuickSettingsRow", sectionCardStart, StringComparison.Ordinal);
+        var sectionCard = quickSettings[sectionCardStart..sectionCardEnd];
         var rightRows = rightContentHost.Elements().Single(element => element.Name.LocalName == "Grid.RowDefinitions")
             .Elements().Select(element => (string?)element.Attribute("Height")).ToArray();
 
@@ -102,9 +106,18 @@ public sealed class OverlayQamVisualResourcesTests
         AssertResourceValue(resources, "QamRowMinHeight", "42");
         AssertResourceValue(resources, "QamRowCornerRadius", "2");
         Assert.Equal("#1AFFFFFF", Resource(resources, "QamSeparatorBrush").Attribute("Color")?.Value);
-        AssertResourceValue(resources, "QamRowSeparatorThickness", "0,0,0,1");
-        Assert.Contains("BorderThickness = OverlayQamResources.Get(\"QamRowSeparatorThickness\", new Thickness(0, 0, 0, 1))", rowChrome);
-        Assert.Contains("BorderBrush = OverlayQamResources.Brush(\"QamSeparatorBrush\")", rowChrome);
+        AssertResourceValue(resources, "QamSectionSeparatorThickness", "0,1,0,0");
+        AssertResourceValue(resources, "QamSectionPadding", "16,0,16,0");
+        Assert.DoesNotContain(resources.Descendants().Attributes(Xaml + "Key"), attribute => attribute.Value == "QamRowSeparatorThickness");
+        Assert.Contains("BorderThickness = OverlayQamResources.Get(\"QamSelectionBorderThickness\", new Thickness(0))", rowChrome);
+        Assert.DoesNotContain("QamSeparatorBrush", rowChrome);
+        Assert.DoesNotContain("QamSectionSeparatorThickness", rowChrome);
+        Assert.Contains("private static void SetOverlaySectionSeparator(Border card, bool visible)", quickSettings);
+        Assert.Contains("card.BorderBrush = OverlayQamResources.Brush(\"QamSeparatorBrush\")", quickSettings);
+        Assert.Contains("\"QamSectionSeparatorThickness\"", quickSettings);
+        Assert.Contains("Margin = OverlayQamResources.Get(\"QamRowMargin\", new Thickness(-16, 0, -16, 0))", quickSettings);
+        Assert.Contains("BorderBrush = OverlayQamResources.Brush(\"QamSeparatorBrush\")", sectionCard);
+        Assert.Contains("BorderThickness = new Thickness(0)", sectionCard);
         Assert.Contains("QamRowPadding", rowChrome);
         Assert.Contains("QamRowMinHeight", rowChrome);
         Assert.Contains("QamRowCornerRadius", rowChrome);

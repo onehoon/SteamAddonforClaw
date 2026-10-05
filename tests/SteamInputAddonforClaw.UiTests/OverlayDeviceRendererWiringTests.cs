@@ -287,6 +287,30 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Quick_settings_section_separators_follow_the_current_visible_feature_order()
+    {
+        var source = ReadOverlayWindowSource();
+        var rebuild = source[source.IndexOf("private void RebuildQuickSettingsContent", StringComparison.Ordinal)..
+            source.IndexOf("private void ReconcileQuickSettingsSections", StringComparison.Ordinal)];
+        var reconcile = source[source.IndexOf("private void ReconcileQuickSettingsSections", StringComparison.Ordinal)..
+            source.IndexOf("private RenderedQuickSettingsSection BuildQuickSettingsSection", StringComparison.Ordinal)];
+        var separatorPolicy = source[source.IndexOf("private static void ApplyQuickSettingsSectionSeparators", StringComparison.Ordinal)..
+            source.IndexOf("private static Border CreateOverlaySectionCard", StringComparison.Ordinal)];
+
+        Assert.Contains("ApplyQuickSettingsSectionSeparators(surface, page);", rebuild);
+        Assert.Contains("ReorderQuickSettingsSectionCards(surface, page);", reconcile);
+        Assert.Contains("ApplyQuickSettingsSectionSeparators(surface, page);", reconcile);
+        Assert.Contains("rendered.Card is null", separatorPolicy);
+        Assert.Contains("surface.PageId == QuickSettingsPageId.Profile", separatorPolicy);
+        Assert.Contains("section.SectionId == QuickSettingsSectionId.ProfileGeneral", separatorPolicy);
+        Assert.Contains("var hasFeature = false;", separatorPolicy);
+        Assert.Contains("SetOverlaySectionSeparator(rendered.Card, hasFeature)", separatorPolicy);
+        Assert.True(separatorPolicy.IndexOf("SetOverlaySectionSeparator(rendered.Card, hasFeature)", StringComparison.Ordinal)
+            < separatorPolicy.IndexOf("hasFeature = true", StringComparison.Ordinal));
+        Assert.DoesNotContain("QuickSettingsSectionId.ProfileTdp", separatorPolicy);
+    }
+
+    [Fact]
     public void Quick_settings_section_updates_preserve_selected_row_identity_and_scroll_only_when_needed()
     {
         var source = ReadOverlayWindowSource();
@@ -571,7 +595,7 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("var sectionPanel = new StackPanel", quickSettings);
         Assert.Contains("QamSectionSpacing", quickSettings);
-        Assert.Contains("var rowStack = new StackPanel", quickSettings);
+        Assert.Contains("var rowStack = usesFeatureHeader", quickSettings);
         Assert.Contains("sectionPanel.Children.Add(rowStack);", quickSettings);
         Assert.Contains("RegisterRowPointerSelection(overlayRow.Container);", quickSettings);
         Assert.Contains("RegisterRowPointerSelection(row.Container);", source);
@@ -609,16 +633,13 @@ public sealed class OverlayDeviceRendererWiringTests
         var buildSection = quickSettings[buildStart..buildEnd];
 
         Assert.Contains("var detailStack = usesFeatureHeader", buildSection);
-        Assert.Contains("Margin = OverlayQamResources.Get(\"QamDetailIndent\", new Thickness(16, 0, 0, 0))", buildSection);
-        var indentPageCondition = buildSection.IndexOf("surface.PageId == QuickSettingsPageId.Profile", StringComparison.Ordinal);
-        var indentConditionStart = buildSection.LastIndexOf("if (", indentPageCondition, StringComparison.Ordinal);
-        var indentConditionEnd = buildSection.IndexOf(")", indentPageCondition, StringComparison.Ordinal);
-        var indentCondition = buildSection[indentConditionStart..indentConditionEnd];
-        Assert.Contains("surface.PageId == QuickSettingsPageId.Profile", indentCondition);
-        Assert.Contains("section.SectionId == QuickSettingsSectionId.ProfileResolution", indentCondition);
-        Assert.Contains("rowStack.Margin = OverlayQamResources.Get(", buildSection);
-        Assert.Contains("\"QamDetailIndent\"", buildSection);
-        Assert.Equal(1, CountOccurrences(buildSection, "rowStack.Margin = OverlayQamResources.Get("));
+        Assert.Contains("CreateOverlayDetailStack()", buildSection);
+        Assert.DoesNotContain("QamDetailIndent", buildSection);
+        var detailStackStart = quickSettings.IndexOf("private static StackPanel CreateOverlayDetailStack()", StringComparison.Ordinal);
+        var detailStackEnd = quickSettings.IndexOf("private static void SetOverlaySectionSeparator", detailStackStart, StringComparison.Ordinal);
+        var detailStack = quickSettings[detailStackStart..detailStackEnd];
+        Assert.Contains("QamRowSpacing", detailStack);
+        Assert.Contains("QamDetailIndent", detailStack);
     }
 
     [Fact]
@@ -650,6 +671,23 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("OverlayRowChrome.Create(grid)", valueRow);
         Assert.DoesNotContain("CreateOverlaySectionCard(BuildShortcutPage())", shell);
         Assert.DoesNotContain("CreateOverlaySectionCard(BuildProfilePage())", shell);
+    }
+
+    [Fact]
+    public void Setting_cards_use_the_shared_separator_only_on_outer_sections()
+    {
+        var clawHud = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.ClawHud.cs");
+        var settingPage = clawHud[clawHud.IndexOf("private FrameworkElement BuildSettingPage", StringComparison.Ordinal)..
+            clawHud.IndexOf("private SettingCardView CreateSettingCard", StringComparison.Ordinal)];
+        var createCard = clawHud[clawHud.IndexOf("private SettingCardView CreateSettingCard", StringComparison.Ordinal)..
+            clawHud.IndexOf("private List<OverlayRow> BuildSettingRows", StringComparison.Ordinal)];
+
+        Assert.Contains("SetOverlaySectionSeparator(_clawHudCard.Container, visible: false)", settingPage);
+        Assert.Contains("SetOverlaySectionSeparator(_quickSettingsCard.Container, visible: true)", settingPage);
+        Assert.Contains("SetOverlaySectionSeparator(_tabOrderCard.Container, visible: true)", settingPage);
+        Assert.Contains("CreateOverlaySectionCard(content)", createCard);
+        Assert.DoesNotContain("SetOverlaySectionSeparator", createCard);
+        Assert.DoesNotContain("QamSeparatorBrush", createCard);
     }
 
     [Fact]
@@ -781,8 +819,9 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("QamRowPadding", chrome);
         Assert.Contains("QamRowMinHeight", chrome);
         Assert.Contains("QamRowCornerRadius", chrome);
-        Assert.Contains("QamRowSeparatorThickness", chrome);
-        Assert.Contains("QamSeparatorBrush", chrome);
+        Assert.Contains("QamSelectionBorderThickness", chrome);
+        Assert.DoesNotContain("QamRowSeparatorThickness", chrome);
+        Assert.DoesNotContain("QamSeparatorBrush", chrome);
         Assert.Contains("QamSelectedFillBrush", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.xaml.cs"));
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayToggleRow.cs"));
         Assert.Contains("OverlayRowChrome.Create(grid)", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayValueRow.cs"));

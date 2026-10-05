@@ -46,6 +46,8 @@ public sealed partial class OverlayWindow
     {
         var page = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionSpacing", 24.0) };
         var mappingSection = CreateControllerSection("M1 / M2");
+        var mappingDetails = CreateOverlayDetailStack();
+        mappingSection.Children.Add(mappingDetails);
         var ledSection = new StackPanel { Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0) };
         var vibrationSection = CreateControllerSection("Vibration Strength");
 
@@ -58,16 +60,21 @@ public sealed partial class OverlayWindow
         _m1MappingRow = m1Row;
         _m2MappingRow = m2Row;
 
-        AddBackButtonMappingRow(mappingSection, rows, m1Row);
-        AddBackButtonMappingRow(mappingSection, rows, m2Row);
+        AddBackButtonMappingRow(mappingDetails, rows, m1Row);
+        AddBackButtonMappingRow(mappingDetails, rows, m2Row);
         RenderBackButtonMappingRows();
 
         BuildControllerLedRows(ledSection, rows);
         BuildControllerVibrationRows(vibrationSection, rows);
-        page.Children.Add(CreateOverlaySectionCard(mappingSection));
+        var mappingCard = CreateOverlaySectionCard(mappingSection);
+        SetOverlaySectionSeparator(mappingCard, visible: false);
+        page.Children.Add(mappingCard);
         _controllerLedSectionCard = CreateOverlaySectionCard(ledSection);
+        SetOverlaySectionSeparator(_controllerLedSectionCard, visible: true);
         page.Children.Add(_controllerLedSectionCard);
-        page.Children.Add(CreateOverlaySectionCard(vibrationSection));
+        var vibrationCard = CreateOverlaySectionCard(vibrationSection);
+        SetOverlaySectionSeparator(vibrationCard, visible: true);
+        page.Children.Add(vibrationCard);
         RenderControllerLedRows();
         return page;
     }
@@ -86,11 +93,7 @@ public sealed partial class OverlayWindow
         _controllerLedEnabledRow = new OverlayToggleRow("Joystick LED", RequestControllerLedEnabled);
         AddControllerRow(section, rows, _controllerLedEnabledRow.Container, _controllerLedEnabledRow.Capabilities);
 
-        var details = new StackPanel
-        {
-            Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0),
-            Margin = OverlayQamResources.Get("QamDetailIndent", new Thickness(16, 0, 0, 0)),
-        };
+        var details = CreateOverlayDetailStack();
         _controllerLedDetailStack = details;
 
         _controllerLedBrightnessRow = new OverlayValueRow("Brightness", OverlayValueRow.FormatInteger,
@@ -133,11 +136,7 @@ public sealed partial class OverlayWindow
 
     private void BuildControllerVibrationRows(StackPanel section, List<OverlayRow> rows)
     {
-        var details = new StackPanel
-        {
-            Spacing = OverlayQamResources.Get("QamSectionHeaderSpacing", 4.0),
-            Margin = OverlayQamResources.Get("QamDetailIndent", new Thickness(16, 0, 0, 0)),
-        };
+        var details = CreateOverlayDetailStack();
         _leftVibrationRow = new OverlayValueRow("Left Motor", FormatPercent,
             value => RequestVibrationEdit(left: (int)Math.Round(value), right: null), OverlayValueButtonKind.NumericStepper);
         _rightVibrationRow = new OverlayValueRow("Right Motor", FormatPercent,

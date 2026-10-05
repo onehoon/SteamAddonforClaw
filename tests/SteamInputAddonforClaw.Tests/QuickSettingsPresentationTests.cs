@@ -27,6 +27,8 @@ public sealed class QuickSettingsPresentationTests
             s => Assert.Equal(QuickSettingsSectionId.DeviceCpuBoost, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.DevicePowerMode, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.DeviceBatteryChargeLimit, s.SectionId));
+
+        Assert.Equal("TDP Control", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.DeviceTdp).Label);
     }
 
     [Fact]
@@ -401,10 +403,12 @@ public sealed class QuickSettingsPresentationTests
         Assert.Collection(page.Sections,
             s => Assert.Equal(QuickSettingsSectionId.ProfileGeneral, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
-            s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileResolution, s.SectionId));
+
+        Assert.Equal("TDP Control", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Label);
 
         Assert.Equal([QuickSettingsRowId.ProfileEnabled], page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2],
