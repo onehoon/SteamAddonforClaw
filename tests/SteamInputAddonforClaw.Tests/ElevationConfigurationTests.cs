@@ -87,6 +87,8 @@ public sealed class ElevationConfigurationTests
     public void Elevation_gate_precedes_single_instance_and_returns_on_cancellation()
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Program.cs"));
+        var velopack = source.IndexOf("VelopackApp.Build()", StringComparison.Ordinal);
+        var approvedUninstallFastPath = source.IndexOf("if (UninstallBootstrap.IsSafeUninstallApproved)", StringComparison.Ordinal);
         var specialMode = source.IndexOf("ElevatedStartupTaskSetup.RunRemove(args)", StringComparison.Ordinal);
         var elevationGate = source.IndexOf("TryExtractOriginatingUserSid(args", StringComparison.Ordinal);
         var sidValidation = source.IndexOf("OriginatingUserSidMatches(originatingUserSid, currentUserSid)", StringComparison.Ordinal);
@@ -96,14 +98,20 @@ public sealed class ElevationConfigurationTests
         var cancellationExit = cancellationLog < 0 ? -1 : source.IndexOf("return;", cancellationLog, StringComparison.Ordinal);
         var failureLog = source.IndexOf("Runtime elevation failed; normal Runtime startup is blocked.", StringComparison.Ordinal);
         var failureExit = failureLog < 0 ? -1 : source.IndexOf("return;", failureLog, StringComparison.Ordinal);
+        var elevationCheck = source.IndexOf("if (!IsCurrentProcessElevated())", elevationGate, StringComparison.Ordinal);
+        var safeUninstallDispatch = source.IndexOf("Environment.ExitCode = SafeUninstall.Run(", StringComparison.Ordinal);
+        var safeUninstallExit = safeUninstallDispatch < 0 ? -1 : source.IndexOf("return;", safeUninstallDispatch, StringComparison.Ordinal);
         var singleInstance = source.IndexOf("SingleInstanceGate singleInstanceGate", StringComparison.Ordinal);
         var pendingUpdate = source.IndexOf("TrySchedulePendingUpdateApply(runtimeArgs)", StringComparison.Ordinal);
         var runtimeEntry = source.IndexOf("new RuntimeProcessApplication(runtimeArgs", StringComparison.Ordinal);
 
+        Assert.True(velopack >= 0 && velopack < approvedUninstallFastPath);
+        Assert.True(approvedUninstallFastPath < specialMode);
         Assert.True(specialMode >= 0 && specialMode < elevationGate);
         Assert.True(elevationGate < sidValidation && sidValidation < sidMismatchLog && sidMismatchLog < sidMismatchExit);
         Assert.True(cancellationLog < cancellationExit && cancellationExit < singleInstance);
         Assert.True(failureLog < failureExit && failureExit < singleInstance);
+        Assert.True(elevationCheck < safeUninstallDispatch && safeUninstallDispatch < safeUninstallExit && safeUninstallExit < singleInstance);
         Assert.True(elevationGate < singleInstance);
         Assert.True(singleInstance < pendingUpdate);
         Assert.True(pendingUpdate < runtimeEntry);

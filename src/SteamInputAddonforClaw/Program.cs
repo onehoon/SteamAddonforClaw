@@ -49,11 +49,6 @@ public static class Program
                 AppLog.Info("Uninstall", "Safe Windows uninstall entry verified.", ("Result", uninstallRegistration.Reason));
             else
                 AppLog.Warn("Uninstall", "Safe Windows uninstall entry could not be repaired.", null, ("Reason", uninstallRegistration.Reason));
-            if (args.Contains(SafeUninstall.Argument, StringComparer.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = SafeUninstall.Run(args.Contains(SafeUninstallRegistration.SilentArgument, StringComparer.OrdinalIgnoreCase));
-                return;
-            }
             if (args.Contains(SteamFseElevatedRegistration.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = SteamFseElevatedRegistration.Run();
@@ -139,6 +134,12 @@ public static class Program
                         ("OriginatingUserSid", currentUserSid));
                     return;
                 }
+            }
+
+            if (args.Contains(SafeUninstall.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = SafeUninstall.Run(args.Contains(SafeUninstallRegistration.SilentArgument, StringComparer.OrdinalIgnoreCase));
+                return;
             }
 
             var restartDeadline = DateTimeOffset.UtcNow.AddSeconds(10);
