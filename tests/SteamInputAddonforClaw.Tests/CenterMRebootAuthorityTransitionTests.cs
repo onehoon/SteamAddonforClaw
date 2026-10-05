@@ -382,13 +382,13 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
-    public async Task Disable_helper_cancel_after_preparation_keeps_the_prepared_state_and_never_says_nothing_changed()
+    public async Task Disable_helper_failure_after_preparation_keeps_the_prepared_state_and_reports_it()
     {
-        var h = new Harness(this) { StartEnabled = true, CenterMHelperCancels = true };
+        var h = new Harness(this) { StartEnabled = true, CenterMHelperCompletes = false };
 
         var result = await h.Build().RequestAsync(centerMEnabled: false, CancellationToken.None);
 
-        Assert.Equal(FrontendCenterMStartupMutationOutcome.Cancelled, result.Outcome);
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
         // The ordered persistent preparation ran and is deliberately left in place (no rollback).
         Assert.Equal(new[] { "startup:true", "hidhide:disable", "centerm:false" }, h.Order);
         Assert.True(h.Hid.Active);
@@ -527,15 +527,15 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
     }
 
     [Fact]
-    public async Task Enable_helper_cancel_after_baseline_clear_reports_the_cleared_state_not_nothing_changed()
+    public async Task Enable_helper_failure_after_baseline_clear_reports_the_cleared_state()
     {
-        var h = new Harness(this) { StartEnabled = false, CenterMHelperCancels = true };
+        var h = new Harness(this) { StartEnabled = false, CenterMHelperCompletes = false };
         h.Hid.Whitelist.Add(AddonExe);
         h.Hid.Active = true;
 
         var result = await h.Build().RequestAsync(centerMEnabled: true, CancellationToken.None);
 
-        Assert.Equal(FrontendCenterMStartupMutationOutcome.Cancelled, result.Outcome);
+        Assert.Equal(FrontendCenterMStartupMutationOutcome.Failed, result.Outcome);
         Assert.Equal(new[] { "physical-release", "stock-baseline", "hidhide:enable", "centerm:true" }, h.Order);
         Assert.False(h.Hid.Active); // baseline was already cleared
         Assert.NotNull(result.FailureMessage);
@@ -887,7 +887,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
         public bool StartPartial { get; init; }
         public bool StartupSucceeds { get; init; } = true;
         public bool CenterMHelperCompletes { get; init; } = true;
-        public bool CenterMHelperCancels { get; init; }
         public bool PrerequisitesReady { get; init; } = true;
         public bool RecoverySafe { get; init; } = true;
         public bool PendingPrerequisiteEvidenceValid { get; init; }
@@ -990,8 +989,6 @@ public sealed class CenterMRebootAuthorityTransitionTests : IDisposable
             {
                 if (h.BeforeCenterMMutation is { } wait) await wait().ConfigureAwait(false);
                 h.Order.Add($"centerm:{enabled.ToString().ToLowerInvariant()}");
-                if (h.CenterMHelperCancels)
-                    return new(CenterMStartupHelperOutcome.Cancelled, false, false, false, false, h.Roots.Service, null);
                 if (!h.CenterMHelperCompletes)
                     return new(CenterMStartupHelperOutcome.HelperUnavailable, false, false, false, false, h.Roots.Service, "helper failed");
                 h.Roots.Server = h.Roots.Updater = enabled;

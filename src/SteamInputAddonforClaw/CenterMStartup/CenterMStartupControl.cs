@@ -4,9 +4,10 @@ using SteamInputAddonforClaw.Diagnostics;
 namespace SteamInputAddonforClaw.CenterMStartup;
 
 /// <summary>Runtime-owned MSI Center M startup control (work order PR1). Deliberately narrow: it
-/// reads the three startup roots (non-elevated) and writes them all at once through the privileged
-/// helper. It is not a generic service/task administration framework, it never stops or starts
-/// anything, and it makes no routing/controller decisions from the result -- a <c>Disabled</c>
+/// reads the three startup roots directly and writes them all at once through a bounded helper
+/// process. Both processes inherit the Runtime's High token. It is not a generic service/task
+/// administration framework; it never stops or starts anything and makes no routing/controller
+/// decisions from the result -- a <c>Disabled</c>
 /// configuration does not mean Center M has left the current Windows session (section 12).</summary>
 internal sealed class CenterMStartupControl
 {
@@ -64,18 +65,12 @@ internal sealed class CenterMStartupControl
         AppLog.Info("CenterM.Startup", enabled ? "Enable requested." : "Disable requested.");
         var helperResult = await _helper.SetEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
 
-        // Always report the freshest actual three-root state, re-read non-elevated. Never fabricate
-        // the requested state after a cancelled/failed privileged operation (Addendum E).
+        // Always report the freshest actual three-root state from an independent Runtime read. Never
+        // fabricate the requested state after a failed helper operation.
         var snapshot = ReadSnapshotAfterMutation(helperResult);
 
         switch (helperResult.Outcome)
         {
-            case CenterMStartupHelperOutcome.Cancelled:
-                AppLog.Info("CenterM.Startup", "Mutation cancelled.", ("State", snapshot.State));
-                return new FrontendCenterMStartupMutationResult(
-                    FrontendCenterMStartupMutationOutcome.Cancelled, snapshot,
-                    "Elevation was cancelled before the MSI Center M startup configuration was changed.");
-
             case CenterMStartupHelperOutcome.HelperUnavailable:
                 AppLog.Warn("CenterM.Startup", "Mutation could not run.", null, ("Reason", helperResult.Error ?? "Unknown"));
                 return new FrontendCenterMStartupMutationResult(
@@ -103,7 +98,7 @@ internal sealed class CenterMStartupControl
         if (_reader.TryRead(out var server, out var updater, out var service, out _))
             return new FrontendCenterMStartupSnapshot(Classify(server, updater, service), server, updater, FoundationEnabledFlag(service), null);
 
-        // The non-elevated re-read failed; fall back to the helper's observation ONLY when it
+        // The Runtime's independent re-read failed; fall back to the helper's observation ONLY when it
         // actually read all three roots (SnapshotAvailable). Placeholder fields after a helper/read
         // failure are "not observed", never "observed disabled" (Addendum E / PR #430 review).
         if (helperResult.Outcome == CenterMStartupHelperOutcome.Completed && helperResult.SnapshotAvailable)

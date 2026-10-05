@@ -12,7 +12,8 @@ public sealed class ElevationConfigurationTests
     [InlineData("SteamInputAddonforClaw", "SteamInputAddonforClaw.app", "asInvoker")]
     [InlineData("SteamInputAddonforClaw.UI", "SteamInputAddonforClaw.UI.app", "asInvoker")]
     [InlineData("SteamInputAddonforClaw.Overlay", "SteamInputAddonforClaw.Overlay.app", "asInvoker")]
-    [InlineData("SteamInputAddonforClaw.TdpHelper", "SteamInputAddonforClaw.TdpHelper.app", "requireAdministrator")]
+    [InlineData("SteamInputAddonforClaw.TdpHelper", "SteamInputAddonforClaw.TdpHelper.app", "asInvoker")]
+    [InlineData("SteamInputAddonforClaw.CenterMStartupHelper", "SteamInputAddonforClaw.CenterMStartupHelper.app", "asInvoker")]
     public void Application_manifest_has_expected_execution_level(string project, string assemblyName, string executionLevel)
     {
         var manifest = XDocument.Load(Path.Combine(RepositoryRoot(), "src", project, "app.manifest"));
@@ -26,6 +27,40 @@ public sealed class ElevationConfigurationTests
         Assert.Equal(executionLevel, requestedLevel!.Attribute("level")!.Value);
         Assert.Equal("false", requestedLevel.Attribute("uiAccess")!.Value);
         Assert.Equal("PerMonitorV2", manifest.Descendants(XName.Get("dpiAwareness", "http://schemas.microsoft.com/SMI/2016/WindowsSettings")).Single().Value);
+    }
+
+    [Fact]
+    public void Tdp_helper_inherits_runtime_token_without_changing_its_fault_containment()
+    {
+        var root = RepositoryRoot();
+        var client = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "TdpHelperClient.cs"));
+        var helper = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
+
+        Assert.Contains("UseShellExecute = false", client);
+        Assert.Contains("CreateNoWindow = true", client);
+        Assert.DoesNotContain("Verb = \"runas\"", client, StringComparison.Ordinal);
+        Assert.Contains("PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly", client);
+        Assert.Contains("TimeSpan.FromSeconds(15)", client);
+        Assert.Contains("TimeSpan.FromSeconds(10)", client);
+        Assert.Contains("_process.Kill()", client);
+        Assert.Contains("if (_pipe?.IsConnected == true) return;", client);
+        Assert.Contains("WaitAsync(TimeSpan.FromSeconds(10))", helper);
+        Assert.Contains("principal.IsInRole(WindowsBuiltInRole.Administrator)", helper);
+    }
+
+    [Fact]
+    public void Center_m_helper_inherits_runtime_token_without_helper_uac_cancellation()
+    {
+        var root = RepositoryRoot();
+        var client = File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw", "CenterMStartup", "CenterMStartupHelperClient.cs"));
+
+        Assert.Contains("UseShellExecute = false", client);
+        Assert.Contains("CreateNoWindow = true", client);
+        Assert.DoesNotContain("Verb = \"runas\"", client, StringComparison.Ordinal);
+        Assert.DoesNotContain("CenterMStartupHelperOutcome.Cancelled", client, StringComparison.Ordinal);
+        Assert.Contains("PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly", client);
+        Assert.Equal(2, CountOccurrences(client, "TimeSpan.FromSeconds(30)"));
+        Assert.Contains("process.Kill()", client);
     }
 
     [Fact]
@@ -233,7 +268,7 @@ public sealed class ElevationConfigurationTests
     }
 
     [Fact]
-    public void Runtime_owns_the_medium_integrity_pipe_and_helper_only_connects()
+    public void Runtime_owns_the_pipe_and_helper_only_connects()
     {
         var client = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "TdpHelperClient.cs"));
         var helper = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
@@ -255,5 +290,13 @@ public sealed class ElevationConfigurationTests
             directory = directory.Parent;
 
         return directory?.FullName ?? throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+
+    private static int CountOccurrences(string value, string match)
+    {
+        var count = 0;
+        for (var offset = 0; (offset = value.IndexOf(match, offset, StringComparison.Ordinal)) >= 0; offset += match.Length)
+            count++;
+        return count;
     }
 }

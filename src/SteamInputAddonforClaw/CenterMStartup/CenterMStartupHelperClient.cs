@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text.Json;
@@ -8,10 +7,8 @@ namespace SteamInputAddonforClaw.CenterMStartup;
 
 internal enum CenterMStartupHelperOutcome
 {
-    /// <summary>The privileged helper ran and returned a result.</summary>
+    /// <summary>The helper process ran and returned a result.</summary>
     Completed,
-    /// <summary>The user dismissed the UAC elevation prompt before the helper could run.</summary>
-    Cancelled,
     /// <summary>The helper could not be launched or did not respond.</summary>
     HelperUnavailable,
 }
@@ -29,12 +26,11 @@ internal sealed record CenterMStartupHelperResult(
     CenterMFoundationServiceMode FoundationServiceMode,
     string? Error);
 
-/// <summary>Runs one privileged MSI Center M startup mutation via
+/// <summary>Runs one MSI Center M startup mutation via
 /// <c>SteamInputAddonforClaw.CenterMStartupHelper.exe</c> (work order PR1 / PR1 Addendum A). Mirrors
 /// the <see cref="Devices.MSI.Claw.TdpHelperClient"/> pattern: a per-request named pipe, the helper
-/// spawned with <c>Verb="runas"</c>, one JSON request line, one JSON result line, then the helper
-/// exits. A cancelled UAC prompt surfaces as <see cref="CenterMStartupHelperOutcome.Cancelled"/>,
-/// never as a fake success (Addendum E).</summary>
+/// launched as a normal child inheriting the Runtime token, one JSON request line, one JSON result
+/// line, then the helper exits.</summary>
 internal interface ICenterMStartupHelperInvoker
 {
     Task<CenterMStartupHelperResult> SetEnabledAsync(bool enabled, CancellationToken cancellationToken);
@@ -42,7 +38,6 @@ internal interface ICenterMStartupHelperInvoker
 
 internal sealed class CenterMStartupHelperClient : ICenterMStartupHelperInvoker
 {
-    private const int ErrorCancelled = 1223; // ERROR_CANCELLED -- the UAC consent prompt was dismissed.
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(30);
 
@@ -73,16 +68,10 @@ internal sealed class CenterMStartupHelperClient : ICenterMStartupHelperInvoker
         {
             process = Process.Start(new ProcessStartInfo(_helperPath, pipeName)
             {
-                UseShellExecute = true,
-                Verb = "runas",
+                UseShellExecute = false,
+                CreateNoWindow = true,
                 WorkingDirectory = AppContext.BaseDirectory,
             }) ?? throw new InvalidOperationException("The MSI Center M startup helper could not be started.");
-        }
-        catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
-        {
-            AppLog.Info("CenterM.Startup", "Startup helper elevation was cancelled by the user.");
-            return new CenterMStartupHelperResult(CenterMStartupHelperOutcome.Cancelled, false, false, false, false,
-                CenterMFoundationServiceMode.Unavailable, null);
         }
         catch (Exception exception)
         {

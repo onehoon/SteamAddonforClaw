@@ -1,4 +1,4 @@
-// Privileged MSI Center M startup Enable/Disable helper (work order PR1 / PR1 Addendum A).
+// MSI Center M startup Enable/Disable helper (work order PR1 / PR1 Addendum A).
 //
 // Scope, deliberately tiny:
 //   * enable/disable Scheduled Task  MSI_Center_M_Server
@@ -8,8 +8,8 @@
 // running Center M session is intentionally left alone -- the clean baseline begins after reboot
 // (work order PR1 sections 1/2/12). No decoy behaviour, no controller-suppression, no watchdog.
 //
-// Packaging mirrors SteamInputAddonforClaw.TdpHelper: requireAdministrator manifest, launched with
-// Verb="runas" by the Runtime, one named-pipe request, one JSON result line, then exit.
+// The Runtime launches this asInvoker helper as an ordinary child; it inherits the Runtime's High
+// token. Each process handles one named-pipe request, writes one JSON result line, then exits.
 using System.ComponentModel;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
