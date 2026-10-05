@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Processes;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -35,7 +36,7 @@ public sealed class WindowsAppRuntimePrerequisiteTests
     }
 
     [Fact]
-    public async Task Already_ready_runtime_does_not_start_elevated_setup()
+    public async Task Already_ready_runtime_does_not_start_the_setup_worker()
     {
         var runner = new FakeRunner();
         var prerequisite = new WindowsAppRuntimePrerequisite(
@@ -57,7 +58,7 @@ public sealed class WindowsAppRuntimePrerequisiteTests
 
         Assert.True(await prerequisite.EnsureAvailableAsync());
         Assert.Equal(1, runner.Calls);
-        Assert.Equal(ElevatedWindowsAppRuntimeSetup.Argument, runner.Arguments);
+        Assert.Equal(WindowsAppRuntimeSetupWorker.Argument, runner.Arguments);
     }
 
     [Fact]
@@ -66,7 +67,7 @@ public sealed class WindowsAppRuntimePrerequisiteTests
         var probe = new FakeProbe(WindowsAppRuntimeAvailability.Missing);
         var runner = new FakeRunner
         {
-            Result = new ElevatedProcessResult(ElevatedProcessResultKind.Completed, 1),
+            Result = new ChildProcessResult(ChildProcessResultKind.Completed, 1),
             OnRun = () => probe.State = WindowsAppRuntimeAvailability.Ready,
         };
         var prerequisite = new WindowsAppRuntimePrerequisite(probe, runner, () => Environment.ProcessPath);
@@ -93,11 +94,11 @@ public sealed class WindowsAppRuntimePrerequisiteTests
     }
 
     [Fact]
-    public void Elevated_setup_skips_acquisition_when_runtime_is_ready()
+    public void Setup_worker_skips_acquisition_when_runtime_is_ready()
     {
         var acquired = false;
         var launched = false;
-        var result = ElevatedWindowsAppRuntimeSetup.Execute(
+        var result = WindowsAppRuntimeSetupWorker.Execute(
             new FakeProbe(WindowsAppRuntimeAvailability.Ready),
             _ => TrustedStorage(),
             (_, _, _) =>
@@ -119,7 +120,7 @@ public sealed class WindowsAppRuntimePrerequisiteTests
     }
 
     [Fact]
-    public void Elevated_setup_uses_pinned_descriptor_and_parent_readback()
+    public void Setup_worker_uses_pinned_descriptor_and_parent_readback()
     {
         var probe = new SequenceProbe(WindowsAppRuntimeAvailability.Missing, WindowsAppRuntimeAvailability.Ready);
         var root = Path.Combine(Path.GetTempPath(), "WindowsAppRuntimeSetupTests", Guid.NewGuid().ToString("N"));
@@ -129,7 +130,7 @@ public sealed class WindowsAppRuntimePrerequisiteTests
         string? installerArguments = null;
         try
         {
-            var result = ElevatedWindowsAppRuntimeSetup.Execute(
+            var result = WindowsAppRuntimeSetupWorker.Execute(
                 probe,
                 _ => TrustedStorage(),
                 (descriptor, directory, _) =>
@@ -162,10 +163,10 @@ public sealed class WindowsAppRuntimePrerequisiteTests
     }
 
     [Fact]
-    public void Elevated_setup_does_not_launch_after_hash_validation_failure()
+    public void Setup_worker_does_not_launch_after_hash_validation_failure()
     {
         var launched = false;
-        var result = ElevatedWindowsAppRuntimeSetup.Execute(
+        var result = WindowsAppRuntimeSetupWorker.Execute(
             new SequenceProbe(WindowsAppRuntimeAvailability.Missing),
             _ => TrustedStorage(),
             (_, directory, _) =>
@@ -188,9 +189,9 @@ public sealed class WindowsAppRuntimePrerequisiteTests
     }
 
     [Fact]
-    public void Elevated_setup_does_not_claim_success_when_post_install_probe_is_not_ready()
+    public void Setup_worker_does_not_claim_success_when_post_install_probe_is_not_ready()
     {
-        var result = ElevatedWindowsAppRuntimeSetup.Execute(
+        var result = WindowsAppRuntimeSetupWorker.Execute(
             new SequenceProbe(WindowsAppRuntimeAvailability.Missing, WindowsAppRuntimeAvailability.UpdateRequired),
             _ => TrustedStorage(),
             (_, directory, _) =>
@@ -247,14 +248,14 @@ public sealed class WindowsAppRuntimePrerequisiteTests
         public WindowsAppRuntimeAvailability Inspect() => states[Math.Min(Interlocked.Increment(ref _index) - 1, states.Length - 1)];
     }
 
-    private sealed class FakeRunner : IElevatedProcessRunner
+    private sealed class FakeRunner : IChildProcessRunner
     {
         public int Calls { get; private set; }
         public string? Arguments { get; private set; }
         public Action? OnRun { get; init; }
-        public ElevatedProcessResult Result { get; init; } = new(ElevatedProcessResultKind.Completed, 0);
+        public ChildProcessResult Result { get; init; } = new(ChildProcessResultKind.Completed, 0);
 
-        public Task<ElevatedProcessResult> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
+        public Task<ChildProcessResult> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
         {
             Calls++;
             Arguments = arguments;

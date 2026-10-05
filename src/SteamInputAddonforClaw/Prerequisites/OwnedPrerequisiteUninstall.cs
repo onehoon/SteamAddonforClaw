@@ -44,7 +44,7 @@ internal sealed class WindowsUninstallProcessRunner : IUninstallProcessRunner
     }
 }
 
-internal sealed class ElevatedOwnedPrerequisiteUninstall
+internal sealed class OwnedPrerequisiteUninstall
 {
     private readonly UsbIpWin2ProvisioningReceiptStore _usbReceiptStore;
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
@@ -55,7 +55,7 @@ internal sealed class ElevatedOwnedPrerequisiteUninstall
     private readonly Func<string, bool> _fileExists;
     private readonly string _provisioningDirectory;
 
-    internal ElevatedOwnedPrerequisiteUninstall(
+    internal OwnedPrerequisiteUninstall(
         UsbIpWin2ProvisioningReceiptStore? usbReceiptStore = null,
         IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
         Func<UsbIpWin2PackageState>? usbPackageProbe = null,

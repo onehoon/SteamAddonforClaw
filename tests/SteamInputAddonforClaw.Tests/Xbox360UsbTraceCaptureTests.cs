@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Processes;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -15,7 +16,7 @@ public sealed class Xbox360UsbTraceCaptureTests
     {
         using var directory = new TemporaryDirectory();
         using var appLogDirectory = new AppLogDirectoryOverride(directory.Path);
-        var runner = new FakeElevatedProcessRunner(directory.Path);
+        var runner = new FakeChildProcessRunner(directory.Path);
         var capture = CreateCapture(runner);
 
         await capture.StartAsync("run-123", CancellationToken.None);
@@ -57,7 +58,7 @@ public sealed class Xbox360UsbTraceCaptureTests
     {
         using var directory = new TemporaryDirectory();
         using var appLogDirectory = new AppLogDirectoryOverride(directory.Path);
-        var runner = new FakeElevatedProcessRunner(directory.Path);
+        var runner = new FakeChildProcessRunner(directory.Path);
         var capture = CreateCapture(runner);
 
         await capture.StartAsync("run-stale", CancellationToken.None);
@@ -70,15 +71,15 @@ public sealed class Xbox360UsbTraceCaptureTests
     }
 
     [Fact]
-    public async Task Uac_cancel_makes_trace_unavailable_but_does_not_block_the_rumble_loop()
+    public async Task Logman_start_failure_makes_trace_unavailable_but_does_not_block_the_rumble_loop()
     {
         using var directory = new TemporaryDirectory();
         using var appLogDirectory = new AppLogDirectoryOverride(directory.Path);
-        var runner = new FakeElevatedProcessRunner(directory.Path)
+        var runner = new FakeChildProcessRunner(directory.Path)
         {
             ResultProvider = (_, index) => index == 2
-                ? new(ElevatedProcessResultKind.CancelledBeforeStart)
-                : new(ElevatedProcessResultKind.Completed, 0)
+                ? new(ChildProcessResultKind.FailedToStart)
+                : new(ChildProcessResultKind.Completed, 0)
         };
         var capture = CreateCapture(runner);
         using var cancellation = new CancellationTokenSource();
@@ -102,14 +103,16 @@ public sealed class Xbox360UsbTraceCaptureTests
 
         Assert.NotEmpty(xinput.SetStates);
         Assert.Equal(FrontendXbox360RumbleLoopState.Stopped, diagnostic.Snapshot.State);
-        Assert.Equal(3, runner.Calls.Count);
+        Assert.Equal(5, runner.Calls.Count);
+        Assert.StartsWith("stop -n", runner.Calls.ElementAt(3).Arguments, StringComparison.Ordinal);
+        Assert.StartsWith("delete -n", runner.Calls.ElementAt(4).Arguments, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task Logman_commands_are_bounded_when_the_elevated_runner_does_not_return()
     {
         using var directory = new TemporaryDirectory();
-        var runner = new FakeElevatedProcessRunner(directory.Path)
+        var runner = new FakeChildProcessRunner(directory.Path)
         {
             Hang = true
         };
@@ -126,19 +129,19 @@ public sealed class Xbox360UsbTraceCaptureTests
         Assert.Equal(5, runner.Calls.Count);
     }
 
-    private static Xbox360UsbTraceCapture CreateCapture(FakeElevatedProcessRunner runner) =>
+    private static Xbox360UsbTraceCapture CreateCapture(FakeChildProcessRunner runner) =>
         new(runner, systemDirectoryProvider: () => Environment.GetFolderPath(Environment.SpecialFolder.System), commandTimeout: TimeSpan.FromSeconds(1));
 
-    private sealed class FakeElevatedProcessRunner(string outputDirectory) : IElevatedProcessRunner
+    private sealed class FakeChildProcessRunner(string outputDirectory) : IChildProcessRunner
     {
         internal ConcurrentQueue<(string FileName, string Arguments)> Calls { get; } = new();
-        internal Func<string, int, ElevatedProcessResult>? ResultProvider { get; init; }
+        internal Func<string, int, ChildProcessResult>? ResultProvider { get; init; }
         internal bool Hang { get; init; }
         internal string[] Providers { get; private set; } = [];
         internal string? OutputPath { get; private set; }
         internal string? ProviderFilePath { get; private set; }
 
-        public Task<ElevatedProcessResult> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
+        public Task<ChildProcessResult> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
         {
             var index = Calls.Count;
             Calls.Enqueue((fileName, arguments));
@@ -154,13 +157,13 @@ public sealed class Xbox360UsbTraceCaptureTests
                 File.WriteAllBytes(finalPath, []);
             }
 
-            if (Hang) return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith<ElevatedProcessResult>(
-                static _ => new(ElevatedProcessResultKind.FailedToStart, Reason: "Cancelled"),
+            if (Hang) return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith<ChildProcessResult>(
+                static _ => new(ChildProcessResultKind.FailedToStart, Reason: "Cancelled"),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
 
-            return Task.FromResult(ResultProvider?.Invoke(arguments, index) ?? new(ElevatedProcessResultKind.Completed, 0));
+            return Task.FromResult(ResultProvider?.Invoke(arguments, index) ?? new(ChildProcessResultKind.Completed, 0));
         }
 
         private static string ReadArgumentAfter(string arguments, string key)

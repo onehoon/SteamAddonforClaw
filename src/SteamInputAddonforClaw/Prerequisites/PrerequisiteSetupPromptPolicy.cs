@@ -1,6 +1,7 @@
 namespace SteamInputAddonforClaw.Prerequisites;
 
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Processes;
 
 internal static class PrerequisiteSetupPromptPolicy
 {
@@ -12,9 +13,9 @@ internal static class PrerequisiteSetupPromptPolicy
 
 internal static class PrerequisiteSetupRunnerPolicy
 {
-    internal static async Task<ElevatedProcessResult?> RunIfInstallableAsync(
+    internal static async Task<ChildProcessResult?> RunIfInstallableAsync(
         FirstTimeSetupAssessment assessment,
-        IElevatedProcessRunner runner,
+        IChildProcessRunner runner,
         string fileName,
         string arguments,
         CancellationToken cancellationToken)

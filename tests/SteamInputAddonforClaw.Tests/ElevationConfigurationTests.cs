@@ -84,12 +84,11 @@ public sealed class ElevationConfigurationTests
     }
 
     [Fact]
-    public void Elevation_gate_precedes_single_instance_and_returns_on_cancellation()
+    public void Elevation_gate_precedes_uninstall_workers_and_single_instance()
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Program.cs"));
         var velopack = source.IndexOf("VelopackApp.Build()", StringComparison.Ordinal);
         var approvedUninstallFastPath = source.IndexOf("if (UninstallBootstrap.IsSafeUninstallApproved)", StringComparison.Ordinal);
-        var specialMode = source.IndexOf("ElevatedStartupTaskSetup.RunRemove(args)", StringComparison.Ordinal);
         var elevationGate = source.IndexOf("TryExtractOriginatingUserSid(args", StringComparison.Ordinal);
         var sidValidation = source.IndexOf("OriginatingUserSidMatches(originatingUserSid, currentUserSid)", StringComparison.Ordinal);
         var sidMismatchLog = source.IndexOf("Elevated Runtime user does not match the originating interactive user", StringComparison.Ordinal);
@@ -101,23 +100,45 @@ public sealed class ElevationConfigurationTests
         var elevationCheck = source.IndexOf("if (!IsCurrentProcessElevated())", elevationGate, StringComparison.Ordinal);
         var safeUninstallDispatch = source.IndexOf("Environment.ExitCode = SafeUninstall.Run(", StringComparison.Ordinal);
         var safeUninstallExit = safeUninstallDispatch < 0 ? -1 : source.IndexOf("return;", safeUninstallDispatch, StringComparison.Ordinal);
+        var fseWorker = source.IndexOf("SteamFseRegistrationWorker.Run()", StringComparison.Ordinal);
+        var prerequisiteWorker = source.IndexOf("PrerequisiteSetupWorker.Run()", StringComparison.Ordinal);
+        var windowsAppRuntimeWorker = source.IndexOf("WindowsAppRuntimeSetupWorker.Run()", StringComparison.Ordinal);
         var singleInstance = source.IndexOf("SingleInstanceGate singleInstanceGate", StringComparison.Ordinal);
         var pendingUpdate = source.IndexOf("TrySchedulePendingUpdateApply(runtimeArgs)", StringComparison.Ordinal);
         var runtimeEntry = source.IndexOf("new RuntimeProcessApplication(runtimeArgs", StringComparison.Ordinal);
 
         Assert.True(velopack >= 0 && velopack < approvedUninstallFastPath);
-        Assert.True(approvedUninstallFastPath < specialMode);
-        Assert.True(specialMode >= 0 && specialMode < elevationGate);
+        Assert.True(approvedUninstallFastPath < elevationGate);
         Assert.True(elevationGate < sidValidation && sidValidation < sidMismatchLog && sidMismatchLog < sidMismatchExit);
-        Assert.True(cancellationLog < cancellationExit && cancellationExit < singleInstance);
-        Assert.True(failureLog < failureExit && failureExit < singleInstance);
-        Assert.True(elevationCheck < safeUninstallDispatch && safeUninstallDispatch < safeUninstallExit && safeUninstallExit < singleInstance);
+        Assert.True(cancellationLog < cancellationExit && cancellationExit < safeUninstallDispatch);
+        Assert.True(failureLog < failureExit && failureExit < safeUninstallDispatch);
+        Assert.True(elevationCheck < safeUninstallDispatch && safeUninstallDispatch < safeUninstallExit);
+        Assert.True(safeUninstallExit < fseWorker && fseWorker < prerequisiteWorker && prerequisiteWorker < windowsAppRuntimeWorker);
+        Assert.True(windowsAppRuntimeWorker < singleInstance);
         Assert.True(elevationGate < singleInstance);
         Assert.True(singleInstance < pendingUpdate);
         Assert.True(pendingUpdate < runtimeEntry);
         Assert.Contains("exception.NativeErrorCode == ElevationCancelledErrorCode", source);
         Assert.Contains("Runtime elevation was cancelled; normal Runtime startup is blocked.", source);
         Assert.Contains("Runtime elevation failed; normal Runtime startup is blocked.", source);
+        Assert.DoesNotContain("--ensure-startup-task", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("--uninstall-owned-prerequisites", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ElevatedStartupTaskSetup", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Safe_uninstall_cleans_owned_prerequisites_in_process_after_stock_safety_proof()
+    {
+        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Install", "SafeUninstall.cs"));
+        var stockSafetyProof = source.IndexOf("Independent PR12 stock-safety proof", StringComparison.Ordinal);
+        var ownedCleanup = source.IndexOf("new OwnedPrerequisiteUninstall().Execute()", StringComparison.Ordinal);
+        var localCleanup = source.IndexOf("UninstallBootstrap.RunBoundedLocalCleanup", StringComparison.Ordinal);
+        var finalHandoff = source.IndexOf("PreserveUserDataAndLaunchVeloPack(", StringComparison.Ordinal);
+
+        Assert.True(stockSafetyProof >= 0 && stockSafetyProof < ownedCleanup);
+        Assert.True(ownedCleanup < localCleanup && localCleanup < finalHandoff);
+        Assert.DoesNotContain("Verb = \"runas\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ElevatedOwnedPrerequisiteUninstallEntry", source, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -6,7 +6,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-public sealed class ElevatedOwnedPrerequisiteUninstallTests
+public sealed class OwnedPrerequisiteUninstallTests
 {
     [Fact]
     public void Execute_RemovesOwnedUsbIpBeforeOwnedHidHideAndDeletesProgramDataState()
@@ -291,7 +291,7 @@ public sealed class ElevatedOwnedPrerequisiteUninstallTests
                 InstalledByAddon: owned));
         }
 
-        internal OwnedPrerequisiteUninstallResult Execute() => new ElevatedOwnedPrerequisiteUninstall(
+        internal OwnedPrerequisiteUninstallResult Execute() => new OwnedPrerequisiteUninstall(
             _usbStore,
             HidReceipt,
             () => UsbStates.Dequeue(),

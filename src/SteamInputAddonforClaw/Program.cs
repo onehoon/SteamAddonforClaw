@@ -49,37 +49,6 @@ public static class Program
                 AppLog.Info("Uninstall", "Safe Windows uninstall entry verified.", ("Result", uninstallRegistration.Reason));
             else
                 AppLog.Warn("Uninstall", "Safe Windows uninstall entry could not be repaired.", null, ("Reason", uninstallRegistration.Reason));
-            if (args.Contains(SteamFseElevatedRegistration.Argument, StringComparer.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = SteamFseElevatedRegistration.Run();
-                return;
-            }
-            if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = ElevatedPrerequisiteSetup.Run();
-                return;
-            }
-            if (args.Contains(ElevatedOwnedPrerequisiteUninstallEntry.Argument, StringComparer.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = ElevatedOwnedPrerequisiteUninstallEntry.Run();
-                return;
-            }
-            if (args.Contains(ElevatedWindowsAppRuntimeSetup.Argument, StringComparer.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = ElevatedWindowsAppRuntimeSetup.Run();
-                return;
-            }
-            if (args.Contains(ElevatedStartupTaskSetup.Argument, StringComparer.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = ElevatedStartupTaskSetup.Run(args);
-                return;
-            }
-            if (args.Contains(ElevatedStartupTaskSetup.RemoveArgument, StringComparer.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = ElevatedStartupTaskSetup.RunRemove(args);
-                return;
-            }
-
             if (!TryExtractOriginatingUserSid(args, out var originatingUserSid, out var runtimeArgs))
             {
                 AppLog.Error("Elevation", "Invalid elevated-runtime user handoff; normal Runtime startup is blocked.", null);
@@ -139,6 +108,22 @@ public static class Program
             if (args.Contains(SafeUninstall.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = SafeUninstall.Run(args.Contains(SafeUninstallRegistration.SilentArgument, StringComparer.OrdinalIgnoreCase));
+                return;
+            }
+
+            if (args.Contains(SteamFseRegistrationWorker.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = SteamFseRegistrationWorker.Run();
+                return;
+            }
+            if (args.Contains(PrerequisiteSetupWorker.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = PrerequisiteSetupWorker.Run();
+                return;
+            }
+            if (args.Contains(WindowsAppRuntimeSetupWorker.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = WindowsAppRuntimeSetupWorker.Run();
                 return;
             }
 

@@ -1,6 +1,4 @@
-using System.ComponentModel;
 using System.Diagnostics;
-using System.Security.Principal;
 using SteamInputAddonforClaw.ClawHud;
 using SteamInputAddonforClaw.CenterMStartup;
 using SteamInputAddonforClaw.Diagnostics;
@@ -69,7 +67,6 @@ internal static class SafeUninstall
     private const string AttemptMutexName = @"Local\SteamInputAddonforClaw.SafeUninstall";
     private static readonly TimeSpan RuntimeReleaseBudget = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RuntimeProbeInterval = TimeSpan.FromMilliseconds(100);
-    private const int ElevatedHelperWaitBudgetMilliseconds = 6 * 60 * 1000;
 
     internal static int Run(bool silent)
     {
@@ -124,8 +121,8 @@ internal static class SafeUninstall
                 host.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
 
-            var dependencyResult = RunElevatedDependencyCleanup(root);
-            if (dependencyResult is null || !dependencyResult.Succeeded)
+            var dependencyResult = new OwnedPrerequisiteUninstall().Execute();
+            if (!dependencyResult.Succeeded)
                 return Abort(silent, "Owned prerequisite cleanup did not complete. No uninstall was started.");
             AppLog.Info("Uninstall", "Owned prerequisite removal outcome recorded.",
                 ("RestartRequired", dependencyResult.RestartRequired));
@@ -186,44 +183,6 @@ internal static class SafeUninstall
             return new(false, "ManagedClawHudShutdownNotConfirmed:" + clawHud.Reason);
 
         return new(true, "StockSafetyProvenAndManagedClawHudStopped");
-    }
-
-    private static OwnedPrerequisiteUninstallResult? RunElevatedDependencyCleanup(string root)
-    {
-        try
-        {
-            if (!VelopackAppPaths.TryResolveCurrentExecutablePath(
-                    Environment.ProcessPath, VelopackAppPaths.CurrentExecutablePath, out var processPath))
-                return new(false, false, "CurrentAddonExecutablePathChanged");
-
-            var startInfo = new ProcessStartInfo(processPath)
-            {
-                UseShellExecute = true,
-                Verb = "runas",
-                WorkingDirectory = root,
-            };
-            startInfo.ArgumentList.Add(ElevatedOwnedPrerequisiteUninstallEntry.Argument);
-            using var process = Process.Start(startInfo);
-            if (process is null) return new(false, false, "ElevatedHelperDidNotStart");
-            if (!process.WaitForExit(ElevatedHelperWaitBudgetMilliseconds))
-                return new(false, false, "ElevatedHelperWaitTimedOut");
-            return process.ExitCode switch
-            {
-                0 => new(true, false, "OwnedPrerequisiteCleanupCompleted"),
-                3010 => new(true, true, "OwnedPrerequisiteCleanupCompletedRestartRequired"),
-                _ => new(false, false, "ElevatedHelperExitCode:" + process.ExitCode)
-            };
-        }
-        catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
-        {
-            AppLog.Info("Uninstall.Dependency", "User cancelled elevated prerequisite cleanup.", ("Result", "UacCancelled"));
-            return new(false, false, "UacCancelled");
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("Uninstall.Dependency", "Elevated prerequisite cleanup could not be completed.", exception);
-            return new(false, false, "ElevatedHelperFailed:" + exception.GetType().Name);
-        }
     }
 
     internal static FinalUninstallHandoffResult PreserveUserDataAndLaunchVeloPack(
@@ -293,26 +252,5 @@ internal static class SafeUninstall
         if (!silent)
             NativeStartupWarning.Show(message);
         return 1;
-    }
-}
-
-internal static class ElevatedOwnedPrerequisiteUninstallEntry
-{
-    internal const string Argument = "--uninstall-owned-prerequisites";
-
-    internal static int Run()
-    {
-        if (!OperatingSystem.IsWindows()) return 1;
-        using var identity = WindowsIdentity.GetCurrent();
-        if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
-        {
-            AppLog.Warn("Uninstall.Dependency", "Owned prerequisite helper refused to run without elevation.");
-            return 1;
-        }
-
-        var result = new ElevatedOwnedPrerequisiteUninstall().Execute();
-        AppLog.Info("Uninstall.Dependency", "Elevated owned-prerequisite uninstall helper completed.",
-            ("Succeeded", result.Succeeded), ("RestartRequired", result.RestartRequired), ("Reason", result.Reason));
-        return result.Succeeded ? result.RestartRequired ? 3010 : 0 : 1;
     }
 }

@@ -10,20 +10,20 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Processes;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
-internal static class ElevatedPrerequisiteSetup
+internal static class PrerequisiteSetupWorker
 {
-    internal const string Argument = "--elevated-prerequisite-setup";
-    internal enum ResultKind { Ready, Installed, RebootRequired, Cancelled, Blocked, Failed, AlreadyInProgress }
-    internal static ResultKind TranslateExitCode(ElevatedProcessResult result) => result.Kind switch
+    internal const string Argument = "--prerequisite-setup-worker";
+    internal enum ResultKind { Ready, Installed, RebootRequired, Blocked, Failed, AlreadyInProgress }
+    internal static ResultKind TranslateExitCode(ChildProcessResult result) => result.Kind switch
     {
-        ElevatedProcessResultKind.CancelledBeforeStart => ResultKind.Cancelled,
-        ElevatedProcessResultKind.Completed when result.ExitCode == 0 => ResultKind.Installed,
-        ElevatedProcessResultKind.Completed when result.ExitCode == 3010 => ResultKind.RebootRequired,
-        ElevatedProcessResultKind.Completed when result.ExitCode == 2 => ResultKind.AlreadyInProgress,
-        ElevatedProcessResultKind.Completed when result.ExitCode == 3 => ResultKind.Blocked,
+        ChildProcessResultKind.Completed when result.ExitCode == 0 => ResultKind.Installed,
+        ChildProcessResultKind.Completed when result.ExitCode == 3010 => ResultKind.RebootRequired,
+        ChildProcessResultKind.Completed when result.ExitCode == 2 => ResultKind.AlreadyInProgress,
+        ChildProcessResultKind.Completed when result.ExitCode == 3 => ResultKind.Blocked,
         _ => ResultKind.Failed
     };
     public static int Run()
@@ -45,7 +45,7 @@ internal static class ElevatedPrerequisiteSetup
         }
         try
         {
-            AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup started.", ("PID", Environment.ProcessId), ("ReceiptDirectory", VelopackAppPaths.ProvisioningStateDirectory));
+            AppLog.Info("PrerequisiteSetup", "Prerequisite setup worker started.", ("PID", Environment.ProcessId), ("ReceiptDirectory", VelopackAppPaths.ProvisioningStateDirectory));
             var devices = new WindowsControllerDeviceEnumerator();
             var adapter = new MsiClawDeviceAdapter(devices);
             var preflight = ElevatedHardwareProvisioningPreflight.Evaluate(
@@ -189,12 +189,12 @@ internal static class ElevatedPrerequisiteSetup
                 }
             }
             var result = restartRequired ? 3010 : 0;
-            AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup completed.", ("ExitCode", result), ("RestartRequired", restartRequired));
+            AppLog.Info("PrerequisiteSetup", "Prerequisite setup worker completed.", ("ExitCode", result), ("RestartRequired", restartRequired));
             return result;
         }
         catch (Exception exception)
         {
-            AppLog.Error("PrerequisiteSetup", "Elevated prerequisite setup failed unexpectedly.", exception);
+            AppLog.Error("PrerequisiteSetup", "Prerequisite setup worker failed unexpectedly.", exception);
             return 1;
         }
         }

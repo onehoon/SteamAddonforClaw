@@ -4,20 +4,21 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Processes;
 
 namespace SteamInputAddonforClaw.Frontend;
 
 internal interface IFrontendPrerequisiteSetupExecutor
 {
     FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot);
-    Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken);
+    Task<ChildProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken);
 }
 
 internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteSetupExecutor
 {
     private readonly bool _allowPrerequisiteRepairWhileRecoveryUnsafe;
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
-    private readonly IElevatedProcessRunner _setupRunner = new ElevatedProcessRunner();
+    private readonly IChildProcessRunner _setupRunner = new ChildProcessRunner();
 
     internal FrontendPrerequisiteSetupExecutor(bool allowPrerequisiteRepairWhileRecoveryUnsafe = false)
     {
@@ -43,8 +44,8 @@ internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteS
         return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.RecoverySafe, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged), allowPrerequisiteRepairWhileRecoveryUnsafe));
     }
 
-    public Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken) =>
-        PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(assessment, _setupRunner, executablePath, ElevatedPrerequisiteSetup.Argument, cancellationToken);
+    public Task<ChildProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken) =>
+        PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(assessment, _setupRunner, executablePath, PrerequisiteSetupWorker.Argument, cancellationToken);
 
     internal static bool AllowsPrerequisiteRepairWhileRecoveryUnsafe(
         bool startupRepairWindow,

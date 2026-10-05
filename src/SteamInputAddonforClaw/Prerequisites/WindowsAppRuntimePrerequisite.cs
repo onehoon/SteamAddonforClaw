@@ -2,6 +2,7 @@ using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Install;
+using SteamInputAddonforClaw.Processes;
 using Windows.Management.Deployment;
 
 namespace SteamInputAddonforClaw.Prerequisites;
@@ -106,17 +107,17 @@ internal interface IWindowsAppRuntimePrerequisite
 internal sealed class WindowsAppRuntimePrerequisite : IWindowsAppRuntimePrerequisite
 {
     private readonly IWindowsAppRuntimePackageProbe _packageProbe;
-    private readonly IElevatedProcessRunner _processRunner;
+    private readonly IChildProcessRunner _processRunner;
     private readonly Func<string?> _executablePathProvider;
     private readonly SemaphoreSlim _setupGate = new(1, 1);
 
     internal WindowsAppRuntimePrerequisite(
         IWindowsAppRuntimePackageProbe? packageProbe = null,
-        IElevatedProcessRunner? processRunner = null,
+        IChildProcessRunner? processRunner = null,
         Func<string?>? executablePathProvider = null)
     {
         _packageProbe = packageProbe ?? new WindowsAppRuntimePackageProbe();
-        _processRunner = processRunner ?? new ElevatedProcessRunner();
+        _processRunner = processRunner ?? new ChildProcessRunner();
         _executablePathProvider = executablePathProvider ?? (() => Environment.ProcessPath);
     }
 
@@ -149,28 +150,28 @@ internal sealed class WindowsAppRuntimePrerequisite : IWindowsAppRuntimePrerequi
             var executablePath = _executablePathProvider();
             if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
             {
-                AppLog.Warn("WindowsAppRuntime", "WinUI surface request blocked because the elevated helper executable is unavailable.", null,
-                    ("Reason", "ElevatedHelperUnavailable"));
+                AppLog.Warn("WindowsAppRuntime", "WinUI surface request blocked because the setup worker executable is unavailable.", null,
+                    ("Reason", "SetupWorkerUnavailable"));
                 return false;
             }
 
             AppLog.Info("WindowsAppRuntime", "Windows App Runtime setup requested for an explicit WinUI surface.",
                 ("Availability", before), ("MinimumVersion", WindowsAppRuntimeMetadata.MinimumFrameworkVersion));
-            ElevatedProcessResult result;
+            ChildProcessResult result;
             try
             {
-                result = await _processRunner.RunAsync(executablePath, ElevatedWindowsAppRuntimeSetup.Argument, cancellationToken).ConfigureAwait(false);
+                result = await _processRunner.RunAsync(executablePath, WindowsAppRuntimeSetupWorker.Argument, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
-                AppLog.Warn("WindowsAppRuntime", "Windows App Runtime elevated helper failed to start.", exception,
-                    ("Reason", "ElevatedHelperStartFailed"));
+                AppLog.Warn("WindowsAppRuntime", "Windows App Runtime setup worker failed to start.", exception,
+                    ("Reason", "SetupWorkerStartFailed"));
                 return false;
             }
 
             var after = Probe();
             var ready = after == WindowsAppRuntimeAvailability.Ready;
-            var helperSucceeded = result.Kind == ElevatedProcessResultKind.Completed && result.ExitCode == 0;
+            var helperSucceeded = result.Kind == ChildProcessResultKind.Completed && result.ExitCode == 0;
             AppLog.Info("WindowsAppRuntime", ready
                 ? "Windows App Runtime availability confirmed after setup."
                 : "Windows App Runtime setup did not establish a usable runtime.",
@@ -182,7 +183,7 @@ internal sealed class WindowsAppRuntimePrerequisite : IWindowsAppRuntimePrerequi
     }
 }
 
-internal static class ElevatedWindowsAppRuntimeSetup
+internal static class WindowsAppRuntimeSetupWorker
 {
     internal const string Argument = "--ensure-windows-app-runtime";
 
@@ -200,7 +201,7 @@ internal static class ElevatedWindowsAppRuntimeSetup
         }
         catch (Exception exception)
         {
-            AppLog.Error("WindowsAppRuntime", "Elevated Windows App Runtime setup failed unexpectedly.", exception);
+            AppLog.Error("WindowsAppRuntime", "Windows App Runtime setup worker failed unexpectedly.", exception);
             return 1;
         }
     }

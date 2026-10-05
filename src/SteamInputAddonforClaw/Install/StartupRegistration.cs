@@ -51,33 +51,21 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     private readonly Func<string> _stableExecutablePathProvider;
     private readonly Func<string> _currentUserIdentityProvider;
     private readonly IOwnedStartupTaskStore _taskStore;
-    // Null == no elevated repair path (unit tests, and the elevated `--ensure-startup-task` child
-    // itself, which writes directly). Production wires SelfElevatedStartupTaskInvoker so a
-    // missing/drifted task is repaired via one bounded elevated child WITHOUT a known-denied
-    // parent-process write first (PR11 section 11).
-    private readonly IElevatedStartupTaskInvoker? _elevatedInvoker;
     private readonly Action<TimeSpan> _sleep;
-    // PR11 section 12: Task Scheduler can lag a normal-process read-back right after an elevated
-    // create. A small bounded read-only settle absorbs that -- no repeated writes, no repeated
-    // elevation, no unbounded retry.
+    // Task Scheduler can briefly lag a read-back after a direct High Runtime write. Settle is
+    // bounded and read-only: never repeat the write or add another elevation path.
     private readonly TimeSpan _readbackSettleWindow;
     private readonly TimeSpan _readbackSettleInterval;
 
     public WindowsTaskSchedulerStartupManager(
         Func<string>? stableExecutablePathProvider = null,
         Func<string>? currentUserIdentityProvider = null)
-        : this(stableExecutablePathProvider, currentUserIdentityProvider, null, null) { }
-
-    /// <summary>The production instance: a missing/drifted task is repaired via one bounded elevated
-    /// child, then verified by an independent normal-process read-back (PR11 section 11).</summary>
-    internal static WindowsTaskSchedulerStartupManager WithElevatedRepair() =>
-        new(null, null, null, new SelfElevatedStartupTaskInvoker());
+        : this(stableExecutablePathProvider, currentUserIdentityProvider, null) { }
 
     internal WindowsTaskSchedulerStartupManager(
         Func<string>? stableExecutablePathProvider,
         Func<string>? currentUserIdentityProvider,
         IOwnedStartupTaskStore? taskStore,
-        IElevatedStartupTaskInvoker? elevatedInvoker,
         Action<TimeSpan>? sleep = null,
         TimeSpan? readbackSettleWindow = null,
         TimeSpan? readbackSettleInterval = null)
@@ -85,7 +73,6 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         _stableExecutablePathProvider = stableExecutablePathProvider ?? (() => VelopackAppPaths.StableExecutablePath);
         _currentUserIdentityProvider = currentUserIdentityProvider ?? (() => WindowsIdentity.GetCurrent().Name);
         _taskStore = taskStore ?? new WindowsOwnedStartupTaskStore();
-        _elevatedInvoker = elevatedInvoker;
         _sleep = sleep ?? Thread.Sleep;
         _readbackSettleWindow = readbackSettleWindow ?? TimeSpan.FromSeconds(2);
         _readbackSettleInterval = readbackSettleInterval ?? TimeSpan.FromMilliseconds(150);
@@ -109,7 +96,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
         var configuration = CreateTaskConfiguration(stableExecutablePath, _currentUserIdentityProvider());
 
         // 1. Read-only verification first: an already-compliant task returns Success with no
-        //    RegisterTaskDefinition call and no UAC (PR10 addendum section 15).
+        //    RegisterTaskDefinition call.
         var current = SafeRead();
         if (current is not null && IsCompliant(current, configuration))
         {
@@ -119,43 +106,21 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
 
         AppLog.Info("TaskScheduler", "Startup task repair required.", ("TaskFound", current is not null), ("RepairRequired", true));
 
-        // 2. Missing / materially drifted. The production Runtime has already proven on supported
-        //    hardware that this write requires elevation, so when an elevated repair path exists,
-        //    request it DIRECTLY -- no known-denied parent-process RegisterTaskDefinition first
-        //    (PR11 section 11). A manager without an elevated invoker IS the elevated child (or a
-        //    unit test) and writes directly.
-        if (_elevatedInvoker is not null)
-        {
-            AppLog.Info("TaskScheduler", "Startup task elevated repair requested.", ("ElevatedRepairRequested", true));
-            var outcome = _elevatedInvoker.EnsureOwnedTask();
-            AppLog.Info("TaskScheduler", "Startup task elevated repair completed.", ("ElevatedRepairResult", outcome));
-            if (outcome != ElevatedStartupTaskOutcome.Created)
-                return StartupRegistrationResult.Failed();
-
-            // 3. Never trust the elevated child's exit code alone -- prove the task by an independent
-            //    normal-process read-back, allowing a small bounded settle for Task Scheduler lag.
-            var settled = ReadBackVerifyWithBoundedSettle(configuration);
-            AppLog.Info("TaskScheduler", "Startup task readback verification completed.", ("ReadbackVerified", settled));
-            return settled ? StartupRegistrationResult.Enabled() : StartupRegistrationResult.Failed();
-        }
-
         var write = _taskStore.Register(configuration);
         if (write != StartupTaskWriteOutcome.Registered)
         {
             if (write == StartupTaskWriteOutcome.AccessDenied)
-                AppLog.Warn("TaskScheduler", "Startup task registration was denied and no elevated repair path is available.", null);
+                AppLog.Warn("TaskScheduler", "High Runtime startup task registration was denied; no secondary elevation fallback is available.", null);
             return StartupRegistrationResult.Failed();
         }
 
-        var reread = SafeRead();
-        var verified = reread is not null && IsCompliant(reread, configuration);
+        var verified = ReadBackVerifyWithBoundedSettle(configuration);
         AppLog.Info("TaskScheduler", "Startup task registered.", ("ReadbackVerified", verified));
         return verified ? StartupRegistrationResult.Enabled() : StartupRegistrationResult.Failed();
     }
 
-    /// <summary>PR12 section 11: remove the ONE Addon-owned task. Read-only first (already absent ->
-    /// Success, no UAC). A denied delete uses the same bounded elevated child pattern as create, then
-    /// an independent normal-process read-back must prove the task is gone.</summary>
+    /// <summary>Remove the ONE Addon-owned task from the High Runtime. Read-only first (already absent
+    /// is success); after one direct delete, bounded readback must prove absence.</summary>
     private StartupRegistrationResult RemoveOwnedTask()
     {
         // review [P1]: a Task Scheduler read failure must NOT be mistaken for verified absence.
@@ -170,21 +135,9 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
             return StartupRegistrationResult.Disabled();
         }
 
-        if (_elevatedInvoker is not null)
-        {
-            AppLog.Info("TaskScheduler", "Startup task elevated removal requested.", ("ElevatedRepairRequested", true));
-            var outcome = _elevatedInvoker.RemoveOwnedTask();
-            AppLog.Info("TaskScheduler", "Startup task elevated removal completed.", ("ElevatedRepairResult", outcome));
-            if (outcome != ElevatedStartupTaskOutcome.Removed)
-                return StartupRegistrationResult.Failed();
-            var gone = ReadBackVerifyAbsentWithBoundedSettle();
-            AppLog.Info("TaskScheduler", "Startup task removal readback verification completed.", ("ReadbackVerified", gone));
-            return gone ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
-        }
-
         try { _taskStore.Delete(); }
         catch (Exception exception) { AppLog.Error("TaskScheduler", "Startup task deletion failed.", exception); return StartupRegistrationResult.Failed(); }
-        var absent = TryRead(out var afterDelete) && afterDelete is null;
+        var absent = ReadBackVerifyAbsentWithBoundedSettle();
         AppLog.Info("TaskScheduler", "Startup task deleted.", ("ReadbackVerified", absent));
         return absent ? StartupRegistrationResult.Disabled() : StartupRegistrationResult.Failed();
     }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Processes;
 
 namespace SteamInputAddonforClaw.Diagnostics;
 
@@ -28,7 +29,7 @@ internal sealed class Xbox360UsbTraceCapture : IXbox360UsbTraceCapture
         WppProvider
     ];
 
-    private readonly IElevatedProcessRunner _processRunner;
+    private readonly IChildProcessRunner _processRunner;
     private readonly Func<string> _outputDirectoryProvider;
     private readonly Func<string> _systemDirectoryProvider;
     private readonly TimeSpan _commandTimeout;
@@ -43,7 +44,7 @@ internal sealed class Xbox360UsbTraceCapture : IXbox360UsbTraceCapture
     internal string? FinalOutputPath { get; private set; }
 
     internal Xbox360UsbTraceCapture(
-        IElevatedProcessRunner processRunner,
+        IChildProcessRunner processRunner,
         Func<string>? outputDirectoryProvider = null,
         Func<string>? systemDirectoryProvider = null,
         TimeSpan? commandTimeout = null)
@@ -68,7 +69,7 @@ internal sealed class Xbox360UsbTraceCapture : IXbox360UsbTraceCapture
             var cleanup = await StopAndDeleteStaleSessionAsync(cancellationToken).ConfigureAwait(false);
             if (cleanup == CommandStatus.Cancelled)
             {
-                LogStart("Unavailable", "UacCancelled");
+                LogStart("Unavailable", "Cancelled");
                 return;
             }
 
@@ -188,9 +189,7 @@ internal sealed class Xbox360UsbTraceCapture : IXbox360UsbTraceCapture
             var executable = Path.Combine(_systemDirectoryProvider(), "logman.exe");
             var result = await _processRunner.RunAsync(executable, arguments, timeout.Token)
                 .WaitAsync(_commandTimeout, cancellationToken).ConfigureAwait(false);
-            if (result.Kind == ElevatedProcessResultKind.CancelledBeforeStart)
-                return new(CommandStatus.Cancelled, "UacCancelled");
-            if (result.Kind != ElevatedProcessResultKind.Completed)
+            if (result.Kind != ChildProcessResultKind.Completed)
                 return new(CommandStatus.Failed, result.Reason ?? result.Kind.ToString());
             return result.ExitCode == 0
                 ? new(CommandStatus.Succeeded, "ExitCode:0")

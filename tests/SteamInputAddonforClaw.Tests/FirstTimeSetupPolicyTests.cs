@@ -6,6 +6,7 @@ using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Processes;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -67,13 +68,14 @@ public sealed class FirstTimeSetupPolicyTests
     public void RecoveryUnsafe_BlocksEvenWhenComponentsAreReady() => Assert.Equal(FirstTimeSetupStatus.Blocked, FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with { RecoverySafe = false }).Status);
 
     [Theory]
-    [InlineData((int)ElevatedProcessResultKind.Completed, 0, (int)ElevatedPrerequisiteSetup.ResultKind.Installed)]
-    [InlineData((int)ElevatedProcessResultKind.Completed, 3010, (int)ElevatedPrerequisiteSetup.ResultKind.RebootRequired)]
-    [InlineData((int)ElevatedProcessResultKind.Completed, 2, (int)ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress)]
-    [InlineData((int)ElevatedProcessResultKind.Completed, 3, (int)ElevatedPrerequisiteSetup.ResultKind.Blocked)]
-    [InlineData((int)ElevatedProcessResultKind.CancelledBeforeStart, 0, (int)ElevatedPrerequisiteSetup.ResultKind.Cancelled)]
-    public void ElevatedSetupExitCodes_AreTranslatedByTheSetupContract(int processKind, int exitCode, int expected)
-        => Assert.Equal((ElevatedPrerequisiteSetup.ResultKind)expected, ElevatedPrerequisiteSetup.TranslateExitCode(new((ElevatedProcessResultKind)processKind, exitCode)));
+    [InlineData((int)ChildProcessResultKind.Completed, 0, (int)PrerequisiteSetupWorker.ResultKind.Installed)]
+    [InlineData((int)ChildProcessResultKind.Completed, 3010, (int)PrerequisiteSetupWorker.ResultKind.RebootRequired)]
+    [InlineData((int)ChildProcessResultKind.Completed, 2, (int)PrerequisiteSetupWorker.ResultKind.AlreadyInProgress)]
+    [InlineData((int)ChildProcessResultKind.Completed, 3, (int)PrerequisiteSetupWorker.ResultKind.Blocked)]
+    [InlineData((int)ChildProcessResultKind.FailedToStart, 0, (int)PrerequisiteSetupWorker.ResultKind.Failed)]
+    [InlineData((int)ChildProcessResultKind.TimedOut, 0, (int)PrerequisiteSetupWorker.ResultKind.Failed)]
+    public void Setup_worker_exit_codes_are_translated_by_the_setup_contract(int processKind, int exitCode, int expected)
+        => Assert.Equal((PrerequisiteSetupWorker.ResultKind)expected, PrerequisiteSetupWorker.TranslateExitCode(new((ChildProcessResultKind)processKind, exitCode)));
 
     [Theory]
     [InlineData(false, (int)PrerequisiteStatus.Missing, false, (int)PrerequisiteComponentAction.Install)]
@@ -146,7 +148,7 @@ public sealed class FirstTimeSetupPolicyTests
     {
         var elapsed = 100000L;
         var packagePoll = 0;
-        var result = ElevatedPrerequisiteSetup.WaitForHidHidePostInstallEvidence(
+        var result = PrerequisiteSetupWorker.WaitForHidHidePostInstallEvidence(
             () => packagePoll++ == 0 ? new HidHidePackageState(false, null, true) : new HidHidePackageState(true, "1.5.230.0", true),
             () => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailableInactive"),
             () => elapsed,
@@ -164,7 +166,7 @@ public sealed class FirstTimeSetupPolicyTests
     {
         var elapsed = 100000L;
         var polls = 0;
-        var result = ElevatedPrerequisiteSetup.WaitForHidHidePostInstallEvidence(
+        var result = PrerequisiteSetupWorker.WaitForHidHidePostInstallEvidence(
             () => new HidHidePackageState(false, null, true),
             () =>
             {
@@ -269,7 +271,7 @@ public sealed class FirstTimeSetupPolicyTests
     {
         var elapsed = 100000L;
         var polls = 0;
-        var result = ElevatedPrerequisiteSetup.WaitForUsbIpPostInstallEvidence(
+        var result = PrerequisiteSetupWorker.WaitForUsbIpPostInstallEvidence(
             () => polls++ == 0 ? new UsbIpWin2PackageState(false, null, true, false) : new UsbIpWin2PackageState(true, "0.9.8.1", true, true),
             () => new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable"),
             () => elapsed,
@@ -558,7 +560,7 @@ public sealed class FirstTimeSetupPolicyTests
 
         Assert.Equal(FirstTimeSetupStatus.Blocked, setup.Status);
         Assert.False(setup.CanInstallRequiredComponents);
-        Assert.False(ElevatedPrerequisiteSetup.ShouldInstallUsbIp(ComponentInstallationStatus.Incompatible));
+        Assert.False(PrerequisiteSetupWorker.ShouldInstallUsbIp(ComponentInstallationStatus.Incompatible));
     }
 
     [Theory]
@@ -569,7 +571,7 @@ public sealed class FirstTimeSetupPolicyTests
     [InlineData((int)ComponentInstallationStatus.ExistingUnverified, false)]
     [InlineData((int)ComponentInstallationStatus.Indeterminate, false)]
     public void ExistingUsbIpInstallerPath_IsSelectedOnlyForMissingOrUpdateRequired(int statusValue, bool expected)
-        => Assert.Equal(expected, ElevatedPrerequisiteSetup.ShouldInstallUsbIp((ComponentInstallationStatus)statusValue));
+        => Assert.Equal(expected, PrerequisiteSetupWorker.ShouldInstallUsbIp((ComponentInstallationStatus)statusValue));
 
     [Fact]
     public void TrueFirstInstall_SelectsBothExistingInstallerSteps()
@@ -582,8 +584,8 @@ public sealed class FirstTimeSetupPolicyTests
 
         Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
         Assert.True(setup.CanInstallRequiredComponents);
-        Assert.True(ElevatedPrerequisiteSetup.ShouldAcquireHidHide(ComponentInstallationStatus.Missing));
-        Assert.True(ElevatedPrerequisiteSetup.ShouldInstallUsbIp(ComponentInstallationStatus.Missing));
+        Assert.True(PrerequisiteSetupWorker.ShouldAcquireHidHide(ComponentInstallationStatus.Missing));
+        Assert.True(PrerequisiteSetupWorker.ShouldInstallUsbIp(ComponentInstallationStatus.Missing));
     }
 
     [Fact]
@@ -605,7 +607,7 @@ public sealed class FirstTimeSetupPolicyTests
     [InlineData((int)ComponentInstallationStatus.Incompatible, false)]
     [InlineData((int)ComponentInstallationStatus.Indeterminate, false)]
     public void HidHideAcquisition_IsSelectedOnlyForMissingPackage(int statusValue, bool expected)
-        => Assert.Equal(expected, ElevatedPrerequisiteSetup.ShouldAcquireHidHide((ComponentInstallationStatus)statusValue));
+        => Assert.Equal(expected, PrerequisiteSetupWorker.ShouldAcquireHidHide((ComponentInstallationStatus)statusValue));
 
     [Fact]
     public void InstallStartedWithExactPackage_DoesNotBlockMissingComponentSetup()
@@ -735,6 +737,6 @@ public sealed class FirstTimeSetupPolicyTests
             directory = directory.Parent;
 
         Assert.NotNull(directory);
-        return File.ReadAllText(Path.Combine(directory!.FullName, "src", "SteamInputAddonforClaw", "Prerequisites", "ElevatedPrerequisiteSetup.cs"));
+        return File.ReadAllText(Path.Combine(directory!.FullName, "src", "SteamInputAddonforClaw", "Prerequisites", "PrerequisiteSetupWorker.cs"));
     }
 }
