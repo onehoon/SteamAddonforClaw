@@ -125,6 +125,53 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
+    public void Overlay_geometry_uses_full_monitor_bounds_without_work_area_reservations()
+    {
+        var windowInterop = ReadWindowInteropSource();
+        var configure = windowInterop[windowInterop.IndexOf("internal static void Configure", StringComparison.Ordinal)..
+            windowInterop.IndexOf("internal static void ShowWithoutActivation", StringComparison.Ordinal)];
+        var geometry = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindowGeometry.cs");
+
+        Assert.Contains("MonitorFromWindow(foreground, MonitorDefaultToNearest)", configure);
+        Assert.Contains("MonitorFromPoint(new POINT(), MonitorDefaultToPrimary)", configure);
+        Assert.Contains("internal RECT rcWork;", windowInterop);
+        Assert.DoesNotContain("info.rcWork", configure);
+        Assert.DoesNotContain("WorkLeft", configure);
+        Assert.DoesNotContain("WorkTop", configure);
+        Assert.DoesNotContain("WorkRight", configure);
+        Assert.DoesNotContain("WorkBottom", configure);
+        Assert.DoesNotContain("WorkWidth", configure);
+        Assert.DoesNotContain("WorkHeight", configure);
+        Assert.DoesNotContain("ReservedLeftPx", configure);
+        Assert.DoesNotContain("ReservedTopPx", configure);
+        Assert.DoesNotContain("ReservedRightPx", configure);
+        Assert.DoesNotContain("ReservedBottomPx", configure);
+
+        Assert.DoesNotContain("OverlayGeometryMetrics", geometry);
+        Assert.DoesNotContain("workLeft", geometry);
+        Assert.DoesNotContain("workTop", geometry);
+        Assert.DoesNotContain("workRight", geometry);
+        Assert.DoesNotContain("workBottom", geometry);
+        Assert.DoesNotContain("WorkWidth", geometry);
+        Assert.DoesNotContain("WorkHeight", geometry);
+        Assert.DoesNotContain("ReservedLeftPx", geometry);
+        Assert.DoesNotContain("ReservedTopPx", geometry);
+        Assert.DoesNotContain("ReservedRightPx", geometry);
+        Assert.DoesNotContain("ReservedBottomPx", geometry);
+
+        var provisionalPlacement = configure.IndexOf("SwpNoActivate | SwpNoSendChanging | SwpNoZOrder", StringComparison.Ordinal);
+        var dpiRead = configure.IndexOf("dpi = GetDpiForWindow(hwnd);", StringComparison.Ordinal);
+        var geometryCalculation = configure.IndexOf("OverlayWindowGeometry.Calculate(", StringComparison.Ordinal);
+        var finalPlacement = configure.LastIndexOf("SetWindowPos(", StringComparison.Ordinal);
+        Assert.True(provisionalPlacement >= 0 && provisionalPlacement < dpiRead);
+        Assert.True(dpiRead < geometryCalculation && geometryCalculation < finalPlacement);
+        Assert.Contains("info.rcMonitor.Left", configure);
+        Assert.Contains("info.rcMonitor.Top", configure);
+        Assert.Contains("info.rcMonitor.Right", configure);
+        Assert.Contains("info.rcMonitor.Bottom", configure);
+    }
+
+    [Fact]
     public void WindowInterop_logs_only_native_z_order_visibility_and_extended_style_transitions()
     {
         var source = ReadWindowInteropSource();

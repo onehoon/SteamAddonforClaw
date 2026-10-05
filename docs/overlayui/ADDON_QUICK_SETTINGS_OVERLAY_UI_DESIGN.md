@@ -2,6 +2,8 @@
 
 > **Current architecture override (2026-09-22):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. Addon QAM tabs, QamHost, GamepadUI/CDP patching, and CEF debugging are retired. QAM-specific material below is historical and must not be used as an active implementation requirement.
 
+> **Current geometry policy (2026-10-05):** Use the selected monitor's full bounds and DPI with a 4-DIP edge gap and a maximum width of 432 DIP. Ignore Windows WorkArea/taskbar reservation; taskbar overlap is intentional. Foreground-monitor selection, two-pass DPI placement, topmost, and no-activate behavior remain unchanged.
+
 > **Status:** Current UI design baseline / implementation planning document  
 > **Date:** 2026-09-02  
 > **Scope:** Visual shell, tab model, controller-first navigation, layout hierarchy, common control interaction, mutation/debounce behavior, and Shortcut surface for `SteamInputAddonforClaw.Overlay.exe`.
@@ -367,21 +369,21 @@ Preferred visual behavior:
 - no drag handles in the ordinary Quick Settings surface;
 - tab-order editing belongs in an explicit configuration surface, not normal tab navigation.
 
-### 6.1 Five tabs at the current 400-DIP width
+### 6.1 Five tabs at the current 432-DIP maximum width
 
 Current code uses:
 
 ```text
-OverlayWindowGeometry.PocPanelWidthDip = 400
+OverlayWindowGeometry.MaxSurfaceWidthDip = 432
 ```
 
-At the reference 150% DPI this is 600 physical pixels.
+At the reference 150% DPI the maximum is 648 physical pixels.
 
 Five English text labels are a tighter fit than the existing POC content, especially `Controller` and `Shortcut`.
 
 Initial policy:
 
-1. Keep the current 400-DIP panel baseline unless hardware/UI evidence says it must change.
+1. Keep the current 432-DIP maximum panel width unless hardware/UI evidence says it must change.
 2. Keep standard WinUI control/typography sizing initially.
 3. Let the tab strip use horizontal space more efficiently than the body content if necessary.
 4. Do not globally scale down the entire UI simply to fit the tabs.
@@ -922,20 +924,23 @@ If future product evidence shows a strong need for row customization, treat it a
 
 ## 16. Base visual layout
 
-The Overlay remains a left-aligned full-WorkArea-height panel.
+The Overlay is right-aligned to the selected monitor's full bounds with a 4-DIP gap, and may cover the taskbar/work area.
 
 Current window baseline:
 
 ```text
-Panel width = 400 DIP
+Maximum panel width = 432 DIP
 Reference display = 1920 × 1200
 Reference scale = 150%
-Physical width at 150% = 600 px
-Height = current monitor WorkArea height
+Maximum physical width at 150% = 648 px
+X = Monitor.Right - 4 DIP - panel width
+Y = Monitor.Top + 4 DIP
+Height = Monitor.Height - 2 × 4 DIP
+Windows WorkArea/taskbar reservation = intentionally ignored
 Background = #FFF3F3F3
 ```
 
-This document does not change the existing WorkArea/DPI/window-placement architecture.
+At 1920 × 1200 and 144 DPI, the final rectangle is `(1266, 6, 648, 1188)`. Foreground-monitor selection and two-pass DPI placement are unchanged.
 
 ### 16.1 Current POC padding fact
 
@@ -1036,7 +1041,7 @@ Exact final point sizes are intentionally **not frozen yet**.
 
 Reason:
 
-- the 400-DIP panel is already established;
+- the 432-DIP maximum panel width is already established;
 - five tabs need real-device validation;
 - content density will become clearer when first real controls land;
 - shrinking fonts prematurely can hurt 1920×1200 handheld readability.
@@ -1058,7 +1063,7 @@ Do not immediately create compact custom templates for:
 
 Do not use `ScaleTransform` to visually shrink standard controls while leaving confusing hit-test geometry.
 
-First validate the standard controls inside the actual 400-DIP handheld panel.
+First validate the standard controls inside the actual handheld panel, capped at 432 DIP.
 
 If later hardware evidence shows that WinUI default toggles/sliders consume too much space, do a focused compact-style pass that adjusts the relevant template metrics deliberately.
 
@@ -1336,7 +1341,7 @@ Implement first:
 - slider-row direct Left/Right interaction contract even if the first shell uses a placeholder control;
 - structured header/tab/body/footer layout;
 - standard WinUI sizing/typography;
-- existing 400-DIP/WorkArea/DPI/window behavior unchanged.
+- existing 432-DIP maximum-width, full-monitor/DPI geometry unchanged; taskbar overlap is allowed.
 
 Do not bind all production feature mutations in the same PR if it makes the shell review large.
 
@@ -1387,7 +1392,7 @@ Before calling the basic UI shell stable, hardware testing should prove at minim
 ### Structure
 
 - all five tabs render at the target 1920×1200 / 150% reference configuration;
-- tabs remain readable at the 400-DIP panel baseline;
+- tabs remain readable at the 432-DIP maximum panel width;
 - page body scroll does not move the tab strip;
 - content has intentional insets and section spacing;
 - no unintended clipping of standard WinUI controls.
@@ -1432,9 +1437,9 @@ Before calling the basic UI shell stable, hardware testing should prove at minim
 
 ```text
 PANEL
-- left-side Addon-owned WinUI 3 Overlay
-- current 400 DIP width baseline
-- WorkArea height
+- right-side Addon-owned WinUI 3 Overlay
+- current 432 DIP maximum width
+- full monitor bounds with a 4-DIP edge gap; WorkArea/taskbar ignored
 - #FFF3F3F3 light surface baseline
 - standard WinUI control sizes initially
 - no compact custom templates yet

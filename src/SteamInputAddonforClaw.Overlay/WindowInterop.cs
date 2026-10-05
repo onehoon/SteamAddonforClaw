@@ -141,7 +141,7 @@ internal static class WindowInterop
         var info = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref info))
         {
-            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the target monitor work area.");
+            var exception = new Win32Exception(Marshal.GetLastWin32Error(), "Could not read target monitor information.");
             OverlayLog.Error("Geometry", "Target monitor information read failed.", exception, ("Operation", "GetMonitorInfo"));
             throw exception;
         }
@@ -175,12 +175,7 @@ internal static class WindowInterop
             info.rcMonitor.Top,
             info.rcMonitor.Right,
             info.rcMonitor.Bottom,
-            info.rcWork.Left,
-            info.rcWork.Top,
-            info.rcWork.Right,
-            info.rcWork.Bottom,
-            dpi,
-            out var geometry);
+            dpi);
         monitorText = $"Monitor: {info.rcMonitor.Left},{info.rcMonitor.Top} - {info.rcMonitor.Right},{info.rcMonitor.Bottom}";
 
         var exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
@@ -210,16 +205,8 @@ internal static class WindowInterop
             ("OverlayHwnd", hwnd), ("ForegroundHwnd", foreground),
             ("MonitorLeft", info.rcMonitor.Left), ("MonitorTop", info.rcMonitor.Top),
             ("MonitorRight", info.rcMonitor.Right), ("MonitorBottom", info.rcMonitor.Bottom),
-            ("WorkLeft", info.rcWork.Left), ("WorkTop", info.rcWork.Top),
-            ("WorkRight", info.rcWork.Right), ("WorkBottom", info.rcWork.Bottom),
             ("Dpi", dpi), ("Scale", dpi / 96.0),
-            ("MonitorWidth", geometry.MonitorWidth), ("MonitorHeight", geometry.MonitorHeight),
-            ("WorkWidth", geometry.WorkWidth), ("WorkHeight", geometry.WorkHeight),
-            ("ReservedLeftPx", geometry.ReservedLeftPx),
-            ("ReservedTopPx", geometry.ReservedTopPx),
-            ("ReservedRightPx", geometry.ReservedRightPx),
-            ("ReservedBottomPx", geometry.ReservedBottomPx),
-            ("FloatingGapPx", geometry.FloatingGapPx),
+            ("MonitorWidth", monitorWidth), ("MonitorHeight", monitorHeight),
             ("OverlayWidthPx", rect.Width), ("OverlayHeightPx", rect.Height));
     }
 
