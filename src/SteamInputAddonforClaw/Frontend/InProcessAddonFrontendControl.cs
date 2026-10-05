@@ -96,6 +96,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _stopXbox360RumbleLoopDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? _runPid1902InputCadenceDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendXboxCatalogDiagnosticResult>> _runXboxCatalogDiagnostic;
+    private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _captureGameInputSystemButtonProbe;
+    private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _startGameInputSystemButtonProbe;
+    private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _stopGameInputSystemButtonProbe;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -106,7 +109,47 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, bool frontButtonMappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null, IntelFrameLimiterRuntime? intelFpsRuntime = null, IMsiClawTdpTransport? fanProbeTransport = null, CenterMStartupControl? centerMStartup = null, ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null, MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null, MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null, FrontendUpdateCoordinator? updateCoordinator = null, Func<AcDcPowerSource?>? quickSettingsPowerSource = null, WindowsGamingHomeConfiguration? steamFse = null, Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null, Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null, Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null, ShortcutRuntime? shortcutRuntime = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? captureXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? startXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? stopXbox360RumbleLoopDiagnostic = null, Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? runPid1902InputCadenceDiagnostic = null, MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null, Func<bool>? controllerVibrationTestAvailable = null, Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? testControllerVibrationMotor = null, bool controllerLedAvailable = false, Func<ControllerLedSettings, CancellationToken, Task>? applyControllerLedSettings = null, Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? applyControllerVibrationSettings = null, Func<CancellationToken, Task<FrontendXboxCatalogDiagnosticResult>>? runXboxCatalogDiagnostic = null)
+    internal InProcessAddonFrontendControl(
+        StartupSettingsCoordinator settings,
+        ISystemStatusProvider status,
+        AddonRuntimeHost? runtime,
+        IFrontendPrerequisiteSetupExecutor? setupExecutor = null,
+        Func<string?>? processPath = null,
+        bool frontButtonMappingAvailable = false,
+        CpuBoostRuntime? cpuBoostRuntime = null,
+        TdpRuntime? tdpRuntime = null,
+        GameProfileMutations? gameProfileMutations = null,
+        Func<uint>? actualRunningAppIdSource = null,
+        Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null,
+        GameDisplayResolutionRuntime? displayResolutionRuntime = null,
+        PowerModeRuntime? powerModeRuntime = null,
+        IntelFrameLimiterRuntime? intelFpsRuntime = null,
+        IMsiClawTdpTransport? fanProbeTransport = null,
+        CenterMStartupControl? centerMStartup = null,
+        ICenterMRebootAuthorityTransition? centerMAuthorityTransition = null,
+        MsiClawBatteryChargeLimitRuntime? batteryChargeLimitRuntime = null,
+        MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null,
+        FrontendUpdateCoordinator? updateCoordinator = null,
+        Func<AcDcPowerSource?>? quickSettingsPowerSource = null,
+        WindowsGamingHomeConfiguration? steamFse = null,
+        Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null,
+        Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null,
+        Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null,
+        ShortcutRuntime? shortcutRuntime = null,
+        Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? captureXbox360RumbleLoopDiagnostic = null,
+        Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? startXbox360RumbleLoopDiagnostic = null,
+        Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? stopXbox360RumbleLoopDiagnostic = null,
+        Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? runPid1902InputCadenceDiagnostic = null,
+        MsiClawVibrationStrengthClient? controllerVibrationStrengthClient = null,
+        Func<bool>? controllerVibrationTestAvailable = null,
+        Func<FrontendControllerVibrationMotor, CancellationToken, Task<FrontendControllerVibrationTestResult>>? testControllerVibrationMotor = null,
+        bool controllerLedAvailable = false,
+        Func<ControllerLedSettings, CancellationToken, Task>? applyControllerLedSettings = null,
+        Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? applyControllerVibrationSettings = null,
+        Func<CancellationToken, Task<FrontendXboxCatalogDiagnosticResult>>? runXboxCatalogDiagnostic = null,
+        Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? captureGameInputSystemButtonProbe = null,
+        Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? startGameInputSystemButtonProbe = null,
+        Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? stopGameInputSystemButtonProbe = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -136,6 +179,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _stopXbox360RumbleLoopDiagnostic = stopXbox360RumbleLoopDiagnostic;
         _runPid1902InputCadenceDiagnostic = runPid1902InputCadenceDiagnostic;
         _runXboxCatalogDiagnostic = runXboxCatalogDiagnostic ?? (_ => Task.FromResult(FrontendXboxCatalogDiagnosticResult.Unavailable("XBOX catalog diagnostic is unavailable.")));
+        _captureGameInputSystemButtonProbe = captureGameInputSystemButtonProbe;
+        _startGameInputSystemButtonProbe = startGameInputSystemButtonProbe;
+        _stopGameInputSystemButtonProbe = stopGameInputSystemButtonProbe;
         _controllerVibrationStrengthClient = controllerVibrationStrengthClient;
         _applyControllerVibrationSettings = applyControllerVibrationSettings;
         _controllerVibrationTestAvailable = controllerVibrationTestAvailable;
@@ -794,6 +840,26 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return _runPid1902InputCadenceDiagnostic?.Invoke(cancellationToken)
             ?? Task.FromResult(FrontendPid1902InputCadenceResult.Unavailable());
     }
+
+    public Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return _captureGameInputSystemButtonProbe?.Invoke(cancellationToken)
+            ?? Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
+    }
+
+    public Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return _startGameInputSystemButtonProbe?.Invoke(cancellationToken)
+            ?? Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
+    }
+
+    public Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
+        _stopGameInputSystemButtonProbe?.Invoke(cancellationToken)
+        ?? Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
 
     private async Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestAsync(
         Func<MsiBatteryChargeLimitMutationResult> mutation,

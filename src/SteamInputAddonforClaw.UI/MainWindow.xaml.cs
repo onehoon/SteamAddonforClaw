@@ -104,6 +104,7 @@ public sealed partial class MainWindow : Window
         DeveloperMenuContent.FanHardwareProbeRequested += (_, _) => ShowPage(_navigationState.OpenFanHardwareProbe());
         DeveloperMenuContent.BatteryChargeLimitTestRequested += (_, _) => ShowPage(_navigationState.OpenBatteryChargeLimitTest());
         DeveloperMenuContent.XboxCatalogDiagnosticRequested += (_, _) => ShowPage(_navigationState.OpenXboxCatalogDiagnostic());
+        DeveloperMenuContent.GameInputSystemButtonProbeRequested += (_, _) => ShowPage(_navigationState.OpenGameInputSystemButtonProbe());
         ClawSensorProbeContent.Initialize(_frontend);
         ClawSensorProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         FanHardwareProbeContent.Initialize(_frontend);
@@ -112,6 +113,8 @@ public sealed partial class MainWindow : Window
         BatteryChargeLimitTestContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         XboxCatalogDiagnosticContent.Initialize(_frontend);
         XboxCatalogDiagnosticContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        GameInputSystemButtonProbeContent.Initialize(_frontend);
+        GameInputSystemButtonProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
         MainNavigationView.SelectedItem = DeviceNavigationItem;
         _ = RefreshSystemStatusAsync();
@@ -150,6 +153,9 @@ public sealed partial class MainWindow : Window
         await VibrationTestContent.DeactivateAsync().ConfigureAwait(true);
         FanHardwareProbeContent.Deactivate();
     }
+
+    internal async Task CloseGameInputSystemButtonProbeForUiShutdownAsync() =>
+        await GameInputSystemButtonProbeContent.DeactivateAsync().ConfigureAwait(true);
 
     internal async Task CloseClawSensorProbeForUiShutdownAsync()
     {
@@ -264,6 +270,7 @@ public sealed partial class MainWindow : Window
         var wasFanHardwareProbe = FanHardwareProbeContent.Visibility == Visibility.Visible;
         var wasBatteryChargeLimitTest = BatteryChargeLimitTestContent.Visibility == Visibility.Visible;
         var wasXboxCatalogDiagnostic = XboxCatalogDiagnosticContent.Visibility == Visibility.Visible;
+        var wasGameInputSystemButtonProbe = GameInputSystemButtonProbeContent.Visibility == Visibility.Visible;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
         ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
@@ -277,6 +284,7 @@ public sealed partial class MainWindow : Window
         FanHardwareProbeContent.Visibility = page == MainNavigationPage.FanHardwareProbe ? Visibility.Visible : Visibility.Collapsed;
         BatteryChargeLimitTestContent.Visibility = page == MainNavigationPage.BatteryChargeLimitTest ? Visibility.Visible : Visibility.Collapsed;
         XboxCatalogDiagnosticContent.Visibility = page == MainNavigationPage.XboxCatalogDiagnostic ? Visibility.Visible : Visibility.Collapsed;
+        GameInputSystemButtonProbeContent.Visibility = page == MainNavigationPage.GameInputSystemButtonProbe ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
         if (page == MainNavigationPage.Controller) ControllerContent.Activate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
@@ -299,6 +307,8 @@ public sealed partial class MainWindow : Window
         else if (wasBatteryChargeLimitTest) BatteryChargeLimitTestContent.Deactivate();
         if (page == MainNavigationPage.XboxCatalogDiagnostic) XboxCatalogDiagnosticContent.Activate();
         else if (wasXboxCatalogDiagnostic) XboxCatalogDiagnosticContent.Deactivate();
+        if (page == MainNavigationPage.GameInputSystemButtonProbe) GameInputSystemButtonProbeContent.Activate();
+        else if (wasGameInputSystemButtonProbe) GameInputSystemButtonProbeContent.Deactivate();
     }
 
     private async Task RefreshSystemStatusAsync()
