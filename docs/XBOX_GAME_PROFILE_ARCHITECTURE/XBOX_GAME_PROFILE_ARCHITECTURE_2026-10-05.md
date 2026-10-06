@@ -49,6 +49,10 @@ XBOX domain
     XBOX profile persistence
     XBOX Main App page
 
+shared profile-resolution and apply boundary
+    platform identity resolves before hardware application
+    one common effective profile view
+
 shared lower-level apply mechanisms
     CPU Boost
     TDP
@@ -870,7 +874,9 @@ internal readonly record struct ActiveProfileTarget(
 
 This is **not** a persisted game-identity framework.
 
-It is only the final selector passed to machine-wide profile apply code.
+It is only an input to the active-profile resolver. The resolver must consume the platform-specific identity and return a platform-neutral effective profile view.
+
+**Do not pass `ActiveProfileTarget`, Steam AppID, XBOX key, or platform kind into CPU/TDP/Power/FPS/Resolution runtime implementation logic.** Platform-specific work ends at profile resolution.
 
 ### 11.2 Selection policy
 
@@ -906,6 +912,16 @@ if XBOX → document.XboxGames
 
 Create one small profile lookup/policy helper returning the relevant enabled profile sections for the derived ActiveProfileTarget.
 
+The resolver should project Steam `GameProfile` or XBOX `XboxGameProfile` into the same platform-neutral view, conceptually:
+
+~~~text
+ResolvedActiveProfile
+    Performance : GamePerformanceOverrides
+    Display     : GameDisplayOverrides
+~~~
+
+After this point, the feature runtimes must not know which platform supplied the profile.
+
 The helper should remain narrow.
 
 Do not introduce:
@@ -927,9 +943,20 @@ The final apply sequence should be:
 Steam event / XBOX event / power-source event / profile mutation
 → compute current ActiveProfileTarget
 → existing ProfileStore + mutation gate
-→ resolve enabled profile
+→ resolve one platform-neutral ResolvedActiveProfile
+→ existing shared feature runtime owners
 → existing apply implementation
 ~~~
+
+Detection/identity and hardware application are separate layers.
+
+~~~text
+Steam identity ─┐
+                ├─ resolver → common profile view → shared apply runtimes
+XBOX identity ──┘
+~~~
+
+Main App and Overlay must also converge on this same apply authority. A frontend surface may choose a different editing target, but it must not own a separate CPU/TDP/Power/FPS/Resolution implementation.
 
 Reuse current ownership/recovery behavior in:
 
@@ -2153,9 +2180,12 @@ Implement this phase as two focused PRs.
 
 #### PR8 — shared active profile target + live apply
 
-- add the one derived `ActiveProfileTarget` convergence point;
+- add the one derived `ActiveProfileTarget` selection point;
 - priority remains Steam RunningAppID first, then production ActiveXboxGame, else None;
-- refactor existing CPU/TDP/Power/FPS/Resolution runtimes to resolve Steam/XBOX target without duplicating hardware implementations;
+- resolve Steam/XBOX persistence into one platform-neutral effective profile **before** entering CPU/TDP/Power/FPS/Resolution runtime logic;
+- reuse the exact existing CPU/TDP/Power/FPS/Resolution runtime owners for every platform;
+- feature runtimes must contain no Steam/XBOX branching and no separate platform apply path;
+- Main App active-target edits and current/future Overlay profile edits must converge on the same typed mutation/apply authority;
 - active target change / process exit / startup / resume converges to the correct profile or Device baseline;
 - no presentation-policy change.
 
@@ -2226,17 +2256,19 @@ The implementation is correct only if all of the following remain true.
 7. A process becomes an XBOX game only from strong package/GDK evidence with exact executable match.
 8. Installed XBOX catalog can be edited before game launch.
 9. Steam and XBOX profile persistence remain distinct collections.
-10. Existing CPU/TDP/Power/FPS/Resolution lower-level implementations are reused.
-11. One derived active-profile selector is the only convergence point for machine-wide game overrides.
-12. XBOX per-game M1/M2 overrides only the Xbox360 software mapping path.
-13. Global M1/M2 remains the fallback.
-14. XBOX detection never changes PID1902 ownership, HidHide, VIIPER ownership, or Steam/BPM presentation policy.
-15. Overlay does not gain separate Steam and XBOX profile tabs.
-16. Overlay active-game profile is selected by Runtime, not by UI guessing.
-17. Front-button Xbox action activates the Xbox app and never routes through Win+G/Game Bar.
-18. Detection/catalog failure fails closed to Device/global settings without affecting Steam or controller ownership.
-19. Sleep/resume and controlled Runtime restart perform bounded reconciliation.
-20. No speculative manager/state-machine/abstraction is added for unsupported multi-session or pathological timing cases.
+10. Existing CPU/TDP/Power/FPS/Resolution lower-level implementations are reused as the single shared runtime owners for every game platform.
+11. Platform-specific detection and identity end at one active-profile resolver; CPU/TDP/Power/FPS/Resolution runtime logic never branches on Steam versus XBOX.
+12. Main App and Overlay mutations converge on the same profile persistence and hardware-apply authority; neither surface owns a separate apply implementation.
+13. One derived active-profile selector is the only convergence point for machine-wide game overrides.
+14. XBOX per-game M1/M2 overrides only the Xbox360 software mapping path.
+15. Global M1/M2 remains the fallback.
+16. XBOX detection never changes PID1902 ownership, HidHide, VIIPER ownership, or Steam/BPM presentation policy.
+17. Overlay does not gain separate Steam and XBOX profile tabs.
+18. Overlay active-game profile is selected by Runtime, not by UI guessing.
+19. Front-button Xbox action activates the Xbox app and never routes through Win+G/Game Bar.
+20. Detection/catalog failure fails closed to Device/global settings without affecting Steam or controller ownership.
+21. Sleep/resume and controlled Runtime restart perform bounded reconciliation.
+22. No speculative manager/state-machine/abstraction is added for unsupported multi-session or pathological timing cases.
 
 ---
 
