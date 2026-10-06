@@ -30,11 +30,28 @@ public sealed class XboxGameCatalogFrontendTests
         Assert.Equal(
             new[] { new FrontendXboxGameCatalogEntry("store:game-one", "Aniimo Legend"), new("pfn:game-two", "星のカービィ") },
             snapshot.Games.ToArray());
-        Assert.Equal(["DisplayName", "Key"], typeof(FrontendXboxGameCatalogEntry)
+        Assert.Equal(["DisplayName", "Favorite", "Key"], typeof(FrontendXboxGameCatalogEntry)
             .GetProperties()
             .Select(property => property.Name)
             .Order(StringComparer.Ordinal)
             .ToArray());
+    }
+
+    [Fact]
+    public async Task Catalog_favorites_are_merged_from_the_XBOX_profile_store()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"XboxFavoriteProjection-{Guid.NewGuid():N}", "profiles.json");
+        var mutations = new SteamInputAddonforClaw.Profiles.XboxGameProfileMutations(
+            new SteamInputAddonforClaw.Profiles.ProfileStore(path), new SteamInputAddonforClaw.Profiles.ProfileMutationGate());
+        Assert.Equal(SteamInputAddonforClaw.Profiles.XboxGameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetFavorite("store:game-one", true, "Aniimo Legend"));
+        var control = CreateControl(_ => Task.FromResult(new XboxInstalledGameCatalogResult(
+            XboxInstalledGameCatalogOutcome.Completed,
+            [CreateGame("store:game-one", "Aniimo Legend"), CreateGame("pfn:game-two", "Other")], null)), mutations);
+
+        var snapshot = await control.ScanXboxGamesAsync();
+
+        Assert.Equal(new[] { true, false }, snapshot.Games.Select(game => game.Favorite));
     }
 
     [Theory]
@@ -77,13 +94,15 @@ public sealed class XboxGameCatalogFrontendTests
     }
 
     private static InProcessAddonFrontendControl CreateControl(
-        Func<CancellationToken, Task<XboxInstalledGameCatalogResult>> scanXboxGames)
+        Func<CancellationToken, Task<XboxInstalledGameCatalogResult>> scanXboxGames,
+        SteamInputAddonforClaw.Profiles.XboxGameProfileMutations? mutations = null)
     {
         var settings = new StartupSettingsCoordinator(
             new AppSettings(),
             new SettingsStore(Path.Combine(Path.GetTempPath(), $"XboxFrontend-{Guid.NewGuid():N}.json")),
             new NoOpStartupManager());
-        return new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null, scanXboxGames: scanXboxGames);
+        return new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null,
+            scanXboxGames: scanXboxGames, xboxGameProfileMutations: mutations);
     }
 
     private static XboxInstalledGameCatalogEntry CreateGame(string key, string displayName)

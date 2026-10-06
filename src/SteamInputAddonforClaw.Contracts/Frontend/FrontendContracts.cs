@@ -9,7 +9,7 @@ public enum FrontendLogLevel { Off, Info, Debug }
 public enum FrontendProfileGameSource { Steam, NonSteam }
 public sealed record FrontendProfileGameCatalogEntry(uint AppId, string Name, FrontendProfileGameSource Source, bool Favorite = false);
 public enum FrontendXboxGameCatalogOutcome { Ready, Unavailable, Failed }
-public sealed record FrontendXboxGameCatalogEntry(string Key, string DisplayName);
+public sealed record FrontendXboxGameCatalogEntry(string Key, string DisplayName, bool Favorite = false);
 public sealed record FrontendXboxGameCatalogSnapshot(
     FrontendXboxGameCatalogOutcome Outcome,
     IReadOnlyList<FrontendXboxGameCatalogEntry> Games,
@@ -25,6 +25,9 @@ public sealed record FrontendGameResolution(int Width, int Height);
 public sealed record FrontendGameFpsLimitConfiguration(bool Enabled, int AcFps, int DcFps, bool Available, string? UnavailableReason = null);
 public sealed record FrontendGameProfileSnapshot(uint AppId, string? DisplayName, bool Exists, bool Enabled,
     FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null);
+public sealed record FrontendXboxGameProfileSnapshot(string Key, string? DisplayName, bool Exists, bool Enabled,
+    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits,
+    FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null);
 public enum FrontendPowerModeReadStatus { Known, Unknown, Unavailable }
 public enum FrontendPowerModeMutationOutcome { Succeeded, PersistenceFailed, ApplyFailed }
 public sealed record FrontendPowerModeSideSnapshot(FrontendPowerModeReadStatus CurrentStatus, WindowsPowerMode? Current, WindowsPowerMode? Desired);
@@ -34,6 +37,10 @@ public sealed record FrontendPowerModeMutationResult(FrontendPowerModeMutationOu
 { public bool Succeeded => Outcome == FrontendPowerModeMutationOutcome.Succeeded; }
 public enum FrontendGameProfileMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, ApplyFailed, Unavailable }
 public sealed record FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome Outcome, string? FailureMessage, FrontendGameProfileSnapshot Snapshot)
+{
+    public bool Succeeded => Outcome == FrontendGameProfileMutationOutcome.Succeeded;
+}
+public sealed record FrontendXboxGameProfileMutationResult(FrontendGameProfileMutationOutcome Outcome, string? FailureMessage, FrontendXboxGameProfileSnapshot Snapshot)
 {
     public bool Succeeded => Outcome == FrontendGameProfileMutationOutcome.Succeeded;
 }
@@ -812,6 +819,36 @@ public interface IAddonFrontendControl
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendXboxGameCatalogSnapshot> ScanXboxGamesAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXboxGameCatalogSnapshot.Unavailable("XBOX game catalog is unavailable."));
+    Task<FrontendXboxGameProfileSnapshot> CaptureXboxGameProfileAsync(string key, CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendXboxGameProfileSnapshotUnavailable(key));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFavoriteAsync(string key, bool favorite, string? displayName, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledAsync(string key, bool enabled, string? displayName, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostAcAsync(string key, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostDcAsync(string key, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileTdpEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileTdpAsync(string key, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeAcAsync(string key, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeDcAsync(string key, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "Intel FPS Limit is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitAcAsync(string key, int fps, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "Intel FPS Limit is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitDcAsync(string key, int fps, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "Intel FPS Limit is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
     Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));
     Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
@@ -860,4 +897,9 @@ public interface IAddonFrontendControl
 
     private static FrontendGameProfileSnapshot FrontendGameProfileSnapshotUnavailable(uint appId) => new(appId, null, false, false,
         new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(false, new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
+    private static FrontendXboxGameProfileSnapshot FrontendXboxGameProfileSnapshotUnavailable(string key) => new(key, null, false, false,
+        new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(false, new(20, 22), new(20, 22)), false, null,
+        FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
+    private static FrontendXboxGameProfileMutationResult UnavailableXboxGameProfileMutation(string key, string message) =>
+        new(FrontendGameProfileMutationOutcome.Unavailable, message, FrontendXboxGameProfileSnapshotUnavailable(key));
 }

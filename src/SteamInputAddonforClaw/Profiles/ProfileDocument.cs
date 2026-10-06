@@ -26,13 +26,17 @@ public sealed record ProfileDocument
     /// is descriptive metadata only.</summary>
     public Dictionary<string, GameProfile> Games { get; init; } = [];
 
+    /// <summary>Per-game XBOX profiles keyed by the production canonical identity string. The key
+    /// is authoritative; <see cref="XboxGameProfile.DisplayName"/> is descriptive metadata.</summary>
+    public Dictionary<string, XboxGameProfile> XboxGames { get; init; } = [];
+
     /// <summary>Preserves genuinely unrecognized top-level JSON properties across a load/save
     /// round trip (e.g. a field a newer build added that this build does not understand yet), so
     /// an older/compatible build editing an unrelated value does not silently destroy it. Uses
     /// System.Text.Json's built-in extension-data support rather than a custom JSON DOM
     /// synchronization engine. The same sidecar is applied to every intentionally extensible
     /// nested section (<see cref="DeviceSettings"/>, <see cref="DevicePerformanceSettings"/>,
-    /// <see cref="DeviceDisplaySettings"/>, <see cref="GameProfile"/>,
+    /// <see cref="DeviceDisplaySettings"/>, <see cref="GameProfile"/>, <see cref="XboxGameProfile"/>,
     /// <see cref="GamePerformanceOverrides"/>, <see cref="GameDisplayOverrides"/>) so a future
     /// additive field anywhere in the document round-trips, not just at the root.</summary>
     [JsonExtensionData]

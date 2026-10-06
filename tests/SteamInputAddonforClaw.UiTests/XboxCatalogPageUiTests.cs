@@ -38,7 +38,7 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
-    public void Xbox_page_contains_only_display_name_catalog_cards_and_safe_controls()
+    public void Xbox_page_contains_display_name_cards_favorites_and_offline_profile_controls()
     {
         var document = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml"));
         var xaml = document.ToString();
@@ -50,14 +50,20 @@ public sealed class XboxCatalogPageUiTests
         Assert.Contains("PlaceholderText=\"Search games...\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"GameGrid\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding DisplayName}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FavoriteButton_Click", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ProfileEnabledToggle\"", xaml, StringComparison.Ordinal);
+        foreach (var control in new[] { "TdpEnabledToggle", "CpuBoostEnabledToggle", "PowerModeEnabledToggle", "FpsEnabledToggle", "ResolutionComboBox" })
+            Assert.Contains($"x:Name=\"{control}\"", xaml, StringComparison.Ordinal);
         foreach (var internalField in new[] { "StoreId", "TitleId", "PackageFamilyName", "PackageFullName", "ConfigPath", "Executable", "AUMID", "ProcessPath" })
         {
             Assert.DoesNotContain(internalField, xaml, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(internalField, code, StringComparison.OrdinalIgnoreCase);
         }
         Assert.DoesNotContain("Text=\"{Binding Key}\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Favorite", xaml, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Profile", xaml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("StoreId", code, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("TitleId", code, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PackageFullName", code, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ConfigPath", code, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -73,10 +79,13 @@ public sealed class XboxCatalogPageUiTests
 
         Assert.Contains("_active = true", activate, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshGamesAsync()", activate, StringComparison.Ordinal);
-        Assert.Contains("scan?.Cancel()", deactivate, StringComparison.Ordinal);
+        Assert.Contains("CancelScan()", deactivate, StringComparison.Ordinal);
+        Assert.Contains("CancelCapture()", deactivate, StringComparison.Ordinal);
+        Assert.Contains("CancelTdpDebounce()", deactivate, StringComparison.Ordinal);
+        Assert.Contains("CancelFpsDebounce()", deactivate, StringComparison.Ordinal);
         Assert.Contains("await RefreshGamesAsync()", refreshButton, StringComparison.Ordinal);
-        Assert.Contains("previousScan?.Cancel()", refresh, StringComparison.Ordinal);
-        var scanCall = refresh.IndexOf("await frontend.ScanXboxGamesAsync(scan.Token)", StringComparison.Ordinal);
+        Assert.Contains("previous?.Cancel()", refresh, StringComparison.Ordinal);
+        var scanCall = refresh.IndexOf("await _frontend.ScanXboxGamesAsync(scan.Token)", StringComparison.Ordinal);
         var staleGuard = refresh.IndexOf("if (!IsCurrentScan(_active, _scanCancellation, scan)) return", StringComparison.Ordinal);
         Assert.True(scanCall >= 0 && staleGuard > scanCall);
         Assert.Contains("XboxContent.Activate()", showPage, StringComparison.Ordinal);
@@ -101,6 +110,10 @@ public sealed class XboxCatalogPageUiTests
         var sorted = XboxPage.FilterAndSort(games, null);
         Assert.Equal(new[] { "Alpha", "alpha", "Beta", "Hidden key game" }, sorted.Select(game => game.DisplayName));
         Assert.Equal("pfn:two", sorted[0].Key);
+
+        var withFavorite = games[0] with { Favorite = true };
+        var favoritesFirst = XboxPage.FilterAndSort(games.Select(game => game.Key == games[0].Key ? withFavorite : game), null);
+        Assert.Equal(withFavorite.Key, favoritesFirst[0].Key);
     }
 
     [Fact]
@@ -114,6 +127,47 @@ public sealed class XboxCatalogPageUiTests
         first.Cancel();
         Assert.False(XboxPage.IsCurrentScan(true, first, first));
         Assert.False(XboxPage.IsCurrentScan(false, first, first));
+    }
+
+    [Fact]
+    public void Xbox_profile_responses_require_active_page_selected_key_and_matching_response_key()
+    {
+        Assert.True(XboxPage.IsCurrentProfileResponse(true, "store:one", "store:one", "store:one"));
+        Assert.False(XboxPage.IsCurrentProfileResponse(false, "store:one", "store:one", "store:one"));
+        Assert.False(XboxPage.IsCurrentProfileResponse(true, "store:two", "store:one", "store:one"));
+        Assert.False(XboxPage.IsCurrentProfileResponse(true, "store:one", "store:one", "store:two"));
+    }
+
+    [Fact]
+    public void Xbox_detail_handlers_use_XBOX_Rpcs_and_cancel_TDP_FPS_debounces_on_retirement()
+    {
+        var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
+        foreach (var method in new[]
+        {
+            "SetXboxGameProfileFavoriteAsync", "SetXboxGameProfileEnabledAsync", "SetXboxGameProfileCpuBoostEnabledAsync",
+            "SetXboxGameProfileCpuBoostAcAsync", "SetXboxGameProfileCpuBoostDcAsync", "SetXboxGameProfileTdpEnabledAsync",
+            "SetXboxGameProfileTdpAsync", "SetXboxGameProfilePowerModeEnabledAsync", "SetXboxGameProfilePowerModeAcAsync",
+            "SetXboxGameProfilePowerModeDcAsync", "SetXboxGameProfileFpsLimitEnabledAsync", "SetXboxGameProfileFpsLimitAcAsync",
+            "SetXboxGameProfileFpsLimitDcAsync", "SetXboxGameProfileResolutionAsync"
+        }) Assert.Contains(method, code, StringComparison.Ordinal);
+        Assert.Contains("Task.Delay(300", code, StringComparison.Ordinal);
+        Assert.Contains("Task.Delay(275", code, StringComparison.Ordinal);
+        Assert.Contains("DevicePage.TdpDraftPolicy.AdjustAfterEdit", code, StringComparison.Ordinal);
+        var select = Method(code, "private async Task SelectGameAsync", "private void BeginProfileLoad");
+        var back = Method(code, "private void BackButton_Click", "private async void FavoriteButton_Click");
+        var deactivate = Method(code, "internal void Deactivate()", "private async void RefreshGamesButton_Click");
+        var clearSelection = Method(code, "private void ClearSelection()", "private void Render(");
+        Assert.Contains("CancelTdpDebounce()", select, StringComparison.Ordinal);
+        Assert.Contains("CancelFpsDebounce()", select, StringComparison.Ordinal);
+        Assert.Contains("ClearSelection()", back, StringComparison.Ordinal);
+        Assert.Contains("CancelTdpDebounce()", clearSelection, StringComparison.Ordinal);
+        Assert.Contains("CancelFpsDebounce()", clearSelection, StringComparison.Ordinal);
+        Assert.Contains("CancelTdpDebounce()", deactivate, StringComparison.Ordinal);
+        Assert.Contains("CancelFpsDebounce()", deactivate, StringComparison.Ordinal);
+        Assert.DoesNotContain("StateInvalidated", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("ActualRunningAppId", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Reconcile", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("XboxSessionDiagnostic", code, StringComparison.Ordinal);
     }
 
     private static string Method(string source, string startMarker, string endMarker)

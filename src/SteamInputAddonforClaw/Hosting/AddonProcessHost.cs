@@ -92,6 +92,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly CpuBoostRuntime _cpuBoostRuntime;
     private readonly PowerModeRuntime _powerModeRuntime;
     private readonly GameProfileMutations _gameProfileMutations;
+    private readonly XboxGameProfileMutations _xboxGameProfileMutations;
     private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
     private readonly IntelFrameLimiterRuntime _intelFpsRuntime;
     private readonly ShortcutStore _shortcutStore;
@@ -188,6 +189,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
+        _xboxGameProfileMutations = new(_profileStore, _profileMutationGate);
         _displayResolutionRuntime = new(_profileStore, _profileMutationGate, testOnlyDataRoot);
         var fpsMarker = testOnlyDataRoot is null ? AddonDataPaths.IntelFpsLimitOwnershipPath : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json");
         var fpsLimiter = testIntelFrameLimiterFactory?.Invoke(fpsMarker) ?? (testOnlyDataRoot is null ? new IntelFrameLimiter(fpsMarker) : new UnavailableIntelFrameLimiter());
@@ -457,6 +459,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
         {
             _gameProfileMutations.SetModelId(tdpModel);
+            _xboxGameProfileMutations.SetModelId(tdpModel);
             _tdpTransport = new();
             var tdpHardware = new MsiClawTdpHardware(_tdpTransport);
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel, tdpHardware);
@@ -581,6 +584,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
+            xboxGameProfileMutations: _xboxGameProfileMutations,
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
             intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
             batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
