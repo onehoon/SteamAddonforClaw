@@ -51,6 +51,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - Configurable WING / Gamebar and Center M actions for Normal and Steam presentation modes
 - Device-level CPU Boost, Windows 11 Power Mode, and TDP control as independent features
 - Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles as independent features
+- A separate read-only catalog of installed XBOX games
 - Event-driven Steam game detection without periodic game/process polling
 - Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls
@@ -147,9 +148,9 @@ Turning **CPU Boost** or **TDP Control** off means the Addon stops managing that
 
 It is not a "restore the value that existed before the Addon started" command. Saved values are kept so they are available again if the feature is re-enabled.
 
-## Profile tab
+## Steam tab
 
-The **Profile** tab provides per-game CPU Boost and TDP settings.
+The **Steam** tab provides per-game CPU Boost and TDP settings for Steam games and Non-Steam shortcuts registered in Steam.
 
 The game list is built from:
 
@@ -160,7 +161,7 @@ Use **Refresh** if you install a game or add a new Non-Steam shortcut while the 
 
 ### Creating a game profile
 
-1. Open **Profile**.
+1. Open **Steam**.
 2. Search for or select a game.
 3. Enable the profile using the toggle beside the game selector.
 4. Configure CPU Boost for plugged-in and battery operation.
@@ -171,6 +172,10 @@ A profile is a complete per-game performance configuration rather than a set of 
 When a profile is enabled for the first time, its initial values are copied from the saved Device values when available. After that, the game keeps its own saved values.
 
 Disabling a profile does not erase its settings.
+
+## XBOX tab
+
+The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only and supports search and manual refresh. This catalog is read-only; XBOX profile editing and per-game performance settings are not available yet.
 
 ### Device and Profile priority
 
@@ -214,7 +219,7 @@ Steam RunningAppID
 
 Non-Steam games can use the same presentation and per-game performance features when they are added to the Steam library as a **Non-Steam Game**.
 
-The Profile tab reads Non-Steam shortcuts registered in Steam, so those shortcuts can have their own CPU Boost and TDP profiles just like regular Steam games.
+The Steam tab reads Non-Steam shortcuts registered in Steam, so those shortcuts can have their own CPU Boost and TDP profiles just like regular Steam games.
 
 When a Non-Steam game is launched through Steam and Steam reports that shortcut as the current running AppID:
 
@@ -274,7 +279,7 @@ If the update service is temporarily unavailable, the update check times out, or
 2. Launch **Steam Addon for Claw**.
 3. Keep Steam running for Steam-related features.
 4. Configure optional CPU Boost / TDP defaults in **Device**.
-5. Configure game-specific performance settings in **Profile** if desired.
+5. Configure game-specific performance settings in **Steam** if desired.
 6. Configure the Center M **Normal Action** in **Controller** if desired.
 7. Start a Steam game, a Non-Steam game added to Steam, or enter Steam Big Picture Mode — the built-in controller is presented to Steam as a virtual Steam Deck controller automatically.
 

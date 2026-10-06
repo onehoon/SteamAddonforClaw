@@ -146,6 +146,16 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void Xbox_navigation_tag_opens_an_independent_top_level_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.Xbox, navigation.SelectNavigationItem(false, "Xbox"));
+        Assert.Equal(MainNavigationPage.Xbox, navigation.CurrentPage);
+        Assert.Null(navigation.GetMouseBackDestination());
+    }
+
+    [Fact]
     public void Overlay_navigation_tag_opens_overlay_page()
     {
         var navigation = new MainNavigationState();

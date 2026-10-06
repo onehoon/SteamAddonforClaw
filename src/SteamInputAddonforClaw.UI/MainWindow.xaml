@@ -29,9 +29,14 @@
                     <SymbolIcon Symbol="Repair" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Profile" Tag="Profile">
+            <NavigationViewItem Content="Steam" Tag="Profile">
                 <NavigationViewItem.Icon>
                     <SymbolIcon Symbol="Contact" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem Content="XBOX" Tag="Xbox">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="Play" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="Overlay" Tag="Overlay">
@@ -55,6 +60,8 @@
             <views:DevicePage x:Name="DeviceContent" />
 
             <views:ProfilePage x:Name="ProfileContent" Visibility="Collapsed" />
+
+            <views:XboxPage x:Name="XboxContent" Visibility="Collapsed" />
 
             <views:HowToUsePage x:Name="HowToUseContent" Visibility="Collapsed" />
 

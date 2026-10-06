@@ -78,6 +78,7 @@ public sealed partial class MainWindow : Window
         SettingsContent.Initialize(_bootstrap, _frontend);
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
+        XboxContent.Initialize(_frontend);
         ControllerContent.Initialize(_bootstrap, _frontend, () => WindowNative.GetWindowHandle(this));
         _controllerLedMutationTimer = DispatcherQueue.CreateTimer();
         _controllerLedMutationTimer.Interval = TimeSpan.FromMilliseconds(200);
@@ -269,6 +270,7 @@ public sealed partial class MainWindow : Window
         var wasVibrationTest = VibrationTestContent.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
         var wasProfile = ProfileContent.Visibility == Visibility.Visible;
+        var wasXbox = XboxContent.Visibility == Visibility.Visible;
         var wasShortcut = ShortcutContent.Visibility == Visibility.Visible;
         var wasClawSensorProbe = ClawSensorProbeContent.Visibility == Visibility.Visible;
         var wasFanHardwareProbe = FanHardwareProbeContent.Visibility == Visibility.Visible;
@@ -277,6 +279,7 @@ public sealed partial class MainWindow : Window
         var wasGameInputSystemButtonProbe = GameInputSystemButtonProbeContent.Visibility == Visibility.Visible;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
         ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
+        XboxContent.Visibility = page == MainNavigationPage.Xbox ? Visibility.Visible : Visibility.Collapsed;
         ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
         OverlayContent.Visibility = page == MainNavigationPage.Overlay ? Visibility.Visible : Visibility.Collapsed;
         ShortcutContent.Visibility = page == MainNavigationPage.Shortcut ? Visibility.Visible : Visibility.Collapsed;
@@ -300,6 +303,8 @@ public sealed partial class MainWindow : Window
         else if (wasDevice) DeviceContent.Deactivate();
         if (page == MainNavigationPage.Profile) ProfileContent.Activate();
         else if (wasProfile) ProfileContent.Deactivate();
+        if (page == MainNavigationPage.Xbox) XboxContent.Activate();
+        else if (wasXbox) XboxContent.Deactivate();
         if (page == MainNavigationPage.Overlay) OverlayContent.Activate();
         if (page == MainNavigationPage.Shortcut) ShortcutContent.Activate();
         else if (wasShortcut) ShortcutContent.Deactivate();
