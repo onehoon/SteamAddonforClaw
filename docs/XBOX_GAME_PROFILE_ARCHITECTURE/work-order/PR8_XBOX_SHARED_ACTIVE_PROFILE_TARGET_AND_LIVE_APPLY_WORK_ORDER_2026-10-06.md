@@ -700,9 +700,11 @@ effective Steam profile
 
 ## 18. Live XBOX profile mutations
 
-Current XBOX mutations are persistence-only.
+Main App's Steam and XBOX pages are catalog editors: a user may edit any listed game before launch or while another game is active. A successful mutation always persists. If the edited game is the current effective active target and its profile is enabled, immediately reconcile through the shared feature runtimes. Otherwise, keep the edit saved without changing the current target's settings.
 
-After successful persistence, apply immediately only when the mutated XBOX key is the current effective target.
+For XBOX specifically, after successful persistence apply immediately only when the mutated canonical XBOX key is the current effective target. Steam RunningAppID retains priority, so editing an XBOX profile while Steam is effective persists without applying that XBOX profile.
+
+The Overlay is a Steam-current-profile surface and remains unchanged by PR8. It continues to use the existing Steam typed mutation path; PR8 adds no XBOX Overlay page or XBOX Overlay profile selection.
 
 Important:
 
@@ -746,6 +748,8 @@ persist succeeds
 → report ApplyFailed where supported
 → no rollback
 ~~~
+
+Favorite is persistence-only even when the XBOX game is active. Profile Enabled reconciles all five shared runtime owners; individual CPU Boost, TDP, Power Mode, Intel FPS, and Resolution edits reconcile only their matching existing owner.
 
 ---
 
@@ -891,6 +895,7 @@ Extend XboxGameProfileFrontendTests.
 Required:
 
 - Favorite never applies hardware;
+- Profile Enabled reconciles all five existing runtime owners;
 - active XBOX CPU edit uses existing CpuBoostRuntime;
 - active XBOX TDP edit uses existing TdpRuntime;
 - active XBOX Power edit uses existing PowerModeRuntime;

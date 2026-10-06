@@ -95,6 +95,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly XboxGameProfileMutations _xboxGameProfileMutations;
     private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
     private readonly IntelFrameLimiterRuntime _intelFpsRuntime;
+    private readonly Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver;
     private readonly ShortcutStore _shortcutStore;
     private readonly ShortcutRuntime _shortcutRuntime;
     private readonly NirCmdScreenshotCapture _nircmdScreenshotCapture = new();
@@ -108,6 +109,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
+    private int _profileRuntimeStartupReady;
     private Task? _deferredRuntimeStartup;
     private Task? _backgroundUpdateTask;
     private int _backgroundUpdateStarted;
@@ -174,6 +176,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
         _frontendPipeNameFactory = testFrontendPipeNameFactory;
         _headlessUninstallPreparation = headlessUninstallPreparation;
+        _activeProfileResolver = ResolveActiveProfile;
         var profilePath = testOnlyDataRoot is null
             ? AddonDataPaths.ProfilesPath
             : Path.Combine(testOnlyDataRoot, "profiles.json");
@@ -434,9 +437,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 uninstallPreparationOnly: _headlessUninstallPreparation);
 
         _runtimeHost = composition.RuntimeHost;
-        _cpuBoostRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
-        _powerModeRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
-        _intelFpsRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
+        _cpuBoostRuntime.SetActiveProfileResolver(_activeProfileResolver);
+        _powerModeRuntime.SetActiveProfileResolver(_activeProfileResolver);
+        _intelFpsRuntime.SetActiveProfileResolver(_activeProfileResolver);
+        _displayResolutionRuntime.SetActiveProfileResolver(_activeProfileResolver);
         if (!_headlessUninstallPreparation)
         {
             _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
@@ -463,9 +467,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _tdpTransport = new();
             var tdpHardware = new MsiClawTdpHardware(_tdpTransport);
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel, tdpHardware);
+            _tdpRuntime.SetActiveProfileResolver(_activeProfileResolver);
             _batteryChargeLimitHardware = new MsiClawBatteryChargeLimitHardware(_tdpTransport);
             _batteryChargeLimitRuntime = new(_profileStore, _profileMutationGate, tdpModel, _batteryChargeLimitHardware);
-            _tdpRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
         }
@@ -569,6 +573,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var setupExecutor = new SteamInputAddonforClaw.Frontend.FrontendPrerequisiteSetupExecutor(
             allowPrerequisiteRepairWhileRecoveryUnsafe);
         _xboxGameSessionRuntime = new XboxGameSessionRuntime();
+        _xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;
         try
         {
             await _xboxGameSessionRuntime.StartAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
@@ -593,6 +598,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
             xboxGameProfileMutations: _xboxGameProfileMutations,
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
+            activeProfileTargetSource: CaptureActiveProfileTarget,
             intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
             batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
             batteryChargeLimitHardware: _batteryChargeLimitHardware,
@@ -2009,18 +2015,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         try
         {
-            _displayResolutionRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0);
+            _displayResolutionRuntime.Reconcile();
         }
         catch (Exception exception) { AppLog.Error("Profiles.Display", "Display resolution startup reconcile failed.", exception); }
         try
         {
-            _cpuBoostRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0);
+            _cpuBoostRuntime.StartupReconcile();
         }
         catch (Exception exception)
         {
             AppLog.Error("Profiles.CpuBoost", "CPU Boost startup reconcile failed.", exception);
         }
-        try { _powerModeRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0); }
+        try { _powerModeRuntime.StartupReconcile(); }
         catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode startup reconcile failed.", exception); }
         // The AC/DC fact is shared by compact Quick Settings and Intel FPS. Register its
         // event-driven notification independently of IGCL availability so a missing Intel driver
@@ -2041,7 +2047,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             _intelFpsRuntime.Initialize();
             _intelFpsRuntime.StartupRecover();
-            _intelFpsRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0);
+            _intelFpsRuntime.StartupReconcile();
         }
         catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "Intel FPS startup reconcile failed.", exception); }
 
@@ -2067,7 +2073,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Error("Profiles.Tdp", "TDP startup reconcile failed.", exception);
         }
+        Volatile.Write(ref _profileRuntimeStartupReady, 1);
     }
+
+    private ActiveProfileTarget CaptureActiveProfileTarget()
+    {
+        var appId = _runtimeHost?.ActualRunningAppId ?? 0;
+        if (appId != 0) return ActiveProfileTarget.ForSteam(appId);
+
+        var activeXboxGame = _xboxGameSessionRuntime?.ActiveGame;
+        return activeXboxGame is null
+            ? ActiveProfileTarget.None
+            : ActiveProfileTarget.ForXbox(activeXboxGame.Key);
+    }
+
+    private ResolvedActiveProfile? ResolveActiveProfile(ProfileDocument document) =>
+        ActiveProfileResolver.Resolve(CaptureActiveProfileTarget(), document);
 
     /// <summary>Restart-specific safety only: a real live transition/shutdown hazard, never the
     /// permanent mandatory-Runtime policy (tray restart/overlay cleanup work order section 7). A
@@ -2357,6 +2378,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _runtimeHost.ActualRunningAppIdChanged -= OnActualRunningAppIdChanged;
             _runtimeHost.PowerResumeObserved -= OnPowerResumeObserved;
         }
+        if (_xboxGameSessionRuntime is not null)
+            _xboxGameSessionRuntime.ActiveGameChanged -= OnActiveXboxGameChanged;
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.BeginProcessShutdown();
         try { _displayResolutionRuntime.Shutdown(); } catch (Exception exception) { AppLog.Error("Profiles.Display", "Display resolution shutdown restore failed.", exception); }
@@ -2369,40 +2392,56 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // wait behind the unrelated CPU Boost / Power Mode / Resolution / TDP / FPS profile work
         // below. The switch itself runs asynchronously, serialized by the presentation owner's gate.
         RequestControllerPresentationReconcile("RunningAppIdChanged");
+        ReconcileEffectiveGameProfile("ActualRunningAppIdChanged");
+    }
 
+    private void OnActiveXboxGameChanged(ActiveXboxGame? activeGame)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0
+            || Volatile.Read(ref _profileRuntimeStartupReady) == 0)
+            return;
+        ReconcileEffectiveGameProfile("ActiveXboxGameChanged");
+    }
+
+    private void ReconcileEffectiveGameProfile(string trigger)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0) return;
+        var target = CaptureActiveProfileTarget();
+        AppLog.Debug("Profiles", "Effective game-profile reconcile started.",
+            ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
         try
         {
-            _cpuBoostRuntime.Reconcile(appId);
+            _cpuBoostRuntime.Reconcile();
         }
         catch (Exception exception)
         {
-            AppLog.Error("Profiles.CpuBoost", "CPU Boost game-profile reconcile failed after Actual RunningAppID changed.", exception,
-                ("RunningAppID", appId));
+            AppLog.Error("Profiles.CpuBoost", "CPU Boost game-profile reconcile failed.", exception,
+                ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
         }
-        try { _powerModeRuntime.Reconcile(appId); }
-        catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode game-profile reconcile failed after Actual RunningAppID changed.", exception); }
+        try { _powerModeRuntime.Reconcile(); }
+        catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode game-profile reconcile failed.", exception, ("ProfileTarget", target.LogLabel), ("Trigger", trigger)); }
 
         try
         {
-            _displayResolutionRuntime.Reconcile(appId);
+            _displayResolutionRuntime.Reconcile();
         }
         catch (Exception exception)
         {
-            AppLog.Error("Profiles.Display", "Display resolution reconcile failed after Actual RunningAppID changed.", exception,
-                ("RunningAppID", appId));
+            AppLog.Error("Profiles.Display", "Display resolution reconcile failed.", exception,
+                ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
         }
 
         try
         {
-            _tdpRuntime?.ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, "ActualRunningAppIdChanged");
+            _tdpRuntime?.ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, trigger);
         }
         catch (Exception exception)
         {
-            AppLog.Error("Profiles.Tdp", "TDP game-profile reconcile failed after Actual RunningAppID changed.", exception,
-                ("RunningAppID", appId));
+            AppLog.Error("Profiles.Tdp", "TDP game-profile reconcile failed.", exception,
+                ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
         }
-        try { _intelFpsRuntime.Reconcile(appId, "ActualRunningAppIdChanged"); }
-        catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "FPS game-profile reconcile failed after Actual RunningAppID changed.", exception, ("RunningAppID", appId)); }
+        try { _intelFpsRuntime.Reconcile(trigger); }
+        catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "FPS game-profile reconcile failed.", exception, ("ProfileTarget", target.LogLabel), ("Trigger", trigger)); }
     }
 
     private void OnBigPictureStateChanged(bool active)
@@ -2552,18 +2591,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _ = ReconcilePerformanceAfterResumeAsync(
             _startupCancellationTokenSource.Token,
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken),
-            () => _runtimeHost?.ActualRunningAppId ?? 0,
-            appId => _cpuBoostRuntime.Reconcile(appId),
-            appId => _powerModeRuntime.Reconcile(appId),
+            () => _cpuBoostRuntime.Reconcile(),
+            () => _powerModeRuntime.Reconcile(),
             () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"));
     }
 
     internal static async Task ReconcilePerformanceAfterResumeAsync(
         CancellationToken cancellationToken,
         Func<TimeSpan, CancellationToken, Task> delay,
-        Func<uint> actualAppIdSource,
-        Action<uint> reconcileCpuBoost,
-        Action<uint> reconcilePowerMode,
+        Action reconcileCpuBoost,
+        Action reconcilePowerMode,
         Action? reconcileBattery = null)
     {
         try
@@ -2575,10 +2612,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return;
         }
 
-        var appId = actualAppIdSource();
         try
         {
-            reconcileCpuBoost(appId);
+            reconcileCpuBoost();
         }
         catch (Exception exception)
         {
@@ -2587,7 +2623,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         try
         {
-            reconcilePowerMode(appId);
+            reconcilePowerMode();
         }
         catch (Exception exception)
         {
@@ -2631,7 +2667,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (Volatile.Read(ref _processShutdownStarted) != 0) return;
             try
             {
-                _intelFpsRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0, "PowerSourceChanged");
+                _intelFpsRuntime.Reconcile("PowerSourceChanged");
             }
             catch (Exception exception)
             {

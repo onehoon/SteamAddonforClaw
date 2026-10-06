@@ -1063,6 +1063,10 @@ This is a core requirement.
 
 The catalog key and persisted profile key are therefore independent of PID/process lifetime.
 
+Offline/pre-launch editing is not an offline-only policy. Main App catalog edits always persist; when the edited XBOX key is the effective active target and its profile is enabled, the same CPU Boost, TDP, Power Mode, Intel FPS, and display-resolution runtimes used by Steam apply the change live. If another Steam game is the effective target, the XBOX edit persists without changing the Steam profile's active settings.
+
+The Overlay remains Steam-current-profile UI in this phase. PR8 does not add an XBOX Overlay surface; that remains Phase X5.
+
 ---
 
 ## 15. Separate frontend contracts
@@ -2153,10 +2157,12 @@ Implement this phase as two focused PRs.
 
 #### PR8 — shared active profile target + live apply
 
-- add the one derived `ActiveProfileTarget` convergence point;
+- implemented one derived `ActiveProfileTarget` convergence point;
 - priority remains Steam RunningAppID first, then production ActiveXboxGame, else None;
-- refactor existing CPU/TDP/Power/FPS/Resolution runtimes to resolve Steam/XBOX target without duplicating hardware implementations;
+- existing CPU/TDP/Power/FPS/Resolution runtimes resolve Steam/XBOX through the same platform-neutral profile view, without duplicated hardware implementations;
 - active target change / process exit / startup / resume converges to the correct profile or Device baseline;
+- Main App catalog mutations always persist and apply live only when the edited XBOX profile is the effective active target; inactive XBOX edits remain persistence-only;
+- Overlay remains Steam-current-profile UI; this phase adds no XBOX Overlay surface;
 - no presentation-policy change.
 
 This split is deliberate: PR7 proves production identity ownership independently of machine-wide setting application.

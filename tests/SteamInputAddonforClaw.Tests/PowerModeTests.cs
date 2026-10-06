@@ -19,9 +19,51 @@ public sealed class PowerModeTests
             Device = new DeviceSettings { Performance = new DevicePerformanceSettings { PowerMode = new DevicePowerModeSettings { Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.Balanced } } },
             Games = new() { ["42"] = new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } }, PowerMode = gamePower } } }
         });
-        var policy = new FakePowerModePolicy(); var runtime = new PowerModeRuntime(store, policy); runtime.SetActualAppIdSource(() => 42);
+        var policy = new FakePowerModePolicy(); var runtime = new PowerModeRuntime(store, policy);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 42));
         Assert.Equal(PowerModeMutationOutcome.Succeeded, runtime.SetDeviceAc(WindowsPowerMode.BestPowerEfficiency).Outcome);
         Assert.Equal((WindowsPowerMode.BestPerformance, WindowsPowerMode.BestPowerEfficiency), policy.LastApplied);
+    }
+
+    [Fact]
+    public void Reconcile_uses_the_same_runtime_for_XBOX_and_falls_back_to_device_after_exit()
+    {
+        const string key = "store:power-game";
+        var store = new ProfileStore(Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json"));
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    PowerMode = new DevicePowerModeSettings { Enabled = true, Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.Balanced }
+                }
+            },
+            XboxGames = new()
+            {
+                [key] = new XboxGameProfile
+                {
+                    Enabled = true,
+                    Performance = new GamePerformanceOverrides
+                    {
+                        CpuBoost = new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled },
+                        Tdp = new GameTdpSettings { Enabled = true, Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } },
+                        PowerMode = new GamePowerModeSettings { Enabled = true, Ac = WindowsPowerMode.BestPerformance, Dc = WindowsPowerMode.BestPowerEfficiency }
+                    }
+                }
+            }
+        });
+        var policy = new FakePowerModePolicy();
+        var runtime = new PowerModeRuntime(store, policy);
+        string? activeKey = key;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForXbox(() => activeKey));
+
+        Assert.True(runtime.ReconcileWithResult().Succeeded);
+        Assert.Equal((WindowsPowerMode.BestPerformance, WindowsPowerMode.BestPowerEfficiency), policy.LastApplied);
+
+        activeKey = null;
+        Assert.True(runtime.ReconcileWithResult().Succeeded);
+        Assert.Equal((WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), policy.LastApplied);
     }
 
     [Fact]
@@ -70,8 +112,8 @@ public sealed class PowerModeTests
         var path = Path.Combine(Path.GetTempPath(), $"power-mode-{Guid.NewGuid():N}", "profiles.json");
         var store = new ProfileStore(path);
         store.Save(new ProfileDocument { Device = new DeviceSettings { Performance = new DevicePerformanceSettings { PowerMode = new DevicePowerModeSettings { Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.Balanced } } } });
-        var policy = new FakePowerModePolicy { FailApply = true }; var runtime = new PowerModeRuntime(store, policy); runtime.SetActualAppIdSource(() => 0);
-        var result = runtime.ReconcileWithResult(0);
+        var policy = new FakePowerModePolicy { FailApply = true }; var runtime = new PowerModeRuntime(store, policy);
+        var result = runtime.ReconcileWithResult();
         Assert.False(result.Succeeded);
         Assert.Contains("native failure", result.FailureMessage);
     }
@@ -117,9 +159,10 @@ internal sealed class FakePowerModePolicy : IPowerModePolicy
 {
     internal bool FailApply { get; init; }
     internal bool FailRead { get; init; }
+    internal int ApplyCount { get; private set; }
     internal (WindowsPowerMode Ac, WindowsPowerMode Dc)? LastApplied { get; private set; }
     public PowerModeSystemState Read() => FailRead
         ? new(false, PowerModeSideReading.Unavailable, PowerModeSideReading.Unavailable, "read failure")
         : new(true, new(PowerModeReadStatus.Known, WindowsPowerMode.Balanced), new(PowerModeReadStatus.Known, WindowsPowerMode.Balanced), null);
-    public PowerModeApplyResult Apply(WindowsPowerMode? ac, WindowsPowerMode? dc) { if (ac is { } || dc is { }) LastApplied = (ac ?? WindowsPowerMode.Balanced, dc ?? WindowsPowerMode.Balanced); return FailApply ? new(false, false, "native failure") : PowerModeApplyResult.NoOp; }
+    public PowerModeApplyResult Apply(WindowsPowerMode? ac, WindowsPowerMode? dc) { ApplyCount++; if (ac is { } || dc is { }) LastApplied = (ac ?? WindowsPowerMode.Balanced, dc ?? WindowsPowerMode.Balanced); return FailApply ? new(false, false, "native failure") : PowerModeApplyResult.NoOp; }
 }

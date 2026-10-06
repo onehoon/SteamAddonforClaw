@@ -51,7 +51,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - Configurable WING / Gamebar and Center M actions for Normal and Steam presentation modes
 - Device-level CPU Boost, Windows 11 Power Mode, and TDP control as independent features
 - Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles as independent features
-- A separate installed XBOX game catalog with offline profile editing
+- A separate installed XBOX game catalog with offline profile editing and live apply for the active profile
 - Event-driven Steam game detection without periodic game/process polling
 - Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls
@@ -175,7 +175,7 @@ Disabling a profile does not erase its settings.
 
 ## XBOX tab
 
-The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only, supports search and manual refresh, and lets you save Favorite, Profile Enabled, CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and resolution settings by the game's canonical identity. These settings are persisted for offline/pre-launch editing; XBOX profile changes do not apply live to a running game yet.
+The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only, supports search and manual refresh, and lets you save Favorite, Profile Enabled, CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and resolution settings by the game's canonical identity. Profiles can be edited before launch or while another game is active; when the edited XBOX game is the effective active target and its profile is enabled, performance and display changes apply live through the same runtimes used by Steam profiles. If Steam is the effective target, XBOX edits are saved without changing the active Steam profile. Overlay continues to show the current Steam profile; XBOX Overlay support is not part of this release.
 
 ### Device and Profile priority
 

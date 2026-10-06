@@ -17,8 +17,8 @@ internal interface IIntelFrameLimiter : IDisposable
     bool Available { get; }
     string? UnavailableReason { get; }
     IntelFpsCapability? Capability { get; }
-    IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId);
-    bool Disable(AcDcPowerSource? source, uint appId);
+    IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source);
+    bool Disable(AcDcPowerSource? source);
 }
 
 internal enum IntelFpsApplyOutcome
@@ -35,8 +35,8 @@ internal sealed class IntelFrameLimiter : IIntelFrameLimiter
     public bool Available => _native.Available;
     public string? UnavailableReason => _native.UnavailableReason;
     public IntelFpsCapability? Capability => _native.Capability;
-    public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId) => _native.Set(true, fps, source, appId);
-    public bool Disable(AcDcPowerSource? source, uint appId) => _native.Set(false, 0, source, appId) == IntelFpsApplyOutcome.Succeeded;
+    public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source) => _native.Set(true, fps, source);
+    public bool Disable(AcDcPowerSource? source) => _native.Set(false, 0, source) == IntelFpsApplyOutcome.Succeeded;
     public void Dispose() => _native.Dispose();
 }
 
@@ -46,8 +46,8 @@ internal sealed class UnavailableIntelFrameLimiter : IIntelFrameLimiter
     public bool Available => false;
     public string? UnavailableReason => "Intel IGCL is unavailable in this test host.";
     public IntelFpsCapability? Capability => null;
-    public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId) => IntelFpsApplyOutcome.Failed;
-    public bool Disable(AcDcPowerSource? source, uint appId) => false;
+    public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source) => IntelFpsApplyOutcome.Failed;
+    public bool Disable(AcDcPowerSource? source) => false;
     public void Dispose() { }
 }
 
@@ -55,57 +55,59 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
 {
     internal const int DefaultFps = 60;
     private readonly ProfileStore _store; private readonly ProfileMutationGate _gate; private readonly IIntelFrameLimiter _limiter; private readonly Func<AcDcPowerSource?> _power; private readonly string _marker;
-    private Func<uint> _app = static () => 0; private bool _shutdown; private bool _ownsGlobalState;
+    private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null; private bool _shutdown; private bool _ownsGlobalState;
     internal IntelFrameLimiterRuntime(ProfileStore store, ProfileMutationGate gate, IIntelFrameLimiter limiter, Func<AcDcPowerSource?>? power = null, string? marker = null) { _store = store; _gate = gate; _limiter = limiter; _power = power ?? WindowsAcDcPowerSource.Read; _marker = marker ?? AddonDataPaths.IntelFpsLimitOwnershipPath; }
     internal bool Available => _limiter.Available;
     internal string? UnavailableReason => _limiter.UnavailableReason;
     internal IntelFpsCapability? Capability => _limiter.Capability;
     internal bool HasPendingOwnership => _ownsGlobalState || File.Exists(_marker);
     internal void Initialize() => _limiter.Initialize();
-    internal void SetActualAppIdSource(Func<uint> source) => _app = source;
-    internal void StartupRecover() { if (!HasPendingOwnership) return; try { if (_limiter.Disable(_power(), 0)) { _ownsGlobalState = false; TryDeleteOwnershipMarker("StartupRecovery", 0); } else AppLog.Warn("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed; keeping marker."); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed.", e); } }
-    internal void StartupReconcile(uint appId) => Reconcile(appId, "Startup");
-    internal void Reconcile(uint appId, string reason = "Reconcile") { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace || (!_limiter.Available && !HasPendingOwnership)) return; ApplyPolicy(loaded.Document, appId, reason); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS reconcile failed.", e, ("RunningAppID", appId), ("Reason", reason)); } }
-    internal bool ReconcileWithResult(uint appId) { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return false; return ApplyPolicy(loaded.Document, appId, "Mutation"); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS apply failed.", e, ("RunningAppID", appId)); return false; } }
-    private bool ApplyPolicy(ProfileDocument doc, uint appId, string reason)
+    internal void SetActiveProfileResolver(Func<ProfileDocument, ResolvedActiveProfile?> resolver)
+        => _activeProfileResolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+    internal void StartupRecover() { if (!HasPendingOwnership) return; try { if (_limiter.Disable(_power())) { _ownsGlobalState = false; TryDeleteOwnershipMarker("StartupRecovery", "None"); } else AppLog.Warn("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed; keeping marker."); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "Stale Intel FPS ownership cleanup failed.", e); } }
+    internal void StartupReconcile() => Reconcile("Startup");
+    internal void Reconcile(string reason = "Reconcile") { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace || (!_limiter.Available && !HasPendingOwnership)) return; ApplyPolicy(loaded.Document, _activeProfileResolver(loaded.Document), reason); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS reconcile failed.", e, ("Reason", reason)); } }
+    internal bool ReconcileWithResult(string reason = "Mutation") { try { lock (_gate.Sync) { var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return false; return ApplyPolicy(loaded.Document, _activeProfileResolver(loaded.Document), reason); } } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS apply failed.", e, ("Reason", reason)); return false; } }
+    private bool ApplyPolicy(ProfileDocument doc, ResolvedActiveProfile? activeProfile, string reason)
     {
-        var target = appId > 0 && doc.Games.TryGetValue(appId.ToString(System.Globalization.CultureInfo.InvariantCulture), out var game) && game.Enabled && game.Performance.FpsLimit is { Enabled: true } fps ? fps : null;
-        if (target is null) return Release(appId, reason);
-        var source = _power(); if (source is null) return FailClosedOwnedState(appId, reason, "UnknownPowerSource");
+        var target = activeProfile?.Performance.FpsLimit is { Enabled: true } fps ? fps : null;
+        var targetLabel = activeProfile?.TargetLabel ?? "None";
+        if (target is null) return Release(targetLabel, reason);
+        var source = _power(); if (source is null) return FailClosedOwnedState(targetLabel, reason, "UnknownPowerSource");
         var value = source == AcDcPowerSource.AC ? target.AcFps : target.DcFps;
-        if (value is < 40 or > 120) return FailClosedOwnedState(appId, reason, "InvalidTarget");
-        var outcome = _limiter.Enable(value, source.Value, appId);
+        if (value is < 40 or > 120) return FailClosedOwnedState(targetLabel, reason, "InvalidTarget");
+        var outcome = _limiter.Enable(value, source.Value);
         if (outcome != IntelFpsApplyOutcome.Succeeded)
-            return FailClosedOwnedState(appId, reason, "EnableFailed", value);
+            return FailClosedOwnedState(targetLabel, reason, "EnableFailed", value);
         _ownsGlobalState = true;
         try { Directory.CreateDirectory(Path.GetDirectoryName(_marker)!); File.WriteAllText(_marker, $"{{\"fps\":{value}}}"); return true; }
         catch (Exception e)
         {
             AppLog.Error("Profiles.IntelFps", "FPS ownership marker persistence failed; disabling immediately.", e);
-            var disabled = _limiter.Disable(source, appId);
+            var disabled = _limiter.Disable(source);
             if (disabled) _ownsGlobalState = false;
-            if (!disabled) AppLog.Warn("Profiles.IntelFps", "Immediate disable after ownership marker failure also failed; retaining any ownership evidence.", null, ("RunningAppID", appId));
+            if (!disabled) AppLog.Warn("Profiles.IntelFps", "Immediate disable after ownership marker failure also failed; retaining any ownership evidence.", null, ("ProfileTarget", targetLabel));
             return false;
         }
     }
-    private bool FailClosedOwnedState(uint appId, string reason, string cause, int? recoveryFps = null)
+    private bool FailClosedOwnedState(string targetLabel, string reason, string cause, int? recoveryFps = null)
     {
         if (!_ownsGlobalState && !File.Exists(_marker)) return false;
-        var disabled = _limiter.Disable(_power(), appId);
+        var disabled = _limiter.Disable(_power());
         if (!disabled)
         {
             if (_ownsGlobalState && !File.Exists(_marker))
-                TryPersistOwnershipMarker(recoveryFps ?? DefaultFps, reason, appId);
-            AppLog.Warn("Profiles.IntelFps", "FPS fail-close disable failed; keeping ownership marker.", null, ("Reason", reason), ("Cause", cause), ("RunningAppID", appId));
+                TryPersistOwnershipMarker(recoveryFps ?? DefaultFps, reason, targetLabel);
+            AppLog.Warn("Profiles.IntelFps", "FPS fail-close disable failed; keeping ownership marker.", null, ("Reason", reason), ("Cause", cause), ("ProfileTarget", targetLabel));
         }
         else
         {
             _ownsGlobalState = false;
-            TryDeleteOwnershipMarker(reason, appId);
+            TryDeleteOwnershipMarker(reason, targetLabel);
         }
         return false;
     }
-    private void TryPersistOwnershipMarker(int fps, string reason, uint appId)
+    private void TryPersistOwnershipMarker(int fps, string reason, string targetLabel)
     {
         try
         {
@@ -114,23 +116,23 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
         }
         catch (Exception e)
         {
-            AppLog.Error("Profiles.IntelFps", "FPS ownership marker persistence for recovery failed.", e, ("Reason", reason), ("RunningAppID", appId));
+            AppLog.Error("Profiles.IntelFps", "FPS ownership marker persistence for recovery failed.", e, ("Reason", reason), ("ProfileTarget", targetLabel));
         }
     }
-    private bool Release(uint appId, string reason)
+    private bool Release(string targetLabel, string reason)
     {
         if (!_ownsGlobalState && !File.Exists(_marker)) return true;
-        if (!_limiter.Disable(_power(), appId)) return false;
+        if (!_limiter.Disable(_power())) return false;
         _ownsGlobalState = false;
-        return TryDeleteOwnershipMarker(reason, appId);
+        return TryDeleteOwnershipMarker(reason, targetLabel);
     }
-    private bool TryDeleteOwnershipMarker(string reason, uint appId)
+    private bool TryDeleteOwnershipMarker(string reason, string targetLabel)
     {
         try { File.Delete(_marker); return true; }
-        catch (Exception e) { AppLog.Warn("Profiles.IntelFps", "FPS ownership marker deletion failed; keeping ownership evidence.", e, ("Reason", reason), ("RunningAppID", appId)); return false; }
+        catch (Exception e) { AppLog.Warn("Profiles.IntelFps", "FPS ownership marker deletion failed; keeping ownership evidence.", e, ("Reason", reason), ("ProfileTarget", targetLabel)); return false; }
     }
     internal void BeginShutdown() => _shutdown = true;
-    public void Dispose() { if (_shutdown) { try { lock (_gate.Sync) Release(_app(), "Shutdown"); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS shutdown cleanup failed.", e); } } _limiter.Dispose(); }
+    public void Dispose() { if (_shutdown) { try { lock (_gate.Sync) Release("None", "Shutdown"); } catch (Exception e) { AppLog.Error("Profiles.IntelFps", "FPS shutdown cleanup failed.", e); } } _limiter.Dispose(); }
 }
 
 // Minimal ABI projection of the official Intel IGCL v298 header (reviewed upstream commit
@@ -227,14 +229,14 @@ internal sealed class NativeIgcl : IDisposable
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
-    internal IntelFpsApplyOutcome Set(bool enable, int fps, AcDcPowerSource? source, uint appId)
+    internal IntelFpsApplyOutcome Set(bool enable, int fps, AcDcPowerSource? source)
     {
         var adapter = enable ? _adapter : _cleanupAdapter;
         if (adapter == 0 || (enable && !Available)) return IntelFpsApplyOutcome.Failed;
         var nativeFps = enable ? fps : 0;
         var setFeature = CreateFrameLimitSetFeature(enable, nativeFps);
         var setResult = _getSet(adapter, ref setFeature);
-        LogFrameLimitSet(enable, source, appId, nativeFps, setResult);
+        LogFrameLimitSet(enable, source, nativeFps, setResult);
         return setResult == 0 ? IntelFpsApplyOutcome.Succeeded : IntelFpsApplyOutcome.Failed;
     }
     private static FeatureGetSet CreateFrameLimitSetFeature(bool enable, int fps) => new()
@@ -248,11 +250,11 @@ internal sealed class NativeIgcl : IDisposable
         ValueType = Int32,
         Value = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps }
     };
-    private void LogFrameLimitSet(bool enable, AcDcPowerSource? source, uint appId, int requestedFps, uint setResult)
+    private void LogFrameLimitSet(bool enable, AcDcPowerSource? source, int requestedFps, uint setResult)
     {
         var fields = new (string Key, object? Value)[]
         {
-            ("Operation", enable ? "Enable" : "Disable"), ("RunningAppID", appId), ("PowerSource", source),
+            ("Operation", enable ? "Enable" : "Disable"), ("PowerSource", source),
             ("RequestedEnabled", enable), ("RequestedFps", requestedFps), ("SetResult", $"0x{setResult:X8}"),
             ("AdapterIndex", _selectedAdapter.Index), ("AdapterName", _selectedAdapter.Name),
             ("AdapterVendorId", $"0x{_selectedAdapter.VendorId:X4}"), ("AdapterDeviceId", $"0x{_selectedAdapter.DeviceId:X4}")
@@ -291,7 +293,7 @@ internal sealed class NativeIgcl : IDisposable
     }
     private static byte[] EncodeFrameLimitPropertyBytes(Property property) => MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref property, 1)).ToArray();
     private readonly record struct AdapterDiagnostics(int Index, string Name, uint VendorId, uint DeviceId);
-    private static void Log(string operation, uint result, int? fps = null, AcDcPowerSource? source = null, uint? appId = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source), ("RunningAppID", appId)); }
+    private static void Log(string operation, uint result, int? fps = null, AcDcPowerSource? source = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source)); }
     public void Dispose() { if (_closed) return; _closed = true; if (_api != 0) { var result = _close(_api); Log("ctlClose", result); _api = 0; } if (_library != 0) { NativeLibrary.Free(_library); _library = 0; } }
     [StructLayout(LayoutKind.Sequential)] private struct ApplicationId { public uint Data1; public ushort Data2; public ushort Data3; public byte Data4_0; public byte Data4_1; public byte Data4_2; public byte Data4_3; public byte Data4_4; public byte Data4_5; public byte Data4_6; public byte Data4_7; }
     [StructLayout(LayoutKind.Sequential)] private struct InitArgs { public uint Size; public byte Version; public uint AppVersion; public uint Flags; public uint SupportedVersion; public ApplicationId ApplicationUid; }

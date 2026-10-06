@@ -123,7 +123,7 @@ internal static class UninstallBootstrap
             // Cleanup is intentionally independent from the 40-120 user-facing capability
             // contract. A previously owned global limiter must still be retired after a driver
             // update narrows that contract, as long as FRAME_LIMIT remains reachable.
-            if (!limiter.Disable(null, 0))
+            if (!limiter.Disable(null))
             {
                 AppLog.Warn("Uninstall", "Owned Intel FPS limiter cleanup failed; preserving ownership evidence.");
                 return false;

@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Display;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
@@ -41,7 +42,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task XBOX_profile_mutations_persist_without_live_apply_or_state_invalidation()
+    public async Task XBOX_profile_mutations_for_an_offline_target_persist_without_live_apply()
     {
         Directory.CreateDirectory(_directory);
         var store = new ProfileStore(ProfilePath);
@@ -94,11 +95,230 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(90, capture.FpsLimit.AcFps);
         Assert.Equal(new FrontendGameResolution(1920, 1200), capture.Resolution);
         Assert.True(saved.Favorite);
-        Assert.Equal(0, invalidations);
+        Assert.Equal(14, invalidations);
         Assert.Equal(0, transport.OperationCount);
         Assert.Equal(0, limiter.ApplyCount);
         await tdp.DisposeAsync();
         fps.Dispose();
+    }
+
+    [Fact]
+    public async Task Active_XBOX_profile_mutation_applies_through_the_five_shared_runtime_owners()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new ProfileStore(ProfilePath);
+        var gate = new ProfileMutationGate();
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Disabled },
+                    Tdp = new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 24), Dc = Pair(18, 22) },
+                    PowerMode = new DevicePowerModeSettings { Enabled = true, Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.Balanced }
+                }
+            },
+            XboxGames = new()
+            {
+                [Key] = new XboxGameProfile
+                {
+                    Enabled = false,
+                    Performance = new GamePerformanceOverrides
+                    {
+                        CpuBoost = new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled },
+                        Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(25, 30), Dc = Pair(18, 24) },
+                        PowerMode = new GamePowerModeSettings { Enabled = true, Ac = WindowsPowerMode.BestPerformance, Dc = WindowsPowerMode.BestPowerEfficiency },
+                        FpsLimit = new GameFpsLimitSettings { Enabled = true, AcFps = 90, DcFps = 60 }
+                    },
+                    Display = new GameDisplayOverrides { Resolution = new GameDisplayResolution { Width = 1600, Height = 900 } }
+                }
+            }
+        });
+
+        var target = ActiveProfileTarget.ForXbox(Key);
+        Func<ProfileDocument, ResolvedActiveProfile?> resolver = document => ActiveProfileResolver.Resolve(target, document);
+        var cpuPolicy = new FakeCpuBoostPowerPolicy
+        {
+            Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled),
+            Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled)
+        };
+        var cpu = new CpuBoostRuntime(store, cpuPolicy, gate);
+        cpu.SetActiveProfileResolver(resolver);
+        var powerPolicy = new FakePowerModePolicy();
+        var power = new PowerModeRuntime(store, powerPolicy, gate);
+        power.SetActiveProfileResolver(resolver);
+        var transport = new RecordingTdpTransport();
+        await using var tdp = new TdpRuntime(store, gate, Model(), new MsiClawTdpHardware(transport),
+            powerSource: () => TdpPowerSource.AC);
+        tdp.SetActiveProfileResolver(resolver);
+        var limiter = new RecordingFrameLimiter();
+        var fps = new IntelFrameLimiterRuntime(store, gate, limiter,
+            () => AcDcPowerSource.AC, marker: Path.Combine(_directory, "fps-marker.json"));
+        fps.SetActiveProfileResolver(resolver);
+        var display = new RecordingDisplayResolutionService();
+        var resolution = new GameDisplayResolutionRuntime(store, gate, _directory, display);
+        resolution.SetActiveProfileResolver(resolver);
+        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var control = CreateControl(mutations, tdp, fps,
+            activeProfileTargetSource: () => target,
+            cpu: cpu,
+            power: power,
+            resolution: resolution);
+
+        var result = await control.SetXboxGameProfileEnabledAsync(Key, true, "Game");
+
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(CpuBoostMode.Aggressive, cpuPolicy.Ac.Mode);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, cpuPolicy.Dc.Mode);
+        Assert.Equal((WindowsPowerMode.BestPerformance, WindowsPowerMode.BestPowerEfficiency), powerPolicy.LastApplied);
+        Assert.Contains(transport.Operations, operation => operation.StartsWith("SetData(", StringComparison.Ordinal));
+        Assert.Equal(90, limiter.LastEnabledFps);
+        Assert.Equal(new DisplayModeSnapshot(1600, 900, 120, 32), display.Current);
+
+        var tdpOperations = transport.OperationCount;
+        var powerApplies = powerPolicy.ApplyCount;
+        var fpsCalls = limiter.ApplyCount;
+        var resolutionCalls = display.ApplyCalls;
+        var cpuEdit = await control.SetXboxGameProfileCpuBoostAcAsync(Key, CpuBoostMode.Disabled);
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, cpuEdit.Outcome);
+        Assert.Equal(CpuBoostMode.Disabled, cpuPolicy.Ac.Mode);
+        Assert.Equal(tdpOperations, transport.OperationCount);
+        Assert.Equal(powerApplies, powerPolicy.ApplyCount);
+        Assert.Equal(fpsCalls, limiter.ApplyCount);
+        Assert.Equal(resolutionCalls, display.ApplyCalls);
+
+        var cpuWrites = cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount;
+        powerApplies = powerPolicy.ApplyCount;
+        fpsCalls = limiter.ApplyCount;
+        resolutionCalls = display.ApplyCalls;
+        var tdpEdit = await control.SetXboxGameProfileTdpAsync(Key,
+            new FrontendGameTdpConfiguration(true, new(23, 30), new(17, 25)));
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, tdpEdit.Outcome);
+        Assert.True(transport.OperationCount > tdpOperations);
+        Assert.Equal(cpuWrites, cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount);
+        Assert.Equal(powerApplies, powerPolicy.ApplyCount);
+        Assert.Equal(fpsCalls, limiter.ApplyCount);
+        Assert.Equal(resolutionCalls, display.ApplyCalls);
+
+        tdpOperations = transport.OperationCount;
+        cpuWrites = cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount;
+        fpsCalls = limiter.ApplyCount;
+        resolutionCalls = display.ApplyCalls;
+        var powerEdit = await control.SetXboxGameProfilePowerModeAcAsync(Key, WindowsPowerMode.BestPowerEfficiency);
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, powerEdit.Outcome);
+        Assert.Equal((WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), powerPolicy.LastApplied);
+        Assert.Equal(tdpOperations, transport.OperationCount);
+        Assert.Equal(cpuWrites, cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount);
+        Assert.Equal(fpsCalls, limiter.ApplyCount);
+        Assert.Equal(resolutionCalls, display.ApplyCalls);
+
+        powerApplies = powerPolicy.ApplyCount;
+        tdpOperations = transport.OperationCount;
+        cpuWrites = cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount;
+        resolutionCalls = display.ApplyCalls;
+        var fpsEdit = await control.SetXboxGameProfileFpsLimitAcAsync(Key, 75);
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, fpsEdit.Outcome);
+        Assert.Equal(75, limiter.LastEnabledFps);
+        Assert.Equal(powerApplies, powerPolicy.ApplyCount);
+        Assert.Equal(tdpOperations, transport.OperationCount);
+        Assert.Equal(cpuWrites, cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount);
+        Assert.Equal(resolutionCalls, display.ApplyCalls);
+
+        fpsCalls = limiter.ApplyCount;
+        powerApplies = powerPolicy.ApplyCount;
+        tdpOperations = transport.OperationCount;
+        cpuWrites = cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount;
+        var resolutionEdit = await control.SetXboxGameProfileResolutionAsync(Key, new(1440, 900), "Game");
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, resolutionEdit.Outcome);
+        Assert.Equal(new DisplayModeSnapshot(1440, 900, 120, 32), display.Current);
+        Assert.Equal(fpsCalls, limiter.ApplyCount);
+        Assert.Equal(powerApplies, powerPolicy.ApplyCount);
+        Assert.Equal(tdpOperations, transport.OperationCount);
+        Assert.Equal(cpuWrites, cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount);
+
+        cpuWrites = cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount;
+        tdpOperations = transport.OperationCount;
+        fpsCalls = limiter.ApplyCount;
+        powerApplies = powerPolicy.ApplyCount;
+        resolutionCalls = display.ApplyCalls;
+        var favorite = await control.SetXboxGameProfileFavoriteAsync(Key, true, "Game");
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, favorite.Outcome);
+        Assert.Equal(cpuWrites, cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount);
+        Assert.Equal(tdpOperations, transport.OperationCount);
+        Assert.Equal(fpsCalls, limiter.ApplyCount);
+        Assert.Equal(powerApplies, powerPolicy.ApplyCount);
+        Assert.Equal(resolutionCalls, display.ApplyCalls);
+
+        fps.BeginShutdown();
+        fps.Dispose();
+        resolution.Shutdown();
+    }
+
+    [Fact]
+    public async Task XBOX_edit_persists_without_apply_while_Steam_is_the_effective_target()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new ProfileStore(ProfilePath);
+        var gate = new ProfileMutationGate();
+        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var transport = new RecordingTdpTransport();
+        await using var tdp = new TdpRuntime(store, gate, Model(), new MsiClawTdpHardware(transport));
+        var limiter = new RecordingFrameLimiter();
+        var fps = new IntelFrameLimiterRuntime(store, gate, limiter, marker: Path.Combine(_directory, "fps-marker.json"));
+        var control = CreateControl(mutations, tdp, fps,
+            activeProfileTargetSource: () => ActiveProfileTarget.ForSteam(123));
+        mutations.SetEnabled(Key, true, "Game");
+
+        var result = await control.SetXboxGameProfileTdpAsync(Key,
+            new FrontendGameTdpConfiguration(true, new(25, 30), new(18, 24)));
+
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, result.Outcome);
+        Assert.Equal(25, store.Load().Document.XboxGames[Key].Performance.Tdp!.Ac.Pl1Watts);
+        Assert.Equal(0, transport.OperationCount);
+        Assert.Equal(0, limiter.ApplyCount);
+        await tdp.DisposeAsync();
+        fps.Dispose();
+    }
+
+    [Fact]
+    public async Task Active_XBOX_apply_failure_keeps_the_saved_profile_change()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new ProfileStore(ProfilePath);
+        var gate = new ProfileMutationGate();
+        store.Save(new ProfileDocument
+        {
+            XboxGames = new()
+            {
+                [Key] = new XboxGameProfile
+                {
+                    Enabled = true,
+                    Performance = new GamePerformanceOverrides
+                    {
+                        CpuBoost = new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Disabled },
+                        Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(20, 24), Dc = Pair(18, 22) }
+                    }
+                }
+            }
+        });
+        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var cpuPolicy = new FakeCpuBoostPowerPolicy
+        {
+            Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled),
+            Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled),
+            FailNextApply = true
+        };
+        var target = ActiveProfileTarget.ForXbox(Key);
+        var resolver = ActiveProfileTestResolver.ForXbox(() => Key);
+        var cpu = new CpuBoostRuntime(store, cpuPolicy, gate);
+        cpu.SetActiveProfileResolver(resolver);
+        var control = CreateControl(mutations, activeProfileTargetSource: () => target, cpu: cpu);
+
+        var result = await control.SetXboxGameProfileCpuBoostAcAsync(Key, CpuBoostMode.Aggressive);
+
+        Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed, result.Outcome);
+        Assert.Equal(CpuBoostMode.Aggressive, store.Load().Document.XboxGames[Key].Performance.CpuBoost!.Ac);
     }
 
     [Fact]
@@ -122,13 +342,19 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         XboxGameProfileMutations mutations,
         TdpRuntime? tdp = null,
         IntelFrameLimiterRuntime? fps = null,
-        Func<uint>? actualRunningAppIdSource = null)
+        Func<uint>? actualRunningAppIdSource = null,
+        Func<ActiveProfileTarget>? activeProfileTargetSource = null,
+        CpuBoostRuntime? cpu = null,
+        PowerModeRuntime? power = null,
+        GameDisplayResolutionRuntime? resolution = null)
     {
         var settings = new StartupSettingsCoordinator(new AppSettings(),
             new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
         return new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null,
-            tdpRuntime: tdp, intelFpsRuntime: fps, xboxGameProfileMutations: mutations,
-            actualRunningAppIdSource: actualRunningAppIdSource);
+            cpuBoostRuntime: cpu, tdpRuntime: tdp, powerModeRuntime: power,
+            displayResolutionRuntime: resolution, intelFpsRuntime: fps,
+            xboxGameProfileMutations: mutations, actualRunningAppIdSource: actualRunningAppIdSource,
+            activeProfileTargetSource: activeProfileTargetSource);
     }
 
     private static HandheldDeviceModelId Model() => new("msi.claw.a2vm.7");
@@ -152,20 +378,36 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
 
     private sealed class RecordingTdpTransport : IMsiClawTdpTransport
     {
+        public List<string> Operations { get; } = [];
         public int OperationCount { get; private set; }
-        public bool TryGetAp(int index, out byte[] payload) { OperationCount++; payload = [0, 0, 0xC0]; return true; }
-        public bool TrySetData(int block, byte value) { OperationCount++; return true; }
+        public bool TryGetAp(int index, out byte[] payload) { OperationCount++; Operations.Add($"GetAp({index})"); payload = [0, 0, 0xC0]; return true; }
+        public bool TrySetData(int block, byte value) { OperationCount++; Operations.Add($"SetData({block},{value})"); return true; }
+    }
+
+    private sealed class RecordingDisplayResolutionService : IDisplayResolutionService
+    {
+        public DisplayModeSnapshot Current { get; private set; } = new(1920, 1200, 120, 32);
+        public int ApplyCalls { get; private set; }
+        public bool TryCapture(out DisplayModeSnapshot snapshot) { snapshot = Current; return true; }
+        public bool TryApply(DisplayModeSnapshot current, int width, int height)
+        {
+            ApplyCalls++;
+            Current = current with { Width = width, Height = height };
+            return true;
+        }
+        public bool TryRestore(DisplayModeSnapshot original) { Current = original; return true; }
     }
 
     private sealed class RecordingFrameLimiter : IIntelFrameLimiter
     {
         public int ApplyCount { get; private set; }
+        public int LastEnabledFps { get; private set; }
         public void Initialize() { }
         public bool Available => true;
         public string? UnavailableReason => null;
         public IntelFpsCapability? Capability => null;
-        public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId) { ApplyCount++; return IntelFpsApplyOutcome.Succeeded; }
-        public bool Disable(AcDcPowerSource? source, uint appId) { ApplyCount++; return true; }
+        public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source) { ApplyCount++; LastEnabledFps = fps; return IntelFpsApplyOutcome.Succeeded; }
+        public bool Disable(AcDcPowerSource? source) { ApplyCount++; return true; }
         public void Dispose() { }
     }
 }

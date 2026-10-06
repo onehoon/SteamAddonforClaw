@@ -460,8 +460,60 @@ public sealed class TdpRuntimeTests : IDisposable
         Assert.Equal(1, transport.Operations.Count(operation => operation == "SetData(81,31)"));
     }
 
-    private TdpRuntime Create(ProfileStore store, FakeTransport transport, TdpPowerSource? source, Func<DeviceTdpSettings?>? seed = null, Func<uint>? actualAppIdSource = null) =>
-        new(store, new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), () => source, seed, actualAppIdSource);
+    [Fact]
+    public async Task Reconcile_uses_the_same_TDP_runtime_for_XBOX_and_falls_back_to_device_after_exit()
+    {
+        const string key = "store:tdp-game";
+        var store = new ProfileStore(PathName);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    Tdp = new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) }
+                }
+            },
+            XboxGames = new()
+            {
+                [key] = new XboxGameProfile
+                {
+                    Enabled = true,
+                    Performance = new GamePerformanceOverrides
+                    {
+                        CpuBoost = new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled },
+                        Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(21, 31), Dc = Pair(11, 21) }
+                    }
+                }
+            }
+        });
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
+        await using var runtime = Create(store, transport, TdpPowerSource.AC);
+        string? activeKey = key;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForXbox(() => activeKey));
+
+        var xbox = await runtime.ReconcileCurrentWithResultAsync(true, false, "XboxStart");
+        Assert.NotNull(xbox);
+        Assert.True(xbox!.Attempted);
+        Assert.Equal((21, 31), (xbox.Pl1Watts, xbox.Pl2Watts));
+        await runtime.DrainAsync();
+
+        transport.Operations.Clear();
+        activeKey = null;
+        var device = await runtime.ReconcileCurrentWithResultAsync(true, false, "XboxExit");
+        Assert.NotNull(device);
+        Assert.True(device!.Attempted);
+        Assert.Equal((20, 30), (device.Pl1Watts, device.Pl2Watts));
+        await runtime.DrainAsync();
+    }
+
+    private TdpRuntime Create(ProfileStore store, FakeTransport transport, TdpPowerSource? source, Func<DeviceTdpSettings?>? seed = null, Func<uint>? actualAppIdSource = null)
+    {
+        var runtime = new TdpRuntime(store, new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"),
+            new MsiClawTdpHardware(transport), () => source, seed);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(actualAppIdSource ?? (() => 0)));
+        return runtime;
+    }
 
     private void Save(DeviceTdpSettings tdp)
     {
