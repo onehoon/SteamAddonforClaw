@@ -14,15 +14,29 @@
                 <Button x:Name="UpdateButton" Content="Check" Click="UpdateButton_Click" />
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard
-                x:Name="SteamFseCard"
-                Description="Start Windows directly in Steam Big Picture."
-                Header="Steam Big Picture Full Screen Experience">
-                <ctcontrols:SettingsCard.HeaderIcon>
+            <ctcontrols:SettingsExpander
+                x:Name="GamingHomeExpander"
+                Description="Choose the home app used by Windows gaming full screen experience."
+                Header="Windows Gaming Full Screen Experience"
+                IsExpanded="False">
+                <ctcontrols:SettingsExpander.HeaderIcon>
                     <SymbolIcon Symbol="FullScreen" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch x:Name="SteamFseToggleSwitch" OffContent="" OnContent="" Toggled="SteamFseToggleSwitch_Toggled" />
-            </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.HeaderIcon>
+                <ComboBox x:Name="GamingHomeComboBox" SelectionChanged="GamingHomeComboBox_SelectionChanged">
+                    <ComboBoxItem Content="Off" Tag="None" />
+                    <ComboBoxItem Content="Xbox" Tag="Xbox" />
+                    <ComboBoxItem Content="Steam Big Picture" Tag="SteamBigPicture" />
+                    <ComboBoxItem x:Name="GamingHomeOtherSelectionItem" Content="Other Windows app" Tag="Other" />
+                </ComboBox>
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard
+                        x:Name="GamingHomeStartupCard"
+                        Description="Start Windows directly in the selected gaming home."
+                        Header="Start on Windows startup">
+                        <ToggleSwitch x:Name="GamingHomeStartupToggleSwitch" OffContent="" OnContent="" Toggled="GamingHomeStartupToggleSwitch_Toggled" />
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
 
             <ctcontrols:SettingsCard
                 x:Name="QuickSettingsPowerSourceCard"

@@ -67,7 +67,7 @@ public sealed class SteamFsePackagingContractTests
     }
 
     [Fact]
-    public void Runtime_does_not_provision_fse_and_first_enable_uses_the_fixed_worker_entrypoint()
+    public void Runtime_does_not_provision_fse_and_first_steam_selection_uses_the_fixed_worker_entrypoint()
     {
         var host = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
         var program = ReadSource("src", "SteamInputAddonforClaw", "Program.cs");
@@ -81,7 +81,7 @@ public sealed class SteamFsePackagingContractTests
         Assert.Contains("SteamInputAddonforClaw.FseHome.msix", configuration, StringComparison.Ordinal);
         Assert.Contains("TrustedPeople", registration, StringComparison.Ordinal);
         Assert.Contains("AllowDevelopmentWithoutDevLicense", registration, StringComparison.Ordinal);
-        Assert.Contains("SetEnabledAsync", configuration, StringComparison.Ordinal);
+        Assert.Contains("SetSelectionAsync", configuration, StringComparison.Ordinal);
         Assert.Contains("cancellationToken.ThrowIfCancellationRequested();", registration, StringComparison.Ordinal);
         Assert.Contains("WaitForExitAsync(CancellationToken.None)", registration, StringComparison.Ordinal);
         Assert.Contains("UseShellExecute = false", registration, StringComparison.Ordinal);

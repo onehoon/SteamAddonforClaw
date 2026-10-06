@@ -42,26 +42,44 @@ public sealed class SettingsPageUpdateTests
     }
 
     [Fact]
-    public void Steam_fse_card_uses_one_silent_guarded_toggle_and_authoritative_refresh()
+    public void Gaming_home_expander_uses_separate_guarded_selection_and_startup_mutations()
     {
         var xaml = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml");
         var source = ReadSource("src", "SteamInputAddonforClaw.UI", "Views", "SettingsPage.xaml.cs");
-        var toggleMethodStart = source.IndexOf("private async void SteamFseToggleSwitch_Toggled", StringComparison.Ordinal);
-        var toggleMethodEnd = source.IndexOf("\n    }", toggleMethodStart, StringComparison.Ordinal);
-        var toggleMethod = source[toggleMethodStart..toggleMethodEnd];
-
-        Assert.Equal(1, xaml.Split("x:Name=\"SteamFseToggleSwitch\"", StringSplitOptions.None).Length - 1);
-        Assert.Contains("Header=\"Steam Big Picture Full Screen Experience\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ToggleSwitch x:Name=\"SteamFseToggleSwitch\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("SetSteamFseEnabledAsync", source, StringComparison.Ordinal);
-        Assert.Contains("_applyingSteamFseState", source, StringComparison.Ordinal);
-        Assert.Contains("_steamFseMutationInProgress", source, StringComparison.Ordinal);
-        Assert.Contains("RenderSteamFse(result.Snapshot)", source, StringComparison.Ordinal);
-        Assert.Contains("SteamFseToggleSwitch.IsEnabled = false", source, StringComparison.Ordinal);
-        Assert.True(toggleMethodStart >= 0 && toggleMethodEnd > toggleMethodStart);
-        Assert.DoesNotContain("ContentDialog", toggleMethod, StringComparison.Ordinal);
-        Assert.DoesNotContain("SetGamingFullScreenExperience", toggleMethod, StringComparison.Ordinal);
-        Assert.DoesNotContain("Restart", toggleMethod, StringComparison.OrdinalIgnoreCase);
+        var selectionHandlerStart = source.IndexOf("private async void GamingHomeComboBox_SelectionChanged", StringComparison.Ordinal);
+        var startupHandlerStart = source.IndexOf("private async void GamingHomeStartupToggleSwitch_Toggled", StringComparison.Ordinal);
+        var mutationHelperStart = source.IndexOf("private async Task RunGamingHomeMutationAsync", StringComparison.Ordinal);
+        Assert.Contains("<ctcontrols:SettingsExpander", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"GamingHomeExpander\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Windows Gaming Full Screen Experience\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsExpanded=\"False\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ComboBox x:Name=\"GamingHomeComboBox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"None\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"Xbox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"SteamBigPicture\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"Other\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("GamingHomeOtherSelectionItem.IsEnabled = _gamingHomeSnapshot.Selection == FrontendGamingHomeSelection.Other", source, StringComparison.Ordinal);
+        Assert.Contains("ToggleSwitch x:Name=\"GamingHomeStartupToggleSwitch\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("SetGamingHomeSelectionAsync", source, StringComparison.Ordinal);
+        Assert.Contains("SetGamingHomeStartupAsync", source, StringComparison.Ordinal);
+        Assert.Contains("_applyingGamingHomeState", source, StringComparison.Ordinal);
+        Assert.Contains("_gamingHomeMutationInProgress", source, StringComparison.Ordinal);
+        Assert.Contains("RenderGamingHome(result.Snapshot)", source, StringComparison.Ordinal);
+        Assert.Contains("GamingHomeComboBox.SelectedItem = snapshot.Available", source, StringComparison.Ordinal);
+        Assert.Contains("GamingHomeStartupToggleSwitch.IsOn = snapshot.StartupEnabled", source, StringComparison.Ordinal);
+        Assert.Contains("GamingHomeStartupToggleSwitch.IsEnabled = IsStartupWritable", source, StringComparison.Ordinal);
+        Assert.Contains("Selection is FrontendGamingHomeSelection.Xbox or FrontendGamingHomeSelection.SteamBigPicture", source, StringComparison.Ordinal);
+        Assert.Contains("snapshot.Selection == FrontendGamingHomeSelection.Other", source, StringComparison.Ordinal);
+        Assert.True(selectionHandlerStart >= 0 && selectionHandlerStart < startupHandlerStart);
+        Assert.True(startupHandlerStart >= 0 && startupHandlerStart < mutationHelperStart);
+        Assert.Contains("_applyingGamingHomeState", source[selectionHandlerStart..startupHandlerStart], StringComparison.Ordinal);
+        Assert.Contains("_applyingGamingHomeState", source[startupHandlerStart..mutationHelperStart], StringComparison.Ordinal);
+        Assert.Contains("Interlocked.Exchange(ref _gamingHomeMutationInProgress, 1)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SteamFseToggleSwitch", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ContentDialog", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ms-settings:", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Process.Start", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Restart", source, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

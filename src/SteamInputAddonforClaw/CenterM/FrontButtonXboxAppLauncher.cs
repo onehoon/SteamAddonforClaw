@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.WindowsGaming;
 
 namespace SteamInputAddonforClaw.CenterM;
 
 internal static class FrontButtonXboxAppLauncher
 {
-    internal const string XboxAppAumid = "Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App";
+    internal const string XboxAppAumid = XboxGamingHomeAppIdentity.Aumid;
 
     internal static void Launch()
     {

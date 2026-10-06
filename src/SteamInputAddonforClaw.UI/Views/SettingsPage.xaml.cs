@@ -12,11 +12,15 @@ public sealed partial class SettingsPage : UserControl
     private IAddonFrontendControl? _frontend;
     private FrontendUpdateSnapshot _updateSnapshot = FrontendUpdateSnapshot.Unavailable;
     private int _updateOperationInProgress;
-    private FrontendSteamFseSnapshot _steamFseSnapshot = FrontendSteamFseSnapshot.Unavailable("Steam Big Picture Full Screen Experience is unavailable.");
-    private int _steamFseMutationInProgress;
-    private bool _applyingSteamFseState;
+    private FrontendGamingHomeSnapshot _gamingHomeSnapshot = FrontendGamingHomeSnapshot.Unavailable("Windows Gaming Full Screen Experience is unavailable.");
+    private int _gamingHomeMutationInProgress;
+    private bool _applyingGamingHomeState;
     private bool _applyingQuickSettingsPowerSourcePreference;
     private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
+    private bool IsStartupWritable =>
+        _gamingHomeSnapshot.Available
+        && _gamingHomeSnapshot.Selection is FrontendGamingHomeSelection.Xbox or FrontendGamingHomeSelection.SteamBigPicture
+        && Volatile.Read(ref _gamingHomeMutationInProgress) == 0;
     public event EventHandler? DeveloperMenuRequested;
 
     public SettingsPage()
@@ -31,11 +35,11 @@ public sealed partial class SettingsPage : UserControl
         _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
         SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
         _ = RefreshAppUpdateAsync();
-        _ = RefreshSteamFseAsync();
+        _ = RefreshGamingHomeAsync();
     }
 
     internal void RequestAppUpdateRefresh() => _ = RefreshAppUpdateAsync();
-    internal void RequestSteamFseRefresh() => _ = RefreshSteamFseAsync();
+    internal void RequestGamingHomeRefresh() => _ = RefreshGamingHomeAsync();
 
     private async Task RefreshAppUpdateAsync()
     {
@@ -65,66 +69,151 @@ public sealed partial class SettingsPage : UserControl
         UpdateButton.IsEnabled = snapshot.CanCheck || snapshot.CanInstall;
     }
 
-    private async Task RefreshSteamFseAsync()
+    private async Task RefreshGamingHomeAsync()
     {
-        if (_frontend is null || Volatile.Read(ref _steamFseMutationInProgress) != 0) return;
-        try { RenderSteamFse(await _frontend.CaptureSteamFseAsync().ConfigureAwait(true)); }
+        if (_frontend is null || Volatile.Read(ref _gamingHomeMutationInProgress) != 0) return;
+        try { RenderGamingHome(await _frontend.CaptureGamingHomeAsync().ConfigureAwait(true)); }
         catch (Exception exception)
         {
             if (exception is FrontendTransportException
                 && exception is not FrontendProtocolException
                 && exception is not FrontendRemoteException)
             {
-                AppLog.Debug("SteamFSE", "Main UI SteamFSE state refresh skipped because Runtime transport is unavailable.",
+                AppLog.Debug("GamingHome", "Main UI Gaming Home state refresh skipped because Runtime transport is unavailable.",
                     ("Reason", exception.Message));
             }
             else
             {
-                AppLog.Warn("SteamFSE", "Main UI SteamFSE state refresh failed.", exception);
+                AppLog.Warn("GamingHome", "Main UI Gaming Home state refresh failed.", exception);
             }
-            RenderSteamFse(FrontendSteamFseSnapshot.Unavailable("Steam Big Picture Full Screen Experience could not be verified."));
+            RenderGamingHome(FrontendGamingHomeSnapshot.Unavailable("Windows Gaming Full Screen Experience could not be verified."));
         }
     }
 
-    private void RenderSteamFse(FrontendSteamFseSnapshot snapshot)
+    private void RenderGamingHome(FrontendGamingHomeSnapshot snapshot)
     {
-        _steamFseSnapshot = snapshot;
-        _applyingSteamFseState = true;
-        try { SteamFseToggleSwitch.IsOn = snapshot.Enabled; }
-        finally { _applyingSteamFseState = false; }
-        SteamFseCard.Description = snapshot.Available
-            ? "Start Windows directly in Steam Big Picture."
-            : snapshot.UnavailableReason ?? "Steam Big Picture Full Screen Experience is unavailable.";
-        SteamFseToggleSwitch.IsEnabled = snapshot.Available && Volatile.Read(ref _steamFseMutationInProgress) == 0;
-    }
-
-    private async void SteamFseToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_applyingSteamFseState || _frontend is null || Interlocked.Exchange(ref _steamFseMutationInProgress, 1) != 0) return;
-        SteamFseToggleSwitch.IsEnabled = false;
+        _gamingHomeSnapshot = snapshot;
+        _applyingGamingHomeState = true;
         try
         {
-            var result = await _frontend.SetSteamFseEnabledAsync(SteamFseToggleSwitch.IsOn).ConfigureAwait(true);
-            RenderSteamFse(result.Snapshot);
-            if (!result.Succeeded && result.FailureMessage is not null)
-                SteamFseCard.Description = result.FailureMessage;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("SteamFSE", "Main UI SteamFSE mutation failed.", exception);
-            try { RenderSteamFse(await _frontend.CaptureSteamFseAsync().ConfigureAwait(true)); }
-            catch (Exception refreshException)
-            {
-                AppLog.Warn("SteamFSE", "Main UI SteamFSE rollback refresh failed.", refreshException);
-                RenderSteamFse(_steamFseSnapshot);
-                SteamFseCard.Description = "The Steam Big Picture Full Screen Experience setting could not be changed.";
-            }
+            GamingHomeComboBox.SelectedItem = snapshot.Available
+                ? FindGamingHomeSelectionItem(snapshot.Selection)
+                : null;
+            GamingHomeStartupToggleSwitch.IsOn = snapshot.StartupEnabled;
         }
         finally
         {
-            Volatile.Write(ref _steamFseMutationInProgress, 0);
-            SteamFseToggleSwitch.IsEnabled = _steamFseSnapshot.Available;
+            _applyingGamingHomeState = false;
         }
+
+        GamingHomeExpander.Description = snapshot.Available
+            ? snapshot.Selection == FrontendGamingHomeSelection.Other
+                ? "The current Windows app is outside Addon control. Choose Off, Xbox, or Steam Big Picture to replace it."
+                : "Choose the home app used by Windows gaming full screen experience."
+            : snapshot.UnavailableReason ?? "The current Windows setting could not be verified.";
+        GamingHomeStartupCard.Description = snapshot.Available && snapshot.Selection == FrontendGamingHomeSelection.Other
+            ? "The current value is shown but startup behavior for this app is not managed by the Addon."
+            : "Start Windows directly in the selected gaming home.";
+        UpdateGamingHomeControlStates();
+    }
+
+    private static string SelectionTag(FrontendGamingHomeSelection selection) => selection switch
+    {
+        FrontendGamingHomeSelection.None => "None",
+        FrontendGamingHomeSelection.Xbox => "Xbox",
+        FrontendGamingHomeSelection.SteamBigPicture => "SteamBigPicture",
+        FrontendGamingHomeSelection.Other => "Other",
+        _ => string.Empty,
+    };
+
+    private ComboBoxItem? FindGamingHomeSelectionItem(FrontendGamingHomeSelection selection) =>
+        GamingHomeComboBox.Items.OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, SelectionTag(selection), StringComparison.Ordinal));
+
+    private void UpdateGamingHomeControlStates()
+    {
+        var mutationInProgress = Volatile.Read(ref _gamingHomeMutationInProgress) != 0;
+        GamingHomeComboBox.IsEnabled = _gamingHomeSnapshot.Available && !mutationInProgress;
+        GamingHomeOtherSelectionItem.IsEnabled = _gamingHomeSnapshot.Selection == FrontendGamingHomeSelection.Other;
+        GamingHomeStartupToggleSwitch.IsEnabled = IsStartupWritable;
+    }
+
+    private async void GamingHomeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_applyingGamingHomeState || _frontend is null || !_gamingHomeSnapshot.Available) return;
+        if (GamingHomeComboBox.SelectedItem is not ComboBoxItem { Tag: string selectionText }
+            || !Enum.TryParse<FrontendGamingHomeSelection>(selectionText, out var selection))
+            return;
+        if (selection == FrontendGamingHomeSelection.Other || selection == _gamingHomeSnapshot.Selection)
+        {
+            RenderGamingHome(_gamingHomeSnapshot);
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _gamingHomeMutationInProgress, 1) != 0) return;
+        UpdateGamingHomeControlStates();
+        await RunGamingHomeMutationAsync(
+            () => _frontend.SetGamingHomeSelectionAsync(selection),
+            "The Gaming Home selection could not be changed.",
+            startupMutation: false);
+    }
+
+    private async void GamingHomeStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (_applyingGamingHomeState || _frontend is null || !_gamingHomeSnapshot.Available) return;
+        if (_gamingHomeSnapshot.Selection is not (FrontendGamingHomeSelection.Xbox or FrontendGamingHomeSelection.SteamBigPicture))
+        {
+            RenderGamingHome(_gamingHomeSnapshot);
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _gamingHomeMutationInProgress, 1) != 0) return;
+        UpdateGamingHomeControlStates();
+        await RunGamingHomeMutationAsync(
+            () => _frontend.SetGamingHomeStartupAsync(GamingHomeStartupToggleSwitch.IsOn),
+            "The Gaming Home startup setting could not be changed.",
+            startupMutation: true);
+    }
+
+    private async Task RunGamingHomeMutationAsync(
+        Func<Task<FrontendGamingHomeMutationResult>> mutation,
+        string fallbackFailureMessage,
+        bool startupMutation)
+    {
+        try
+        {
+            var result = await mutation().ConfigureAwait(true);
+            RenderGamingHome(result.Snapshot);
+            if (!result.Succeeded)
+                SetGamingHomeFailureDescription(startupMutation, result.FailureMessage ?? fallbackFailureMessage);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("GamingHome", "Main UI Gaming Home mutation failed.", exception);
+            try
+            {
+                RenderGamingHome(await _frontend!.CaptureGamingHomeAsync().ConfigureAwait(true));
+            }
+            catch (Exception refreshException)
+            {
+                AppLog.Warn("GamingHome", "Main UI Gaming Home state refresh after mutation failure failed.", refreshException);
+                RenderGamingHome(FrontendGamingHomeSnapshot.Unavailable("Windows Gaming Full Screen Experience could not be verified."));
+            }
+            SetGamingHomeFailureDescription(startupMutation, fallbackFailureMessage);
+        }
+        finally
+        {
+            Volatile.Write(ref _gamingHomeMutationInProgress, 0);
+            UpdateGamingHomeControlStates();
+        }
+    }
+
+    private void SetGamingHomeFailureDescription(bool startupMutation, string message)
+    {
+        if (startupMutation)
+            GamingHomeStartupCard.Description = message;
+        else
+            GamingHomeExpander.Description = message;
     }
 
     private async void UpdateButton_Click(object sender, RoutedEventArgs args)

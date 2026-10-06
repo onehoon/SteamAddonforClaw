@@ -138,7 +138,7 @@ public sealed partial class MainWindow : Window
     {
         _ = RefreshSystemStatusAsync();
         SettingsContent.RequestAppUpdateRefresh();
-        SettingsContent.RequestSteamFseRefresh();
+        SettingsContent.RequestGamingHomeRefresh();
         OverlayContent.RequestClawHudRefresh();
         ShortcutContent.RequestRefresh();
         XboxSessionDiagnosticContent.RequestRefresh();

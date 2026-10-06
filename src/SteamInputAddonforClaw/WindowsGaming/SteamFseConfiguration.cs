@@ -16,11 +16,11 @@ internal static class SteamFsePackageContract
     internal static Version FixedPackageVersion { get; } = Version.Parse(FixedPackageVersionText);
 }
 
-internal sealed record SteamFseOsSupport(bool Supported, string? FailureReason);
+internal sealed record GamingHomeOsSupport(bool Supported, string? FailureReason);
 
-internal interface ISteamFseOsProbe
+internal interface IGamingHomeOsProbe
 {
-    SteamFseOsSupport Capture();
+    GamingHomeOsSupport Capture();
 }
 
 internal sealed record SteamFsePackageInfo(
@@ -55,12 +55,12 @@ internal interface IGamingConfigurationStore
     void WriteStartupToGamingHome(bool enabled);
 }
 
-internal sealed class WindowsSteamFseOsProbe : ISteamFseOsProbe
+internal sealed class WindowsGamingHomeOsProbe : IGamingHomeOsProbe
 {
     private const int MinimumBuild = 26100;
     private const int MinimumUbr = 8039;
 
-    public SteamFseOsSupport Capture()
+    public GamingHomeOsSupport Capture()
     {
         if (!OperatingSystem.IsWindows())
             return new(false, "Windows Gaming Full Screen Experience is supported only on Windows.");
@@ -77,7 +77,7 @@ internal sealed class WindowsSteamFseOsProbe : ISteamFseOsProbe
         }
         catch (Exception exception)
         {
-            AppLog.Warn("SteamFSE", "Windows Gaming Full Screen Experience support probe failed.", exception);
+            AppLog.Warn("GamingHome", "Windows Gaming Full Screen Experience support probe failed.", exception);
             return new(false, "Windows Gaming Full Screen Experience support could not be verified.");
         }
     }
@@ -195,116 +195,227 @@ internal sealed class WindowsGamingConfigurationStore : IGamingConfigurationStor
     }
 }
 
+internal static class XboxGamingHomeAppIdentity
+{
+    internal const string PackageIdentityName = "Microsoft.GamingApp";
+    internal const string PackageFamilyName = "Microsoft.GamingApp_8wekyb3d8bbwe";
+    internal const string ApplicationId = "Microsoft.Xbox.App";
+    internal const string Aumid = PackageFamilyName + "!" + ApplicationId;
+}
+
+internal interface IXboxGamingHomeAppProbe
+{
+    Task<bool> IsResolvableAsync();
+}
+
+internal sealed class WindowsXboxGamingHomeAppProbe : IXboxGamingHomeAppProbe
+{
+    public async Task<bool> IsResolvableAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+
+        var packages = new PackageManager()
+            .FindPackagesForUser(string.Empty, XboxGamingHomeAppIdentity.PackageFamilyName)
+            .Where(package => string.Equals(package.Id.Name, XboxGamingHomeAppIdentity.PackageIdentityName, StringComparison.Ordinal)
+                && string.Equals(package.Id.FamilyName, XboxGamingHomeAppIdentity.PackageFamilyName, StringComparison.Ordinal));
+        foreach (var package in packages)
+        {
+            var entries = await package.GetAppListEntriesAsync().AsTask().ConfigureAwait(false);
+            if (entries.Any(entry => string.Equals(entry.AppUserModelId, XboxGamingHomeAppIdentity.Aumid, StringComparison.Ordinal)))
+                return true;
+        }
+
+        return false;
+    }
+}
+
 internal sealed class WindowsGamingHomeConfiguration
 {
-    internal const string DefaultUnavailableReason = "Steam Big Picture Full Screen Experience is unavailable.";
+    internal const string DefaultUnavailableReason = "Windows Gaming Full Screen Experience is unavailable.";
 
-    private readonly ISteamFseOsProbe _osProbe;
+    private readonly IGamingHomeOsProbe _osProbe;
     private readonly ISteamFsePackageProbe _packageProbe;
     private readonly ISteamFseRegistrationClient _registrationClient;
+    private readonly IXboxGamingHomeAppProbe _xboxAppProbe;
     private readonly IGamingConfigurationStore _configuration;
 
     internal WindowsGamingHomeConfiguration(
-        ISteamFseOsProbe? osProbe = null,
+        IGamingHomeOsProbe? osProbe = null,
         ISteamFsePackageProbe? packageProbe = null,
         IGamingConfigurationStore? configuration = null,
-        ISteamFseRegistrationClient? registrationClient = null)
+        ISteamFseRegistrationClient? registrationClient = null,
+        IXboxGamingHomeAppProbe? xboxAppProbe = null)
     {
-        _osProbe = osProbe ?? new WindowsSteamFseOsProbe();
+        _osProbe = osProbe ?? new WindowsGamingHomeOsProbe();
         _packageProbe = packageProbe ?? new WindowsSteamFsePackageProbe();
         _registrationClient = registrationClient ?? new SteamFseRegistrationClient();
+        _xboxAppProbe = xboxAppProbe ?? new WindowsXboxGamingHomeAppProbe();
         _configuration = configuration ?? new WindowsGamingConfigurationStore();
     }
 
-    internal FrontendSteamFseSnapshot Capture()
+    internal FrontendGamingHomeSnapshot Capture()
     {
-        var support = _osProbe.Capture();
-        if (!support.Supported)
-            return FrontendSteamFseSnapshot.Unavailable(support.FailureReason ?? DefaultUnavailableReason);
+        try
+        {
+            var support = _osProbe.Capture();
+            if (!support.Supported)
+                return FrontendGamingHomeSnapshot.Unavailable(support.FailureReason ?? DefaultUnavailableReason);
 
-        var inspection = _packageProbe.Inspect();
-        if (!inspection.Succeeded)
-            return FrontendSteamFseSnapshot.Unavailable(inspection.FailureReason ?? "The registered Gaming Home package could not be verified.");
-
-        if (inspection.Package is null)
-            return new(true, false, null);
-
-        var aumid = WindowsSteamFsePackageProbe.TryGetAumid(inspection.Package);
-        if (aumid is null)
-            return FrontendSteamFseSnapshot.Unavailable("The registered Gaming Home package identity could not be verified.");
-        if (inspection.Package.Version < SteamFsePackageContract.FixedPackageVersion)
-            return new(true, false, null);
-
-        var selectedHome = _configuration.ReadGamingHomeApp();
-        var startup = _configuration.ReadStartupToGamingHome();
-        return new(true, startup && string.Equals(selectedHome, aumid, StringComparison.Ordinal), null);
+            var state = CaptureRawState();
+            var classification = Classify(state.GamingHomeApp);
+            return classification.Succeeded
+                ? new(true, classification.Selection, state.StartupToGamingHome, null)
+                : FrontendGamingHomeSnapshot.Unavailable(classification.FailureReason ?? "The current Gaming Home app could not be identified.");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("GamingHome", "Windows GamingConfiguration capture failed.", exception);
+            return FrontendGamingHomeSnapshot.Unavailable("Windows Gaming Full Screen Experience could not be read.");
+        }
     }
 
-    internal async Task<FrontendSteamFseMutationResult> SetEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    internal async Task<FrontendGamingHomeMutationResult> SetSelectionAsync(
+        FrontendGamingHomeSelection selection, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var support = _osProbe.Capture();
         if (!support.Supported)
-            return Unavailable(support.FailureReason ?? DefaultUnavailableReason);
-
-        var inspection = _packageProbe.Inspect();
-        if (!inspection.Succeeded)
-            return Unavailable(inspection.FailureReason ?? "The registered Gaming Home package could not be verified.");
+            return UnavailableResult(support.FailureReason ?? DefaultUnavailableReason);
 
         try
         {
-            AppLog.Info("SteamFSE", enabled ? "SteamFSE enable requested." : "SteamFSE disable requested.");
-            if (enabled)
+            if (!Enum.IsDefined(selection) || selection == FrontendGamingHomeSelection.Other)
+                return Failed(Capture(), "Other Windows Gaming Home apps cannot be selected by the Addon.");
+
+            var previous = CaptureRawState();
+            AppLog.Info("GamingHome", "Gaming Home selection requested.",
+                ("PreviousGamingHomeApp", previous.GamingHomeApp),
+                ("PreviousStartupToGamingHome", previous.StartupToGamingHome),
+                ("RequestedSelection", selection));
+
+            string? expectedHome = null;
+            var expectedStartup = previous.StartupToGamingHome;
+            if (selection == FrontendGamingHomeSelection.None)
             {
-                var aumid = WindowsSteamFsePackageProbe.TryGetAumid(inspection.Package);
-                if (inspection.Package is null || inspection.Package.Version < SteamFsePackageContract.FixedPackageVersion || aumid is null)
+                _configuration.DeleteGamingHomeApp();
+                _configuration.WriteStartupToGamingHome(false);
+                expectedStartup = false;
+            }
+            else if (selection == FrontendGamingHomeSelection.Xbox)
+            {
+                if (!await _xboxAppProbe.IsResolvableAsync().ConfigureAwait(false))
+                    return Failed(Capture(), "The Xbox app is not installed or its application identity could not be verified.");
+
+                expectedHome = XboxGamingHomeAppIdentity.Aumid;
+                _configuration.WriteGamingHomeApp(expectedHome);
+            }
+            else
+            {
+                var inspection = _packageProbe.Inspect();
+                if (!inspection.Succeeded)
+                    return Failed(Capture(), inspection.FailureReason ?? "The registered Gaming Home package could not be verified.");
+
+                expectedHome = WindowsSteamFsePackageProbe.TryGetAumid(inspection.Package);
+                if (inspection.Package is null || inspection.Package.Version < SteamFsePackageContract.FixedPackageVersion || expectedHome is null)
                 {
                     var registration = await _registrationClient.EnsureRegisteredAsync(cancellationToken).ConfigureAwait(false);
                     if (!registration.Succeeded)
-                        return Failed(Capture(), registration.FailureReason ?? "The Gaming Home package could not be registered.");
+                        return Failed(Capture(), registration.FailureReason ?? "The Steam Gaming Home package could not be registered.");
 
                     inspection = _packageProbe.Inspect();
                     if (!inspection.Succeeded)
                         return Failed(Capture(), inspection.FailureReason ?? "The registered Gaming Home package could not be verified.");
 
-                    aumid = WindowsSteamFsePackageProbe.TryGetAumid(inspection.Package);
-                    if (inspection.Package is null || inspection.Package.Version < SteamFsePackageContract.FixedPackageVersion || aumid is null)
-                        return Failed(Capture(), "The registered Gaming Home package could not be read back.");
+                    expectedHome = WindowsSteamFsePackageProbe.TryGetAumid(inspection.Package);
+                    if (inspection.Package is null || inspection.Package.Version < SteamFsePackageContract.FixedPackageVersion || expectedHome is null)
+                        return Failed(Capture(), "The registered Steam Gaming Home package could not be read back.");
                 }
 
-                _configuration.WriteGamingHomeApp(aumid!);
-                _configuration.WriteStartupToGamingHome(true);
-            }
-            else
-            {
-                _configuration.DeleteGamingHomeApp();
-                _configuration.WriteStartupToGamingHome(false);
+                _configuration.WriteGamingHomeApp(expectedHome);
             }
 
             var readback = CaptureRawState();
-            var verified = enabled
-                ? string.Equals(readback.GamingHomeApp, WindowsSteamFsePackageProbe.TryGetAumid(inspection.Package), StringComparison.Ordinal) && readback.StartupToGamingHome
-                : readback.GamingHomeApp is null && !readback.StartupToGamingHome;
+            AppLog.Info("GamingHome", "Gaming Home selection readback.",
+                ("WrittenGamingHomeApp", expectedHome),
+                ("ReadbackGamingHomeApp", readback.GamingHomeApp),
+                ("ReadbackStartupToGamingHome", readback.StartupToGamingHome));
+            var verified = string.Equals(readback.GamingHomeApp, expectedHome, StringComparison.Ordinal)
+                && readback.StartupToGamingHome == expectedStartup;
             var snapshot = Capture();
-            if (verified)
+            if (verified && snapshot.Available && snapshot.Selection == selection && snapshot.StartupEnabled == expectedStartup)
             {
-                AppLog.Info("SteamFSE", enabled ? "SteamFSE enable verified." : "SteamFSE disable verified.");
-                return new(FrontendSteamFseMutationOutcome.Succeeded, snapshot, null);
+                AppLog.Info("GamingHome", "Gaming Home selection verified.", ("Selection", selection));
+                return new(FrontendGamingHomeMutationOutcome.Succeeded, snapshot, null);
             }
 
-            AppLog.Warn("SteamFSE", "SteamFSE readback verification failed.", null,
-                ("EnabledRequested", enabled), ("SelectedHome", readback.GamingHomeApp),
-                ("StartupToGamingHome", readback.StartupToGamingHome));
+            AppLog.Warn("GamingHome", "Gaming Home selection readback verification failed.", null,
+                ("RequestedSelection", selection), ("ReadbackGamingHomeApp", readback.GamingHomeApp),
+                ("ReadbackStartupToGamingHome", readback.StartupToGamingHome));
             return Failed(snapshot, "Windows did not confirm the requested Gaming Home state.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return Failed(Capture(), "The Gaming Home change was cancelled.");
+            return Failed(Capture(), "The Gaming Home selection was cancelled.");
         }
         catch (Exception exception)
         {
-            AppLog.Warn("SteamFSE", "SteamFSE registry mutation failed.", exception,
-                ("EnabledRequested", enabled));
-            return Failed(Capture(), "The Gaming Home setting could not be changed.");
+            AppLog.Warn("GamingHome", "Gaming Home selection mutation failed.", exception,
+                ("RequestedSelection", selection));
+            return Failed(Capture(), "The Gaming Home selection could not be changed.");
+        }
+    }
+
+    internal Task<FrontendGamingHomeMutationResult> SetStartupEnabledAsync(
+        bool enabled, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var support = _osProbe.Capture();
+        if (!support.Supported)
+            return Task.FromResult(UnavailableResult(support.FailureReason ?? DefaultUnavailableReason));
+
+        try
+        {
+            var previous = CaptureRawState();
+            var classification = Classify(previous.GamingHomeApp);
+            if (!classification.Succeeded)
+                return Task.FromResult(Failed(Capture(), classification.FailureReason ?? "The current Gaming Home app could not be identified."));
+
+            AppLog.Info("GamingHome", "Gaming Home startup requested.",
+                ("PreviousStartupToGamingHome", previous.StartupToGamingHome),
+                ("RequestedStartupToGamingHome", enabled),
+                ("CurrentGamingHomeApp", previous.GamingHomeApp));
+
+            if (classification.Selection == FrontendGamingHomeSelection.Other)
+                return Task.FromResult(Failed(Capture(), "Startup behavior for another Windows Gaming Home app is not managed by the Addon."));
+            if (classification.Selection == FrontendGamingHomeSelection.None && enabled)
+                return Task.FromResult(Failed(Capture(), "Select Xbox or Steam Big Picture before enabling startup."));
+            if (classification.Selection == FrontendGamingHomeSelection.None && !previous.StartupToGamingHome)
+                return Task.FromResult(new FrontendGamingHomeMutationResult(
+                    FrontendGamingHomeMutationOutcome.Succeeded, Capture(), null));
+
+            _configuration.WriteStartupToGamingHome(enabled);
+            var readback = CaptureRawState();
+            AppLog.Info("GamingHome", "Gaming Home startup readback.",
+                ("ReadbackStartupToGamingHome", readback.StartupToGamingHome),
+                ("CurrentGamingHomeApp", readback.GamingHomeApp));
+            var verified = string.Equals(readback.GamingHomeApp, previous.GamingHomeApp, StringComparison.Ordinal)
+                && readback.StartupToGamingHome == enabled;
+            var snapshot = Capture();
+            if (verified && snapshot.Available && snapshot.Selection == classification.Selection && snapshot.StartupEnabled == enabled)
+                return Task.FromResult(new FrontendGamingHomeMutationResult(FrontendGamingHomeMutationOutcome.Succeeded, snapshot, null));
+
+            AppLog.Warn("GamingHome", "Gaming Home startup readback verification failed.", null,
+                ("RequestedStartupToGamingHome", enabled),
+                ("ReadbackStartupToGamingHome", readback.StartupToGamingHome),
+                ("PreviousGamingHomeApp", previous.GamingHomeApp),
+                ("ReadbackGamingHomeApp", readback.GamingHomeApp));
+            return Task.FromResult(Failed(snapshot, "Windows did not confirm the requested Gaming Home startup state."));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("GamingHome", "Gaming Home startup mutation failed.", exception,
+                ("RequestedStartupToGamingHome", enabled));
+            return Task.FromResult(Failed(Capture(), "The Gaming Home startup setting could not be changed."));
         }
     }
 
@@ -319,7 +430,7 @@ internal sealed class WindowsGamingHomeConfiguration
         catch (Exception exception)
         {
             configurationCleaned = false;
-            AppLog.Warn("Uninstall", "SteamFSE GamingConfiguration cleanup failed.", exception);
+            AppLog.Warn("Uninstall", "Gaming Home GamingConfiguration cleanup failed.", exception);
         }
 
         return configurationCleaned && _packageProbe.TryRemoveOwnedPackage();
@@ -328,9 +439,27 @@ internal sealed class WindowsGamingHomeConfiguration
     private (string? GamingHomeApp, bool StartupToGamingHome) CaptureRawState() =>
         (_configuration.ReadGamingHomeApp(), _configuration.ReadStartupToGamingHome());
 
-    private static FrontendSteamFseMutationResult Failed(FrontendSteamFseSnapshot snapshot, string reason) =>
-        new(FrontendSteamFseMutationOutcome.Failed, snapshot, reason);
+    private (bool Succeeded, FrontendGamingHomeSelection Selection, string? FailureReason) Classify(string? aumid)
+    {
+        if (string.IsNullOrWhiteSpace(aumid))
+            return (true, FrontendGamingHomeSelection.None, null);
+        if (string.Equals(aumid, XboxGamingHomeAppIdentity.Aumid, StringComparison.Ordinal))
+            return (true, FrontendGamingHomeSelection.Xbox, null);
 
-    private static FrontendSteamFseMutationResult Unavailable(string reason) =>
-        new(FrontendSteamFseMutationOutcome.Unavailable, FrontendSteamFseSnapshot.Unavailable(reason), reason);
+        var inspection = _packageProbe.Inspect();
+        if (!inspection.Succeeded)
+            return (false, FrontendGamingHomeSelection.Other,
+                inspection.FailureReason ?? "The current Gaming Home app could not be safely identified.");
+
+        var steamAumid = WindowsSteamFsePackageProbe.TryGetAumid(inspection.Package);
+        return string.Equals(aumid, steamAumid, StringComparison.Ordinal)
+            ? (true, FrontendGamingHomeSelection.SteamBigPicture, null)
+            : (true, FrontendGamingHomeSelection.Other, null);
+    }
+
+    private static FrontendGamingHomeMutationResult Failed(FrontendGamingHomeSnapshot snapshot, string reason) =>
+        new(FrontendGamingHomeMutationOutcome.Failed, snapshot, reason);
+
+    private static FrontendGamingHomeMutationResult UnavailableResult(string reason) =>
+        new(FrontendGamingHomeMutationOutcome.Unavailable, FrontendGamingHomeSnapshot.Unavailable(reason), reason);
 }
