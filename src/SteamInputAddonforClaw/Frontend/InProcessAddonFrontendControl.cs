@@ -101,7 +101,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _captureGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _startGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _stopGameInputSystemButtonProbe;
-    private readonly IntelGpuIgclProbe _intelGpuFrequencyProbe = new();
+    private IntelGpuIgclProbe? _intelGpuFrequencyProbe;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -853,8 +853,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             try { probe.Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
             catch (Exception exception) { AppLog.Warn("ClawSensorProbe", "Probe shutdown cleanup failed.", exception); }
         }
-        try { _intelGpuFrequencyProbe.Dispose(); }
-        catch (Exception exception) { AppLog.Warn("Diagnostics.IntelGpuFrequency", "Probe shutdown cleanup failed.", exception); }
+        if (_intelGpuFrequencyProbe is not null)
+        {
+            try { _intelGpuFrequencyProbe.Dispose(); }
+            catch (Exception exception) { AppLog.Warn("Diagnostics.IntelGpuFrequency", "Probe shutdown cleanup failed.", exception); }
+        }
     }
 
     // ---- MSI Fan Probe (developer-only bounded hardware diagnostic) ----
@@ -1005,7 +1008,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendIntelGpuFrequencyProbeSnapshot> CaptureIntelGpuFrequencyProbeAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_intelGpuFrequencyProbe.Capture());
+        return Task.FromResult((_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()).Capture());
     }
 
     public Task<FrontendIntelGpuFrequencyProbeSnapshot> RunIntelGpuFrequencyProbeAsync(
@@ -1014,7 +1017,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_intelGpuFrequencyProbe.Run(operation, testPl1Mw));
+        return Task.FromResult((_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()).Run(operation, testPl1Mw));
     }
 
     private async Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestAsync(

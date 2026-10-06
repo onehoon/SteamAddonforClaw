@@ -43,6 +43,118 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Developer_surfaces_are_materialized_only_when_their_navigation_page_is_first_opened()
+    {
+        var root = FindRepositoryRoot();
+        var mainWindowXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var constructor = ExtractMethod(mainWindow, "internal MainWindow(");
+        var showPage = ExtractMethod(mainWindow, "private void ShowPage(");
+        var developerPageTypes = new[]
+        {
+            "DeveloperPage",
+            "VibrationTestPage",
+            "ClawSensorProbePage",
+            "FanHardwareProbePage",
+            "BatteryChargeLimitTestPage",
+            "GameInputSystemButtonProbePage"
+        };
+
+        Assert.Contains("x:Name=\"DeveloperContentHost\"", mainWindowXaml, StringComparison.Ordinal);
+        foreach (var pageType in developerPageTypes)
+        {
+            Assert.DoesNotContain($"<views:{pageType}", mainWindowXaml, StringComparison.Ordinal);
+            Assert.DoesNotContain($"new {pageType}(", constructor, StringComparison.Ordinal);
+            Assert.Equal(1, mainWindow.Split($"new {pageType}(", StringSplitOptions.None).Length - 1);
+        }
+
+        Assert.Contains("DeveloperContentHost.Content = page switch", showPage, StringComparison.Ordinal);
+        foreach (var page in new[]
+        {
+            (Navigation: "DeveloperMenu", Type: "DeveloperPage"),
+            (Navigation: "VibrationTest", Type: "VibrationTestPage"),
+            (Navigation: "ClawSensorProbe", Type: "ClawSensorProbePage"),
+            (Navigation: "FanHardwareProbe", Type: "FanHardwareProbePage"),
+            (Navigation: "BatteryChargeLimitTest", Type: "BatteryChargeLimitTestPage"),
+            (Navigation: "GameInputSystemButtonProbe", Type: "GameInputSystemButtonProbePage")
+        })
+        {
+            Assert.Contains($"MainNavigationPage.{page.Navigation} => GetOrCreate", showPage, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Developer_page_invalidation_shutdown_and_navigation_guards_do_not_materialize_pages()
+    {
+        var root = FindRepositoryRoot();
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var invalidation = ExtractMethod(mainWindow, "private void RefreshInvalidatedFrontendStateOnUiThread()");
+        var vibrationShutdown = ExtractMethod(mainWindow, "internal async Task CloseVibrationTestForUiShutdownAsync()");
+        var gameInputShutdown = ExtractMethod(mainWindow, "internal async Task CloseGameInputSystemButtonProbeForUiShutdownAsync()");
+        var sensorShutdown = ExtractMethod(mainWindow, "internal async Task CloseClawSensorProbeForUiShutdownAsync()");
+        var batteryGuard = ExtractMethod(mainWindow, "private bool IsBatteryValidationBlockingNavigation()");
+
+        Assert.DoesNotContain("GetOrCreate", invalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeveloperContentHost", invalidation, StringComparison.Ordinal);
+        Assert.Contains("if (_vibrationTestContent is not null)", vibrationShutdown, StringComparison.Ordinal);
+        Assert.Contains("_fanHardwareProbeContent?.Deactivate()", vibrationShutdown, StringComparison.Ordinal);
+        Assert.Contains("if (_gameInputSystemButtonProbeContent is not null)", gameInputShutdown, StringComparison.Ordinal);
+        Assert.Contains("if (_clawSensorProbeContent is not null)", sensorShutdown, StringComparison.Ordinal);
+        Assert.Contains("_batteryChargeLimitTestContent is { IsValidationRunning: true }", batteryGuard, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(DeveloperContentHost.Content, _batteryChargeLimitTestContent)", batteryGuard, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Developer_diagnostic_leave_paths_preserve_stop_and_sensor_session_cleanup()
+    {
+        var root = FindRepositoryRoot();
+        var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
+        var sensorPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ClawSensorProbePage.xaml.cs"));
+        var vibrationPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
+        var gameInputPage = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/GameInputSystemButtonProbePage.xaml.cs"));
+        var showPage = ExtractMethod(mainWindow, "private void ShowPage(");
+        var sensorActivate = ExtractMethod(sensorPage, "internal void Activate()");
+        var sensorDeactivate = ExtractMethod(sensorPage, "internal async Task DeactivateAsync()");
+        var sensorTimer = ExtractMethod(sensorPage, "private void StartPollTimer()");
+
+        Assert.Contains("else if (wasVibrationTest) _vibrationTestContent?.Deactivate()", showPage, StringComparison.Ordinal);
+        Assert.Contains("else if (wasGameInputSystemButtonProbe) _gameInputSystemButtonProbeContent?.Deactivate()", showPage, StringComparison.Ordinal);
+        Assert.Contains("StopIfRunningAsync()", ExtractMethod(vibrationPage, "internal void Deactivate()"), StringComparison.Ordinal);
+        Assert.Contains("StopIfRunningAsync(forceRequest: true)", ExtractMethod(gameInputPage, "internal void Deactivate()"), StringComparison.Ordinal);
+        Assert.Contains("StartPollTimer();", sensorActivate, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromMilliseconds(200)", sensorTimer, StringComparison.Ordinal);
+        Assert.Contains("_pollTimer?.Stop()", sensorDeactivate, StringComparison.Ordinal);
+        Assert.Contains("_pageCancellation?.Cancel()", sensorDeactivate, StringComparison.Ordinal);
+        Assert.Contains("CloseClawSensorProbeAsync()", sensorDeactivate, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Runtime_gameinput_and_igcl_probes_are_created_on_first_use_and_shutdown_only_if_created()
+    {
+        var root = FindRepositoryRoot();
+        var host = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
+        var frontend = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs"));
+        var gameInputCapture = ExtractMethod(host, "private Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(");
+        var gameInputStart = ExtractMethod(host, "private Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(");
+        var gameInputStop = ExtractMethod(host, "private Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(");
+        var hostShutdown = ExtractMethod(host, "public async ValueTask DisposeAsync()");
+        var intelCapture = ExtractMethod(frontend, "public Task<FrontendIntelGpuFrequencyProbeSnapshot> CaptureIntelGpuFrequencyProbeAsync(");
+        var intelRun = ExtractMethod(frontend, "public Task<FrontendIntelGpuFrequencyProbeSnapshot> RunIntelGpuFrequencyProbeAsync(");
+        var frontendShutdown = ExtractMethod(frontend, "internal void BeginProcessShutdown()");
+
+        Assert.Contains("private GameInputSystemButtonProbe? _gameInputSystemButtonProbe;", host, StringComparison.Ordinal);
+        Assert.Contains("_gameInputSystemButtonProbe ??= new GameInputSystemButtonProbe()", gameInputCapture, StringComparison.Ordinal);
+        Assert.Contains("_gameInputSystemButtonProbe ??= new GameInputSystemButtonProbe()", gameInputStart, StringComparison.Ordinal);
+        Assert.Contains("_gameInputSystemButtonProbe?.Stop()", gameInputStop, StringComparison.Ordinal);
+        Assert.DoesNotContain("new GameInputSystemButtonProbe()", gameInputStop, StringComparison.Ordinal);
+        Assert.Contains("if (_gameInputSystemButtonProbe is not null)", hostShutdown, StringComparison.Ordinal);
+        Assert.Contains("private IntelGpuIgclProbe? _intelGpuFrequencyProbe;", frontend, StringComparison.Ordinal);
+        Assert.Contains("_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()", intelCapture, StringComparison.Ordinal);
+        Assert.Contains("_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()", intelRun, StringComparison.Ordinal);
+        Assert.Contains("if (_intelGpuFrequencyProbe is not null)", frontendShutdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Runtime_is_true_headless_and_ui_keeps_winui_ownership()
     {
         var root = FindRepositoryRoot();
@@ -124,7 +236,7 @@ public sealed class UiArchitectureTests
         var mainWindowXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
-        Assert.Contains("VibrationTestPage", mainWindowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<views:VibrationTestPage", mainWindowXaml, StringComparison.Ordinal);
         Assert.Contains("Xbox360 Terminal STOP Loop", pageXaml, StringComparison.Ordinal);
         Assert.Contains("StartXbox360RumbleLoopDiagnosticAsync", page, StringComparison.Ordinal);
         Assert.Contains("CaptureXbox360RumbleLoopDiagnosticAsync", page, StringComparison.Ordinal);
@@ -154,7 +266,8 @@ public sealed class UiArchitectureTests
 
         Assert.Contains("GameInput System Button Probe", developerXaml, StringComparison.Ordinal);
         Assert.Contains("GameInputSystemButtonProbeRequested", developerCode, StringComparison.Ordinal);
-        Assert.Contains("GameInputSystemButtonProbePage", mainWindowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<views:GameInputSystemButtonProbePage", mainWindowXaml, StringComparison.Ordinal);
+        Assert.Contains("GameInputSystemButtonProbePage", File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs")), StringComparison.Ordinal);
         Assert.Contains("IAddonFrontendControl", page, StringComparison.Ordinal);
         Assert.Contains("CaptureGameInputSystemButtonProbeAsync", page, StringComparison.Ordinal);
         Assert.Contains("StartGameInputSystemButtonProbeAsync", page, StringComparison.Ordinal);
@@ -957,7 +1070,7 @@ public sealed class UiArchitectureTests
 
         Assert.Contains("internal bool IsValidationRunning => _busy;", page, StringComparison.Ordinal);
         Assert.Contains("private bool IsBatteryValidationBlockingNavigation()", window, StringComparison.Ordinal);
-        Assert.Contains("BatteryChargeLimitTestContent.IsValidationRunning", window, StringComparison.Ordinal);
+        Assert.Contains("_batteryChargeLimitTestContent is { IsValidationRunning: true }", window, StringComparison.Ordinal);
         Assert.Contains("if (IsBatteryValidationBlockingNavigation())", window, StringComparison.Ordinal);
         Assert.Contains("sender.SelectedItem = sender.SettingsItem", window, StringComparison.Ordinal);
         Assert.Contains("args.Handled = true", window, StringComparison.Ordinal);

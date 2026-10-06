@@ -81,7 +81,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _overlayQuickSettingsMutationInFlight;
     private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
     private GameBarStateDiagnosticObserver? _gameBarStateDiagnosticObserver;
-    private readonly GameInputSystemButtonProbe _gameInputSystemButtonProbe = new();
+    private GameInputSystemButtonProbe? _gameInputSystemButtonProbe;
 
     // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
     // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
@@ -1445,21 +1445,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_gameInputSystemButtonProbe.Capture());
+        return Task.FromResult((_gameInputSystemButtonProbe ??= new GameInputSystemButtonProbe()).Capture());
     }
 
     private Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Volatile.Read(ref _processShutdownStarted) == 0
-            ? Task.FromResult(_gameInputSystemButtonProbe.Start())
+            ? Task.FromResult((_gameInputSystemButtonProbe ??= new GameInputSystemButtonProbe()).Start())
             : Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable("The Runtime is shutting down."));
     }
 
     private Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_gameInputSystemButtonProbe.Stop());
+        return Task.FromResult(_gameInputSystemButtonProbe?.Stop()
+            ?? FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     }
 
     private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync(CancellationToken cancellationToken)
@@ -2266,11 +2267,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
             _frontendServer = null;
         }
-        try { _gameInputSystemButtonProbe.Dispose(); }
-        catch (Exception exception)
+        if (_gameInputSystemButtonProbe is not null)
         {
-            AppLog.Warn("GameInput.SystemButton", "Probe shutdown cleanup failed; Runtime shutdown will continue.",
-                exception, ("Reason", exception.GetType().Name));
+            try { _gameInputSystemButtonProbe.Dispose(); }
+            catch (Exception exception)
+            {
+                AppLog.Warn("GameInput.SystemButton", "Probe shutdown cleanup failed; Runtime shutdown will continue.",
+                    exception, ("Reason", exception.GetType().Name));
+            }
         }
         PrepareRuntimeForShutdown();
         _systemTrayIcon?.Dispose();
