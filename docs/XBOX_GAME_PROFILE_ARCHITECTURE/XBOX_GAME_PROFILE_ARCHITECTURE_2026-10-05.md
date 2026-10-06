@@ -2113,7 +2113,7 @@ PR5
 → add separate XBOX page with read-only installed catalog
 ~~~
 
-The XBOX Active Game Session Diagnostic is retired when PR7 promotes the field-proven detector into the production `XboxGameSessionRuntime`. Do not keep a production session owner and a parallel session diagnostic observer after that promotion.
+PR7 retired the XBOX Active Game Session Diagnostic by promoting the field-proven detector into the production `XboxGameSessionRuntime`. Keep one production session owner; do not restore a parallel session diagnostic observer.
 
 - production XboxGameIdentity model;
 - production installed-XBOX catalog scan;
@@ -2140,16 +2140,16 @@ Production active-session/apply integration remains Phase X3, and per-game M1/M2
 
 Implement this phase as two focused PRs.
 
-#### PR7 — production XBOX session runtime
+#### PR7 — production XBOX session runtime (implemented)
 
-- promote the field-proven PoC B detector into one always-on Runtime-owned `XboxGameSessionRuntime`;
-- publish a minimal `ActiveXboxGame` production fact;
-- preserve event-driven WinEvent + process-generation + process-lifetime + exact MicrosoftGame.config executable matching;
-- preserve bounded startup/resume reconciliation;
-- retire the Developer XBOX Active Game Session Diagnostic UI, report, frontend contracts, and RPCs;
-- remove diagnostic-only process evidence collection that is not used by production identity;
-- do **not** read XBOX profiles or apply CPU/TDP/Power/FPS/Resolution yet;
-- do **not** add `ActiveProfileTarget` yet.
+- promoted the field-proven PoC B detector into one always-on Runtime-owned `XboxGameSessionRuntime`;
+- published a minimal `ActiveXboxGame` production fact;
+- preserved event-driven WinEvent + process-generation + process-lifetime + exact MicrosoftGame.config executable matching;
+- preserved bounded startup/resume reconciliation;
+- retired the Developer XBOX Active Game Session Diagnostic UI, report, frontend contracts, and RPCs;
+- removed diagnostic-only process evidence collection that is not used by production identity;
+- did **not** read XBOX profiles or apply CPU/TDP/Power/FPS/Resolution;
+- did **not** add `ActiveProfileTarget`.
 
 #### PR8 — shared active profile target + live apply
 

@@ -386,92 +386,6 @@ public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
 
-public enum FrontendXboxSessionDiagnosticState { Stopped, Running, Failed }
-public enum FrontendXboxSessionDiagnosticReportOutcome { Created, Failed, Unavailable }
-
-public sealed record FrontendXboxSessionDiagnosticCounters(
-    int AcceptedWinEvents,
-    int UniqueProcessGenerationsInspected,
-    int ProcessOpenFailures,
-    int ProcessImageFailures,
-    int NoPackageCandidates,
-    int PackageIdentityFailures,
-    int ConfigNegativeCandidates,
-    int ExecutableMismatches,
-    int PositiveMatches,
-    int ProcessExits)
-{
-    public static readonly FrontendXboxSessionDiagnosticCounters Empty = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-}
-
-public sealed record FrontendXboxSessionDiagnosticPackagePath(
-    string PathType,
-    int ResultCode,
-    string? Path);
-
-/// <summary>Diagnostic evidence for one exact live process generation. RunningProcessPath comes
-/// from the process handle; ConfigPath comes from package metadata and may be on another drive.</summary>
-public sealed record FrontendXboxSessionDiagnosticGame(
-    string CandidateKey,
-    uint ProcessId,
-    string RunningProcessPath,
-    string RunningExecutableName,
-    string PackageFullName,
-    string PackageFamilyName,
-    string? ApplicationUserModelId,
-    int ApplicationUserModelIdResult,
-    string? PackageIdentityName,
-    string? PackageIdentityPublisher,
-    string? PackageIdentityPublisherId,
-    string? PackageIdentityResourceId,
-    string? PackageIdentityArchitecture,
-    string? PackageIdentityVersion,
-    string IdentityName,
-    string IdentityPublisher,
-    string? IdentityResourceId,
-    string? StoreId,
-    string? TitleId,
-    string MatchedExecutableName,
-    string ConfigPath,
-    IReadOnlyList<FrontendXboxSessionDiagnosticPackagePath> PackagePaths);
-
-public sealed record FrontendXboxSessionDiagnosticLifecycleEvent(
-    DateTimeOffset TimestampUtc,
-    string Event,
-    string? CandidateKey,
-    string? Detail);
-
-public sealed record FrontendXboxSessionDiagnosticSnapshot(
-    bool Available,
-    FrontendXboxSessionDiagnosticState State,
-    string Status,
-    bool ForegroundHookInstalled,
-    bool CreateHookInstalled,
-    bool ShowHookInstalled,
-    FrontendXboxSessionDiagnosticCounters Counters,
-    FrontendXboxSessionDiagnosticGame? ActiveGame,
-    FrontendXboxSessionDiagnosticGame? LastPositiveGame,
-    IReadOnlyList<FrontendXboxSessionDiagnosticLifecycleEvent> LifecycleEvents,
-    int OmittedLifecycleEventCount,
-    string? FailureMessage)
-{
-    public static FrontendXboxSessionDiagnosticSnapshot Unavailable(string status) => new(
-        false, FrontendXboxSessionDiagnosticState.Stopped, status, false, false, false,
-        FrontendXboxSessionDiagnosticCounters.Empty, null, null, [], 0, null);
-}
-
-public sealed record FrontendXboxSessionDiagnosticReportResult(
-    FrontendXboxSessionDiagnosticReportOutcome Outcome,
-    string Status,
-    string? ReportPath,
-    FrontendXboxSessionDiagnosticSnapshot Snapshot,
-    string? FailureMessage)
-{
-    public static FrontendXboxSessionDiagnosticReportResult Unavailable(string status) => new(
-        FrontendXboxSessionDiagnosticReportOutcome.Unavailable, status, null,
-        FrontendXboxSessionDiagnosticSnapshot.Unavailable(status), null);
-}
-
 public sealed record FrontendDeviceSnapshot(string Manufacturer, string Model, string BaseBoard, IReadOnlyList<string> GpuModels);
 public sealed record FrontendHardwareSnapshot(FrontendHardwareStatus Status, string? Family, string? Model, string Reason);
 public sealed record FrontendSteamSnapshot(bool Active, uint AppId, FrontendSteamSource Source);
@@ -695,14 +609,6 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable."));
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);
     Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default);
-    Task<FrontendXboxSessionDiagnosticSnapshot> CaptureXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendXboxSessionDiagnosticSnapshot.Unavailable("XBOX active game diagnostic is unavailable."));
-    Task<FrontendXboxSessionDiagnosticSnapshot> StartXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendXboxSessionDiagnosticSnapshot.Unavailable("XBOX active game diagnostic is unavailable."));
-    Task<FrontendXboxSessionDiagnosticSnapshot> StopXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendXboxSessionDiagnosticSnapshot.Unavailable("XBOX active game diagnostic is unavailable."));
-    Task<FrontendXboxSessionDiagnosticReportResult> GenerateXboxSessionDiagnosticReportAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendXboxSessionDiagnosticReportResult.Unavailable("XBOX active game diagnostic is unavailable."));
     /// <summary>Captures the current CPU Boost frontend snapshot. Never mutates anything -- opening
     /// the Device page and capturing this snapshot must cause zero ProfileStore/Windows writes
     /// (work order section 8/21).</summary>

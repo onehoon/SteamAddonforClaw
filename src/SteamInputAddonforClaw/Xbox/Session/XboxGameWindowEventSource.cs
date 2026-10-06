@@ -1,7 +1,8 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Diagnostics;
 
-namespace SteamInputAddonforClaw.Diagnostics.XboxSession;
+namespace SteamInputAddonforClaw.Xbox.Session;
 
 internal enum XboxGameWindowEventKind
 {
@@ -97,7 +98,7 @@ internal sealed class WindowsXboxGameWindowEventSource : IXboxGameWindowEventSou
         {
             var error = Marshal.GetLastWin32Error();
             if (error != 1444) // ERROR_INVALID_THREAD_ID: the pump already exited.
-                AppLog.Warn("XboxSessionDiagnostic", "Could not post the WinEvent pump quit message.", new Win32Exception(error));
+                AppLog.Warn("XboxSession", "Could not post the WinEvent pump quit message.", new Win32Exception(error));
         }
 
         if (stopped is not null)
