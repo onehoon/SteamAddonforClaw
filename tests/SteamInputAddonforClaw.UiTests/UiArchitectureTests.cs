@@ -977,10 +977,22 @@ public sealed class UiArchitectureTests
         var start = control.IndexOf("SetGameProfilePowerModeEnabledAsync", StringComparison.Ordinal);
         var end = control.IndexOf("SetGameProfileCpuBoostAcAsync", start, StringComparison.Ordinal);
         var method = control[start..end];
+        var mutationStart = control.IndexOf("private async Task<FrontendGameProfileMutationResult> MutateGame(", StringComparison.Ordinal);
+        var mutationEnd = control.IndexOf("private bool IsActiveSteamProfileTarget(", mutationStart, StringComparison.Ordinal);
+        var dispatcherStart = control.IndexOf("private async Task<ProfileApplyResult> ReconcileActiveProfileMutationAsync(", StringComparison.Ordinal);
+        var dispatcherEnd = control.IndexOf("private static bool IncludesFeature(", dispatcherStart, StringComparison.Ordinal);
+        var steamMutation = control[mutationStart..mutationEnd];
+        var dispatcher = control[dispatcherStart..dispatcherEnd];
 
-        Assert.Contains("ReconcileWithResult", method, StringComparison.Ordinal);
-        Assert.Contains("FrontendGameProfileMutationOutcome.ApplyFailed", method, StringComparison.Ordinal);
-        Assert.Contains("Power Mode apply failed.", method, StringComparison.Ordinal);
+        Assert.Contains("ProfileApplyKind.PowerMode", method, StringComparison.Ordinal);
+        Assert.Contains("ReconcileActiveProfileMutationAsync(applyKind, \"SteamProfileMutation\")", steamMutation, StringComparison.Ordinal);
+        Assert.Contains("ReconcileActiveProfileMutationAsync(applyKind, \"XboxProfileMutation\")", control, StringComparison.Ordinal);
+        Assert.Contains("Apply(ProfileApplyKind.PowerMode, \"Power Mode\"", dispatcher, StringComparison.Ordinal);
+        Assert.Contains("powerModeRuntime.ReconcileWithResult()", dispatcher, StringComparison.Ordinal);
+        Assert.Contains("FrontendGameProfileMutationOutcome.ApplyFailed", steamMutation, StringComparison.Ordinal);
+        Assert.Contains("$\"{feature} apply failed.\"", dispatcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReconcileXboxProfileMutationAsync", control, StringComparison.Ordinal);
+        Assert.DoesNotContain("XboxProfileApplyKind", control, StringComparison.Ordinal);
     }
 
     [Fact]
