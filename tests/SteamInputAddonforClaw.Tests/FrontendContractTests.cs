@@ -86,6 +86,14 @@ public sealed class FrontendContractTests
         Assert.Equal(FrontendIntelGpuFrequencyProbeSnapshot.Unavailable(), operated);
     }
 
+    [Fact]
+    public void Unavailable_intel_gpu_probe_does_not_claim_known_throttle_state()
+    {
+        var snapshot = FrontendIntelGpuFrequencyProbeSnapshot.Unavailable();
+
+        Assert.Null(snapshot.ThrottleReasons);
+    }
+
     private sealed class MinimalFrontendControl : IAddonFrontendControl
     {
         public event EventHandler? StateInvalidated

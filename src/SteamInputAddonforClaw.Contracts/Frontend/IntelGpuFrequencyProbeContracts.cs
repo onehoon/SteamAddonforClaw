@@ -53,7 +53,7 @@ public sealed record FrontendIntelGpuFrequencyProbeSnapshot(
 {
     public static FrontendIntelGpuFrequencyProbeSnapshot Unavailable(string reason = "Intel IGCL GPU diagnostics are unavailable.") =>
         new(false, false, "Unavailable", 0, 0, null, null, null, null, false, false,
-            null, null, null, null, null, 0, false, false, null, null, null, reason,
+            null, null, null, null, null, null, false, false, null, null, null, reason,
             false, false, null, null, null, null, null, null, null, null, null, null,
             false, false, null, null, null, null);
 }
