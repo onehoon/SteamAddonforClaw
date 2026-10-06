@@ -5,7 +5,7 @@
 <Grid Grid.Row="1">
 <Grid x:Name="CatalogPanel">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-<Grid Grid.Row="0" ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock FontSize="24" FontWeight="SemiBold" Text="Profile"/><Button x:Name="RefreshGamesButton" Grid.Column="1" Content="↻ Refresh" Style="{StaticResource AccentButtonStyle}" Click="RefreshGamesButton_Click"/></Grid>
+<Grid Grid.Row="0" ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock FontSize="24" FontWeight="SemiBold" Text="Steam"/><Button x:Name="RefreshGamesButton" Grid.Column="1" Content="↻ Refresh" Style="{StaticResource AccentButtonStyle}" Click="RefreshGamesButton_Click"/></Grid>
 <TextBox x:Name="GameSearchBox" Grid.Row="1" PlaceholderText="Search games..." TextChanged="GameSearchBox_TextChanged" Margin="0,16,0,0"/>
 <ScrollViewer Grid.Row="3" Margin="0,16,0,0" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollMode="Enabled" VerticalScrollBarVisibility="Auto">
 <ItemsRepeater x:Name="GameGrid" HorizontalAlignment="Stretch">
