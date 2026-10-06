@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.GameDetection.Windows;
 
 namespace SteamInputAddonforClaw.Xbox.Session;
 
@@ -7,7 +8,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
 {
     private const int MaximumReconcileWindows = 512;
 
-    private readonly IXboxGameWindowEventSource _windowSource;
+    private readonly IGameWindowEventSource _windowSource;
     private readonly IXboxGameProcessIdentityProbe _processProbe;
     private readonly Channel<SessionMessage> _messages = Channel.CreateUnbounded<SessionMessage>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false, AllowSynchronousContinuations = false });
@@ -16,16 +17,16 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     private readonly Task _worker;
     private CancellationTokenSource? _sessionCancellation;
     private ActiveXboxGame? _activeGame;
-    private XboxGameProcessGenerationKey? _activeGeneration;
+    private GameProcessGenerationKey? _activeGeneration;
     private int _acceptWindowEvents;
     private int _startAttempted;
     private int _disposed;
 
     internal XboxGameSessionRuntime(
-        IXboxGameWindowEventSource? windowSource = null,
+        IGameWindowEventSource? windowSource = null,
         IXboxGameProcessIdentityProbe? processProbe = null)
     {
-        _windowSource = windowSource ?? new WindowsXboxGameWindowEventSource();
+        _windowSource = windowSource ?? new WindowsGameWindowEventSource();
         _processProbe = processProbe ?? new WindowsXboxGameProcessIdentityProbe();
         _worker = Task.Run(ProcessMessagesAsync);
     }
@@ -247,7 +248,7 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
         return candidates;
     }
 
-    private async Task ProcessWindowObservationAsync(XboxGameWindowObservation observation, CancellationToken sessionToken)
+    private async Task ProcessWindowObservationAsync(GameWindowObservation observation, CancellationToken sessionToken)
     {
         if (sessionToken.IsCancellationRequested || Volatile.Read(ref _acceptWindowEvents) == 0)
             return;
@@ -378,10 +379,10 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
         }
     }
 
-    private void OnProcessExited(IXboxGameProcessGeneration generation) =>
+    private void OnProcessExited(IGameProcessGeneration generation) =>
         TryQueue(new ProcessExitedMessage(generation.Key));
 
-    private void ProcessExited(XboxGameProcessGenerationKey key)
+    private void ProcessExited(GameProcessGenerationKey key)
     {
         if (!_processes.TryGetValue(key.ProcessId, out var record) || record.Generation.Key != key)
             return;
@@ -511,17 +512,17 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
     }
 
     private abstract record SessionMessage;
-    private sealed record WindowObservationMessage(XboxGameWindowObservation Observation, CancellationToken SessionToken) : SessionMessage;
-    private sealed record ProcessExitedMessage(XboxGameProcessGenerationKey Key) : SessionMessage;
+    private sealed record WindowObservationMessage(GameWindowObservation Observation, CancellationToken SessionToken) : SessionMessage;
+    private sealed record ProcessExitedMessage(GameProcessGenerationKey Key) : SessionMessage;
     private sealed record EventSourceFailureMessage(Exception Exception) : SessionMessage;
     private sealed record ReconcileMessage(TaskCompletionSource<int> Completion, CancellationToken CancellationToken) : SessionMessage;
     private sealed record PrepareForResumeMessage(TaskCompletionSource Completion) : SessionMessage;
     private sealed record RetireNonActiveMessage(TaskCompletionSource Completion) : SessionMessage;
     private sealed record ShutdownMessage(TaskCompletionSource Completion) : SessionMessage;
 
-    private sealed class ProcessRecord(IXboxGameProcessGeneration generation)
+    private sealed class ProcessRecord(IGameProcessGeneration generation)
     {
-        internal IXboxGameProcessGeneration Generation { get; } = generation;
+        internal IGameProcessGeneration Generation { get; } = generation;
         internal XboxGameProcessInspection? Inspection { get; set; }
     }
 }

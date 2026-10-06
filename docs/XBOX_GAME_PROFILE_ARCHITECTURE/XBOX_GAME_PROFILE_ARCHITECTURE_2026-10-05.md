@@ -581,11 +581,18 @@ XboxGameSessionRuntime
 
 Responsibilities:
 
-- own the WinEvent hooks;
+- coordinate XBOX session lifecycle through the shared Windows game-detection primitives;
 - inspect only candidate PIDs raised by those events;
+- own the candidate-generation cache, XBOX inspection cache, and active-XBOX selection policy;
 - publish the current ActiveXboxGame fact;
-- monitor the matched process lifetime;
 - perform bounded startup/resume reconciliation.
+
+The shared `GameDetection.Windows` foundation owns the platform-neutral mechanics:
+
+- WinEvent hook installation, filtering, message-pump lifetime, and bounded top-level PID enumeration;
+- PID + process creation-time generation, retained process handle, exit wait, and lazy full-image-path query.
+
+It reports Windows process/window facts only. XBOX package/config/executable proof and the serialized XBOX session owner remain under `Xbox.Session`. Steam remains outside this foundation and continues to use `SteamSessionRuntime.ActualRunningAppId`.
 
 It must not own:
 
