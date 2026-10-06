@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.GameDetection.Windows;
 using SteamInputAddonforClaw.Xbox;
 using SteamInputAddonforClaw.Xbox.Session;
 using Xunit;
@@ -72,7 +73,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         await using var runtime = CreateRuntime(windows, probe);
         await runtime.StartAsync();
 
-        windows.Raise(Enum.Parse<XboxGameWindowEventKind>(eventKind), 30);
+        windows.Raise(Enum.Parse<GameWindowEventKind>(eventKind), 30);
         await WaitUntilAsync(() => runtime.ActiveGame is not null);
 
         Assert.Equal("store:9NABC123", runtime.ActiveGame?.Key);
@@ -91,10 +92,10 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         runtime.ActiveGameChanged += changes.Add;
         await runtime.StartAsync();
 
-        windows.Raise(XboxGameWindowEventKind.Create, 30);
+        windows.Raise(GameWindowEventKind.Create, 30);
         await WaitUntilAsync(() => runtime.ActiveGame is not null);
-        windows.Raise(XboxGameWindowEventKind.Show, 30);
-        windows.Raise(XboxGameWindowEventKind.Foreground, 30);
+        windows.Raise(GameWindowEventKind.Show, 30);
+        windows.Raise(GameWindowEventKind.Foreground, 30);
         await WaitUntilAsync(() => probe.OpenCount >= 3);
 
         Assert.Equal(1, probe.InspectionCount);
@@ -111,7 +112,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         await using var runtime = CreateRuntime(windows, probe);
         await runtime.StartAsync();
 
-        windows.Raise(XboxGameWindowEventKind.Foreground, 41);
+        windows.Raise(GameWindowEventKind.Foreground, 41);
         await WaitUntilAsync(() => probe.InspectionCount == 2);
 
         Assert.Equal("store:9NABC123", runtime.ActiveGame?.Key);
@@ -127,7 +128,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         var changes = new List<ActiveXboxGame?>();
         runtime.ActiveGameChanged += changes.Add;
         await runtime.StartAsync();
-        var generation = Assert.Single(probe.Generations, item => item.Key == new XboxGameProcessGenerationKey(50, 1));
+        var generation = Assert.Single(probe.Generations, item => item.Key == new GameProcessGenerationKey(50, 1));
 
         generation.Signal();
         await WaitUntilAsync(() => runtime.ActiveGame is null);
@@ -147,16 +148,16 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         probe.Set(60, 1, MatchedInspection(60, "store:old"));
         await using var runtime = CreateRuntime(windows, probe);
         await runtime.StartAsync();
-        var oldGeneration = Assert.Single(probe.Generations, item => item.Key == new XboxGameProcessGenerationKey(60, 1));
+        var oldGeneration = Assert.Single(probe.Generations, item => item.Key == new GameProcessGenerationKey(60, 1));
 
         probe.Set(60, 2, MatchedInspection(60, "store:new"));
-        windows.Raise(XboxGameWindowEventKind.Foreground, 60);
+        windows.Raise(GameWindowEventKind.Foreground, 60);
         await WaitUntilAsync(() => runtime.ActiveGame?.Key == "store:new");
         oldGeneration.RaiseStaleExit();
         await Task.Delay(20);
 
         Assert.Equal("store:new", runtime.ActiveGame?.Key);
-        Assert.Equal(new XboxGameProcessGenerationKey(60, 2), probe.ActiveKey(60));
+        Assert.Equal(new GameProcessGenerationKey(60, 2), probe.ActiveKey(60));
     }
 
     [Fact]
@@ -169,7 +170,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         await using var runtime = CreateRuntime(windows, probe);
         await runtime.StartAsync();
 
-        windows.Raise(XboxGameWindowEventKind.Create, 62);
+        windows.Raise(GameWindowEventKind.Create, 62);
         await WaitUntilAsync(() => probe.InspectionCount == 2);
 
         Assert.Equal("store:first", runtime.ActiveGame?.Key);
@@ -203,12 +204,12 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         await using var runtime = CreateRuntime(windows, probe);
         await runtime.StartAsync();
         var activeGeneration = Assert.Single(probe.Generations, item => item.ProcessId == 100);
-        windows.Raise(XboxGameWindowEventKind.Create, 101);
+        windows.Raise(GameWindowEventKind.Create, 101);
         await WaitUntilAsync(() => probe.InspectionCount == 2);
         var retiredCandidate = Assert.Single(probe.Generations, item => item.ProcessId == 101);
 
         await runtime.ReconcileAfterResumeAsync();
-        windows.Raise(XboxGameWindowEventKind.Show, 101);
+        windows.Raise(GameWindowEventKind.Show, 101);
         await WaitUntilAsync(() => probe.InspectionCount == 3);
 
         Assert.Equal("store:9NABC123", runtime.ActiveGame?.Key);
@@ -274,22 +275,6 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         Assert.Equal(1, windows.StopCount);
         Assert.Null(runtime.ActiveGame);
         Assert.Null(changes[^1]);
-    }
-
-    [Theory]
-    [InlineData(0x8000, 0, 0, 123, true, true)]
-    [InlineData(0x8002, 0, 0, 123, true, true)]
-    [InlineData(0x0003, -1, -1, 123, true, true)]
-    [InlineData(0x8000, 1, 0, 123, true, false)]
-    [InlineData(0x8002, 0, 1, 123, true, false)]
-    [InlineData(0x8000, 0, 0, 0, true, false)]
-    [InlineData(0x8000, 0, 0, 123, false, false)]
-    [InlineData(0x8001, 0, 0, 123, true, false)]
-    public void WinEvent_filter_requires_allowed_event_top_level_window_and_self_object(
-        int eventType, int objectId, int childId, int window, bool isTopLevel, bool expected)
-    {
-        Assert.Equal(expected, WindowsXboxGameWindowEventSource.IsRelevantObservation(
-            checked((uint)eventType), objectId, childId, window, isTopLevel));
     }
 
     [Fact]
@@ -463,23 +448,27 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
     [Fact]
     public void Production_session_source_keeps_the_event_and_process_lifetime_contract_without_diagnostic_evidence()
     {
-        var root = Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Xbox", "Session");
-        var sources = string.Join("\n", Directory.GetFiles(root, "*.cs").Select(File.ReadAllText));
-        var hookSource = File.ReadAllText(Path.Combine(root, "XboxGameWindowEventSource.cs"));
+        var sourceRoot = Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw");
+        var sessionRoot = Path.Combine(sourceRoot, "Xbox", "Session");
+        var foundationRoot = Path.Combine(sourceRoot, "GameDetection", "Windows");
+        var sources = string.Join("\n", Directory.GetFiles(sessionRoot, "*.cs").Select(File.ReadAllText));
+        var hookSource = File.ReadAllText(Path.Combine(foundationRoot, "WindowsGameWindowEventSource.cs"));
+        var processSource = File.ReadAllText(Path.Combine(foundationRoot, "WindowsGameProcess.cs"));
         var callbackStart = hookSource.IndexOf("private void OnWinEvent", StringComparison.Ordinal);
         var callbackEnd = hookSource.IndexOf("private delegate void WinEventProc", callbackStart, StringComparison.Ordinal);
         var callback = hookSource[callbackStart..callbackEnd];
-        var runtime = File.ReadAllText(Path.Combine(root, "XboxGameSessionRuntime.cs"));
-        var probe = File.ReadAllText(Path.Combine(root, "XboxGameProcessIdentityProbe.cs"));
+        var runtime = File.ReadAllText(Path.Combine(sessionRoot, "XboxGameSessionRuntime.cs"));
+        var probe = File.ReadAllText(Path.Combine(sessionRoot, "XboxGameProcessIdentityProbe.cs"));
 
         foreach (var eventName in new[] { "EventSystemForeground", "EventObjectCreate", "EventObjectShow" })
-            Assert.Contains(eventName, sources, StringComparison.Ordinal);
-        Assert.Contains("RegisterWaitForSingleObject", sources, StringComparison.Ordinal);
-        Assert.Contains("_observation?.Invoke(new XboxGameWindowObservation", callback, StringComparison.Ordinal);
+            Assert.Contains(eventName, hookSource, StringComparison.Ordinal);
+        Assert.Contains("RegisterWaitForSingleObject", processSource, StringComparison.Ordinal);
+        Assert.Contains("_observation?.Invoke(new GameWindowObservation", callback, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenProcess", callback, StringComparison.Ordinal);
         Assert.DoesNotContain("InspectAsync", callback, StringComparison.Ordinal);
-        Assert.Contains("ProcessQueryLimitedInformation | Synchronize", probe, StringComparison.Ordinal);
-        Assert.Contains("QueryFullProcessImageNameW", probe, StringComparison.Ordinal);
+        Assert.Contains("ProcessQueryLimitedInformation | Synchronize", processSource, StringComparison.Ordinal);
+        Assert.Contains("generation.QueryImagePath()", probe, StringComparison.Ordinal);
+        Assert.DoesNotContain("QueryFullProcessImageNameW", probe, StringComparison.Ordinal);
         Assert.Contains("GetPackageFullName", probe, StringComparison.Ordinal);
         Assert.Contains("GetPackageFamilyName", probe, StringComparison.Ordinal);
         Assert.Contains("new PackageManager().FindPackageForUser(userSecurityId, packageFullName)", probe, StringComparison.Ordinal);
@@ -493,10 +482,10 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         Assert.DoesNotContain("ProfileStore", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("CpuBoostRuntime", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("RequestControllerPresentationReconcile", runtime, StringComparison.Ordinal);
-        Assert.DoesNotContain("PeriodicTimer", sources, StringComparison.Ordinal);
-        Assert.DoesNotContain("DispatcherTimer", sources, StringComparison.Ordinal);
-        Assert.DoesNotContain("System.Threading.Timer", sources, StringComparison.Ordinal);
-        Assert.DoesNotContain("Task.Delay", sources, StringComparison.Ordinal);
+        Assert.DoesNotContain("PeriodicTimer", sources + hookSource + processSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("DispatcherTimer", sources + hookSource + processSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("System.Threading.Timer", sources + hookSource + processSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("Task.Delay", sources + hookSource + processSource, StringComparison.Ordinal);
     }
 
     public async Task DisposeAsync()
@@ -560,9 +549,9 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         throw new Xunit.Sdk.XunitException("The production XBOX game-session runtime did not reach the expected state.");
     }
 
-    private sealed class FakeWindowSource : IXboxGameWindowEventSource
+    private sealed class FakeWindowSource : IGameWindowEventSource
     {
-        private Action<XboxGameWindowObservation>? _observation;
+        private Action<GameWindowObservation>? _observation;
         private Action<Exception>? _failure;
         public uint ForegroundProcessId { get; set; }
         public IReadOnlyList<uint> ProcessIds { get; set; } = [];
@@ -572,7 +561,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         public int EnumerationCount { get; private set; }
         public int LastEnumerationLimit { get; private set; }
 
-        public Task StartAsync(Action<XboxGameWindowObservation> observation, Action<Exception> failure, CancellationToken cancellationToken)
+        public Task StartAsync(Action<GameWindowObservation> observation, Action<Exception> failure, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             StartCount++;
@@ -601,7 +590,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-        internal void Raise(XboxGameWindowEventKind kind, uint processId) => _observation?.Invoke(new(kind, (nint)processId, processId));
+        internal void Raise(GameWindowEventKind kind, uint processId) => _observation?.Invoke(new(kind, (nint)processId, processId));
         internal void Fail(Exception exception) => _failure?.Invoke(exception);
     }
 
@@ -616,10 +605,10 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         internal void Set(uint processId, long creationTime, XboxGameProcessInspection inspection) =>
             _current[processId] = (creationTime, inspection);
 
-        internal XboxGameProcessGenerationKey ActiveKey(uint processId) =>
+        internal GameProcessGenerationKey ActiveKey(uint processId) =>
             new(processId, _current[processId].CreationTime);
 
-        public XboxGameProcessOpenResult Open(uint processId)
+        public GameProcessOpenResult Open(uint processId)
         {
             OpenCount++;
             if (!_current.TryGetValue(processId, out var configured))
@@ -630,7 +619,7 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
             return new(generation, 0);
         }
 
-        public Task<XboxGameProcessInspection> InspectAsync(IXboxGameProcessGeneration generation, CancellationToken cancellationToken)
+        public Task<XboxGameProcessInspection> InspectAsync(IGameProcessGeneration generation, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             InspectionCount++;
@@ -639,16 +628,17 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         }
     }
 
-    private sealed class FakeProcessGeneration(uint processId, long creationTime) : IXboxGameProcessGeneration
+    private sealed class FakeProcessGeneration(uint processId, long creationTime) : IGameProcessGeneration
     {
-        private Action<IXboxGameProcessGeneration>? _exited;
-        private Action<IXboxGameProcessGeneration>? _lastExitHandler;
+        private Action<IGameProcessGeneration>? _exited;
+        private Action<IGameProcessGeneration>? _lastExitHandler;
 
         public uint ProcessId { get; } = processId;
-        public XboxGameProcessGenerationKey Key { get; } = new(processId, creationTime);
+        public GameProcessGenerationKey Key { get; } = new(processId, creationTime);
         public bool IsSignaled { get; set; }
         public bool IsDisposed { get; private set; }
-        public event Action<IXboxGameProcessGeneration>? Exited
+        public GameProcessImageQueryResult QueryImagePath() => new(true, @"D:\Games\Sample.exe", 0);
+        public event Action<IGameProcessGeneration>? Exited
         {
             add => _exited += value;
             remove

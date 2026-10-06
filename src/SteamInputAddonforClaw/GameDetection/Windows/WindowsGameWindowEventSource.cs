@@ -2,26 +2,26 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Diagnostics;
 
-namespace SteamInputAddonforClaw.Xbox.Session;
+namespace SteamInputAddonforClaw.GameDetection.Windows;
 
-internal enum XboxGameWindowEventKind
+internal enum GameWindowEventKind
 {
     Foreground,
     Create,
     Show,
 }
 
-internal sealed record XboxGameWindowObservation(XboxGameWindowEventKind Kind, nint WindowHandle, uint ProcessId);
+internal sealed record GameWindowObservation(GameWindowEventKind Kind, nint WindowHandle, uint ProcessId);
 
-internal interface IXboxGameWindowEventSource : IAsyncDisposable
+internal interface IGameWindowEventSource : IAsyncDisposable
 {
-    Task StartAsync(Action<XboxGameWindowObservation> observation, Action<Exception> failure, CancellationToken cancellationToken);
+    Task StartAsync(Action<GameWindowObservation> observation, Action<Exception> failure, CancellationToken cancellationToken);
     Task StopAsync();
     uint GetForegroundProcessId();
     IReadOnlyList<uint> EnumerateTopLevelProcessIds(int maximumProcessCount);
 }
 
-internal sealed class WindowsXboxGameWindowEventSource : IXboxGameWindowEventSource
+internal sealed class WindowsGameWindowEventSource : IGameWindowEventSource
 {
     internal const uint EventSystemForeground = 0x0003;
     internal const uint EventObjectCreate = 0x8000;
@@ -38,14 +38,14 @@ internal sealed class WindowsXboxGameWindowEventSource : IXboxGameWindowEventSou
     private Thread? _thread;
     private TaskCompletionSource? _started;
     private TaskCompletionSource? _stopped;
-    private Action<XboxGameWindowObservation>? _observation;
+    private Action<GameWindowObservation>? _observation;
     private Action<Exception>? _failure;
     private uint _threadId;
 
-    internal WindowsXboxGameWindowEventSource() => _callback = OnWinEvent;
+    internal WindowsGameWindowEventSource() => _callback = OnWinEvent;
 
     public async Task StartAsync(
-        Action<XboxGameWindowObservation> observation,
+        Action<GameWindowObservation> observation,
         Action<Exception> failure,
         CancellationToken cancellationToken)
     {
@@ -56,7 +56,7 @@ internal sealed class WindowsXboxGameWindowEventSource : IXboxGameWindowEventSou
         lock (_sync)
         {
             if (_thread is not null)
-                throw new InvalidOperationException("XBOX game window hooks are already running.");
+                throw new InvalidOperationException("Game window hooks are already running.");
 
             _observation = observation;
             _failure = failure;
@@ -66,7 +66,7 @@ internal sealed class WindowsXboxGameWindowEventSource : IXboxGameWindowEventSou
             _thread = new Thread(PumpMessages)
             {
                 IsBackground = true,
-                Name = "SteamAddon XBOX WinEvent",
+                Name = "Windows game-window events",
             };
             _thread.Start();
         }
@@ -98,7 +98,7 @@ internal sealed class WindowsXboxGameWindowEventSource : IXboxGameWindowEventSou
         {
             var error = Marshal.GetLastWin32Error();
             if (error != 1444) // ERROR_INVALID_THREAD_ID: the pump already exited.
-                AppLog.Warn("XboxSession", "Could not post the WinEvent pump quit message.", new Win32Exception(error));
+                AppLog.Warn("GameDetection.Windows", "Could not post the WinEvent pump quit message.", new Win32Exception(error));
         }
 
         if (stopped is not null)
@@ -215,10 +215,10 @@ internal sealed class WindowsXboxGameWindowEventSource : IXboxGameWindowEventSou
         {
             var kind = eventType switch
             {
-                EventSystemForeground => XboxGameWindowEventKind.Foreground,
-                EventObjectCreate => XboxGameWindowEventKind.Create,
-                EventObjectShow => XboxGameWindowEventKind.Show,
-                _ => (XboxGameWindowEventKind?)null,
+                EventSystemForeground => GameWindowEventKind.Foreground,
+                EventObjectCreate => GameWindowEventKind.Create,
+                EventObjectShow => GameWindowEventKind.Show,
+                _ => (GameWindowEventKind?)null,
             };
             if (kind is null || window == 0)
                 return;
@@ -228,7 +228,7 @@ internal sealed class WindowsXboxGameWindowEventSource : IXboxGameWindowEventSou
             if (processId == 0)
                 return;
 
-            _observation?.Invoke(new XboxGameWindowObservation(kind.Value, window, processId));
+            _observation?.Invoke(new GameWindowObservation(kind.Value, window, processId));
         }
         catch
         {

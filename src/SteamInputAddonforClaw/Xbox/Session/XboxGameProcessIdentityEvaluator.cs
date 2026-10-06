@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.GameDetection.Windows;
 using SteamInputAddonforClaw.Xbox;
 
 namespace SteamInputAddonforClaw.Xbox.Session;
@@ -129,7 +130,7 @@ internal static class XboxGameProcessIdentityEvaluator
     private const long MaximumConfigBytes = 2 * 1024 * 1024;
 
     internal static async Task<XboxGameProcessInspection> InspectAsync(
-        IXboxGameProcessGeneration generation,
+        IGameProcessGeneration generation,
         XboxGameProcessIdentityEvidence evidence,
         CancellationToken cancellationToken)
     {
@@ -245,7 +246,7 @@ internal static class XboxGameProcessIdentityEvaluator
     }
 
     private static void LogConfigResolution(
-        IXboxGameProcessGeneration generation,
+        IGameProcessGeneration generation,
         XboxGameProcessIdentityEvidence evidence,
         string? selectedConfigPath,
         string? failureReason)
