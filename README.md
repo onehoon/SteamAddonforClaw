@@ -51,7 +51,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - Configurable WING / Gamebar and Center M actions for Normal and Steam presentation modes
 - Device-level CPU Boost, Windows 11 Power Mode, and TDP control as independent features
 - Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles as independent features
-- A separate installed XBOX game catalog with offline profile editing
+- A separate installed XBOX game catalog with offline/pre-launch profile editing and shared live profile application for the effective XBOX game
 - Event-driven Steam game detection without periodic game/process polling
 - Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls
@@ -175,7 +175,9 @@ Disabling a profile does not erase its settings.
 
 ## XBOX tab
 
-The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only, supports search and manual refresh, and lets you save Favorite, Profile Enabled, CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and resolution settings by the game's canonical identity. These settings are persisted for offline/pre-launch editing; XBOX profile changes do not apply live to a running game yet.
+The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only, supports search and manual refresh, and lets you save Favorite, Profile Enabled, CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and resolution settings by the game's canonical identity.
+
+XBOX profiles remain fully editable offline and before launch. If the edited XBOX game is the Runtime's current effective profile target, the saved change is reconciled live through the **same CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and Display Resolution runtime owners used by Steam profiles**. Editing an inactive XBOX profile only changes persistence and does not touch current hardware state.
 
 ### Device and Profile priority
 
@@ -192,7 +194,16 @@ When the game exits:
 - if the corresponding Device feature is enabled, the saved Device value becomes effective again;
 - if the Device feature is disabled, the Addon stops managing that feature instead of restoring an older pre-game value.
 
-Performance profiles use the actual Steam AppID and operate independently from controller presentation.
+Game detection and profile application are separate layers.
+
+- **Steam detection** remains authoritative through Steam's actual `RunningAppID`.
+- **XBOX detection** remains authoritative through the XBOX package/config/executable session runtime.
+- Those platform-specific identities are resolved into one effective profile before settings reach hardware.
+- **CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and Display Resolution use one shared set of runtime owners regardless of platform.**
+
+The Main App and Overlay are only different frontend surfaces. The Main App can edit any selected profile before launch; if that profile is currently effective, the same typed mutation path performs live reconciliation. The Overlay is active-game oriented, but it uses the same frontend mutation authority and the same runtime apply path rather than a separate Overlay implementation.
+
+Controller presentation remains independent from this performance-profile pipeline.
 
 ## Game detection and Non-Steam games
 
