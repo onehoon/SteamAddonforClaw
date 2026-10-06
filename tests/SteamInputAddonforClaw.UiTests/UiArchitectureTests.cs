@@ -170,6 +170,38 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Intel_gpu_igcl_probe_stays_inline_in_developer_menu_and_routes_writes_through_frontend()
+    {
+        var root = FindRepositoryRoot();
+        var developerXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
+        var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
+        var mainWindowXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
+        var overlayRoot = Path.Combine(root, "src/SteamInputAddonforClaw.Overlay");
+
+        Assert.Contains("Intel GPU Frequency / IGCL Probe", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Set Max / Max + Readback", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Restore Original Frequency", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Set Test PL1 + Readback", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"mW\"", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("Restore Original Power", developerXaml, StringComparison.Ordinal);
+        Assert.Contains("CaptureIntelGpuFrequencyProbeAsync", developerCode, StringComparison.Ordinal);
+        Assert.Contains("RunIntelGpuFrequencyProbeAsync", developerCode, StringComparison.Ordinal);
+        Assert.Contains("Math.Truncate(raw)", developerCode, StringComparison.Ordinal);
+        Assert.Contains("value is null", developerCode, StringComparison.Ordinal);
+        Assert.Contains("if (value is not { } flags) return \"Unknown\";", developerCode, StringComparison.Ordinal);
+        Assert.Contains("0x{flags:X8} ({string.Join", developerCode, StringComparison.Ordinal);
+        Assert.Contains("false when nativeResult == 0 => \"MISMATCH\"", developerCode, StringComparison.Ordinal);
+        Assert.Contains("false => \"FAILED\"", developerCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("IntelGpuFrequencyProbePage", mainWindowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("NativeLibrary", developerCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("DllImport", developerCode, StringComparison.Ordinal);
+
+        foreach (var file in Directory.EnumerateFiles(overlayRoot, "*", SearchOption.AllDirectories)
+                     .Where(path => Path.GetExtension(path) is ".cs" or ".xaml"))
+            Assert.DoesNotContain("IntelGpuIgclProbe", File.ReadAllText(file), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Tdp_toggle_disables_editors_while_the_first_enable_is_in_flight()
     {
         var root = FindRepositoryRoot();

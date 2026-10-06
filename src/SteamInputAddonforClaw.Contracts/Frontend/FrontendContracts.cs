@@ -809,6 +809,13 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
+    Task<FrontendIntelGpuFrequencyProbeSnapshot> CaptureIntelGpuFrequencyProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendIntelGpuFrequencyProbeSnapshot.Unavailable());
+    Task<FrontendIntelGpuFrequencyProbeSnapshot> RunIntelGpuFrequencyProbeAsync(
+        FrontendIntelGpuFrequencyProbeOperation operation,
+        int? testPl1Mw = null,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendIntelGpuFrequencyProbeSnapshot.Unavailable());
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
     Task<FrontendXboxGameCatalogSnapshot> ScanXboxGamesAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXboxGameCatalogSnapshot.Unavailable("XBOX game catalog is unavailable."));

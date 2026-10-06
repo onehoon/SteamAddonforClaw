@@ -74,6 +74,18 @@ public sealed class FrontendContractTests
         Assert.Equal(FrontendGameInputSystemButtonProbeSnapshot.Unavailable(), stopped);
     }
 
+    [Fact]
+    public async Task Intel_gpu_igcl_probe_default_frontend_methods_fail_closed_as_unavailable()
+    {
+        IAddonFrontendControl control = new MinimalFrontendControl();
+
+        var captured = await control.CaptureIntelGpuFrequencyProbeAsync();
+        var operated = await control.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.SetMaxMax);
+
+        Assert.Equal(FrontendIntelGpuFrequencyProbeSnapshot.Unavailable(), captured);
+        Assert.Equal(FrontendIntelGpuFrequencyProbeSnapshot.Unavailable(), operated);
+    }
+
     private sealed class MinimalFrontendControl : IAddonFrontendControl
     {
         public event EventHandler? StateInvalidated

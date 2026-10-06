@@ -67,7 +67,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(fake.XboxSessionDiagnosticSnapshot, await client.CaptureXboxSessionDiagnosticAsync(), strict: true);
         Assert.Equal(FrontendXboxSessionDiagnosticState.Running, (await client.StartXboxSessionDiagnosticAsync()).State);
         Assert.Equal(FrontendXboxSessionDiagnosticState.Stopped, (await client.StopXboxSessionDiagnosticAsync()).State);
@@ -93,7 +93,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
@@ -143,7 +143,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -187,7 +187,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -240,7 +240,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -260,7 +260,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -284,7 +284,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -297,7 +297,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.GameInputProbeSnapshot, await client.CaptureGameInputSystemButtonProbeAsync());
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.StartGameInputSystemButtonProbeAsync()).State);
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.CaptureGameInputSystemButtonProbeAsync()).State);
@@ -325,6 +325,53 @@ public sealed class FrontendNamedPipeTransportTests
 
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
         Assert.Equal(0, fake.GameInputProbeStartCount);
+    }
+
+    [Fact]
+    public async Task Intel_gpu_igcl_probe_capture_frequency_and_power_operations_round_trip()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(fake.IntelGpuProbeSnapshot, await client.CaptureIntelGpuFrequencyProbeAsync());
+
+        var frequency = await client.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.SetMaxMax);
+        Assert.Equal(FrontendIntelGpuFrequencyProbeOperation.SetMaxMax.ToString(), frequency.LastOperation);
+        Assert.Equal((FrontendIntelGpuFrequencyProbeOperation.SetMaxMax, (int?)null), fake.LastIntelGpuProbeOperation);
+
+        var pl1 = await client.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.SetTestPl1, 14000);
+        Assert.Equal(FrontendIntelGpuFrequencyProbeOperation.SetTestPl1.ToString(), pl1.LastPowerOperation);
+        Assert.Equal((FrontendIntelGpuFrequencyProbeOperation.SetTestPl1, (int?)14000), fake.LastIntelGpuProbeOperation);
+
+        var restoreFrequency = await client.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalFrequency);
+        var restorePower = await client.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalPower);
+        Assert.Equal(FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalFrequency.ToString(), restoreFrequency.LastOperation);
+        Assert.Equal(FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalPower.ToString(), restorePower.LastPowerOperation);
+        Assert.Equal(4, fake.IntelGpuProbeOperationCount);
+    }
+
+    [Fact]
+    public async Task Intel_gpu_igcl_probe_rejects_set_pl1_without_a_target()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Request, 1,
+            FrontendRpcMethod.RunIntelGpuFrequencyProbe,
+            Payload: FrontendWireCodec.Payload(new RunIntelGpuFrequencyProbeRequest(FrontendIntelGpuFrequencyProbeOperation.SetTestPl1, null))), writeGate, CancellationToken.None);
+
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.IntelGpuProbeOperationCount);
     }
 
     [Fact]
@@ -357,7 +404,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(55, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
         var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
         var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
@@ -725,7 +772,7 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task A_v54_frontend_peer_is_rejected_by_the_v55_server()
+    public async Task A_v55_frontend_peer_is_rejected_by_the_v56_server()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
@@ -1618,13 +1665,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 55 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 56 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":55,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":55,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":55,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":56,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":56,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":56,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -2223,6 +2270,35 @@ public sealed class FrontendNamedPipeTransportTests
             GameInputProbeStopCount++;
             GameInputProbeSnapshot = GameInputProbeSnapshot with { State = FrontendGameInputSystemButtonProbeState.Stopped, Status = "Stopped" };
             return Task.FromResult(GameInputProbeSnapshot);
+        }
+        public FrontendIntelGpuFrequencyProbeSnapshot IntelGpuProbeSnapshot { get; private set; } =
+            FrontendIntelGpuFrequencyProbeSnapshot.Unavailable("No IGCL hardware in transport test.");
+        public int IntelGpuProbeOperationCount { get; private set; }
+        public (FrontendIntelGpuFrequencyProbeOperation Operation, int? TestPl1Mw)? LastIntelGpuProbeOperation { get; private set; }
+        public Task<FrontendIntelGpuFrequencyProbeSnapshot> CaptureIntelGpuFrequencyProbeAsync(CancellationToken t = default)
+        {
+            TotalCalls++;
+            return Task.FromResult(IntelGpuProbeSnapshot);
+        }
+        public Task<FrontendIntelGpuFrequencyProbeSnapshot> RunIntelGpuFrequencyProbeAsync(
+            FrontendIntelGpuFrequencyProbeOperation operation, int? testPl1Mw = null, CancellationToken t = default)
+        {
+            TotalCalls++;
+            IntelGpuProbeOperationCount++;
+            LastIntelGpuProbeOperation = (operation, testPl1Mw);
+            IntelGpuProbeSnapshot = operation switch
+            {
+                FrontendIntelGpuFrequencyProbeOperation.SetTestPl1 => IntelGpuProbeSnapshot with
+                {
+                    LastPowerOperation = operation.ToString(), LastPowerOperationVerified = true
+                },
+                FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalPower => IntelGpuProbeSnapshot with
+                {
+                    LastPowerOperation = operation.ToString(), LastPowerOperationVerified = true
+                },
+                _ => IntelGpuProbeSnapshot with { LastOperation = operation.ToString(), LastOperationVerified = true }
+            };
+            return Task.FromResult(IntelGpuProbeSnapshot);
         }
     }
 
