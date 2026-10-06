@@ -1,71 +1,72 @@
-# Work Order — XBOX PR8: Shared Active Profile Target and Live XBOX Profile Apply
+# Work Order — XBOX PR8: Platform-Neutral Active Profile Resolution and Live XBOX Apply
 
 > **Date:** 2026-10-06  
-> **Repository:** \`onehoon/SteamAddonforClaw\`  
-> **Reviewed main:** \`main@d16ebde10bb1cdd4fa8cb38cd6ceb82b2ccacb8a\`  
-> **Architecture authority:** \`docs/XBOX_GAME_PROFILE_ARCHITECTURE/XBOX_GAME_PROFILE_ARCHITECTURE_2026-10-05.md\`  
-> **Full1902 authority:** \`docs/Full 1902 Implementation/README.md\` and its active precedence chain  
-> **Previous XBOX phase:** PR #695 / merge \`21e07e7693779751e07a4f17361d4251461d9e93\` promoted the field-proven detector into production \`XboxGameSessionRuntime\`  
-> **Current frontend protocol:** \`FrontendTransportProtocol.CurrentVersion = 58\`  
-> **Scope:** introduce one narrow derived \`ActiveProfileTarget\`, select Steam first / XBOX second / Device baseline otherwise, refactor the existing CPU Boost / TDP / Windows Power Mode / Intel FPS / Display Resolution runtimes to resolve Steam or XBOX profiles through one small shared lookup policy, wire \`XboxGameSessionRuntime.ActiveGameChanged\` into live profile convergence, and make active XBOX profile mutations apply immediately  
-> **Out of scope:** generic game-detection framework, Epic/GOG/custom EXE detection, Steam detector rewrite, XBOX per-game M1/M2, Overlay XBOX projection, Xbox app front-button action, controller presentation changes, new frontend RPCs
+> **Repository:** onehoon/SteamAddonforClaw  
+> **Reviewed main:** main@d16ebde10bb1cdd4fa8cb38cd6ceb82b2ccacb8a  
+> **Architecture authority:** docs/XBOX_GAME_PROFILE_ARCHITECTURE/XBOX_GAME_PROFILE_ARCHITECTURE_2026-10-05.md  
+> **Full1902 authority:** docs/Full 1902 Implementation/README.md and its active precedence chain  
+> **Previous XBOX phase:** PR #695 / merge 21e07e7693779751e07a4f17361d4251461d9e93  
+> **Current frontend protocol:** FrontendTransportProtocol.CurrentVersion = 58  
+> **Scope:** keep Steam detection and persistence semantics unchanged, resolve the currently effective game profile outside the hardware runtimes, and feed the already-existing CPU Boost / TDP / Windows Power Mode / Intel FPS / Display Resolution runtime owners through one platform-neutral apply path for both Steam and XBOX  
+> **Out of scope:** generic game-detection framework, Epic/GOG/custom EXE detection, Steam detector rewrite, XBOX-specific performance runtimes, per-game M1/M2, Overlay XBOX projection, Xbox app front-button action, controller-presentation changes, new frontend RPCs
 
 ---
 
 ## 1. Goal
 
-Complete the XBOX core vertical slice from proven active-game identity to real per-game machine-setting application.
+Complete the XBOX game-profile path without creating a second performance-control implementation.
 
-Current production state after PR7:
+The locked architecture rule for PR8 is:
 
-~~~text
-Steam
-  SteamSessionRuntime.ActualRunningAppId
-      ↓
-  existing Steam profile apply
+> **Platform-specific logic ends at active-profile resolution. CPU/TDP/Power/FPS/Resolution runtimes must not know whether the effective profile came from Steam or XBOX.**
 
-XBOX
-  XboxGameSessionRuntime
-      ↓
-  ActiveXboxGame(Key, DisplayName)
-      ↓
-      STOP
-~~~
-
-PR8 target:
+Required structure:
 
 ~~~text
-SteamSessionRuntime.ActualRunningAppId
-            │
-            ├── Steam target
-            │
-XboxGameSessionRuntime.ActiveGame
-            │
-            └── XBOX target
-                    ↓
-            ActiveProfileTarget
-                    ↓
-         shared enabled-profile lookup
-                    ↓
-     existing apply implementations only
-       ├─ CPU Boost
-       ├─ TDP
-       ├─ Windows Power Mode
-       ├─ Intel FPS Limit
-       └─ Display Resolution
+Steam detector / Steam profile identity
+    SteamSessionRuntime.ActualRunningAppId
+    ProfileDocument.Games
+                │
+                ├──────────────┐
+                │              │
+XBOX detector / XBOX profile identity
+    XboxGameSessionRuntime.ActiveGame
+    ProfileDocument.XboxGames
+                │              │
+                └──────┬───────┘
+                       ↓
+          Active profile resolution
+        platform-specific work ends here
+                       ↓
+            ResolvedActiveProfile
+                       ↓
+       SAME existing runtime instances
+          ├─ CpuBoostRuntime
+          ├─ TdpRuntime
+          ├─ PowerModeRuntime
+          ├─ IntelFrameLimiterRuntime
+          └─ GameDisplayResolutionRuntime
 ~~~
 
-The XBOX profile must become effective while its proven XBOX game process is alive and must converge back to Device/global policy when that process exits.
+Forbidden structure:
 
-This PR is the final core XBOX performance-profile integration step before broader non-Steam detection work.
+~~~text
+Steam → Steam TDP path
+XBOX  → XBOX TDP path
+
+Steam → existing runtime
+XBOX  → new XBOX wrapper/runtime
+~~~
+
+There is exactly one runtime owner per machine-setting feature.
 
 ---
 
-## 2. Locked authority boundaries
+## 2. Non-negotiable authority rules
 
-### 2.1 Steam identity remains separate and authoritative
+### 2.1 Steam logic remains authoritative and is not replaced
 
-Do not replace or wrap the existing Steam detector.
+Do not change how Steam active-game identity is obtained.
 
 Steam remains:
 
@@ -75,130 +76,111 @@ SteamSessionRuntime.ActualRunningAppId
 → ProfileDocument.Games
 ~~~
 
-PR8 may consume this fact when deriving the effective profile target, but must not change how Steam RunningAppID is detected.
+Do not:
 
-Do not add Steam to:
+- move Steam into WinEvent detection;
+- infer Steam games from PID/EXE;
+- add a generic Steam detector abstraction;
+- replace numeric Steam AppID persistence;
+- change Steam/BPM controller-presentation behavior;
+- change Steam catalog/frontend identity.
 
-- WinEvent XBOX detection;
-- process/executable matching;
-- a generic Windows game detector;
-- a universal string game-ID abstraction.
+PR8 only consumes the existing Steam fact when selecting the effective profile.
 
 ### 2.2 XBOX identity remains owned by XboxGameSessionRuntime
 
-PR8 consumes:
-
-~~~csharp
-XboxGameSessionRuntime.ActiveGame
-XboxGameSessionRuntime.ActiveGameChanged
-~~~
-
-Do not move XBOX package/config/executable validation into the profile layer.
-
-Do not change the proven XBOX identity path:
+XBOX remains:
 
 ~~~text
-WinEvent
-→ HWND/PID
-→ process generation
-→ package identity
-→ MicrosoftGame.config
-→ exact executable match
-→ ActiveXboxGame
+XboxGameSessionRuntime
+→ exact package/config/executable proof
+→ ActiveXboxGame(Key, DisplayName)
+→ ProfileDocument.XboxGames
 ~~~
 
-### 2.3 ActiveProfileTarget is derived state only
+Do not redesign the PR7 detector.
 
-\`ActiveProfileTarget\` is not:
+### 2.3 Existing feature runtimes are mandatory shared owners
 
-- persisted game identity;
-- a new game database;
-- a detector;
-- a platform registry;
-- an entitlement model;
-- a replacement for Steam AppID or XBOX canonical keys.
-
-It is only the narrow selector used by machine-wide profile apply code.
-
-### 2.4 Full1902 controller authority is unchanged
-
-PR8 must not change:
+The following existing runtime instances are the only owners:
 
 ~~~text
-Center M Enabled/Disabled authority
-PID1901 / PID1902 ownership
-DirectInput
-HidHide
-VIIPER
-Xbox360 / SteamDeck presentation selection
-WING / Win+G suppression
-PnP recovery
-Sleep controller recovery
-rumble
-LED
-vibration
-M1/M2 mapping
+CpuBoostRuntime
+TdpRuntime
+PowerModeRuntime
+IntelFrameLimiterRuntime
+GameDisplayResolutionRuntime
 ~~~
 
-In particular:
+They must not contain platform branching.
+
+Forbidden inside these runtimes:
 
 ~~~text
-ActiveProfileTarget = Xbox
-≠ force Xbox360
-≠ detach SteamDeck
-≠ change physical PID
-≠ change HidHide
+if Steam ...
+if Xbox ...
+switch ActiveProfileTargetKind ...
+document.Games versus document.XboxGames ...
+read XboxGameSessionRuntime ...
+read SteamSessionRuntime ...
 ~~~
 
-Steam/BPM remains the only current virtual-presentation selector.
+They must receive a platform-neutral resolved profile.
+
+### 2.4 No platform-specific runtime variants
+
+Do not create:
+
+~~~text
+XboxCpuBoostRuntime
+XboxTdpRuntime
+XboxPowerModeRuntime
+XboxIntelFpsRuntime
+XboxDisplayResolutionRuntime
+XboxPerformanceCoordinator
+~~~
+
+Do not add thin XBOX wrappers that merely delegate to the existing runtimes.
 
 ---
 
-## 3. Current code facts that must drive the implementation
+## 3. Current code facts
 
-Reviewed \`main@d16ebde10bb1cdd4fa8cb38cd6ceb82b2ccacb8a\`.
+Reviewed main@d16ebde10bb1cdd4fa8cb38cd6ceb82b2ccacb8a.
 
-### 3.1 Production XBOX session owner already exists
+### 3.1 Existing runtimes currently perform Steam lookup themselves
 
-Current production files:
-
-~~~text
-src/SteamInputAddonforClaw/Xbox/Session/
-    ActiveXboxGame.cs
-    XboxGameSessionRuntime.cs
-    XboxGameWindowEventSource.cs
-    XboxGameProcessIdentityProbe.cs
-    XboxGameProcessIdentityEvaluator.cs
-~~~
-
-\`XboxGameSessionRuntime\` already:
-
-- starts for normal Runtime lifetime;
-- publishes \`ActiveGame\`;
-- raises \`ActiveGameChanged\`;
-- retains matched process lifetime;
-- clears on matched process exit;
-- performs bounded startup reconciliation;
-- re-arms/reconciles on resume;
-- does not change profile settings or controller presentation.
-
-Do not redesign it in PR8.
-
-### 3.2 XBOX persistence already uses the same override shapes as Steam
-
-Current persistence:
+Current examples:
 
 ~~~text
-ProfileDocument.Games
-    key = Steam AppID string
-    value = GameProfile
+CpuBoostRuntime
+    SetActualAppIdSource(Func<uint>)
+    Reconcile(uint actualAppId)
 
-ProfileDocument.XboxGames
-    key = canonical XBOX string key
-    value = XboxGameProfile
+TdpRuntime
+    Func<uint> _actualAppIdSource
+    ResolveEffectiveTdp(ProfileDocument, uint actualAppId)
+
+PowerModeRuntime
+    Func<uint> _actualAppIdSource
+    document.Games lookup
+
+IntelFrameLimiterRuntime
+    Func<uint> _app
+    document.Games lookup
+
+GameDisplayResolutionRuntime
+    Reconcile(uint appId)
+    document.Games lookup
 ~~~
 
-Both profile types expose:
+This Steam-specific lookup is the seam that must move outward.
+
+Do not duplicate the rest of these runtimes for XBOX.
+
+### 3.2 Steam and XBOX already share the same override shapes
+
+Both GameProfile and XboxGameProfile contain:
 
 ~~~text
 Enabled
@@ -206,80 +188,21 @@ Performance : GamePerformanceOverrides
 Display     : GameDisplayOverrides
 ~~~
 
-Therefore the apply layer does not need platform-specific hardware runtimes.
-
-### 3.3 Existing apply runtimes are Steam-AppID-shaped
-
-Current code still assumes numeric Steam AppID at its profile-selection boundary.
-
-Examples:
-
-~~~text
-CpuBoostRuntime
-    SetActualAppIdSource(Func<uint>)
-    Reconcile(uint actualAppId)
-    StartupReconcile(uint actualAppId)
-
-TdpRuntime
-    SetActualAppIdSource(Func<uint>)
-    ResolveEffectiveTdp(ProfileDocument, uint actualAppId)
-
-PowerModeRuntime
-    SetActualAppIdSource(Func<uint>)
-    Reconcile(uint appId)
-    ApplyEffective(... reads document.Games)
-
-IntelFrameLimiterRuntime
-    SetActualAppIdSource(Func<uint>)
-    Reconcile(uint appId)
-    ApplyPolicy(... reads document.Games)
-
-GameDisplayResolutionRuntime
-    Reconcile(uint appId)
-    reads document.Games
-~~~
-
-PR8 removes this Steam-only assumption from the **apply boundary**, not from Steam detection.
-
-### 3.4 Host currently reacts only to Steam identity changes
-
-\`AddonProcessHost.OnActualRunningAppIdChanged(uint appId)\` currently reconciles:
-
-- CPU Boost;
-- Power Mode;
-- Display Resolution;
-- TDP;
-- Intel FPS.
-
-\`XboxGameSessionRuntime.ActiveGameChanged\` currently has no production consumer outside the runtime itself.
-
-PR8 adds that missing XBOX convergence path.
-
-### 3.5 XBOX frontend mutations are persistence-only today
-
-Current \`InProcessAddonFrontendControl.MutateXboxGame(...)\`:
-
-~~~text
-persist mutation
-→ map result
-→ return refreshed XBOX profile snapshot
-~~~
-
-It does not apply the changed setting even when that XBOX game is currently active.
-
-PR8 must make active XBOX mutations follow the same persist-first, then live-apply behavior already used by Steam profile mutations.
+That shared shape is the correct runtime boundary.
 
 ---
 
-## 4. Add one narrow ActiveProfileTarget value
+## 4. Add one narrow active identity selector
 
-Add one small internal model under the Profiles domain, for example:
+Add one small internal value in the Profiles domain.
+
+Example:
 
 ~~~text
-src/SteamInputAddonforClaw/Profiles/ActiveProfileTarget.cs
+Profiles/ActiveProfileTarget.cs
 ~~~
 
-Recommended conceptual contract:
+Conceptual model:
 
 ~~~csharp
 internal enum ActiveProfileTargetKind
@@ -303,63 +226,27 @@ internal readonly record struct ActiveProfileTarget
 }
 ~~~
 
-Required semantic states:
+This type is allowed only in the selection/resolution layer.
 
-~~~text
-None
-→ Kind=None
-→ SteamAppId=0
-→ XboxGameKey=null
-
-Steam
-→ Kind=Steam
-→ SteamAppId!=0
-→ XboxGameKey=null
-
-Xbox
-→ Kind=Xbox
-→ SteamAppId=0
-→ XboxGameKey=non-empty canonical key
-~~~
-
-Do not expose arbitrary public construction that makes invalid mixed states easy.
-
-Expected log labels:
-
-~~~text
-None
-Steam:553850
-Xbox:store:9XXXXXXXXXXX
-Xbox:pfn:...
-Xbox:identity:...
-~~~
-
-Do not create:
-
-- \`IGameIdentity\`;
-- \`IGamePlatform\`;
-- \`GameSessionManager\`;
-- provider registries;
-- plugin abstractions;
-- a universal persisted game key.
+Do not pass ActiveProfileTarget into the five feature runtimes.
 
 ---
 
-## 5. One selection policy in AddonProcessHost
+## 5. Effective target selection
 
-Add one narrow method/fact in \`AddonProcessHost\` that derives the current machine-setting target from the two existing authorities.
+AddonProcessHost derives the current target.
 
 Required priority:
 
 ~~~text
-if SteamSessionRuntime.ActualRunningAppId != 0
-    → ActiveProfileTarget.Steam(appId)
+Steam ActualRunningAppId != 0
+→ Steam target
 
-else if XboxGameSessionRuntime.ActiveGame != null
-    → ActiveProfileTarget.Xbox(activeXbox.Key)
+else XBOX ActiveGame != null
+→ XBOX target
 
 else
-    → ActiveProfileTarget.None
+→ None
 ~~~
 
 Conceptually:
@@ -378,513 +265,448 @@ private ActiveProfileTarget CaptureActiveProfileTarget()
 }
 ~~~
 
-This is a product-priority rule, not simultaneous-game arbitration.
-
-Do not add:
-
-- epochs;
-- priorities stored in another state machine;
-- foreground arbitration;
-- process scoring;
-- multi-game ownership.
-
-Unsupported simultaneous Steam + XBOX gameplay does not justify more machinery.
+This is selection only. It does not apply settings.
 
 ---
 
-## 6. Add one small shared enabled-profile lookup policy
+## 6. Resolve platform identity into one common profile view
 
-The five hardware runtimes must not each duplicate:
+Add one small resolver outside the feature runtimes.
 
-~~~text
-if Steam → document.Games
-if Xbox  → document.XboxGames
-~~~
-
-Add one small lookup helper, for example:
+Recommended:
 
 ~~~text
-Profiles/ActiveProfileLookup.cs
+Profiles/ActiveProfileResolver.cs
 ~~~
 
-It may return a narrow common view such as:
+Recommended common value:
 
 ~~~csharp
-internal readonly record struct ActiveGameProfileView(
+internal readonly record struct ResolvedActiveProfile(
+    string TargetLabel,
     GamePerformanceOverrides Performance,
     GameDisplayOverrides Display);
 ~~~
 
-Required lookup semantics:
+Equivalent naming is acceptable.
+
+Required resolver behavior:
 
 ~~~text
-Target=None
-→ no game profile
+None
+→ null
 
-Target=Steam
-→ exact numeric AppID key in ProfileDocument.Games
-→ profile must exist
-→ profile.Enabled must be true
+Steam
+→ exact AppID lookup in ProfileDocument.Games
+→ require profile.Enabled
+→ project to ResolvedActiveProfile
 
-Target=Xbox
-→ exact canonical key in ProfileDocument.XboxGames
-→ profile must exist
-→ profile.Enabled must be true
+XBOX
+→ exact canonical-key lookup in ProfileDocument.XboxGames
+→ require profile.Enabled
+→ project to ResolvedActiveProfile
 ~~~
 
-No fuzzy/case-rewritten identity conversion should be invented beyond the collection's current key semantics.
+After resolution, platform identity is finished.
 
-The helper must not:
+The five feature runtimes may consume:
 
-- mutate persistence;
-- apply hardware;
-- read Steam/XBOX detectors;
-- own lifecycle;
-- fall back to Device settings itself.
+~~~text
+Performance.CpuBoost
+Performance.Tdp
+Performance.PowerMode
+Performance.FpsLimit
+Display.Resolution
+TargetLabel for diagnostics only
+~~~
 
-Each feature runtime continues to own its existing Device fallback / release policy.
+They must not consume:
+
+~~~text
+SteamAppId
+XboxGameKey
+Steam/Xbox enum
+Games/XboxGames dictionaries
+~~~
+
+ResolvedActiveProfile is derived in-memory state only. Do not persist it.
 
 ---
 
-## 7. Refactor CPU Boost to ActiveProfileTarget
+## 7. One common profile-source seam
 
-Current Steam behavior must remain unchanged.
+Use one platform-neutral source for all existing feature runtimes.
 
-Replace the Steam-only profile lookup boundary with \`ActiveProfileTarget\`.
+Preferred shape:
 
-Recommended API direction:
-
-~~~text
-SetActualAppIdSource(Func<uint>)
-→ SetActiveProfileTargetSource(Func<ActiveProfileTarget>)
-
-Reconcile(uint)
-→ Reconcile(ActiveProfileTarget)
-
-ReconcileWithResult(uint)
-→ ReconcileWithResult(ActiveProfileTarget)
-
-StartupReconcile(uint)
-→ StartupReconcile(ActiveProfileTarget)
+~~~csharp
+Func<ProfileDocument, ResolvedActiveProfile?> activeProfileResolver
 ~~~
 
-Equivalent naming is acceptable if the ownership remains obvious.
+Equivalent minimal design is acceptable.
 
-Required effective policy:
+This shape preserves the current feature ownership:
 
 ~~~text
-enabled active game profile has enabled CPU Boost override
-→ apply game AC/DC override
-
-otherwise
-→ existing Device CPU Boost policy
-
-Device disabled/uninitialized
-→ preserve existing behavior exactly
+feature runtime
+→ loads ProfileStore under its existing gate
+→ calls shared resolver with that document
+→ receives common resolved profile or null
+→ applies existing game override / Device fallback logic
 ~~~
 
-Preserve all current CPU Boost invariants:
+Example:
 
-- first-run baseline bootstrap;
+~~~csharp
+var loaded = _profileStore.Load();
+var active = _activeProfileResolver(loaded.Document);
+
+if (active?.Performance.CpuBoost is { Enabled: true } gameCpu)
+{
+    // existing game CPU apply path
+}
+else
+{
+    // existing Device CPU fallback
+}
+~~~
+
+Do not inject separate Steam and XBOX sources into each runtime.
+
+Forbidden:
+
+~~~text
+Func<uint> steamAppIdSource
+Func<string?> xboxGameKeySource
+~~~
+
+inside a feature runtime.
+
+---
+
+## 8. CpuBoostRuntime
+
+CpuBoostRuntime remains the only CPU Boost owner.
+
+Change only the game-profile selection seam:
+
+~~~text
+OLD
+Steam AppID
+→ document.Games
+→ game CPU override
+→ existing apply
+
+NEW
+ResolvedActiveProfile
+→ Performance.CpuBoost
+→ SAME existing apply
+~~~
+
+Preserve:
+
+- baseline/bootstrap;
 - complete AC/DC baseline requirement;
-- persistence-before-Windows-write ordering;
-- unsafe profile-load behavior;
-- no rollback of persisted user choice when Windows apply fails;
-- mutation gate serialization;
-- snapshot semantics.
+- persist-before-apply;
+- unsafe-load behavior;
+- mutation gate;
+- snapshot semantics;
+- no persistence rollback after apply failure.
 
-Do not rewrite \`WindowsCpuBoostPowerPolicy\`.
+Do not add XBOX logic to WindowsCpuBoostPowerPolicy.
 
 ---
 
-## 8. Refactor TDP to ActiveProfileTarget
+## 9. TdpRuntime
 
-Replace \`Func<uint> _actualAppIdSource\` with the active profile target source.
+TdpRuntime remains the only TDP owner.
 
-\`ResolveEffectiveTdp\` must resolve the shared enabled game-profile view.
-
-Required policy:
+Target:
 
 ~~~text
-enabled active game profile
-+ enabled valid game TDP
-→ use game TDP
-
-no enabled game TDP
-→ existing enabled Device TDP
-
-active game TDP exists but is outside current model ranges
-→ preserve current fail-closed behavior
-→ do not silently fall through to another TDP target
+ResolvedActiveProfile
+→ Performance.Tdp
+→ SAME TDP queue
+→ SAME helper/hardware path
 ~~~
 
 Preserve:
 
-- \`MsiClawTdpPolicy\` validation;
-- TDP helper/transport ownership;
-- queue/tail semantics;
+- MsiClawTdpPolicy validation;
+- helper transport;
+- queue/tail;
 - authority/reconcile versions;
-- hardware-cache invalidation;
-- AC/DC power lifecycle watcher;
-- resume settle/retry policy;
-- Center M manual seed behavior;
-- existing helper failure handling.
+- cache invalidation;
+- power-source lifecycle watcher;
+- resume settle/retry;
+- Center M manual Device seed;
+- failure behavior.
 
-Do not create \`XboxTdpRuntime\`.
+If an active resolved game TDP exists but is invalid, preserve the existing fail-closed behavior.
 
-\`TdpPowerLifecycleWatcher\` must continue to call the same one \`TdpRuntime\`; because that runtime now reads \`ActiveProfileTarget\`, AC/DC/resume lifecycle applies the current Steam or XBOX profile automatically.
+No XBOX-specific TDP code path is allowed.
 
 ---
 
-## 9. Refactor Windows Power Mode to ActiveProfileTarget
+## 10. PowerModeRuntime
 
-Replace the Steam-only source/lookup with \`ActiveProfileTarget\`.
+PowerModeRuntime remains the only Power Mode owner.
 
-Required policy:
+Replace only:
 
 ~~~text
-enabled active game profile
-+ enabled Power Mode override
-→ apply game AC/DC modes
-
-otherwise
-→ existing enabled Device Power Mode
-
-Device disabled
-→ preserve current no-op behavior
+Steam AppID profile lookup
 ~~~
 
-Preserve:
+with:
 
-- first-run Device Power Mode bootstrap;
-- persist-then-apply mutation policy;
-- current readback/snapshot behavior;
-- existing failure result classification;
-- mutation gate.
+~~~text
+ResolvedActiveProfile.Performance.PowerMode
+~~~
 
-Do not rewrite \`WindowsPowerModePolicy\`.
+Preserve all current bootstrap, readback, mutation-gate, persistence, and failure semantics.
+
+No platform branch inside PowerModeRuntime.
 
 ---
 
-## 10. Refactor Intel FPS to ActiveProfileTarget without fake AppIDs
+## 11. IntelFrameLimiterRuntime
 
-The Intel frame limiter is currently global at the IGCL call site:
+IntelFrameLimiterRuntime remains the only Intel FPS owner.
+
+Target:
+
+~~~text
+ResolvedActiveProfile
+→ Performance.FpsLimit
+→ SAME IGCL FRAME_LIMIT path
+~~~
+
+The current native call is global:
 
 ~~~text
 ApplicationName = 0
 ApplicationNameLength = 0
 ~~~
 
-The current \`uint appId\` passed through \`IIntelFrameLimiter\` / \`NativeIgcl.Set\` is diagnostic context, not the native per-app selector.
+Therefore do not invent a numeric XBOX AppID.
 
-PR8 must not invent a numeric AppID for XBOX.
+If diagnostic context must change, use TargetLabel only for logging.
 
-Required profile policy:
+Preserve:
+
+- IGCL ABI;
+- ownership marker;
+- fail-close disable;
+- startup recovery;
+- shutdown cleanup;
+- valid FPS range;
+- AC/DC notification.
+
+No platform-specific FPS implementation.
+
+---
+
+## 12. GameDisplayResolutionRuntime
+
+GameDisplayResolutionRuntime remains the only display-resolution owner.
+
+Replace only:
 
 ~~~text
-enabled active game profile
-+ enabled FPS limit
-→ apply AC/DC FPS target
+Steam AppID profile lookup
+~~~
 
-otherwise
-→ release Addon-owned FRAME_LIMIT state using existing fail-close rules
+with:
+
+~~~text
+ResolvedActiveProfile.Display.Resolution
 ~~~
 
 Preserve:
 
-- startup stale-ownership recovery;
-- ownership marker semantics;
-- immediate disable on marker-persist failure;
-- fail-close cleanup behavior;
-- supported 40–120 validation;
-- AC/DC notification behavior;
-- shutdown cleanup.
+- stale startup recovery;
+- original-mode capture;
+- recovery file;
+- fail-closed restore;
+- shutdown restore.
 
-Logging must become platform-neutral at the profile layer:
+Required transition:
 
 ~~~text
-ProfileTarget=Steam:553850
-ProfileTarget=Xbox:store:...
-ProfileTarget=None
+Steam resolution A
+→ effective profile becomes XBOX resolution B
+→ SAME runtime applies B
+→ original pre-game mode remains the recovery baseline
+
+XBOX exits and no active profile remains
+→ SAME runtime restores original
 ~~~
-
-If the lower-level \`IIntelFrameLimiter\` / \`NativeIgcl\` diagnostic argument is changed, keep it diagnostic-only. A small managed rename from numeric \`appId\` to a target label is acceptable and preferable to logging \`RunningAppID=0\` for XBOX.
-
-Do not change the IGCL ABI or start using per-app ApplicationName in PR8.
 
 ---
 
-## 11. Refactor Display Resolution to ActiveProfileTarget
+## 13. Host-level convergence
 
-Change:
+AddonProcessHost coordinates; it does not apply hardware itself.
 
-~~~text
-GameDisplayResolutionRuntime.Reconcile(uint appId)
-~~~
-
-to consume \`ActiveProfileTarget\`.
-
-Required policy:
+Add one helper conceptually:
 
 ~~~text
-enabled active game profile
-+ Resolution override
-→ apply target resolution
-
-target has no enabled resolution
-→ restore saved original display mode if Addon currently owns an override
-~~~
-
-Preserve existing recovery ownership:
-
-- startup stale-recovery file handling;
-- capture original mode before first override;
-- one original baseline across live target changes;
-- fail-closed restore on apply/capture failure;
-- shutdown restore;
-- recovery-file deletion only after confirmed restore.
-
-Important live transition:
-
-~~~text
-Steam profile resolution A
-→ Steam ends while an XBOX game session is still live
-→ effective target becomes XBOX
-→ apply XBOX resolution B using the same original baseline
-
-XBOX exits
-→ target None
-→ restore original pre-game display mode
-~~~
-
-Do not restore original between two live profile targets unless the existing resolution owner requires it for a real correctness reason.
-
----
-
-## 12. Add one host-level profile convergence entrypoint
-
-Refactor the profile-apply portion of \`OnActualRunningAppIdChanged\` into one host helper that accepts/captures the current \`ActiveProfileTarget\`.
-
-Conceptually:
-
-~~~text
-ReconcileActiveProfileTarget(trigger)
+ReconcileEffectiveGameProfile(trigger)
     target = CaptureActiveProfileTarget()
+    resolver supplies ResolvedActiveProfile
 
-    CPU Boost      reconcile(target)
-    Power Mode     reconcile(target)
-    Display        reconcile(target)
-    TDP            reconcile current target
-    Intel FPS      reconcile(target)
+    SAME CpuBoostRuntime
+    SAME PowerModeRuntime
+    SAME GameDisplayResolutionRuntime
+    SAME TdpRuntime
+    SAME IntelFrameLimiterRuntime
 ~~~
 
-Each feature remains independently guarded with its existing error logging so one failure does not prevent the other features from converging.
-
-The host helper is coordination only.
-
-It must not become:
-
-- another profile persistence owner;
-- another hardware implementation;
-- another detector;
-- a generic scheduler.
+Each feature keeps independent exception/failure handling.
 
 ### Steam event
 
-Keep:
+Keep the existing Steam path:
 
 ~~~text
 OnActualRunningAppIdChanged
-→ RequestControllerPresentationReconcile("RunningAppIdChanged")
+→ existing RequestControllerPresentationReconcile(...)
+→ effective-profile convergence
 ~~~
 
-exactly as the controller-presentation path.
-
-Then call the profile-target convergence helper.
-
-Steam identity changes continue to affect presentation.
+Do not alter Steam detector behavior.
 
 ### XBOX event
 
-Subscribe to:
+Subscribe:
 
 ~~~csharp
 _xboxGameSessionRuntime.ActiveGameChanged += OnActiveXboxGameChanged;
 ~~~
 
-The subscription should be established before or as part of production session startup so no normal active-game transition is missed.
-
-The XBOX handler:
+Handler:
 
 ~~~text
-ActiveXboxGame changes
-→ recompute ActiveProfileTarget
-→ reconcile machine-setting profiles
+ActiveXboxGame changed
+→ effective-profile convergence
 ~~~
 
-It must **not** call:
+Do not request controller-presentation reconcile for XBOX identity changes.
 
-~~~text
-RequestControllerPresentationReconcile
-~~~
-
-XBOX game identity is not a VIIPER presentation authority.
-
-Unsubscribe during process shutdown before disposing the XBOX session owner.
+Unsubscribe during shutdown.
 
 ---
 
-## 13. Startup convergence
+## 14. Startup
 
-\`ReconcileDeviceProfileStartup()\` must use the fresh derived target rather than only \`ActualRunningAppId\`.
-
-Required order remains compatible with current startup design:
+Required:
 
 ~~~text
-controller Runtime initialized
-→ XBOX production session owner already started / bounded startup reconcile attempted
-→ deferred Device/Profile startup phase
-→ capture current ActiveProfileTarget
-→ reconcile Display / CPU / Power / Intel FPS
-→ existing TDP lifecycle startup schedule resolves the same target source
+Runtime initializes
+→ XBOX session starts/reconciles
+→ Device/Profile startup phase
+→ capture effective target
+→ resolve common profile
+→ SAME feature runtimes reconcile
 ~~~
 
-If XBOX detection is unavailable or failed to start:
+No active game:
 
 ~~~text
-Steam AppID == 0
-+ ActiveXboxGame == null
-→ ActiveProfileTarget.None
-→ Device/global policy
+ResolvedActiveProfile = null
+→ existing Device/global behavior
 ~~~
 
-XBOX detection failure must not fail Runtime startup.
+XBOX detection failure must not block Runtime startup.
 
 ---
 
-## 14. Process exit and target transitions
+## 15. XBOX process exit
 
-The following transitions are required.
-
-### XBOX start
+Required:
 
 ~~~text
-Steam AppID = 0
-ActiveXboxGame: null → XboxA
-→ target None → XboxA
-→ apply enabled XboxA profile
+ActiveXboxGame XboxA → null
+→ recompute effective target
+→ no Steam target
+→ ResolvedActiveProfile = null
+→ SAME runtime owners converge to Device/global state
 ~~~
 
-### XBOX exit
+Expected behavior:
 
-~~~text
-Steam AppID = 0
-ActiveXboxGame: XboxA → null
-→ target XboxA → None
-→ CPU/TDP/Power converge to Device policy
-→ Intel FPS releases Addon-owned limit
-→ Display restores original if owned
-~~~
+- CPU Boost → Device policy;
+- TDP → Device policy;
+- Power Mode → Device policy;
+- Intel FPS → release Addon-owned FRAME_LIMIT if no game profile owns it;
+- Display → restore original mode if no active resolution override remains.
 
-### Steam takes priority
-
-~~~text
-XboxA remains alive
-Steam AppID: 0 → 553850
-→ target XboxA → Steam:553850
-→ Steam profile becomes effective
-→ controller presentation follows existing Steam/BPM policy
-~~~
-
-### Steam ends while XBOX remains alive
-
-~~~text
-XboxA remains alive
-Steam AppID: 553850 → 0
-→ target Steam:553850 → XboxA
-→ XBOX profile becomes effective
-~~~
-
-Do not add simultaneous-game arbitration beyond this fixed Steam-first rule.
+No platform-specific teardown.
 
 ---
 
-## 15. Resume behavior
+## 16. Steam/XBOX overlap
 
-Keep the existing controller resume path independent.
-
-Current:
+Steam priority remains fixed.
 
 ~~~text
-OnPowerResumeObserved
-→ XboxGameSessionRuntime.ReconcileAfterResumeAsync()
-→ immediate controller-presentation reconcile
-→ existing device/profile delayed settle
-→ TDP lifecycle watcher handles its own resume settle/retry
+XBOX alive + Steam AppID 0
+→ resolve XBOX
+
+Steam AppID becomes non-zero
+→ resolve Steam
+
+Steam AppID returns to zero while XBOX remains alive
+→ resolve XBOX
 ~~~
 
-PR8 requirements:
-
-1. XBOX session resume reconciliation remains the identity owner.
-2. CPU Boost / Power Mode / Display Resolution / Intel FPS resume work must capture the current \`ActiveProfileTarget\`, not only Steam AppID.
-3. TDP resume remains owned by \`TdpPowerLifecycleWatcher\`; only its target source changes to \`ActiveProfileTarget\`.
-4. Do not add another generic power lifecycle framework.
-5. Do not add polling.
-6. A resume-time identity transition emitted by \`ActiveGameChanged\` must also converge profiles normally.
-
-Do not wait on controller presentation to apply profile settings, and do not make profile failure affect Full1902 resume safety.
+All three transitions use the same downstream runtime calls.
 
 ---
 
-## 16. AC/DC power-source behavior
+## 17. Resume and AC/DC lifecycle
 
-Current Intel FPS AC/DC callback uses:
+Keep existing lifecycle owners.
 
-~~~text
-_runtimeHost?.ActualRunningAppId ?? 0
-~~~
-
-Change it to the active profile target.
-
-TDP already receives its own power notification and should resolve the same active target through its target source.
-
-Required result:
+Resume:
 
 ~~~text
-XBOX game active
-→ AC ↔ DC
-→ XBOX FPS AC/DC value selected
-→ XBOX TDP AC/DC value selected
+XboxGameSessionRuntime.ReconcileAfterResumeAsync()
+existing Full1902 presentation resume
+existing performance settle
+existing TdpPowerLifecycleWatcher
 ~~~
 
-No periodic power polling is required.
+Only the game-profile source becomes platform-neutral.
+
+Do not add another power coordinator.
+
+AC/DC:
+
+~~~text
+effective XBOX profile
+→ existing TDP/FPS power notification
+→ SAME runtime
+→ common resolved profile
+→ XBOX profile's AC/DC value
+
+effective Steam profile
+→ same path
+→ Steam profile's AC/DC value
+~~~
 
 ---
 
-## 17. Live XBOX profile mutations
+## 18. Live XBOX profile mutations
 
 Current XBOX mutations are persistence-only.
 
-PR8 must apply a successful mutation immediately **only when that XBOX key is the effective current target**.
+After successful persistence, apply immediately only when the mutated XBOX key is the current effective target.
 
-Effective means:
+Important:
 
-~~~text
-ActiveProfileTarget.Kind == Xbox
-&& target.XboxGameKey == mutated key
-~~~
-
-Because Steam has priority, this naturally means:
-
-~~~text
-Steam AppID != 0
-→ XBOX mutation persists
-→ no XBOX live hardware apply
-~~~
-
-### Feature-specific apply
-
-Do not write unrelated machine settings after every mutation.
+> The live apply must go through the same platform-neutral existing runtime owner used by Steam. No XBOX hardware method is allowed.
 
 Recommended mapping:
 
@@ -893,84 +715,73 @@ Favorite
 → persistence only
 
 Profile Enabled
-→ reconcile all five profile-owned features
+→ reconcile all five existing feature runtimes
 
-CPU Boost enabled/AC/DC
-→ CPU Boost only
+CPU Boost
+→ CpuBoostRuntime
 
-TDP enabled/values
-→ TDP only
+TDP
+→ TdpRuntime
 
-Power Mode enabled/AC/DC
-→ Power Mode only
+Power Mode
+→ PowerModeRuntime
 
-FPS enabled/AC/DC
-→ Intel FPS only
+FPS
+→ IntelFrameLimiterRuntime
 
 Resolution
-→ Display Resolution only
+→ GameDisplayResolutionRuntime
 ~~~
 
-A small internal enum/flags local to the frontend mutation helper is acceptable if it reduces duplicated branches.
+Inactive XBOX profile mutation remains persistence-only.
 
-Do not create a general command bus.
+If Steam is currently effective, XBOX mutation remains persistence-only.
 
-### Failure semantics
-
-Keep existing product policy:
+Failure policy:
 
 ~~~text
-persist succeeded
-→ live apply attempted
-
-live apply failed
+persist succeeds
+→ apply fails
 → persisted user choice remains
-→ return ApplyFailed where the existing frontend result contract supports it
-→ do not roll persistence back
+→ report ApplyFailed where supported
+→ no rollback
 ~~~
 
-Do not weaken per-feature fail-close behavior.
-
-The existing frontend DTO/RPC surface is already sufficient. No new frontend method is required.
-
 ---
 
-## 18. Keep Steam profile mutation behavior working
+## 19. Steam mutation behavior is regression-locked
 
-Steam profile mutation APIs remain numeric-AppID public/frontend contracts.
+Do not redesign Steam frontend mutation APIs.
 
-They must continue to:
-
-- persist Steam profile edits;
-- immediately apply edits when the effective target is that Steam AppID;
-- not apply an inactive Steam game's edits;
-- preserve current per-feature result behavior.
-
-Internal implementation may reuse the new \`ActiveProfileTarget\` source/lookup, but do not migrate Steam frontend DTOs to generic string IDs.
-
----
-
-## 19. Frontend transport
-
-PR8 requires no new RPC and no wire-schema change.
-
-Therefore:
+Keep:
 
 ~~~text
-FrontendTransportProtocol.CurrentVersion remains 58
+uint Steam AppID contracts
+ProfileDocument.Games
+existing Steam editing semantics
 ~~~
 
-Do not bump the protocol merely because internal apply behavior changes.
+Current active Steam mutations must still live-apply through the same existing runtime owners.
 
-Do not add an active-XBOX frontend DTO in this PR.
-
-Overlay XBOX active-profile projection remains Phase X5.
+Inactive Steam mutations remain persistence-only.
 
 ---
 
-## 20. Logging
+## 20. Frontend protocol
 
-Replace profile-selection logs that would be ambiguous outside Steam with stable target context.
+No new RPC or schema.
+
+Keep:
+
+~~~text
+FrontendTransportProtocol.CurrentVersion = 58
+~~~
+
+---
+
+## 21. Logging
+
+Platform identity belongs in resolver/host diagnostic context.
 
 Preferred:
 
@@ -978,29 +789,23 @@ Preferred:
 ProfileTarget=Steam:553850
 ProfileTarget=Xbox:store:...
 ProfileTarget=None
-Reason=ActualRunningAppIdChanged
-Reason=ActiveXboxGameChanged
-Reason=Startup
-Reason=PowerResume
-Reason=PowerSourceChanged
-Reason=Mutation
 ~~~
 
-Keep useful feature-specific native details.
+Feature runtime behavior must not depend on this label.
 
-Do not remove current Steam RunningAppID diagnostics where they remain specifically about the Steam detector itself.
+Do not emit fake XBOX RunningAppID values.
 
-Do not log an XBOX target as a fake numeric RunningAppID.
+Steam detector-specific RunningAppID logs remain unchanged.
 
 ---
 
-## 21. Suggested file changes
+## 22. Expected files
 
-Expected production files include, but are not limited to:
+Likely:
 
 ~~~text
 src/SteamInputAddonforClaw/Profiles/ActiveProfileTarget.cs
-src/SteamInputAddonforClaw/Profiles/ActiveProfileLookup.cs
+src/SteamInputAddonforClaw/Profiles/ActiveProfileResolver.cs
 
 src/SteamInputAddonforClaw/Profiles/Performance/CpuBoostRuntime.cs
 src/SteamInputAddonforClaw/Profiles/Performance/TdpRuntime.cs
@@ -1012,272 +817,229 @@ src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs
 src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs
 ~~~
 
-Do not move or rename the XBOX detector files merely for this PR.
+The five runtime files may change only enough to replace embedded Steam-only game-profile selection with the common resolved-profile source.
 
-Do not create separate XBOX hardware runtime classes.
-
----
-
-## 22. Tests
-
-Add focused tests before relying on full-suite coverage.
-
-### 22.1 ActiveProfileTarget / lookup tests
-
-Required:
-
-1. None resolves no game profile.
-2. Steam exact AppID resolves enabled \`GameProfile\`.
-3. disabled Steam profile resolves no game override.
-4. XBOX exact canonical key resolves enabled \`XboxGameProfile\`.
-5. disabled XBOX profile resolves no game override.
-6. missing key resolves no game override.
-7. target selection chooses Steam when both Steam AppID and ActiveXboxGame exist.
-8. target selection chooses XBOX when Steam AppID is zero.
-9. target selection chooses None when neither is active.
-
-### 22.2 CPU Boost tests
-
-Required:
-
-- active XBOX CPU profile overrides Device;
-- XBOX profile disabled/missing falls back to Device;
-- XBOX exit/None converges to Device;
-- Steam behavior remains unchanged;
-- Device mutation while XBOX profile is active does not incorrectly override the active game policy.
-
-### 22.3 TDP tests
-
-Required:
-
-- active XBOX TDP profile queues the correct AC/DC values;
-- invalid active XBOX TDP preserves current fail-closed/deferred behavior;
-- XBOX exit falls back to Device TDP;
-- power-source change while XBOX target is active selects the correct XBOX side;
-- existing queue/cache/retry tests remain passing.
-
-### 22.4 Power Mode tests
-
-Required:
-
-- active XBOX Power Mode overrides Device;
-- XBOX exit restores Device policy;
-- disabled/missing XBOX override falls back to Device;
-- Steam tests remain unchanged.
-
-### 22.5 Intel FPS tests
-
-Required:
-
-- active XBOX FPS profile applies;
-- active XBOX exit releases owned FRAME_LIMIT;
-- XBOX AC/DC change selects the correct target value;
-- no fake XBOX numeric AppID is required by the managed policy;
-- ownership-marker/fail-close tests remain passing;
-- Steam behavior remains unchanged.
-
-### 22.6 Display tests
-
-Required:
-
-- active XBOX resolution applies;
-- XBOX exit restores original mode;
-- Steam → XBOX effective target transition changes to the XBOX resolution without losing the original recovery baseline;
-- XBOX → Steam transition works equivalently;
-- apply/capture failure still restores fail-closed.
-
-### 22.7 Host wiring tests
-
-Required:
-
-- production XBOX session remains Runtime-owned;
-- \`ActiveGameChanged\` is subscribed for normal runtime lifetime and unsubscribed on shutdown;
-- XBOX active-game change triggers profile convergence;
-- XBOX active-game change does not request controller-presentation switching;
-- Steam RunningAppID change still requests controller-presentation reconcile first/independently;
-- Steam-first target priority is enforced;
-- startup profile reconcile can consume an already-reconciled ActiveXboxGame;
-- resume profile reconcile reads ActiveProfileTarget;
-- headless uninstall preparation does not start the XBOX session owner.
-
-Do not add timing-race tests for pathological callback interleavings that are outside normal product lifecycle.
-
-### 22.8 Frontend mutation tests
-
-Extend \`XboxGameProfileFrontendTests\`.
-
-Required:
-
-- Favorite mutation never applies hardware;
-- active XBOX profile enable/disable applies all profile-owned features;
-- active XBOX CPU mutation applies CPU only;
-- active XBOX TDP mutation applies TDP only;
-- active XBOX Power mutation applies Power only;
-- active XBOX FPS mutation applies FPS only;
-- active XBOX Resolution mutation applies Display only;
-- inactive XBOX mutation persists without apply;
-- XBOX mutation while Steam target is active persists without XBOX apply;
-- apply failure returns the existing ApplyFailed outcome where applicable and does not roll persistence back.
+Do not duplicate runtime ownership.
 
 ---
 
-## 23. Manual validation on MSI Claw
+## 23. Required tests
 
-After automated tests pass, validate on the supported MSI Claw.
+### 23.1 Resolver
 
-Use at least one already field-proven XBOX title from the PR2/PR7 validation set.
+Required:
 
-### A. Basic live apply
+1. None → no resolved profile.
+2. Steam AppID → exact enabled GameProfile.
+3. disabled/missing Steam → no resolved profile.
+4. XBOX key → exact enabled XboxGameProfile.
+5. disabled/missing XBOX → no resolved profile.
+6. both active → Steam wins.
+7. Steam ends while XBOX remains live → XBOX resolves.
+8. both source types project to the same GamePerformanceOverrides / GameDisplayOverrides view.
 
-1. Configure a distinctive XBOX profile.
-2. Launch the game.
-3. Confirm positive XBOX identity.
-4. Confirm log:
-   ~~~text
-   ProfileTarget=Xbox:<canonical key>
-   ~~~
-5. Confirm configured TDP / CPU Boost / Power / FPS / Resolution values apply as applicable.
+### 23.2 Platform-neutral runtime equivalence
 
-### B. Alt+Tab retention
+For each feature:
 
 ~~~text
-XBOX game running
-→ Alt+Tab to desktop/app
-→ XBOX process remains alive
-→ XBOX profile remains effective
+Steam-resolved profile X
+and
+XBOX-resolved profile X
+→ identical feature target/effect
 ~~~
 
-Foreground loss must not restore Device settings.
+There must be no XBOX-specific runtime path in the test.
 
-### C. Process exit restore
+### 23.3 Steam regressions
 
-Exit the XBOX game normally.
+Required:
 
-Verify:
+- existing Steam active profile apply unchanged;
+- Steam exit fallback unchanged;
+- active Steam mutation apply unchanged;
+- inactive Steam mutation persistence-only behavior unchanged;
+- Steam RunningAppID authority unchanged;
+- Steam/BPM presentation unchanged.
 
-- CPU Boost returns to Device policy;
-- TDP returns to Device policy;
-- Power Mode returns to Device policy;
-- Intel FPS ownership is released when no active profile owns it;
-- Display Resolution restores the original mode;
-- no controller presentation/authority mutation occurs because of the XBOX exit.
+### 23.4 XBOX live apply
 
-### D. Live profile edit
+Required:
 
-While the XBOX game is active:
+- CPU Boost;
+- TDP;
+- Power Mode;
+- Intel FPS;
+- Resolution;
+- process exit Device/global convergence.
 
-- change one TDP field;
-- change CPU Boost;
-- change Power Mode;
-- change FPS;
-- change Resolution.
+### 23.5 Lifecycle
 
-Verify each setting applies immediately and unrelated settings are not gratuitously rewritten.
+Required:
 
-### E. Runtime restart
-
-With the XBOX game already running:
-
-~~~text
-controlled Runtime restart
-→ bounded XBOX startup reconcile
-→ ActiveProfileTarget=Xbox
-→ XBOX profile reapplied
-~~~
-
-### F. Sleep / Resume
-
-With the XBOX game active:
-
-~~~text
-Sleep/Hibernate
-→ Resume
-→ XBOX session reconciles
-→ existing profile/lifecycle settle
-→ XBOX profile remains/reapplies correctly
-~~~
-
-Verify Full1902 controller recovery remains unchanged.
-
-### G. Steam regression
-
-Launch a normal Steam game with a Steam profile.
-
-Verify:
-
-- numeric RunningAppID remains authoritative;
-- Steam profile applies exactly as before;
-- SteamDeck/Xbox360 presentation behavior is unchanged;
-- XBOX session events do not override the Steam profile while Steam RunningAppID is nonzero.
-
----
-
-## 24. Explicit non-goals
-
-Do not implement in PR8:
-
-- Epic detection;
-- GOG detection;
-- custom EXE registration;
-- shared/general Windows game detector extraction;
-- generic launcher framework;
-- HHC-style universal ProcessManager;
-- ClawHUD IPC;
-- XBOX per-game M1/M2;
-- Overlay XBOX active profile;
-- Xbox app launch action;
-- Game Bar integration;
-- PresentMon detection;
-- foreground/fullscreen heuristics;
-- periodic polling;
-- Steam identity migration;
-- Steam frontend genericization;
-- controller presentation changes;
-- multi-game arbitration;
-- new profile schema version;
-- frontend protocol bump.
-
-The shared Windows observation extraction for future Custom/Epic/GOG support should be considered only after this end-to-end XBOX profile path is complete.
-
----
-
-## 25. Architecture / overengineering constraints
-
-Follow the project review policy.
-
-PR8 should protect realistic lifecycle behavior:
-
-- XBOX game start;
-- XBOX process exit;
-- Runtime startup/restart;
+- startup with already-running XBOX game;
+- controlled Runtime restart with XBOX game alive;
 - Sleep/Hibernate/Resume;
-- AC/DC transition;
-- real persistence/apply failure;
-- active profile mutation;
-- Steam ↔ XBOX effective-target transition;
-- profile disable / Device fallback.
+- AC/DC switch;
+- XBOX process exit;
+- XBOX → Steam → XBOX transition.
 
-Do not add state/locks/epochs/barriers solely for theoretical instruction-level races.
+### 23.6 XBOX mutations
 
-Prefer:
+Extend XboxGameProfileFrontendTests.
 
-~~~text
-existing Steam authority
-+ existing XboxGameSessionRuntime authority
-→ one derived target
-→ one small lookup policy
-→ existing feature owners
-~~~
+Required:
 
-The goal is not minimum LOC.
+- Favorite never applies hardware;
+- active XBOX CPU edit uses existing CpuBoostRuntime;
+- active XBOX TDP edit uses existing TdpRuntime;
+- active XBOX Power edit uses existing PowerModeRuntime;
+- active XBOX FPS edit uses existing IntelFrameLimiterRuntime;
+- active XBOX Resolution edit uses existing GameDisplayResolutionRuntime;
+- inactive XBOX edit persists only;
+- XBOX edit while Steam is effective persists only;
+- apply failure does not roll back persistence.
 
-The goal is one clear target-selection rule and no duplicated hardware authority.
+Do not add pathological timing-race tests outside supported lifecycle.
 
 ---
 
-## 26. Required validation
+## 24. Manual MSI Claw validation
 
-Before opening the PR:
+Validate one field-proven XBOX title.
+
+### A. Live apply
+
+~~~text
+XBOX detected
+→ XBOX profile resolved
+→ SAME existing five runtime owners
+→ settings applied
+~~~
+
+### B. Alt+Tab
+
+Matched XBOX process remains alive, so profile remains effective.
+
+### C. Exit
+
+Exit game and verify Device/global convergence through the same runtimes.
+
+### D. Steam regression
+
+Launch an existing Steam-profile title and verify behavior is indistinguishable from pre-PR8 behavior.
+
+### E. Cross-platform transition
+
+~~~text
+XBOX effective
+→ Steam starts
+→ resolver selects Steam
+→ SAME runtimes update
+
+Steam ends, XBOX still alive
+→ resolver selects XBOX
+→ SAME runtimes update
+~~~
+
+---
+
+## 25. Explicit non-goals
+
+Do not implement:
+
+- Epic;
+- GOG;
+- Custom EXE;
+- shared Windows process detector;
+- HHC-style ProcessManager;
+- ClawHUD IPC;
+- XBOX-specific feature runtimes;
+- platform-specific hardware apply methods;
+- generic provider/plugin framework;
+- XBOX per-game M1/M2;
+- Overlay XBOX projection;
+- Xbox app action;
+- Steam detector changes;
+- Steam persistence migration;
+- controller-presentation changes;
+- polling;
+- protocol bump.
+
+---
+
+## 26. Overengineering constraints
+
+Preferred:
+
+~~~text
+Steam identity ─┐
+                ├─ active-profile resolver
+XBOX identity ──┘
+                     ↓
+              common profile view
+                     ↓
+          SAME existing runtime owners
+~~~
+
+Reject:
+
+~~~text
+platform
+→ platform manager
+→ platform-specific runtime
+→ hardware
+~~~
+
+Protect realistic:
+
+- game start;
+- game exit;
+- Runtime restart;
+- Sleep/Hibernate/Resume;
+- AC/DC;
+- persistence failure;
+- hardware apply failure.
+
+Do not add locks/epochs/state machines for theoretical interleavings.
+
+---
+
+## 27. Source-audit requirements
+
+Before PR submission verify:
+
+~~~text
+SteamSessionRuntime.ActualRunningAppId remains Steam authority
+
+XboxGameSessionRuntime remains XBOX authority
+
+exactly one production owner of each:
+    CpuBoostRuntime
+    TdpRuntime
+    PowerModeRuntime
+    IntelFrameLimiterRuntime
+    GameDisplayResolutionRuntime
+
+no feature runtime contains:
+    ActiveProfileTargetKind
+    Steam/Xbox switch
+    ProfileDocument.Games versus XboxGames selection
+    XboxGameSessionRuntime access
+    SteamSessionRuntime access
+
+platform collection selection exists only in active-profile resolution
+
+no XboxCpuBoostRuntime
+no XboxTdpRuntime
+no XboxPowerModeRuntime
+no XboxIntelFpsRuntime
+no XboxDisplayResolutionRuntime
+
+FrontendTransportProtocol.CurrentVersion remains 58
+~~~
+
+Required commands:
 
 ~~~powershell
 dotnet build .\SteamInputAddonforClaw.slnx -c Release --no-restore
@@ -1286,60 +1048,48 @@ dotnet test .\tests\SteamInputAddonforClaw.UiTests\SteamInputAddonforClaw.UiTest
 git diff --check
 ~~~
 
-Also perform source audits:
-
-~~~text
-ActiveProfileTarget exists exactly once as the shared apply selector
-XboxGameSessionRuntime still owns XBOX identity only
-SteamSessionRuntime.ActualRunningAppId remains the Steam detector authority
-no XboxCpuBoostRuntime / XboxTdpRuntime / XboxPowerModeRuntime / XboxFpsRuntime / XboxDisplayRuntime
-no generic game identity/provider registry
-no new polling loop
-FrontendTransportProtocol.CurrentVersion remains 58
-~~~
-
----
-
-## 27. PR description requirements
-
-The implementation PR description must explicitly state:
-
-- reviewed architecture/main baseline;
-- one derived \`ActiveProfileTarget\` was added;
-- Steam RunningAppID remains untouched and has priority;
-- XBOX active identity comes only from \`XboxGameSessionRuntime\`;
-- the existing five apply implementations were reused;
-- XBOX process exit returns to Device/global policy;
-- active XBOX mutations now apply live;
-- no controller-presentation behavior changed;
-- no generic game-detection framework was added;
-- frontend protocol remains 58;
-- automated validation results;
-- real MSI Claw manual validation performed or explicitly pending.
-
 ---
 
 ## 28. Completion condition
 
-PR8 is complete only when this full path works:
+PR8 is complete only when:
 
 ~~~text
-installed XBOX profile
-→ exact production XBOX game detection
-→ ActiveXboxGame
-→ ActiveProfileTarget.Xbox
-→ persisted XboxGameProfile
-→ existing CPU/TDP/Power/FPS/Display owners
-→ live machine settings
-
-matched XBOX process exits
-→ ActiveXboxGame=None
-→ ActiveProfileTarget.None
-→ Device/global convergence
+Steam identity
+or
+XBOX identity
+        ↓
+one resolver selects enabled profile
+        ↓
+one common ResolvedActiveProfile
+        ↓
+existing five runtime owners apply it
+        ↓
+no runtime knows which platform supplied it
 ~~~
 
-At that point the core XBOX game-profile implementation is end-to-end complete.
+XBOX path:
 
-Per-game M1/M2, Overlay projection, and front-button Xbox action remain separate follow-up phases.
+~~~text
+XboxGameSessionRuntime.ActiveGame
+→ XboxGames lookup in resolver
+→ ResolvedActiveProfile
+→ existing CpuBoostRuntime
+→ existing TdpRuntime
+→ existing PowerModeRuntime
+→ existing IntelFrameLimiterRuntime
+→ existing GameDisplayResolutionRuntime
+~~~
 
-The next game-detection expansion should then introduce Custom EXE as the second Windows-process consumer and extract only the Windows observation/process-lifetime mechanics that are proven to be genuinely shared.
+Steam path:
+
+~~~text
+SteamSessionRuntime.ActualRunningAppId
+→ Games lookup in resolver
+→ same ResolvedActiveProfile
+→ same existing runtime owners
+~~~
+
+No duplicate performance implementation is acceptable.
+
+After PR8, a later Custom EXE / Epic / GOG identity source must terminate at the same resolver boundary and reuse the same runtime owners.
