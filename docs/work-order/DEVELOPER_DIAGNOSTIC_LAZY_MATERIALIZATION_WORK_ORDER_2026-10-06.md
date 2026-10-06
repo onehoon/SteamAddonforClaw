@@ -3,7 +3,7 @@
 > **Date:** 2026-10-06  
 > **Status:** Ready for implementation  
 > **Repository:** `onehoon/SteamAddonforClaw`  
-> **Reviewed main HEAD:** `a237034a3db279748f5c5978634b3fdae7faba9b`  
+> **Reviewed main HEAD:** `21e07e7693779751e07a4f17361d4251461d9e93`  
 > **Relevant implementation baseline:** `5e21ca301f1045279dbeed5c19e77d470fabb46c`  
 > **Scope:** Main UI developer-surface lifetime + two trivial Runtime developer-probe first-use allocations  
 > **Product impact:** No user-facing feature change. Reduce unused Developer/Diag memory footprint for normal users and developers who do not open a specific diagnostic.
@@ -22,7 +22,6 @@ VibrationTestPage
 ClawSensorProbePage
 FanHardwareProbePage
 BatteryChargeLimitTestPage
-XboxSessionDiagnosticPage
 GameInputSystemButtonProbePage
 ```
 
@@ -85,6 +84,16 @@ Settings
 
 This work order only changes **when developer UI objects are materialized**.
 
+Current XBOX state is already productionized on main:
+
+```text
+#695 / 21e07e7693779751e07a4f17361d4251461d9e93
+XboxGameSessionRuntime = production Runtime infrastructure
+former XboxSessionDiagnosticPage / XboxGameSessionDiagnostic = retired
+```
+
+Therefore XBOX session detection is explicitly outside the lazy-Developer lifetime scope.
+
 ---
 
 ## 3. Current behavior that must change
@@ -109,7 +118,6 @@ VibrationTestContent.Initialize(...)
 ClawSensorProbeContent.Initialize(...)
 FanHardwareProbeContent.Initialize(...)
 BatteryChargeLimitTestContent.Initialize(...)
-XboxSessionDiagnosticContent.Initialize(...)
 GameInputSystemButtonProbeContent.Initialize(...)
 ```
 
@@ -170,7 +178,6 @@ private VibrationTestPage? _vibrationTestContent;
 private ClawSensorProbePage? _clawSensorProbeContent;
 private FanHardwareProbePage? _fanHardwareProbeContent;
 private BatteryChargeLimitTestPage? _batteryChargeLimitTestContent;
-private XboxSessionDiagnosticPage? _xboxSessionDiagnosticContent;
 private GameInputSystemButtonProbePage? _gameInputSystemButtonProbeContent;
 ```
 
@@ -203,7 +210,6 @@ private DeveloperPage GetOrCreateDeveloperMenu()
     page.SensorProbeRequested += ...;
     page.FanHardwareProbeRequested += ...;
     page.BatteryChargeLimitTestRequested += ...;
-    page.XboxSessionDiagnosticRequested += ...;
     page.GameInputSystemButtonProbeRequested += ...;
 
     return _developerMenuContent = page;
@@ -264,7 +270,6 @@ VibrationTest
 ClawSensorProbe
 FanHardwareProbe
 BatteryChargeLimitTest
-XboxSessionDiagnostic
 GameInputSystemButtonProbe
 ```
 
@@ -385,41 +390,44 @@ The Suspend/Resume test also intentionally needs Runtime state to survive until 
 
 This PR only makes the **UI page** first-use lazy.
 
-### 6.6 XBOX Active Game Diagnostic
+### 6.6 XBOX production session runtime is not a Developer diagnostic
 
-Do not redesign or optimize the Runtime diagnostic in this PR.
-
-The XBOX diagnostic is expected to be promoted/replaced by production XBOX session work and retired.
-
-If that retirement lands before this work order is implemented:
+As of production commit:
 
 ```text
-do not reintroduce XboxSessionDiagnosticPage
-do not reintroduce XboxGameSessionDiagnostic
-simply omit the retired page from this lazy-materialization change
+21e07e7693779751e07a4f17361d4251461d9e93
+Promote XBOX session detection to production Runtime (#695)
 ```
 
-If it still exists, make only the UI page first-use lazy and preserve its current force-stop-on-leave behavior.
+the former Developer-only XBOX active-session diagnostic has already been retired.
+
+The following no longer belong to Developer Menu and must **not** be reintroduced:
+
+```text
+XboxSessionDiagnosticPage
+XboxGameSessionDiagnostic
+FrontendXboxSessionDiagnostic*
+DeveloperPage XBOX Active Game Diagnostic card
+MainNavigationPage.XboxSessionDiagnostic
+```
+
+The production owner is now:
+
+```text
+XboxGameSessionRuntime
+```
+
+owned by `AddonProcessHost` as normal Runtime infrastructure.
+
+This work order must leave that production runtime unchanged. It is **not** a lazy Developer object and must not be moved behind Developer Menu activation or first-use UI creation.
 
 ---
 
 ## 7. Frontend invalidation must not materialize hidden developer UI
 
-Current frontend invalidation includes developer-page refresh behavior such as:
+After lazy materialization, an ordinary Runtime/frontend invalidation must **never create** a developer page.
 
-```csharp
-XboxSessionDiagnosticContent.RequestRefresh();
-```
-
-After lazy materialization, an ordinary Runtime invalidation must **never create** a developer page.
-
-Use null checks:
-
-```csharp
-_xboxSessionDiagnosticContent?.RequestRefresh();
-```
-
-Apply the same principle anywhere a developer page is referenced from:
+Apply this principle anywhere a developer page is referenced from:
 
 - Runtime state invalidation;
 - MainWindow shutdown;
@@ -604,11 +612,10 @@ VibrationTestPage
 ClawSensorProbePage
 FanHardwareProbePage
 BatteryChargeLimitTestPage
-XboxSessionDiagnosticPage
 GameInputSystemButtonProbePage
 ```
 
-If XBOX diagnostic has already been retired, omit it from the expected list.
+The retired XBOX diagnostic must not appear in the expected list or be recreated by these tests.
 
 Assert that the developer host exists instead.
 
@@ -653,8 +660,9 @@ This is a required lifecycle invariant.
 Preserve existing tests for:
 
 - Xbox360 rumble loop stop on leave;
-- GameInput probe stop on leave;
-- XBOX session diagnostic force stop on leave, if that diagnostic still exists.
+- GameInput probe stop on leave.
+
+Do not add Developer UI lifecycle tests for the retired XBOX diagnostic. Production `XboxGameSessionRuntime` tests remain separate and unchanged.
 
 ### 12.6 Runtime developer probes
 
@@ -683,7 +691,6 @@ src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs
 src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs
 
 tests/SteamInputAddonforClaw.UiTests/UiArchitectureTests.cs
-tests/SteamInputAddonforClaw.UiTests/XboxSessionDiagnosticUiTests.cs   if still present/relevant
 tests/SteamInputAddonforClaw.Tests/*                                   only where needed for Runtime lazy lifetime
 ```
 
@@ -698,8 +705,8 @@ Do not spread this into unrelated files solely to create a generalized lazy navi
 Do not include:
 
 ```text
-XBOX production session promotion
-XBOX diagnostic redesign
+production XboxGameSessionRuntime changes
+reintroduction of retired XBOX diagnostic UI/RPC/contracts
 Fan Runtime session teardown redesign
 new CloseFanProbe RPC
 Sensor polling-rate changes
@@ -759,16 +766,17 @@ The PR is complete when all of the following are true:
 8. Main UI shutdown does not materialize pages solely to call cleanup.
 9. Gyro/Sensor polling still begins only on Sensor page activation.
 10. Leaving Gyro/Sensor page still stops its 200 ms polling and closes the Runtime probe session.
-11. Vibration/GameInput/XBOX Start-only diagnostics preserve current stop-on-leave behavior.
+11. Vibration and GameInput Start-only diagnostics preserve current stop-on-leave behavior.
 12. Fan Probe behavior remains unchanged except that its UI page is created only on first use.
 13. `GameInputSystemButtonProbe` is not allocated until its developer frontend path is first used.
 14. `IntelGpuIgclProbe` is not allocated until its developer frontend path is first used.
 15. Intel IGCL native initialization remains first Capture/Run only, never Developer Menu open.
 16. Existing Intel probe shutdown restore semantics remain intact when the lazy probe was actually created.
-17. XBOX diagnostic retirement work, if already merged, is not reversed or reintroduced.
-18. Production `Info` logging remains the default.
-19. Full1902 controller lifecycle/ownership behavior is unchanged.
-20. Full solution build and relevant tests pass.
+17. Retired `XboxSessionDiagnosticPage`, `XboxGameSessionDiagnostic`, and related Developer RPC/contracts are not reintroduced.
+18. Production `XboxGameSessionRuntime` remains Runtime-owned and unchanged by this PR.
+19. Production `Info` logging remains the default.
+20. Full1902 controller lifecycle/ownership behavior is unchanged.
+21. Full solution build and relevant tests pass.
 
 ---
 
@@ -784,6 +792,8 @@ A reviewer should request changes if:
 - GameInput callbacks can survive page exit after an actual Start;
 - Intel probe lazy conversion loses shutdown restore of a probe-owned mutation;
 - production Device/Controller/Profile functionality is incorrectly moved behind developer lazy initialization;
+- production `XboxGameSessionRuntime` is made lazy behind Developer Menu or otherwise changed by this PR;
+- any retired XBOX diagnostic page/RPC/contract is reintroduced;
 - the implementation introduces a new manager/service/authority solely to implement this small lifetime cleanup.
 
 A reviewer should **not** block the PR because a theoretical simultaneous first-use call could allocate twice unless a realistic supported application path is demonstrated.
