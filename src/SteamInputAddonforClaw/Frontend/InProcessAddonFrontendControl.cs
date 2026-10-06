@@ -21,6 +21,7 @@ using SteamInputAddonforClaw.Shortcuts;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Updates;
 using SteamInputAddonforClaw.WindowsGaming;
+using SteamInputAddonforClaw.Xbox;
 using System.Diagnostics;
 using Microsoft.Win32;
 
@@ -77,6 +78,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly GameProfileMutations? _gameProfileMutations;
     private readonly Func<uint> _actualRunningAppIdSource;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>> _scanProfileGames;
+    private readonly Func<CancellationToken, Task<XboxInstalledGameCatalogResult>> _scanXboxGames;
     private readonly GameDisplayResolutionRuntime? _displayResolutionRuntime;
     // Narrow MSI Center M startup control (work order PR1). Null is a valid passive state -- the
     // capture/mutation just report unavailable, like every other null-runtime fallback here.
@@ -155,7 +157,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? captureXboxSessionDiagnostic = null,
         Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? startXboxSessionDiagnostic = null,
         Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? stopXboxSessionDiagnostic = null,
-        Func<CancellationToken, Task<FrontendXboxSessionDiagnosticReportResult>>? generateXboxSessionDiagnosticReport = null)
+        Func<CancellationToken, Task<FrontendXboxSessionDiagnosticReportResult>>? generateXboxSessionDiagnosticReport = null,
+        Func<CancellationToken, Task<XboxInstalledGameCatalogResult>>? scanXboxGames = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -170,6 +173,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _gameProfileMutations = gameProfileMutations;
         _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
         _scanProfileGames = scanProfileGames ?? (token => new ProfileGameCatalogScanner().ScanAsync(token));
+        _scanXboxGames = scanXboxGames ?? (token => new XboxInstalledGameCatalog().ScanAsync(token));
         _displayResolutionRuntime = displayResolutionRuntime;
         _fanProbeTransport = fanProbeTransport;
         _batteryChargeLimitRuntime = batteryChargeLimitRuntime;
@@ -293,6 +297,29 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         var favorites = _gameProfileMutations?.CaptureFavoriteAppIds() ?? new HashSet<uint>();
         return (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).Select(x => new FrontendProfileGameCatalogEntry(x.AppId, x.Name, x.Source == ProfileGameSource.Steam ? FrontendProfileGameSource.Steam : FrontendProfileGameSource.NonSteam, favorites.Contains(x.AppId))).ToArray();
+    }
+
+    public async Task<FrontendXboxGameCatalogSnapshot> ScanXboxGamesAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var result = await _scanXboxGames(cancellationToken).ConfigureAwait(false);
+        return result.Outcome switch
+        {
+            XboxInstalledGameCatalogOutcome.Completed => new(
+                FrontendXboxGameCatalogOutcome.Ready,
+                result.Games.Select(game => new FrontendXboxGameCatalogEntry(
+                    game.Identity.Key,
+                    game.Identity.DisplayName)).ToArray(),
+                null),
+            XboxInstalledGameCatalogOutcome.Unavailable =>
+                FrontendXboxGameCatalogSnapshot.Unavailable("XBOX game catalog is unavailable."),
+            _ => new(
+                FrontendXboxGameCatalogOutcome.Failed,
+                [],
+                "XBOX game catalog could not be loaded.")
+        };
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileFavoriteAsync(uint appId, bool favorite, string? displayName, CancellationToken cancellationToken = default)

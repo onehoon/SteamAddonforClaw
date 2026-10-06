@@ -4,6 +4,7 @@ internal enum MainNavigationPage
 {
     Device,
     Profile,
+    Xbox,
     Controller,
     Overlay,
     Shortcut,
@@ -31,6 +32,7 @@ internal sealed class MainNavigationState
             {
                 "Device" => MainNavigationPage.Device,
                 "Profile" => MainNavigationPage.Profile,
+                "Xbox" => MainNavigationPage.Xbox,
                 "Controller" => MainNavigationPage.Controller,
                 "Overlay" => MainNavigationPage.Overlay,
                 "Shortcut" => MainNavigationPage.Shortcut,

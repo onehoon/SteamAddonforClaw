@@ -8,6 +8,16 @@ namespace SteamInputAddonforClaw.Contracts.Frontend;
 public enum FrontendLogLevel { Off, Info, Debug }
 public enum FrontendProfileGameSource { Steam, NonSteam }
 public sealed record FrontendProfileGameCatalogEntry(uint AppId, string Name, FrontendProfileGameSource Source, bool Favorite = false);
+public enum FrontendXboxGameCatalogOutcome { Ready, Unavailable, Failed }
+public sealed record FrontendXboxGameCatalogEntry(string Key, string DisplayName);
+public sealed record FrontendXboxGameCatalogSnapshot(
+    FrontendXboxGameCatalogOutcome Outcome,
+    IReadOnlyList<FrontendXboxGameCatalogEntry> Games,
+    string? FailureMessage)
+{
+    public static FrontendXboxGameCatalogSnapshot Unavailable(string message) =>
+        new(FrontendXboxGameCatalogOutcome.Unavailable, [], message);
+}
 public sealed record FrontendGameCpuBoostConfiguration(bool Enabled, CpuBoostMode Ac, CpuBoostMode Dc);
 public sealed record FrontendGameTdpConfiguration(bool Enabled, FrontendTdpPowerPair Ac, FrontendTdpPowerPair Dc);
 public sealed record FrontendGamePowerModeConfiguration(bool Enabled, WindowsPowerMode Ac, WindowsPowerMode Dc);
@@ -786,6 +796,8 @@ public interface IAddonFrontendControl
     Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
     Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
+    Task<FrontendXboxGameCatalogSnapshot> ScanXboxGamesAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendXboxGameCatalogSnapshot.Unavailable("XBOX game catalog is unavailable."));
     Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
     Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));
     Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
