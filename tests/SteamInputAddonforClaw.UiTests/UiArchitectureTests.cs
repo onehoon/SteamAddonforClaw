@@ -50,6 +50,9 @@ public sealed class UiArchitectureTests
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
         var constructor = ExtractMethod(mainWindow, "internal MainWindow(");
         var showPage = ExtractMethod(mainWindow, "private void ShowPage(");
+        XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var developerContentHost = XDocument.Parse(mainWindowXaml).Descendants()
+            .Single(element => (string?)element.Attribute(xamlNamespace + "Name") == "DeveloperContentHost");
         var developerPageTypes = new[]
         {
             "DeveloperPage",
@@ -61,6 +64,8 @@ public sealed class UiArchitectureTests
         };
 
         Assert.Contains("x:Name=\"DeveloperContentHost\"", mainWindowXaml, StringComparison.Ordinal);
+        Assert.Equal("Stretch", (string?)developerContentHost.Attribute("HorizontalContentAlignment"));
+        Assert.Equal("Stretch", (string?)developerContentHost.Attribute("VerticalContentAlignment"));
         foreach (var pageType in developerPageTypes)
         {
             Assert.DoesNotContain($"<views:{pageType}", mainWindowXaml, StringComparison.Ordinal);

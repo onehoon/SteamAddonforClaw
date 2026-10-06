@@ -73,7 +73,11 @@
 
             <views:SettingsPage x:Name="SettingsContent" Visibility="Collapsed" />
 
-            <ContentControl x:Name="DeveloperContentHost" Visibility="Collapsed" />
+            <ContentControl
+                x:Name="DeveloperContentHost"
+                HorizontalContentAlignment="Stretch"
+                VerticalContentAlignment="Stretch"
+                Visibility="Collapsed" />
         </Grid>
     </NavigationView>
         <Grid x:Name="PrerequisiteSetupBusyOverlay"

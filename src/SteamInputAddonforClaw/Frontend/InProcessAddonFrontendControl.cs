@@ -1007,6 +1007,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendIntelGpuFrequencyProbeSnapshot> CaptureIntelGpuFrequencyProbeAsync(CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult((_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()).Capture());
     }
@@ -1016,6 +1017,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         int? testPl1Mw = null,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult((_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()).Run(operation, testPl1Mw));
     }
