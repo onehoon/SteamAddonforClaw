@@ -771,7 +771,7 @@ If XboxGames is additive and old builds preserve unknown extension data safely, 
 
 Do not reuse GameProfile directly if that keeps Steam-specific semantics/comments attached to the type.
 
-Recommended:
+The first production persistence/editing implementation (PR6) should stay minimal:
 
 ~~~csharp
 public sealed record XboxGameProfile
@@ -780,13 +780,12 @@ public sealed record XboxGameProfile
     public bool Favorite { get; init; }
     public string? DisplayName { get; init; }
 
-    public XboxGameProfileIdentityMetadata Identity { get; init; } = new();
-
     public GamePerformanceOverrides Performance { get; init; } = new();
     public GameDisplayOverrides Display { get; init; } = new();
-    public XboxGameControllerOverrides Controller { get; init; } = new();
 }
 ~~~
+
+The dictionary's canonical XBOX key remains the authoritative identity. Do not broaden the normal frontend catalog or add package rescans/caches merely to persist StoreId/TitleId/PFN diagnostics metadata. A technical identity sidecar may be added later only when a concrete recovery/diagnostic consumer requires it.
 
 Reuse existing nested performance/display models where their semantics are genuinely identical.
 
@@ -798,9 +797,11 @@ Do not duplicate:
 - GameFpsLimitSettings;
 - GameDisplayResolution.
 
+Do not add an unused Controller placeholder in PR6. Per-game controller persistence belongs to Phase X4.
+
 ### 10.3 Controller override
 
-XBOX profiles may add:
+In Phase X4, XBOX profiles may add:
 
 ~~~csharp
 public sealed record XboxGameControllerOverrides
@@ -2122,11 +2123,18 @@ The XBOX Active Game Session Diagnostic is retired only when the later productio
 
 ### Phase X2 — XBOX profile persistence/editing
 
+PR6 scope is persistence + offline/pre-launch editing only:
+
 - ProfileDocument.XboxGames;
-- XboxGameProfile;
-- XboxGameProfileMutations;
-- XBOX page profile detail;
-- reuse existing performance/display nested settings.
+- separate XboxGameProfile keyed by canonical string XBOX key;
+- XboxGameProfileMutations using the existing ProfileStore and shared ProfileMutationGate;
+- XBOX Favorite + Profile Enabled + CPU Boost + TDP + Power Mode + FPS + Resolution editing;
+- reuse existing performance/display nested settings;
+- no package-identity sidecar required merely for diagnostics;
+- no Controller/M1/M2 placeholder yet;
+- no live XBOX profile apply in this phase.
+
+Production active-session/apply integration remains Phase X3, and per-game M1/M2 remains Phase X4.
 
 ### Phase X3 — active XBOX session + shared apply target
 
