@@ -376,7 +376,11 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
                 lookupCount++;
                 Assert.Equal(string.Empty, userSecurityId);
                 Assert.Equal(packageFullName, resolvedPackageFullName);
-                return new(() => effectiveRoot, () => installedRoot) { DisplayName = "Package Display", Name = "Sample.Package" };
+                return new(() => effectiveRoot, () => installedRoot)
+                {
+                    DisplayName = () => "Package Display",
+                    Name = () => "Sample.Package",
+                };
             });
         var inspection = await EvaluateAsync(new FakeProcessGeneration(94, 1), Evidence(
             packageFullName: packageFullName,
@@ -389,6 +393,36 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
         Assert.Equal(["Effective", "Installed"], resolution.Locations.Select(location => location.Kind));
         Assert.Equal(XboxGameProcessInspectionDisposition.Matched, inspection.Disposition);
         Assert.Equal("Sample Display", inspection.Match?.Identity.DisplayName);
+    }
+
+    [Fact]
+    public async Task Optional_package_display_metadata_failures_do_not_block_config_identity_match()
+    {
+        var root = Path.Combine(_directory, "optional-package-metadata-failure");
+        Directory.CreateDirectory(root);
+        const string config = "<Game><Identity Name=\"Sample.Game\" Publisher=\"CN=Sample\"/><ExecutableList><Executable Name=\"Sample.exe\"/></ExecutableList></Game>";
+        await File.WriteAllTextAsync(Path.Combine(root, "MicrosoftGame.config"), config);
+        const string packageFullName = "Sample_1.0.0.0_x64__test";
+
+        var resolution = XboxGamePackageConfigLocationResolver.ResolveCurrentUserPackage(
+            packageFullName,
+            (_, _) => new(() => root, () => null)
+            {
+                DisplayName = static () => throw new InvalidOperationException("Display metadata unavailable."),
+                Name = static () => throw new InvalidOperationException("Package name metadata unavailable."),
+            });
+        var inspection = await EvaluateAsync(new FakeProcessGeneration(95, 1), Evidence(
+            packageFullName: packageFullName,
+            packageDisplayName: resolution.PackageDisplayName,
+            packageName: resolution.PackageName,
+            configLocations: resolution.Locations,
+            configLocationFailure: resolution.FailureReason));
+
+        Assert.Single(resolution.Locations);
+        Assert.Null(resolution.PackageDisplayName);
+        Assert.Null(resolution.PackageName);
+        Assert.Equal(XboxGameProcessInspectionDisposition.Matched, inspection.Disposition);
+        Assert.Equal("Sample.exe", inspection.Match?.Identity.DisplayName);
     }
 
     [Fact]

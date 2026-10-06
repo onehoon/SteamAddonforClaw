@@ -80,8 +80,8 @@ internal sealed class WindowsXboxGameProcessIdentityProbe : IXboxGameProcessIden
                             () => package.EffectiveLocation?.Path,
                             () => package.InstalledLocation?.Path)
                         {
-                            DisplayName = package.DisplayName,
-                            Name = package.Id.Name,
+                            DisplayName = () => package.DisplayName,
+                            Name = () => package.Id.Name,
                         };
                 })
             : new XboxGamePackageConfigLocationResolution([], null);

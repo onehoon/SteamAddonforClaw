@@ -9,8 +9,8 @@ internal sealed record XboxGamePackageConfigMetadata(
     Func<string?> EffectiveLocationPath,
     Func<string?> InstalledLocationPath)
 {
-    internal string? DisplayName { get; init; }
-    internal string? Name { get; init; }
+    internal Func<string?>? DisplayName { get; init; }
+    internal Func<string?>? Name { get; init; }
 }
 
 internal sealed record XboxGamePackageConfigLocationResolution(
@@ -55,9 +55,22 @@ internal static class XboxGamePackageConfigLocationResolver
 
         return new(locations, failures.Count == 0 ? null : string.Join("; ", failures))
         {
-            PackageDisplayName = package.DisplayName,
-            PackageName = package.Name,
+            PackageDisplayName = ReadOptionalMetadata(package.DisplayName),
+            PackageName = ReadOptionalMetadata(package.Name),
         };
+    }
+
+    private static string? ReadOptionalMetadata(Func<string?>? getValue)
+    {
+        try
+        {
+            var value = getValue?.Invoke();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static void AddLocation(
