@@ -533,14 +533,14 @@ public sealed class UiArchitectureTests
         Assert.Contains("DispatcherQueue.TryEnqueue(RefreshInvalidatedFrontendStateOnUiThread)", invalidation, StringComparison.Ordinal);
         Assert.Contains("UI dispatcher is unavailable", invalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("RequestAppUpdateRefresh", invalidation, StringComparison.Ordinal);
-        Assert.DoesNotContain("RequestSteamFseRefresh", invalidation, StringComparison.Ordinal);
+        Assert.DoesNotContain("RequestGamingHomeRefresh", invalidation, StringComparison.Ordinal);
         Assert.DoesNotContain("RequestClawHudRefresh", invalidation, StringComparison.Ordinal);
 
         var expectedRefreshes = new[]
         {
             "_ = RefreshSystemStatusAsync();",
             "SettingsContent.RequestAppUpdateRefresh();",
-            "SettingsContent.RequestSteamFseRefresh();",
+            "SettingsContent.RequestGamingHomeRefresh();",
             "OverlayContent.RequestClawHudRefresh();",
             "ShortcutContent.RequestRefresh();",
         };

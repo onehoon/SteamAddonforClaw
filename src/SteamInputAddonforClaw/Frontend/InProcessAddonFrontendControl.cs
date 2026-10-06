@@ -88,7 +88,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly ICenterMRebootAuthorityTransition? _centerMAuthorityTransition;
     private readonly FrontendUpdateCoordinator? _updateCoordinator;
     private readonly Func<AcDcPowerSource?> _quickSettingsPowerSource;
-    private readonly WindowsGamingHomeConfiguration _steamFse;
+    private readonly WindowsGamingHomeConfiguration _gamingHome;
     private readonly Func<CancellationToken, Task<FrontendClawHudSnapshot>>? _captureClawHud;
     private readonly Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? _setClawHudEnabled;
     private readonly Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? _mutateClawHudSetting;
@@ -136,7 +136,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         MsiClawBatteryChargeLimitHardware? batteryChargeLimitHardware = null,
         FrontendUpdateCoordinator? updateCoordinator = null,
         Func<AcDcPowerSource?>? quickSettingsPowerSource = null,
-        WindowsGamingHomeConfiguration? steamFse = null,
+        WindowsGamingHomeConfiguration? gamingHome = null,
         Func<CancellationToken, Task<FrontendClawHudSnapshot>>? captureClawHud = null,
         Func<bool, CancellationToken, Task<FrontendClawHudSnapshot>>? setClawHudEnabled = null,
         Func<FrontendClawHudMutationIntent, CancellationToken, Task<FrontendClawHudMutationResult>>? mutateClawHudSetting = null,
@@ -179,7 +179,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _batteryChargeLimitRuntime = batteryChargeLimitRuntime;
         _batteryChargeLimitHardware = batteryChargeLimitHardware ?? (fanProbeTransport is null ? null : new MsiClawBatteryChargeLimitHardware(fanProbeTransport));
         _quickSettingsPowerSource = quickSettingsPowerSource ?? WindowsAcDcPowerSource.Read;
-        _steamFse = steamFse ?? new WindowsGamingHomeConfiguration();
+        _gamingHome = gamingHome ?? new WindowsGamingHomeConfiguration();
         _captureClawHud = captureClawHud;
         _setClawHudEnabled = setClawHudEnabled;
         _mutateClawHudSetting = mutateClawHudSetting;
@@ -550,16 +550,25 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             ?? Task.FromResult(new FrontendUpdateInstallResult(FrontendUpdateInstallOutcome.Unavailable, FrontendUpdateSnapshot.Unavailable, "Updates are unavailable in this installation."));
     }
 
-    public Task<FrontendSteamFseSnapshot> CaptureSteamFseAsync(CancellationToken cancellationToken = default)
+    public Task<FrontendGamingHomeSnapshot> CaptureGamingHomeAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_steamFse.Capture());
+        return Task.FromResult(_gamingHome.Capture());
     }
 
-    public async Task<FrontendSteamFseMutationResult> SetSteamFseEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    public async Task<FrontendGamingHomeMutationResult> SetGamingHomeSelectionAsync(
+        FrontendGamingHomeSelection selection, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        var result = await _steamFse.SetEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
+        var result = await _gamingHome.SetSelectionAsync(selection, cancellationToken).ConfigureAwait(false);
+        if (result.Succeeded) StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return result;
+    }
+
+    public async Task<FrontendGamingHomeMutationResult> SetGamingHomeStartupAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var result = await _gamingHome.SetStartupEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
         if (result.Succeeded) StateInvalidated?.Invoke(this, EventArgs.Empty);
         return result;
     }
