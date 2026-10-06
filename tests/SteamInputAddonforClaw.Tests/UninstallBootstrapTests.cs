@@ -235,8 +235,8 @@ public sealed class UninstallBootstrapTests
         public bool AvailableValue { get; init; } = true;
         public string? UnavailableReason => null;
         public IntelFpsCapability? Capability => null;
-        public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source, uint appId) => IntelFpsApplyOutcome.Succeeded;
-        public bool Disable(AcDcPowerSource? source, uint appId) { DisableCalls++; return DisableResult; }
+        public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source) => IntelFpsApplyOutcome.Succeeded;
+        public bool Disable(AcDcPowerSource? source) { DisableCalls++; return DisableResult; }
         public void Dispose() { }
     }
 

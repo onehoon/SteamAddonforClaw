@@ -939,8 +939,9 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         SaveProfile(deviceEnabled: false, gameAppId: 123, gameEnabled: true);
         var backend = new FakeCpuBoostPowerPolicy();
         var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 123));
 
-        runtime.StartupReconcile(123);
+        runtime.StartupReconcile();
 
         Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
         Assert.Equal(CpuBoostMode.EfficientEnabled, backend.Dc.Mode);
@@ -955,8 +956,9 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         SaveProfile(deviceEnabled: true, gameAppId: 123, gameEnabled: false);
         var backend = new FakeCpuBoostPowerPolicy();
         var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 123));
 
-        runtime.StartupReconcile(123);
+        runtime.StartupReconcile();
 
         Assert.Equal(CpuBoostMode.Enabled, backend.Ac.Mode);
         Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
@@ -969,7 +971,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var backend = new FakeCpuBoostPowerPolicy();
         var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
 
-        runtime.StartupReconcile(123);
+        runtime.StartupReconcile();
 
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(0, backend.DcWriteCount);
@@ -981,11 +983,15 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         SaveProfile(deviceEnabled: true, gameAppId: 123, gameEnabled: true, secondGameAppId: 456);
         var backend = new FakeCpuBoostPowerPolicy();
         var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
+        uint appId = 123;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => appId));
 
-        runtime.StartupReconcile(123);
-        runtime.Reconcile(456);
+        runtime.StartupReconcile();
+        appId = 456;
+        runtime.Reconcile();
         Assert.Equal(CpuBoostMode.Disabled, backend.Ac.Mode);
-        runtime.Reconcile(0);
+        appId = 0;
+        runtime.Reconcile();
         Assert.Equal(CpuBoostMode.Enabled, backend.Ac.Mode);
     }
 
@@ -995,13 +1001,49 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         SaveProfile(deviceEnabled: true, gameAppId: 123, gameEnabled: true);
         var backend = new FakeCpuBoostPowerPolicy();
         var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
-        runtime.SetActualAppIdSource(() => 123);
-        runtime.StartupReconcile(123);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 123));
+        runtime.StartupReconcile();
 
         Assert.True(runtime.SetDeviceCpuBoostAc(CpuBoostMode.EfficientAggressive).Succeeded);
 
         Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
         Assert.Equal(CpuBoostMode.EfficientAggressive, new ProfileStore(ProfilesPath).Load().Document.Device.Performance.CpuBoost!.Ac);
+    }
+
+    [Fact]
+    public void Reconcile_uses_the_same_runtime_for_XBOX_and_falls_back_to_device_after_exit()
+    {
+        const string key = "store:cpu-game";
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new() { Performance = new() { CpuBoost = new() { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Disabled } } },
+            XboxGames = new()
+            {
+                [key] = new XboxGameProfile
+                {
+                    Enabled = true,
+                    Performance = new()
+                    {
+                        CpuBoost = new() { Enabled = true, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled },
+                        Tdp = new() { Enabled = true, Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } }
+                    }
+                }
+            }
+        });
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+        string? activeKey = key;
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForXbox(() => activeKey));
+
+        Assert.True(runtime.ReconcileWithResult().Succeeded);
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, backend.Dc.Mode);
+
+        activeKey = null;
+        Assert.True(runtime.ReconcileWithResult().Succeeded);
+        Assert.Equal(CpuBoostMode.Enabled, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
     }
 
     private void SaveProfile(bool deviceEnabled, uint? gameAppId, bool gameEnabled, uint? secondGameAppId = null)

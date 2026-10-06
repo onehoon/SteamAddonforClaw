@@ -72,7 +72,7 @@ internal sealed class CpuBoostRuntime
 
     private ProfileDocument _document = new();
     private bool _persistenceWritable;
-    private Func<uint> _actualAppIdSource = static () => 0;
+    private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null;
     private CpuBoostRuntimeSnapshot _snapshot = CpuBoostRuntimeSnapshot.Empty;
 
     internal CpuBoostRuntime(ProfileStore profileStore, ICpuBoostPowerPolicy? powerPolicy = null, ProfileMutationGate? mutationGate = null)
@@ -82,11 +82,9 @@ internal sealed class CpuBoostRuntime
         _mutationGate = mutationGate ?? new ProfileMutationGate();
     }
 
-    /// <summary>Resolves the actual Steam AppID against the persisted Game/Device CPU policy.
-    /// This path deliberately does not consume routing's effective session.</summary>
-    internal void Reconcile(uint actualAppId) => _ = ReconcileWithResult(actualAppId);
+    internal void Reconcile() => _ = ReconcileWithResult();
 
-    internal CpuBoostApplyResult ReconcileWithResult(uint actualAppId)
+    internal CpuBoostApplyResult ReconcileWithResult()
     {
         lock (_mutationGate.Sync)
         {
@@ -102,15 +100,7 @@ internal sealed class CpuBoostRuntime
                 return new CpuBoostApplyResult(false, false, "Profile state is not safe to replace.");
             }
 
-            if (TryGetGameCpu(loaded.Document, actualAppId, out var gameAc, out var gameDc))
-                return ReconcileWindows(gameAc, gameDc, loaded.Document.Device.Performance.CpuBoost, "actual AppID game reconcile");
-
-            var device = loaded.Document.Device.Performance.CpuBoost;
-            if (device is { Enabled: true, Ac: { } deviceAc, Dc: { } deviceDc })
-                return ReconcileWindows(deviceAc, deviceDc, device, "actual AppID device reconcile");
-
-            RefreshSnapshotAfterApply(device, CpuBoostApplyResult.NoOp);
-            return CpuBoostApplyResult.NoOp;
+            return ReconcileDocument(loaded.Document, "active-profile reconcile");
         }
     }
 
@@ -140,9 +130,10 @@ internal sealed class CpuBoostRuntime
     /// guarantees a mutation can only ever run strictly before or strictly after startup reconcile,
     /// never interleaved with it.
     /// </summary>
-    internal void SetActualAppIdSource(Func<uint> source) => _actualAppIdSource = source ?? throw new ArgumentNullException(nameof(source));
+    internal void SetActiveProfileResolver(Func<ProfileDocument, ResolvedActiveProfile?> resolver)
+        => _activeProfileResolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
 
-    internal void StartupReconcile(uint actualAppId = 0)
+    internal void StartupReconcile()
     {
         lock (_mutationGate.Sync)
         {
@@ -163,9 +154,10 @@ internal sealed class CpuBoostRuntime
                 return;
             }
 
-            if (TryGetGameCpu(loadResult.Document, actualAppId, out var gameAc, out var gameDc))
+            var active = _activeProfileResolver(loadResult.Document);
+            if (active?.Performance.CpuBoost is { Enabled: true, Ac: { } gameAc, Dc: { } gameDc })
             {
-                ReconcileWindows(gameAc, gameDc, loadResult.Document.Device.Performance.CpuBoost, contextLabel: "game profile startup reconcile");
+                ReconcileWindows(gameAc, gameDc, loadResult.Document.Device.Performance.CpuBoost, $"{active.Value.TargetLabel} profile startup reconcile");
                 return;
             }
 
@@ -360,7 +352,7 @@ internal sealed class CpuBoostRuntime
                 _persistenceWritable = true;
             }
 
-            var applyResult = ReconcileDeviceMutation(updatedDocument, _actualAppIdSource(), mutateAc, mode);
+            var applyResult = ReconcileDeviceMutation(updatedDocument, mutateAc, mode);
 
             if (!applyResult.Succeeded)
             {
@@ -445,7 +437,7 @@ internal sealed class CpuBoostRuntime
                 _persistenceWritable = true;
             }
 
-            var applyResult = ReconcileDocument(updatedDocument, _actualAppIdSource(), "Device CPU enabled mutation");
+            var applyResult = ReconcileDocument(updatedDocument, "Device CPU enabled mutation");
 
             if (!applyResult.Succeeded)
             {
@@ -461,10 +453,11 @@ internal sealed class CpuBoostRuntime
 
     /// <summary>Resolves and applies a complete (concrete AC and DC) CPU policy to Windows and
     /// refreshes the snapshot.</summary>
-    private CpuBoostApplyResult ReconcileDocument(ProfileDocument document, uint actualAppId, string contextLabel)
+    private CpuBoostApplyResult ReconcileDocument(ProfileDocument document, string contextLabel)
     {
-        if (TryGetGameCpu(document, actualAppId, out var gameAc, out var gameDc))
-            return ReconcileWindows(gameAc, gameDc, document.Device.Performance.CpuBoost, contextLabel + " (game)");
+        var active = _activeProfileResolver(document);
+        if (active?.Performance.CpuBoost is { Enabled: true, Ac: { } gameAc, Dc: { } gameDc })
+            return ReconcileWindows(gameAc, gameDc, document.Device.Performance.CpuBoost, $"{contextLabel} ({active.Value.TargetLabel})");
 
         var device = document.Device.Performance.CpuBoost;
         if (device is not { Enabled: true, Ac: { } deviceAc, Dc: { } deviceDc })
@@ -475,10 +468,11 @@ internal sealed class CpuBoostRuntime
         return ReconcileWindows(deviceAc, deviceDc, device, contextLabel + " (device)");
     }
 
-    private CpuBoostApplyResult ReconcileDeviceMutation(ProfileDocument document, uint actualAppId, bool mutateAc, CpuBoostMode mode)
+    private CpuBoostApplyResult ReconcileDeviceMutation(ProfileDocument document, bool mutateAc, CpuBoostMode mode)
     {
-        if (TryGetGameCpu(document, actualAppId, out var gameAc, out var gameDc))
-            return ReconcileWindows(gameAc, gameDc, document.Device.Performance.CpuBoost, "Device CPU mutation (game)");
+        var active = _activeProfileResolver(document);
+        if (active?.Performance.CpuBoost is { Enabled: true, Ac: { } gameAc, Dc: { } gameDc })
+            return ReconcileWindows(gameAc, gameDc, document.Device.Performance.CpuBoost, $"Device CPU mutation ({active.Value.TargetLabel})");
 
         var device = document.Device.Performance.CpuBoost;
         if (device is not { Enabled: true })
@@ -502,21 +496,6 @@ internal sealed class CpuBoostRuntime
         var current = _powerPolicy.Read();
         UpdateSnapshot(current, device?.Ac, device?.Dc, enabled: device?.Enabled == true, applyResult.Succeeded ? null : applyResult.FailureMessage);
         return applyResult;
-    }
-
-    private static bool TryGetGameCpu(ProfileDocument document, uint actualAppId, out CpuBoostMode ac, out CpuBoostMode dc)
-    {
-        ac = default;
-        dc = default;
-        if (actualAppId == 0
-            || !document.Games.TryGetValue(actualAppId.ToString(System.Globalization.CultureInfo.InvariantCulture), out var game)
-            || !game.Enabled
-            || game.Performance.CpuBoost is not { Enabled: true } cpu)
-            return false;
-
-        ac = cpu.Ac;
-        dc = cpu.Dc;
-        return true;
     }
 
     private void RefreshSnapshotAfterApply(DeviceCpuBoostSettings? cpuBoost, CpuBoostApplyResult applyResult)

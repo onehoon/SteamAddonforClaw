@@ -136,8 +136,8 @@ public sealed class CpuBoostFrontendTests : IDisposable
             }
         });
         var runtime = new CpuBoostRuntime(store, policy);
-        runtime.SetActualAppIdSource(() => 12345);
-        runtime.StartupReconcile(12345);
+        runtime.SetActiveProfileResolver(ActiveProfileTestResolver.ForSteam(() => 12345));
+        runtime.StartupReconcile();
         var mutations = new GameProfileMutations(store);
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostEnabled(12345, false));
         var control = CreateControl(runtime, mutations, () => 12345);

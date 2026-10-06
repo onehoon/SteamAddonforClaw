@@ -31,7 +31,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private readonly MsiClawTdpHardware _hardware;
     private readonly Func<TdpPowerSource?> _powerSource;
     private readonly Func<DeviceTdpSettings?> _centerMManualSeed;
-    private Func<uint> _actualAppIdSource = static () => 0;
+    private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null;
     private readonly Lock _sync = new();
     private Task _tail = Task.CompletedTask;
     private long _authorityVersion;
@@ -43,8 +43,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private bool _accepting = true;
 
     internal TdpRuntime(ProfileStore profileStore, ProfileMutationGate mutationGate, HandheldDeviceModelId? modelId,
-        MsiClawTdpHardware hardware, Func<TdpPowerSource?>? powerSource = null, Func<DeviceTdpSettings?>? centerMManualSeed = null,
-        Func<uint>? actualAppIdSource = null)
+        MsiClawTdpHardware hardware, Func<TdpPowerSource?>? powerSource = null, Func<DeviceTdpSettings?>? centerMManualSeed = null)
     {
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _mutationGate = mutationGate ?? throw new ArgumentNullException(nameof(mutationGate));
@@ -52,10 +51,10 @@ internal sealed class TdpRuntime : IAsyncDisposable
         _hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
         _powerSource = powerSource ?? WindowsTdpPowerSource.Read;
         _centerMManualSeed = centerMManualSeed ?? (() => _modelId is { } id ? WindowsTdpCenterMManualSettings.Read(id) : null);
-        _actualAppIdSource = actualAppIdSource ?? (() => 0);
     }
 
-    internal void SetActualAppIdSource(Func<uint> source) => _actualAppIdSource = source ?? throw new ArgumentNullException(nameof(source));
+    internal void SetActiveProfileResolver(Func<ProfileDocument, ResolvedActiveProfile?> resolver)
+        => _activeProfileResolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
 
     internal TdpCommitResult SetEnabled(bool enabled)
     {
@@ -116,19 +115,33 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
     internal void ReconcileCurrent(bool forceApply, bool invalidateHardwareCache, string reason)
     {
-        if (_modelId is null) return;
+        _ = ReconcileCurrentCore(forceApply, invalidateHardwareCache, reason, completion: null);
+    }
+
+    internal Task<TdpApplyCompletion?> ReconcileCurrentWithResultAsync(bool forceApply, bool invalidateHardwareCache, string reason)
+    {
+        var completion = new TaskCompletionSource<TdpApplyCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        return ReconcileCurrentCore(forceApply, invalidateHardwareCache, reason, completion)
+            ? AwaitCompletionAsync(completion.Task)
+            : Task.FromResult<TdpApplyCompletion?>(null);
+    }
+
+    private bool ReconcileCurrentCore(bool forceApply, bool invalidateHardwareCache, string reason,
+        TaskCompletionSource<TdpApplyCompletion>? completion)
+    {
+        if (_modelId is null) return false;
 
         lock (_mutationGate.Sync)
         {
             var loaded = _profileStore.Load();
             if (!loaded.CanSafelyReplace)
-                return;
+                return false;
 
-            var tdp = ResolveEffectiveTdp(loaded.Document, _actualAppIdSource());
+            var tdp = ResolveEffectiveTdp(loaded.Document, _activeProfileResolver(loaded.Document));
 
             lock (_sync)
             {
-                if (!_accepting) return;
+                if (!_accepting) return false;
                 if (invalidateHardwareCache)
                     RequestCacheInvalidationUnderLock(reason);
                 if (tdp is null)
@@ -139,7 +152,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     RequestCacheInvalidationUnderLock("EffectiveTdpUnavailable");
                     AppLog.Debug("Profiles.Tdp", "TDP effective authority revoked",
                         ("Reason", reason), ("Action", "StopManaging"));
-                    return;
+                    return false;
                 }
 
                 var source = _powerSource();
@@ -148,23 +161,27 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     MarkReconcileRequiredUnderLock();
                     AppLog.Warn("Profiles.Tdp", "Current power source is unknown; lifecycle reconcile was not queued.",
                         null, ("Reason", reason), ("Action", "Deferred"), ("Cause", "UnknownPowerSource"));
-                    return;
+                    return false;
                 }
 
                 var realPowerBoundary = _lastAdmittedPowerSource is { } previousSource
                     && previousSource != currentSource;
                 if (!forceApply && !_reconcileRequired && !realPowerBoundary)
-                    return;
+                    return false;
 
                 if (realPowerBoundary)
                     RequestCacheInvalidationUnderLock("PowerSourceBoundary");
                 var effectiveInvalidation = _invalidateHardwareCacheBeforeNextApply;
 
                 AppLog.Debug("Profiles.Tdp", "TDP reconcile admitted", ("Reason", reason), ("Source", currentSource), ("PL1", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl1Watts), ("PL2", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl2Watts), ("Force", forceApply), ("Invalidate", effectiveInvalidation));
-                EnqueueSnapshotUnderLock(currentSource, tdp, reason);
+                EnqueueSnapshotUnderLock(currentSource, tdp, reason, completion);
+                return true;
             }
         }
     }
+
+    private static async Task<TdpApplyCompletion?> AwaitCompletionAsync(Task<TdpApplyCompletion> completion)
+        => await completion.ConfigureAwait(false);
 
     internal TdpCommitResult CommitGlobalTdp(DeviceTdpSettings settings)
     {
@@ -208,7 +225,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     ("Enabled", settings.Enabled), ("AcPL1", settings.Ac.Pl1Watts), ("AcPL2", settings.Ac.Pl2Watts),
                     ("DcPL1", settings.Dc.Pl1Watts), ("DcPL2", settings.Dc.Pl2Watts));
 
-                var effective = ResolveEffectiveTdp(updated, _actualAppIdSource());
+                var effective = ResolveEffectiveTdp(updated, _activeProfileResolver(updated));
                 if (effective is null)
                 {
                     _authorityVersion++;
@@ -300,16 +317,15 @@ internal sealed class TdpRuntime : IAsyncDisposable
         };
     }
 
-    private DeviceTdpSettings? ResolveEffectiveTdp(ProfileDocument document, uint actualAppId)
+    private DeviceTdpSettings? ResolveEffectiveTdp(ProfileDocument document, ResolvedActiveProfile? activeProfile)
     {
-        if (actualAppId > 0 && document.Games.TryGetValue(actualAppId.ToString(), out var game)
-            && game.Enabled && game.Performance.Tdp is { Enabled: true } gameTdp)
+        if (activeProfile?.Performance.Tdp is { Enabled: true } gameTdp)
         {
             if (!MsiClawTdpPolicy.TryResolve(_modelId!.Value, out var policy)
                 || !policy.IsValid(gameTdp.Ac) || !policy.IsValid(gameTdp.Dc))
             {
                 AppLog.Warn("Profiles.Tdp", "Active Game TDP is outside the current model ranges; no target was queued.", null,
-                    ("RunningAppID", actualAppId), ("Action", "Deferred"));
+                    ("ProfileTarget", activeProfile.Value.TargetLabel), ("Action", "Deferred"));
                 return null;
             }
 

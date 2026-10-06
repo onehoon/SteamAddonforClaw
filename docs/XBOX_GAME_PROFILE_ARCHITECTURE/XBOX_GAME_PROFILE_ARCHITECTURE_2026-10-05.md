@@ -1090,6 +1090,10 @@ This is a core requirement.
 
 The catalog key and persisted profile key are therefore independent of PID/process lifetime.
 
+Offline/pre-launch editing is not an offline-only policy. Main App catalog edits always persist; when the edited XBOX key is the effective active target and its profile is enabled, the same CPU Boost, TDP, Power Mode, Intel FPS, and display-resolution runtimes used by Steam apply the change live. If another Steam game is the effective target, the XBOX edit persists without changing the Steam profile's active settings.
+
+The Overlay remains Steam-current-profile UI in this phase. PR8 does not add an XBOX Overlay surface; that remains Phase X5.
+
 ---
 
 ## 15. Separate frontend contracts
@@ -2180,13 +2184,15 @@ Implement this phase as two focused PRs.
 
 #### PR8 — shared active profile target + live apply
 
-- add the one derived `ActiveProfileTarget` selection point;
+- implemented one derived `ActiveProfileTarget` convergence point;
 - priority remains Steam RunningAppID first, then production ActiveXboxGame, else None;
 - resolve Steam/XBOX persistence into one platform-neutral effective profile **before** entering CPU/TDP/Power/FPS/Resolution runtime logic;
 - reuse the exact existing CPU/TDP/Power/FPS/Resolution runtime owners for every platform;
 - feature runtimes must contain no Steam/XBOX branching and no separate platform apply path;
 - Main App active-target edits and current/future Overlay profile edits must converge on the same typed mutation/apply authority;
 - active target change / process exit / startup / resume converges to the correct profile or Device baseline;
+- Main App catalog mutations always persist; edits to the enabled effective XBOX profile reconcile live, while inactive XBOX edits remain persistence-only;
+- Overlay continues using the shared mutation/apply authority and remains without an XBOX profile surface in PR8;
 - no presentation-policy change.
 
 This split is deliberate: PR7 proves production identity ownership independently of machine-wide setting application.

@@ -1,4 +1,3 @@
-using System.Globalization;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles;
@@ -14,13 +13,14 @@ internal sealed class PowerModeRuntime
 {
     private readonly ProfileStore _store; private readonly IPowerModePolicy _policy; private readonly ProfileMutationGate _gate; private readonly Lock _sync = new();
     private PowerModeRuntimeSnapshot _snapshot = PowerModeRuntimeSnapshot.Empty;
-    private Func<uint> _actualAppIdSource = static () => 0;
+    private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null;
     internal PowerModeRuntime(ProfileStore store, IPowerModePolicy? policy = null, ProfileMutationGate? gate = null, ProfileMutationGate? mutationGate = null) { _store = store ?? throw new ArgumentNullException(nameof(store)); _policy = policy ?? new WindowsPowerModePolicy(); _gate = gate ?? mutationGate ?? new ProfileMutationGate(); }
     internal PowerModeRuntimeSnapshot Snapshot { get { lock (_sync) return _snapshot; } }
-    internal void SetActualAppIdSource(Func<uint> source) => _actualAppIdSource = source ?? throw new ArgumentNullException(nameof(source));
-    internal void StartupReconcile(uint appId = 0) => Reconcile(appId, true);
-    internal void Reconcile(uint appId) => Reconcile(appId, false);
-    internal PowerModeApplyResult ReconcileWithResult(uint appId)
+    internal void SetActiveProfileResolver(Func<ProfileDocument, ResolvedActiveProfile?> resolver)
+        => _activeProfileResolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+    internal void StartupReconcile() => Reconcile(true);
+    internal void Reconcile() => Reconcile(false);
+    internal PowerModeApplyResult ReconcileWithResult()
     {
         lock (_gate.Sync)
         {
@@ -32,7 +32,7 @@ internal sealed class PowerModeRuntime
             return applied;
         }
     }
-    private void Reconcile(uint appId, bool startup)
+    private void Reconcile(bool startup)
     {
         lock (_gate.Sync)
         {
@@ -83,8 +83,7 @@ internal sealed class PowerModeRuntime
     }
     private PowerModeApplyResult ApplyEffective(ProfileDocument document, DevicePowerModeSettings? device, bool? mutatedAcSide)
     {
-        var appId = _actualAppIdSource();
-        if (appId > 0 && document.Games.TryGetValue(appId.ToString(CultureInfo.InvariantCulture), out var game) && game.Enabled && game.Performance.PowerMode is { Enabled: true } gamePower) return _policy.Apply(gamePower.Ac, gamePower.Dc);
+        if (_activeProfileResolver(document)?.Performance.PowerMode is { Enabled: true } gamePower) return _policy.Apply(gamePower.Ac, gamePower.Dc);
         if (device is not { Enabled: true }) return PowerModeApplyResult.NoOp;
         return mutatedAcSide switch { true => _policy.Apply(device.Ac, null), false => _policy.Apply(null, device.Dc), _ => _policy.Apply(device.Ac, device.Dc) };
     }
