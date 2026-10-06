@@ -2113,7 +2113,7 @@ PR5
 → add separate XBOX page with read-only installed catalog
 ~~~
 
-The XBOX Active Game Session Diagnostic is retired only when the later production `XboxGameSessionRuntime` is implemented in X3. Do not keep a production catalog and a separate catalog diagnostic scanner in parallel.
+The XBOX Active Game Session Diagnostic is retired when PR7 promotes the field-proven detector into the production `XboxGameSessionRuntime`. Do not keep a production session owner and a parallel session diagnostic observer after that promotion.
 
 - production XboxGameIdentity model;
 - production installed-XBOX catalog scan;
@@ -2136,12 +2136,30 @@ PR6 scope is persistence + offline/pre-launch editing only:
 
 Production active-session/apply integration remains Phase X3, and per-game M1/M2 remains Phase X4.
 
-### Phase X3 — active XBOX session + shared apply target
+### Phase X3 — production active XBOX session + shared apply target
 
-- production XboxGameSessionRuntime;
-- ActiveProfileTarget;
-- refactor existing performance runtimes to resolve Steam/XBOX target without duplicating hardware implementations;
-- startup/resume/exit reconciliation.
+Implement this phase as two focused PRs.
+
+#### PR7 — production XBOX session runtime
+
+- promote the field-proven PoC B detector into one always-on Runtime-owned `XboxGameSessionRuntime`;
+- publish a minimal `ActiveXboxGame` production fact;
+- preserve event-driven WinEvent + process-generation + process-lifetime + exact MicrosoftGame.config executable matching;
+- preserve bounded startup/resume reconciliation;
+- retire the Developer XBOX Active Game Session Diagnostic UI, report, frontend contracts, and RPCs;
+- remove diagnostic-only process evidence collection that is not used by production identity;
+- do **not** read XBOX profiles or apply CPU/TDP/Power/FPS/Resolution yet;
+- do **not** add `ActiveProfileTarget` yet.
+
+#### PR8 — shared active profile target + live apply
+
+- add the one derived `ActiveProfileTarget` convergence point;
+- priority remains Steam RunningAppID first, then production ActiveXboxGame, else None;
+- refactor existing CPU/TDP/Power/FPS/Resolution runtimes to resolve Steam/XBOX target without duplicating hardware implementations;
+- active target change / process exit / startup / resume converges to the correct profile or Device baseline;
+- no presentation-policy change.
+
+This split is deliberate: PR7 proves production identity ownership independently of machine-wide setting application.
 
 ### Phase X4 — per-game M1/M2
 
