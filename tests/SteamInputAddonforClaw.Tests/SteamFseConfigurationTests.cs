@@ -362,16 +362,78 @@ public sealed class SteamFseConfigurationTests
     }
 
     [Fact]
-    public void Uninstall_cleanup_clears_windows_state_and_removes_only_owned_package()
+    public void Uninstall_cleanup_clears_windows_state_only_when_owned_home_is_selected()
     {
         var store = new FakeConfigurationStore { GamingHomeApp = SteamAumid, StartupToGamingHome = true };
-        var package = new FakePackageProbe(Package("owned_family", "1.0.0.0"));
+        var package = new FakePackageProbe(Package(SteamAumid[..^4], "1.0.0.0"));
 
         var cleaned = CreateConfiguration(store: store, package: package).TryCleanupForUninstall();
 
         Assert.True(cleaned);
         Assert.Null(store.GamingHomeApp);
         Assert.False(store.StartupToGamingHome);
+        Assert.Equal(1, package.RemoveCalls);
+    }
+
+    [Fact]
+    public void Uninstall_cleanup_preserves_xbox_home_and_removes_owned_package()
+    {
+        var store = new FakeConfigurationStore { GamingHomeApp = XboxAumid, StartupToGamingHome = true };
+        var package = new FakePackageProbe(Package(SteamAumid[..^4], "1.0.0.0"));
+
+        var cleaned = CreateConfiguration(store: store, package: package).TryCleanupForUninstall();
+
+        Assert.True(cleaned);
+        Assert.Equal(XboxAumid, store.GamingHomeApp);
+        Assert.True(store.StartupToGamingHome);
+        Assert.Empty(store.Writes);
+        Assert.Equal(1, package.RemoveCalls);
+    }
+
+    [Fact]
+    public void Uninstall_cleanup_preserves_external_home_and_removes_owned_package()
+    {
+        const string externalAumid = "ExternalLauncher_family!App";
+        var store = new FakeConfigurationStore { GamingHomeApp = externalAumid, StartupToGamingHome = true };
+        var package = new FakePackageProbe(Package(SteamAumid[..^4], "1.0.0.0"));
+
+        var cleaned = CreateConfiguration(store: store, package: package).TryCleanupForUninstall();
+
+        Assert.True(cleaned);
+        Assert.Equal(externalAumid, store.GamingHomeApp);
+        Assert.True(store.StartupToGamingHome);
+        Assert.Empty(store.Writes);
+        Assert.Equal(1, package.RemoveCalls);
+    }
+
+    [Fact]
+    public void Uninstall_cleanup_preserves_home_when_owned_package_cannot_be_verified_and_still_removes_package()
+    {
+        var store = new FakeConfigurationStore { GamingHomeApp = SteamAumid, StartupToGamingHome = true };
+        var package = new FakePackageProbe(null, succeeded: false);
+
+        var cleaned = CreateConfiguration(store: store, package: package).TryCleanupForUninstall();
+
+        Assert.True(cleaned);
+        Assert.Equal(SteamAumid, store.GamingHomeApp);
+        Assert.True(store.StartupToGamingHome);
+        Assert.Empty(store.Writes);
+        Assert.Equal(1, package.RemoveCalls);
+    }
+
+    [Fact]
+    public void Uninstall_cleanup_does_not_treat_a_foreign_package_with_the_same_family_as_owned()
+    {
+        var store = new FakeConfigurationStore { GamingHomeApp = SteamAumid, StartupToGamingHome = true };
+        var foreignPackage = new SteamFsePackageInfo("OtherPackage", SteamAumid[..^4], "other-full-name", new Version(9, 0));
+        var package = new FakePackageProbe(foreignPackage);
+
+        var cleaned = CreateConfiguration(store: store, package: package).TryCleanupForUninstall();
+
+        Assert.True(cleaned);
+        Assert.Equal(SteamAumid, store.GamingHomeApp);
+        Assert.True(store.StartupToGamingHome);
+        Assert.Empty(store.Writes);
         Assert.Equal(1, package.RemoveCalls);
     }
 

@@ -424,8 +424,18 @@ internal sealed class WindowsGamingHomeConfiguration
         var configurationCleaned = true;
         try
         {
-            _configuration.DeleteGamingHomeApp();
-            _configuration.WriteStartupToGamingHome(false);
+            var current = CaptureRawState();
+            var inspection = _packageProbe.Inspect();
+            var package = inspection.Succeeded
+                && string.Equals(inspection.Package?.IdentityName, SteamFsePackageContract.PackageIdentityName, StringComparison.Ordinal)
+                    ? inspection.Package
+                    : null;
+            var ownedAumid = WindowsSteamFsePackageProbe.TryGetAumid(package);
+            if (ownedAumid is not null && string.Equals(current.GamingHomeApp, ownedAumid, StringComparison.Ordinal))
+            {
+                _configuration.DeleteGamingHomeApp();
+                _configuration.WriteStartupToGamingHome(false);
+            }
         }
         catch (Exception exception)
         {
@@ -433,7 +443,8 @@ internal sealed class WindowsGamingHomeConfiguration
             AppLog.Warn("Uninstall", "Gaming Home GamingConfiguration cleanup failed.", exception);
         }
 
-        return configurationCleaned && _packageProbe.TryRemoveOwnedPackage();
+        var packageRemoved = _packageProbe.TryRemoveOwnedPackage();
+        return configurationCleaned && packageRemoved;
     }
 
     private (string? GamingHomeApp, bool StartupToGamingHome) CaptureRawState() =>
