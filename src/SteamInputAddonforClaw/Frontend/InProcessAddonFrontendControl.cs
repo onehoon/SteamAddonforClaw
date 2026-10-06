@@ -95,7 +95,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _startXbox360RumbleLoopDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendXbox360RumbleLoopSnapshot>>? _stopXbox360RumbleLoopDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendPid1902InputCadenceResult>>? _runPid1902InputCadenceDiagnostic;
-    private readonly Func<CancellationToken, Task<FrontendXboxCatalogDiagnosticResult>> _runXboxCatalogDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? _captureXboxSessionDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? _startXboxSessionDiagnostic;
     private readonly Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? _stopXboxSessionDiagnostic;
@@ -150,7 +149,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         bool controllerLedAvailable = false,
         Func<ControllerLedSettings, CancellationToken, Task>? applyControllerLedSettings = null,
         Func<ControllerVibrationSettings, CancellationToken, Task<bool>>? applyControllerVibrationSettings = null,
-        Func<CancellationToken, Task<FrontendXboxCatalogDiagnosticResult>>? runXboxCatalogDiagnostic = null,
         Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? captureGameInputSystemButtonProbe = null,
         Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? startGameInputSystemButtonProbe = null,
         Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? stopGameInputSystemButtonProbe = null,
@@ -186,7 +184,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _startXbox360RumbleLoopDiagnostic = startXbox360RumbleLoopDiagnostic;
         _stopXbox360RumbleLoopDiagnostic = stopXbox360RumbleLoopDiagnostic;
         _runPid1902InputCadenceDiagnostic = runPid1902InputCadenceDiagnostic;
-        _runXboxCatalogDiagnostic = runXboxCatalogDiagnostic ?? (_ => Task.FromResult(FrontendXboxCatalogDiagnosticResult.Unavailable("XBOX catalog diagnostic is unavailable.")));
         _captureGameInputSystemButtonProbe = captureGameInputSystemButtonProbe;
         _startGameInputSystemButtonProbe = startGameInputSystemButtonProbe;
         _stopGameInputSystemButtonProbe = stopGameInputSystemButtonProbe;
@@ -1284,13 +1281,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             AppLog.Warn("EnvironmentDiscovery", "Environment discovery report generation failed.", exception, ("Reason", exception.GetType().Name));
             return new(false, exception.Message);
         }
-    }
-
-    public Task<FrontendXboxCatalogDiagnosticResult> RunXboxCatalogDiagnosticAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return _runXboxCatalogDiagnostic(cancellationToken);
     }
 
     public Task<FrontendXboxSessionDiagnosticSnapshot> CaptureXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default)

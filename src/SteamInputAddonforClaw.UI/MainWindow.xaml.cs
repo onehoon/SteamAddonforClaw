@@ -103,7 +103,6 @@ public sealed partial class MainWindow : Window
         DeveloperMenuContent.SensorProbeRequested += (_, _) => ShowPage(_navigationState.OpenClawSensorProbe());
         DeveloperMenuContent.FanHardwareProbeRequested += (_, _) => ShowPage(_navigationState.OpenFanHardwareProbe());
         DeveloperMenuContent.BatteryChargeLimitTestRequested += (_, _) => ShowPage(_navigationState.OpenBatteryChargeLimitTest());
-        DeveloperMenuContent.XboxCatalogDiagnosticRequested += (_, _) => ShowPage(_navigationState.OpenXboxCatalogDiagnostic());
         DeveloperMenuContent.XboxSessionDiagnosticRequested += (_, _) => ShowPage(_navigationState.OpenXboxSessionDiagnostic());
         DeveloperMenuContent.GameInputSystemButtonProbeRequested += (_, _) => ShowPage(_navigationState.OpenGameInputSystemButtonProbe());
         ClawSensorProbeContent.Initialize(_frontend);
@@ -112,8 +111,6 @@ public sealed partial class MainWindow : Window
         FanHardwareProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         BatteryChargeLimitTestContent.Initialize(_frontend);
         BatteryChargeLimitTestContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        XboxCatalogDiagnosticContent.Initialize(_frontend);
-        XboxCatalogDiagnosticContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         XboxSessionDiagnosticContent.Initialize(_frontend);
         XboxSessionDiagnosticContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         GameInputSystemButtonProbeContent.Initialize(_frontend);
@@ -276,7 +273,6 @@ public sealed partial class MainWindow : Window
         var wasClawSensorProbe = ClawSensorProbeContent.Visibility == Visibility.Visible;
         var wasFanHardwareProbe = FanHardwareProbeContent.Visibility == Visibility.Visible;
         var wasBatteryChargeLimitTest = BatteryChargeLimitTestContent.Visibility == Visibility.Visible;
-        var wasXboxCatalogDiagnostic = XboxCatalogDiagnosticContent.Visibility == Visibility.Visible;
         var wasXboxSessionDiagnostic = XboxSessionDiagnosticContent.Visibility == Visibility.Visible;
         var wasGameInputSystemButtonProbe = GameInputSystemButtonProbeContent.Visibility == Visibility.Visible;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
@@ -291,7 +287,6 @@ public sealed partial class MainWindow : Window
         ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
         FanHardwareProbeContent.Visibility = page == MainNavigationPage.FanHardwareProbe ? Visibility.Visible : Visibility.Collapsed;
         BatteryChargeLimitTestContent.Visibility = page == MainNavigationPage.BatteryChargeLimitTest ? Visibility.Visible : Visibility.Collapsed;
-        XboxCatalogDiagnosticContent.Visibility = page == MainNavigationPage.XboxCatalogDiagnostic ? Visibility.Visible : Visibility.Collapsed;
         XboxSessionDiagnosticContent.Visibility = page == MainNavigationPage.XboxSessionDiagnostic ? Visibility.Visible : Visibility.Collapsed;
         GameInputSystemButtonProbeContent.Visibility = page == MainNavigationPage.GameInputSystemButtonProbe ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
@@ -314,8 +309,6 @@ public sealed partial class MainWindow : Window
         else if (wasFanHardwareProbe) FanHardwareProbeContent.Deactivate();
         if (page == MainNavigationPage.BatteryChargeLimitTest) BatteryChargeLimitTestContent.Activate();
         else if (wasBatteryChargeLimitTest) BatteryChargeLimitTestContent.Deactivate();
-        if (page == MainNavigationPage.XboxCatalogDiagnostic) XboxCatalogDiagnosticContent.Activate();
-        else if (wasXboxCatalogDiagnostic) XboxCatalogDiagnosticContent.Deactivate();
         if (page == MainNavigationPage.XboxSessionDiagnostic) XboxSessionDiagnosticContent.Activate();
         else if (wasXboxSessionDiagnostic) XboxSessionDiagnosticContent.Deactivate();
         if (page == MainNavigationPage.GameInputSystemButtonProbe) GameInputSystemButtonProbeContent.Activate();

@@ -100,17 +100,6 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
-    public void DeveloperMenu_opens_xbox_catalog_diagnostic_and_returns_to_developer_menu()
-    {
-        var navigation = new MainNavigationState();
-
-        navigation.OpenDeveloperMenu();
-        Assert.Equal(MainNavigationPage.XboxCatalogDiagnostic, navigation.OpenXboxCatalogDiagnostic());
-        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
-        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.ReturnToDeveloperMenu());
-    }
-
-    [Fact]
     public void DeveloperMenu_opens_gameinput_system_button_probe_and_mouse_back_returns_to_developer_menu()
     {
         var navigation = new MainNavigationState();
@@ -136,8 +125,6 @@ public sealed class MainNavigationStateTests
         navigation.OpenBatteryChargeLimitTest();
         Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
 
-        navigation.OpenXboxCatalogDiagnostic();
-        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
     }
 
     [Fact]

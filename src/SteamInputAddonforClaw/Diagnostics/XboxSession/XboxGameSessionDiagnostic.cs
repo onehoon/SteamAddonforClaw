@@ -1,7 +1,7 @@
 using System.Text;
 using System.Threading.Channels;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
+using SteamInputAddonforClaw.Xbox;
 
 namespace SteamInputAddonforClaw.Diagnostics.XboxSession;
 

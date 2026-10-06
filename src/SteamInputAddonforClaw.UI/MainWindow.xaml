@@ -71,7 +71,6 @@
             <views:ClawSensorProbePage x:Name="ClawSensorProbeContent" Visibility="Collapsed" />
             <views:FanHardwareProbePage x:Name="FanHardwareProbeContent" Visibility="Collapsed" />
             <views:BatteryChargeLimitTestPage x:Name="BatteryChargeLimitTestContent" Visibility="Collapsed" />
-            <views:XboxCatalogDiagnosticPage x:Name="XboxCatalogDiagnosticContent" Visibility="Collapsed" />
             <views:XboxSessionDiagnosticPage x:Name="XboxSessionDiagnosticContent" Visibility="Collapsed" />
             <views:GameInputSystemButtonProbePage x:Name="GameInputSystemButtonProbeContent" Visibility="Collapsed" />
         </Grid>

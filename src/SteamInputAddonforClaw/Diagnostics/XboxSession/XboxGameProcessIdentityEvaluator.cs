@@ -1,5 +1,5 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
+using SteamInputAddonforClaw.Xbox;
 
 namespace SteamInputAddonforClaw.Diagnostics.XboxSession;
 
@@ -178,7 +178,7 @@ internal static class XboxGameProcessIdentityEvaluator
                     return Negative(XboxGameProcessInspectionDisposition.ProcessImageFailure, "The process exited before its identity evidence was complete.");
 
                 var game = new FrontendXboxSessionDiagnosticGame(
-                    XboxCatalogDiagnostic.CreateCandidateKey(read.Config.StoreId, evidence.PackageFamilyName, read.Config),
+                    XboxGameIdentity.CreateKey(read.Config.StoreId, evidence.PackageFamilyName, read.Config),
                     generation.ProcessId,
                     evidence.RunningProcessPath,
                     runningExecutableName,

@@ -1,9 +1,9 @@
 using System.Xml;
 using System.Xml.Linq;
 
-namespace SteamInputAddonforClaw.Diagnostics.XboxCatalog;
+namespace SteamInputAddonforClaw.Xbox;
 
-internal sealed record XboxCatalogExecutable(string Name, string? Id, string? TargetDeviceFamily, string? Architecture);
+internal sealed record XboxGameExecutable(string Name, string? Id, string? TargetDeviceFamily, string? Architecture);
 
 internal sealed record MicrosoftGameConfig(
     string? DefaultDisplayName,
@@ -12,7 +12,7 @@ internal sealed record MicrosoftGameConfig(
     string? IdentityResourceId,
     string? StoreId,
     string? TitleId,
-    IReadOnlyList<XboxCatalogExecutable> Executables);
+    IReadOnlyList<XboxGameExecutable> Executables);
 
 internal sealed record MicrosoftGameConfigReadResult(
     bool XmlParsed,
@@ -53,7 +53,14 @@ internal static class MicrosoftGameConfigReader
     internal static MicrosoftGameConfigReadResult Parse(string xml)
     {
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml));
-        var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 2_000_000 };
+        var settings = new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            MaxCharactersInDocument = 2_000_000,
+            MaxCharactersFromEntities = 0,
+        };
+
         try
         {
             using var reader = XmlReader.Create(stream, settings);
@@ -81,7 +88,7 @@ internal static class MicrosoftGameConfigReader
         var executables = Child(root, "ExecutableList")?
             .Elements()
             .Where(element => string.Equals(element.Name.LocalName, "Executable", StringComparison.Ordinal))
-            .Select(element => new XboxCatalogExecutable(
+            .Select(element => new XboxGameExecutable(
                 Attribute(element, "Name") ?? string.Empty,
                 Attribute(element, "Id"),
                 Attribute(element, "TargetDeviceFamily"),
