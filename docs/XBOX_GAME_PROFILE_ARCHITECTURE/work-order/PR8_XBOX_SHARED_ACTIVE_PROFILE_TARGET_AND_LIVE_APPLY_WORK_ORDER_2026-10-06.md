@@ -698,7 +698,37 @@ effective Steam profile
 
 ---
 
-## 18. Live XBOX profile mutations
+## 18. Frontend surface contract and live XBOX profile mutations
+
+Main App and Overlay are different editing surfaces, not different apply authorities.
+
+Required product semantics:
+
+~~~text
+Main App
+→ may select any installed profile
+→ persist selected profile changes
+→ if selected profile == current effective profile: live reconcile
+→ otherwise: persistence only
+
+Overlay
+→ active-game/current-profile oriented
+→ uses the same typed frontend mutation authority
+→ uses the same shared runtime apply path
+~~~
+
+PR8 does not add XBOX profile UI to Overlay; that remains a later phase. However, PR8 must preserve the shared mutation/apply architecture so future XBOX Overlay projection can bind to the same authority without another hardware path.
+
+Forbidden:
+
+~~~text
+Main App apply implementation
+Overlay apply implementation
+Steam apply implementation
+XBOX apply implementation
+~~~
+
+There is one persistence/mutation authority and one shared feature-runtime apply path.
 
 Current XBOX mutations are persistence-only.
 
@@ -751,6 +781,20 @@ persist succeeds
 
 ## 19. Steam mutation behavior is regression-locked
 
+The existing Steam behavior defines the surface semantics that XBOX should match:
+
+~~~text
+Main App edits inactive Steam profile
+→ persistence only
+
+Main App edits currently active Steam profile
+→ persistence + live reconcile
+
+Overlay edits current Steam profile
+→ same typed mutation APIs
+→ same live reconcile
+~~~
+
 Do not redesign Steam frontend mutation APIs.
 
 Keep:
@@ -767,7 +811,31 @@ Inactive Steam mutations remain persistence-only.
 
 ---
 
-## 20. Frontend protocol
+## 20. README and architecture documentation
+
+Update README.md in the implementation PR so it no longer states that XBOX profile changes never apply live.
+
+The README must distinguish:
+
+~~~text
+offline/pre-launch editing capability
+≠ offline-only apply policy
+~~~
+
+Required wording/meaning:
+
+- XBOX profiles remain editable before launch and while inactive;
+- inactive-profile edits only persist;
+- editing the currently effective XBOX profile performs live reconciliation;
+- Steam and XBOX use platform-specific detection/identity;
+- after profile resolution, both platforms use the same CPU/TDP/Power/FPS/Resolution runtime owners;
+- Main App and Overlay are frontend surfaces over the same mutation/apply authority.
+
+Keep the architecture authority synchronized with this rule.
+
+---
+
+## 21. Frontend protocol
 
 No new RPC or schema.
 
@@ -779,7 +847,7 @@ FrontendTransportProtocol.CurrentVersion = 58
 
 ---
 
-## 21. Logging
+## 22. Logging
 
 Platform identity belongs in resolver/host diagnostic context.
 
@@ -799,7 +867,7 @@ Steam detector-specific RunningAppID logs remain unchanged.
 
 ---
 
-## 22. Expected files
+## 23. Expected files
 
 Likely:
 
@@ -823,9 +891,9 @@ Do not duplicate runtime ownership.
 
 ---
 
-## 23. Required tests
+## 24. Required tests
 
-### 23.1 Resolver
+### 24.1 Resolver
 
 Required:
 
@@ -838,7 +906,7 @@ Required:
 7. Steam ends while XBOX remains live → XBOX resolves.
 8. both source types project to the same GamePerformanceOverrides / GameDisplayOverrides view.
 
-### 23.2 Platform-neutral runtime equivalence
+### 24.2 Platform-neutral runtime equivalence
 
 For each feature:
 
@@ -851,7 +919,7 @@ XBOX-resolved profile X
 
 There must be no XBOX-specific runtime path in the test.
 
-### 23.3 Steam regressions
+### 24.3 Steam regressions
 
 Required:
 
@@ -862,7 +930,7 @@ Required:
 - Steam RunningAppID authority unchanged;
 - Steam/BPM presentation unchanged.
 
-### 23.4 XBOX live apply
+### 24.4 XBOX live apply
 
 Required:
 
@@ -873,7 +941,7 @@ Required:
 - Resolution;
 - process exit Device/global convergence.
 
-### 23.5 Lifecycle
+### 24.5 Lifecycle
 
 Required:
 
@@ -884,7 +952,7 @@ Required:
 - XBOX process exit;
 - XBOX → Steam → XBOX transition.
 
-### 23.6 XBOX mutations
+### 24.6 XBOX mutations
 
 Extend XboxGameProfileFrontendTests.
 
@@ -904,7 +972,7 @@ Do not add pathological timing-race tests outside supported lifecycle.
 
 ---
 
-## 24. Manual MSI Claw validation
+## 25. Manual MSI Claw validation
 
 Validate one field-proven XBOX title.
 
@@ -944,7 +1012,7 @@ Steam ends, XBOX still alive
 
 ---
 
-## 25. Explicit non-goals
+## 26. Explicit non-goals
 
 Do not implement:
 
@@ -968,7 +1036,7 @@ Do not implement:
 
 ---
 
-## 26. Overengineering constraints
+## 27. Overengineering constraints
 
 Preferred:
 
@@ -1005,7 +1073,7 @@ Do not add locks/epochs/state machines for theoretical interleavings.
 
 ---
 
-## 27. Source-audit requirements
+## 28. Source-audit requirements
 
 Before PR submission verify:
 
@@ -1027,6 +1095,12 @@ no feature runtime contains:
     ProfileDocument.Games versus XboxGames selection
     XboxGameSessionRuntime access
     SteamSessionRuntime access
+
+no frontend surface contains direct hardware apply logic:
+    Main App
+    Overlay
+
+Main App and Overlay dispatch through the same typed frontend mutation authority
 
 platform collection selection exists only in active-profile resolution
 
@@ -1050,7 +1124,7 @@ git diff --check
 
 ---
 
-## 28. Completion condition
+## 29. Completion condition
 
 PR8 is complete only when:
 
