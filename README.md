@@ -51,7 +51,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - Configurable WING / Gamebar and Center M actions for Normal and Steam presentation modes
 - Device-level CPU Boost, Windows 11 Power Mode, and TDP control as independent features
 - Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles as independent features
-- A separate read-only catalog of installed XBOX games
+- A separate installed XBOX game catalog with offline profile editing
 - Event-driven Steam game detection without periodic game/process polling
 - Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls
@@ -175,7 +175,7 @@ Disabling a profile does not erase its settings.
 
 ## XBOX tab
 
-The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only and supports search and manual refresh. This catalog is read-only; XBOX profile editing and per-game performance settings are not available yet.
+The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only, supports search and manual refresh, and lets you save Favorite, Profile Enabled, CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and resolution settings by the game's canonical identity. These settings are persisted for offline/pre-launch editing; XBOX profile changes do not apply live to a running game yet.
 
 ### Device and Profile priority
 

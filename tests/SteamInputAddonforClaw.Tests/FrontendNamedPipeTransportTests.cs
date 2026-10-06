@@ -67,7 +67,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(fake.XboxSessionDiagnosticSnapshot, await client.CaptureXboxSessionDiagnosticAsync(), strict: true);
         Assert.Equal(FrontendXboxSessionDiagnosticState.Running, (await client.StartXboxSessionDiagnosticAsync()).State);
         Assert.Equal(FrontendXboxSessionDiagnosticState.Stopped, (await client.StopXboxSessionDiagnosticAsync()).State);
@@ -93,11 +93,59 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
         Assert.Equal(1, fake.XboxGameCatalogScanCount);
+    }
+
+    [Fact]
+    public async Task Xbox_profile_capture_and_persistence_mutations_round_trip_string_keys_and_values()
+    {
+        const string key = "identity:SAMPLE.GAME|CN%3DSAMPLE|PC";
+        var profile = new FrontendXboxGameProfileSnapshot(key, "Sample Game", true, true,
+            new(true, CpuBoostMode.Aggressive, CpuBoostMode.Disabled),
+            new(true, new(25, 30), new(18, 24)), true, new(8, 30, 8, 37),
+            new(1920, 1200), new(true, WindowsPowerMode.BestPerformance, WindowsPowerMode.Balanced),
+            new(true, 90, 60, true));
+        var fake = new RecordingFrontendControl { XboxGameProfileSnapshot = profile };
+        fake.SetXboxMutationResult(profile);
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        Assert.Equal(profile, await client.CaptureXboxGameProfileAsync(key));
+        Assert.True((await client.SetXboxGameProfileFavoriteAsync(key, true, "Sample Game")).Succeeded);
+        Assert.Equal((key, true, "Sample Game"), fake.LastXboxFavorite);
+        Assert.True((await client.SetXboxGameProfileEnabledAsync(key, true, "Sample Game")).Succeeded);
+        Assert.Equal((key, true, "Sample Game"), fake.LastXboxEnabled);
+        Assert.True((await client.SetXboxGameProfileCpuBoostEnabledAsync(key, false)).Succeeded);
+        Assert.Equal((key, false), fake.LastXboxCpuEnabled);
+        Assert.True((await client.SetXboxGameProfileCpuBoostAcAsync(key, CpuBoostMode.EfficientAggressive)).Succeeded);
+        Assert.Equal((key, CpuBoostMode.EfficientAggressive), fake.LastXboxCpuAc);
+        Assert.True((await client.SetXboxGameProfileCpuBoostDcAsync(key, CpuBoostMode.EfficientEnabled)).Succeeded);
+        Assert.Equal((key, CpuBoostMode.EfficientEnabled), fake.LastXboxCpuDc);
+        Assert.True((await client.SetXboxGameProfileTdpEnabledAsync(key, false)).Succeeded);
+        Assert.Equal((key, false), fake.LastXboxTdpEnabled);
+        var tdp = new FrontendGameTdpConfiguration(true, new(26, 31), new(17, 23));
+        Assert.True((await client.SetXboxGameProfileTdpAsync(key, tdp)).Succeeded);
+        Assert.Equal((key, tdp), fake.LastXboxTdp);
+        Assert.True((await client.SetXboxGameProfilePowerModeEnabledAsync(key, true)).Succeeded);
+        Assert.Equal((key, true), fake.LastXboxPowerEnabled);
+        Assert.True((await client.SetXboxGameProfilePowerModeAcAsync(key, WindowsPowerMode.Balanced)).Succeeded);
+        Assert.Equal((key, WindowsPowerMode.Balanced), fake.LastXboxPowerAc);
+        Assert.True((await client.SetXboxGameProfilePowerModeDcAsync(key, WindowsPowerMode.BestPerformance)).Succeeded);
+        Assert.Equal((key, WindowsPowerMode.BestPerformance), fake.LastXboxPowerDc);
+        Assert.True((await client.SetXboxGameProfileFpsLimitEnabledAsync(key, true)).Succeeded);
+        Assert.Equal((key, true), fake.LastXboxFpsEnabled);
+        Assert.True((await client.SetXboxGameProfileFpsLimitAcAsync(key, 100)).Succeeded);
+        Assert.Equal((key, 100), fake.LastXboxFpsAc);
+        Assert.True((await client.SetXboxGameProfileFpsLimitDcAsync(key, 55)).Succeeded);
+        Assert.Equal((key, 55), fake.LastXboxFpsDc);
+        Assert.True((await client.SetXboxGameProfileResolutionAsync(key, new(1680, 1050), "Sample Game")).Succeeded);
+        Assert.Equal((key, new FrontendGameResolution(1680, 1050), "Sample Game"), fake.LastXboxResolution);
+        Assert.Equal(15, fake.XboxProfileOperationCount);
     }
 
     [Fact]
@@ -143,7 +191,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -187,7 +235,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -240,7 +288,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -260,7 +308,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -284,7 +332,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -297,7 +345,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.GameInputProbeSnapshot, await client.CaptureGameInputSystemButtonProbeAsync());
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.StartGameInputSystemButtonProbeAsync()).State);
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.CaptureGameInputSystemButtonProbeAsync()).State);
@@ -335,7 +383,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.IntelGpuProbeSnapshot, await client.CaptureIntelGpuFrequencyProbeAsync());
 
         var frequency = await client.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.SetMaxMax);
@@ -404,7 +452,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(56, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
         var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
@@ -772,13 +820,14 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task A_v55_frontend_peer_is_rejected_by_the_v56_server()
+    public async Task A_v56_frontend_peer_is_rejected_by_the_v57_server()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
         await using var serverLifetime = server;
         await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
+        Assert.Equal(57, FrontendTransportProtocol.CurrentVersion);
         await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
     }
 
@@ -1665,13 +1714,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 56 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 57 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":56,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":56,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":56,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":57,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":57,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":57,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1716,6 +1765,10 @@ public sealed class FrontendNamedPipeTransportTests
     [InlineData("StartXboxSessionDiagnostic", "{}")]
     [InlineData("StopXboxSessionDiagnostic", "{}")]
     [InlineData("GenerateXboxSessionDiagnosticReport", "{}")]
+    [InlineData("CaptureXboxGameProfile", "{}")]
+    [InlineData("SetXboxGameProfileFavorite", "{}")]
+    [InlineData("SetXboxGameProfileCpuBoostAc", "{\"Key\":\"store:sample\",\"Mode\":\"Bogus\"}")]
+    [InlineData("SetXboxGameProfileTdp", "{\"Key\":\"store:sample\"}")]
     public async Task Malformed_mutation_payload_is_rejected_without_invoking_frontend(string method, string payload)
     {
         var fake = new RecordingFrontendControl();
@@ -1980,6 +2033,26 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendXboxGameCatalogSnapshot XboxGameCatalogSnapshot { get; set; } =
             new(FrontendXboxGameCatalogOutcome.Ready, [], null);
         public int XboxGameCatalogScanCount { get; private set; }
+        public FrontendXboxGameProfileSnapshot XboxGameProfileSnapshot { get; set; } = new("store:test", "Test", true, true,
+            new(true, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(true, new(20, 22), new(20, 22)), true, null);
+        private FrontendXboxGameProfileMutationResult XboxGameProfileMutationResult { get; set; } = null!;
+        public int XboxProfileOperationCount { get; private set; }
+        public (string Key, bool Favorite, string? DisplayName)? LastXboxFavorite { get; private set; }
+        public (string Key, bool Enabled, string? DisplayName)? LastXboxEnabled { get; private set; }
+        public (string Key, bool Enabled)? LastXboxCpuEnabled { get; private set; }
+        public (string Key, CpuBoostMode Mode)? LastXboxCpuAc { get; private set; }
+        public (string Key, CpuBoostMode Mode)? LastXboxCpuDc { get; private set; }
+        public (string Key, bool Enabled)? LastXboxTdpEnabled { get; private set; }
+        public (string Key, FrontendGameTdpConfiguration Configuration)? LastXboxTdp { get; private set; }
+        public (string Key, bool Enabled)? LastXboxPowerEnabled { get; private set; }
+        public (string Key, WindowsPowerMode Mode)? LastXboxPowerAc { get; private set; }
+        public (string Key, WindowsPowerMode Mode)? LastXboxPowerDc { get; private set; }
+        public (string Key, bool Enabled)? LastXboxFpsEnabled { get; private set; }
+        public (string Key, int Fps)? LastXboxFpsAc { get; private set; }
+        public (string Key, int Fps)? LastXboxFpsDc { get; private set; }
+        public (string Key, FrontendGameResolution? Resolution, string? DisplayName)? LastXboxResolution { get; private set; }
+        public void SetXboxMutationResult(FrontendXboxGameProfileSnapshot snapshot) =>
+            XboxGameProfileMutationResult = new(FrontendGameProfileMutationOutcome.Succeeded, null, snapshot);
         public int XboxSessionDiagnosticStartCount { get; private set; }
         public int XboxSessionDiagnosticStopCount { get; private set; }
         public int XboxSessionDiagnosticReportCount { get; private set; }
@@ -2080,6 +2153,41 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastEnabled = enabled; return Task.FromResult(CpuBoostMutationResult); }
         public Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([new(12345, "Test Game", FrontendProfileGameSource.Steam)]); }
         public Task<FrontendXboxGameCatalogSnapshot> ScanXboxGamesAsync(CancellationToken t = default) { TotalCalls++; XboxGameCatalogScanCount++; return Task.FromResult(XboxGameCatalogSnapshot); }
+        public Task<FrontendXboxGameProfileSnapshot> CaptureXboxGameProfileAsync(string key, CancellationToken t = default)
+        { TotalCalls++; XboxProfileOperationCount++; return Task.FromResult(XboxGameProfileSnapshot with { Key = key }); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFavoriteAsync(string key, bool favorite, string? displayName, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxFavorite = (key, favorite, displayName));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledAsync(string key, bool enabled, string? displayName, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxEnabled = (key, enabled, displayName));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostEnabledAsync(string key, bool enabled, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxCpuEnabled = (key, enabled));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostAcAsync(string key, CpuBoostMode mode, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxCpuAc = (key, mode));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostDcAsync(string key, CpuBoostMode mode, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxCpuDc = (key, mode));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileTdpEnabledAsync(string key, bool enabled, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxTdpEnabled = (key, enabled));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileTdpAsync(string key, FrontendGameTdpConfiguration configuration, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxTdp = (key, configuration));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeEnabledAsync(string key, bool enabled, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxPowerEnabled = (key, enabled));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeAcAsync(string key, WindowsPowerMode mode, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxPowerAc = (key, mode));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeDcAsync(string key, WindowsPowerMode mode, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxPowerDc = (key, mode));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitEnabledAsync(string key, bool enabled, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxFpsEnabled = (key, enabled));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitAcAsync(string key, int fps, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxFpsAc = (key, fps));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitDcAsync(string key, int fps, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxFpsDc = (key, fps));
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken t = default) =>
+            RecordXboxMutation(key, () => LastXboxResolution = (key, resolution, displayName));
+        private Task<FrontendXboxGameProfileMutationResult> RecordXboxMutation(string key, Action record)
+        {
+            TotalCalls++; XboxProfileOperationCount++; record();
+            return Task.FromResult(XboxGameProfileMutationResult with { Snapshot = XboxGameProfileSnapshot with { Key = key } });
+        }
         public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; return Task.FromResult(GameProfile with { AppId = appId }); }
         public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; return Task.FromResult(GameMutationResult); }
         public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostEnabledAsync(uint appId, bool enabled, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameCpuEnabled = enabled; return Task.FromResult(GameMutationResult); }

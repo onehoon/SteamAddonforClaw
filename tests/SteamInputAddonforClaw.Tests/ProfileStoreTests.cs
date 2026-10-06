@@ -593,6 +593,83 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.False(store.Load().Document.Games.ContainsKey("123"));
     }
 
+    [Fact]
+    public void Load_LegacySchemaOneWithoutXboxGamesDefaultsToEmptyAndKeepsSchema()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, "{\"schemaVersion\":1,\"device\":{},\"games\":{\"570\":{\"displayName\":\"Dota 2\"}}}");
+
+        var loaded = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Equal(ProfileLoadStatus.Loaded, loaded.Status);
+        Assert.Equal(1, loaded.Document.SchemaVersion);
+        Assert.Empty(loaded.Document.XboxGames);
+        Assert.Equal("Dota 2", loaded.Document.Games["570"].DisplayName);
+    }
+
+    [Fact]
+    public void SaveAndLoad_RoundTripsSteamAndXboxCollectionsIndependentlyWithExactXboxKeys()
+    {
+        var document = new ProfileDocument
+        {
+            Games = new Dictionary<string, GameProfile> { ["570"] = new() { DisplayName = "Dota 2", Favorite = true } },
+            XboxGames = new Dictionary<string, XboxGameProfile>
+            {
+                ["store:9PK8PHLCQDF6"] = new() { DisplayName = "Aniimo Legend", Favorite = true },
+                ["identity:SAMPLE.GAME|CN%3DSAMPLE|PC"] = new() { DisplayName = "Example" }
+            }
+        };
+        var store = new ProfileStore(ProfilesPath);
+
+        store.Save(document);
+        var loaded = store.Load();
+
+        Assert.Equal(1, loaded.Document.SchemaVersion);
+        Assert.Single(loaded.Document.Games);
+        Assert.Equal("Dota 2", loaded.Document.Games["570"].DisplayName);
+        Assert.Equal(document.XboxGames.Keys.Order(StringComparer.Ordinal), loaded.Document.XboxGames.Keys.Order(StringComparer.Ordinal));
+        Assert.True(loaded.Document.XboxGames["store:9PK8PHLCQDF6"].Favorite);
+        Assert.Equal("Example", loaded.Document.XboxGames["identity:SAMPLE.GAME|CN%3DSAMPLE|PC"].DisplayName);
+    }
+
+    [Theory]
+    [InlineData("{\"schemaVersion\":1,\"device\":{},\"games\":{},\"xboxGames\":null}")]
+    [InlineData("{\"schemaVersion\":1,\"device\":{},\"games\":{},\"xboxGames\":{\"store:game\":null}}")]
+    [InlineData("{\"schemaVersion\":1,\"device\":{},\"games\":{},\"xboxGames\":{\"store:game\":{\"performance\":null}}}")]
+    [InlineData("{\"schemaVersion\":1,\"device\":{},\"games\":{},\"xboxGames\":{\"store:game\":{\"display\":null}}}")]
+    [InlineData("{\"schemaVersion\":1,\"device\":{},\"games\":{},\"xboxGames\":{\"store:game\":{\"enabled\":true}}}")]
+    public void Load_MalformedXboxStructureReturnsUnsafeAndPreservesOriginal(string json)
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, json);
+
+        var loaded = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Equal(ProfileLoadStatus.Malformed, loaded.Status);
+        Assert.False(loaded.CanSafelyReplace);
+        Assert.Equal(json, File.ReadAllText(ProfilesPath));
+    }
+
+    [Fact]
+    public void Load_DisabledIncompleteXboxProfileAndUnknownNestedPropertiesRemainRoundTrippable()
+    {
+        const string json = "{\"schemaVersion\":1,\"device\":{},\"games\":{},\"xboxGames\":{\"pfn:Example_8wekyb3d8bbwe\":{\"displayName\":\"Game\",\"futureProfile\":42,\"performance\":{\"futurePerformance\":{\"value\":1}},\"display\":{\"futureDisplay\":true}}}}";
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, json);
+        var store = new ProfileStore(ProfilesPath);
+
+        var loaded = store.Load();
+        Assert.Equal(ProfileLoadStatus.Loaded, loaded.Status);
+        Assert.False(loaded.Document.XboxGames["pfn:Example_8wekyb3d8bbwe"].Enabled);
+        store.Save(loaded.Document);
+
+        var saved = File.ReadAllText(ProfilesPath);
+        Assert.Contains("futureProfile", saved);
+        Assert.Contains("futurePerformance", saved);
+        Assert.Contains("futureDisplay", saved);
+        Assert.Equal(1, store.Load().Document.SchemaVersion);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))

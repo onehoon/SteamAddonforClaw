@@ -142,7 +142,7 @@ public sealed class ProfileStore
                     AppLog.Warn("Profiles", "Profile document has invalid null structural fields. Preserving the original file.", null, ("Path", _profilesPath));
                     return new ProfileLoadResult(new ProfileDocument(), ProfileLoadStatus.Malformed);
                 }
-                AppLog.Debug("Profiles", "Profile document loaded.", ("Path", _profilesPath), ("GameCount", parsed!.Games.Count));
+                AppLog.Debug("Profiles", "Profile document loaded.", ("Path", _profilesPath), ("GameCount", parsed!.Games.Count), ("XboxGameCount", parsed.XboxGames.Count));
                 return new ProfileLoadResult(parsed, ProfileLoadStatus.Loaded);
             }
             catch (JsonException exception)
@@ -167,13 +167,21 @@ public sealed class ProfileStore
         && (document.Device.Performance.Tdp is not { } tdp
             || (tdp.Ac is not null && tdp.Dc is not null))
         && document.Games is not null
+        && document.XboxGames is not null
         && document.Games.Values.All(game =>
             game is not null
             && game.Performance is not null
             && game.Display is not null
             && (!game.Enabled
                 || (game.Performance.CpuBoost is not null
-                    && game.Performance.Tdp is { Ac: not null, Dc: not null })));
+                    && game.Performance.Tdp is { Ac: not null, Dc: not null })))
+        && document.XboxGames.Values.All(profile =>
+            profile is not null
+            && profile.Performance is not null
+            && profile.Display is not null
+            && (!profile.Enabled
+                || (profile.Performance.CpuBoost is not null
+                    && profile.Performance.Tdp is { Ac: not null, Dc: not null })));
 
     /// <summary>Crash-resistant replace: serialize to a same-directory temporary file, then
     /// atomically move it over the canonical path -- mirrors <see cref="SteamInputAddonforClaw.Settings.SettingsStore.Save"/>.
@@ -181,7 +189,7 @@ public sealed class ProfileStore
     public void Save(ProfileDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
-        AppLog.Debug("Profiles", "Profile document save started.", ("Path", _profilesPath), ("GameCount", document.Games.Count));
+        AppLog.Debug("Profiles", "Profile document save started.", ("Path", _profilesPath), ("GameCount", document.Games.Count), ("XboxGameCount", document.XboxGames.Count));
 
         var directory = Path.GetDirectoryName(_profilesPath) ?? throw new InvalidOperationException("The profile document path does not have a parent directory.");
         Directory.CreateDirectory(directory);

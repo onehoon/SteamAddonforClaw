@@ -385,6 +385,36 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.StartGameInputSystemButtonProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.StopGameInputSystemButtonProbe
         ? FrontendWireCodec.Payload(await _inner.StopGameInputSystemButtonProbeAsync(t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.CaptureXboxGameProfile
+        ? FrontendWireCodec.Payload(await _inner.CaptureXboxGameProfileAsync(FrontendWireCodec.Decode<CaptureXboxGameProfileRequest>(p).Key, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileFavorite
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileFavoriteAsync(FrontendWireCodec.Decode<SetXboxGameProfileFavoriteRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileFavoriteRequest>(p).Favorite, FrontendWireCodec.Decode<SetXboxGameProfileFavoriteRequest>(p).DisplayName, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileEnabledAsync(FrontendWireCodec.Decode<SetXboxGameProfileEnabledRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileEnabledRequest>(p).Enabled, FrontendWireCodec.Decode<SetXboxGameProfileEnabledRequest>(p).DisplayName, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileCpuBoostEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileCpuBoostEnabledAsync(FrontendWireCodec.Decode<SetXboxGameProfileCpuBoostEnabledRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileCpuBoostEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileCpuBoostAc
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileCpuBoostAcAsync(FrontendWireCodec.Decode<SetXboxGameProfileCpuBoostAcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileCpuBoostAcRequest>(p).Mode, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileCpuBoostDc
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileCpuBoostDcAsync(FrontendWireCodec.Decode<SetXboxGameProfileCpuBoostDcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileCpuBoostDcRequest>(p).Mode, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileTdpEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileTdpEnabledAsync(FrontendWireCodec.Decode<SetXboxGameProfileTdpEnabledRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileTdpEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileTdp
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileTdpAsync(FrontendWireCodec.Decode<SetXboxGameProfileTdpRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileTdpRequest>(p).Configuration, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfilePowerModeEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfilePowerModeEnabledAsync(FrontendWireCodec.Decode<SetXboxGameProfilePowerModeEnabledRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfilePowerModeEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfilePowerModeAc
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfilePowerModeAcAsync(FrontendWireCodec.Decode<SetXboxGameProfilePowerModeAcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfilePowerModeAcRequest>(p).Mode, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfilePowerModeDc
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfilePowerModeDcAsync(FrontendWireCodec.Decode<SetXboxGameProfilePowerModeDcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfilePowerModeDcRequest>(p).Mode, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileFpsLimitEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileFpsLimitEnabledAsync(FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitEnabledRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileFpsLimitAc
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileFpsLimitAcAsync(FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitAcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitAcRequest>(p).Fps, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileFpsLimitDc
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileFpsLimitDcAsync(FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitDcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitDcRequest>(p).Fps, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileResolution
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileResolutionAsync(FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureIntelGpuFrequencyProbe
         ? FrontendWireCodec.Payload(await _inner.CaptureIntelGpuFrequencyProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RunIntelGpuFrequencyProbe

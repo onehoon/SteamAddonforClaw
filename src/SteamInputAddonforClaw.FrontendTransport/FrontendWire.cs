@@ -141,9 +141,11 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // the separate Main App XBOX page. v53 peers fail the handshake.
 // Version 55: replace the combined Steam-only Gaming Home enabled contract with separate Gaming
 // Home selection and startup state/mutations. A v54 peer cannot represent the new Windows state.
-// Version 56: add the Developer-only Intel IGCL GPU frequency and PL1 read/write/readback probe.
-// v55 peers fail the handshake before either surface can use the new typed contract.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 56; }
+// Version 56: add XBOX profile capture and persistence-only mutation RPCs, plus Favorite on the
+// production XBOX catalog entry. No active-XBOX apply contract is added.
+// Version 57: add the Developer-only Intel IGCL GPU frequency and PL1 read/write/readback probe.
+// v56 peers fail the handshake before either new typed contract can be used.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 57; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -169,7 +171,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, CaptureAppUpdate, CheckAndDownloadAppUpdate, InstallAppUpdate, SetFrontButtonMapping, SetBackButtonMapping, SetControllerLedSettings, SuppressDeveloperMenuWarning, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder, MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled, SetDeviceBatteryChargeLimitPercent, SetQuickSettingsCurrentPowerSourceOnly, CaptureGamingHome, SetGamingHomeSelection, SetGamingHomeStartup, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting, CaptureShortcutEditor, MutateShortcut, SetScreenshotSaveFolder, CaptureXbox360RumbleLoopDiagnostic, StartXbox360RumbleLoopDiagnostic, StopXbox360RumbleLoopDiagnostic, RunPid1902InputCadenceDiagnostic, CaptureControllerVibrationStrength, SetControllerVibrationStrength, TestControllerVibrationMotor, RunControllerVibrationProfileWriteProbe, CaptureGameInputSystemButtonProbe, StartGameInputSystemButtonProbe, StopGameInputSystemButtonProbe, CaptureXboxSessionDiagnostic, StartXboxSessionDiagnostic, StopXboxSessionDiagnostic, GenerateXboxSessionDiagnosticReport, ScanXboxGames, CaptureIntelGpuFrequencyProbe, RunIntelGpuFrequencyProbe }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLogLevel, CaptureAppUpdate, CheckAndDownloadAppUpdate, InstallAppUpdate, SetFrontButtonMapping, SetBackButtonMapping, SetControllerLedSettings, SuppressDeveloperMenuWarning, RunPrerequisiteSetup, GenerateEnvironmentReport, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdpEnabled, SetGameProfileTdp, SetGameProfileFavorite, SetGameProfileResolution, CapturePowerMode, SetDevicePowerModeAc, SetDevicePowerModeDc, SetDevicePowerModeEnabled, SetGameProfilePowerModeEnabled, SetGameProfilePowerModeAc, SetGameProfilePowerModeDc, SetGameProfileFpsLimitEnabled, SetGameProfileFpsLimitAc, SetGameProfileFpsLimitDc, OpenFanProbe, RunFanProbe, CaptureCenterMStartup, RequestCenterMAuthorityTransition, CaptureDeviceQuickSettings, CaptureQuickSettingsPage, CaptureAddonQuickSettingsShell, CaptureAddonQuickSettingsTabOrder, MoveAddonQuickSettingsTab, MutateQuickSetting, CaptureBatteryChargeLimitTest, SetBatteryChargeLimitTestEnabled, SetBatteryChargeLimitTestPercent, CaptureBatteryChargeLimit, SetDeviceBatteryChargeLimitEnabled, SetDeviceBatteryChargeLimitPercent, SetQuickSettingsCurrentPowerSourceOnly, CaptureGamingHome, SetGamingHomeSelection, SetGamingHomeStartup, CaptureClawHud, SetClawHudEnabled, MutateClawHudSetting, CaptureShortcutEditor, MutateShortcut, SetScreenshotSaveFolder, CaptureXbox360RumbleLoopDiagnostic, StartXbox360RumbleLoopDiagnostic, StopXbox360RumbleLoopDiagnostic, RunPid1902InputCadenceDiagnostic, CaptureControllerVibrationStrength, SetControllerVibrationStrength, TestControllerVibrationMotor, RunControllerVibrationProfileWriteProbe, CaptureGameInputSystemButtonProbe, StartGameInputSystemButtonProbe, StopGameInputSystemButtonProbe, CaptureXboxSessionDiagnostic, StartXboxSessionDiagnostic, StopXboxSessionDiagnostic, GenerateXboxSessionDiagnosticReport, ScanXboxGames, CaptureXboxGameProfile, SetXboxGameProfileFavorite, SetXboxGameProfileEnabled, SetXboxGameProfileCpuBoostEnabled, SetXboxGameProfileCpuBoostAc, SetXboxGameProfileCpuBoostDc, SetXboxGameProfileTdpEnabled, SetXboxGameProfileTdp, SetXboxGameProfilePowerModeEnabled, SetXboxGameProfilePowerModeAc, SetXboxGameProfilePowerModeDc, SetXboxGameProfileFpsLimitEnabled, SetXboxGameProfileFpsLimitAc, SetXboxGameProfileFpsLimitDc, SetXboxGameProfileResolution, CaptureIntelGpuFrequencyProbe, RunIntelGpuFrequencyProbe }
 internal enum FrontendNotificationKind { StateInvalidated, CloseRequested }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -220,6 +222,21 @@ internal sealed record SetGameProfileFpsLimitDcRequest(uint AppId, int Fps);
 internal sealed record SetGameProfileTdpRequest(uint AppId, FrontendGameTdpConfiguration Configuration);
 internal sealed record SetGameProfileFavoriteRequest(uint AppId, bool Favorite, string? DisplayName);
 internal sealed record SetGameProfileResolutionRequest(uint AppId, FrontendGameResolution? Resolution, string? DisplayName);
+internal sealed record CaptureXboxGameProfileRequest(string Key);
+internal sealed record SetXboxGameProfileFavoriteRequest(string Key, bool Favorite, string? DisplayName);
+internal sealed record SetXboxGameProfileEnabledRequest(string Key, bool Enabled, string? DisplayName);
+internal sealed record SetXboxGameProfileCpuBoostEnabledRequest(string Key, bool Enabled);
+internal sealed record SetXboxGameProfileCpuBoostAcRequest(string Key, SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
+internal sealed record SetXboxGameProfileCpuBoostDcRequest(string Key, SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
+internal sealed record SetXboxGameProfileTdpEnabledRequest(string Key, bool Enabled);
+internal sealed record SetXboxGameProfileTdpRequest(string Key, FrontendGameTdpConfiguration Configuration);
+internal sealed record SetXboxGameProfilePowerModeEnabledRequest(string Key, bool Enabled);
+internal sealed record SetXboxGameProfilePowerModeAcRequest(string Key, SteamInputAddonforClaw.Contracts.DeviceProfiles.WindowsPowerMode Mode);
+internal sealed record SetXboxGameProfilePowerModeDcRequest(string Key, SteamInputAddonforClaw.Contracts.DeviceProfiles.WindowsPowerMode Mode);
+internal sealed record SetXboxGameProfileFpsLimitEnabledRequest(string Key, bool Enabled);
+internal sealed record SetXboxGameProfileFpsLimitAcRequest(string Key, int Fps);
+internal sealed record SetXboxGameProfileFpsLimitDcRequest(string Key, int Fps);
+internal sealed record SetXboxGameProfileResolutionRequest(string Key, FrontendGameResolution? Resolution, string? DisplayName);
 
 internal static class FrontendWireCodec
 {
