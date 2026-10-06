@@ -190,7 +190,6 @@ public sealed class XboxCatalogPageUiTests
         Assert.DoesNotContain("StateInvalidated", code, StringComparison.Ordinal);
         Assert.DoesNotContain("ActualRunningAppId", code, StringComparison.Ordinal);
         Assert.DoesNotContain("Reconcile", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("XboxSessionDiagnostic", code, StringComparison.Ordinal);
     }
 
     private static string Method(string source, string startMarker, string endMarker)

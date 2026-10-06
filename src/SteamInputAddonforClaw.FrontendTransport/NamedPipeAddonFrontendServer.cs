@@ -56,7 +56,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
     private async Task AcceptLoopAsync()
     { while (!_lifetime.IsCancellationRequested) { try { await using var pipe = _pipeFactory(); Interlocked.Exchange(ref _activePipe, pipe); _ready.TrySetResult(); await pipe.WaitForConnectionAsync(_lifetime.Token).ConfigureAwait(false); await ServeAsync(pipe, _lifetime.Token).ConfigureAwait(false); } catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { _ready.TrySetCanceled(_lifetime.Token); } catch (Exception exception) { if (_ready.TrySetException(exception)) return; try { await Task.Delay(100, _lifetime.Token).ConfigureAwait(false); } catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { } } finally { Interlocked.Exchange(ref _activePipe, null)?.Dispose(); } } }
     private async Task ServeAsync(Stream pipe, CancellationToken token)
-    { using var connection = CancellationTokenSource.CreateLinkedTokenSource(token); using var gate = new SemaphoreSlim(1, 1); var requests = new ConcurrentDictionary<long, CancellationTokenSource>(); var activeRequests = new ConcurrentDictionary<long, Task>(); var operationGate = new SemaphoreSlim(1, 1); var notificationGate = new object(); Task? notificationTask = null; var notificationDirty = false; var notificationSending = false; var probeSessionMayBeOpen = false; var rumbleLoopMayBeRunning = false; var xboxSessionDiagnosticMayBeRunning = false; var connectionClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    { using var connection = CancellationTokenSource.CreateLinkedTokenSource(token); using var gate = new SemaphoreSlim(1, 1); var requests = new ConcurrentDictionary<long, CancellationTokenSource>(); var activeRequests = new ConcurrentDictionary<long, Task>(); var operationGate = new SemaphoreSlim(1, 1); var notificationGate = new object(); Task? notificationTask = null; var notificationDirty = false; var notificationSending = false; var probeSessionMayBeOpen = false; var rumbleLoopMayBeRunning = false; var connectionClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         async Task Send(FrontendWireEnvelope e) => await FrontendWireCodec.WriteAsync(pipe, e, gate, connection.Token).ConfigureAwait(false);
         async Task Notify()
         {
@@ -89,11 +89,6 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                         rumbleLoopMayBeRunning = FrontendWireCodec.Decode<FrontendXbox360RumbleLoopSnapshot>(payload).State == FrontendXbox360RumbleLoopState.Running;
                     else if (message.Method.Value == FrontendRpcMethod.StopXbox360RumbleLoopDiagnostic)
                         rumbleLoopMayBeRunning = false;
-                    else if (message.Method.Value == FrontendRpcMethod.StartXboxSessionDiagnostic)
-                        xboxSessionDiagnosticMayBeRunning =
-                            FrontendWireCodec.Decode<FrontendXboxSessionDiagnosticSnapshot>(payload).State == FrontendXboxSessionDiagnosticState.Running;
-                    else if (message.Method.Value == FrontendRpcMethod.StopXboxSessionDiagnostic)
-                        xboxSessionDiagnosticMayBeRunning = false;
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, message.Method, Payload: payload)).ConfigureAwait(false);
                     if (_afterResponse is not null)
                         await _afterResponse().ConfigureAwait(false);
@@ -169,7 +164,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
                     continue;
                 }
-                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureGamingHome or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.CaptureShortcutEditor or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.ScanXboxGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit or FrontendRpcMethod.CaptureControllerVibrationStrength or FrontendRpcMethod.CaptureXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StartXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StopXbox360RumbleLoopDiagnostic or FrontendRpcMethod.RunPid1902InputCadenceDiagnostic or FrontendRpcMethod.CaptureGameInputSystemButtonProbe or FrontendRpcMethod.StartGameInputSystemButtonProbe or FrontendRpcMethod.StopGameInputSystemButtonProbe or FrontendRpcMethod.CaptureXboxSessionDiagnostic or FrontendRpcMethod.StartXboxSessionDiagnostic or FrontendRpcMethod.StopXboxSessionDiagnostic or FrontendRpcMethod.GenerateXboxSessionDiagnosticReport or FrontendRpcMethod.CaptureIntelGpuFrequencyProbe)
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.CaptureAppUpdate or FrontendRpcMethod.CheckAndDownloadAppUpdate or FrontendRpcMethod.InstallAppUpdate or FrontendRpcMethod.CaptureGamingHome or FrontendRpcMethod.CaptureClawHud or FrontendRpcMethod.CaptureShortcutEditor or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.CaptureTdp or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport or FrontendRpcMethod.OpenClawSensorProbe or FrontendRpcMethod.CaptureClawSensorProbe or FrontendRpcMethod.NextClawSensorProbePhase or FrontendRpcMethod.PreviousClawSensorProbePhase or FrontendRpcMethod.StopClawSensorProbe or FrontendRpcMethod.CloseClawSensorProbe or FrontendRpcMethod.OpenFanProbe or FrontendRpcMethod.ScanProfileGames or FrontendRpcMethod.ScanXboxGames or FrontendRpcMethod.CaptureActiveGameProfile or FrontendRpcMethod.CaptureCenterMStartup or FrontendRpcMethod.CaptureDeviceQuickSettings or FrontendRpcMethod.CaptureAddonQuickSettingsShell or FrontendRpcMethod.CaptureAddonQuickSettingsTabOrder or FrontendRpcMethod.CaptureBatteryChargeLimitTest or FrontendRpcMethod.CaptureBatteryChargeLimit or FrontendRpcMethod.CaptureControllerVibrationStrength or FrontendRpcMethod.CaptureXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StartXbox360RumbleLoopDiagnostic or FrontendRpcMethod.StopXbox360RumbleLoopDiagnostic or FrontendRpcMethod.RunPid1902InputCadenceDiagnostic or FrontendRpcMethod.CaptureGameInputSystemButtonProbe or FrontendRpcMethod.StartGameInputSystemButtonProbe or FrontendRpcMethod.StopGameInputSystemButtonProbe or FrontendRpcMethod.CaptureIntelGpuFrequencyProbe)
                 {
                     requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
@@ -201,8 +196,6 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
             // boundary, not a general session/connection framework.
             if (rumbleLoopMayBeRunning)
                 try { await _inner.StopXbox360RumbleLoopDiagnosticAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
-            if (xboxSessionDiagnosticMayBeRunning)
-                try { await _inner.StopXboxSessionDiagnosticAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
             if (probeSessionMayBeOpen)
                 try { await _inner.CloseClawSensorProbeAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
             operationGate.Dispose(); }
@@ -371,14 +364,6 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.StopXbox360RumbleLoopDiagnosticAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RunPid1902InputCadenceDiagnostic
         ? FrontendWireCodec.Payload(await _inner.RunPid1902InputCadenceDiagnosticAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.CaptureXboxSessionDiagnostic
-        ? FrontendWireCodec.Payload(await _inner.CaptureXboxSessionDiagnosticAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.StartXboxSessionDiagnostic
-        ? FrontendWireCodec.Payload(await _inner.StartXboxSessionDiagnosticAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.StopXboxSessionDiagnostic
-        ? FrontendWireCodec.Payload(await _inner.StopXboxSessionDiagnosticAsync(t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.GenerateXboxSessionDiagnosticReport
-        ? FrontendWireCodec.Payload(await _inner.GenerateXboxSessionDiagnosticReportAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureGameInputSystemButtonProbe
         ? FrontendWireCodec.Payload(await _inner.CaptureGameInputSystemButtonProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.StartGameInputSystemButtonProbe

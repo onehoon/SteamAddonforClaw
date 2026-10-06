@@ -1,17 +1,25 @@
-using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Xbox;
 
-namespace SteamInputAddonforClaw.Diagnostics.XboxSession;
+namespace SteamInputAddonforClaw.Xbox.Session;
 
 internal sealed record XboxGamePackageConfigLocation(string Kind, string RootPath);
 
 internal sealed record XboxGamePackageConfigMetadata(
     Func<string?> EffectiveLocationPath,
-    Func<string?> InstalledLocationPath);
+    Func<string?> InstalledLocationPath)
+{
+    internal Func<string?>? DisplayName { get; init; }
+    internal Func<string?>? Name { get; init; }
+}
 
 internal sealed record XboxGamePackageConfigLocationResolution(
     IReadOnlyList<XboxGamePackageConfigLocation> Locations,
-    string? FailureReason);
+    string? FailureReason)
+{
+    internal string? PackageDisplayName { get; init; }
+    internal string? PackageName { get; init; }
+}
 
 internal static class XboxGamePackageConfigLocationResolver
 {
@@ -45,7 +53,24 @@ internal static class XboxGamePackageConfigLocationResolver
             return new([], reason);
         }
 
-        return new(locations, failures.Count == 0 ? null : string.Join("; ", failures));
+        return new(locations, failures.Count == 0 ? null : string.Join("; ", failures))
+        {
+            PackageDisplayName = ReadOptionalMetadata(package.DisplayName),
+            PackageName = ReadOptionalMetadata(package.Name),
+        };
+    }
+
+    private static string? ReadOptionalMetadata(Func<string?>? getValue)
+    {
+        try
+        {
+            var value = getValue?.Invoke();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static void AddLocation(
@@ -75,17 +100,25 @@ internal sealed record XboxGameProcessIdentityEvidence(
     string? PackageFullName,
     int PackageFamilyNameResultCode,
     string? PackageFamilyName,
-    string? ApplicationUserModelId,
-    int ApplicationUserModelIdResult,
-    string? PackageIdentityName,
-    string? PackageIdentityPublisher,
-    string? PackageIdentityPublisherId,
-    string? PackageIdentityResourceId,
-    string? PackageIdentityArchitecture,
-    string? PackageIdentityVersion,
+    string? PackageDisplayName,
+    string? PackageName,
     IReadOnlyList<XboxGamePackageConfigLocation> ConfigLocations,
-    string? ConfigLocationFailure,
-    IReadOnlyList<FrontendXboxSessionDiagnosticPackagePath> PackagePaths);
+    string? ConfigLocationFailure);
+
+internal enum XboxGameProcessInspectionDisposition
+{
+    ProcessImageFailure,
+    NoPackage,
+    PackageIdentityFailure,
+    ConfigNegative,
+    ExecutableMismatch,
+    Matched,
+}
+
+internal sealed record XboxGameProcessInspection(
+    XboxGameProcessInspectionDisposition Disposition,
+    string? FailureReason,
+    XboxGameProcessMatch? Match);
 
 /// <summary>Applies the XBOX package/config/executable identity contract to live-process evidence.
 /// Kept separate from Win32 acquisition so those decisions can be tested without a packaged game.</summary>
@@ -114,9 +147,10 @@ internal static class XboxGameProcessIdentityEvaluator
         if (evidence.PackageFullNameResultCode != ErrorSuccess || string.IsNullOrWhiteSpace(evidence.PackageFullName))
             return Negative(XboxGameProcessInspectionDisposition.PackageIdentityFailure,
                 $"GetPackageFullName failed with result {evidence.PackageFullNameResultCode}.");
-        if (evidence.PackageFamilyNameResultCode != ErrorSuccess || string.IsNullOrWhiteSpace(evidence.PackageFamilyName))
-            return Negative(XboxGameProcessInspectionDisposition.PackageIdentityFailure,
-                $"GetPackageFamilyName failed with result {evidence.PackageFamilyNameResultCode}.");
+        var packageFamilyName = evidence.PackageFamilyNameResultCode == ErrorSuccess
+            ? evidence.PackageFamilyName
+            : null;
+
         var configFailure = "MicrosoftGame.config was not found in the Package object's Effective/Installed locations.";
         if (!string.IsNullOrWhiteSpace(evidence.ConfigLocationFailure))
             configFailure += " " + evidence.ConfigLocationFailure;
@@ -177,31 +211,26 @@ internal static class XboxGameProcessIdentityEvaluator
                 if (generation.IsSignaled)
                     return Negative(XboxGameProcessInspectionDisposition.ProcessImageFailure, "The process exited before its identity evidence was complete.");
 
-                var game = new FrontendXboxSessionDiagnosticGame(
-                    XboxGameIdentity.CreateKey(read.Config.StoreId, evidence.PackageFamilyName, read.Config),
+                var config = read.Config;
+                var displayName = FirstNonBlank(config.DefaultDisplayName, evidence.PackageDisplayName, evidence.PackageName, runningExecutableName);
+                var identity = new XboxGameIdentity(
+                    XboxGameIdentity.CreateKey(config.StoreId, packageFamilyName, config),
+                    displayName,
+                    config.StoreId,
+                    config.TitleId,
+                    packageFamilyName,
+                    config.IdentityName,
+                    config.IdentityPublisher,
+                    config.IdentityResourceId,
+                    config.Executables);
+                var match = new XboxGameProcessMatch(
+                    identity,
                     generation.ProcessId,
                     evidence.RunningProcessPath,
                     runningExecutableName,
-                    evidence.PackageFullName,
-                    evidence.PackageFamilyName,
-                    evidence.ApplicationUserModelId,
-                    evidence.ApplicationUserModelIdResult,
-                    evidence.PackageIdentityName,
-                    evidence.PackageIdentityPublisher,
-                    evidence.PackageIdentityPublisherId,
-                    evidence.PackageIdentityResourceId,
-                    evidence.PackageIdentityArchitecture,
-                    evidence.PackageIdentityVersion,
-                    read.Config.IdentityName,
-                    read.Config.IdentityPublisher,
-                    read.Config.IdentityResourceId,
-                    read.Config.StoreId,
-                    read.Config.TitleId,
-                    matchedExecutable.Name,
-                    configPath,
-                    evidence.PackagePaths);
+                    evidence.PackageFullName);
                 LogConfigResolution(generation, evidence, configPath, null);
-                return new(XboxGameProcessInspectionDisposition.Matched, null, game);
+                return new(XboxGameProcessInspectionDisposition.Matched, null, match);
             }
         }
 
@@ -221,7 +250,7 @@ internal static class XboxGameProcessIdentityEvaluator
         string? selectedConfigPath,
         string? failureReason)
     {
-        AppLog.Debug("XboxSessionDiagnostic", "Resolved live process MicrosoftGame.config location.",
+        AppLog.Debug("XboxSession", "Resolved live process MicrosoftGame.config location.",
             ("PID", generation.ProcessId),
             ("PackageFullName", evidence.PackageFullName),
             ("RunningProcessPath", evidence.RunningProcessPath),
@@ -233,6 +262,9 @@ internal static class XboxGameProcessIdentityEvaluator
 
     private static string? LocationPath(IReadOnlyList<XboxGamePackageConfigLocation> locations, string kind) =>
         locations.FirstOrDefault(location => string.Equals(location.Kind, kind, StringComparison.OrdinalIgnoreCase))?.RootPath;
+
+    private static string FirstNonBlank(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))!.Trim();
 
     private static XboxGameProcessInspection Negative(XboxGameProcessInspectionDisposition disposition, string reason) =>
         new(disposition, reason, null);
