@@ -179,19 +179,16 @@ public sealed partial class ControllerPage : UserControl
         try
         {
             _backButtonMapping = mapping;
-            SelectBackButtonTarget(M1TargetComboBox, mapping.M1);
-            SelectBackButtonTarget(M2TargetComboBox, mapping.M2);
+            BackButtonMappingUiOptions.SelectTarget(M1TargetComboBox, mapping.M1);
+            BackButtonMappingUiOptions.SelectTarget(M2TargetComboBox, mapping.M2);
         }
         finally { _isLoading = false; }
     }
 
     private void PopulateBackButtonTargets()
     {
-        foreach (var target in Enum.GetValues<Xbox360BackButtonTarget>())
-        {
-            M1TargetComboBox.Items.Add(new ComboBoxItem { Content = DescribeBackButtonTarget(target), Tag = target });
-            M2TargetComboBox.Items.Add(new ComboBoxItem { Content = DescribeBackButtonTarget(target), Tag = target });
-        }
+        BackButtonMappingUiOptions.AddTargets(M1TargetComboBox);
+        BackButtonMappingUiOptions.AddTargets(M2TargetComboBox);
     }
 
     private void BackButtonTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
@@ -431,42 +428,6 @@ public sealed partial class ControllerPage : UserControl
     private void HideVibrationMessage() => VibrationStrengthInfoBar.IsOpen = false;
 
     private static int ToPercent(double value) => Math.Clamp((int)Math.Round(value), 0, 100);
-
-    private static void SelectBackButtonTarget(ComboBox comboBox, Xbox360BackButtonTarget target)
-    {
-        comboBox.SelectedItem = null;
-        foreach (var item in comboBox.Items)
-        {
-            if (item is ComboBoxItem { Tag: Xbox360BackButtonTarget candidate } && candidate == target)
-            {
-                comboBox.SelectedItem = item;
-                return;
-            }
-        }
-    }
-
-    private static string DescribeBackButtonTarget(Xbox360BackButtonTarget target) => target switch
-    {
-        Xbox360BackButtonTarget.Disabled => "Disabled",
-        Xbox360BackButtonTarget.A => "A",
-        Xbox360BackButtonTarget.B => "B",
-        Xbox360BackButtonTarget.X => "X",
-        Xbox360BackButtonTarget.Y => "Y",
-        Xbox360BackButtonTarget.DPadUp => "D-Pad Up",
-        Xbox360BackButtonTarget.DPadRight => "D-Pad Right",
-        Xbox360BackButtonTarget.DPadDown => "D-Pad Down",
-        Xbox360BackButtonTarget.DPadLeft => "D-Pad Left",
-        Xbox360BackButtonTarget.LeftBumper => "Left Bumper (LB)",
-        Xbox360BackButtonTarget.RightBumper => "Right Bumper (RB)",
-        Xbox360BackButtonTarget.LeftTrigger => "Left Trigger (LT)",
-        Xbox360BackButtonTarget.RightTrigger => "Right Trigger (RT)",
-        Xbox360BackButtonTarget.LeftStickClick => "Left Stick Click (L3)",
-        Xbox360BackButtonTarget.RightStickClick => "Right Stick Click (R3)",
-        Xbox360BackButtonTarget.View => "View",
-        Xbox360BackButtonTarget.Menu => "Menu",
-        Xbox360BackButtonTarget.XboxGuide => "Xbox Guide",
-        _ => throw new ArgumentOutOfRangeException(nameof(target), target, null)
-    };
 
     private void OnEditorConfigurationChanged(BindingEditor editor)
     {

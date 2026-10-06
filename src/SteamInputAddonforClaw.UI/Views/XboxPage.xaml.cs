@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
@@ -9,7 +10,7 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class XboxPage : UserControl
 {
     private IAddonFrontendControl? _frontend;
-    private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents;
+    private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents, _suppressControllerEvents;
     private IReadOnlyList<FrontendXboxGameCatalogEntry> _catalog = [];
     private FrontendXboxGameCatalogEntry? _selectedGame;
     private FrontendXboxGameProfileSnapshot? _snapshot;
@@ -24,7 +25,7 @@ public sealed partial class XboxPage : UserControl
 
     public XboxPage()
     {
-        InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; SetEditorsEnabled(false);
+        InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; BackButtonMappingUiOptions.AddTargets(M1BackButtonTargetComboBox); BackButtonMappingUiOptions.AddTargets(M2BackButtonTargetComboBox); SetEditorsEnabled(false);
 }
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
     internal void Activate() { if (_active) return; _active = true; _ = RefreshGamesAsync(); }
@@ -110,7 +111,7 @@ public sealed partial class XboxPage : UserControl
     }
 
     private async Task SelectGameAsync(FrontendXboxGameCatalogEntry game) { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.Key, preserveDirtyTdpDraft: false); }
-    private void BeginProfileLoad(FrontendXboxGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = true; CancelFpsDebounce(); try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = false; } SetEditorsEnabled(false); }
+    private void BeginProfileLoad(FrontendXboxGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = true; CancelFpsDebounce(); try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; FpsEnabledToggle.IsOn = false; FpsEnabledToggle.IsEnabled = false; UseGlobalBackButtonMappingToggle.IsOn = true; UseGlobalBackButtonMappingToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; PowerModeAcComboBox.SelectedItem = null; PowerModeDcComboBox.SelectedItem = null; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = _suppressFpsEvents = _suppressControllerEvents = false; } SetEditorsEnabled(false); }
     private async Task CaptureSelectedAsync(string key, bool preserveDirtyTdpDraft = true)
     {
         if (!_active || _frontend is null) return;
@@ -128,7 +129,7 @@ public sealed partial class XboxPage : UserControl
         catch (Exception exception) { if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, key)) ShowError("XBOX profile settings could not be loaded.", exception); }
         finally { if (ReferenceEquals(_captureCancellation, capture)) _captureCancellation = null; capture.Dispose(); }
     }
-    private void ClearSelection() { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
+    private void ClearSelection() { CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; _suppressControllerEvents = true; try { UseGlobalBackButtonMappingToggle.IsOn = true; UseGlobalBackButtonMappingToggle.IsEnabled = false; M1BackButtonTargetComboBox.SelectedItem = M2BackButtonTargetComboBox.SelectedItem = null; M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled = false; } finally { _suppressControllerEvents = false; } ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; ResolutionComboBox.SelectedItem = null; ResolutionComboBox.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendXboxGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false)
     {
@@ -138,6 +139,7 @@ public sealed partial class XboxPage : UserControl
             ProfileEnabledToggle.IsOn = snapshot.Enabled; ProfileEnabledToggle.IsEnabled = snapshot.PersistenceWritable; CpuBoostEnabledToggle.IsOn = snapshot.CpuBoost.Enabled; TdpEnabledToggle.IsOn = snapshot.Tdp.Enabled; PowerModeEnabledToggle.IsOn = snapshot.PowerMode?.Enabled == true; FpsEnabledToggle.IsOn = snapshot.FpsLimit?.Enabled == true; CpuBoostEnabledToggle.IsEnabled = TdpEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable; PowerModeEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.PowerMode is not null; FpsEnabledToggle.IsEnabled = snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable && snapshot.FpsLimit?.Available == true; _acFpsDraft = snapshot.FpsLimit?.AcFps ?? 60; _dcFpsDraft = snapshot.FpsLimit?.DcFps ?? 60; AcFpsSlider.Value = _acFpsDraft.Value; DcFpsSlider.Value = _dcFpsDraft.Value; AcFpsText.Text = $"{_acFpsDraft} FPS"; DcFpsText.Text = $"{_dcFpsDraft} FPS"; IntelFpsExpander.Description = snapshot.FpsLimit?.Available == true ? "Uses Intel's official API. Some games may not support FPS limiting." : snapshot.FpsLimit?.UnavailableReason ?? "Intel FPS Limit is unavailable.";
             CpuBoostAcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Ac); CpuBoostDcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Dc); PowerModeAcComboBox.SelectedItem = snapshot.PowerMode is { } power ? PowerModes.FirstOrDefault(x => x.Mode == power.Ac) : null; PowerModeDcComboBox.SelectedItem = snapshot.PowerMode is { } powerDc ? PowerModes.FirstOrDefault(x => x.Mode == powerDc.Dc) : null;
             ResolutionComboBox.SelectedItem = ResolutionItems.FirstOrDefault(x => x.Width == snapshot.Resolution?.Width && x.Height == snapshot.Resolution?.Height);
+            RenderBackButtonMapping(snapshot);
             if (!preserveDirtyTdpDraft || !_tdpDraftDirty)
             {
                 _acPl1 = snapshot.Tdp.Ac.Pl1Watts; _acPl2 = snapshot.Tdp.Ac.Pl2Watts; _dcPl1 = snapshot.Tdp.Dc.Pl1Watts; _dcPl2 = snapshot.Tdp.Dc.Pl2Watts;
@@ -173,6 +175,76 @@ public sealed partial class XboxPage : UserControl
         var key = _selectedGame.Key;
         CancelTdpDebounce();
         try { var result = await _frontend.SetXboxGameProfileEnabledAsync(key, ProfileEnabledToggle.IsOn, _selectedGame.DisplayName); if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Profile could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(key, "Profile could not be updated because the Runtime connection was interrupted.", exception); }
+    }
+
+    private void RenderBackButtonMapping(FrontendXboxGameProfileSnapshot snapshot)
+    {
+        var configuration = snapshot.BackButtonMapping
+            ?? new FrontendGameBackButtonMappingConfiguration(true, BackButtonMappingSettings.Default);
+        _suppressControllerEvents = true;
+        try
+        {
+            UseGlobalBackButtonMappingToggle.IsOn = configuration.UseGlobalMapping;
+            BackButtonMappingUiOptions.SelectTarget(M1BackButtonTargetComboBox, configuration.Mapping.M1);
+            BackButtonMappingUiOptions.SelectTarget(M2BackButtonTargetComboBox, configuration.Mapping.M2);
+        }
+        finally { _suppressControllerEvents = false; }
+
+        UseGlobalBackButtonMappingToggle.IsEnabled = snapshot.PersistenceWritable;
+        M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled =
+            snapshot.PersistenceWritable && !configuration.UseGlobalMapping;
+    }
+
+    private async void UseGlobalBackButtonMappingToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_active || _suppressControllerEvents || _frontend is null || _selectedGame is null
+            || _snapshot is not { PersistenceWritable: true }) return;
+
+        var mapping = UseGlobalBackButtonMappingToggle.IsOn ? null : ReadSelectedBackButtonMapping();
+        if (!UseGlobalBackButtonMappingToggle.IsOn && mapping is null)
+        {
+            RenderBackButtonMapping(_snapshot);
+            ShowError("Choose valid M1 and M2 targets before saving the per-game mapping.", null);
+            return;
+        }
+
+        var key = _selectedGame.Key;
+        M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled =
+            _snapshot.PersistenceWritable && !UseGlobalBackButtonMappingToggle.IsOn;
+        await SaveBackButtonMappingAsync(key, mapping);
+    }
+
+    private async void BackButtonTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_active || _suppressControllerEvents || UseGlobalBackButtonMappingToggle.IsOn
+            || _frontend is null || _selectedGame is null || _snapshot is not { PersistenceWritable: true }) return;
+        if (ReadSelectedBackButtonMapping() is not { } mapping) return;
+        await SaveBackButtonMappingAsync(_selectedGame.Key, mapping);
+    }
+
+    private BackButtonMappingSettings? ReadSelectedBackButtonMapping()
+    {
+        if (!BackButtonMappingUiOptions.TryGetSelectedTarget(M1BackButtonTargetComboBox, out var m1)
+            || !BackButtonMappingUiOptions.TryGetSelectedTarget(M2BackButtonTargetComboBox, out var m2))
+            return null;
+        var mapping = new BackButtonMappingSettings(m1, m2);
+        return BackButtonMappingValidation.IsValid(mapping) ? mapping : null;
+    }
+
+    private async Task SaveBackButtonMappingAsync(string key, BackButtonMappingSettings? mapping)
+    {
+        try
+        {
+            var result = await _frontend!.SetXboxGameProfileBackButtonMappingAsync(key, mapping);
+            if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) return;
+            Render(result.Snapshot);
+            if (!result.Succeeded)
+                ShowError(result.FailureMessage ?? "M1 / M2 mapping could not be updated.", null);
+        }
+        catch (Exception exception)
+        {
+            await RestoreSelectedAfterMutationFailureAsync(key, "M1 / M2 mapping could not be updated.", exception);
+        }
     }
     private async void CpuBoostAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(true);
     private async void CpuBoostDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(false);

@@ -67,6 +67,35 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
+    public void Xbox_controller_editor_uses_global_fallback_and_persists_one_complete_mapping()
+    {
+        var xaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml")).ToString();
+        var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
+        var options = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "BackButtonMappingUiOptions.cs"));
+        var render = Method(code, "private void Render(", "private void RenderProfileStatus(");
+        var useGlobal = Method(code, "private async void UseGlobalBackButtonMappingToggle_Toggled", "private async void BackButtonTargetComboBox_SelectionChanged");
+        var targetChanged = Method(code, "private async void BackButtonTargetComboBox_SelectionChanged", "private BackButtonMappingSettings? ReadSelectedBackButtonMapping");
+        var save = Method(code, "private async Task SaveBackButtonMappingAsync", "private async void CpuBoostAcComboBox_SelectionChanged");
+
+        Assert.Contains("Header=\"Controller\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"UseGlobalBackButtonMappingToggle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"M1BackButtonTargetComboBox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"M2BackButtonTargetComboBox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("snapshot.PersistenceWritable && !configuration.UseGlobalMapping", code, StringComparison.Ordinal);
+        Assert.Contains("UseGlobalBackButtonMappingToggle.IsOn ? null : ReadSelectedBackButtonMapping()", useGlobal, StringComparison.Ordinal);
+        Assert.Contains("ReadSelectedBackButtonMapping()", targetChanged, StringComparison.Ordinal);
+        Assert.Contains("new BackButtonMappingSettings(m1, m2)", code, StringComparison.Ordinal);
+        Assert.Contains("SetXboxGameProfileBackButtonMappingAsync(key, mapping)", save, StringComparison.Ordinal);
+        Assert.Contains("IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)", save, StringComparison.Ordinal);
+        Assert.Contains("Render(result.Snapshot)", save, StringComparison.Ordinal);
+        Assert.True(render.IndexOf("_suppressEvents =", StringComparison.Ordinal) >= 0);
+        Assert.DoesNotContain("SetXboxGameProfileBackButtonMappingAsync", render, StringComparison.Ordinal);
+        Assert.Contains("Enum.GetValues<Xbox360BackButtonTarget>()", options, StringComparison.Ordinal);
+        Assert.Contains("BackButtonMappingUiOptions.AddTargets(M1BackButtonTargetComboBox)", code, StringComparison.Ordinal);
+        Assert.Contains("BackButtonMappingUiOptions.AddTargets(M2BackButtonTargetComboBox)", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Xbox_page_scans_once_on_activation_and_refresh_and_ignores_results_after_leave()
     {
         var pageCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
@@ -171,7 +200,7 @@ public sealed class XboxCatalogPageUiTests
             "SetXboxGameProfileCpuBoostAcAsync", "SetXboxGameProfileCpuBoostDcAsync", "SetXboxGameProfileTdpEnabledAsync",
             "SetXboxGameProfileTdpAsync", "SetXboxGameProfilePowerModeEnabledAsync", "SetXboxGameProfilePowerModeAcAsync",
             "SetXboxGameProfilePowerModeDcAsync", "SetXboxGameProfileFpsLimitEnabledAsync", "SetXboxGameProfileFpsLimitAcAsync",
-            "SetXboxGameProfileFpsLimitDcAsync", "SetXboxGameProfileResolutionAsync"
+            "SetXboxGameProfileFpsLimitDcAsync", "SetXboxGameProfileResolutionAsync", "SetXboxGameProfileBackButtonMappingAsync"
         }) Assert.Contains(method, code, StringComparison.Ordinal);
         Assert.Contains("Task.Delay(300", code, StringComparison.Ordinal);
         Assert.Contains("Task.Delay(275", code, StringComparison.Ordinal);

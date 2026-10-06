@@ -82,6 +82,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly XboxGameProfileMutations? _xboxGameProfileMutations;
     private readonly GameDisplayResolutionRuntime? _displayResolutionRuntime;
     private readonly Func<ActiveProfileTarget>? _activeProfileTargetSource;
+    private readonly Func<string, bool>? _reconcileXboxBackButtonMapping;
     // Narrow MSI Center M startup control (work order PR1). Null is a valid passive state -- the
     // capture/mutation just report unavailable, like every other null-runtime fallback here.
     private readonly CenterMStartupControl? _centerMStartup;
@@ -155,7 +156,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? stopGameInputSystemButtonProbe = null,
         Func<CancellationToken, Task<XboxInstalledGameCatalogResult>>? scanXboxGames = null,
         XboxGameProfileMutations? xboxGameProfileMutations = null,
-        Func<ActiveProfileTarget>? activeProfileTargetSource = null)
+        Func<ActiveProfileTarget>? activeProfileTargetSource = null,
+        Func<string, bool>? reconcileXboxBackButtonMapping = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -173,6 +175,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _scanXboxGames = scanXboxGames ?? (token => new XboxInstalledGameCatalog().ScanAsync(token));
         _xboxGameProfileMutations = xboxGameProfileMutations;
         _activeProfileTargetSource = activeProfileTargetSource;
+        _reconcileXboxBackButtonMapping = reconcileXboxBackButtonMapping;
         _displayResolutionRuntime = displayResolutionRuntime;
         _fanProbeTransport = fanProbeTransport;
         _batteryChargeLimitRuntime = batteryChargeLimitRuntime;
@@ -330,7 +333,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         MutateXboxGame(key, cancellationToken, mutations => mutations.SetFavorite(key, favorite, displayName), ProfileApplyKind.None);
 
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledAsync(string key, bool enabled, string? displayName, CancellationToken cancellationToken = default) =>
-        MutateXboxGame(key, cancellationToken, mutations => mutations.SetEnabled(key, enabled, displayName), ProfileApplyKind.All);
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetEnabled(key, enabled, displayName), ProfileApplyKind.All,
+            reconcileBackButtonMapping: true);
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileBackButtonMappingAsync(
+        string key,
+        BackButtonMappingSettings? mapping,
+        CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken,
+            mutations => mutations.SetBackButtonMapping(key, mapping),
+            ProfileApplyKind.None,
+            reconcileBackButtonMapping: true);
 
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
         MutateXboxGame(key, cancellationToken, mutations => mutations.SetCpuBoostEnabled(key, enabled), ProfileApplyKind.CpuBoost);
@@ -395,7 +408,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         string key,
         CancellationToken cancellationToken,
         Func<XboxGameProfileMutations, XboxGameProfileMutations.MutationOutcome> mutation,
-        ProfileApplyKind applyKind)
+        ProfileApplyKind applyKind,
+        bool reconcileBackButtonMapping = false)
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
@@ -412,10 +426,27 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         string? failure = null;
         if (outcome == XboxGameProfileMutations.MutationOutcome.Succeeded)
         {
-            if (applyKind != ProfileApplyKind.None && IsActiveXboxProfileTarget(key))
+            var isActiveTarget = IsActiveXboxProfileTarget(key);
+            if (reconcileBackButtonMapping && isActiveTarget && _reconcileXboxBackButtonMapping is not null)
+            {
+                var reconciled = false;
+                try { reconciled = _reconcileXboxBackButtonMapping(key); }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("Controller.BackButtons", "Active XBOX back-button mapping reconcile failed; global mapping remains effective.", exception,
+                        ("ProfileTarget", $"Xbox:{key}"));
+                }
+
+                if (!reconciled)
+                    failure = "The profile was saved, but its active M1 / M2 mapping could not be refreshed. Global mapping remains effective.";
+            }
+
+            if (applyKind != ProfileApplyKind.None && isActiveTarget)
             {
                 var applyResult = await ReconcileActiveProfileMutationAsync(applyKind, "XboxProfileMutation").ConfigureAwait(false);
-                failure = GetApplyFailureMessage(applyResult, ProfileApplyKind.All);
+                var applyFailure = GetApplyFailureMessage(applyResult, ProfileApplyKind.All);
+                if (applyFailure is not null)
+                    failure = failure is null ? applyFailure : $"{failure} {applyFailure}";
             }
             StateInvalidated?.Invoke(this, EventArgs.Empty);
         }
@@ -496,9 +527,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (captured is null)
             return new(key, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled),
                 new(false, new(20, 22), new(20, 22)), false, null,
-                FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
+                FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."))
+            {
+                BackButtonMapping = new(true, _settings.BackButtonMapping)
+            };
 
         var profile = captured.Profile;
+        var storedMapping = profile.Controller.BackButtonMapping;
+        if (!BackButtonMappingValidation.IsValid(storedMapping)) storedMapping = null;
         var limits = _tdpRuntime?.CaptureSnapshot().Policy is { } policy
             ? new FrontendTdpLimits(policy.Pl1MinimumWatts, policy.Pl1MaximumWatts, policy.Pl2MinimumWatts, policy.Pl2MaximumWatts)
             : null;
@@ -511,7 +547,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
             profile.Performance.PowerMode is { } power ? new(power.Enabled, power.Ac, power.Dc) : null,
             new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60,
-                profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason));
+                profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason))
+        {
+            BackButtonMapping = new(storedMapping is null, storedMapping ?? _settings.BackButtonMapping)
+        };
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileFavoriteAsync(uint appId, bool favorite, string? displayName, CancellationToken cancellationToken = default)

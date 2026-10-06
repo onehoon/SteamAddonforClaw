@@ -12,6 +12,7 @@ public sealed record XboxGameProfile
     public string? DisplayName { get; init; }
     public GamePerformanceOverrides Performance { get; init; } = new();
     public GameDisplayOverrides Display { get; init; } = new();
+    public NonSteamGameControllerOverrides Controller { get; init; } = new();
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

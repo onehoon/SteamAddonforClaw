@@ -76,6 +76,35 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
+    public async Task Cached_override_and_latest_global_mapping_are_selected_on_each_tick()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var global = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.Disabled);
+        BackButtonMappingSettings? cachedOverride = null;
+        var publisher = new CanonicalXbox360InputPublisher(
+            source,
+            sink.SetState,
+            ticks,
+            backButtonMappingProvider: () => cachedOverride ?? global);
+
+        publisher.Start();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        cachedOverride = new(Xbox360BackButtonTarget.B, Xbox360BackButtonTarget.Disabled);
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        global = new(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Disabled);
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        cachedOverride = null;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(4);
+        await publisher.StopAsync();
+
+        Assert.Equal(Xbox360ButtonBits.A, sink.States[0].Buttons);
+        Assert.Equal(Xbox360ButtonBits.B, sink.States[1].Buttons);
+        Assert.Equal(Xbox360ButtonBits.B, sink.States[2].Buttons);
+        Assert.Equal(Xbox360ButtonBits.X, sink.States[3].Buttons);
+    }
+
+    [Fact]
     public async Task Each_tick_uses_current_raw_rear_state_and_current_mapping_together()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, true])));

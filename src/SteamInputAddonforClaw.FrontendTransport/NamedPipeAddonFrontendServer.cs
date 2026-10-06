@@ -400,6 +400,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileFpsLimitDcAsync(FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitDcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitDcRequest>(p).Fps, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetXboxGameProfileResolution
         ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileResolutionAsync(FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileBackButtonMapping
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileBackButtonMappingAsync(FrontendWireCodec.Decode<SetXboxGameProfileBackButtonMappingRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileBackButtonMappingRequest>(p).Mapping, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureIntelGpuFrequencyProbe
         ? FrontendWireCodec.Payload(await _inner.CaptureIntelGpuFrequencyProbeAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RunIntelGpuFrequencyProbe

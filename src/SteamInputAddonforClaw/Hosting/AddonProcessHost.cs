@@ -93,6 +93,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly PowerModeRuntime _powerModeRuntime;
     private readonly GameProfileMutations _gameProfileMutations;
     private readonly XboxGameProfileMutations _xboxGameProfileMutations;
+    private readonly object _backButtonMappingReconcileSync = new();
+    private BackButtonMappingSettings? _activeNonSteamBackButtonMappingOverride;
     private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
     private readonly IntelFrameLimiterRuntime _intelFpsRuntime;
     private readonly Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver;
@@ -599,6 +601,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             xboxGameProfileMutations: _xboxGameProfileMutations,
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
             activeProfileTargetSource: CaptureActiveProfileTarget,
+            reconcileXboxBackButtonMapping: key => ReconcileEffectiveBackButtonMapping($"XboxProfileMutation:{key}"),
             intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
             batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
             batteryChargeLimitHardware: _batteryChargeLimitHardware,
@@ -644,6 +647,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // authority transition is gated (see the wrapped lower-level safety delegate above) so a user
         // cannot request Enable-and-Restart mid-commit -- preserving the old ordering guarantee.
         _runtimeStartupSettings = composition.StartupSettings;
+        ReconcileEffectiveBackButtonMapping("Startup");
         if (startupResult.CenterMStartupState == FrontendCenterMStartupState.Disabled)
             Volatile.Write(ref _disabledControllerStartupPending, 1);
 
@@ -883,7 +887,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var presentation = new Devices.MSI.Claw.MsiClawAddonPresentation(
                 viiper,
                 rumbleSink,
-                backButtonMappingProvider: () => startupSettings.BackButtonMapping,
+                backButtonMappingProvider: () =>
+                    Volatile.Read(ref _activeNonSteamBackButtonMappingOverride) ?? startupSettings.BackButtonMapping,
                 rumbleLoopUsbTraceCaptureFactory: () => new SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture(
                     new SteamInputAddonforClaw.Processes.ChildProcessRunner(
                         SteamInputAddonforClaw.Diagnostics.Xbox360UsbTraceCapture.CommandTimeout)),
@@ -2392,6 +2397,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // wait behind the unrelated CPU Boost / Power Mode / Resolution / TDP / FPS profile work
         // below. The switch itself runs asynchronously, serialized by the presentation owner's gate.
         RequestControllerPresentationReconcile("RunningAppIdChanged");
+        ReconcileEffectiveBackButtonMapping("RunningAppIdChanged");
         ReconcileEffectiveGameProfile("ActualRunningAppIdChanged");
     }
 
@@ -2400,7 +2406,80 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Volatile.Read(ref _processShutdownStarted) != 0
             || Volatile.Read(ref _profileRuntimeStartupReady) == 0)
             return;
+        ReconcileEffectiveBackButtonMapping("XboxActiveGameChanged");
         ReconcileEffectiveGameProfile("ActiveXboxGameChanged");
+    }
+
+    private bool ReconcileEffectiveBackButtonMapping(string trigger)
+    {
+        if (Volatile.Read(ref _processShutdownStarted) != 0)
+        {
+            Volatile.Write(ref _activeNonSteamBackButtonMappingOverride, null);
+            return false;
+        }
+
+        lock (_backButtonMappingReconcileSync)
+        {
+            // Clear first so any failed or superseded target transition immediately falls back to
+            // the latest global setting rather than retaining the previous game's mapping.
+            Volatile.Write(ref _activeNonSteamBackButtonMappingOverride, null);
+            var target = CaptureActiveProfileTarget();
+            XboxGameProfileMutations.Capture? captured = null;
+            var succeeded = true;
+            if (target is { Kind: ActiveProfileTargetKind.Xbox, XboxGameKey: { } key })
+            {
+                try
+                {
+                    captured = _xboxGameProfileMutations.CaptureProfile(key);
+                    succeeded = captured.PersistenceWritable;
+                }
+                catch (Exception exception)
+                {
+                    succeeded = false;
+                    AppLog.Warn("Controller.BackButtons", "XBOX profile could not be read while reconciling M1 / M2; global mapping remains effective.", exception,
+                        ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
+                }
+            }
+
+            if (CaptureActiveProfileTarget() != target)
+            {
+                AppLog.Debug("Controller.BackButtons", "M1 / M2 reconciliation was superseded by a newer active profile target.",
+                    ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
+                return true;
+            }
+
+            var next = ResolveNonSteamBackButtonMappingOverride(target, captured);
+            var persistedMapping = captured?.Profile.Controller.BackButtonMapping;
+            var invalidMapping = persistedMapping is not null && !BackButtonMappingValidation.IsValid(persistedMapping);
+            if (invalidMapping)
+            {
+                succeeded = false;
+                AppLog.Warn("Controller.BackButtons", "Persisted XBOX M1 / M2 mapping is invalid; global mapping remains effective.", null,
+                    ("ProfileTarget", target.LogLabel), ("Trigger", trigger));
+            }
+
+            Volatile.Write(ref _activeNonSteamBackButtonMappingOverride, next);
+            var effective = next ?? _runtimeStartupSettings?.BackButtonMapping ?? BackButtonMappingSettings.Default;
+            AppLog.Debug("Controller.BackButtons", "Effective M1 / M2 mapping reconciled.",
+                ("Trigger", trigger), ("ProfileTarget", target.LogLabel),
+                ("MappingSource", next is null ? "Global" : "NonSteamProfile"),
+                ("M1", effective.M1), ("M2", effective.M2));
+            return succeeded;
+        }
+    }
+
+    internal static BackButtonMappingSettings? ResolveNonSteamBackButtonMappingOverride(
+        ActiveProfileTarget target,
+        XboxGameProfileMutations.Capture? captured)
+    {
+        if (target is not { Kind: ActiveProfileTargetKind.Xbox, XboxGameKey: { } key }
+            || captured is not { PersistenceWritable: true, Exists: true }
+            || !string.Equals(captured.Key, key, StringComparison.Ordinal)
+            || !captured.Profile.Enabled)
+            return null;
+
+        var mapping = captured.Profile.Controller.BackButtonMapping;
+        return BackButtonMappingValidation.IsValid(mapping) ? mapping : null;
     }
 
     private void ReconcileEffectiveGameProfile(string trigger)
