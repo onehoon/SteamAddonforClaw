@@ -333,6 +333,28 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     }
 
     [Fact]
+    public void Shutdown_barrier_rejects_igcl_probe_calls_before_lazy_creation()
+    {
+        var control = CreateControl(cpuBoostRuntime: null);
+        control.BeginProcessShutdown();
+
+        Assert.Throws<FrontendProtocolException>(() =>
+        {
+            _ = control.CaptureIntelGpuFrequencyProbeAsync();
+        });
+        Assert.Throws<FrontendProtocolException>(() =>
+        {
+            _ = control.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.SetMaxMax);
+        });
+
+        var probeField = typeof(InProcessAddonFrontendControl).GetField(
+            "_intelGpuFrequencyProbe",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(probeField);
+        Assert.Null(probeField.GetValue(control));
+    }
+
+    [Fact]
     public async Task Valid_mutation_reaches_the_underlying_typed_method_and_reprojects()
     {
         var cpuPolicy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Disabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };

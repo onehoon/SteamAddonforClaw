@@ -14,6 +14,7 @@ using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.Views;
 
 namespace SteamInputAddonforClaw;
 
@@ -33,6 +34,12 @@ public sealed partial class MainWindow : Window
     private bool _prerequisiteSetupPendingActivation;
     private bool _prerequisiteSetupInProgress;
     private bool _prerequisiteSetupAttemptedForCurrentProcess;
+    private DeveloperPage? _developerMenuContent;
+    private VibrationTestPage? _vibrationTestContent;
+    private ClawSensorProbePage? _clawSensorProbeContent;
+    private FanHardwareProbePage? _fanHardwareProbeContent;
+    private BatteryChargeLimitTestPage? _batteryChargeLimitTestContent;
+    private GameInputSystemButtonProbePage? _gameInputSystemButtonProbeContent;
 
     // App UI PR-C: the single ordered mutation path for the WHOLE front-button mapping. The
     // cross-button same-domain uniqueness rule belongs to one whole mapping, so there is one save
@@ -96,23 +103,6 @@ public sealed partial class MainWindow : Window
         ControllerContent.BackButtonMappingEditRequested += (_, mapping) => QueueBackButtonMutation(mapping);
         ControllerContent.ControllerLedEditRequested += (_, settings) => QueueControllerLedMutation(settings);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
-        DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
-        DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
-        DeveloperMenuContent.VibrationTestRequested += (_, _) => ShowPage(_navigationState.OpenVibrationTest());
-        VibrationTestContent.Initialize(_frontend, _bootstrap);
-        VibrationTestContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        DeveloperMenuContent.SensorProbeRequested += (_, _) => ShowPage(_navigationState.OpenClawSensorProbe());
-        DeveloperMenuContent.FanHardwareProbeRequested += (_, _) => ShowPage(_navigationState.OpenFanHardwareProbe());
-        DeveloperMenuContent.BatteryChargeLimitTestRequested += (_, _) => ShowPage(_navigationState.OpenBatteryChargeLimitTest());
-        DeveloperMenuContent.GameInputSystemButtonProbeRequested += (_, _) => ShowPage(_navigationState.OpenGameInputSystemButtonProbe());
-        ClawSensorProbeContent.Initialize(_frontend);
-        ClawSensorProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        FanHardwareProbeContent.Initialize(_frontend);
-        FanHardwareProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        BatteryChargeLimitTestContent.Initialize(_frontend);
-        BatteryChargeLimitTestContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        GameInputSystemButtonProbeContent.Initialize(_frontend);
-        GameInputSystemButtonProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
         MainNavigationView.SelectedItem = DeviceNavigationItem;
         _ = RefreshSystemStatusAsync();
@@ -148,16 +138,21 @@ public sealed partial class MainWindow : Window
 
     internal async Task CloseVibrationTestForUiShutdownAsync()
     {
-        await VibrationTestContent.DeactivateAsync().ConfigureAwait(true);
-        FanHardwareProbeContent.Deactivate();
+        if (_vibrationTestContent is not null)
+            await _vibrationTestContent.DeactivateAsync().ConfigureAwait(true);
+        _fanHardwareProbeContent?.Deactivate();
     }
 
-    internal async Task CloseGameInputSystemButtonProbeForUiShutdownAsync() =>
-        await GameInputSystemButtonProbeContent.DeactivateAsync().ConfigureAwait(true);
+    internal async Task CloseGameInputSystemButtonProbeForUiShutdownAsync()
+    {
+        if (_gameInputSystemButtonProbeContent is not null)
+            await _gameInputSystemButtonProbeContent.DeactivateAsync().ConfigureAwait(true);
+    }
 
     internal async Task CloseClawSensorProbeForUiShutdownAsync()
     {
-        await ClawSensorProbeContent.DeactivateAsync().ConfigureAwait(true);
+        if (_clawSensorProbeContent is not null)
+            await _clawSensorProbeContent.DeactivateAsync().ConfigureAwait(true);
         await _frontend.CloseClawSensorProbeAsync().ConfigureAwait(true);
     }
 
@@ -188,6 +183,71 @@ public sealed partial class MainWindow : Window
         AppLog.Info("Window", "Developer menu opened.",
             ("PreviousPage", previousPage),
             ("CurrentPage", _navigationState.CurrentPage));
+    }
+
+    private DeveloperPage GetOrCreateDeveloperMenu()
+    {
+        if (_developerMenuContent is not null) return _developerMenuContent;
+
+        var page = new DeveloperPage();
+        page.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
+        page.BackRequested += (_, _) => ReturnToSettings("BackButton");
+        page.VibrationTestRequested += (_, _) => ShowPage(_navigationState.OpenVibrationTest());
+        page.SensorProbeRequested += (_, _) => ShowPage(_navigationState.OpenClawSensorProbe());
+        page.FanHardwareProbeRequested += (_, _) => ShowPage(_navigationState.OpenFanHardwareProbe());
+        page.BatteryChargeLimitTestRequested += (_, _) => ShowPage(_navigationState.OpenBatteryChargeLimitTest());
+        page.GameInputSystemButtonProbeRequested += (_, _) => ShowPage(_navigationState.OpenGameInputSystemButtonProbe());
+        return _developerMenuContent = page;
+    }
+
+    private VibrationTestPage GetOrCreateVibrationTestPage()
+    {
+        if (_vibrationTestContent is not null) return _vibrationTestContent;
+
+        var page = new VibrationTestPage();
+        page.Initialize(_frontend, _bootstrap);
+        page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        return _vibrationTestContent = page;
+    }
+
+    private ClawSensorProbePage GetOrCreateClawSensorProbePage()
+    {
+        if (_clawSensorProbeContent is not null) return _clawSensorProbeContent;
+
+        var page = new ClawSensorProbePage();
+        page.Initialize(_frontend);
+        page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        return _clawSensorProbeContent = page;
+    }
+
+    private FanHardwareProbePage GetOrCreateFanHardwareProbePage()
+    {
+        if (_fanHardwareProbeContent is not null) return _fanHardwareProbeContent;
+
+        var page = new FanHardwareProbePage();
+        page.Initialize(_frontend);
+        page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        return _fanHardwareProbeContent = page;
+    }
+
+    private BatteryChargeLimitTestPage GetOrCreateBatteryChargeLimitTestPage()
+    {
+        if (_batteryChargeLimitTestContent is not null) return _batteryChargeLimitTestContent;
+
+        var page = new BatteryChargeLimitTestPage();
+        page.Initialize(_frontend);
+        page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        return _batteryChargeLimitTestContent = page;
+    }
+
+    private GameInputSystemButtonProbePage GetOrCreateGameInputSystemButtonProbePage()
+    {
+        if (_gameInputSystemButtonProbeContent is not null) return _gameInputSystemButtonProbeContent;
+
+        var page = new GameInputSystemButtonProbePage();
+        page.Initialize(_frontend);
+        page.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        return _gameInputSystemButtonProbeContent = page;
     }
 
     private async void OnDeveloperMenuRequested(object? sender, EventArgs args)
@@ -254,21 +314,39 @@ public sealed partial class MainWindow : Window
         ShowPage(_navigationState.SelectNavigationItem(args.IsSettingsSelected, selectedTag));
     }
 
-    private bool IsBatteryValidationBlockingNavigation() =>
-        BatteryChargeLimitTestContent.Visibility == Visibility.Visible &&
-        BatteryChargeLimitTestContent.IsValidationRunning;
+    private bool IsBatteryValidationBlockingNavigation()
+    {
+        return _batteryChargeLimitTestContent is { IsValidationRunning: true } &&
+            ReferenceEquals(DeveloperContentHost.Content, _batteryChargeLimitTestContent);
+    }
 
     private void ShowPage(MainNavigationPage page)
     {
-        var wasVibrationTest = VibrationTestContent.Visibility == Visibility.Visible;
+        var wasVibrationTest = _vibrationTestContent is not null &&
+            ReferenceEquals(DeveloperContentHost.Content, _vibrationTestContent);
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
         var wasProfile = ProfileContent.Visibility == Visibility.Visible;
         var wasXbox = XboxContent.Visibility == Visibility.Visible;
         var wasShortcut = ShortcutContent.Visibility == Visibility.Visible;
-        var wasClawSensorProbe = ClawSensorProbeContent.Visibility == Visibility.Visible;
-        var wasFanHardwareProbe = FanHardwareProbeContent.Visibility == Visibility.Visible;
-        var wasBatteryChargeLimitTest = BatteryChargeLimitTestContent.Visibility == Visibility.Visible;
-        var wasGameInputSystemButtonProbe = GameInputSystemButtonProbeContent.Visibility == Visibility.Visible;
+        var wasClawSensorProbe = _clawSensorProbeContent is not null &&
+            ReferenceEquals(DeveloperContentHost.Content, _clawSensorProbeContent);
+        var wasFanHardwareProbe = _fanHardwareProbeContent is not null &&
+            ReferenceEquals(DeveloperContentHost.Content, _fanHardwareProbeContent);
+        var wasBatteryChargeLimitTest = _batteryChargeLimitTestContent is not null &&
+            ReferenceEquals(DeveloperContentHost.Content, _batteryChargeLimitTestContent);
+        var wasGameInputSystemButtonProbe = _gameInputSystemButtonProbeContent is not null &&
+            ReferenceEquals(DeveloperContentHost.Content, _gameInputSystemButtonProbeContent);
+        DeveloperContentHost.Content = page switch
+        {
+            MainNavigationPage.DeveloperMenu => GetOrCreateDeveloperMenu(),
+            MainNavigationPage.VibrationTest => GetOrCreateVibrationTestPage(),
+            MainNavigationPage.ClawSensorProbe => GetOrCreateClawSensorProbePage(),
+            MainNavigationPage.FanHardwareProbe => GetOrCreateFanHardwareProbePage(),
+            MainNavigationPage.BatteryChargeLimitTest => GetOrCreateBatteryChargeLimitTestPage(),
+            MainNavigationPage.GameInputSystemButtonProbe => GetOrCreateGameInputSystemButtonProbePage(),
+            _ => null
+        };
+        DeveloperContentHost.Visibility = DeveloperContentHost.Content is null ? Visibility.Collapsed : Visibility.Visible;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
         ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         XboxContent.Visibility = page == MainNavigationPage.Xbox ? Visibility.Visible : Visibility.Collapsed;
@@ -277,19 +355,13 @@ public sealed partial class MainWindow : Window
         ShortcutContent.Visibility = page == MainNavigationPage.Shortcut ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
-        DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
-        VibrationTestContent.Visibility = page == MainNavigationPage.VibrationTest ? Visibility.Visible : Visibility.Collapsed;
-        ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
-        FanHardwareProbeContent.Visibility = page == MainNavigationPage.FanHardwareProbe ? Visibility.Visible : Visibility.Collapsed;
-        BatteryChargeLimitTestContent.Visibility = page == MainNavigationPage.BatteryChargeLimitTest ? Visibility.Visible : Visibility.Collapsed;
-        GameInputSystemButtonProbeContent.Visibility = page == MainNavigationPage.GameInputSystemButtonProbe ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
         if (page == MainNavigationPage.Controller) ControllerContent.Activate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how
         // the user leaves.
-        if (page == MainNavigationPage.VibrationTest) VibrationTestContent.Activate();
-        else if (wasVibrationTest) VibrationTestContent.Deactivate();
+        if (page == MainNavigationPage.VibrationTest) _vibrationTestContent!.Activate();
+        else if (wasVibrationTest) _vibrationTestContent?.Deactivate();
         if (page == MainNavigationPage.Device) DeviceContent.Activate();
         else if (wasDevice) DeviceContent.Deactivate();
         if (page == MainNavigationPage.Profile) ProfileContent.Activate();
@@ -299,14 +371,14 @@ public sealed partial class MainWindow : Window
         if (page == MainNavigationPage.Overlay) OverlayContent.Activate();
         if (page == MainNavigationPage.Shortcut) ShortcutContent.Activate();
         else if (wasShortcut) ShortcutContent.Deactivate();
-        if (page == MainNavigationPage.ClawSensorProbe) ClawSensorProbeContent.Activate();
-        else if (wasClawSensorProbe) ClawSensorProbeContent.Deactivate();
-        if (page == MainNavigationPage.FanHardwareProbe) FanHardwareProbeContent.Activate();
-        else if (wasFanHardwareProbe) FanHardwareProbeContent.Deactivate();
-        if (page == MainNavigationPage.BatteryChargeLimitTest) BatteryChargeLimitTestContent.Activate();
-        else if (wasBatteryChargeLimitTest) BatteryChargeLimitTestContent.Deactivate();
-        if (page == MainNavigationPage.GameInputSystemButtonProbe) GameInputSystemButtonProbeContent.Activate();
-        else if (wasGameInputSystemButtonProbe) GameInputSystemButtonProbeContent.Deactivate();
+        if (page == MainNavigationPage.ClawSensorProbe) _clawSensorProbeContent!.Activate();
+        else if (wasClawSensorProbe) _clawSensorProbeContent?.Deactivate();
+        if (page == MainNavigationPage.FanHardwareProbe) _fanHardwareProbeContent!.Activate();
+        else if (wasFanHardwareProbe) _fanHardwareProbeContent?.Deactivate();
+        if (page == MainNavigationPage.BatteryChargeLimitTest) _batteryChargeLimitTestContent!.Activate();
+        else if (wasBatteryChargeLimitTest) _batteryChargeLimitTestContent?.Deactivate();
+        if (page == MainNavigationPage.GameInputSystemButtonProbe) _gameInputSystemButtonProbeContent!.Activate();
+        else if (wasGameInputSystemButtonProbe) _gameInputSystemButtonProbeContent?.Deactivate();
     }
 
     private async Task RefreshSystemStatusAsync()

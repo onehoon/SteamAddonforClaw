@@ -73,12 +73,11 @@
 
             <views:SettingsPage x:Name="SettingsContent" Visibility="Collapsed" />
 
-            <views:DeveloperPage x:Name="DeveloperMenuContent" Visibility="Collapsed" />
-            <views:VibrationTestPage x:Name="VibrationTestContent" Visibility="Collapsed" />
-            <views:ClawSensorProbePage x:Name="ClawSensorProbeContent" Visibility="Collapsed" />
-            <views:FanHardwareProbePage x:Name="FanHardwareProbeContent" Visibility="Collapsed" />
-            <views:BatteryChargeLimitTestPage x:Name="BatteryChargeLimitTestContent" Visibility="Collapsed" />
-            <views:GameInputSystemButtonProbePage x:Name="GameInputSystemButtonProbeContent" Visibility="Collapsed" />
+            <ContentControl
+                x:Name="DeveloperContentHost"
+                HorizontalContentAlignment="Stretch"
+                VerticalContentAlignment="Stretch"
+                Visibility="Collapsed" />
         </Grid>
     </NavigationView>
         <Grid x:Name="PrerequisiteSetupBusyOverlay"
