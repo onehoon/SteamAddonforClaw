@@ -79,6 +79,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<uint> _actualRunningAppIdSource;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>> _scanProfileGames;
     private readonly Func<CancellationToken, Task<XboxInstalledGameCatalogResult>> _scanXboxGames;
+    private readonly XboxGameProfileMutations? _xboxGameProfileMutations;
     private readonly GameDisplayResolutionRuntime? _displayResolutionRuntime;
     // Narrow MSI Center M startup control (work order PR1). Null is a valid passive state -- the
     // capture/mutation just report unavailable, like every other null-runtime fallback here.
@@ -158,7 +159,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? startXboxSessionDiagnostic = null,
         Func<CancellationToken, Task<FrontendXboxSessionDiagnosticSnapshot>>? stopXboxSessionDiagnostic = null,
         Func<CancellationToken, Task<FrontendXboxSessionDiagnosticReportResult>>? generateXboxSessionDiagnosticReport = null,
-        Func<CancellationToken, Task<XboxInstalledGameCatalogResult>>? scanXboxGames = null)
+        Func<CancellationToken, Task<XboxInstalledGameCatalogResult>>? scanXboxGames = null,
+        XboxGameProfileMutations? xboxGameProfileMutations = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -174,6 +176,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
         _scanProfileGames = scanProfileGames ?? (token => new ProfileGameCatalogScanner().ScanAsync(token));
         _scanXboxGames = scanXboxGames ?? (token => new XboxInstalledGameCatalog().ScanAsync(token));
+        _xboxGameProfileMutations = xboxGameProfileMutations;
         _displayResolutionRuntime = displayResolutionRuntime;
         _fanProbeTransport = fanProbeTransport;
         _batteryChargeLimitRuntime = batteryChargeLimitRuntime;
@@ -305,13 +308,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         cancellationToken.ThrowIfCancellationRequested();
 
         var result = await _scanXboxGames(cancellationToken).ConfigureAwait(false);
+        var favorites = _xboxGameProfileMutations?.CaptureFavoriteKeys() ?? new HashSet<string>(StringComparer.Ordinal);
         return result.Outcome switch
         {
             XboxInstalledGameCatalogOutcome.Completed => new(
                 FrontendXboxGameCatalogOutcome.Ready,
                 result.Games.Select(game => new FrontendXboxGameCatalogEntry(
                     game.Identity.Key,
-                    game.Identity.DisplayName)).ToArray(),
+                    game.Identity.DisplayName,
+                    favorites.Contains(game.Identity.Key))).ToArray(),
                 null),
             XboxInstalledGameCatalogOutcome.Unavailable =>
                 FrontendXboxGameCatalogSnapshot.Unavailable("XBOX game catalog is unavailable."),
@@ -320,6 +325,106 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
                 [],
                 "XBOX game catalog could not be loaded.")
         };
+    }
+
+    public Task<FrontendXboxGameProfileSnapshot> CaptureXboxGameProfileAsync(string key, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(CaptureXboxGameProfile(key));
+    }
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFavoriteAsync(string key, bool favorite, string? displayName, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetFavorite(key, favorite, displayName));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledAsync(string key, bool enabled, string? displayName, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetEnabled(key, enabled, displayName));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetCpuBoostEnabled(key, enabled));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostAcAsync(string key, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetCpuBoostAc(key, mode));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostDcAsync(string key, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetCpuBoostDc(key, mode));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileTdpEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetTdpEnabled(key, enabled));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileTdpAsync(string key, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        return MutateXboxGame(key, cancellationToken, mutations => mutations.SetTdp(key,
+            new() { Pl1Watts = configuration.Ac.Pl1Watts, Pl2Watts = configuration.Ac.Pl2Watts },
+            new() { Pl1Watts = configuration.Dc.Pl1Watts, Pl2Watts = configuration.Dc.Pl2Watts }));
+    }
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetPowerModeEnabled(key, enabled));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeAcAsync(string key, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetPowerModeAc(key, mode));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeDcAsync(string key, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetPowerModeDc(key, mode));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetFpsLimitEnabled(key, enabled));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitAcAsync(string key, int fps, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetFpsLimitAc(key, fps));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitDcAsync(string key, int fps, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetFpsLimitDc(key, fps));
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default) =>
+        MutateXboxGame(key, cancellationToken, mutations => mutations.SetResolution(key,
+            resolution is { } value ? new GameDisplayResolution { Width = value.Width, Height = value.Height } : null, displayName));
+
+    private Task<FrontendXboxGameProfileMutationResult> MutateXboxGame(
+        string key,
+        CancellationToken cancellationToken,
+        Func<XboxGameProfileMutations, XboxGameProfileMutations.MutationOutcome> mutation)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        var outcome = _xboxGameProfileMutations is { } mutations
+            ? mutation(mutations)
+            : XboxGameProfileMutations.MutationOutcome.Unavailable;
+        var mapped = outcome switch
+        {
+            XboxGameProfileMutations.MutationOutcome.Succeeded => FrontendGameProfileMutationOutcome.Succeeded,
+            XboxGameProfileMutations.MutationOutcome.InvalidTarget => FrontendGameProfileMutationOutcome.InvalidTarget,
+            XboxGameProfileMutations.MutationOutcome.PersistenceFailed => FrontendGameProfileMutationOutcome.PersistenceFailed,
+            _ => FrontendGameProfileMutationOutcome.Unavailable
+        };
+        return Task.FromResult(new FrontendXboxGameProfileMutationResult(mapped,
+            mapped == FrontendGameProfileMutationOutcome.Succeeded ? null : "XBOX profile mutation failed.", CaptureXboxGameProfile(key)));
+    }
+
+    private FrontendXboxGameProfileSnapshot CaptureXboxGameProfile(string key)
+    {
+        var captured = _xboxGameProfileMutations?.CaptureProfile(key);
+        if (captured is null)
+            return new(key, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled),
+                new(false, new(20, 22), new(20, 22)), false, null,
+                FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
+
+        var profile = captured.Profile;
+        var limits = _tdpRuntime?.CaptureSnapshot().Policy is { } policy
+            ? new FrontendTdpLimits(policy.Pl1MinimumWatts, policy.Pl1MaximumWatts, policy.Pl2MinimumWatts, policy.Pl2MaximumWatts)
+            : null;
+        return new(key, profile.DisplayName, captured.Exists, captured.Exists && profile.Enabled,
+            new(profile.Performance.CpuBoost!.Enabled, profile.Performance.CpuBoost.Ac, profile.Performance.CpuBoost.Dc),
+            new(profile.Performance.Tdp!.Enabled,
+                new(profile.Performance.Tdp.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts),
+                new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)),
+            captured.PersistenceWritable, limits,
+            profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
+            profile.Performance.PowerMode is { } power ? new(power.Enabled, power.Ac, power.Dc) : null,
+            new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60,
+                profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason));
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileFavoriteAsync(uint appId, bool favorite, string? displayName, CancellationToken cancellationToken = default)
