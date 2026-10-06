@@ -374,7 +374,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         MutateXboxGame(key, cancellationToken, mutations => mutations.SetResolution(key,
             resolution is { } value ? new GameDisplayResolution { Width = value.Width, Height = value.Height } : null, displayName), ProfileApplyKind.Resolution);
 
-    private enum ProfileApplyKind { None, All, CpuBoost, Tdp, PowerMode, FpsLimit, Resolution }
+    [Flags]
+    private enum ProfileApplyKind
+    {
+        None = 0,
+        CpuBoost = 1 << 0,
+        Tdp = 1 << 1,
+        PowerMode = 1 << 2,
+        FpsLimit = 1 << 3,
+        Resolution = 1 << 4,
+        ExistingProfileEnable = CpuBoost | Tdp | PowerMode | FpsLimit,
+        All = ExistingProfileEnable | Resolution
+    }
 
     private sealed record ProfileApplyFailure(ProfileApplyKind Kind, string Message, bool RuntimeUnavailable = false);
 
@@ -467,7 +478,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     private static bool IncludesFeature(ProfileApplyKind kind, ProfileApplyKind featureKind) =>
-        kind is ProfileApplyKind.All || kind == featureKind;
+        (kind & featureKind) != 0;
 
     private static string? GetApplyFailureMessage(ProfileApplyResult result, params ProfileApplyKind[] reportedKinds)
     {
@@ -535,7 +546,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         var outcome = _gameProfileMutations?.SetEnabled(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
-        return MutateGame(appId, outcome, ProfileApplyKind.All,
+        return MutateGame(appId, outcome, ProfileApplyKind.ExistingProfileEnable,
             ProfileApplyKind.PowerMode, ProfileApplyKind.FpsLimit);
     }
 
