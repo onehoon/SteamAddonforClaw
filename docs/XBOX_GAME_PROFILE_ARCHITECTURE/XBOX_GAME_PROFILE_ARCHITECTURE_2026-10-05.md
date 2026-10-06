@@ -1072,14 +1072,33 @@ Add XBOX-specific contracts.
 
 Conceptual examples:
 
+For the first read-only production catalog surface, keep the catalog DTO intentionally narrow:
+
 ~~~csharp
 public sealed record FrontendXboxGameCatalogEntry(
     string Key,
-    string DisplayName,
-    string? StoreId,
-    string? TitleId,
-    bool Favorite);
+    string DisplayName);
+~~~
 
+`Key` is internal transport/application identity only. The normal Main App catalog renders and searches `DisplayName` only.
+
+Do not expose normal-user catalog fields for:
+
+- StoreId;
+- TitleId;
+- PackageFamilyName / PFN;
+- PackageFullName;
+- MicrosoftGame.config path;
+- ExecutableList;
+- AUMID or process/path evidence.
+
+Those remain Runtime identity/persistence metadata.
+
+Later profile persistence may extend the XBOX frontend surface with user-facing profile state such as Favorite, but technical platform identity still remains hidden from the normal UI.
+
+Conceptual future profile example:
+
+~~~csharp
 public sealed record FrontendXboxGameProfileSnapshot(
     string Key,
     string? DisplayName,
