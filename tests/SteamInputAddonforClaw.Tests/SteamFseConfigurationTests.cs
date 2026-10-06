@@ -73,14 +73,25 @@ public sealed class SteamFseConfigurationTests
     }
 
     [Fact]
-    public void Capture_fails_closed_when_os_or_unknown_home_identity_cannot_be_verified()
+    public void Capture_fails_closed_when_os_is_unsupported()
     {
         var unsupported = CreateConfiguration(osSupported: false).Capture();
-        var unknownIdentity = CreateConfiguration(home: "Unclassified_family!App", probeSucceeded: false).Capture();
 
         Assert.False(unsupported.Available);
-        Assert.False(unknownIdentity.Available);
-        Assert.NotNull(unknownIdentity.UnavailableReason);
+    }
+
+    [Fact]
+    public void Capture_keeps_unknown_home_available_as_other_when_steam_package_probe_fails()
+    {
+        var snapshot = CreateConfiguration(
+            home: "Unclassified_family!App",
+            startup: true,
+            probeSucceeded: false).Capture();
+
+        Assert.True(snapshot.Available);
+        Assert.Equal(FrontendGamingHomeSelection.Other, snapshot.Selection);
+        Assert.True(snapshot.StartupEnabled);
+        Assert.Null(snapshot.UnavailableReason);
     }
 
     [Fact]
@@ -125,6 +136,20 @@ public sealed class SteamFseConfigurationTests
         Assert.Equal(["WriteHome:" + XboxAumid], store.Writes);
         Assert.Equal(FrontendGamingHomeSelection.Xbox, result.Snapshot.Selection);
         Assert.Equal(startup, result.Snapshot.StartupEnabled);
+    }
+
+    [Fact]
+    public async Task Select_xbox_recovers_from_unknown_home_when_steam_package_probe_fails()
+    {
+        var store = new FakeConfigurationStore { GamingHomeApp = "Unclassified_family!App", StartupToGamingHome = true };
+        var result = await CreateConfiguration(store: store, probeSucceeded: false, xboxResolvable: true)
+            .SetSelectionAsync(FrontendGamingHomeSelection.Xbox);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(XboxAumid, store.GamingHomeApp);
+        Assert.True(store.StartupToGamingHome);
+        Assert.Equal(FrontendGamingHomeSelection.Xbox, result.Snapshot.Selection);
+        Assert.Equal(["WriteHome:" + XboxAumid], store.Writes);
     }
 
     [Fact]
@@ -292,6 +317,21 @@ public sealed class SteamFseConfigurationTests
 
         Assert.False(result.Succeeded);
         Assert.Equal(FrontendGamingHomeSelection.Other, result.Snapshot.Selection);
+        Assert.True(store.StartupToGamingHome);
+        Assert.Empty(store.Writes);
+    }
+
+    [Fact]
+    public async Task Startup_mutation_is_rejected_for_unknown_home_when_steam_package_probe_fails()
+    {
+        var store = new FakeConfigurationStore { GamingHomeApp = "Unclassified_family!App", StartupToGamingHome = true };
+
+        var result = await CreateConfiguration(store: store, probeSucceeded: false).SetStartupEnabledAsync(false);
+
+        Assert.False(result.Succeeded);
+        Assert.True(result.Snapshot.Available);
+        Assert.Equal(FrontendGamingHomeSelection.Other, result.Snapshot.Selection);
+        Assert.True(result.Snapshot.StartupEnabled);
         Assert.True(store.StartupToGamingHome);
         Assert.Empty(store.Writes);
     }

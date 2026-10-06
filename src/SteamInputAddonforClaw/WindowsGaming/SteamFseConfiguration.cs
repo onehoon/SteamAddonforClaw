@@ -448,8 +448,7 @@ internal sealed class WindowsGamingHomeConfiguration
 
         var inspection = _packageProbe.Inspect();
         if (!inspection.Succeeded)
-            return (false, FrontendGamingHomeSelection.Other,
-                inspection.FailureReason ?? "The current Gaming Home app could not be safely identified.");
+            return (true, FrontendGamingHomeSelection.Other, null);
 
         var steamAumid = WindowsSteamFsePackageProbe.TryGetAumid(inspection.Package);
         return string.Equals(aumid, steamAumid, StringComparison.Ordinal)
