@@ -5,7 +5,6 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics.XboxSession;
-using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
@@ -600,7 +599,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startXbox360RumbleLoopDiagnostic: StartXbox360RumbleLoopDiagnosticAsync,
             stopXbox360RumbleLoopDiagnostic: StopXbox360RumbleLoopDiagnosticAsync,
             runPid1902InputCadenceDiagnostic: RunPid1902InputCadenceDiagnosticAsync,
-            runXboxCatalogDiagnostic: cancellationToken => new XboxCatalogDiagnostic().RunAsync(cancellationToken),
             captureGameInputSystemButtonProbe: CaptureGameInputSystemButtonProbeAsync,
             startGameInputSystemButtonProbe: StartGameInputSystemButtonProbeAsync,
             stopGameInputSystemButtonProbe: StopGameInputSystemButtonProbeAsync,

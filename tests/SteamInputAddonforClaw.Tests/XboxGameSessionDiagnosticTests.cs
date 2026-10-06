@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
 using SteamInputAddonforClaw.Diagnostics.XboxSession;
+using SteamInputAddonforClaw.Xbox;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -574,7 +574,7 @@ public sealed class XboxGameSessionDiagnosticTests : IAsyncLifetime
 
         Assert.Equal(XboxGameProcessInspectionDisposition.PackageIdentityFailure, result.Disposition);
         var parsedConfig = MicrosoftGameConfigReader.Parse(config).Config!;
-        Assert.Equal("identity:SAMPLE.GAME|CN%3DSAMPLE|PC", XboxCatalogDiagnostic.CreateCandidateKey(null, null, parsedConfig));
+        Assert.Equal("identity:SAMPLE.GAME|CN%3DSAMPLE|PC", XboxGameIdentity.CreateKey(null, null, parsedConfig));
     }
 
     [Fact]

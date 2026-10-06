@@ -369,51 +369,6 @@ public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
 
-public enum FrontendXboxCatalogDiagnosticOutcome { Completed, Unavailable, Failed }
-
-public sealed record FrontendXboxCatalogDiagnosticResult(
-    FrontendXboxCatalogDiagnosticOutcome Outcome,
-    string Status,
-    int EnumeratedPackageCount,
-    int AccessiblePackageCount,
-    int ConfigCandidateCount,
-    int ParsedConfigCount,
-    int ValidGameCount,
-    int SkippedOrFailedCount,
-    IReadOnlyList<FrontendXboxCatalogDiagnosticGame> Games,
-    IReadOnlyList<FrontendXboxCatalogDiagnosticFailure> Failures,
-    string? ReportPath,
-    int OmittedGameCount = 0,
-    int OmittedFailureCount = 0)
-{
-    public static FrontendXboxCatalogDiagnosticResult Unavailable(string status) => new(
-        FrontendXboxCatalogDiagnosticOutcome.Unavailable, status, 0, 0, 0, 0, 0, 0, [], [], null);
-}
-
-public sealed record FrontendXboxCatalogDiagnosticGame(
-    string CandidateKey,
-    string DisplayName,
-    string PackageFullName,
-    string PackageFamilyName,
-    string? StoreId,
-    string? TitleId,
-    string IdentityName,
-    string IdentityPublisher,
-    string? IdentityResourceId,
-    IReadOnlyList<FrontendXboxCatalogDiagnosticExecutable> Executables,
-    string PackageLocationKind,
-    string PackageRoot,
-    string ConfigPath,
-    int OmittedExecutableCount = 0);
-
-public sealed record FrontendXboxCatalogDiagnosticExecutable(
-    string Name,
-    string? Id,
-    string? TargetDeviceFamily,
-    string? Architecture);
-
-public sealed record FrontendXboxCatalogDiagnosticFailure(string Stage, string PackageIdentity, string Reason);
-
 public enum FrontendXboxSessionDiagnosticState { Stopped, Running, Failed }
 public enum FrontendXboxSessionDiagnosticReportOutcome { Created, Failed, Unavailable }
 
@@ -709,8 +664,6 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendCenterMStartupMutationResult(FrontendCenterMStartupMutationOutcome.Unavailable, FrontendCenterMStartupSnapshot.Unavailable, "MSI Center M controller authority control is unavailable."));
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);
     Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default);
-    Task<FrontendXboxCatalogDiagnosticResult> RunXboxCatalogDiagnosticAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendXboxCatalogDiagnosticResult.Unavailable("XBOX catalog diagnostic is unavailable."));
     Task<FrontendXboxSessionDiagnosticSnapshot> CaptureXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendXboxSessionDiagnosticSnapshot.Unavailable("XBOX active game diagnostic is unavailable."));
     Task<FrontendXboxSessionDiagnosticSnapshot> StartXboxSessionDiagnosticAsync(CancellationToken cancellationToken = default) =>

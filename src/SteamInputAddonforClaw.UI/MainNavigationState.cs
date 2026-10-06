@@ -15,7 +15,6 @@ internal enum MainNavigationPage
     VibrationTest,
     FanHardwareProbe,
     BatteryChargeLimitTest,
-    XboxCatalogDiagnostic,
     GameInputSystemButtonProbe,
     XboxSessionDiagnostic,
 }
@@ -67,7 +66,6 @@ internal sealed class MainNavigationState
     internal MainNavigationPage OpenVibrationTest() => CurrentPage = MainNavigationPage.VibrationTest;
     internal MainNavigationPage OpenFanHardwareProbe() => CurrentPage = MainNavigationPage.FanHardwareProbe;
     internal MainNavigationPage OpenBatteryChargeLimitTest() => CurrentPage = MainNavigationPage.BatteryChargeLimitTest;
-    internal MainNavigationPage OpenXboxCatalogDiagnostic() => CurrentPage = MainNavigationPage.XboxCatalogDiagnostic;
     internal MainNavigationPage OpenGameInputSystemButtonProbe() => CurrentPage = MainNavigationPage.GameInputSystemButtonProbe;
     internal MainNavigationPage OpenXboxSessionDiagnostic() => CurrentPage = MainNavigationPage.XboxSessionDiagnostic;
 
@@ -79,7 +77,6 @@ internal sealed class MainNavigationState
         MainNavigationPage.VibrationTest => MainNavigationPage.DeveloperMenu,
         MainNavigationPage.FanHardwareProbe => MainNavigationPage.DeveloperMenu,
         MainNavigationPage.BatteryChargeLimitTest => MainNavigationPage.DeveloperMenu,
-        MainNavigationPage.XboxCatalogDiagnostic => MainNavigationPage.DeveloperMenu,
         MainNavigationPage.GameInputSystemButtonProbe => MainNavigationPage.DeveloperMenu,
         MainNavigationPage.XboxSessionDiagnostic => MainNavigationPage.DeveloperMenu,
         _ => null

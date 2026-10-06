@@ -49,7 +49,6 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(fake.SetupResult.Result, setupResult.Result);
         Assert.Equivalent(fake.SetupResult.Status, setupResult.Status, strict: true);
         Assert.Equal(fake.EnvironmentResult, await client.GenerateEnvironmentReportAsync());
-        Assert.Equivalent(fake.XboxCatalogDiagnosticResult, await client.RunXboxCatalogDiagnosticAsync(), strict: true);
     }
 
     [Fact]
@@ -68,7 +67,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(52, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(53, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(fake.XboxSessionDiagnosticSnapshot, await client.CaptureXboxSessionDiagnosticAsync(), strict: true);
         Assert.Equal(FrontendXboxSessionDiagnosticState.Running, (await client.StartXboxSessionDiagnosticAsync()).State);
         Assert.Equal(FrontendXboxSessionDiagnosticState.Stopped, (await client.StopXboxSessionDiagnosticAsync()).State);
@@ -103,7 +102,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(52, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(53, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.SteamFseSnapshot, await client.CaptureSteamFseAsync());
         Assert.Equal(fake.SteamFseMutationResult, await client.SetSteamFseEnabledAsync(true));
         Assert.True(fake.LastSteamFseEnabled);
@@ -139,7 +138,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(52, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(53, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -192,7 +191,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(52, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(53, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -212,7 +211,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(52, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(53, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -236,7 +235,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(52, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(53, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -249,7 +248,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(52, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(53, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.GameInputProbeSnapshot, await client.CaptureGameInputSystemButtonProbeAsync());
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.StartGameInputSystemButtonProbeAsync()).State);
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.CaptureGameInputSystemButtonProbeAsync()).State);
@@ -309,7 +308,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(52, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(53, FrontendTransportProtocol.CurrentVersion);
         var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
         var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
@@ -677,7 +676,7 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task A_v50_frontend_peer_is_rejected_by_the_v51_server()
+    public async Task A_v52_frontend_peer_is_rejected_by_the_v53_server()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
@@ -1570,13 +1569,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 52 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 53 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":52,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":52,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":52,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":53,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":53,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":53,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1642,7 +1641,6 @@ public sealed class FrontendNamedPipeTransportTests
 
     [Theory]
     [InlineData("GetBootstrap")]
-    [InlineData("RunXboxCatalogDiagnostic")]
     public async Task No_argument_method_with_payload_is_rejected_without_invoking_frontend(string method)
     {
         var fake = new RecordingFrontendControl();
@@ -1881,14 +1879,6 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, @"C:\Logs", true);
         public FrontendPrerequisiteSetupResult SetupResult { get; } = new(FrontendPrerequisiteSetupResultKind.Installed, Status);
         public FrontendEnvironmentReportResult EnvironmentResult { get; } = new(true, null);
-        public FrontendXboxCatalogDiagnosticResult XboxCatalogDiagnosticResult { get; } = new(
-            FrontendXboxCatalogDiagnosticOutcome.Completed, "Completed.", 42, 40, 2, 1, 1, 1,
-            [new FrontendXboxCatalogDiagnosticGame("store:9ABC", "Sample Game", "Sample_1.0.0.0_x64__test", "Sample_test",
-                "9ABC", "1234", "Sample", "CN=Sample", null,
-                [new FrontendXboxCatalogDiagnosticExecutable("Game.exe", "Game", "PC", "x64")],
-                "Installed", @"D:\Games\Sample", @"D:\Games\Sample\MicrosoftGame.config")],
-            [new FrontendXboxCatalogDiagnosticFailure("ConfigRead", "Sample_test", "Access denied.")],
-            @"C:\Logs\Discovery\xbox-catalog-diagnostic.txt");
         public FrontendXboxSessionDiagnosticSnapshot XboxSessionDiagnosticSnapshot { get; set; } =
             FrontendXboxSessionDiagnosticSnapshot.Unavailable("Not started.");
         public int XboxSessionDiagnosticStartCount { get; private set; }
@@ -1934,7 +1924,6 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken t = default) { TotalCalls++; SuppressDeveloperWarningCount++; return Task.FromResult(Settings); }
         public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken t = default) { TotalCalls++; if (!BlockPrerequisiteSetup) return SetupResult; PrerequisiteSetupStarted.TrySetResult(); try { await Task.Delay(Timeout.InfiniteTimeSpan, t); throw new UnreachableException(); } catch (OperationCanceledException) { PrerequisiteSetupCancelled.TrySetResult(); throw; } }
         public Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(EnvironmentResult); }
-        public Task<FrontendXboxCatalogDiagnosticResult> RunXboxCatalogDiagnosticAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(XboxCatalogDiagnosticResult); }
         public Task<FrontendXboxSessionDiagnosticSnapshot> CaptureXboxSessionDiagnosticAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(XboxSessionDiagnosticSnapshot); }
         public Task<FrontendXboxSessionDiagnosticSnapshot> StartXboxSessionDiagnosticAsync(CancellationToken t = default)
         {

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Diagnostics.XboxCatalog;
+using SteamInputAddonforClaw.Xbox;
 using Windows.Management.Deployment;
 
 namespace SteamInputAddonforClaw.Diagnostics.XboxSession;
