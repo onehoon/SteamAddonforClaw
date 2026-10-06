@@ -54,18 +54,25 @@ public sealed partial class XboxPage : UserControl
             _selectedGame = selectedKey is null ? null : _catalog.FirstOrDefault(x => x.Key == selectedKey);
             if (snapshot.Outcome != FrontendXboxGameCatalogOutcome.Ready)
             {
-                ClearSelection();
+                ReturnToCatalog();
                 ShowError(snapshot.FailureMessage ?? "XBOX game catalog could not be loaded.", null);
             }
             else if (_selectedGame is null)
             {
-                ClearSelection();
+                ReturnToCatalog();
                 if (_catalog.Count == 0) ShowInfo("No installed XBOX games were found."); else ClearError();
             }
             else await CaptureSelectedAsync(_selectedGame.Key);
         }
         catch (OperationCanceledException) when (scan.IsCancellationRequested) { }
-        catch (Exception exception) { if (IsCurrentScan(_active, _scanCancellation, scan)) ShowError("XBOX game catalog could not be refreshed.", exception); }
+        catch (Exception exception)
+        {
+            if (IsCurrentScan(_active, _scanCancellation, scan))
+            {
+                ReturnToCatalog();
+                ShowError("XBOX game catalog could not be refreshed.", exception);
+            }
+        }
         finally { if (ReferenceEquals(_scanCancellation, scan)) _scanCancellation = null; scan.Dispose(); }
     }
 
@@ -81,7 +88,15 @@ public sealed partial class XboxPage : UserControl
         SelectedGameNameText.Text = game.DisplayName; CatalogPanel.Visibility = Visibility.Collapsed; DetailPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Collapsed;
         await SelectGameAsync(game);
     }
-    private void BackButton_Click(object sender, RoutedEventArgs e) { ClearSelection(); DetailPanel.Visibility = Visibility.Collapsed; CatalogPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Visible; }
+    private void BackButton_Click(object sender, RoutedEventArgs e) => ReturnToCatalog();
+    private void ReturnToCatalog()
+    {
+        ClearSelection();
+        SelectedGameNameText.Text = string.Empty;
+        DetailPanel.Visibility = Visibility.Collapsed;
+        CatalogPanel.Visibility = Visibility.Visible;
+        RefreshGamesButton.Visibility = Visibility.Visible;
+    }
     private async void FavoriteButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_active || _frontend is null || (sender as Button)?.Tag is not FrontendXboxGameCatalogEntry game) return;

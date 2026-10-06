@@ -96,6 +96,29 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
+    public void Xbox_page_returns_to_catalog_when_refreshed_catalog_retires_the_selected_game()
+    {
+        var pageCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
+        var activate = Method(pageCode, "internal void Activate()", "internal void Deactivate()");
+        var refresh = Method(pageCode, "private async Task RefreshGamesAsync()", "private void GameSearchBox_TextChanged");
+        var back = Method(pageCode, "private void BackButton_Click", "private async void FavoriteButton_Click");
+        var returnToCatalog = Method(pageCode, "private void ReturnToCatalog()", "private async void FavoriteButton_Click");
+
+        Assert.Contains("_ = RefreshGamesAsync()", activate, StringComparison.Ordinal);
+        Assert.Contains("var selectedKey = _selectedGame?.Key", refresh, StringComparison.Ordinal);
+        Assert.Contains("_catalog.FirstOrDefault(x => x.Key == selectedKey)", refresh, StringComparison.Ordinal);
+        Assert.Contains("if (snapshot.Outcome != FrontendXboxGameCatalogOutcome.Ready)", refresh, StringComparison.Ordinal);
+        Assert.Contains("else if (_selectedGame is null)", refresh, StringComparison.Ordinal);
+        Assert.True(refresh.Split("ReturnToCatalog();", StringSplitOptions.None).Length - 1 >= 3);
+        Assert.Contains("ReturnToCatalog()", back, StringComparison.Ordinal);
+        Assert.Contains("ClearSelection()", returnToCatalog, StringComparison.Ordinal);
+        Assert.Contains("SelectedGameNameText.Text = string.Empty", returnToCatalog, StringComparison.Ordinal);
+        Assert.Contains("DetailPanel.Visibility = Visibility.Collapsed", returnToCatalog, StringComparison.Ordinal);
+        Assert.Contains("CatalogPanel.Visibility = Visibility.Visible", returnToCatalog, StringComparison.Ordinal);
+        Assert.Contains("RefreshGamesButton.Visibility = Visibility.Visible", returnToCatalog, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Xbox_page_search_uses_display_name_only_and_catalog_is_sorted_deterministically()
     {
         FrontendXboxGameCatalogEntry[] games =
