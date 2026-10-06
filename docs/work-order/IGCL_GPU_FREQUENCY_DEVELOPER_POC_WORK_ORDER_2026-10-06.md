@@ -1,4 +1,4 @@
-# Work Order — Developer-Only Intel IGCL GPU Frequency Range PoC with Readback
+# Work Order — Developer-Only Intel IGCL GPU Frequency + Power Limit PoC with Readback
 
 **Date:** 2026-10-06  
 **Target repository:** `onehoon/SteamAddonforClaw`  
@@ -12,7 +12,7 @@
 
 Add one small **developer-only Intel GPU Frequency probe** that answers a single implementation question before any production Device/Profile feature is designed:
 
-> On the current B390 Intel iGPU and installed Intel graphics driver, does the official Intel Graphics Control Library (IGCL) expose a controllable GPU frequency domain, and does `ctlFrequencySetRange()` successfully change the GPU min/max range with authoritative `ctlFrequencyGetRange()` readback?
+> On the current B390 Intel iGPU and installed Intel graphics driver, does the official Intel Graphics Control Library (IGCL) expose both (a) a controllable GPU frequency domain and (b) a controllable GPU power domain, with authoritative readback after `ctlFrequencySetRange()` and `ctlPowerSetLimits()` writes?
 
 The PoC must allow the developer to:
 
@@ -23,9 +23,17 @@ The PoC must allow the developer to:
 5. immediately read the range back and clearly report whether the requested Max / Max range was verified;
 6. manually refresh live state while a game is running;
 7. restore the exact pre-PoC range captured before the first successful write;
-8. perform a best-effort restore during normal Runtime shutdown if the PoC still owns a modified range.
+8. perform a best-effort restore during normal Runtime shutdown if the PoC still owns a modified range;
+9. enumerate the Intel GPU power domain and read `canControl`, factory/default limit, min/max supported power limits, and current PL1/PL2/PL4;
+10. allow one explicit developer-entered **PL1 test value** within the driver-reported min/max range;
+11. apply that PL1 through `ctlPowerSetLimits()`, immediately read it back through `ctlPowerGetLimits()`, and report VERIFIED / MISMATCH / FAILED;
+12. restore the exact pre-test power-limit structure and verify the restore.
 
-This PR is evidence gathering. It is **not** the production GPU Clock feature.
+This PR is evidence gathering. It is **not** the production GPU Clock or GPU Power/TDP feature.
+
+Important semantic boundary:
+
+> IGCL PL1/PL2 are **power ceilings**, not a guaranteed minimum GPU power reservation. A successful PL1 write proves that the GPU power-limit primitive is controllable; it does **not** prove that assigning 14 W reserves 14 W for the GPU under a shared package TDP.
 
 ---
 
@@ -48,7 +56,23 @@ Intel ControlLib.dll
   -> verified readback
 ```
 
-Only after hardware validation should a later work order decide persistence, Device baseline, per-game overrides, AC/DC policy, Quick Settings, Overlay exposure, startup/recovery behavior, and final UX.
+The power side has the same narrow evidence goal:
+
+```text
+Intel ControlLib.dll
+  -> Intel integrated graphics adapter
+  -> ctlEnumPowerDomains
+  -> ctlPowerGetProperties
+  -> ctlPowerGetLimits
+  -> ctlPowerSetLimits(test PL1)
+  -> ctlPowerGetLimits
+  -> verified readback
+  -> restore original limits
+```
+
+Do not interpret a writable PL1 as a GPU power reservation mechanism. IGCL documents the sustained limit as the threshold above which the power controller throttles operating frequency over the averaging window; it is therefore an upper bound.
+
+Only after hardware validation should a later work order decide persistence, Device baseline, per-game overrides, total-package-TDP coupling, any minimum-total-TDP floor, AC/DC policy, Quick Settings, Overlay exposure, startup/recovery behavior, and final UX.
 
 ---
 
@@ -175,9 +199,44 @@ ctlFrequencyGetProperties
 ctlFrequencyGetRange
 ctlFrequencySetRange
 ctlFrequencyGetState
+ctlEnumPowerDomains
+ctlPowerGetProperties
+ctlPowerGetLimits
+ctlPowerSetLimits
+ctlPowerGetEnergyCounter
 ```
 
 `ctlFrequencyGetAvailableClocks()` is optional for this PoC and is not required for acceptance.
+
+For the power API, preserve these official semantics:
+
+```text
+ctl_power_properties_t.canControl
+  software can change power limits for the domain assuming permission.
+
+defaultLimit
+  factory default TDP power limit of the part, in milliwatts.
+
+minLimit / maxLimit
+  driver-reported bounds for requested power limit values.
+
+sustainedPowerLimit
+  PL1; average-power ceiling over an averaging interval (Tau).
+
+burstPowerLimit
+  PL2; short-duration burst-power ceiling.
+
+peakPowerLimits
+  PL4; instantaneous/peak AC/DC ceiling.
+
+ctlPowerSetLimits
+  changes the power-limit structure; immediate ctlPowerGetLimits readback is required.
+
+ctlPowerGetEnergyCounter
+  monotonic energy counter usable for optional observed average-GPU-power calculation.
+```
+
+The PoC must treat PL1/PL2/PL4 as **limits/ceilings**, not as guaranteed minimum GPU allocation.
 
 Important official semantics:
 
@@ -268,7 +327,7 @@ Keep the PoC deliberately small.
 Recommended file:
 
 ```text
-src/SteamInputAddonforClaw/Diagnostics/IntelGpuFrequencyProbe.cs
+src/SteamInputAddonforClaw/Diagnostics/IntelGpuIgclProbe.cs
 ```
 
 Conceptual responsibility:
@@ -284,7 +343,12 @@ IntelGpuFrequencyProbe
   performs readback verification
   exposes current frequency state
   restores the original range
-  best-effort restores on normal process shutdown
+  enumerates/reads the IGCL GPU power domain
+  captures the original power-limit structure before first power write
+  performs one bounded developer-entered PL1 test write
+  verifies PL1 by immediate GetLimits readback
+  restores the original power-limit structure
+  best-effort restores any probe-owned frequency or power mutation on normal process shutdown
 ```
 
 Do not create a generic GPU-control framework, provider registry, vendor abstraction, frequency manager, or future AMD/NVIDIA interface in this PR.
@@ -360,10 +424,27 @@ Throttle:   0x........ [decoded names]
 
 [ Refresh ] [ Set Max / Max + Readback ] [ Restore Original + Readback ]
 
-Last operation: ...
+Last frequency operation: ...
+
+GPU Power
+Power controllable: Yes / No
+Factory/default: xxxx mW
+Allowed:         xxxx - xxxx mW
+PL1:             Enabled / xxxx mW / Tau xxxx ms
+PL2:             Enabled / xxxx mW
+PL4 AC:          xxxx mW
+PL4 DC:          xxxx mW
+
+Test PL1: [ NumericBox, mW ]
+
+[ Set Test PL1 + Readback ] [ Restore Original Power + Readback ]
+
+Last power operation: ...
 ```
 
 No free-form frequency fields or sliders are needed in this PR.
+
+One numeric input is allowed for the **developer-only PL1 write test**. It must accept only finite integer milliwatt values inside the driver-reported `minLimit..maxLimit` range. Do not expose PL2/PL4 mutation in this PoC. PL2/PL4 are read-only evidence here.
 
 The one write experiment is intentionally fixed:
 
@@ -413,7 +494,24 @@ public sealed record FrontendIntelGpuFrequencyProbeSnapshot(
     string? LastOperation,
     bool? LastOperationVerified,
     uint? LastNativeResult,
-    string? FailureMessage);
+    string? FailureMessage,
+    bool PowerAvailable,
+    bool PowerCanControl,
+    int? PowerDefaultLimitMw,
+    int? PowerMinLimitMw,
+    int? PowerMaxLimitMw,
+    bool? Pl1Enabled,
+    int? Pl1PowerMw,
+    int? Pl1IntervalMs,
+    bool? Pl2Enabled,
+    int? Pl2PowerMw,
+    int? Pl4AcPowerMw,
+    int? Pl4DcPowerMw,
+    bool OriginalPowerLimitsCaptured,
+    bool PowerModifiedByProbe,
+    bool? LastPowerOperationVerified,
+    uint? LastPowerNativeResult,
+    string? PowerFailureMessage);
 ```
 
 Exact naming may follow repository conventions. Keep the information equivalent.
@@ -424,7 +522,9 @@ Use one small operation enum:
 public enum FrontendIntelGpuFrequencyProbeOperation
 {
     SetMaxMax,
-    RestoreOriginal
+    RestoreOriginalFrequency,
+    SetTestPl1,
+    RestoreOriginalPower
 }
 ```
 
@@ -433,7 +533,8 @@ Frontend methods:
 ```csharp
 Task<FrontendIntelGpuFrequencyProbeSnapshot> CaptureIntelGpuFrequencyProbeAsync(...)
 Task<FrontendIntelGpuFrequencyProbeSnapshot> RunIntelGpuFrequencyProbeAsync(
-    FrontendIntelGpuFrequencyProbeOperation operation, ...)
+    FrontendIntelGpuFrequencyProbeOperation operation,
+    int? testPl1Mw = null, ...)
 ```
 
 Add the corresponding named-pipe RPC methods and request payload using the existing transport conventions.
@@ -454,6 +555,10 @@ ensure lazy IGCL session initialized
 -> read GPU frequency properties
 -> read current range
 -> read current state
+-> enumerate/read GPU power domain
+-> read power properties
+-> read current PL1/PL2/PL4 limits
+-> optionally sample the energy counter
 -> return snapshot
 ```
 
@@ -577,6 +682,107 @@ Verification rules:
 Only after verified restore should `ModifiedByProbe` become false.
 
 Do not erase the stored original range on a failed restore; keep it available for another Restore attempt.
+
+---
+
+## 11.5 GPU Power Limit Write + Readback
+
+This is a second, independent PoC primitive. Do not couple frequency Max/Max and PL1 writes into one automatic action.
+
+### 11.5.1 Read-only capability
+
+The probe must:
+
+```text
+ctlEnumPowerDomains(selected Intel adapter)
+-> select the usable power domain returned by the driver
+-> ctlPowerGetProperties
+-> ctlPowerGetLimits
+```
+
+Record:
+
+```text
+canControl
+defaultLimit
+minLimit
+maxLimit
+PL1 enabled/power/interval
+PL2 enabled/power
+PL4 AC/DC
+```
+
+If no power domain is returned, properties fail, or `canControl != true`, report the official result and disable power writes.
+
+Do not invent a domain-type discriminator that the current IGCL power API does not expose.
+
+### 11.5.2 PL1 test write
+
+Before the first power write:
+
+1. call `ctlPowerGetLimits()` again;
+2. preserve the **entire returned power-limit structure** as the authoritative original state;
+3. validate the developer-entered PL1 target against `minLimit..maxLimit`;
+4. copy the original structure;
+5. change only:
+   - `sustainedPowerLimit.enabled = true`;
+   - `sustainedPowerLimit.power = requested test mW`;
+6. preserve the original Tau, PL2, and PL4 values exactly;
+7. call `ctlPowerSetLimits()`;
+8. immediately call `ctlPowerGetLimits()`.
+
+PASS for the PL1 write primitive only when:
+
+```text
+SetLimits succeeds
+AND GetLimits succeeds
+AND readback PL1 enabled == true
+AND readback PL1 power == requested target
+```
+
+Do not require actual GPU power draw to equal the requested PL1. PL1 is a ceiling, not a minimum reservation.
+
+### 11.5.3 Power restore
+
+Restore must write the exact pre-test `ctl_power_limits_t` captured before the first successful mutation, then read the structure back and verify the relevant PL1/PL2/PL4 fields.
+
+Do not restore to `defaultLimit` unless that was actually the pre-test state.
+
+### 11.5.4 Optional observed GPU power
+
+If `ctlPowerGetEnergyCounter()` succeeds, the Developer Menu may show an observed average GPU power sample:
+
+```text
+Power(W) = delta energy (microjoules) / delta timestamp (microseconds)
+```
+
+This is observational evidence only and must not be required for SetLimits success.
+
+### 11.5.5 What this PoC does NOT prove
+
+Even if a test such as:
+
+```text
+PL1 requested = 14000 mW
+PL1 readback  = 14000 mW
+```
+
+is VERIFIED, that does **not** establish:
+
+```text
+the GPU is guaranteed/reserved 14 W
+```
+
+The later production design may combine:
+
+```text
+total package TDP policy
++ GPU frequency floor/range
++ GPU power-limit policy
++ a total-TDP minimum floor
+```
+
+to bias a GPU-bound workload toward stable graphics performance, but that policy is explicitly outside this PoC.
 
 ---
 
@@ -879,7 +1085,10 @@ Quick Settings GPU clock control
 Overlay GPU clock control
 GPU overclocking
 voltage control
-power-limit changes
+production GPU power-limit policy
+PL2/PL4 mutation
+package-TDP/GPU-power coupling
+minimum GPU power reservation claims
 Intel private provider calls
 B390Native.dll dependency
 new elevated helper
@@ -899,7 +1108,7 @@ Do not expand the PoC because a future production feature may eventually need th
 Likely minimum set:
 
 ```text
-src/SteamInputAddonforClaw/Diagnostics/IntelGpuFrequencyProbe.cs                  new
+src/SteamInputAddonforClaw/Diagnostics/IntelGpuIgclProbe.cs                       new
 src/SteamInputAddonforClaw.Contracts/Frontend/FrontendContracts.cs
 src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs
 src/SteamInputAddonforClaw.FrontendTransport/FrontendWire.cs
@@ -907,7 +1116,7 @@ src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs
 src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendServer.cs
 src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml
 src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs
-tests/SteamInputAddonforClaw.Tests/IntelGpuFrequencyProbeTests.cs                new
+tests/SteamInputAddonforClaw.Tests/IntelGpuIgclProbeTests.cs                     new
 tests/SteamInputAddonforClaw.Tests/FrontendNamedPipeTransportTests.cs            if required by transport coverage
 ```
 
@@ -925,6 +1134,9 @@ A reviewer should reject the PR if any of the following occurs:
 - a new elevation/helper/service architecture is added;
 - controller ownership/lifecycle code is touched without necessity;
 - Max/Max is reported successful solely because `ctlFrequencySetRange()` returned success without `GetRange()` verification;
+- a PL1 test is reported successful solely because `ctlPowerSetLimits()` returned success without `GetLimits()` verification;
+- a writable PL1 is described as a guaranteed/minimum GPU power reservation;
+- the PoC changes PL2/PL4 just to broaden coverage;
 - `actual` not reaching max is incorrectly classified as SetRange failure;
 - original pre-PoC range is overwritten after the probe has modified the GPU;
 - Restore blindly applies hardware min/max instead of restoring original external-range semantics;
@@ -953,4 +1165,12 @@ The PR is complete when all of the following are true:
 12. Frontend/named-pipe transport tests pass.
 13. Existing Intel FPS limiter tests and behavior remain unchanged.
 14. Full solution build/tests pass.
-15. Hardware validation result can unambiguously answer whether official IGCL B390 GPU frequency range control is usable for the next production-design phase.
+15. Refresh reports IGCL power-domain availability, canControl, default/min/max limits, and current PL1/PL2/PL4.
+16. A developer-entered PL1 test value is range-validated before any write.
+17. PL1 mutation changes only the sustained-limit enabled/power fields, preserves Tau/PL2/PL4, and performs immediate GetLimits readback.
+18. Power restore writes the exact pre-test power-limit structure and verifies it.
+19. A successful PL1 write is documented as an upper-limit control primitive, not a guaranteed GPU power reservation.
+20. Hardware validation result can unambiguously answer both:
+    - whether official IGCL B390 GPU frequency-range control is writable; and
+    - whether official IGCL B390 GPU sustained power-limit control is writable.
+21. Full solution build/tests pass.
