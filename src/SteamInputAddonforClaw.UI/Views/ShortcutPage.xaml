@@ -32,6 +32,11 @@
                         <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3" />
                     </ItemsPanelTemplate>
                 </ListView.ItemsPanel>
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="frontend:FrontendShortcutEditorTile">
                         <Border

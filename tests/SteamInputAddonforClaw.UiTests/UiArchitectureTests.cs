@@ -593,11 +593,18 @@ public sealed class UiArchitectureTests
         var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
         var list = shortcutXaml.Descendants().Single(element => (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "ShortcutList");
         var wrapGrid = list.Descendants().Single(element => element.Name.LocalName == "ItemsWrapGrid");
+        var itemContainerStyle = list.Elements().Single(element => element.Name.LocalName == "ListView.ItemContainerStyle")
+            .Elements().Single(element => element.Name.LocalName == "Style");
+        var horizontalContentAlignment = itemContainerStyle.Elements()
+            .Single(element => element.Name.LocalName == "Setter"
+                && (string?)element.Attribute("Property") == "HorizontalContentAlignment");
 
         Assert.Equal("Horizontal", (string?)wrapGrid.Attribute("Orientation"));
         Assert.Equal("3", (string?)wrapGrid.Attribute("MaximumRowsOrColumns"));
         Assert.Equal("0", (string?)list.Attribute("Padding"));
         Assert.Equal("True", (string?)list.Attribute("CanReorderItems"));
+        Assert.Equal("ListViewItem", (string?)itemContainerStyle.Attribute("TargetType"));
+        Assert.Equal("Stretch", (string?)horizontalContentAlignment.Attribute("Value"));
         Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("itemsPanel.ItemWidth = itemWidth", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("GetShortcutItemWidth(itemsPanel.ActualWidth)", shortcutCode, StringComparison.Ordinal);
