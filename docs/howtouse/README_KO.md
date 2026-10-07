@@ -86,7 +86,7 @@ MSI Center M 설정은 **Device** 페이지에 있습니다. MSI Center M을 비
 
 ### Device
 
-Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습니다. 컨트롤러 관리 권한인 **MSI Center M**도 여기서 변경합니다. 자세한 내용은 [MSI Center M과 컨트롤러 관리](#msi-center-m과-컨트롤러-관리)를 참고하세요.
+Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습니다. 컨트롤러 관리 방식을 정하는 **MSI Center M**도 여기서 변경합니다. 자세한 내용은 [MSI Center M과 내장 컨트롤러](#msi-center-m과-내장-컨트롤러)를 참고하세요.
 
 기기 전체에 적용되는 성능 및 배터리 설정은 다음과 같습니다.
 
