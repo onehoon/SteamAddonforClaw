@@ -175,7 +175,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null,
         IWindowsAppRuntimePrerequisite? testWindowsAppRuntimePrerequisite = null,
         bool headlessUninstallPreparation = false,
-        Func<string, IIntelGpuMinimumClockControl>? testIntelGpuMinimumClockControlFactory = null)
+        Func<string, IIntelGpuMinimumClockControl>? testIntelGpuMinimumClockControlFactory = null,
+        Func<AcDcPowerSource?>? testGpuMinimumClockPowerSource = null)
     {
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
         _frontendPipeNameFactory = testFrontendPipeNameFactory;
@@ -206,7 +207,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             : Path.Combine(testOnlyDataRoot, "intel-gpu-minimum-clock-ownership.json");
         var minimumClockControl = testIntelGpuMinimumClockControlFactory?.Invoke(minimumClockMarker)
             ?? (testOnlyDataRoot is null ? new IntelGpuMinimumClockControl() : new UnavailableIntelGpuMinimumClockControl());
-        _intelGpuMinimumClockRuntime = new(minimumClockControl, minimumClockMarker);
+        _intelGpuMinimumClockRuntime = new(_profileStore, _profileMutationGate, minimumClockControl,
+            testGpuMinimumClockPowerSource ?? WindowsAcDcPowerSource.Read, minimumClockMarker);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _windowsAppRuntimePrerequisite = testWindowsAppRuntimePrerequisite ?? new WindowsAppRuntimePrerequisite();
         _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
@@ -614,7 +616,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 && string.Equals(activeGame.Key, key, StringComparison.Ordinal)
                     ? activeGame.DisplayName
                     : null,
-            intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
+            intelFpsRuntime: _intelFpsRuntime, intelGpuMinimumClockRuntime: _intelGpuMinimumClockRuntime,
+            fanProbeTransport: _tdpTransport,
             batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
             batteryChargeLimitHardware: _batteryChargeLimitHardware,
             // MSI Center M startup Enable/Disable (work order PR1). The one shared reader -- also
@@ -2039,7 +2042,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         try { _powerModeRuntime.StartupReconcile(); }
         catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode startup reconcile failed.", exception); }
-        InitializeIntelGpuMinimumClockReadOnlyForStartup();
+        ReconcileIntelGpuMinimumClockForStartup();
         // The AC/DC fact is shared by compact Quick Settings and Intel FPS. Register its
         // event-driven notification independently of IGCL availability so a missing Intel driver
         // cannot disable Quick Settings power-source refresh.
@@ -2088,12 +2091,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Volatile.Write(ref _profileRuntimeStartupReady, 1);
     }
 
-    internal void InitializeIntelGpuMinimumClockReadOnlyForStartup()
+    internal void ReconcileIntelGpuMinimumClockForStartup()
     {
-        // PR1 performs capability discovery only; production writes remain deferred to a later PR.
-        try { _intelGpuMinimumClockRuntime.InitializeReadOnly(); }
-        catch (Exception exception) { AppLog.Debug("Profiles.IntelGpuMinimumClock", "Startup capability discovery failed; Addon Runtime remains available.", ("Failure", exception.Message)); }
+        try { _intelGpuMinimumClockRuntime.StartupReconcile(); }
+        catch (Exception exception) { AppLog.Debug("Profiles.IntelGpuMinimumClock", "Startup Device reconcile failed; Addon Runtime remains available.", ("Failure", exception.Message)); }
     }
+
+    internal IntelGpuMinimumClockOperationResult ReconcileGpuMinimumClockForPowerSourceChanged() =>
+        _intelGpuMinimumClockRuntime.ReconcileDevice("PowerSourceChanged");
 
     private ActiveProfileTarget CaptureActiveProfileTarget()
     {
@@ -2182,6 +2187,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// restored + mandatory Addon startup task removed) or fails closed. Issues no Windows restart.</summary>
     internal async Task<SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult> PrepareForUninstallAsync()
     {
+        var gpuRelease = _intelGpuMinimumClockRuntime.PrepareForUninstall();
+        if (!gpuRelease.Succeeded)
+        {
+            AppLog.Warn("Uninstall", "Owned minimum GPU clock could not be verified restored; uninstall preparation is blocked.", null,
+                ("Failure", gpuRelease.FailureReason), ("OwnershipMarkerPresent", gpuRelease.OwnershipMarkerPresent));
+            return SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult.Fail(
+                "GpuMinimumClockReleaseFailed:" + (gpuRelease.FailureReason ?? "Unknown"));
+        }
+
         if (_centerMAuthorityTransition is not { } transition)
             return SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult.Fail("AuthorityTransitionUnavailable");
         try
@@ -2722,6 +2736,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             static (delay, cancellationToken) => Task.Delay(delay, cancellationToken),
             () => _cpuBoostRuntime.Reconcile(),
             () => _powerModeRuntime.Reconcile(),
+            () => _intelGpuMinimumClockRuntime.ReconcileAfterResume(),
             () => _batteryChargeLimitRuntime?.Reconcile("PowerResume"));
     }
 
@@ -2730,6 +2745,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Func<TimeSpan, CancellationToken, Task> delay,
         Action reconcileCpuBoost,
         Action reconcilePowerMode,
+        Action? reconcileGpuMinimumClock = null,
         Action? reconcileBattery = null)
     {
         try
@@ -2757,6 +2773,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("Profiles.PowerMode", "Power Mode resume reconcile failed.", exception);
+        }
+
+        try
+        {
+            reconcileGpuMinimumClock?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.IntelGpuMinimumClock", "Minimum GPU Clock resume reconcile failed.", exception);
         }
 
         try
@@ -2801,6 +2826,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             catch (Exception exception)
             {
                 AppLog.Error("Profiles.IntelFps", "FPS reconcile failed after AC/DC change.", exception);
+            }
+
+            try
+            {
+                ReconcileGpuMinimumClockForPowerSourceChanged();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("Profiles.IntelGpuMinimumClock", "Minimum GPU Clock reconcile failed after AC/DC change.", exception);
             }
 
             if (Volatile.Read(ref _processShutdownStarted) == 0
