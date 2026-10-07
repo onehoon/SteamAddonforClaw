@@ -13,6 +13,33 @@ internal sealed record HowToUseDocumentSource(string RawMarkdownUrl, string Repo
 
 internal static class HowToUseMarkdownRenderer
 {
+    private const string LinkRoutingScript = """
+        document.addEventListener("click", event => {
+            const target = event.target;
+            const anchor = target instanceof Element ? target.closest("a") : null;
+            if (!anchor)
+                return;
+
+            const href = anchor.getAttribute("href");
+            if (!href)
+                return;
+
+            event.preventDefault();
+
+            if (href.startsWith("#")) {
+                try {
+                    const id = decodeURIComponent(href.substring(1));
+                    document.getElementById(id)?.scrollIntoView({ block: "start" });
+                } catch {
+                    // Ignore malformed fragments without leaving the rendered document.
+                }
+                return;
+            }
+
+            window.chrome.webview.postMessage(JSON.stringify({ type: "open-link", href }));
+        });
+        """;
+
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAutoIdentifiers(AutoIdentifierOptions.GitHub)
         .UseAdvancedExtensions()
@@ -92,8 +119,45 @@ internal static class HowToUseMarkdownRenderer
             </head>
             <body>
             {{bodyHtml}}
+            <script>
+            {{LinkRoutingScript}}
+            </script>
             </body>
             </html>
             """;
     }
+
+    internal static Uri? ResolveExternalLink(HowToUseDocumentSource source, string href)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (string.IsNullOrWhiteSpace(href) || href.Length > 2048)
+            return null;
+
+        href = href.Trim();
+        if (href.StartsWith('#'))
+            return null;
+
+        if (Uri.TryCreate(href, UriKind.Absolute, out var absoluteUri))
+            return IsHttpUri(absoluteUri) ? absoluteUri : null;
+
+        var repositoryBase = new Uri(
+            $"https://github.com/onehoon/SteamAddonforClaw/blob/main/{source.RepositoryDirectory}",
+            UriKind.Absolute);
+        if (!Uri.TryCreate(repositoryBase, href, out var repositoryUri)
+            || !IsHttpUri(repositoryUri)
+            || !string.Equals(repositoryUri.Host, "github.com", StringComparison.OrdinalIgnoreCase)
+            || !repositoryUri.AbsolutePath.StartsWith(
+                "/onehoon/SteamAddonforClaw/blob/main/",
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return repositoryUri;
+    }
+
+    private static bool IsHttpUri(Uri uri) =>
+        uri.IsAbsoluteUri
+        && (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase));
 }
