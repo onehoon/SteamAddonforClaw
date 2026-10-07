@@ -424,6 +424,28 @@ public sealed class OverlayQamVisualResourcesTests
     }
 
     [Fact]
+    public void Shortcut_tiles_use_distinct_idle_and_selected_fills_without_a_focus_border()
+    {
+        var root = RepoRoot();
+        var resources = XDocument.Load(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml"));
+        var navigation = File.ReadAllText(Path.Combine(
+            root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Navigation.cs"));
+
+        Assert.NotEqual(
+            Resource(resources, "QamContentBrush").Attribute("Color")?.Value,
+            Resource(resources, "QamTileBrush").Attribute("Color")?.Value);
+        Assert.Equal("#0DFFFFFF", Resource(resources, "QamTileBrush").Attribute("Color")?.Value);
+        Assert.Equal("#26FFFFFF", Resource(resources, "QamTileSelectedBrush").Attribute("Color")?.Value);
+        Assert.Contains(
+            "tile.Background = OverlayQamResources.Brush(selected ? \"QamTileSelectedBrush\" : \"QamTileBrush\");",
+            navigation,
+            StringComparison.Ordinal);
+        AssertResourceValue(resources, "QamSelectionBorderThickness", "0");
+        Assert.Equal("#00000000", Resource(resources, "QamFocusBorderBrush").Attribute("Color")?.Value);
+    }
+
+    [Fact]
     public void Programmatic_overlay_text_uses_qam_keyed_styles_not_generic_windows_text_styles()
     {
         var root = RepoRoot();
