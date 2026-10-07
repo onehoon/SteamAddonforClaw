@@ -2302,16 +2302,27 @@ This split is deliberate: PR7 proves production identity ownership independently
 
 ### Phase X5 — Overlay active XBOX profile — next implementation phase
 
+Implement X5 as two focused PRs so the identity/transport conversion is reviewable independently from the special whole-record M1/M2 override semantics.
+
+#### PR11 — active-game-only Overlay Profile + XBOX performance/display parity
+
 - retire the Overlay's installed Steam catalog/offline selected-profile mode;
 - make Overlay Profile active-game-only;
-- Runtime-authoritative Steam/XBOX active profile context;
+- replace the Steam-only `uint AppId` Quick Settings Profile context with one narrow transient Steam/XBOX profile-target contract;
 - no active game → centered message: **"No game is currently running. Start a game to configure its profile."**;
 - project Steam or XBOX into the same generic Quick Settings Profile rendering;
-- dispatch mutations to the existing typed Steam/XBOX mutation authority;
-- active XBOX Profile shows per-game **Controller / Use global M1/M2 / M1 / M2** above the existing performance/display sections;
+- dispatch Profile Enabled / CPU Boost / TDP / Power Mode / Intel FPS Limit / Resolution mutations to the existing typed Steam/XBOX mutation authority;
+- no XBOX or Steam installed-game catalog in Overlay;
+- do not add XBOX per-game M1/M2 rows yet.
+
+#### PR12 — XBOX Overlay per-game M1/M2 + final X5 acceptance
+
+- active XBOX Profile shows per-game **Controller / Use global M1/M2 / M1 / M2**;
+- place that Controller section **above the existing performance/display sections**;
 - Steam Profile does not show per-game M1/M2;
 - Overlay Controller tab continues editing only the global M1/M2 fallback;
-- no XBOX or Steam installed-game catalog in Overlay.
+- reuse the existing `SetXboxGameProfileBackButtonMappingAsync` mutation authority and the existing effective-mapping cache / `CanonicalXbox360InputPublisher`;
+- close final active-target/start/exit/resume/Overlay lifecycle acceptance for XBOX.
 
 ### Phase X6 — front-button Xbox action — implemented in production code, final device validation pending
 
