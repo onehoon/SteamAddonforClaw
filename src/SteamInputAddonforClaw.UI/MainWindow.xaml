@@ -39,7 +39,7 @@
                     <SymbolIcon Symbol="Play" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Overlay" Tag="Overlay">
+            <NavigationViewItem Content="ClawHUD" Tag="Overlay">
                 <NavigationViewItem.Icon>
                     <SymbolIcon Symbol="View" />
                 </NavigationViewItem.Icon>
