@@ -135,6 +135,23 @@ internal static class IntelGpuMinimumClockPolicy
         MatchesRangeSide(request.Min, readback.Min)
         && MatchesRangeSide(preWrite.Max >= 0 ? preWrite.Max : -1, readback.Max);
 
+    internal static bool MatchesFactoryMinimumReleaseReadback(
+        IntelGpuFrequencyRange preWrite,
+        IntelGpuFrequencyRange readback,
+        double hardwareMinimumMhz)
+    {
+        if (!double.IsFinite(hardwareMinimumMhz)
+            || !double.IsFinite(readback.Min)
+            || !double.IsFinite(readback.Max))
+            return false;
+
+        var minimumReleased = readback.Min < 0
+            || Math.Abs(readback.Min - hardwareMinimumMhz) <= FrequencyToleranceMhz;
+
+        return minimumReleased
+            && MatchesRangeSide(preWrite.Max >= 0 ? preWrite.Max : -1, readback.Max);
+    }
+
     private static bool MatchesRangeSide(double requested, double actual) =>
         double.IsFinite(actual)
         && (requested < 0 ? actual < 0 : Math.Abs(requested - actual) <= FrequencyToleranceMhz);
