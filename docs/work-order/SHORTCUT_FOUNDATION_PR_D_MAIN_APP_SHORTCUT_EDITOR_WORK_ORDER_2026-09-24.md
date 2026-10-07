@@ -1,6 +1,7 @@
 # Work Order — Shortcut Foundation PR-D: Runtime CRUD + Main App Shortcut Editor
 
-> **Superseded for Screenshot folder ownership (2026-10-08):** `docs/work-order/1008_SHORTCUT_SCREENSHOT_ACTION_OWNED_FOLDER_WORK_ORDER.md` supersedes the page-level/global Screenshot folder card, `SetScreenshotSaveFolderAsync`, and the rule that Screenshot has no folder setting in its edit dialog. Screenshot folder configuration now lives inside the Screenshot Add/Edit panel and is persisted as Screenshot action parameters in `shortcuts.json`. The product is pre-release, so no legacy migration is required. Other Shortcut editor authority and save-then-publish rules in this historical work order remain applicable where not superseded.\n
+> **Superseded for Screenshot folder ownership (2026-10-08):** `docs/work-order/1008_SHORTCUT_SCREENSHOT_ACTION_OWNED_FOLDER_WORK_ORDER.md` supersedes the page-level/global Screenshot folder card, `SetScreenshotSaveFolderAsync`, and the rule that Screenshot has no folder setting in its edit dialog. Screenshot folder configuration now lives inside the Screenshot Add/Edit panel and is persisted as Screenshot action parameters in `shortcuts.json`. The product is pre-release, so no legacy migration is required. Other Shortcut editor authority and save-then-publish rules in this historical work order remain applicable where not superseded.
+
 
 **Date:** 2026-09-24  
 **Status:** Ready for implementation  
