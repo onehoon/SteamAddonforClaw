@@ -2,7 +2,7 @@
 
 > **Date:** 2026-10-05  
 > **Status:** Architecture authority for the XBOX game/profile feature family  
-> **Field-validation status (2026-10-05):** PoC A installed catalog = PASS; PoC B event-driven active-game identity/lifecycle = PASS; PoC C Xbox app activation = pending  
+> **Field-validation status:** PoC A installed catalog = PASS; PoC B event-driven active-game identity/lifecycle = PASS; Xbox app packaged activation is implemented in production code and remains pending final physical-device validation  
 > **Product baseline:** Standalone Full1902 SteamAddonforClaw  
 > **Scope:** XBOX/Game Pass installed-game catalog, event-driven active-game detection, XBOX-specific per-game profiles, per-game M1/M2 mapping, Main App navigation, Overlay projection, and front-button Xbox app launch  
 > **Out of scope:** Xbox Game Bar integration, ClawHUD IPC/dependency, Steam profile redesign, Full1902 physical controller ownership redesign
@@ -812,7 +812,7 @@ Do not add an unused Controller placeholder in PR6. Per-game controller persiste
 
 ### 10.3 Non-Steam controller override
 
-Phase X4 establishes one reusable controller override shape for non-Steam game profiles. XBOX is its first production consumer; future Custom EXE, Epic, and GOG profiles reuse the same shape:
+Phase X4 establishes one reusable controller override shape for supported non-Steam game profiles. XBOX is its first production consumer. Direct user registration of arbitrary Custom EXE games is not a supported product feature; users should add those games to Steam as Non-Steam games. If native Epic or GOG detection is implemented later, those profile types should reuse the same controller-override shape:
 
 ~~~csharp
 public sealed record NonSteamGameControllerOverrides
@@ -1175,15 +1175,13 @@ Do not introduce one giant universal profile DTO unless a later measured mainten
 
 ## 16. Overlay behavior
 
-### 16.1 One Profile surface, not two platform tabs
+### 16.1 One active-game Profile surface
 
-The Main App has separate Steam and XBOX pages.
+The Main App keeps separate Steam and XBOX pages because it owns installed-game browsing and offline/pre-launch editing.
 
-The Overlay should **not** gain separate Steam and XBOX tabs.
+The Overlay does **not** expose separate Steam/XBOX profile tabs and does **not** expose an installed-game catalog.
 
-Overlay remains context-driven.
-
-When a game is active:
+Overlay Profile is active-game-only:
 
 ~~~text
 active Steam game
@@ -1192,43 +1190,125 @@ active Steam game
 active XBOX game
 → Overlay Profile shows only that XBOX game's profile
 
-no active recognized game
-→ no active-game profile detail
+no recognized active game
+→ show only the centered inactive-game message
 ~~~
 
-The Overlay should not ask the user which platform is active.
+Runtime owns the active-platform fact. The Overlay must never infer the platform from window/process heuristics and must never ask the user which platform is active.
 
-Runtime already owns that fact.
+The existing out-of-game Steam catalog/selected-profile flow is retired as part of Phase X5. Offline/pre-launch editing belongs exclusively to the Main App Steam/XBOX pages.
 
-### 16.2 Current overlay catalog behavior
+### 16.2 No-active-game empty state
 
-The XBOX feature does not require adding an XBOX installed-game catalog to Overlay.
+When there is no recognized active Steam or XBOX game, the Profile tab must not show a catalog, stale profile controls, or Device controls.
 
-Pre-launch/offline profile editing belongs in Main App Steam/XBOX pages.
+Render one standalone message centered within the Profile tab:
 
-If the existing out-of-game Steam catalog remains temporarily in Overlay, it must not interfere with active XBOX projection.
+> **No game is currently running. Start a game to configure its profile.**
 
-A later UX cleanup may simplify Overlay to active-game-only, but that is not required to implement XBOX detection.
+Presentation requirements:
 
-### 16.3 Transport
+- horizontally centered;
+- vertically centered in the Profile content area;
+- visually separate from normal profile cards/sections;
+- moderately large readable text, larger than ordinary row labels but not a page-title scale;
+- no fake disabled profile rows behind it.
 
-Current Overlay profile transport uses uint AppId.
+When a recognized game starts while the Overlay remains open, Runtime publication replaces this empty state with that active game's profile. When the active game exits, the Overlay returns to this message.
 
-Do not encode XBOX key into uint.
+### 16.3 Runtime-authoritative profile context
 
-Prefer an explicit active-profile projection contract for Overlay, for example:
+Current Steam-only Overlay profile transport carries a numeric AppId. XBOX uses a canonical string key and must never be encoded into uint.
+
+Phase X5 must introduce one small transient Quick Settings profile context that can identify only the currently supported active profile kinds:
 
 ~~~text
-Platform = Steam | Xbox
-TargetId = string representation
-QuickSettingsPageSnapshot = rendered active page
+Steam → numeric Steam AppID
+Xbox  → canonical XBOX key
 ~~~
 
-or keep platform-specific capture inside Runtime and send only the already-rendered generic Quick Settings page.
+This is a frontend/transport correlation value only. It is not a persisted universal game identity and must not be passed into CPU/TDP/Power/FPS/Resolution hardware runtime logic.
 
-The latter is preferable when existing generic Quick Settings projection can carry all XBOX fields except M1/M2.
+The preferred flow is:
 
-Do not make Overlay own profile-store lookup.
+~~~text
+SteamSessionRuntime.ActualRunningAppId ─┐
+                                       ├→ CaptureActiveProfileTarget()
+XboxGameSessionRuntime.ActiveGame ──────┘
+                                               ↓
+                                  Runtime active-profile projection
+                                               ↓
+                                  generic Quick Settings Profile page
+                                               ↓
+                                             Overlay
+~~~
+
+The Overlay never reads ProfileStore directly.
+
+### 16.4 Shared profile projection and mutation authority
+
+Steam and XBOX remain separate typed persistence/mutation domains above the shared apply boundary.
+
+Overlay may use one generic rendered Quick Settings Profile page, but Runtime must dispatch a mutation to the already-existing typed authority for the active target:
+
+~~~text
+Steam target
+→ existing SetGameProfile... methods
+
+XBOX target
+→ existing SetXboxGameProfile... methods
+~~~
+
+Do not create Overlay-specific persistence or hardware-apply methods.
+
+CPU Boost / TDP / Power Mode / Intel FPS Limit / Resolution continue to use the same existing runtime owners already shared by Main App and XBOX live apply.
+
+### 16.5 XBOX per-game M1/M2 placement
+
+When the active Overlay profile is XBOX, expose the existing per-game controller override in the Profile tab.
+
+Required XBOX Profile ordering:
+
+~~~text
+Profile / game heading
+Profile Enabled
+
+Controller
+  Use global M1 / M2 mapping
+  M1
+  M2
+
+TDP Control
+CPU Boost
+Windows Power Mode
+Intel FPS Limit
+Resolution
+~~~
+
+The XBOX per-game M1/M2 Controller section is intentionally placed **above the existing performance/display sections**.
+
+Steam active profiles do not show this Controller section because Steam Input owns Steam per-game rear-button mapping.
+
+The Overlay Controller tab remains a separate **global fallback M1/M2 editor**. XBOX Profile M1/M2 must use the already-existing XBOX per-game mutation authority and effective mapping cache; it must not reinterpret or duplicate the global Controller-tab path.
+
+### 16.6 Active-target lifecycle while Overlay is visible
+
+The visible Overlay must converge when Runtime's active profile target changes:
+
+~~~text
+None → Steam
+None → Xbox
+Steam → None
+Xbox → None
+Steam → Xbox
+Xbox → Steam
+~~~
+
+Use the existing Runtime active-target authority and ordinary StateInvalidated/refresh path.
+
+The current mutation backstop that compares Steam ActualRunningAppId before/after a mutation must be updated to compare the existing derived ActiveProfileTarget instead, so an XBOX start/exit/switch during an in-flight Overlay mutation cannot leave a stale page.
+
+Do not add an epoch manager or new profile state machine for this.
 
 ---
 
@@ -2104,7 +2184,7 @@ PoC B — event-driven active XBOX identity/lifecycle
 PASS
 
 PoC C — Xbox app packaged activation
-PENDING
+PRODUCTION IMPLEMENTATION PRESENT / FINAL PHYSICAL VALIDATION PENDING
 ~~~
 
 Production X1 catalog/identity work should not re-litigate PoC A or PoC B without contradictory new device evidence.
@@ -2133,12 +2213,12 @@ Current field status:
 catalog enumeration / config parser   PASS
 WinEvent active-game detector         PASS
 resume/restart bounded recovery       PASS
-Xbox app activation                   PENDING
+Xbox app activation                   IMPLEMENTED / FINAL PHYSICAL VALIDATION PENDING
 ~~~
 
-Remaining X0 scope is only the packaged Xbox app activation PoC.
+The packaged Xbox app activation path is now implemented in production code. X0 has no remaining implementation design question; only final physical-device validation of that action remains.
 
-No production profile mutation yet.
+No new production profile mutation belongs to X0.
 
 ### Phase X1 — XBOX identity/catalog foundation
 
@@ -2210,27 +2290,36 @@ Implement this phase as two focused PRs.
 
 This split is deliberate: PR7 proves production identity ownership independently of machine-wide setting application.
 
-### Phase X4 — non-Steam per-game M1/M2 foundation (XBOX first consumer)
+### Phase X4 — non-Steam per-game M1/M2 foundation (XBOX first consumer) — implemented
 
 - reusable `NonSteamGameControllerOverrides` on XBOX profiles;
 - one host-owned cached effective mapping with the global mapping as fallback;
 - XBOX Main App M1/M2 editing;
 - one existing `CanonicalXbox360InputPublisher` and mapper;
 - Steam excluded because Steam Input owns Steam per-game mapping;
-- Custom EXE, Epic, and GOG may reuse this boundary in later phases.
+- Custom EXE registration is intentionally unsupported; arbitrary Win32 games should be added to Steam as Non-Steam games;
+- native Epic/GOG support is deferred and may reuse this boundary if later implemented.
 
-### Phase X5 — Overlay active XBOX profile
+### Phase X5 — Overlay active XBOX profile — next implementation phase
 
-- Runtime-authoritative active platform projection;
-- Overlay shows one current profile;
-- no XBOX catalog added to Overlay.
+- retire the Overlay's installed Steam catalog/offline selected-profile mode;
+- make Overlay Profile active-game-only;
+- Runtime-authoritative Steam/XBOX active profile context;
+- no active game → centered message: **"No game is currently running. Start a game to configure its profile."**;
+- project Steam or XBOX into the same generic Quick Settings Profile rendering;
+- dispatch mutations to the existing typed Steam/XBOX mutation authority;
+- active XBOX Profile shows per-game **Controller / Use global M1/M2 / M1 / M2** above the existing performance/display sections;
+- Steam Profile does not show per-game M1/M2;
+- Overlay Controller tab continues editing only the global M1/M2 fallback;
+- no XBOX or Steam installed-game catalog in Overlay.
 
-### Phase X6 — front-button Xbox action
+### Phase X6 — front-button Xbox action — implemented in production code, final device validation pending
 
-- FrontButtonAction.XboxApp;
-- capability validation;
-- packaged activation executor;
-- UI label/action.
+- `FrontButtonAction.XboxApp` exists;
+- Normal-domain capability validation exists;
+- packaged Xbox app activation is delegated through the interactive shell using the centralized Xbox Gaming Home AUMID;
+- no Win+G / Game Bar route is used;
+- remaining work is final physical-device validation and documentation closure, not a second implementation path.
 
 Keep each phase small enough for evidence-based review.
 
@@ -2247,7 +2336,8 @@ Do not implement as part of this architecture:
 - ClawHUD IPC;
 - PresentMon game classification;
 - universal Win32/non-Steam game profiles;
-- Epic/GOG detection;
+- direct Custom EXE registration/detection (users should use Steam Add a Non-Steam Game);
+- Epic/GOG detection in the current XBOX completion phase;
 - generic "all launchers" game identity framework;
 - entitlement/Game Pass subscription-state detection;
 - Xbox cloud gaming profile detection unless later explicitly designed;
