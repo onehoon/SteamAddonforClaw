@@ -206,7 +206,7 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
     private async Task<System.Text.Json.JsonElement> InvokeQuickSettingsCaptureAsync(System.Text.Json.JsonElement? p, CancellationToken t)
     {
         var request = FrontendWireCodec.Decode<CaptureQuickSettingsPageRequest>(p);
-        return FrontendWireCodec.Payload(await _inner.CaptureQuickSettingsPageAsync(request.PageId, request.AppId, t).ConfigureAwait(false));
+        return FrontendWireCodec.Payload(await _inner.CaptureQuickSettingsPageAsync(request.PageId, request.ProfileTarget, t).ConfigureAwait(false));
     }
 
     private static bool IsControllerVibrationPayloadValid(FrontendRpcMethod method, System.Text.Json.JsonElement? payload)

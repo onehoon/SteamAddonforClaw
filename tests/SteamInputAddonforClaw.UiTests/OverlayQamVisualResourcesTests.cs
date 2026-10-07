@@ -249,7 +249,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.DoesNotContain("rows[i].Container.BorderBrush", selectionVisual);
 
         Assert.Contains("tile.BorderBrush = _rowSelectedBrush", navigation);
-        Assert.Contains("_profileCatalogCards[index].BorderBrush = _rowSelectedBrush", profile);
+        Assert.DoesNotContain("_profileCatalogCards", profile);
     }
 
     [Fact]
@@ -282,15 +282,14 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("BasedOn=\"{StaticResource QamFlatButtonStyle}\"", resources.Descendants().Single(element =>
             element.Name.LocalName == "Style" && (string?)element.Attribute(Xaml + "Key") == "QamTileButtonStyle").ToString());
         Assert.Contains("Style = OverlayQamResources.Style(\"QamRailButtonStyle\")", shell);
-        Assert.Contains("Style = OverlayQamResources.Style(\"QamTileButtonStyle\")", profile);
+        Assert.DoesNotContain("QamTileButtonStyle", profile);
         Assert.Contains("Style = OverlayQamResources.Style(\"QamFlatButtonStyle\")", setting);
 
         Assert.Contains("x:Key=\"QamValueButtonStyle\" TargetType=\"primitives:ButtonBase\"", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml")));
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", valueRow);
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
 
-        Assert.Contains("for (var i = 0; i < 2; i++)", profile);
-        Assert.Contains("Grid.SetColumn(card, index % 2)", profile);
+        Assert.DoesNotContain("_profileCatalog", profile);
         Assert.Contains("Math.Min(2, _shortcutSnapshot.Tiles.Count)", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs")));
     }
 
@@ -383,8 +382,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("_shortcutExecutionInFlight", shortcuts, StringComparison.Ordinal);
         Assert.Contains("_clawHudSnapshot = snapshot", clawHud, StringComparison.Ordinal);
         Assert.Contains("RenderClawHudControls();", clawHud, StringComparison.Ordinal);
-        Assert.Contains("state.Error", profile, StringComparison.Ordinal);
-        Assert.Contains("OverlayLog.Warn(\"Profile\", state.Error)", profile, StringComparison.Ordinal);
+        Assert.DoesNotContain("state.Error", profile, StringComparison.Ordinal);
         Assert.Contains("FailureMessage = response.Succeeded", controller, StringComparison.Ordinal);
         Assert.Contains("RenderBackButtonMappingRows();", controller, StringComparison.Ordinal);
         Assert.Contains("QamCaptionTextStyle", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "Themes", "QamOverlayResources.xaml")));
@@ -420,8 +418,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("QamSectionCornerRadius", sources["OverlayWindow.QuickSettings.cs"]);
         Assert.Contains("QamTileBrush", sources["OverlayWindow.Shortcuts.cs"]);
         Assert.Contains("QamTileSelectedBrush", sources["OverlayWindow.Navigation.cs"]);
-        Assert.Contains("QamTileBrush", sources["OverlayWindow.Profile.cs"]);
-        Assert.Contains("QamTileSelectedBrush", sources["OverlayWindow.Profile.cs"]);
+        Assert.DoesNotContain("QamTile", sources["OverlayWindow.Profile.cs"]);
     }
 
     [Fact]

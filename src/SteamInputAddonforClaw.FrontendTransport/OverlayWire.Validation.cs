@@ -15,7 +15,6 @@ internal static class OverlayCommandWireValidation
         && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null
         && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null
         && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null
-        && message.ProfileCatalogState is null && message.ProfilePageRequest is null && message.ProfilePageResult is null
         && message.ShortcutState is null && message.ShortcutExecuteRequest is null && message.ShortcutExecuteResult is null
         && message.BackButtonMappingState is null && message.BackButtonMappingMutationRequest is null && message.BackButtonMappingMutationResponse is null
         && message.FrontendSettingsState is null && message.ControllerLedAvailable is null && message.FrontendSettingsAvailable is null
@@ -93,7 +92,6 @@ internal static class OverlayProductionControlsWireValidation
         && message.TabOrderState is null && message.TabOrderMove is null && message.TabOrderMutationResult is null
         && message.QuickSettingsPage is null && message.QuickSettingsMutationRequest is null && message.QuickSettingsMutationResponse is null
         && message.ClawHudState is null && message.ClawHudMutationRequest is null && message.ClawHudMutationResponse is null
-        && message.ProfileCatalogState is null && message.ProfilePageRequest is null && message.ProfilePageResult is null
         && message.ShortcutState is null && message.ShortcutExecuteRequest is null && message.ShortcutExecuteResult is null
         && message.BackButtonMappingState is null && message.BackButtonMappingMutationRequest is null && message.BackButtonMappingMutationResponse is null;
 }
@@ -152,9 +150,6 @@ internal static class OverlayBackButtonMappingWireValidation
         || message.ClawHudState is not null
         || message.ClawHudMutationRequest is not null
         || message.ClawHudMutationResponse is not null
-        || message.ProfileCatalogState is not null
-        || message.ProfilePageRequest is not null
-        || message.ProfilePageResult is not null
         || message.ShortcutState is not null
         || message.ShortcutExecuteRequest is not null
         || message.ShortcutExecuteResult is not null;
@@ -187,6 +182,9 @@ internal static class OverlayQuickSettingsWireValidation
     internal static bool IsStructurallyValid(OverlayQuickSettingsMutationRequest? request) =>
         request is { RequestId: > 0, Intent: { } intent } &&
         Enum.IsDefined(intent.PageId) &&
+        (intent.PageId == QuickSettingsPageId.Device
+            ? intent.ProfileTarget is null
+            : intent.PageId == QuickSettingsPageId.Profile && intent.ProfileTarget is { IsStructurallyValid: true }) &&
         Enum.IsDefined(intent.EditedRowId) &&
         intent.Values is { } values &&
         values.All(IsStructurallyValid);
@@ -201,26 +199,18 @@ internal static class OverlayQuickSettingsWireValidation
     /// reuses the shared <see cref="QuickSettingsMutationResult"/>/<see cref="QuickSettingsPageSnapshot"/>
     /// shapes -- never a second outcome enum -- with zero Runtime invocation.</summary>
     internal static QuickSettingsMutationResult NotAdmitted(QuickSettingsMutationIntent intent, string message) =>
-            new(false, message, QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.AppId, "Quick Settings are unavailable for this Overlay session."));
-
-    internal static bool IsStructurallyValid(OverlayProfileCatalogState? state) =>
-        state is { Entries: not null } && state.Entries.All(entry =>
-            entry is { AppId: > 0 } && !string.IsNullOrWhiteSpace(entry.Name) && Enum.IsDefined(entry.Source));
-
-    internal static bool IsStructurallyValid(OverlayProfilePageRequest? request) => request is { AppId: > 0 };
-
-    internal static bool IsStructurallyValid(OverlayProfilePageResponse? response) =>
-        response is { AppId: > 0, Page: { } page } &&
-        page.PageId == QuickSettingsPageId.Profile && page.AppId == response.AppId && IsStructurallyValid(page);
-
-    internal static bool HasProfilePayload(OverlayWireMessage message) =>
-        message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null;
+            new(false, message, QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.ProfileTarget, "Quick Settings are unavailable for this Overlay session."));
 
     /// <summary>Section 11: the Overlay client must fail closed on a malformed outbound page frame
     /// rather than pass null collections into the future SF-V2-07 renderer. Narrow structural safety
     /// only -- not a re-run of the shared product projection's semantic validation.</summary>
     internal static bool IsStructurallyValid(QuickSettingsPageSnapshot? page) =>
         page is { Sections: { } sections, LinkedSliderConstraints: not null } &&
+        (page.PageId == QuickSettingsPageId.Device
+            ? page.ProfileTarget is null
+            : page.PageId == QuickSettingsPageId.Profile
+                && (page.Available ? page.ProfileTarget is { IsStructurallyValid: true }
+                    : page.ProfileTarget is null or { IsStructurallyValid: true })) &&
         sections.All(section => section is { Rows: not null } && section.Rows.All(row => row is not null));
 }
 
@@ -331,8 +321,5 @@ internal static class OverlayShortcutWireValidation
         || message.ClawHudState is not null
         || message.ClawHudMutationRequest is not null
         || message.ClawHudMutationResponse is not null
-        || message.ProfileCatalogState is not null
-        || message.ProfilePageRequest is not null
-        || message.ProfilePageResult is not null
         || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message);
 }

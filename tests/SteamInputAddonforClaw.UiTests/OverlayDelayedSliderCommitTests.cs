@@ -10,7 +10,7 @@ public sealed class OverlayDelayedSliderCommitTests
     private static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(300);
 
     private static QuickSettingsMutationIntent Intent(int value) => new(
-        QuickSettingsPageId.Device, AppId: null, QuickSettingsRowId.DeviceTdpAcPl1,
+        QuickSettingsPageId.Device, ProfileTarget: null, QuickSettingsRowId.DeviceTdpAcPl1,
         [new QuickSettingsRowValue(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsValue.Integer(value))]);
 
     private static QuickSettingsMutationResult SuccessResult(int _) => new(

@@ -31,19 +31,19 @@ internal static class OverlayTransportProtocol
     // AC/DC projection. Hidden rows remain in the authoritative page and grouped drafts.
     // Version 10 (CH-A3): adds Runtime-owned ClawHUD snapshot publication and correlated
     // top-level/nested ClawHUD mutations. A v9 peer must fail the handshake; no compatibility shim.
-    // Version 11: adds the narrow Profile catalog and selected Profile page request flows. A v10
-    // peer must fail the handshake; no compatibility shim.
     // Version 12: adds Runtime-owned sanitized Shortcut state, TileId-only execution requests, and
     // correlated execution results. A v11 peer must fail the handshake; no compatibility shim.
     // Version 13: adds Runtime-owned global Xbox360 M1/M2 mapping state and one correlated
     // whole-record mutation. A v12 peer must fail the handshake; no compatibility shim.
     // Version 14 adds shared settings and vibration state/mutation frames.
     // Version 15 adds the Runtime-authorized active-game Profile-first Show command.
-    internal const int CurrentVersion = 15;
+    // Version 16 retires the Overlay Steam catalog/offline selected-profile request flow; Profile
+    // is now delivered only through the shared active-game Quick Settings page contract.
+    internal const int CurrentVersion = 16;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 
-internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ProfileCatalogRequest, ProfileCatalogState, ProfilePageRequest, ProfilePageResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult }
+internal enum OverlayWireMessageKind { Handshake, HandshakeAccepted, Command, Navigation, State, DismissRequested, ProtocolError, TabOrderState, TabOrderMoveRequest, TabOrderMoveResult, QuickSettingsPageState, QuickSettingsMutationRequest, QuickSettingsMutationResult, ClawHudState, ClawHudMutationRequest, ClawHudMutationResult, ShortcutState, ShortcutExecuteRequest, ShortcutExecuteResult, BackButtonMappingState, BackButtonMappingMutationRequest, BackButtonMappingMutationResult, FrontendSettingsState, ControllerLedMutationRequest, ControllerLedMutationResult, CurrentPowerSourceMutationRequest, CurrentPowerSourceMutationResult, ControllerVibrationState, ControllerVibrationMutationRequest, ControllerVibrationMutationResult }
 internal enum OverlayCommand { Show, Hide, Shutdown, ShowActiveProfile }
 internal enum OverlayNavigationAction { NavigateUp, NavigateDown, NavigateLeft, NavigateRight, Accept, Back, PreviousTab, NextTab }
 internal enum OverlayState { Ready, Visible, Hidden }
@@ -62,9 +62,6 @@ internal sealed record OverlayQuickSettingsMutationResponse(long RequestId, Quic
 
 internal sealed record OverlayClawHudMutationRequest(long RequestId, bool? Enabled = null, FrontendClawHudMutationIntent? Intent = null);
 internal sealed record OverlayClawHudMutationResponse(long RequestId, FrontendClawHudMutationResult? Result = null, string? Error = null);
-internal sealed record OverlayProfileCatalogState(IReadOnlyList<FrontendProfileGameCatalogEntry> Entries, string? Error = null);
-internal sealed record OverlayProfilePageRequest(uint AppId);
-internal sealed record OverlayProfilePageResponse(uint AppId, QuickSettingsPageSnapshot Page, string? Error = null);
 internal sealed record OverlayShortcutExecuteRequest(long RequestId, Guid TileId);
 internal sealed record OverlayShortcutExecutionOutcome(bool Succeeded, string? FailureMessage = null);
 internal sealed record OverlayShortcutExecuteResponse(
@@ -115,9 +112,6 @@ internal sealed record OverlayWireMessage(
     FrontendClawHudSnapshot? ClawHudState = null,
     OverlayClawHudMutationRequest? ClawHudMutationRequest = null,
     OverlayClawHudMutationResponse? ClawHudMutationResponse = null,
-    OverlayProfileCatalogState? ProfileCatalogState = null,
-    OverlayProfilePageRequest? ProfilePageRequest = null,
-    OverlayProfilePageResponse? ProfilePageResult = null,
     FrontendShortcutDashboardSnapshot? ShortcutState = null,
     OverlayShortcutExecuteRequest? ShortcutExecuteRequest = null,
     OverlayShortcutExecuteResponse? ShortcutExecuteResult = null,

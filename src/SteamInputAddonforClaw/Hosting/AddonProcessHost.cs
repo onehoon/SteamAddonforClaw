@@ -602,6 +602,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
             activeProfileTargetSource: CaptureActiveProfileTarget,
             reconcileXboxBackButtonMapping: key => ReconcileEffectiveBackButtonMapping($"XboxProfileMutation:{key}"),
+            activeXboxDisplayNameSource: key => _xboxGameSessionRuntime?.ActiveGame is { } activeGame
+                && string.Equals(activeGame.Key, key, StringComparison.Ordinal)
+                    ? activeGame.DisplayName
+                    : null,
             intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
             batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
             batteryChargeLimitHardware: _batteryChargeLimitHardware,
@@ -672,19 +676,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _overlayController.BindTabOrderAuthority(
             capture: token => _frontendControl!.CaptureAddonQuickSettingsTabOrderAsync(token),
             move: (intent, token) => _frontendControl!.MoveAddonQuickSettingsTabAsync(intent, token));
-        // SF-V2-02/06/09 section 14/14.2/7.2/7.3: bind the Overlay shared Quick Settings transport
-        // onto the SAME _frontendControl at the same stage as BindTabOrderAuthority, before the first
-        // warm Overlay connection. Both Device and Profile are captured/exposed to the Overlay as of
-        // Profile catalog/detail requests reuse the existing generic frontend seams (their own
-        // current-target revalidation/display-name enrichment stays authoritative) -- never
-        // ProfileStore/hardware directly, and no local FrontendGameProfileSnapshot construction here.
+        // Bind the Overlay shared Quick Settings transport onto the same frontend control before
+        // the first warm connection. Profile context is captured from the Runtime active target;
+        // offline catalog/profile capture remains in the Main App only.
         _overlayController.BindQuickSettingsAuthority(
-            captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, appId: null, token),
+            captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, profileTarget: null, token),
             captureProfilePage: token => CaptureOverlayProfileQuickSettingsPageAsync(token),
             mutate: (intent, token) => HandleOverlayQuickSettingsMutationAsync(intent, token));
-        _overlayController.BindProfileCatalogAuthority(
-            scan: token => _frontendControl!.ScanProfileGamesAsync(token),
-            captureSelectedProfilePage: (appId, token) => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId, token));
         _overlayController.BindClawHudAuthority(
             capture: token => _frontendControl!.CaptureClawHudAsync(token),
             setEnabled: (enabled, token) => _frontendControl!.SetClawHudEnabledAsync(enabled, token),
@@ -710,16 +708,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         // Disabled-mode controller startup can reuse it off the message-loop thread.
     }
 
-    // SF-V2-09 active publication remains tied to the current Runtime active-game authority. AppId 0
-    // (no active Steam game) is resolved locally to an explicit Unavailable page without ever calling
-    // into the frontend control; the Overlay catalog uses the separate selected-AppId request seam.
+    // Overlay Profile projects only the Runtime-selected Steam/XBOX target. No target produces the
+    // no-game empty state and never falls back to a catalog.
     private Task<QuickSettingsPageSnapshot> CaptureOverlayProfileQuickSettingsPageAsync(CancellationToken token)
     {
-        var appId = _runtimeHost?.ActualRunningAppId ?? 0;
-        if (appId == 0)
-            return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId: null, message: "No active game."));
+        var target = CaptureActiveQuickSettingsProfileTarget();
+        if (target is null)
+            return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null,
+                "No game is currently running. Start a game to configure its profile."));
 
-        return _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId, token);
+        return _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, target, token);
     }
 
     private async Task<OverlayBackButtonMappingState> CaptureOverlayBackButtonMappingAsync(CancellationToken token)
@@ -1743,12 +1741,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (control is null)
             return OverlayQuickSettingsWireValidation.NotAdmitted(intent, "The Overlay is not the active captured surface.");
 
-        // Section 10: capture the active AppId before the mutation, so that if it changes while this
+        // Capture the active Steam/XBOX target before the mutation, so that if it changes while this
         // mutation is in flight (a game starts/exits/switches), the finally block below can request
         // one backstop refresh even though OnFrontendStateInvalidatedForOverlay intentionally
         // suppressed every StateInvalidated it saw during that window. No epoch/state machine --
         // just the narrowest before/after comparison that satisfies this lifecycle.
-        var activeAppIdBefore = _runtimeHost?.ActualRunningAppId ?? 0;
+        var activeTargetBefore = CaptureActiveProfileTarget();
         Interlocked.Increment(ref _overlayQuickSettingsMutationInFlight);
         try
         {
@@ -1770,8 +1768,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             Interlocked.Decrement(ref _overlayQuickSettingsMutationInFlight);
 
-            var activeAppIdAfter = _runtimeHost?.ActualRunningAppId ?? 0;
-            if (activeAppIdAfter != activeAppIdBefore &&
+            var activeTargetAfter = CaptureActiveProfileTarget();
+            if (activeTargetAfter != activeTargetBefore &&
                 Volatile.Read(ref _processShutdownStarted) == 0 &&
                 _overlayCaptureActive &&
                 _overlayController.IsVisible)
@@ -2092,6 +2090,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             : ActiveProfileTarget.ForXbox(activeXboxGame.Key);
     }
 
+    private QuickSettingsProfileTarget? CaptureActiveQuickSettingsProfileTarget()
+    {
+        var target = CaptureActiveProfileTarget();
+        return target.Kind switch
+        {
+            ActiveProfileTargetKind.Steam => QuickSettingsProfileTarget.ForSteam(target.SteamAppId),
+            ActiveProfileTargetKind.Xbox => QuickSettingsProfileTarget.ForXbox(target.XboxGameKey!),
+            _ => null,
+        };
+    }
+
     private ResolvedActiveProfile? ResolveActiveProfile(ProfileDocument document) =>
         ActiveProfileResolver.Resolve(CaptureActiveProfileTarget(), document);
 
@@ -2399,6 +2408,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         RequestControllerPresentationReconcile("RunningAppIdChanged");
         ReconcileEffectiveBackButtonMapping("RunningAppIdChanged");
         ReconcileEffectiveGameProfile("ActualRunningAppIdChanged");
+        RefreshVisibleOverlayForActiveTargetChange();
     }
 
     private void OnActiveXboxGameChanged(ActiveXboxGame? activeGame)
@@ -2408,6 +2418,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             Volatile.Read(ref _profileRuntimeStartupReady) != 0,
             () => ReconcileEffectiveBackButtonMapping("XboxActiveGameChanged"),
             () => ReconcileEffectiveGameProfile("ActiveXboxGameChanged"));
+        RefreshVisibleOverlayForActiveTargetChange();
+    }
+
+    private void RefreshVisibleOverlayForActiveTargetChange()
+    {
+        if (Volatile.Read(ref _processShutdownStarted) == 0 && _overlayCaptureActive && _overlayController.IsVisible)
+            _ = _overlayController.RefreshQuickSettingsAsync();
     }
 
     internal static void ReconcileActiveXboxGameTransition(

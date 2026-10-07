@@ -82,6 +82,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly XboxGameProfileMutations? _xboxGameProfileMutations;
     private readonly GameDisplayResolutionRuntime? _displayResolutionRuntime;
     private readonly Func<ActiveProfileTarget>? _activeProfileTargetSource;
+    private readonly Func<string, string?>? _activeXboxDisplayNameSource;
     private readonly Func<string, bool>? _reconcileXboxBackButtonMapping;
     // Narrow MSI Center M startup control (work order PR1). Null is a valid passive state -- the
     // capture/mutation just report unavailable, like every other null-runtime fallback here.
@@ -157,7 +158,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<XboxInstalledGameCatalogResult>>? scanXboxGames = null,
         XboxGameProfileMutations? xboxGameProfileMutations = null,
         Func<ActiveProfileTarget>? activeProfileTargetSource = null,
-        Func<string, bool>? reconcileXboxBackButtonMapping = null)
+        Func<string, bool>? reconcileXboxBackButtonMapping = null,
+        Func<string, string?>? activeXboxDisplayNameSource = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -175,6 +177,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _scanXboxGames = scanXboxGames ?? (token => new XboxInstalledGameCatalog().ScanAsync(token));
         _xboxGameProfileMutations = xboxGameProfileMutations;
         _activeProfileTargetSource = activeProfileTargetSource;
+        _activeXboxDisplayNameSource = activeXboxDisplayNameSource;
         _reconcileXboxBackButtonMapping = reconcileXboxBackButtonMapping;
         _displayResolutionRuntime = displayResolutionRuntime;
         _fanProbeTransport = fanProbeTransport;
@@ -538,7 +541,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var limits = _tdpRuntime?.CaptureSnapshot().Policy is { } policy
             ? new FrontendTdpLimits(policy.Pl1MinimumWatts, policy.Pl1MaximumWatts, policy.Pl2MinimumWatts, policy.Pl2MaximumWatts)
             : null;
-        return new(key, profile.DisplayName, captured.Exists, captured.Exists && profile.Enabled,
+        var displayName = profile.DisplayName;
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = _activeXboxDisplayNameSource?.Invoke(key);
+        return new(key, displayName, captured.Exists, captured.Exists && profile.Enabled,
             new(profile.Performance.CpuBoost!.Enabled, profile.Performance.CpuBoost.Ac, profile.Performance.CpuBoost.Dc),
             new(profile.Performance.Tdp!.Enabled,
                 new(profile.Performance.Tdp.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts),
@@ -1901,21 +1907,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, batteryChargeLimit);
     }
 
-    /// <summary>Shared Quick Settings product seam (Shared Frontend V2, SF-V2-03 section 22/23,
-    /// SF-V2-08 section 7): Device is projected from <see cref="CaptureDeviceQuickSettingsAsync"/>;
-    /// Profile is projected from the requested <see cref="FrontendGameProfileSnapshot"/> only when
-    /// it is still the actual active game, or when no game is active and the request is an explicit
-    /// offline target. A different active game always wins and rejects the request.</summary>
-    public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken cancellationToken = default)
+    /// <summary>Captures Device settings or the Runtime-selected active Steam/XBOX profile. The
+    /// Overlay never supplies an offline profile target.</summary>
+    public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, QuickSettingsProfileTarget? profileTarget = null, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        return (pageId, appId) switch
+        return (pageId, profileTarget) switch
         {
             (QuickSettingsPageId.Device, null) => CaptureDeviceQuickSettingsPageAsync(cancellationToken),
-            (QuickSettingsPageId.Profile, > 0) => CaptureProfileQuickSettingsPageAsync(appId.Value, cancellationToken),
-            (QuickSettingsPageId.Profile, null or 0) => Task.FromResult(
-                QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "No active game.")),
-            _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, appId)),
+            (QuickSettingsPageId.Profile, null) => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(
+                QuickSettingsPageId.Profile, null, "No game is currently running. Start a game to configure its profile.")),
+            (QuickSettingsPageId.Profile, { IsStructurallyValid: true }) => CaptureProfileQuickSettingsPageAsync(profileTarget, cancellationToken),
+            _ => Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, profileTarget)),
         };
     }
 
@@ -1925,27 +1928,42 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildDevice(snapshot));
     }
 
-    private async Task<QuickSettingsPageSnapshot> CaptureProfileQuickSettingsPageAsync(uint appId, CancellationToken cancellationToken)
+    private async Task<QuickSettingsPageSnapshot> CaptureProfileQuickSettingsPageAsync(QuickSettingsProfileTarget profileTarget, CancellationToken cancellationToken)
     {
-        var actualAppId = _actualRunningAppIdSource();
-        if (actualAppId > 0 && actualAppId != appId)
-            return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, "The requested game is not currently active.");
+        var currentTarget = _activeProfileTargetSource?.Invoke() ?? ActiveProfileTarget.ForSteam(_actualRunningAppIdSource());
+        if (!MatchesQuickSettingsTarget(profileTarget, currentTarget))
+            return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, profileTarget, "The requested game is not currently active.");
 
-        var snapshot = actualAppId == appId
-            ? await CaptureActiveGameProfileAsync(cancellationToken).ConfigureAwait(false)
-            : await CaptureGameProfileAsync(appId, cancellationToken).ConfigureAwait(false);
-        if (snapshot.AppId != appId || (!snapshot.Exists && !snapshot.PersistenceWritable))
-            return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId, actualAppId == 0 ? "The selected game Profile is unavailable." : "The requested game is not currently active.");
+        if (profileTarget.Kind == QuickSettingsProfileTargetKind.Steam)
+        {
+            var appId = profileTarget.SteamAppId!.Value;
+            var snapshot = await CaptureActiveGameProfileAsync(cancellationToken).ConfigureAwait(false);
+            if (snapshot.AppId != appId || (!snapshot.Exists && !snapshot.PersistenceWritable))
+                return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, profileTarget, "The active game Profile is unavailable.");
+            return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildProfile(snapshot));
+        }
 
-        return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildProfile(snapshot));
+        var key = profileTarget.XboxGameKey!;
+        var xboxSnapshot = await CaptureXboxGameProfileAsync(key, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(xboxSnapshot.Key, key, StringComparison.Ordinal) || (!xboxSnapshot.Exists && !xboxSnapshot.PersistenceWritable))
+            return QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, profileTarget, "The active XBOX game Profile is unavailable.");
+        return ApplyQuickSettingsPowerSourceVisibility(QuickSettingsPresentation.BuildProfile(xboxSnapshot));
     }
+
+    private static bool MatchesQuickSettingsTarget(QuickSettingsProfileTarget requested, ActiveProfileTarget current) =>
+        requested.Kind switch
+        {
+            QuickSettingsProfileTargetKind.Steam => current.Kind == ActiveProfileTargetKind.Steam && current.SteamAppId == requested.SteamAppId,
+            QuickSettingsProfileTargetKind.Xbox => current.Kind == ActiveProfileTargetKind.Xbox && string.Equals(current.XboxGameKey, requested.XboxGameKey, StringComparison.Ordinal),
+            _ => false,
+        };
 
     /// <summary>Shared Quick Settings mutation seam (section 22/24): validates and dispatches onto
     /// the existing typed Device mutation methods via <see cref="QuickSettingsMutationAdapter"/>.</summary>
     public async Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        var currentPage = await CaptureQuickSettingsPageAsync(intent.PageId, intent.AppId, cancellationToken).ConfigureAwait(false);
+        var currentPage = await CaptureQuickSettingsPageAsync(intent.PageId, intent.ProfileTarget, cancellationToken).ConfigureAwait(false);
         if (currentPage.Available)
         {
             var currentRow = currentPage.Sections.SelectMany(section => section.Rows).FirstOrDefault(row => row.RowId == intent.EditedRowId);

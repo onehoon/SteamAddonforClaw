@@ -10,8 +10,6 @@ public sealed partial class OverlayWindow : Window
     private readonly Brush _rowSelectedBrush;
 
     internal event Action<OverlayOutsideClick>? OutsideClickDismissRequested;
-    internal event Action? ProfileSelectedDetailBackRequested;
-    internal event Action? ProfileSelectedDetailTabLeaveRequested;
 
     public OverlayWindow()
     {

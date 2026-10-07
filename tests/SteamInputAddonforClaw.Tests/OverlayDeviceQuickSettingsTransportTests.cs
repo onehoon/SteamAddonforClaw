@@ -39,10 +39,10 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     [Fact]
     public void Protocol_is_v14_and_frontend_transport_is_current()
     {
-        Assert.Equal(15, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(16, OverlayTransportProtocol.CurrentVersion);
         // The desktop frontend protocol is independent of
         // the Overlay protocol, even though its own version may advance for a separate RPC.
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]
@@ -409,26 +409,26 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
     {
         var data = new TheoryData<string>();
         // RequestId 0 / negative -- structurally decodes, fails the transport's own RequestId check.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":0,"Intent":{"PageId":"Device","AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":-1,"Intent":{"PageId":"Device","AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":0,"Intent":{"PageId":"Device","ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":-1,"Intent":{"PageId":"Device","ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
         // Missing required Intent.PageId -- RespectRequiredConstructorParameters throws at decode.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
         // Missing required Intent.EditedRowId.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","AppId":null,"Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","ProfileTarget":null,"Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
         // Missing nested RowId.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
         // Missing nested Value.Kind.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"BooleanValue":true}}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"BooleanValue":true}}]}}"""));
         // Values = null.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":null}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":null}}"""));
         // Null nested row-value entry.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[null]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[null]}}"""));
         // Null nested Value.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":null}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"Device","ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":null}]}}"""));
         // Unknown enum string.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"NotAPage","AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":"NotAPage","ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
         // Numeric enum token where a string enum name is required.
-        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":0,"AppId":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
+        data.Add(Envelope("QuickSettingsMutationRequest", """{"RequestId":1,"Intent":{"PageId":0,"ProfileTarget":null,"EditedRowId":"DeviceCpuBoostEnabled","Values":[{"RowId":"DeviceCpuBoostEnabled","Value":{"Kind":"Boolean","BooleanValue":true}}]}}"""));
         return data;
     }
 
@@ -736,7 +736,7 @@ public sealed class OverlayDeviceQuickSettingsTransportTests
         public bool ThrowOnMutate { get; set; }
         public int CaptureCount { get; private set; }
 
-        public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken t = default)
+        public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, QuickSettingsProfileTarget? profileTarget = null, CancellationToken t = default)
         { CaptureCount++; return Task.FromResult(Page); }
 
         public Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken t = default)

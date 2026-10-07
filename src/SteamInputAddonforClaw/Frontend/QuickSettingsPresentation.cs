@@ -10,6 +10,18 @@ namespace SteamInputAddonforClaw.Frontend;
 /// caches -- a pure function of its input.</summary>
 internal static class QuickSettingsPresentation
 {
+    private sealed record ProfileQuickSettingsProjection(
+        string DisplayName,
+        bool Enabled,
+        FrontendGameCpuBoostConfiguration CpuBoost,
+        FrontendGameTdpConfiguration Tdp,
+        bool PersistenceWritable,
+        FrontendTdpLimits? Limits,
+        FrontendGameResolution? Resolution,
+        FrontendGamePowerModeConfiguration? PowerMode,
+        FrontendGameFpsLimitConfiguration? FpsLimit,
+        QuickSettingsProfileTarget ProfileTarget);
+
     internal static QuickSettingsPageSnapshot ApplyPowerSourceVisibility(
         QuickSettingsPageSnapshot page,
         bool currentPowerSourceOnly,
@@ -98,7 +110,7 @@ internal static class QuickSettingsPresentation
             BuildBatteryChargeLimitSection(snapshot.BatteryChargeLimit),
         ];
 
-        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, AppId: null, Available: true, Message: null, sections, BuildDeviceTdpLinkedConstraints(snapshot.Tdp));
+        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, ProfileTarget: null, Available: true, Message: null, sections, BuildDeviceTdpLinkedConstraints(snapshot.Tdp));
     }
 
     private static QuickSettingsSection BuildBatteryChargeLimitSection(FrontendBatteryChargeLimitSnapshot snapshot)
@@ -134,7 +146,17 @@ internal static class QuickSettingsPresentation
     /// visible Overlay Profile product. Called only for a valid target -- an unavailable/stale Profile
     /// context is represented separately via <see cref="QuickSettingsPageSnapshot.Unavailable"/>, never
     /// fabricated here.</summary>
-    internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot)
+    internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
+        string.IsNullOrWhiteSpace(snapshot.DisplayName) ? $"Game {snapshot.AppId}" : snapshot.DisplayName,
+        snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
+        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, QuickSettingsProfileTarget.ForSteam(snapshot.AppId)));
+
+    internal static QuickSettingsPageSnapshot BuildProfile(FrontendXboxGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
+        string.IsNullOrWhiteSpace(snapshot.DisplayName) ? "XBOX game" : snapshot.DisplayName,
+        snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
+        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, QuickSettingsProfileTarget.ForXbox(snapshot.Key)));
+
+    private static QuickSettingsPageSnapshot BuildProfile(ProfileQuickSettingsProjection snapshot)
     {
         var sections = new List<QuickSettingsSection> { BuildProfileGeneralSection(snapshot) };
         if (snapshot.Limits is not null) sections.Add(BuildProfileTdpSection(snapshot));
@@ -144,22 +166,21 @@ internal static class QuickSettingsPresentation
         sections.Add(BuildProfileResolutionSection(snapshot));
 
         var linkedConstraints = snapshot.Limits is { } limits ? BuildProfileTdpLinkedConstraints(limits) : [];
-        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, snapshot.AppId, Available: true, Message: null, sections, linkedConstraints);
+        return new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, snapshot.ProfileTarget, Available: true, Message: null, sections, linkedConstraints);
     }
 
-    private static QuickSettingsSection BuildProfileGeneralSection(FrontendGameProfileSnapshot snapshot)
+    private static QuickSettingsSection BuildProfileGeneralSection(ProfileQuickSettingsProjection snapshot)
     {
-        var label = string.IsNullOrWhiteSpace(snapshot.DisplayName) ? $"Game {snapshot.AppId}" : snapshot.DisplayName;
         var row = new QuickSettingsRow(QuickSettingsRowId.ProfileEnabled, "Profile", QuickSettingsControlKind.Toggle,
             Available: true,
             Writable: snapshot.PersistenceWritable,
             Value: QuickSettingsValue.Boolean(snapshot.Enabled),
             SliderSpec: null,
             CommitPolicy: QuickSettingsCommitPolicy.Immediate);
-        return new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, label, [row]);
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, snapshot.DisplayName, [row]);
     }
 
-    private static QuickSettingsSection BuildProfileTdpSection(FrontendGameProfileSnapshot snapshot)
+    private static QuickSettingsSection BuildProfileTdpSection(ProfileQuickSettingsProjection snapshot)
     {
         var limits = snapshot.Limits!;
         var writable = snapshot.PersistenceWritable && snapshot.Enabled;
@@ -195,7 +216,7 @@ internal static class QuickSettingsPresentation
             CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300,
             CommitGroupId: QuickSettingsCommitGroupId.ProfileTdpConfiguration);
 
-    private static QuickSettingsSection BuildProfileCpuBoostSection(FrontendGameProfileSnapshot snapshot)
+    private static QuickSettingsSection BuildProfileCpuBoostSection(ProfileQuickSettingsProjection snapshot)
     {
         var writable = snapshot.PersistenceWritable && snapshot.Enabled;
         var rows = new List<QuickSettingsRow>
@@ -225,7 +246,7 @@ internal static class QuickSettingsPresentation
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: CpuBoostDiscreteOptions),
             CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
 
-    private static QuickSettingsSection BuildProfilePowerModeSection(FrontendGameProfileSnapshot snapshot)
+    private static QuickSettingsSection BuildProfilePowerModeSection(ProfileQuickSettingsProjection snapshot)
     {
         var powerMode = snapshot.PowerMode!;
         var writable = snapshot.PersistenceWritable && snapshot.Enabled;
@@ -256,7 +277,7 @@ internal static class QuickSettingsPresentation
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: PowerModeDiscreteOptions),
             CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
 
-    private static QuickSettingsSection BuildProfileFpsLimitSection(FrontendGameProfileSnapshot snapshot)
+    private static QuickSettingsSection BuildProfileFpsLimitSection(ProfileQuickSettingsProjection snapshot)
     {
         var fps = snapshot.FpsLimit!;
         if (!fps.Available)
@@ -292,7 +313,7 @@ internal static class QuickSettingsPresentation
             SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Numeric, Minimum: 40, Maximum: 120, Step: 1, Suffix: " FPS"),
             CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
 
-    private static QuickSettingsSection BuildProfileResolutionSection(FrontendGameProfileSnapshot snapshot)
+    private static QuickSettingsSection BuildProfileResolutionSection(ProfileQuickSettingsProjection snapshot)
     {
         var current = snapshot.Resolution switch
         {

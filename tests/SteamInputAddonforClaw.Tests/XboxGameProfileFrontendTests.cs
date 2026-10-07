@@ -43,6 +43,37 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     }
 
     [Fact]
+    public async Task Active_XBOX_overlay_uses_live_title_for_first_profile_and_persists_it_when_enabled()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new ProfileStore(ProfilePath);
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        const string liveTitle = "Xbox Live Title";
+        var target = QuickSettingsProfileTarget.ForXbox(Key);
+        var control = CreateControl(
+            mutations,
+            activeProfileTargetSource: () => ActiveProfileTarget.ForXbox(Key),
+            activeXboxDisplayNameSource: requestedKey => string.Equals(requestedKey, Key, StringComparison.Ordinal)
+                ? liveTitle
+                : null);
+
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, target);
+        var initialSnapshot = await control.CaptureXboxGameProfileAsync(Key);
+        Assert.True(page.Available);
+        Assert.False(initialSnapshot.Exists);
+        Assert.Equal(liveTitle, page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, target, QuickSettingsRowId.ProfileEnabled,
+            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        var persisted = store.Load().Document.XboxGames[Key];
+        Assert.True(persisted.Enabled);
+        Assert.Equal(liveTitle, persisted.DisplayName);
+        Assert.Equal(liveTitle, result.Page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+    }
+
+    [Fact]
     public async Task XBOX_profile_mutations_for_an_offline_target_persist_without_live_apply()
     {
         Directory.CreateDirectory(_directory);
@@ -438,6 +469,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         IntelFrameLimiterRuntime? fps = null,
         Func<uint>? actualRunningAppIdSource = null,
         Func<ActiveProfileTarget>? activeProfileTargetSource = null,
+        Func<string, string?>? activeXboxDisplayNameSource = null,
         Func<string, bool>? reconcileXboxBackButtonMapping = null,
         BackButtonMappingSettings? globalBackButtonMapping = null,
         CpuBoostRuntime? cpu = null,
@@ -451,7 +483,8 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
             displayResolutionRuntime: resolution, intelFpsRuntime: fps,
             xboxGameProfileMutations: mutations, actualRunningAppIdSource: actualRunningAppIdSource,
             activeProfileTargetSource: activeProfileTargetSource,
-            reconcileXboxBackButtonMapping: reconcileXboxBackButtonMapping);
+            reconcileXboxBackButtonMapping: reconcileXboxBackButtonMapping,
+            activeXboxDisplayNameSource: activeXboxDisplayNameSource);
     }
 
     private static HandheldDeviceModelId Model() => new("msi.claw.a2vm.7");

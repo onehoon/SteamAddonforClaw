@@ -61,7 +61,7 @@ public sealed class QuickSettingsPresentationTests
     [Fact]
     public void Power_source_projection_applies_to_profile_rows_without_removing_hidden_companions()
     {
-        var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, 42, true, null,
+        var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(42), true, null,
         [new QuickSettingsSection(QuickSettingsSectionId.ProfileTdp, "TDP", [
             new(QuickSettingsRowId.ProfileTdpAcPl1, "AC", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(20), new(QuickSettingsSliderKind.Numeric, 8, 30), QuickSettingsCommitPolicy.TrailingDebounce300, QuickSettingsCommitGroupId.ProfileTdpConfiguration),
             new(QuickSettingsRowId.ProfileTdpDcPl1, "DC", QuickSettingsControlKind.Slider, true, true, QuickSettingsValue.Integer(10), new(QuickSettingsSliderKind.Numeric, 8, 30), QuickSettingsCommitPolicy.TrailingDebounce300, QuickSettingsCommitGroupId.ProfileTdpConfiguration),
@@ -423,7 +423,7 @@ public sealed class QuickSettingsPresentationTests
             page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileResolution).Rows.Select(r => r.RowId).ToArray());
 
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
-        Assert.Equal(4200u, page.AppId);
+        Assert.Equal(4200u, page.ProfileTarget?.SteamAppId);
         Assert.True(page.Available);
     }
 
@@ -435,6 +435,50 @@ public sealed class QuickSettingsPresentationTests
 
         var blank = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with { DisplayName = "  " });
         Assert.Equal("Game 4200", blank.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+    }
+
+    [Fact]
+    public void Xbox_profile_uses_the_shared_sections_rows_writability_limits_and_power_source_visibility()
+    {
+        var xbox = new FrontendXboxGameProfileSnapshot(
+            "xbox:canonical-key", "XBOX Game", Exists: true, Enabled: true,
+            new FrontendGameCpuBoostConfiguration(true, CpuBoostMode.Aggressive, CpuBoostMode.Disabled),
+            new FrontendGameTdpConfiguration(true, new(15, 20), new(12, 18)),
+            PersistenceWritable: true,
+            Limits: new FrontendTdpLimits(8, 30, 8, 37),
+            Resolution: new FrontendGameResolution(1920, 1080),
+            PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.Balanced, WindowsPowerMode.BestPowerEfficiency),
+            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true));
+
+        var page = QuickSettingsPresentation.BuildProfile(xbox);
+
+        Assert.Equal(QuickSettingsProfileTarget.ForXbox("xbox:canonical-key"), page.ProfileTarget);
+        Assert.Equal("XBOX Game", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
+        Assert.Collection(page.Sections,
+            s => Assert.Equal(QuickSettingsSectionId.ProfileGeneral, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileResolution, s.SectionId));
+        Assert.Equal(8, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Minimum);
+        Assert.Equal(30, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Maximum);
+        Assert.True(FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).Writable);
+        Assert.True(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.DoesNotContain(page.Sections.SelectMany(section => section.Rows), row => row.Label.Contains("M1", StringComparison.Ordinal) || row.Label.Contains("M2", StringComparison.Ordinal));
+
+        var dcOnly = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, currentPowerSourceOnly: true, AcDcPowerSource.DC);
+        Assert.False(FindRow(dcOnly, QuickSettingsRowId.ProfileTdpAcPl1).Visible);
+        Assert.True(FindRow(dcOnly, QuickSettingsRowId.ProfileTdpDcPl1).Visible);
+        Assert.False(FindRow(dcOnly, QuickSettingsRowId.ProfileCpuBoostAc).Visible);
+        Assert.True(FindRow(dcOnly, QuickSettingsRowId.ProfileCpuBoostDc).Visible);
+
+        var disabled = QuickSettingsPresentation.BuildProfile(xbox with { Enabled = false });
+        Assert.True(FindRow(disabled, QuickSettingsRowId.ProfileEnabled).Writable);
+        Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileTdpEnabled).Writable);
+        Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileCpuBoostEnabled).Writable);
+        Assert.False(FindRow(disabled, QuickSettingsRowId.ProfilePowerModeEnabled).Writable);
+        Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileFpsLimitEnabled).Writable);
     }
 
     [Fact]

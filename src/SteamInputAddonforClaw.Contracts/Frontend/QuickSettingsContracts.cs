@@ -12,6 +12,30 @@ public enum QuickSettingsPageId
     Profile,
 }
 
+public enum QuickSettingsProfileTargetKind
+{
+    Steam,
+    Xbox
+}
+
+/// <summary>Transient Quick Settings page/mutation correlation for the Runtime-selected active
+/// game. This is not persisted identity or an input to performance runtimes.</summary>
+public sealed record QuickSettingsProfileTarget(
+    QuickSettingsProfileTargetKind Kind,
+    uint? SteamAppId = null,
+    string? XboxGameKey = null)
+{
+    public static QuickSettingsProfileTarget ForSteam(uint appId) => new(QuickSettingsProfileTargetKind.Steam, SteamAppId: appId);
+    public static QuickSettingsProfileTarget ForXbox(string gameKey) => new(QuickSettingsProfileTargetKind.Xbox, XboxGameKey: gameKey);
+
+    public bool IsStructurallyValid => Kind switch
+    {
+        QuickSettingsProfileTargetKind.Steam => SteamAppId is > 0 && XboxGameKey is null,
+        QuickSettingsProfileTargetKind.Xbox => SteamAppId is null && !string.IsNullOrWhiteSpace(XboxGameKey),
+        _ => false,
+    };
+}
+
 public enum QuickSettingsSectionId
 {
     DeviceTdp,
@@ -146,18 +170,18 @@ public sealed record QuickSettingsRow(
 
 public sealed record QuickSettingsSection(QuickSettingsSectionId SectionId, string? Label, IReadOnlyList<QuickSettingsRow> Rows, string? Message = null);
 
-/// <summary>One projected Quick Settings page. <see cref="AppId"/> is the optional context identity
-/// used by the Profile page (the game this page belongs to); Device has none.</summary>
+/// <summary>One projected Quick Settings page. <see cref="ProfileTarget"/> is the optional transient
+/// context identity used by the active-game Profile page; Device has none.</summary>
 public sealed record QuickSettingsPageSnapshot(
     QuickSettingsPageId PageId,
-    uint? AppId,
+    QuickSettingsProfileTarget? ProfileTarget,
     bool Available,
     string? Message,
     IReadOnlyList<QuickSettingsSection> Sections,
     IReadOnlyList<QuickSettingsLinkedSliderConstraint> LinkedSliderConstraints)
 {
-    public static QuickSettingsPageSnapshot Unavailable(QuickSettingsPageId pageId, uint? appId = null, string? message = null) =>
-        new(pageId, appId, false, message ?? "Quick Settings are unavailable.", [], []);
+    public static QuickSettingsPageSnapshot Unavailable(QuickSettingsPageId pageId, QuickSettingsProfileTarget? profileTarget = null, string? message = null) =>
+        new(pageId, profileTarget, false, message ?? "Quick Settings are unavailable.", [], []);
 }
 
 /// <summary>A closed mutation intent (work order section 20). For an independent Toggle/Slider,
@@ -167,7 +191,7 @@ public sealed record QuickSettingsPageSnapshot(
 /// separately by each transport.</summary>
 public sealed record QuickSettingsMutationIntent(
     QuickSettingsPageId PageId,
-    uint? AppId,
+    QuickSettingsProfileTarget? ProfileTarget,
     QuickSettingsRowId EditedRowId,
     IReadOnlyList<QuickSettingsRowValue> Values);
 

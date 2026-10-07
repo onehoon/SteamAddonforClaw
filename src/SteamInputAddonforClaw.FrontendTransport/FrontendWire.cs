@@ -148,8 +148,9 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // the field-proven detector is promoted to an always-on Runtime-owned XboxGameSessionRuntime.
 // No production active-XBOX frontend RPC is added yet.
 // Version 59: project and mutate the XBOX profile's optional non-Steam M1/M2 mapping override.
-// v58 peers fail the handshake before either new typed contract can be used.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 59; }
+// Version 60: Quick Settings Profile context carries the active Steam/XBOX target instead of a
+// Steam-only AppId. v59 peers fail the handshake before this shared contract can be used.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 60; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -211,7 +212,7 @@ internal sealed record SetDeviceTdpEnabledRequest(bool Enabled);
 internal sealed record RequestCenterMAuthorityTransitionRequest(bool CenterMEnabled);
 // SF-V2-04: the generic Quick Settings capture request. MutateQuickSetting sends the shared
 // QuickSettingsMutationIntent contract directly as its payload -- no transport wrapper record.
-internal sealed record CaptureQuickSettingsPageRequest(QuickSettingsPageId PageId, uint? AppId);
+internal sealed record CaptureQuickSettingsPageRequest(QuickSettingsPageId PageId, QuickSettingsProfileTarget? ProfileTarget);
 internal sealed record CaptureGameProfileRequest(uint AppId);
 internal sealed record SetGameProfileEnabledRequest(uint AppId, bool Enabled, string? DisplayName);
 internal sealed record SetGameProfileCpuBoostEnabledRequest(uint AppId, bool Enabled);
