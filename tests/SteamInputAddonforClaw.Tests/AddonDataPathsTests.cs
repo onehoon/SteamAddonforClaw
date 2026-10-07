@@ -28,6 +28,14 @@ public sealed class AddonDataPathsTests
     }
 
     [Fact]
+    public void IntelGpuMinimumClockOwnershipPath_UsesCanonicalDataRoot()
+    {
+        Assert.Equal(
+            @"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\intel-gpu-minimum-clock-ownership.json",
+            AddonDataPaths.ResolveIntelGpuMinimumClockOwnershipPath(InstallRoot));
+    }
+
+    [Fact]
     public void ResolveClawHudRuntimePaths_UseCanonicalDataRootOutsideInstallRoot()
     {
         var runtimeRoot = AddonDataPaths.ResolveClawHudRuntimeRoot(InstallRoot);

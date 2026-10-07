@@ -97,6 +97,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private BackButtonMappingSettings? _activeNonSteamBackButtonMappingOverride;
     private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
     private readonly IntelFrameLimiterRuntime _intelFpsRuntime;
+    private readonly IntelGpuMinimumClockRuntime _intelGpuMinimumClockRuntime;
     private readonly Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver;
     private readonly ShortcutStore _shortcutStore;
     private readonly ShortcutRuntime _shortcutRuntime;
@@ -173,7 +174,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Func<string>? testFrontendPipeNameFactory = null,
         Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null,
         IWindowsAppRuntimePrerequisite? testWindowsAppRuntimePrerequisite = null,
-        bool headlessUninstallPreparation = false)
+        bool headlessUninstallPreparation = false,
+        Func<string, IIntelGpuMinimumClockControl>? testIntelGpuMinimumClockControlFactory = null)
     {
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
         _frontendPipeNameFactory = testFrontendPipeNameFactory;
@@ -199,6 +201,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var fpsMarker = testOnlyDataRoot is null ? AddonDataPaths.IntelFpsLimitOwnershipPath : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json");
         var fpsLimiter = testIntelFrameLimiterFactory?.Invoke(fpsMarker) ?? (testOnlyDataRoot is null ? new IntelFrameLimiter(fpsMarker) : new UnavailableIntelFrameLimiter());
         _intelFpsRuntime = new(_profileStore, _profileMutationGate, fpsLimiter, marker: fpsMarker);
+        var minimumClockMarker = testOnlyDataRoot is null
+            ? AddonDataPaths.IntelGpuMinimumClockOwnershipPath
+            : Path.Combine(testOnlyDataRoot, "intel-gpu-minimum-clock-ownership.json");
+        var minimumClockControl = testIntelGpuMinimumClockControlFactory?.Invoke(minimumClockMarker)
+            ?? (testOnlyDataRoot is null ? new IntelGpuMinimumClockControl() : new UnavailableIntelGpuMinimumClockControl());
+        _intelGpuMinimumClockRuntime = new(minimumClockControl, minimumClockMarker);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _windowsAppRuntimePrerequisite = testWindowsAppRuntimePrerequisite ?? new WindowsAppRuntimePrerequisite();
         _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
@@ -2031,6 +2039,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         try { _powerModeRuntime.StartupReconcile(); }
         catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode startup reconcile failed.", exception); }
+        InitializeIntelGpuMinimumClockReadOnlyForStartup();
         // The AC/DC fact is shared by compact Quick Settings and Intel FPS. Register its
         // event-driven notification independently of IGCL availability so a missing Intel driver
         // cannot disable Quick Settings power-source refresh.
@@ -2077,6 +2086,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("Profiles.Tdp", "TDP startup reconcile failed.", exception);
         }
         Volatile.Write(ref _profileRuntimeStartupReady, 1);
+    }
+
+    internal void InitializeIntelGpuMinimumClockReadOnlyForStartup()
+    {
+        // PR1 performs capability discovery only; production writes remain deferred to a later PR.
+        try { _intelGpuMinimumClockRuntime.InitializeReadOnly(); }
+        catch (Exception exception) { AppLog.Debug("Profiles.IntelGpuMinimumClock", "Startup capability discovery failed; Addon Runtime remains available.", ("Failure", exception.Message)); }
     }
 
     private ActiveProfileTarget CaptureActiveProfileTarget()
@@ -2221,6 +2237,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _acDcPowerSource = null;
         }
         _intelFpsRuntime.BeginShutdown();
+        _intelGpuMinimumClockRuntime.BeginShutdown();
         // PR10 section 15: stop the Device Arrival watcher before recovery drains -- no WMI callback
         // may reach OnControllerDeviceArrived after this, and _processShutdownStarted is already set
         // so no new arrival-triggered recovery can be scheduled.
@@ -2353,6 +2370,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _tdpTransport = null;
         }
         _intelFpsRuntime.Dispose();
+        _intelGpuMinimumClockRuntime.Dispose();
         // OQ3-A: disposed last, after the frontend server and Overlay controller are gone, so any
         // in-flight visible-surface coordination has already unwound and released the gate.
         try { _visibleSurfaceTransition.Dispose(); } catch (ObjectDisposedException) { }
