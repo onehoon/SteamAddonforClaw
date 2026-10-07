@@ -120,39 +120,6 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task Developer_probe_blocks_XBOX_gpu_mutations_and_whole_profile_activation_before_persistence()
-    {
-        Directory.CreateDirectory(_directory);
-        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
-        var store = new ProfileStore(ProfilePath);
-        var gate = new ProfileMutationGate();
-        var mutations = new XboxGameProfileMutations(store, gate, Model());
-        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, true, "Game"));
-        var hardware = new RecordingMinimumClockControl();
-        using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => AcDcPowerSource.AC);
-        var control = CreateControl(mutations, gpuMinimumClockRuntime: runtime, developerModified: true);
-
-        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
-            (await control.SetXboxGameProfileGpuMinimumClockEnabledAsync(Key, true)).Outcome);
-        Assert.Null(store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock);
-
-        var configured = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1725.125, DcMhz = 1825.375 };
-        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded,
-            mutations.SetGpuMinimumClockEnabled(Key, true, configured));
-        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
-            (await control.SetXboxGameProfileGpuMinimumClockAcAsync(Key, 0)).Outcome);
-        Assert.Equal(configured, store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock);
-
-        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, false, null));
-        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
-            (await control.SetXboxGameProfileEnabledAsync(Key, true, "Game")).Outcome);
-        Assert.False(store.Load().Document.XboxGames[Key].Enabled);
-        Assert.Equal(configured, store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock);
-        Assert.Equal(0, hardware.SetCalls);
-    }
-
-    [Fact]
     public async Task Active_XBOX_overlay_uses_live_title_for_first_profile_and_persists_it_when_enabled()
     {
         Directory.CreateDirectory(_directory);
@@ -597,8 +564,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         CpuBoostRuntime? cpu = null,
         PowerModeRuntime? power = null,
         GameDisplayResolutionRuntime? resolution = null,
-        IntelGpuMinimumClockRuntime? gpuMinimumClockRuntime = null,
-        bool developerModified = false)
+        IntelGpuMinimumClockRuntime? gpuMinimumClockRuntime = null)
     {
         var settings = new StartupSettingsCoordinator(new AppSettings { BackButtonMapping = globalBackButtonMapping ?? BackButtonMappingSettings.Default },
             new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
@@ -609,8 +575,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
             xboxGameProfileMutations: mutations, actualRunningAppIdSource: actualRunningAppIdSource,
             activeProfileTargetSource: activeProfileTargetSource,
             reconcileXboxBackButtonMapping: reconcileXboxBackButtonMapping,
-            activeXboxDisplayNameSource: activeXboxDisplayNameSource,
-            developerGpuFrequencyProbeModified: () => developerModified);
+            activeXboxDisplayNameSource: activeXboxDisplayNameSource);
     }
 
     private static HandheldDeviceModelId Model() => new("msi.claw.a2vm.7");

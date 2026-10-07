@@ -16,7 +16,7 @@ public sealed class CenterMStartupContractTests
         Assert.DoesNotContain("SetCenterMStartupEnabled", Enum.GetNames<FrontendRpcMethod>());
         // v46 adds Controller LED settings; v47 adds firmware-backed controller vibration RPCs;
         // v48 adds the closed developer-only CG3EM profile-write probe and restore RPC.
-        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(65, FrontendTransportProtocol.CurrentVersion);
         Assert.DoesNotContain("RequestEnterBios", Enum.GetNames<FrontendRpcMethod>());
     }
 

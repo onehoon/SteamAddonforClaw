@@ -134,18 +134,14 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Runtime_gameinput_and_igcl_probes_are_created_on_first_use_and_shutdown_only_if_created()
+    public void Runtime_gameinput_probe_is_created_on_first_use_and_shutdown_only_if_created()
     {
         var root = FindRepositoryRoot();
         var host = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs"));
-        var frontend = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs"));
         var gameInputCapture = ExtractMethod(host, "private Task<FrontendGameInputSystemButtonProbeSnapshot> CaptureGameInputSystemButtonProbeAsync(");
         var gameInputStart = ExtractMethod(host, "private Task<FrontendGameInputSystemButtonProbeSnapshot> StartGameInputSystemButtonProbeAsync(");
         var gameInputStop = ExtractMethod(host, "private Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(");
         var hostShutdown = ExtractMethod(host, "public async ValueTask DisposeAsync()");
-        var intelCapture = ExtractMethod(frontend, "public Task<FrontendIntelGpuFrequencyProbeSnapshot> CaptureIntelGpuFrequencyProbeAsync(");
-        var intelRun = ExtractMethod(frontend, "public Task<FrontendIntelGpuFrequencyProbeSnapshot> RunIntelGpuFrequencyProbeAsync(");
-        var frontendShutdown = ExtractMethod(frontend, "internal void BeginProcessShutdown()");
 
         Assert.Contains("private GameInputSystemButtonProbe? _gameInputSystemButtonProbe;", host, StringComparison.Ordinal);
         Assert.Contains("_gameInputSystemButtonProbe ??= new GameInputSystemButtonProbe()", gameInputCapture, StringComparison.Ordinal);
@@ -153,10 +149,6 @@ public sealed class UiArchitectureTests
         Assert.Contains("_gameInputSystemButtonProbe?.Stop()", gameInputStop, StringComparison.Ordinal);
         Assert.DoesNotContain("new GameInputSystemButtonProbe()", gameInputStop, StringComparison.Ordinal);
         Assert.Contains("if (_gameInputSystemButtonProbe is not null)", hostShutdown, StringComparison.Ordinal);
-        Assert.Contains("private IntelGpuIgclProbe? _intelGpuFrequencyProbe;", frontend, StringComparison.Ordinal);
-        Assert.Contains("_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()", intelCapture, StringComparison.Ordinal);
-        Assert.Contains("_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()", intelRun, StringComparison.Ordinal);
-        Assert.Contains("if (_intelGpuFrequencyProbe is not null)", frontendShutdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -288,35 +280,16 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
-    public void Intel_gpu_igcl_probe_stays_inline_in_developer_menu_and_routes_writes_through_frontend()
+    public void Developer_surface_omits_retired_gpu_frequency_controls()
     {
         var root = FindRepositoryRoot();
         var developerXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
         var developerCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml.cs"));
-        var mainWindowXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml"));
-        var overlayRoot = Path.Combine(root, "src/SteamInputAddonforClaw.Overlay");
 
-        Assert.Contains("Intel GPU Frequency / IGCL Probe", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Set Max / Max + Readback", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Restore Original Frequency", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Set Test PL1 + Readback", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"mW\"", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("Restore Original Power", developerXaml, StringComparison.Ordinal);
-        Assert.Contains("CaptureIntelGpuFrequencyProbeAsync", developerCode, StringComparison.Ordinal);
-        Assert.Contains("RunIntelGpuFrequencyProbeAsync", developerCode, StringComparison.Ordinal);
-        Assert.Contains("Math.Truncate(raw)", developerCode, StringComparison.Ordinal);
-        Assert.Contains("value is null", developerCode, StringComparison.Ordinal);
-        Assert.Contains("if (value is not { } flags) return \"Unknown\";", developerCode, StringComparison.Ordinal);
-        Assert.Contains("0x{flags:X8} ({string.Join", developerCode, StringComparison.Ordinal);
-        Assert.Contains("false when nativeResult == 0 => \"MISMATCH\"", developerCode, StringComparison.Ordinal);
-        Assert.Contains("false => \"FAILED\"", developerCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("IntelGpuFrequencyProbePage", mainWindowXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("NativeLibrary", developerCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("DllImport", developerCode, StringComparison.Ordinal);
-
-        foreach (var file in Directory.EnumerateFiles(overlayRoot, "*", SearchOption.AllDirectories)
-                     .Where(path => Path.GetExtension(path) is ".cs" or ".xaml"))
-            Assert.DoesNotContain("IntelGpuIgclProbe", File.ReadAllText(file), StringComparison.Ordinal);
+        Assert.DoesNotContain("Intel GPU Frequency / IGCL Probe", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Set Max / Max + Readback", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Set Test PL1 + Readback", developerXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Frequency" + "Probe", developerCode, StringComparison.Ordinal);
     }
 
     [Fact]

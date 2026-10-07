@@ -76,26 +76,6 @@
                 <Button Content="Open" Click="OpenGameInputSystemButtonProbeButton_Click" />
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard Header="Intel GPU Frequency / IGCL Probe" Description="Developer-only official IGCL read/write test. A hard Runtime crash can leave a test range applied; normal shutdown attempts restoration. PL1 is a power ceiling, not a GPU power reservation.">
-                <ctcontrols:SettingsCard.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsCard.HeaderIcon>
-                <StackPanel Spacing="8">
-                    <TextBlock x:Name="IntelGpuFrequencyProbeDetailsText" FontFamily="Consolas" TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button x:Name="RefreshIntelGpuFrequencyProbeButton" Click="RefreshIntelGpuFrequencyProbeButton_Click" Content="Refresh" />
-                        <Button x:Name="SetIntelGpuMaxMaxButton" Click="SetIntelGpuMaxMaxButton_Click" Content="Set Max / Max + Readback" />
-                        <Button x:Name="RestoreIntelGpuFrequencyButton" Click="RestoreIntelGpuFrequencyButton_Click" Content="Restore Original Frequency" />
-                    </StackPanel>
-                    <TextBlock Text="GPU Power Limit (PL1)" FontWeight="SemiBold" />
-                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <NumberBox x:Name="IntelGpuTestPl1NumberBox" Width="160" Minimum="0" Maximum="100000" SpinButtonPlacementMode="Inline" ValueChanged="IntelGpuTestPl1NumberBox_ValueChanged" />
-                        <TextBlock Text="mW" VerticalAlignment="Center" />
-                        <Button x:Name="SetIntelGpuTestPl1Button" Click="SetIntelGpuTestPl1Button_Click" Content="Set Test PL1 + Readback" />
-                        <Button x:Name="RestoreIntelGpuPowerButton" Click="RestoreIntelGpuPowerButton_Click" Content="Restore Original Power" />
-                    </StackPanel>
-                    <TextBlock x:Name="IntelGpuFrequencyProbeStatusText" Opacity="0.7" TextWrapping="Wrap" />
-                </StackPanel>
-            </ctcontrols:SettingsCard>
-
             <ctcontrols:SettingsCard Header="Logging" Description="Off by default. Info enables runtime diagnostics; Debug is verbose and for developer use only.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="List" />
