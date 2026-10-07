@@ -414,20 +414,6 @@ public sealed class IntelGpuMinimumClockTests
     }
 
     [Fact]
-    public void Developer_frequency_mutation_is_blocked_only_by_enabled_game_profile_ownership()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(SteamDocument(enabled: true, gpuEnabled: true, 1800, 1700));
-        using var runtime = CreateRuntime(temp, new FakeControl(new(-1, -1)), () => AcDcPowerSource.AC);
-
-        Assert.True(runtime.BlocksDeveloperFrequencyMutation());
-
-        store.Save(SteamDocument(enabled: true, gpuEnabled: false, 1800, 1700));
-        Assert.False(runtime.BlocksDeveloperFrequencyMutation());
-    }
-
-    [Fact]
     public void Normal_runtime_dispose_does_not_issue_a_separate_factory_release()
     {
         using var temp = new TemporaryDirectory();

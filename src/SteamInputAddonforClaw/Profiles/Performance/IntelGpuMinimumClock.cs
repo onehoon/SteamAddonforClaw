@@ -390,19 +390,6 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         }
     }
 
-    internal bool BlocksDeveloperFrequencyMutation()
-    {
-        if (_profileStore is null || _mutationGate is null) return false;
-
-        lock (_mutationGate.Sync)
-        {
-            var loaded = _profileStore.Load();
-            return !loaded.CanSafelyReplace
-                || loaded.Document.Games.Values.Any(profile => profile.Enabled && profile.Performance.GpuMinimumClock?.Enabled == true)
-                || loaded.Document.XboxGames.Values.Any(profile => profile.Enabled && profile.Performance.GpuMinimumClock?.Enabled == true);
-        }
-    }
-
     internal bool TryReinitializeSession(uint nativeResult)
     {
         lock (_gate)

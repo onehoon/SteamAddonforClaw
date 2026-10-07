@@ -74,7 +74,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly PowerModeRuntime? _powerModeRuntime;
     private readonly IntelFrameLimiterRuntime? _intelFpsRuntime;
     private readonly IntelGpuMinimumClockRuntime? _intelGpuMinimumClockRuntime;
-    private readonly Func<bool> _developerGpuFrequencyProbeModified;
     private readonly IMsiClawTdpTransport? _fanProbeTransport;
     private readonly TdpRuntime? _tdpRuntime;
     private readonly GameProfileMutations? _gameProfileMutations;
@@ -106,7 +105,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _captureGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _startGameInputSystemButtonProbe;
     private readonly Func<CancellationToken, Task<FrontendGameInputSystemButtonProbeSnapshot>>? _stopGameInputSystemButtonProbe;
-    private IntelGpuIgclProbe? _intelGpuFrequencyProbe;
 
     /// <param name="frontButtonMappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -162,8 +160,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         XboxGameProfileMutations? xboxGameProfileMutations = null,
         Func<ActiveProfileTarget>? activeProfileTargetSource = null,
         Func<string, bool>? reconcileXboxBackButtonMapping = null,
-        Func<string, string?>? activeXboxDisplayNameSource = null,
-        Func<bool>? developerGpuFrequencyProbeModified = null)
+        Func<string, string?>? activeXboxDisplayNameSource = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -175,8 +172,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _powerModeRuntime = powerModeRuntime;
         _intelFpsRuntime = intelFpsRuntime;
         _intelGpuMinimumClockRuntime = intelGpuMinimumClockRuntime;
-        _developerGpuFrequencyProbeModified = developerGpuFrequencyProbeModified
-            ?? (() => _intelGpuFrequencyProbe?.FrequencyModifiedByProbe == true);
         _tdpRuntime = tdpRuntime;
         _gameProfileMutations = gameProfileMutations;
         _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
@@ -344,10 +339,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledAsync(string key, bool enabled, string? displayName, CancellationToken cancellationToken = default) =>
         MutateXboxGame(key, cancellationToken,
-            mutations => enabled && _developerGpuFrequencyProbeModified()
-                && mutations.CaptureProfile(key).Profile.Performance.GpuMinimumClock?.Enabled == true
-                    ? XboxGameProfileMutations.MutationOutcome.Unavailable
-                    : mutations.SetEnabled(key, enabled, displayName),
+            mutations => mutations.SetEnabled(key, enabled, displayName),
             ProfileApplyKind.All,
             reconcileBackButtonMapping: true);
 
@@ -416,8 +408,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
-        if (_developerGpuFrequencyProbeModified())
-            return MutateXboxGame(key, cancellationToken, _ => XboxGameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.None);
         if (_intelGpuMinimumClockRuntime is not { } runtime)
             return MutateXboxGame(key, cancellationToken, _ => XboxGameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.None);
 
@@ -672,10 +662,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        var gpuOverrideEnabled = _gameProfileMutations?.CaptureProfile(appId)?.Profile.Performance.GpuMinimumClock?.Enabled == true;
-        if (enabled && _developerGpuFrequencyProbeModified() && gpuOverrideEnabled)
-            return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable,
-                "Restore the Developer GPU frequency probe before enabling this GPU-clock profile.", CaptureGameProfile(appId)));
         var outcome = _gameProfileMutations?.SetEnabled(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
         return MutateGame(appId, outcome, ProfileApplyKind.ExistingProfileEnable,
             ProfileApplyKind.PowerMode, ProfileApplyKind.FpsLimit, ProfileApplyKind.GpuMinimumClock);
@@ -732,8 +718,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
-        if (_developerGpuFrequencyProbeModified())
-            return MutateGame(appId, GameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.None);
         if (_intelGpuMinimumClockRuntime is not { } runtime)
             return MutateGame(appId, GameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.None);
 
@@ -1108,11 +1092,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             try { probe.Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
             catch (Exception exception) { AppLog.Warn("ClawSensorProbe", "Probe shutdown cleanup failed.", exception); }
         }
-        if (_intelGpuFrequencyProbe is not null)
-        {
-            try { _intelGpuFrequencyProbe.Dispose(); }
-            catch (Exception exception) { AppLog.Warn("Diagnostics.IntelGpuFrequency", "Probe shutdown cleanup failed.", exception); }
-        }
     }
 
     // ---- MSI Fan Probe (developer-only bounded hardware diagnostic) ----
@@ -1259,35 +1238,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameInputSystemButtonProbeSnapshot> StopGameInputSystemButtonProbeAsync(CancellationToken cancellationToken = default) =>
         _stopGameInputSystemButtonProbe?.Invoke(cancellationToken)
         ?? Task.FromResult(FrontendGameInputSystemButtonProbeSnapshot.Unavailable());
-
-    public Task<FrontendIntelGpuFrequencyProbeSnapshot> CaptureIntelGpuFrequencyProbeAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult((_intelGpuFrequencyProbe ??= new IntelGpuIgclProbe()).Capture());
-    }
-
-    public Task<FrontendIntelGpuFrequencyProbeSnapshot> RunIntelGpuFrequencyProbeAsync(
-        FrontendIntelGpuFrequencyProbeOperation operation,
-        int? testPl1Mw = null,
-        CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        var probe = _intelGpuFrequencyProbe ??= new IntelGpuIgclProbe();
-        if (ShouldBlockDeveloperFrequencyMutation(operation,
-                _intelGpuMinimumClockRuntime?.BlocksDeveloperFrequencyMutation() == true))
-        {
-            var blocked = probe.Capture() with
-            {
-                LastOperation = operation.ToString(),
-                LastOperationVerified = false,
-                FailureMessage = "Production Minimum GPU Clock owns the Intel frequency range; Developer frequency writes are disabled."
-            };
-            return Task.FromResult(blocked);
-        }
-        return Task.FromResult(probe.Run(operation, testPl1Mw));
-    }
 
     private async Task<FrontendBatteryChargeLimitTestMutationResult> SetBatteryChargeLimitTestAsync(
         Func<MsiBatteryChargeLimitMutationResult> mutation,
@@ -1754,12 +1704,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private static FrontendPowerModeMutationOutcome MapPowerModeOutcome(PowerModeMutationOutcome outcome) => outcome switch { PowerModeMutationOutcome.Succeeded => FrontendPowerModeMutationOutcome.Succeeded, PowerModeMutationOutcome.ApplyFailed => FrontendPowerModeMutationOutcome.ApplyFailed, _ => FrontendPowerModeMutationOutcome.PersistenceFailed };
     private static FrontendPowerModeSnapshot MapPowerModeSnapshot(PowerModeRuntimeSnapshot s) => new(MapPowerModeSide(s.AcCurrent, s.AcDesired), MapPowerModeSide(s.DcCurrent, s.DcDesired), s.Enabled, s.PersistenceWritable, s.LastFailure);
     private static FrontendPowerModeSideSnapshot MapPowerModeSide(PowerModeSideReading r, WindowsPowerMode? desired) => new(r.Status switch { PowerModeReadStatus.Known => FrontendPowerModeReadStatus.Known, PowerModeReadStatus.Unknown => FrontendPowerModeReadStatus.Unknown, _ => FrontendPowerModeReadStatus.Unavailable }, r.Mode, desired);
-
-    internal static bool ShouldBlockDeveloperFrequencyMutation(
-        FrontendIntelGpuFrequencyProbeOperation operation,
-        bool productionOwnsFrequency) =>
-        productionOwnsFrequency && operation is
-            (FrontendIntelGpuFrequencyProbeOperation.SetMaxMax or FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalFrequency);
 
     // ---- Production Device battery charge limit (PR2) ----
     public Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken cancellationToken = default)

@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.FrontButtons;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
@@ -75,23 +76,17 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
-    public async Task Intel_gpu_igcl_probe_default_frontend_methods_fail_closed_as_unavailable()
+    public void Retired_gpu_frequency_probe_is_absent_from_frontend_contract_and_rpc_surface()
     {
-        IAddonFrontendControl control = new MinimalFrontendControl();
+        const string retiredSurfaceFragment = "Gpu" + "Frequency" + "Probe";
 
-        var captured = await control.CaptureIntelGpuFrequencyProbeAsync();
-        var operated = await control.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.SetMaxMax);
-
-        Assert.Equal(FrontendIntelGpuFrequencyProbeSnapshot.Unavailable(), captured);
-        Assert.Equal(FrontendIntelGpuFrequencyProbeSnapshot.Unavailable(), operated);
-    }
-
-    [Fact]
-    public void Unavailable_intel_gpu_probe_does_not_claim_known_throttle_state()
-    {
-        var snapshot = FrontendIntelGpuFrequencyProbeSnapshot.Unavailable();
-
-        Assert.Null(snapshot.ThrottleReasons);
+        Assert.Equal(65, FrontendTransportProtocol.CurrentVersion);
+        Assert.DoesNotContain(typeof(IAddonFrontendControl).GetMethods(),
+            method => method.Name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
+        Assert.DoesNotContain(Enum.GetNames<FrontendRpcMethod>(),
+            name => name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
+        Assert.DoesNotContain(typeof(IAddonFrontendControl).Assembly.GetTypes(),
+            type => type.Name.Contains(retiredSurfaceFragment, StringComparison.Ordinal));
     }
 
     private sealed class MinimalFrontendControl : IAddonFrontendControl

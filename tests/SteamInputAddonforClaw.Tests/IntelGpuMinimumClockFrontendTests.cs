@@ -27,7 +27,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         var hardware = new FakeMinimumClockControl();
         using var runtime = new IntelGpuMinimumClockRuntime(
             store, gate, hardware, () => AcDcPowerSource.AC);
-        var control = CreateControl(runtime, developerModified: false,
+        var control = CreateControl(runtime,
             gameProfileMutations: gameMutations, actualRunningAppIdSource: () => 0);
 
         var before = await control.CaptureGameProfileAsync(42);
@@ -74,7 +74,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         using var runtime = new IntelGpuMinimumClockRuntime(
             store, gate, hardware, () => acPower ? AcDcPowerSource.AC : AcDcPowerSource.DC);
         runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(target, document));
-        var control = CreateControl(runtime, developerModified: false,
+        var control = CreateControl(runtime,
             gameProfileMutations: gameMutations,
             activeProfileTargetSource: () => target);
 
@@ -90,40 +90,6 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         var saved = store.Load().Document.Games["42"].Performance.GpuMinimumClock!;
         Assert.Equal(1525, saved.AcMhz);
         Assert.Equal(1625, saved.DcMhz);
-    }
-
-    [Fact]
-    public async Task Developer_probe_blocks_Steam_gpu_mutations_and_whole_profile_activation_before_persistence()
-    {
-        Directory.CreateDirectory(_directory);
-        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
-        var profilesPath = Path.Combine(_directory, "profiles.json");
-        var store = new ProfileStore(profilesPath);
-        var gate = new ProfileMutationGate();
-        var mutations = new GameProfileMutations(store, gate);
-        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(42, true, "Game"));
-        var hardware = new FakeMinimumClockControl();
-        using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => AcDcPowerSource.AC);
-        var control = CreateControl(runtime, developerModified: true, gameProfileMutations: mutations);
-
-        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
-            (await control.SetGameProfileGpuMinimumClockEnabledAsync(42, true)).Outcome);
-        Assert.Null(store.Load().Document.Games["42"].Performance.GpuMinimumClock);
-
-        var configured = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1725.125, DcMhz = 1825.375 };
-        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
-            mutations.SetGpuMinimumClockEnabled(42, true, configured));
-        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
-            (await control.SetGameProfileGpuMinimumClockAcAsync(42, 0)).Outcome);
-        Assert.Equal(configured, store.Load().Document.Games["42"].Performance.GpuMinimumClock);
-
-        Assert.True(mutations.Disable(42));
-        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
-            (await control.SetGameProfileEnabledAsync(42, true, "Game")).Outcome);
-        Assert.False(store.Load().Document.Games["42"].Enabled);
-        Assert.Equal(configured, store.Load().Document.Games["42"].Performance.GpuMinimumClock);
-        Assert.Equal(0, hardware.SetCalls);
     }
 
     [Fact]
@@ -144,7 +110,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         using var runtime = new IntelGpuMinimumClockRuntime(
             store, gate, hardware, () => AcDcPowerSource.AC);
         runtime.SetActiveProfileResolver(profileDocument => ActiveProfileResolver.Resolve(target, profileDocument));
-        var control = CreateControl(runtime, developerModified: false,
+        var control = CreateControl(runtime,
             gameProfileMutations: mutations,
             activeProfileTargetSource: () => target);
 
@@ -156,24 +122,8 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         Assert.Equal(1725, hardware.LastSetRange.Min);
     }
 
-    [Fact]
-    public void Production_ownership_blocks_only_developer_frequency_range_operations()
-    {
-        Assert.True(InProcessAddonFrontendControl.ShouldBlockDeveloperFrequencyMutation(
-            FrontendIntelGpuFrequencyProbeOperation.SetMaxMax, productionOwnsFrequency: true));
-        Assert.True(InProcessAddonFrontendControl.ShouldBlockDeveloperFrequencyMutation(
-            FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalFrequency, productionOwnsFrequency: true));
-        Assert.False(InProcessAddonFrontendControl.ShouldBlockDeveloperFrequencyMutation(
-            FrontendIntelGpuFrequencyProbeOperation.SetTestPl1, productionOwnsFrequency: true));
-        Assert.False(InProcessAddonFrontendControl.ShouldBlockDeveloperFrequencyMutation(
-            FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalPower, productionOwnsFrequency: true));
-        Assert.False(InProcessAddonFrontendControl.ShouldBlockDeveloperFrequencyMutation(
-            FrontendIntelGpuFrequencyProbeOperation.SetMaxMax, productionOwnsFrequency: false));
-    }
-
     private InProcessAddonFrontendControl CreateControl(
         IntelGpuMinimumClockRuntime runtime,
-        bool developerModified,
         GameProfileMutations? gameProfileMutations = null,
         Func<uint>? actualRunningAppIdSource = null,
         Func<ActiveProfileTarget>? activeProfileTargetSource = null)
@@ -187,8 +137,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
             gameProfileMutations: gameProfileMutations,
             actualRunningAppIdSource: actualRunningAppIdSource,
             activeProfileTargetSource: activeProfileTargetSource,
-            intelGpuMinimumClockRuntime: runtime,
-            developerGpuFrequencyProbeModified: () => developerModified);
+            intelGpuMinimumClockRuntime: runtime);
     }
 
     public void Dispose()
