@@ -105,6 +105,26 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
     }
 
     [Fact]
+    public void Successful_close_enabled_shortcut_reuses_the_existing_overlay_retirement_path()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var execution = ExtractMethod(source, "private async Task<OverlayShortcutExecutionOutcome> HandleOverlayShortcutExecutionAsync");
+
+        Assert.True(execution.IndexOf("_shortcutRuntime.ExecuteAsync(tileId, token)", StringComparison.Ordinal)
+            < execution.IndexOf("_visibleSurfaceTransition.WaitAsync(token)", StringComparison.Ordinal));
+        Assert.Contains("result.Outcome != ShortcutExecutionOutcome.Succeeded || !result.RetireOverlayAfterExecution", execution, StringComparison.Ordinal);
+        Assert.Contains("if (!_overlayCaptureActive && !_overlayController.IsVisible)", execution, StringComparison.Ordinal);
+        Assert.Contains("RetireOverlayCaptureUnderTransitionAsync(", execution, StringComparison.Ordinal);
+        Assert.Contains("\"ShortcutLaunch\"", execution, StringComparison.Ordinal);
+        Assert.Contains("surfaceAlreadyGone: false", execution, StringComparison.Ordinal);
+        Assert.Contains("ShortcutPostLaunchOverlayRetirementIncomplete", execution, StringComparison.Ordinal);
+        Assert.Contains("Shortcut launched, but the Overlay could not be closed.", execution, StringComparison.Ordinal);
+        Assert.Contains("_visibleSurfaceTransition.Release()", execution, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShortcutScreenshot", execution, StringComparison.Ordinal);
+        Assert.DoesNotContain("Task.Delay", execution, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Overlay_back_button_mapping_binds_capture_and_mutation_to_the_frontend_control()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");

@@ -128,6 +128,14 @@ public sealed partial class ShortcutPage : UserControl
         AddActionChoice(actionPicker, "Steam", FrontendShortcutEditorActionKind.SteamClient);
         AddActionChoice(actionPicker, "Xbox", FrontendShortcutEditorActionKind.XboxApp);
         AddActionChoice(actionPicker, "Screenshot", FrontendShortcutEditorActionKind.ScreenshotFullscreen);
+        var closeOverlayToggle = new ToggleSwitch
+        {
+            Header = "Close Overlay after launch",
+            OnContent = "Close Overlay",
+            OffContent = "Keep Overlay open",
+            IsOn = existing?.CloseOverlayAfterLaunch ?? false,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
 
         var executablePath = new TextBox { Header = "Executable path", PlaceholderText = @"C:\Path\Application.exe" };
         var executableBrowse = new Button { Content = "Browse…", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
@@ -178,6 +186,12 @@ public sealed partial class ShortcutPage : UserControl
             if (actionPicker.SelectedItem is not ComboBoxItem { Tag: FrontendShortcutEditorActionKind selectedKind })
                 return;
 
+            closeOverlayToggle.Visibility = selectedKind == FrontendShortcutEditorActionKind.ScreenshotFullscreen
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            if (existing is null)
+                closeOverlayToggle.IsOn = DefaultCloseOverlayAfterLaunch(selectedKind);
+
             var defaultTitle = GetDefaultTitle(selectedKind);
             if (defaultTitle is null) return;
             if (ShouldApplyDefaultTitle(existing is null, titleBox.Text, suggestedTitle))
@@ -204,7 +218,7 @@ public sealed partial class ShortcutPage : UserControl
             Spacing = 10,
             Children =
             {
-                titleBox, actionPicker, executablePanel, scriptPanel, urlPanel,
+                titleBox, actionPicker, closeOverlayToggle, executablePanel, scriptPanel, urlPanel,
                 steamBigPicturePanel, steamClientPanel, xboxAppPanel, screenshotPanel
             }
         };
@@ -248,7 +262,8 @@ public sealed partial class ShortcutPage : UserControl
             existing is null ? FrontendShortcutMutationKind.Create : FrontendShortcutMutationKind.Update,
             existing?.TileId,
             titleBox.Text,
-            action);
+            action,
+            selectedKind != FrontendShortcutEditorActionKind.ScreenshotFullscreen && closeOverlayToggle.IsOn);
         await ApplyMutationAsync(intent);
     }
 
@@ -269,6 +284,11 @@ public sealed partial class ShortcutPage : UserControl
         FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Screenshot",
         _ => null
     };
+
+    internal static bool DefaultCloseOverlayAfterLaunch(FrontendShortcutEditorActionKind kind) => kind is
+        FrontendShortcutEditorActionKind.SteamBigPicture or
+        FrontendShortcutEditorActionKind.SteamClient or
+        FrontendShortcutEditorActionKind.XboxApp;
 
     internal static bool ShouldApplyDefaultTitle(bool isCreating, string currentTitle, string? previousSuggestedTitle) =>
         isCreating

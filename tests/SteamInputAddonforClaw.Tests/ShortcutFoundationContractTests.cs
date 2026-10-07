@@ -141,6 +141,14 @@ public sealed class ShortcutFoundationContractTests
         Assert.DoesNotContain("Script", propertyNames);
         Assert.DoesNotContain("ExecutablePath", propertyNames);
         Assert.DoesNotContain("Arguments", propertyNames);
+        Assert.DoesNotContain("CloseOverlayAfterLaunch", propertyNames);
+    }
+
+    [Fact]
+    public void Overlay_dashboard_tile_contract_does_not_expose_the_main_app_close_preference()
+    {
+        Assert.DoesNotContain(typeof(FrontendShortcutTile).GetProperties(),
+            property => property.Name == "CloseOverlayAfterLaunch");
     }
 
     [Fact]
@@ -156,7 +164,7 @@ public sealed class ShortcutFoundationContractTests
         Assert.DoesNotContain("AddonQuickSettingsShortcutContract", source);
     }
 
-    private static ShortcutTileDefinition Tile(Guid id, string title, ShortcutActionSpec action) => new(id, title, action);
+    private static ShortcutTileDefinition Tile(Guid id, string title, ShortcutActionSpec action) => new(id, title, false, action);
 
     private static JsonElement ObjectParameters() => JsonSerializer.SerializeToElement(new { enabled = true });
 

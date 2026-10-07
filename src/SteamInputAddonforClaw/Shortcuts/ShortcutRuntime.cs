@@ -21,7 +21,8 @@ internal enum ShortcutExecutionOutcome
 
 internal sealed record ShortcutExecutionResult(
     ShortcutExecutionOutcome Outcome,
-    string? FailureMessage = null);
+    string? FailureMessage = null,
+    bool RetireOverlayAfterExecution = false);
 
 /// <summary>
 /// Runtime owner for the persisted Shortcut document and its currently supported external actions.
@@ -171,19 +172,21 @@ internal sealed class ShortcutRuntime
         {
             case FrontendShortcutMutationKind.Create:
             {
-                if (intent.TileId is not null || intent.Title is null || intent.Action is null || intent.TargetIndex is not null)
+                if (intent.TileId is not null || intent.Title is null || intent.Action is null
+                    || intent.CloseOverlayAfterLaunch is null || intent.TargetIndex is not null)
                     return Fail("Shortcut create request is invalid.", out failureMessage);
                 if (!IsValidTitle(intent.Title))
                     return Fail("Enter a valid Shortcut title.", out failureMessage);
                 if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
-                tiles.Add(new ShortcutTileDefinition(Guid.NewGuid(), intent.Title, action!));
+                tiles.Add(new ShortcutTileDefinition(Guid.NewGuid(), intent.Title,
+                    intent.CloseOverlayAfterLaunch.Value, action!));
                 changed = true;
                 break;
             }
             case FrontendShortcutMutationKind.Update:
             {
                 if (intent.TileId is not { } tileId || tileId == Guid.Empty || intent.Title is null
-                    || intent.Action is null || intent.TargetIndex is not null)
+                    || intent.Action is null || intent.CloseOverlayAfterLaunch is null || intent.TargetIndex is not null)
                     return Fail("Shortcut update request is invalid.", out failureMessage);
                 if (!IsValidTitle(intent.Title))
                     return Fail("Enter a valid Shortcut title.", out failureMessage);
@@ -192,14 +195,19 @@ internal sealed class ShortcutRuntime
                 if (!ProjectEditorAction(tiles[index].Action).Editable)
                     return Fail("This Shortcut action cannot be edited in this version.", out failureMessage);
                 if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
-                tiles[index] = tiles[index] with { Title = intent.Title, Action = action! };
+                tiles[index] = tiles[index] with
+                {
+                    Title = intent.Title,
+                    CloseOverlayAfterLaunch = intent.CloseOverlayAfterLaunch.Value,
+                    Action = action!
+                };
                 changed = true;
                 break;
             }
             case FrontendShortcutMutationKind.Delete:
             {
                 if (intent.TileId is not { } tileId || tileId == Guid.Empty || intent.Title is not null
-                    || intent.Action is not null || intent.TargetIndex is not null)
+                    || intent.Action is not null || intent.CloseOverlayAfterLaunch is not null || intent.TargetIndex is not null)
                     return Fail("Shortcut delete request is invalid.", out failureMessage);
                 var index = tiles.FindIndex(tile => tile.TileId == tileId);
                 if (index < 0) return Fail("Shortcut tile was not found.", out failureMessage);
@@ -210,7 +218,8 @@ internal sealed class ShortcutRuntime
             case FrontendShortcutMutationKind.Move:
             {
                 if (intent.TileId is not { } tileId || tileId == Guid.Empty || intent.Title is not null
-                    || intent.Action is not null || intent.TargetIndex is not { } targetIndex)
+                    || intent.Action is not null || intent.CloseOverlayAfterLaunch is not null
+                    || intent.TargetIndex is not { } targetIndex)
                     return Fail("Shortcut move request is invalid.", out failureMessage);
                 var currentIndex = tiles.FindIndex(tile => tile.TileId == tileId);
                 if (currentIndex < 0) return Fail("Shortcut tile was not found.", out failureMessage);
@@ -244,6 +253,7 @@ internal sealed class ShortcutRuntime
             tile.TileId,
             tile.Title,
             GetEditorTargetSummary(tile.Action),
+            tile.CloseOverlayAfterLaunch,
             ProjectEditorAction(tile.Action))).ToArray(), screenshotFolder);
 
     private static FrontendShortcutEditorAction ProjectEditorAction(ShortcutActionSpec action)
@@ -477,7 +487,7 @@ internal sealed class ShortcutRuntime
         if (string.Equals(tile.Action.TypeId, ShortcutActionTypeIds.ScreenshotFullscreen, StringComparison.Ordinal))
             return await ExecuteScreenshotAsync(tile, cancellationToken).ConfigureAwait(false);
 
-        return tile.Action.TypeId switch
+        var result = tile.Action.TypeId switch
         {
             ShortcutActionTypeIds.Executable => ExecuteExecutable(tile, cancellationToken),
             ShortcutActionTypeIds.PowerShell => ExecutePowerShell(tile, cancellationToken),
@@ -495,6 +505,10 @@ internal sealed class ShortcutRuntime
                 }, cancellationToken),
             _ => new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage)
         };
+
+        return result.Outcome == ShortcutExecutionOutcome.Succeeded && tile.CloseOverlayAfterLaunch
+            ? result with { RetireOverlayAfterExecution = true }
+            : result;
     }
 
     private TileResolution Resolve(ShortcutTileDefinition tile)
@@ -542,7 +556,8 @@ internal sealed class ShortcutRuntime
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            return await _screenshotAction(cancellationToken).ConfigureAwait(false);
+            var result = await _screenshotAction(cancellationToken).ConfigureAwait(false);
+            return result with { RetireOverlayAfterExecution = false };
         }
         catch (OperationCanceledException)
         {

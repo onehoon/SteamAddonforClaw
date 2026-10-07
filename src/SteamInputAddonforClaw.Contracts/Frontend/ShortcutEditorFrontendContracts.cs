@@ -39,6 +39,7 @@ public sealed record FrontendShortcutEditorTile(
     Guid TileId,
     string Title,
     string TargetSummary,
+    bool CloseOverlayAfterLaunch,
     FrontendShortcutEditorAction Action);
 
 public sealed record FrontendScreenshotFolderSnapshot(
@@ -69,6 +70,7 @@ public sealed record FrontendShortcutMutationIntent(
     Guid? TileId = null,
     string? Title = null,
     FrontendShortcutActionInput? Action = null,
+    bool? CloseOverlayAfterLaunch = null,
     int? TargetIndex = null);
 
 public sealed record FrontendShortcutMutationResult(

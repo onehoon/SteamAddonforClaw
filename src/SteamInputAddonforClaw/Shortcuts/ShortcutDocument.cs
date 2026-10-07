@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.Shortcuts;
 public sealed record ShortcutDocument
 {
     /// <summary>The schema version this build writes and understands.</summary>
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
