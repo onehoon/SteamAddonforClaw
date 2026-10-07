@@ -26,7 +26,8 @@ public sealed class AddonProcessHostScreenshotContractTests
         Assert.Contains("_overlayCaptureActive || _overlayController.IsVisible", method, StringComparison.Ordinal);
         Assert.DoesNotContain("EnsureHiddenAsync", method, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Delay", method, StringComparison.Ordinal);
-        Assert.Contains("CaptureAsync(\n                saveFolder,", method, StringComparison.Ordinal);
+        Assert.Contains("CaptureAsync(\n                saveFolder,",
+            method.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
         Assert.DoesNotContain("ScreenshotSaveFolder", method, StringComparison.Ordinal);
     }
 
