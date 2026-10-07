@@ -51,7 +51,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - Configurable WING / Gamebar and Center M actions for Normal and Steam presentation modes
 - Device-level CPU Boost, Windows 11 Power Mode, and TDP control as independent features
 - Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles as independent features
-- A separate installed XBOX game catalog with offline/pre-launch profile editing and shared live profile application for the effective XBOX game
+- A separate installed XBOX game catalog with offline/pre-launch profile editing, shared live profile application for the effective XBOX game, and per-game M1/M2 Xbox360 mapping overrides
 - Event-driven Steam game detection without periodic game/process polling
 - Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls
@@ -175,7 +175,7 @@ Disabling a profile does not erase its settings.
 
 ## XBOX tab
 
-The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only, supports search and manual refresh, and lets you save Favorite, Profile Enabled, CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and resolution settings by the game's canonical identity.
+The **XBOX** tab lists installed XBOX games discovered from the current user's installed game packages. It shows game names only, supports search and manual refresh, and lets you save Favorite, Profile Enabled, CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, resolution, and optional per-game M1/M2 Xbox360 mapping settings by the game's canonical identity.
 
 XBOX profiles remain fully editable offline and before launch. If the edited XBOX game is the Runtime's current effective profile target, the saved change is reconciled live through the **same CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and Display Resolution runtime owners used by Steam profiles**. Editing an inactive XBOX profile only changes persistence and does not touch current hardware state.
 
@@ -201,7 +201,9 @@ Game detection and profile application are separate layers.
 - Those platform-specific identities are resolved into one effective profile before settings reach hardware.
 - **CPU Boost, TDP, Windows Power Mode, Intel FPS Limit, and Display Resolution use one shared set of runtime owners regardless of platform.**
 
-The Main App and Overlay are only different frontend surfaces. The Main App can edit any selected profile before launch; if that profile is currently effective, the same typed mutation path performs live reconciliation. The Overlay is active-game oriented, but it uses the same frontend mutation authority and the same runtime apply path rather than a separate Overlay implementation.
+The Main App and Overlay are only different frontend surfaces. The Main App can edit any selected profile before launch; if that profile is currently effective, the same typed mutation path performs live reconciliation.
+
+The Overlay Profile surface is active-game-only: it does not provide an installed-game catalog or offline profile editor. A running Steam game shows that Steam profile; a running XBOX game shows that XBOX profile. If no recognized game is active, the Profile tab shows the centered message **"No game is currently running. Start a game to configure its profile."**. For an active XBOX profile, its per-game Controller / M1 / M2 section is placed above the performance/display sections. The separate Overlay Controller tab continues to edit the global M1/M2 fallback.
 
 Controller presentation remains independent from this performance-profile pipeline.
 
@@ -228,7 +230,9 @@ Steam RunningAppID
 
 ### Non-Steam games
 
-Non-Steam games can use the same presentation and per-game performance features when they are added to the Steam library as a **Non-Steam Game**.
+Steam Addon for Claw does not provide a separate "register arbitrary executable" / Custom EXE game-profile feature. For ordinary Win32 games outside the native XBOX catalog, add the game to Steam as a **Non-Steam Game**.
+
+Non-Steam games can then use the same presentation and per-game performance features when they are added to the Steam library as a **Non-Steam Game**.
 
 The Steam tab reads Non-Steam shortcuts registered in Steam, so those shortcuts can have their own CPU Boost and TDP profiles just like regular Steam games.
 
