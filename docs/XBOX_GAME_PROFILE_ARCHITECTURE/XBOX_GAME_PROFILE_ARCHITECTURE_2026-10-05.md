@@ -1,8 +1,8 @@
 # Steam Addon for Claw — XBOX Game Detection, Catalog, and Profile Architecture
 
 > **Date:** 2026-10-05  
-> **Status:** Architecture authority for the XBOX game/profile feature family  
-> **Field-validation status:** PoC A installed catalog = PASS; PoC B event-driven active-game identity/lifecycle = PASS; Xbox app packaged activation is implemented in production code and remains pending final physical-device validation  
+> **Status:** Architecture authority for the XBOX game/profile feature family; XBOX implementation scope through Overlay per-game M1/M2 is code-complete as of PR #701  
+> **Field-validation status:** PoC A installed catalog = PASS; PoC B event-driven active-game identity/lifecycle = PASS; Main App/Overlay/profile/M1-M2 implementation is complete in production code; final physical-device lifecycle validation and Xbox app packaged-activation validation remain pending  
 > **Product baseline:** Standalone Full1902 SteamAddonforClaw  
 > **Scope:** XBOX/Game Pass installed-game catalog, event-driven active-game detection, XBOX-specific per-game profiles, per-game M1/M2 mapping, Main App navigation, Overlay projection, and front-button Xbox app launch  
 > **Out of scope:** Xbox Game Bar integration, ClawHUD IPC/dependency, Steam profile redesign, Full1902 physical controller ownership redesign
@@ -2300,11 +2300,11 @@ This split is deliberate: PR7 proves production identity ownership independently
 - Custom EXE registration is intentionally unsupported; arbitrary Win32 games should be added to Steam as Non-Steam games;
 - native Epic/GOG support is deferred and may reuse this boundary if later implemented.
 
-### Phase X5 — Overlay active XBOX profile — next implementation phase
+### Phase X5 — Overlay active XBOX profile — implemented
 
-Implement X5 as two focused PRs so the identity/transport conversion is reviewable independently from the special whole-record M1/M2 override semantics.
+X5 was completed as two focused PRs so the identity/transport conversion remained reviewable independently from the special whole-record M1/M2 override semantics.
 
-#### PR11 — active-game-only Overlay Profile + XBOX performance/display parity
+#### PR11 — active-game-only Overlay Profile + XBOX performance/display parity — implemented
 
 - retire the Overlay's installed Steam catalog/offline selected-profile mode;
 - make Overlay Profile active-game-only;
@@ -2315,14 +2315,14 @@ Implement X5 as two focused PRs so the identity/transport conversion is reviewab
 - no XBOX or Steam installed-game catalog in Overlay;
 - do not add XBOX per-game M1/M2 rows yet.
 
-#### PR12 — XBOX Overlay per-game M1/M2 + X5 implementation closure
+#### PR12 — XBOX Overlay per-game M1/M2 + X5 implementation closure — implemented
 
 - active XBOX Profile shows per-game **Controller / Use global M1/M2 / M1 / M2**;
 - place that Controller section **above the existing performance/display sections**;
 - Steam Profile does not show per-game M1/M2;
 - Overlay Controller tab continues editing only the global M1/M2 fallback;
 - reuse the existing `SetXboxGameProfileBackButtonMappingAsync` mutation authority and the existing effective-mapping cache / `CanonicalXbox360InputPublisher`;
-- PR12 acceptance is code/automated-test only. Physical-device lifecycle validation (launch/exit, Alt+Tab, Runtime restart, Sleep/Hibernate/Resume) is intentionally deferred to a later user-run validation session and is not an implementation requirement for this PR.
+- PR12 code/automated-test acceptance is complete. Physical-device lifecycle validation (launch/exit, Alt+Tab, Runtime restart, Sleep/Hibernate/Resume) remains intentionally deferred to a later user-run validation session and was not required for PR merge.
 
 ### Phase X6 — front-button Xbox action — implemented in production code, final device validation pending
 
