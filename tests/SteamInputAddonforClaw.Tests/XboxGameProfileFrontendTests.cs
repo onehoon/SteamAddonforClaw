@@ -54,7 +54,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, true, "Game"));
         var hardware = new RecordingMinimumClockControl();
         using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => AcDcPowerSource.AC, Path.Combine(_directory, "minimum-clock.json"));
+            store, gate, hardware, () => AcDcPowerSource.AC);
         var control = CreateControl(mutations, gpuMinimumClockRuntime: runtime);
 
         var before = await control.CaptureXboxGameProfileAsync(Key);
@@ -99,8 +99,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         var hardware = new RecordingMinimumClockControl();
         var target = ActiveProfileTarget.ForXbox(Key);
         using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => acPower ? AcDcPowerSource.AC : AcDcPowerSource.DC,
-            Path.Combine(_directory, "minimum-clock.json"));
+            store, gate, hardware, () => acPower ? AcDcPowerSource.AC : AcDcPowerSource.DC);
         runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(target, document));
         var control = CreateControl(mutations,
             activeProfileTargetSource: () => target,
@@ -131,7 +130,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, true, "Game"));
         var hardware = new RecordingMinimumClockControl();
         using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => AcDcPowerSource.AC, Path.Combine(_directory, "minimum-clock.json"));
+            store, gate, hardware, () => AcDcPowerSource.AC);
         var control = CreateControl(mutations, gpuMinimumClockRuntime: runtime, developerModified: true);
 
         Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
@@ -304,8 +303,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         var resolution = new GameDisplayResolutionRuntime(store, gate, _directory, display);
         resolution.SetActiveProfileResolver(resolver);
         var gpuHardware = new RecordingMinimumClockControl();
-        var gpuMarker = Path.Combine(_directory, "minimum-clock.json");
-        using var gpuRuntime = new IntelGpuMinimumClockRuntime(store, gate, gpuHardware, () => AcDcPowerSource.AC, gpuMarker);
+        using var gpuRuntime = new IntelGpuMinimumClockRuntime(store, gate, gpuHardware, () => AcDcPowerSource.AC);
         gpuRuntime.SetActiveProfileResolver(resolver);
         var mutations = new XboxGameProfileMutations(store, gate, Model());
         var mappingReconciles = 0;
@@ -329,7 +327,6 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(1, mappingReconciles);
         Assert.Equal(1, gpuHardware.SetCalls);
         Assert.Equal(1725, gpuHardware.LastSetRange.Min);
-        Assert.True(File.Exists(gpuMarker));
 
         var tdpOperations = transport.OperationCount;
         var powerApplies = powerPolicy.ApplyCount;
@@ -414,7 +411,6 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, disabled.Outcome);
         Assert.Equal(2, gpuHardware.SetCalls);
         Assert.Equal(new IntelGpuFrequencyRange(-1, -1), gpuHardware.LastSetRange);
-        Assert.False(File.Exists(gpuMarker));
 
         fps.BeginShutdown();
         fps.Dispose();

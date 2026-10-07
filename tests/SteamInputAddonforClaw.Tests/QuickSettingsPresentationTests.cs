@@ -112,23 +112,6 @@ public sealed class QuickSettingsPresentationTests
     }
 
     [Fact]
-    public void Minimum_gpu_clock_in_device_aggregate_does_not_add_quick_settings_or_overlay_rows()
-    {
-        var snapshot = EnabledSnapshot() with
-        {
-            GpuMinimumClock = new(true, true, true, true, [1525, 1625, 1725], 1625, 1725, 1725, null)
-        };
-
-        var page = QuickSettingsPresentation.BuildDevice(snapshot);
-
-        Assert.Equal(
-            [QuickSettingsSectionId.DeviceTdp, QuickSettingsSectionId.DeviceCpuBoost,
-                QuickSettingsSectionId.DevicePowerMode, QuickSettingsSectionId.DeviceBatteryChargeLimit],
-            page.Sections.Select(section => section.SectionId).ToArray());
-        Assert.DoesNotContain(page.Sections.SelectMany(section => section.Rows), row => row.RowId.ToString().Contains("GpuMinimumClock", StringComparison.Ordinal));
-    }
-
-    [Fact]
     public void Battery_rows_use_production_value_priority_and_supported_range()
     {
         var battery = new FrontendBatteryChargeLimitSnapshot(true, true, true,

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Hosting;
 using SteamInputAddonforClaw.Profiles;
@@ -26,19 +25,7 @@ public sealed class IntelGpuMinimumClockTests
     }
 
     [Fact]
-    public void Missing_1500_uses_first_actual_supported_clock_above_threshold()
-    {
-        var selection = IntelGpuMinimumClockPolicy.SelectAvailableClocks([1000, 1475, 1525, 1600, 1650]);
-
-        Assert.True(selection.Available);
-        Assert.Equal(new[] { 1525d }, selection.SelectableClocksMhz);
-        Assert.Equal(1525, selection.SelectableMinMhz);
-        Assert.Equal(1525, selection.SelectableMaxMhz);
-        Assert.Equal(1525, selection.RecommendedDefaultMhz);
-    }
-
-    [Fact]
-    public void Different_integrated_gpu_tables_produce_dynamic_bounds_without_model_constants()
+    public void Different_integrated_gpu_tables_produce_dynamic_bounds()
     {
         var b390 = IntelGpuMinimumClockPolicy.SelectAvailableClocks([900, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2250, 2300]);
         var arc140V = IntelGpuMinimumClockPolicy.SelectAvailableClocks([500, 800, 1300, 1525, 1625, 1725, 1825, 1925, 1975, 2025]);
@@ -59,999 +46,472 @@ public sealed class IntelGpuMinimumClockTests
     }
 
     [Fact]
-    public void Target_validation_accepts_only_current_driver_entries_with_small_tolerance()
-    {
-        Assert.True(IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(SelectableClocks, 1800.05, out var canonical));
-        Assert.Equal(1800, canonical);
-        Assert.False(IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(SelectableClocks, 1850, out _));
-        Assert.False(IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(SelectableClocks, 1499, out _));
-        Assert.False(IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(SelectableClocks, 2200, out _));
-        Assert.False(IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(SelectableClocks, double.NaN, out _));
-    }
-
-    [Fact]
-    public void Minimum_request_preserves_current_max_and_refuses_an_explicit_conflict()
+    public void Minimum_request_preserves_explicit_max_and_factory_release_always_uses_minus_one()
     {
         Assert.True(IntelGpuMinimumClockPolicy.TryCreateMinimumRequest(
-            SelectableClocks, 1800, new(-1, 1950), out var target, out var explicitMaxRequest, out _));
+            SelectableClocks, 1800, new(-1, 1950), out var target, out var applyRequest, out _));
         Assert.Equal(1800, target);
-        Assert.Equal(new IntelGpuFrequencyRange(1800, 1950), explicitMaxRequest);
-
-        Assert.True(IntelGpuMinimumClockPolicy.TryCreateMinimumRequest(
-            SelectableClocks, 1800, new(-1, -2), out _, out var unmanagedMaxRequest, out _));
-        Assert.Equal(new IntelGpuFrequencyRange(1800, -1), unmanagedMaxRequest);
+        Assert.Equal(new IntelGpuFrequencyRange(1800, 1950), applyRequest);
 
         Assert.False(IntelGpuMinimumClockPolicy.TryCreateMinimumRequest(
-            SelectableClocks, 1800, new(-1, 1750), out _, out _, out var failure));
-        Assert.Contains("explicit maximum", failure, StringComparison.OrdinalIgnoreCase);
+            SelectableClocks, 1800, new(-1, 1750), out _, out _, out _));
+
+        Assert.True(IntelGpuMinimumClockPolicy.TryCreateFactoryMinimumReleaseRequest(new(1900, 1950), out var explicitMax));
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 1950), explicitMax);
+        Assert.True(IntelGpuMinimumClockPolicy.TryCreateFactoryMinimumReleaseRequest(new(1900, -2), out var unspecifiedMax));
+        Assert.Equal(new IntelGpuFrequencyRange(-1, -1), unspecifiedMax);
+        Assert.False(IntelGpuMinimumClockPolicy.TryCreateFactoryMinimumReleaseRequest(new(double.NaN, 1950), out _));
     }
 
     [Fact]
-    public void Explicit_max_conflict_refuses_apply_without_creating_ownership_marker()
+    public void Readback_verifies_factory_minimum_and_preserved_max_semantics()
+    {
+        Assert.True(IntelGpuMinimumClockPolicy.MatchesReadback(new(-1, 1950), new(1900, 1950), new(-2, 1949.95)));
+        Assert.False(IntelGpuMinimumClockPolicy.MatchesReadback(new(-1, 1950), new(1900, 1950), new(1500, 1950)));
+        Assert.True(IntelGpuMinimumClockPolicy.MatchesReadback(new(-1, -1), new(1900, -2), new(-3, -4)));
+        Assert.False(IntelGpuMinimumClockPolicy.MatchesReadback(new(-1, 1950), new(1900, 1950), new(-1, 1800)));
+    }
+
+    [Fact]
+    public void Startup_without_an_enabled_active_game_releases_minimum_and_does_not_create_profile_file()
     {
         using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, 1750));
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-        runtime.InitializeReadOnly();
+        var fake = new FakeControl(new(1850, 2100));
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
 
-        var result = runtime.ApplyMinimum(1800, "UnitTest");
+        runtime.StartupReconcile();
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(0, fake.SetCalls);
-        Assert.False(File.Exists(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Readback_verifies_minimum_and_preserved_max_semantics()
-    {
-        Assert.True(IntelGpuMinimumClockPolicy.MatchesReadback(new(1800, 1950), new(-1, 1950), new(1800.05, 1949.95)));
-        Assert.False(IntelGpuMinimumClockPolicy.MatchesReadback(new(1800, 1950), new(-1, 1950), new(1700, 1950)));
-        Assert.True(IntelGpuMinimumClockPolicy.MatchesReadback(new(1800, -1), new(-1, -2), new(1800, -3)));
-        Assert.False(IntelGpuMinimumClockPolicy.MatchesReadback(new(1800, 1950), new(-1, 1950), new(1800, 1900)));
-    }
-
-    [Fact]
-    public void Marker_is_persisted_before_first_set_and_successful_apply_keeps_it()
-    {
-        using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-        runtime.InitializeReadOnly();
-        fake.BeforeSet = _ => Assert.True(File.Exists(temp.MarkerPath));
-
-        var result = runtime.ApplyMinimum(1800, "UnitTest");
-
-        Assert.True(result.Succeeded);
-        Assert.True(result.Verified);
-        Assert.True(result.OwnershipMarkerPresent);
-        Assert.True(File.Exists(temp.MarkerPath));
-        var marker = JsonSerializer.Deserialize<IntelGpuMinimumClockOwnershipMarker>(
-            File.ReadAllText(temp.MarkerPath), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        Assert.NotNull(marker);
-        Assert.Equal(0x8086u, marker.VendorId);
-        Assert.Equal(0x1234u, marker.DeviceId);
-        Assert.Equal(-1, marker.OriginalMinMhz);
-        Assert.Equal(new IntelGpuFrequencyRange(1800, -1), fake.LastSetRange);
-    }
-
-    [Fact]
-    public void Marker_persistence_failure_prevents_native_set()
-    {
-        using var temp = new TemporaryDirectory();
-        var parentBlocker = Path.Combine(temp.Root, "not-a-directory");
-        Directory.CreateDirectory(temp.Root);
-        File.WriteAllText(parentBlocker, "block");
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateRuntime(Path.Combine(parentBlocker, "marker.json"), fake);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.ApplyMinimum(1800, "UnitTest");
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(0, fake.SetCalls);
-        Assert.False(File.Exists(Path.Combine(parentBlocker, "marker.json")));
-    }
-
-    [Fact]
-    public void Successful_set_with_readback_failure_retains_marker()
-    {
-        using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1)) { ThrowOnGetCall = 2 };
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.ApplyMinimum(1800, "UnitTest");
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(0u, result.NativeSetResult);
+        Assert.Equal(1, fake.InitializeCalls);
         Assert.Equal(1, fake.SetCalls);
-        Assert.True(result.OwnershipMarkerPresent);
-        Assert.True(File.Exists(temp.MarkerPath));
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2100), fake.LastSetRange);
+        Assert.False(File.Exists(temp.ProfilesPath));
     }
 
     [Fact]
-    public void Readback_mismatch_after_successful_set_retains_marker()
+    public void Legacy_device_gpu_json_does_not_become_a_runtime_floor()
     {
         using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1))
+        Directory.CreateDirectory(Path.GetDirectoryName(temp.ProfilesPath)!);
+        File.WriteAllText(temp.ProfilesPath,
+            "{\"schemaVersion\":1,\"device\":{\"performance\":{\"gpuMinimumClock\":{\"enabled\":true,\"acMhz\":2200,\"dcMhz\":2100}}},\"games\":{}}");
+        var fake = new FakeControl(new(2200, 2300));
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2300), fake.LastSetRange);
+    }
+
+    [Theory]
+    [InlineData(true, 1700)]
+    [InlineData(false, 1600)]
+    public void Enabled_active_Steam_game_uses_its_current_power_rail(bool ac, double expectedMinimum)
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ProfileStore(temp.ProfilesPath);
+        store.Save(SteamDocument(enabled: true, gpuEnabled: true, acMhz: 1700, dcMhz: 1600));
+        var fake = new FakeControl(new(900, 2100));
+        using var runtime = CreateRuntime(temp, fake, () => ac ? AcDcPowerSource.AC : AcDcPowerSource.DC);
+        runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), document));
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(new IntelGpuFrequencyRange(expectedMinimum, 2100), fake.LastSetRange);
+        Assert.Equal(1, fake.SetCalls);
+    }
+
+    [Fact]
+    public void Enabled_active_Xbox_game_uses_its_saved_override()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ProfileStore(temp.ProfilesPath);
+        store.Save(new ProfileDocument
         {
-            SetRangeReadback = requested => requested with { Min = requested.Min - 100 }
+            XboxGames = new Dictionary<string, XboxGameProfile>
+            {
+                ["store:test"] = new()
+                {
+                    Enabled = true,
+                    Performance = CreateGamePerformance(Gpu(enabled: true, acMhz: 1800, dcMhz: 1700))
+                }
+            }
+        });
+        var fake = new FakeControl(new(900, 2100));
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForXbox("store:test"), document));
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(new IntelGpuFrequencyRange(1800, 2100), fake.LastSetRange);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public void Disabled_game_or_disabled_game_override_releases_to_factory(bool profileEnabled, bool gpuEnabled)
+    {
+        using var temp = new TemporaryDirectory();
+        new ProfileStore(temp.ProfilesPath).Save(SteamDocument(profileEnabled, gpuEnabled, 1800, 1700));
+        var fake = new FakeControl(new(1800, 2050));
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), document));
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2050), fake.LastSetRange);
+        Assert.Equal(1, fake.SetCalls);
+    }
+
+    [Fact]
+    public void Game_exit_releases_to_factory_instead_of_using_a_device_fallback()
+    {
+        using var temp = new TemporaryDirectory();
+        new ProfileStore(temp.ProfilesPath).Save(SteamDocument(enabled: true, gpuEnabled: true, 1800, 1700));
+        var fake = new FakeControl(new(900, 2000));
+        ActiveProfileTarget? target = ActiveProfileTarget.ForSteam(42);
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.SetActiveProfileResolver(document => target is { } active ? ActiveProfileResolver.Resolve(active, document) : null);
+
+        Assert.True(runtime.ReconcileEffective("GameStart").Succeeded);
+        Assert.Equal(1800, fake.LastSetRange!.Value.Min);
+        target = null;
+
+        Assert.True(runtime.ReconcileEffective("GameExit").Succeeded);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2000), fake.LastSetRange);
+        Assert.Equal(2, fake.SetCalls);
+    }
+
+    [Fact]
+    public void Game_A_to_game_B_applies_B_then_B_off_releases_to_factory()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ProfileStore(temp.ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Games = new Dictionary<string, GameProfile>
+            {
+                ["42"] = SteamDocument(true, true, 1700, 1600).Games["42"],
+                ["43"] = SteamDocument(true, true, 1800, 1750).Games["42"]
+            }
+        });
+        ActiveProfileTarget? target = ActiveProfileTarget.ForSteam(42);
+        var fake = new FakeControl(new(900, 2100));
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.SetActiveProfileResolver(document => target is { } active ? ActiveProfileResolver.Resolve(active, document) : null);
+
+        Assert.True(runtime.ReconcileEffective("GameAStart").Succeeded);
+        Assert.Equal(1700, fake.LastSetRange!.Value.Min);
+        target = ActiveProfileTarget.ForSteam(43);
+        Assert.True(runtime.ReconcileEffective("GameAtoB").Succeeded);
+        Assert.Equal(1800, fake.LastSetRange!.Value.Min);
+
+        var updated = store.Load().Document;
+        var games = new Dictionary<string, GameProfile>(updated.Games)
+        {
+            ["43"] = updated.Games["43"] with { Enabled = false }
         };
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
+        store.Save(updated with { Games = games });
+        Assert.True(runtime.ReconcileEffective("GameBDisabled").Succeeded);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2100), fake.LastSetRange);
+    }
+
+    [Fact]
+    public void Active_game_without_gpu_feature_releases_to_factory()
+    {
+        using var temp = new TemporaryDirectory();
+        var document = SteamDocument(enabled: true, gpuEnabled: true, 1800, 1700);
+        var game = document.Games["42"];
+        var games = new Dictionary<string, GameProfile>(document.Games)
+        {
+            ["42"] = game with { Performance = game.Performance with { GpuMinimumClock = null } }
+        };
+        document = document with
+        {
+            Games = games
+        };
+        new ProfileStore(temp.ProfilesPath).Save(document);
+        var fake = new FakeControl(new(1800, 2050));
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.SetActiveProfileResolver(value => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), value));
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2050), fake.LastSetRange);
+    }
+
+    [Fact]
+    public void Unsupported_saved_game_target_is_not_clamped_and_factory_release_is_attempted()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ProfileStore(temp.ProfilesPath);
+        store.Save(SteamDocument(enabled: true, gpuEnabled: true, acMhz: 1777, dcMhz: 1700));
+        var fake = new FakeControl(new(1800, 2000));
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), document));
+
+        var result = runtime.ReconcileEffective("Startup");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("SavedTargetUnsupportedByCurrentDriver", result.FailureReason);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2000), fake.LastSetRange);
+        Assert.Equal(1777, store.Load().Document.Games["42"].Performance.GpuMinimumClock!.AcMhz);
+    }
+
+    [Fact]
+    public void Unknown_power_source_attempts_factory_release_and_reports_failure()
+    {
+        using var temp = new TemporaryDirectory();
+        new ProfileStore(temp.ProfilesPath).Save(SteamDocument(enabled: true, gpuEnabled: true, 1800, 1700));
+        var fake = new FakeControl(new(1800, 2050));
+        using var runtime = CreateRuntime(temp, fake, () => null);
+        runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), document));
+
+        var result = runtime.ReconcileEffective("PowerSourceChanged");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("PowerSourceUnknown", result.FailureReason, StringComparison.Ordinal);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2050), fake.LastSetRange);
+    }
+
+    [Fact]
+    public void Factory_release_readback_mismatch_is_a_failure()
+    {
+        using var temp = new TemporaryDirectory();
+        var fake = new FakeControl(new(1800, 2050))
+        {
+            SetRangeReadback = requested => requested with { Min = 1500 }
+        };
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
         runtime.InitializeReadOnly();
 
-        var result = runtime.ApplyMinimum(1800, "UnitTest");
+        var result = runtime.ReleaseToFactoryMinimum("UnitTest");
 
         Assert.False(result.Succeeded);
         Assert.False(result.Verified);
-        Assert.Equal(1700, result.ReadbackRange!.Value.Min);
-        Assert.True(File.Exists(temp.MarkerPath));
+        Assert.Equal(1500, result.ReadbackRange!.Value.Min);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2050), fake.LastSetRange);
     }
 
     [Fact]
-    public void Failed_set_retains_conservative_marker_for_later_restore()
+    public void Uninstall_always_attempts_and_verifies_factory_release()
     {
         using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1)) { SetResult = 0x40000001 };
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
+        var fake = new FakeControl(new(1700, 2050));
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
         runtime.InitializeReadOnly();
 
-        var result = runtime.ApplyMinimum(1800, "UnitTest");
+        var result = runtime.PrepareForUninstall();
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Verified);
+        Assert.Equal(1, fake.SetCalls);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2050), fake.LastSetRange);
+    }
+
+    [Fact]
+    public void Uninstall_fails_closed_when_factory_release_cannot_be_verified()
+    {
+        using var temp = new TemporaryDirectory();
+        var fake = new FakeControl(new(1700, 2050)) { SetResult = 0x40000001 };
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.InitializeReadOnly();
+
+        var result = runtime.PrepareForUninstall();
 
         Assert.False(result.Succeeded);
         Assert.Equal(0x40000001u, result.NativeSetResult);
-        Assert.True(File.Exists(temp.MarkerPath));
-        Assert.True(result.OwnershipMarkerPresent);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2050), fake.LastSetRange);
     }
 
     [Fact]
-    public void Verified_restore_deletes_marker_and_preserves_current_max()
+    public void Uninstall_fails_closed_when_readback_keeps_an_external_minimum()
     {
         using var temp = new TemporaryDirectory();
-        WriteMarker(temp.MarkerPath, originalMinMhz: -1);
-        var fake = new FakeControl(new(1800, 1950));
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.RestoreOriginalMinimum("UnitTest");
-
-        Assert.True(result.Succeeded);
-        Assert.True(result.Verified);
-        Assert.False(File.Exists(temp.MarkerPath));
-        Assert.False(result.OwnershipMarkerPresent);
-        Assert.Equal(new IntelGpuFrequencyRange(-1, 1950), fake.LastSetRange);
-    }
-
-    [Fact]
-    public void Verified_restore_restores_an_explicit_original_minimum_exactly()
-    {
-        using var temp = new TemporaryDirectory();
-        WriteMarker(temp.MarkerPath, originalMinMhz: 950);
-        var fake = new FakeControl(new(1800, -2));
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.RestoreOriginalMinimum("UnitTest");
-
-        Assert.True(result.Verified);
-        Assert.Equal(new IntelGpuFrequencyRange(950, -1), fake.LastSetRange);
-        Assert.False(File.Exists(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Failed_restore_keeps_marker_for_retry()
-    {
-        using var temp = new TemporaryDirectory();
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1800, -1)) { SetResult = 0x40000001 };
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.RestoreOriginalMinimum("UnitTest");
-
-        Assert.False(result.Succeeded);
-        Assert.True(File.Exists(temp.MarkerPath));
-        Assert.True(result.OwnershipMarkerPresent);
-    }
-
-    [Fact]
-    public void New_runtime_instance_adopts_original_baseline_without_overwriting_it()
-    {
-        using var temp = new TemporaryDirectory();
-        var firstControl = new FakeControl(new(-1, -1));
-        using (var firstRuntime = CreateRuntime(temp.MarkerPath, firstControl))
+        var fake = new FakeControl(new(1700, 2050))
         {
-            firstRuntime.InitializeReadOnly();
-            Assert.True(firstRuntime.ApplyMinimum(1800, "FirstProcess").Succeeded);
-        }
-
-        var nextControl = new FakeControl(new(1800, 1950));
-        using var nextRuntime = CreateRuntime(temp.MarkerPath, nextControl);
-        var capability = nextRuntime.InitializeReadOnly();
-        var result = nextRuntime.RestoreOriginalMinimum("ReplacementProcess");
-
-        Assert.True(capability.OwnershipMarkerPresent);
-        Assert.True(result.Verified);
-        Assert.Equal(new IntelGpuFrequencyRange(-1, 1950), nextControl.LastSetRange);
-        Assert.False(File.Exists(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Startup_discovery_is_read_only_and_does_not_create_ownership_marker()
-    {
-        using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-
-        var capability = runtime.InitializeReadOnly();
-
-        Assert.True(capability.Available);
-        Assert.Equal(1, fake.InitializeCalls);
-        Assert.Equal(0, fake.SetCalls);
-        Assert.False(File.Exists(temp.MarkerPath));
-        Assert.False(capability.OwnershipMarkerPresent);
-    }
-
-    [Fact]
-    public void Device_startup_with_absent_off_setting_does_not_write_or_create_profile()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-
-        runtime.StartupReconcile();
-
-        Assert.Equal(1, fake.InitializeCalls);
-        Assert.Equal(0, fake.SetCalls);
-        Assert.False(File.Exists(temp.MarkerPath));
-        Assert.False(File.Exists(temp.ProfilesPath));
-        Assert.False(runtime.CaptureDeviceSnapshot().Enabled);
-    }
-
-    [Fact]
-    public void Active_game_override_has_priority_over_device_minimum_clock()
-    {
-        using var temp = new TemporaryDirectory();
-        var document = DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1800 }) with
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1700, DcMhz = 1600 })
-            }
+            SetRangeReadback = requested => requested with { Min = 0 }
         };
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(document);
-        var fake = new FakeControl(new(900, 2100));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.SetActiveProfileResolver(doc => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), doc));
-
-        runtime.StartupReconcile();
-
-        Assert.Equal(new IntelGpuFrequencyRange(1700, 2100), fake.LastSetRange);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.True(File.Exists(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Active_xbox_game_override_has_priority_over_device_minimum_clock()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1800 }) with
-        {
-            XboxGames = new Dictionary<string, XboxGameProfile>
-            {
-                ["store:test"] = EnabledXboxGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1700, DcMhz = 1600 })
-            }
-        });
-        var fake = new FakeControl(new(900, 2100));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.SetActiveProfileResolver(doc => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForXbox("store:test"), doc));
-
-        runtime.StartupReconcile();
-
-        Assert.Equal(new IntelGpuFrequencyRange(1700, 2100), fake.LastSetRange);
-        Assert.Equal(1, fake.SetCalls);
-    }
-
-    [Fact]
-    public void Game_to_device_source_switch_reuses_original_marker_and_device_edit_does_not_replace_active_game_floor()
-    {
-        using var temp = new TemporaryDirectory();
-        var document = DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1600 }) with
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1700, DcMhz = 1500 })
-            }
-        };
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(document);
-        var fake = new FakeControl(new(900, 2100));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        ActiveProfileTarget? target = ActiveProfileTarget.ForSteam(42);
-        runtime.SetActiveProfileResolver(doc => target is { } active ? ActiveProfileResolver.Resolve(active, doc) : null);
-        runtime.StartupReconcile();
-        var markerBefore = File.ReadAllText(temp.MarkerPath);
-        Assert.Equal(new IntelGpuFrequencyRange(1700, 2100), fake.LastSetRange);
-
-        var deviceEdit = runtime.SetAc(1900);
-
-        Assert.True(deviceEdit.Succeeded);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(1700, 2100), fake.LastSetRange);
-        Assert.Equal(markerBefore, File.ReadAllText(temp.MarkerPath));
-        Assert.Equal(1900, store.Load().Document.Device.Performance.GpuMinimumClock!.AcMhz);
-
-        target = null;
-        var deviceEffective = runtime.ReconcileEffective("GameExit");
-
-        Assert.True(deviceEffective.Succeeded);
-        Assert.Equal(2, fake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(1900, 2100), fake.LastSetRange);
-        Assert.Equal(markerBefore, File.ReadAllText(temp.MarkerPath));
-
-        var noEffectiveSource = runtime.SetEnabled(false);
-
-        Assert.True(noEffectiveSource.Succeeded);
-        Assert.Equal(3, fake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(900, 2100), fake.LastSetRange);
-        Assert.False(File.Exists(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Device_disable_during_active_game_override_keeps_game_floor_and_ownership_marker()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1700 }) with
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1700, DcMhz = 1600 })
-            }
-        });
-        var fake = new FakeControl(new(900, 2100));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.SetActiveProfileResolver(doc => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), doc));
-        runtime.StartupReconcile();
-        var markerBefore = File.ReadAllText(temp.MarkerPath);
-
-        var result = runtime.SetEnabled(false);
-
-        Assert.True(result.Succeeded);
-        Assert.False(store.Load().Document.Device.Performance.GpuMinimumClock!.Enabled);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(1700, 2100), fake.LastSetRange);
-        Assert.Equal(markerBefore, File.ReadAllText(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Device_enable_during_active_game_override_persists_fallback_without_stealing_hardware_authority()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = false, AcMhz = 1800, DcMhz = 1700 }) with
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1700, DcMhz = 1600 })
-            }
-        });
-        var fake = new FakeControl(new(900, 2100));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.SetActiveProfileResolver(doc => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), doc));
-        runtime.StartupReconcile();
-        var markerBefore = File.ReadAllText(temp.MarkerPath);
-
-        var result = runtime.SetEnabled(true);
-
-        Assert.True(result.Succeeded);
-        Assert.True(store.Load().Document.Device.Performance.GpuMinimumClock!.Enabled);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(1700, 2100), fake.LastSetRange);
-        Assert.Equal(markerBefore, File.ReadAllText(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Game_feature_off_inherits_device_and_unsupported_enabled_game_target_never_falls_back_to_device()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1600 }) with
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = false, AcMhz = 1700, DcMhz = 1500 })
-            }
-        });
-        var fake = new FakeControl(new(900, 2100));
-        using (var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC))
-        {
-            runtime.SetActiveProfileResolver(doc => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), doc));
-            runtime.StartupReconcile();
-            Assert.Equal(new IntelGpuFrequencyRange(1800, 2100), fake.LastSetRange);
-        }
-
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1600 }) with
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1777, DcMhz = 1500 })
-            }
-        });
-        var unsupportedFake = new FakeControl(new(1700, 2100));
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        using var unsupportedRuntime = CreateDeviceRuntime(temp.MarkerPath, store, unsupportedFake, () => AcDcPowerSource.AC);
-        unsupportedRuntime.SetActiveProfileResolver(doc => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), doc));
-
-        unsupportedRuntime.StartupReconcile();
-
-        Assert.Equal(1, unsupportedFake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(900, 2100), unsupportedFake.LastSetRange);
-        Assert.False(File.Exists(temp.MarkerPath));
-        Assert.Equal(1800, store.Load().Document.Device.Performance.GpuMinimumClock!.AcMhz);
-    }
-
-    [Fact]
-    public void First_enable_persists_dynamic_defaults_before_applying_current_rail()
-    {
-        using var temp = new TemporaryDirectory();
-        var driverClocks = new[] { 1000d, 1525, 1625, 1725, 1825, 1925, 2025, 2125 };
-        var fake = new FakeControl(new(-1, -1)) { Capability = CreateNativeCapability(driverClocks) };
-        var store = new ProfileStore(temp.ProfilesPath);
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
         runtime.InitializeReadOnly();
-        fake.BeforeSet = _ =>
-        {
-            var persisted = store.Load().Document.Device.Performance.GpuMinimumClock;
-            Assert.NotNull(persisted);
-            Assert.True(persisted.Enabled);
-            Assert.Equal(1925, persisted.AcMhz);
-            Assert.Equal(1925, persisted.DcMhz);
-        };
-
-        var result = runtime.SetEnabled(true);
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(1925, result.Snapshot.RecommendedDefaultMhz);
-        Assert.Equal(1925, result.Snapshot.AcMhz);
-        Assert.Equal(1925, result.Snapshot.DcMhz);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(1925, -1), fake.LastSetRange);
-        Assert.True(File.Exists(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Enable_recovers_only_unsupported_saved_rails_and_preserves_supported_value()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = false, AcMhz = 1900, DcMhz = 2222 }));
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.SetEnabled(true);
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(1900, result.Snapshot.AcMhz);
-        Assert.Equal(runtime.Capability!.RecommendedDefaultMhz, result.Snapshot.DcMhz);
-        Assert.True(result.Snapshot.Enabled);
-        Assert.Equal(new IntelGpuFrequencyRange(1900, -1), fake.LastSetRange);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void Off_state_rail_mutation_is_rejected_without_persistence_or_native_write(bool ac)
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.InitializeReadOnly();
-
-        var result = ac ? runtime.SetAc(1800) : runtime.SetDc(1800);
-
-        Assert.Equal(GpuMinimumClockMutationOutcome.Unavailable, result.Outcome);
-        Assert.Equal(0, fake.SetCalls);
-        Assert.False(File.Exists(temp.ProfilesPath));
-        Assert.False(File.Exists(temp.MarkerPath));
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void Active_rail_edit_applies_and_inactive_rail_edit_only_persists(bool acPower)
-    {
-        using var temp = new TemporaryDirectory();
-        var source = acPower ? AcDcPowerSource.AC : AcDcPowerSource.DC;
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1700 }));
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => source);
-        runtime.InitializeReadOnly();
-
-        var active = source == AcDcPowerSource.AC ? runtime.SetAc(1900) : runtime.SetDc(1900);
-        Assert.True(active.Succeeded);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(1900, fake.LastSetRange!.Value.Min);
-
-        var inactive = source == AcDcPowerSource.AC ? runtime.SetDc(1800) : runtime.SetAc(1800);
-        Assert.True(inactive.Succeeded);
-        Assert.Equal(1, fake.SetCalls);
-        var persisted = store.Load().Document.Device.Performance.GpuMinimumClock!;
-        Assert.Equal(source == AcDcPowerSource.AC ? 1900 : 1800, persisted.AcMhz);
-        Assert.Equal(source == AcDcPowerSource.DC ? 1900 : 1800, persisted.DcMhz);
-    }
-
-    [Fact]
-    public void Disable_persists_off_before_restore_and_keeps_marker_when_restore_fails()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1800 }));
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1800, 1950)) { SetResult = 0x40000001 };
-        fake.BeforeSet = _ => Assert.False(store.Load().Document.Device.Performance.GpuMinimumClock!.Enabled);
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.SetEnabled(false);
-
-        Assert.Equal(GpuMinimumClockMutationOutcome.ApplyFailed, result.Outcome);
-        Assert.False(store.Load().Document.Device.Performance.GpuMinimumClock!.Enabled);
-        Assert.True(File.Exists(temp.MarkerPath));
-        Assert.Equal(1, fake.SetCalls);
-    }
-
-    [Fact]
-    public void Disable_with_verified_restore_clears_marker_and_preserves_maximum()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1800 }));
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1800, 1950));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.SetEnabled(false);
-
-        Assert.True(result.Succeeded);
-        Assert.False(store.Load().Document.Device.Performance.GpuMinimumClock!.Enabled);
-        Assert.False(File.Exists(temp.MarkerPath));
-        Assert.Equal(new IntelGpuFrequencyRange(900, 1950), fake.LastSetRange);
-    }
-
-    [Fact]
-    public void Startup_enabled_adopts_existing_baseline_and_reapplies_without_recapturing_it()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1700 }));
-        WriteMarker(temp.MarkerPath, originalMinMhz: 875);
-        var fake = new FakeControl(new(1700, 1950));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-
-        runtime.StartupReconcile();
-
-        var marker = JsonSerializer.Deserialize<IntelGpuMinimumClockOwnershipMarker>(
-            File.ReadAllText(temp.MarkerPath), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        Assert.Equal(875, marker!.OriginalMinMhz);
-        Assert.Equal(new IntelGpuFrequencyRange(1800, 1950), fake.LastSetRange);
-        Assert.Equal(1, fake.SetCalls);
-    }
-
-    [Fact]
-    public void Unknown_power_source_restores_owned_minimum_instead_of_guessing_a_rail()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1600 }));
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1800, 1950));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, static () => null);
-
-        runtime.StartupReconcile();
-
-        Assert.Equal(new IntelGpuFrequencyRange(900, 1950), fake.LastSetRange);
-        Assert.False(File.Exists(temp.MarkerPath));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Startup_off_or_missing_setting_restores_a_stale_owned_marker(bool hasOffRecord)
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        if (hasOffRecord)
-            store.Save(DeviceDocument(new() { Enabled = false, AcMhz = 1800, DcMhz = 1700 }));
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1800, 1950));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-
-        runtime.StartupReconcile();
-
-        Assert.Equal(new IntelGpuFrequencyRange(900, 1950), fake.LastSetRange);
-        Assert.False(File.Exists(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Unsupported_saved_target_is_not_clamped_or_rewritten_and_owned_state_is_released()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1777, DcMhz = 1700 }));
-        var originalProfile = File.ReadAllText(temp.ProfilesPath);
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1800, 1950));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-
-        runtime.StartupReconcile();
-
-        Assert.Equal(originalProfile, File.ReadAllText(temp.ProfilesPath));
-        Assert.Equal(new IntelGpuFrequencyRange(900, 1950), fake.LastSetRange);
-        Assert.False(File.Exists(temp.MarkerPath));
-        Assert.Contains("SavedTargetUnsupportedByCurrentDriver", runtime.CaptureDeviceSnapshot().LastFailure);
-    }
-
-    [Fact]
-    public void Resume_reinitializes_once_after_device_unavailable_then_reconciles_once()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1700 }));
-        var fake = new FakeControl(new(-1, -1)) { ThrowOnGetCall = 1 };
-        fake.ReinitializedCapability = CreateNativeCapability([1400, 1525, 1625, 1725, 1800, 1825, 1925]);
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.ReconcileAfterResume();
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(1, fake.ReinitializeCalls);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(1800, fake.LastSetRange!.Value.Min);
-    }
-
-    [Fact]
-    public void Resume_reinitializes_once_and_reapplies_the_active_game_override()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1700, DcMhz = 1600 }) with
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1825, DcMhz = 1725 })
-            }
-        });
-        var fake = new FakeControl(new(-1, -1)) { ThrowOnGetCall = 1 };
-        fake.Capability = CreateNativeCapability([1400, 1525, 1625, 1725, 1825, 1925, 2025]);
-        fake.ReinitializedCapability = CreateNativeCapability([1400, 1525, 1625, 1725, 1825, 1925, 2025]);
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.SetActiveProfileResolver(doc => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), doc));
-        runtime.InitializeReadOnly();
-
-        var result = runtime.ReconcileAfterResume();
-
-        Assert.True(result.Succeeded, result.FailureReason);
-        Assert.Equal(1, fake.ReinitializeCalls);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(1825, fake.LastSetRange!.Value.Min);
-    }
-
-    [Fact]
-    public void Resume_does_not_fall_back_to_device_when_active_game_target_disappears_after_reinitialize()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1700 }) with
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1700, DcMhz = 1500 })
-            }
-        });
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1700, 2100)) { ThrowOnGetCall = 1 };
-        fake.ReinitializedCapability = CreateNativeCapability([1400, 1525, 1625, 1725, 1825, 1925, 2025]);
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.SetActiveProfileResolver(doc => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), doc));
-        runtime.InitializeReadOnly();
-
-        var result = runtime.ReconcileAfterResume();
-
-        Assert.False(result.Succeeded);
-        Assert.Contains("SavedTargetUnsupportedByCurrentDriver", result.FailureReason);
-        Assert.Equal(1, fake.ReinitializeCalls);
-        Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(900, 2100), fake.LastSetRange);
-        Assert.False(File.Exists(temp.MarkerPath));
-        Assert.Equal(1800, store.Load().Document.Device.Performance.GpuMinimumClock!.AcMhz);
-    }
-
-    [Fact]
-    public void Resume_stops_after_one_reinitialize_when_saved_target_is_no_longer_supported()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1700 }));
-        var fake = new FakeControl(new(-1, -1)) { ThrowOnGetCall = 1 };
-        fake.ReinitializedCapability = CreateNativeCapability([1400, 1525, 1625, 1725, 1825, 1925]);
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-        runtime.InitializeReadOnly();
-
-        var result = runtime.ReconcileAfterResume();
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(1, fake.ReinitializeCalls);
-        Assert.Equal(0, fake.SetCalls);
-        Assert.Equal(1800, store.Load().Document.Device.Performance.GpuMinimumClock!.AcMhz);
-    }
-
-    [Fact]
-    public void Normal_runtime_shutdown_does_not_restore_or_remove_owned_minimum()
-    {
-        using var temp = new TemporaryDirectory();
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1800, 1950));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, new ProfileStore(temp.ProfilesPath), fake, () => AcDcPowerSource.AC);
-        runtime.InitializeReadOnly();
-
-        runtime.BeginShutdown();
-
-        Assert.Equal(0, fake.SetCalls);
-        Assert.True(File.Exists(temp.MarkerPath));
-    }
-
-    [Fact]
-    public void Developer_frequency_mutation_is_blocked_by_enabled_desired_state_or_owned_marker()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new ProfileStore(temp.ProfilesPath);
-        store.Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1800 }));
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, store, fake, () => AcDcPowerSource.AC);
-
-        Assert.True(runtime.BlocksDeveloperFrequencyMutation());
-        store.Save(DeviceDocument(new() { Enabled = false, AcMhz = 1800, DcMhz = 1800 }));
-        Assert.False(runtime.BlocksDeveloperFrequencyMutation());
-        store.Save(new ProfileDocument
-        {
-            Games = new Dictionary<string, GameProfile>
-            {
-                ["42"] = EnabledGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1800, DcMhz = 1800 })
-            }
-        });
-        Assert.True(runtime.BlocksDeveloperFrequencyMutation());
-        store.Save(new ProfileDocument
-        {
-            XboxGames = new Dictionary<string, XboxGameProfile>
-            {
-                ["store:test"] = EnabledXboxGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1800, DcMhz = 1800 })
-            }
-        });
-        Assert.True(runtime.BlocksDeveloperFrequencyMutation());
-        store.Save(new ProfileDocument
-        {
-            XboxGames = new Dictionary<string, XboxGameProfile>
-            {
-                ["store:test"] = EnabledXboxGameProfile(new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1800, DcMhz = 1800 }) with { Enabled = false }
-            }
-        });
-        Assert.False(runtime.BlocksDeveloperFrequencyMutation());
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        Assert.True(runtime.BlocksDeveloperFrequencyMutation());
-    }
-
-    [Fact]
-    public void Uninstall_skips_IGCL_when_no_ownership_marker_exists()
-    {
-        using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, new ProfileStore(temp.ProfilesPath), fake, () => AcDcPowerSource.AC);
-
-        var result = runtime.PrepareForUninstall();
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(0, fake.InitializeCalls);
-        Assert.Equal(0, fake.SetCalls);
-    }
-
-    [Fact]
-    public void Uninstall_requires_verified_restore_and_preserves_marker_on_failure()
-    {
-        using var temp = new TemporaryDirectory();
-        WriteMarker(temp.MarkerPath, originalMinMhz: 900);
-        var fake = new FakeControl(new(1800, 1950)) { SetResult = 0x40000001 };
-        using var runtime = CreateDeviceRuntime(temp.MarkerPath, new ProfileStore(temp.ProfilesPath), fake, () => AcDcPowerSource.AC);
 
         var result = runtime.PrepareForUninstall();
 
         Assert.False(result.Succeeded);
-        Assert.True(File.Exists(temp.MarkerPath));
-        Assert.Equal(1, fake.InitializeCalls);
+        Assert.False(result.Verified);
+        Assert.Equal(0, result.ReadbackRange!.Value.Min);
         Assert.Equal(1, fake.SetCalls);
     }
 
     [Fact]
-    public void Capability_without_control_permission_fails_closed_without_a_write()
+    public void Uninstall_fails_when_capability_stays_unavailable_after_one_reinitialize()
     {
         using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1))
+        var fake = new FakeControl(new(1700, 2050))
         {
-            Capability = CreateNativeCapability(SelectableClocks) with { CanControl = false }
+            Capability = new(false, "Unavailable", "", 0, 0, false, 0, 0, Array.Empty<double>())
         };
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-        var capability = runtime.InitializeReadOnly();
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
 
-        var result = runtime.ApplyMinimum(1800, "UnitTest");
+        var result = runtime.PrepareForUninstall();
 
-        Assert.False(capability.Available);
         Assert.False(result.Succeeded);
+        Assert.Equal(1, fake.ReinitializeCalls);
         Assert.Equal(0, fake.SetCalls);
-        Assert.False(File.Exists(temp.MarkerPath));
     }
 
     [Fact]
-    public void Invalid_hardware_frequency_properties_make_capability_unavailable()
+    public async Task Host_startup_reconciles_no_active_game_to_factory_minimum()
     {
         using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1))
-        {
-            Capability = CreateNativeCapability(SelectableClocks) with { HardwareMaxMhz = double.NaN }
-        };
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
-
-        Assert.False(runtime.InitializeReadOnly().Available);
-    }
-
-    [Fact]
-    public async Task Host_startup_discovery_does_not_write_gpu_range_marker_or_profile_settings()
-    {
-        using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1));
-        var host = new AddonProcessHost(
+        var fake = new FakeControl(new(1850, 2100));
+        await using var host = new AddonProcessHost(
             testOnlyDataRoot: temp.Root,
-            testIntelGpuMinimumClockControlFactory: _ => fake);
+            testIntelGpuMinimumClockControlFactory: () => fake,
+            testGpuMinimumClockPowerSource: () => AcDcPowerSource.AC);
 
         host.ReconcileIntelGpuMinimumClockForStartup();
 
         Assert.Equal(1, fake.InitializeCalls);
-        Assert.Equal(0, fake.SetCalls);
-        Assert.False(File.Exists(temp.MarkerPath));
-        Assert.False(File.Exists(Path.Combine(temp.Root, "profiles.json")));
-        await host.DisposeAsync();
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2100), fake.LastSetRange);
     }
 
     [Fact]
-    public async Task Existing_host_power_source_reconcile_applies_the_matching_ac_and_dc_rails_once()
+    public async Task Host_uninstall_stops_before_Full1902_when_factory_release_fails()
     {
         using var temp = new TemporaryDirectory();
-        new ProfileStore(temp.ProfilesPath).Save(DeviceDocument(new() { Enabled = true, AcMhz = 1800, DcMhz = 1600 }));
-        var fake = new FakeControl(new(-1, -1));
-        var source = AcDcPowerSource.AC;
-        var host = new AddonProcessHost(
+        var fake = new FakeControl(new(1850, 2100)) { SetResult = 0x40000001 };
+        await using var host = new AddonProcessHost(
             testOnlyDataRoot: temp.Root,
-            testIntelGpuMinimumClockControlFactory: _ => fake,
-            testGpuMinimumClockPowerSource: () => source);
+            testIntelGpuMinimumClockControlFactory: () => fake,
+            testGpuMinimumClockPowerSource: () => AcDcPowerSource.AC);
 
-        var ac = host.ReconcileGpuMinimumClockForPowerSourceChanged();
-        source = AcDcPowerSource.DC;
-        var dc = host.ReconcileGpuMinimumClockForPowerSourceChanged();
+        var result = await host.PrepareForUninstallAsync();
 
-        Assert.True(ac.Succeeded);
-        Assert.True(dc.Succeeded);
-        Assert.Equal(2, fake.SetCalls);
-        Assert.Equal(1600, fake.LastSetRange!.Value.Min);
-        Assert.True(File.Exists(temp.MarkerPath));
-        await host.DisposeAsync();
+        Assert.False(result.Succeeded);
+        Assert.StartsWith("GpuMinimumClockReleaseFailed:", result.Reason, StringComparison.Ordinal);
+        Assert.Equal(1, fake.SetCalls);
     }
 
-    [Theory]
-    [InlineData(IntelGpuMinimumClockRuntime.DeviceLostResult)]
-    [InlineData(IntelGpuMinimumClockRuntime.DeviceUnavailableResult)]
-    public void Session_reinitialize_is_bounded_to_one_discovery_for_device_loss_results(uint resultCode)
+    [Fact]
+    public void Resume_reinitializes_once_for_device_unavailable_then_reconciles_game_override()
     {
         using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
+        new ProfileStore(temp.ProfilesPath).Save(SteamDocument(enabled: true, gpuEnabled: true, 1800, 1700));
+        var fake = new FakeControl(new(900, 2050));
+        fake.SetResults.Enqueue(IntelGpuMinimumClockRuntime.DeviceUnavailableResult);
+        fake.SetResults.Enqueue(0);
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(ActiveProfileTarget.ForSteam(42), document));
         runtime.InitializeReadOnly();
-        fake.ReinitializedCapability = CreateNativeCapability([1400, 1525, 1625, 1725, 1825]);
 
-        Assert.True(runtime.TryReinitializeSession(resultCode));
+        var result = runtime.ReconcileAfterResume();
 
+        Assert.True(result.Succeeded);
         Assert.Equal(1, fake.ReinitializeCalls);
-        Assert.Equal(1525, runtime.Capability!.SelectableMinMhz);
+        Assert.Equal(2, fake.SetCalls);
+        Assert.Equal(new IntelGpuFrequencyRange(1800, 2050), fake.LastSetRange);
+    }
+
+    [Fact]
+    public void Developer_frequency_mutation_is_blocked_only_by_enabled_game_profile_ownership()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ProfileStore(temp.ProfilesPath);
+        store.Save(SteamDocument(enabled: true, gpuEnabled: true, 1800, 1700));
+        using var runtime = CreateRuntime(temp, new FakeControl(new(-1, -1)), () => AcDcPowerSource.AC);
+
+        Assert.True(runtime.BlocksDeveloperFrequencyMutation());
+
+        store.Save(SteamDocument(enabled: true, gpuEnabled: false, 1800, 1700));
+        Assert.False(runtime.BlocksDeveloperFrequencyMutation());
+    }
+
+    [Fact]
+    public void Normal_runtime_dispose_does_not_issue_a_separate_factory_release()
+    {
+        using var temp = new TemporaryDirectory();
+        var fake = new FakeControl(new(1800, 2050));
+        var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.InitializeReadOnly();
+
+        runtime.Dispose();
+
         Assert.Equal(0, fake.SetCalls);
     }
 
     [Fact]
-    public void Session_is_not_reinitialized_for_unrelated_native_results()
+    public void Session_reinitialize_is_limited_to_device_loss_results()
     {
         using var temp = new TemporaryDirectory();
         var fake = new FakeControl(new(-1, -1));
-        using var runtime = CreateRuntime(temp.MarkerPath, fake);
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
         runtime.InitializeReadOnly();
 
         Assert.False(runtime.TryReinitializeSession(0x40000001));
-
         Assert.Equal(0, fake.ReinitializeCalls);
+        Assert.True(runtime.TryReinitializeSession(IntelGpuMinimumClockRuntime.DeviceLostResult));
+        Assert.Equal(1, fake.ReinitializeCalls);
     }
 
     [Fact]
-    public void Production_igcl_frequency_abi_and_available_clock_delegate_match_x64_header()
+    public void Production_igcl_frequency_abi_matches_the_expected_x64_layout()
         => Assert.True(IntelGpuMinimumClockControl.NativeAbiIsExpectedForTests());
 
-    private static IntelGpuMinimumClockRuntime CreateRuntime(string markerPath, FakeControl control) => new(control, markerPath);
-
-    private static IntelGpuMinimumClockRuntime CreateDeviceRuntime(
-        string markerPath,
-        ProfileStore store,
+    private static IntelGpuMinimumClockRuntime CreateRuntime(
+        TemporaryDirectory temp,
         FakeControl control,
-        Func<AcDcPowerSource?> powerSource) => new(store, new ProfileMutationGate(), control, powerSource, markerPath);
+        Func<AcDcPowerSource?> powerSource) =>
+        new(new ProfileStore(temp.ProfilesPath), new ProfileMutationGate(), control, powerSource);
 
-    private static ProfileDocument DeviceDocument(DeviceGpuMinimumClockSettings settings) => new()
+    private static ProfileDocument SteamDocument(bool enabled, bool gpuEnabled, double acMhz, double dcMhz) => new()
     {
-        Device = new()
+        Games = new Dictionary<string, GameProfile>
         {
-            Performance = new() { GpuMinimumClock = settings }
+            ["42"] = new()
+            {
+                Enabled = enabled,
+                Performance = CreateGamePerformance(Gpu(gpuEnabled, acMhz, dcMhz))
+            }
         }
     };
 
-    private static GameProfile EnabledGameProfile(GameGpuMinimumClockSettings gpu) => new()
+    private static GamePerformanceOverrides CreateGamePerformance(GameGpuMinimumClockSettings gpu) => new()
     {
-        Enabled = true,
-        Performance = new()
+        CpuBoost = new() { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled },
+        Tdp = new()
         {
-            CpuBoost = new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled },
-            Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(20, 22), Dc = Pair(20, 22) },
-            GpuMinimumClock = gpu
-        }
-    };
-
-    private static XboxGameProfile EnabledXboxGameProfile(GameGpuMinimumClockSettings gpu) => new()
-    {
-        Enabled = true,
-        Performance = new()
-        {
-            CpuBoost = new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled },
-            Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(20, 22), Dc = Pair(20, 22) },
-            GpuMinimumClock = gpu
-        }
+            Enabled = true,
+            Ac = Pair(20, 22),
+            Dc = Pair(20, 22)
+        },
+        GpuMinimumClock = gpu
     };
 
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };
 
-    private static IntelGpuMinimumClockNativeCapability CreateNativeCapability(IReadOnlyList<double> clocks) => new(
-        true, null, "Intel Integrated GPU", 0x8086, 0x1234, true, 300, 2300, clocks);
-
-    private static void WriteMarker(string path, double originalMinMhz)
+    private static GameGpuMinimumClockSettings Gpu(bool enabled, double acMhz, double dcMhz) => new()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(new IntelGpuMinimumClockOwnershipMarker(0x8086, 0x1234, originalMinMhz)));
-    }
+        Enabled = enabled,
+        AcMhz = acMhz,
+        DcMhz = dcMhz
+    };
+
+    private static IntelGpuMinimumClockNativeCapability CreateNativeCapability() => new(
+        true, null, "Intel Integrated GPU", 0x8086, 0x1234, true, 300, 2300, SelectableClocks);
 
     private sealed class FakeControl(IntelGpuFrequencyRange currentRange) : IIntelGpuMinimumClockControl
     {
-        private int _getCalls;
         private IntelGpuFrequencyRange _currentRange = currentRange;
 
-        public IntelGpuMinimumClockNativeCapability Capability { get; set; } = CreateNativeCapability(SelectableClocks);
-        public IntelGpuMinimumClockNativeCapability? ReinitializedCapability { get; set; }
+        public IntelGpuMinimumClockNativeCapability Capability { get; set; } = CreateNativeCapability();
+        public Queue<uint> SetResults { get; } = new();
         public int InitializeCalls { get; private set; }
         public int ReinitializeCalls { get; private set; }
         public int SetCalls { get; private set; }
-        public int? ThrowOnGetCall { get; set; }
         public uint SetResult { get; set; }
         public IntelGpuFrequencyRange? LastSetRange { get; private set; }
         public Func<IntelGpuFrequencyRange, IntelGpuFrequencyRange>? SetRangeReadback { get; set; }
-        public Action<IntelGpuFrequencyRange>? BeforeSet { get; set; }
 
         public IntelGpuMinimumClockNativeCapability Initialize()
         {
@@ -1062,23 +522,18 @@ public sealed class IntelGpuMinimumClockTests
         public IntelGpuMinimumClockNativeCapability Reinitialize()
         {
             ReinitializeCalls++;
-            return Capability = ReinitializedCapability ?? Capability;
+            return Capability;
         }
 
-        public IntelGpuFrequencyRange GetRange()
-        {
-            _getCalls++;
-            if (_getCalls == ThrowOnGetCall) throw new IgclMinimumClockException("ctlFrequencyGetRange", 0x40000027);
-            return _currentRange;
-        }
+        public IntelGpuFrequencyRange GetRange() => _currentRange;
 
         public uint SetRange(IntelGpuFrequencyRange range)
         {
             SetCalls++;
             LastSetRange = range;
-            BeforeSet?.Invoke(range);
-            if (SetResult == 0) _currentRange = SetRangeReadback?.Invoke(range) ?? range;
-            return SetResult;
+            var result = SetResults.Count == 0 ? SetResult : SetResults.Dequeue();
+            if (result == 0) _currentRange = SetRangeReadback?.Invoke(range) ?? range;
+            return result;
         }
 
         public void Dispose() { }
@@ -1086,13 +541,13 @@ public sealed class IntelGpuMinimumClockTests
 
     private sealed class TemporaryDirectory : IDisposable
     {
-        internal string Root { get; } = Path.Combine(Path.GetTempPath(), $"IntelGpuMinimumClock-{Guid.NewGuid():N}");
-        internal string MarkerPath => Path.Combine(Root, "intel-gpu-minimum-clock-ownership.json");
-        internal string ProfilesPath => Path.Combine(Root, "profiles.json");
+        private readonly string _root = Path.Combine(Path.GetTempPath(), $"IntelGpuMinimumClock-{Guid.NewGuid():N}");
+        internal string Root => _root;
+        internal string ProfilesPath => Path.Combine(_root, "profiles.json");
 
         public void Dispose()
         {
-            if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
+            if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
         }
     }
 }

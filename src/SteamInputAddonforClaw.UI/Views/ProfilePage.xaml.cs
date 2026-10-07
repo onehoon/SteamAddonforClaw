@@ -109,12 +109,12 @@ public sealed partial class ProfilePage : UserControl
             var clocks = gpu?.SelectableClocksMhz ?? Array.Empty<double>();
             if (!preserveDraft || !_gpuDraftDirty || _acGpuDraftIndex is null || _dcGpuDraftIndex is null)
             {
-                _acGpuDraftIndex = DevicePage.GpuMinimumClockDraftPolicy.TryGetIndex(clocks, gpu?.AcMhz, out var acSaved)
+                _acGpuDraftIndex = GpuMinimumClockUiPolicy.TryGetIndex(clocks, gpu?.AcMhz, out var acSaved)
                     ? acSaved
-                    : DevicePage.GpuMinimumClockDraftPolicy.TryGetIndex(clocks, gpu?.RecommendedDefaultMhz, out var acDefault) ? acDefault : null;
-                _dcGpuDraftIndex = DevicePage.GpuMinimumClockDraftPolicy.TryGetIndex(clocks, gpu?.DcMhz, out var dcSaved)
+                    : GpuMinimumClockUiPolicy.TryGetIndex(clocks, gpu?.RecommendedDefaultMhz, out var acDefault) ? acDefault : null;
+                _dcGpuDraftIndex = GpuMinimumClockUiPolicy.TryGetIndex(clocks, gpu?.DcMhz, out var dcSaved)
                     ? dcSaved
-                    : DevicePage.GpuMinimumClockDraftPolicy.TryGetIndex(clocks, gpu?.RecommendedDefaultMhz, out var dcDefault) ? dcDefault : null;
+                    : GpuMinimumClockUiPolicy.TryGetIndex(clocks, gpu?.RecommendedDefaultMhz, out var dcDefault) ? dcDefault : null;
             }
 
             ConfigureGpuClockSlider(GpuMinimumClockAcSlider, clocks, _acGpuDraftIndex);
@@ -140,7 +140,7 @@ public sealed partial class ProfilePage : UserControl
 
     private static string FormatGpuClockAtIndex(IReadOnlyList<double> clocks, int? index) =>
         index is { } value && value >= 0 && value < clocks.Count
-            ? DevicePage.GpuMinimumClockDraftPolicy.FormatMhz(clocks[value])
+            ? GpuMinimumClockUiPolicy.FormatMhz(clocks[value])
             : "— MHz";
 
     private async void GpuMinimumClockEnabledToggle_Toggled(object sender, RoutedEventArgs e)
@@ -209,7 +209,7 @@ public sealed partial class ProfilePage : UserControl
         {
             if (_selectedGame?.AppId == appId)
             {
-                var preserveDraft = DevicePage.GpuMinimumClockDraftPolicy.ResolveFailedCommit(
+                var preserveDraft = GpuMinimumClockUiPolicy.ResolveFailedCommit(
                     ref _gpuDraftDirty, draftGeneration, _gpuDraftGeneration);
                 await RestoreSelectedAfterMutationFailureAsync(appId, "Minimum GPU Clock could not be updated.", exception,
                     preserveDirtyGpuDraft: preserveDraft);

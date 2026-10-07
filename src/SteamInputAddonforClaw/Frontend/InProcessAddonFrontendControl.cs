@@ -425,7 +425,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         ProfileApplyKind applyKind = ProfileApplyKind.None;
         if (enabled is { } toggle)
         {
-            var capability = runtime.CaptureDeviceSnapshot();
+            var capability = runtime.CaptureCapability();
             if (capability.Available)
             {
                 GameGpuMinimumClockSettings? settings = null;
@@ -740,7 +740,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var outcome = GameProfileMutations.MutationOutcome.Unavailable;
         if (enabled is { } toggle)
         {
-            var capability = runtime.CaptureDeviceSnapshot();
+            var capability = runtime.CaptureCapability();
             if (capability.Available)
             {
                 GameGpuMinimumClockSettings? settings = null;
@@ -831,7 +831,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             return new(false, settings is not null, settings?.Enabled == true, [], settings?.AcMhz, settings?.DcMhz, null,
                 "Intel GPU minimum-frequency control is unavailable.");
 
-        var capability = runtime.CaptureDeviceSnapshot();
+        var capability = runtime.CaptureCapability();
         var unsupportedSavedValue = settings?.Enabled == true
             && (!IsSelectableClock(capability.SelectableClocksMhz, settings.AcMhz)
                 || !IsSelectableClock(capability.SelectableClocksMhz, settings.DcMhz));
@@ -839,7 +839,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             capability.SelectableClocksMhz, settings?.AcMhz, settings?.DcMhz, capability.RecommendedDefaultMhz,
             unsupportedSavedValue
                 ? "A saved game minimum GPU clock is no longer supported by the current driver. Choose a supported value to replace it."
-                : capability.Available ? null : capability.LastFailure);
+            : capability.Available ? null : capability.UnavailableReason);
     }
 
     private static bool IsSelectableClock(IReadOnlyList<double> clocks, double value) =>
@@ -1755,96 +1755,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private static FrontendPowerModeSnapshot MapPowerModeSnapshot(PowerModeRuntimeSnapshot s) => new(MapPowerModeSide(s.AcCurrent, s.AcDesired), MapPowerModeSide(s.DcCurrent, s.DcDesired), s.Enabled, s.PersistenceWritable, s.LastFailure);
     private static FrontendPowerModeSideSnapshot MapPowerModeSide(PowerModeSideReading r, WindowsPowerMode? desired) => new(r.Status switch { PowerModeReadStatus.Known => FrontendPowerModeReadStatus.Known, PowerModeReadStatus.Unknown => FrontendPowerModeReadStatus.Unknown, _ => FrontendPowerModeReadStatus.Unavailable }, r.Mode, desired);
 
-    public Task<FrontendGpuMinimumClockSnapshot> CaptureGpuMinimumClockAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_intelGpuMinimumClockRuntime is null
-            ? FrontendGpuMinimumClockSnapshot.Unavailable
-            : MapGpuMinimumClockSnapshot(_intelGpuMinimumClockRuntime.CaptureDeviceSnapshot()));
-    }
-
-    public Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockEnabledAsync(
-        bool enabled,
-        CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_intelGpuMinimumClockRuntime is null)
-            return Task.FromResult(UnavailableGpuMinimumClockMutation("Minimum GPU Clock is unavailable."));
-        if (_developerGpuFrequencyProbeModified())
-            return Task.FromResult(RefusedGpuMinimumClockMutation(
-                enabled
-                    ? "Restore the Developer GPU frequency probe before enabling Minimum GPU Clock."
-                    : "Restore the Developer GPU frequency probe before changing Minimum GPU Clock."));
-
-        var result = _intelGpuMinimumClockRuntime.SetEnabled(enabled);
-        StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return Task.FromResult(MapGpuMinimumClockMutation(result));
-    }
-
-    public Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockAcAsync(
-        double mhz,
-        CancellationToken cancellationToken = default) => SetDeviceGpuMinimumClockRailAsync(ac: true, mhz, cancellationToken);
-
-    public Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockDcAsync(
-        double mhz,
-        CancellationToken cancellationToken = default) => SetDeviceGpuMinimumClockRailAsync(ac: false, mhz, cancellationToken);
-
-    private Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockRailAsync(
-        bool ac,
-        double mhz,
-        CancellationToken cancellationToken)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_intelGpuMinimumClockRuntime is null)
-            return Task.FromResult(UnavailableGpuMinimumClockMutation("Minimum GPU Clock is unavailable."));
-        if (_developerGpuFrequencyProbeModified())
-            return Task.FromResult(RefusedGpuMinimumClockMutation(
-                "Restore the Developer GPU frequency probe before changing Minimum GPU Clock."));
-
-        var result = ac
-            ? _intelGpuMinimumClockRuntime.SetAc(mhz)
-            : _intelGpuMinimumClockRuntime.SetDc(mhz);
-        StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return Task.FromResult(MapGpuMinimumClockMutation(result));
-    }
-
-    private FrontendGpuMinimumClockMutationResult RefusedGpuMinimumClockMutation(string message)
-    {
-        var snapshot = _intelGpuMinimumClockRuntime is null
-            ? FrontendGpuMinimumClockSnapshot.Unavailable
-            : MapGpuMinimumClockSnapshot(_intelGpuMinimumClockRuntime.CaptureDeviceSnapshot());
-        StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return new(FrontendGpuMinimumClockMutationOutcome.Unavailable, message, snapshot);
-    }
-
-    private FrontendGpuMinimumClockMutationResult UnavailableGpuMinimumClockMutation(string message)
-    {
-        StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return new(FrontendGpuMinimumClockMutationOutcome.Unavailable, message, FrontendGpuMinimumClockSnapshot.Unavailable);
-    }
-
-    private static FrontendGpuMinimumClockMutationResult MapGpuMinimumClockMutation(GpuMinimumClockMutationResult result) =>
-        new(result.Outcome switch
-        {
-            GpuMinimumClockMutationOutcome.Succeeded => FrontendGpuMinimumClockMutationOutcome.Succeeded,
-            GpuMinimumClockMutationOutcome.InvalidTarget => FrontendGpuMinimumClockMutationOutcome.InvalidTarget,
-            GpuMinimumClockMutationOutcome.PersistenceFailed => FrontendGpuMinimumClockMutationOutcome.PersistenceFailed,
-            GpuMinimumClockMutationOutcome.ApplyFailed => FrontendGpuMinimumClockMutationOutcome.ApplyFailed,
-            _ => FrontendGpuMinimumClockMutationOutcome.Unavailable
-        }, result.FailureMessage, MapGpuMinimumClockSnapshot(result.Snapshot));
-
     internal static bool ShouldBlockDeveloperFrequencyMutation(
         FrontendIntelGpuFrequencyProbeOperation operation,
         bool productionOwnsFrequency) =>
         productionOwnsFrequency && operation is
             (FrontendIntelGpuFrequencyProbeOperation.SetMaxMax or FrontendIntelGpuFrequencyProbeOperation.RestoreOriginalFrequency);
-
-    private static FrontendGpuMinimumClockSnapshot MapGpuMinimumClockSnapshot(GpuMinimumClockRuntimeSnapshot snapshot) =>
-        new(snapshot.Available, snapshot.PersistenceWritable, snapshot.Initialized, snapshot.Enabled,
-            snapshot.SelectableClocksMhz, snapshot.AcMhz, snapshot.DcMhz, snapshot.RecommendedDefaultMhz, snapshot.LastFailure);
 
     // ---- Production Device battery charge limit (PR2) ----
     public Task<FrontendBatteryChargeLimitSnapshot> CaptureBatteryChargeLimitAsync(CancellationToken cancellationToken = default)
@@ -2145,7 +2060,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     /// <summary>Shared Device Quick Settings aggregate read (Shared Frontend V2, SF-V2-01 section
-    /// 8): reuses the existing Runtime authorities/mappers, performs the five reads sequentially
+    /// 8): reuses the existing Runtime authorities/mappers, performs the four reads sequentially
     /// (no cross-feature lock/epoch/parallelization), and isolates a real capture failure to that
     /// child so healthy siblings are still returned. Read-only: never persists, mutates, reconciles,
     /// or raises <see cref="StateInvalidated"/> merely because state was requested.</summary>
@@ -2169,17 +2084,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) { AppLog.Warn("Device", "Power Mode snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
 
-        var gpuMinimumClock = FrontendGpuMinimumClockSnapshot.Unavailable;
-        try { gpuMinimumClock = await CaptureGpuMinimumClockAsync(cancellationToken).ConfigureAwait(false); }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception exception) { AppLog.Warn("Device", "Minimum GPU Clock snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
-
         var batteryChargeLimit = FrontendBatteryChargeLimitSnapshot.Unavailable;
         try { batteryChargeLimit = await CaptureBatteryChargeLimitAsync(cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) { AppLog.Warn("Device", "Battery charge-limit snapshot capture failed.", exception, ("Reason", exception.GetType().Name)); }
 
-        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, gpuMinimumClock, batteryChargeLimit);
+        return new FrontendDeviceQuickSettingsSnapshot(cpuBoost, tdp, powerMode, batteryChargeLimit);
     }
 
     /// <summary>Captures Device settings or the Runtime-selected active Steam/XBOX profile. The

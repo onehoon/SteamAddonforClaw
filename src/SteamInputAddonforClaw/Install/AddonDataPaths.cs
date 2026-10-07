@@ -19,7 +19,6 @@ internal static class AddonDataPaths
     internal static string ShortcutsPath => ResolveShortcutsPath(VelopackAppPaths.RootAppDirectory);
     internal static string DisplayResolutionRecoveryPath => Path.Combine(RootDirectory, "display-resolution-recovery.json");
     internal static string IntelFpsLimitOwnershipPath => Path.Combine(RootDirectory, "intel-fps-limit-ownership.json");
-    internal static string IntelGpuMinimumClockOwnershipPath => ResolveIntelGpuMinimumClockOwnershipPath(VelopackAppPaths.RootAppDirectory);
 
     internal static string ClawHudRuntimeRoot => ResolveClawHudRuntimeRoot(VelopackAppPaths.RootAppDirectory);
 
@@ -31,9 +30,6 @@ internal static class AddonDataPaths
 
     internal static string ResolveShortcutsPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "shortcuts.json");
-
-    internal static string ResolveIntelGpuMinimumClockOwnershipPath(string rootAppDirectory) =>
-        Path.Combine(ResolveDataRoot(rootAppDirectory), "intel-gpu-minimum-clock-ownership.json");
 
     internal static string ResolveLogDirectory(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "logs");

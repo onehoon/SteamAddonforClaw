@@ -73,34 +73,16 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
-    public void SaveAndLoad_RoundTripsDeviceMinimumGpuClockWithoutChangingSchema()
-    {
-        var setting = new DeviceGpuMinimumClockSettings { Enabled = false, AcMhz = 1725.125, DcMhz = 1825.375 };
-        var store = new ProfileStore(ProfilesPath);
-        store.Save(new ProfileDocument
-        {
-            Device = new DeviceSettings
-            {
-                Performance = new DevicePerformanceSettings { GpuMinimumClock = setting }
-            }
-        });
-
-        var result = store.Load();
-
-        Assert.Equal(ProfileDocument.CurrentSchemaVersion, result.Document.SchemaVersion);
-        Assert.Equal(setting, result.Document.Device.Performance.GpuMinimumClock);
-    }
-
-    [Fact]
-    public void Load_without_minimum_gpu_clock_keeps_legacy_device_uninitialized_and_does_not_rewrite()
+    public void Load_keeps_legacy_device_gpu_minimum_json_inert_and_does_not_rewrite()
     {
         Directory.CreateDirectory(_testDirectory);
-        const string json = "{\"schemaVersion\":1,\"device\":{\"performance\":{}},\"games\":{}}";
+        const string json = "{\"schemaVersion\":1,\"device\":{\"performance\":{\"gpuMinimumClock\":{\"enabled\":true,\"acMhz\":2200,\"dcMhz\":2100}}},\"games\":{}}";
         File.WriteAllText(ProfilesPath, json);
 
         var result = new ProfileStore(ProfilesPath).Load();
 
-        Assert.Null(result.Document.Device.Performance.GpuMinimumClock);
+        Assert.True(result.CanSafelyReplace);
+        Assert.Contains("gpuMinimumClock", result.Document.Device.Performance.ExtensionData!.Keys);
         Assert.Equal(json, File.ReadAllText(ProfilesPath));
     }
 

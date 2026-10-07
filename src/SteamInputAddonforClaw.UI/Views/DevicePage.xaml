@@ -55,31 +55,6 @@
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
 
-            <InfoBar x:Name="GpuMinimumClockInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
-            <ctcontrols:SettingsExpander x:Name="GpuMinimumClockExpander" Header="Minimum GPU Clock" IsExpanded="False"
-                Description="Prevents unnecessary GPU downclocking below the selected frequency. Power and thermal limits may still reduce the actual GPU clock.">
-                <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
-                <ToggleSwitch x:Name="GpuMinimumClockEnabledToggleSwitch" OffContent="" OnContent="" Toggled="GpuMinimumClockEnabledToggleSwitch_Toggled" />
-                <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard Header="Plugged in">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="72" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <TextBlock x:Name="GpuMinimumClockAcValueText" Text="— MHz" VerticalAlignment="Center" />
-                            <Slider x:Name="GpuMinimumClockAcSlider" Grid.Column="1" Minimum="0" Maximum="0" StepFrequency="1"
-                                ValueChanged="GpuMinimumClockSlider_ValueChanged" PointerCaptureLost="GpuMinimumClockSlider_PointerCaptureLost" KeyUp="GpuMinimumClockSlider_KeyUp" />
-                        </Grid>
-                    </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard Header="On battery">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="72" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <TextBlock x:Name="GpuMinimumClockDcValueText" Text="— MHz" VerticalAlignment="Center" />
-                            <Slider x:Name="GpuMinimumClockDcSlider" Grid.Column="1" Minimum="0" Maximum="0" StepFrequency="1"
-                                ValueChanged="GpuMinimumClockSlider_ValueChanged" PointerCaptureLost="GpuMinimumClockSlider_PointerCaptureLost" KeyUp="GpuMinimumClockSlider_KeyUp" />
-                        </Grid>
-                    </ctcontrols:SettingsCard>
-                </ctcontrols:SettingsExpander.Items>
-            </ctcontrols:SettingsExpander>
-
             <InfoBar x:Name="CpuBoostInfoBar" IsClosable="False" IsOpen="False" Visibility="Collapsed" Severity="Warning" />
 
             <ctcontrols:SettingsExpander

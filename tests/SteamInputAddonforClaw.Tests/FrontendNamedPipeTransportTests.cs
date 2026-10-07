@@ -65,7 +65,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
@@ -187,7 +187,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -231,7 +231,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -284,7 +284,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -304,7 +304,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -328,7 +328,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -341,7 +341,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.GameInputProbeSnapshot, await client.CaptureGameInputSystemButtonProbeAsync());
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.StartGameInputSystemButtonProbeAsync()).State);
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.CaptureGameInputSystemButtonProbeAsync()).State);
@@ -379,7 +379,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.IntelGpuProbeSnapshot, await client.CaptureIntelGpuFrequencyProbeAsync());
 
         var frequency = await client.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.SetMaxMax);
@@ -448,7 +448,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
         var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
@@ -590,27 +590,6 @@ public sealed class FrontendNamedPipeTransportTests
 
         Assert.Equivalent(fake.DeviceQuickSettingsSnapshot, snapshot, strict: true);
         Assert.Equal(1, fake.CaptureDeviceQuickSettingsCount);
-    }
-
-    [Fact]
-    public async Task Minimum_gpu_clock_snapshot_and_device_mutations_round_trip_through_the_named_pipe()
-    {
-        var fake = new RecordingFrontendControl();
-        var (server, pipeName) = await StartServerAsync(fake);
-        await using var serverLifetime = server;
-        await using var client = await ConnectAsync(pipeName);
-
-        Assert.Equivalent(fake.GpuMinimumClockSnapshot, await client.CaptureGpuMinimumClockAsync(), strict: true);
-        Assert.Equivalent(fake.GpuMinimumClockMutationResult,
-            await client.SetDeviceGpuMinimumClockEnabledAsync(true));
-        Assert.True(fake.LastGpuMinimumClockEnabled);
-        Assert.Equivalent(fake.GpuMinimumClockMutationResult,
-            await client.SetDeviceGpuMinimumClockAcAsync(1725.125));
-        Assert.Equal(1725.125, fake.LastGpuMinimumClockAcMhz);
-        Assert.Equivalent(fake.GpuMinimumClockMutationResult,
-            await client.SetDeviceGpuMinimumClockDcAsync(1825.375));
-        Assert.Equal(1825.375, fake.LastGpuMinimumClockDcMhz);
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
     }
 
     [Fact]
@@ -868,7 +847,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
-        Assert.Equal(63, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(64, FrontendTransportProtocol.CurrentVersion);
         await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
     }
 
@@ -1797,13 +1776,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 63 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 64 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":63,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":63,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":63,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":64,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":64,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":64,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1870,7 +1849,6 @@ public sealed class FrontendNamedPipeTransportTests
 
     [Theory]
     [InlineData("GetBootstrap")]
-    [InlineData("CaptureGpuMinimumClock")]
     public async Task No_argument_method_with_payload_is_rejected_without_invoking_frontend(string method)
     {
         var fake = new RecordingFrontendControl();
@@ -2302,26 +2280,13 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendClawSensorProbeSnapshot> StopClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeStopCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeCloseCount++; ClawSensorProbeClosed.TrySetResult(); return Task.FromResult(ClawSensorProbeSnapshot); }
 
-        public FrontendGpuMinimumClockSnapshot GpuMinimumClockSnapshot { get; } = new(true, true, true, true,
-            [1525, 1625, 1725], 1625, 1725, 1725, null);
-        public FrontendGpuMinimumClockMutationResult GpuMinimumClockMutationResult { get; } = new(
-            FrontendGpuMinimumClockMutationOutcome.Succeeded, null,
-            new(true, true, true, true, [1525, 1625, 1725], 1725.125, 1825.375, 1725, null));
-        public bool? LastGpuMinimumClockEnabled { get; private set; }
-        public double? LastGpuMinimumClockAcMhz { get; private set; }
-        public double? LastGpuMinimumClockDcMhz { get; private set; }
         public FrontendDeviceQuickSettingsSnapshot DeviceQuickSettingsSnapshot { get; } = new(
             new(new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, CpuBoostMode.Aggressive), new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, CpuBoostMode.Disabled), true, true, null),
             new(true, true, new(true, new(20, 30), new(15, 25)), new(8, 30, 8, 40)),
             new(new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced), new(FrontendPowerModeReadStatus.Known, WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), true, true, null),
-            new(true, true, true, true, [1525, 1625, 1725], 1625, 1725, 1725, null),
             new(true, true, true, true, 70, true, 70, null));
         public int CaptureDeviceQuickSettingsCount { get; private set; }
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default) { TotalCalls++; CaptureDeviceQuickSettingsCount++; return Task.FromResult(DeviceQuickSettingsSnapshot); }
-        public Task<FrontendGpuMinimumClockSnapshot> CaptureGpuMinimumClockAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(GpuMinimumClockSnapshot); }
-        public Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastGpuMinimumClockEnabled = enabled; return Task.FromResult(GpuMinimumClockMutationResult); }
-        public Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockAcAsync(double mhz, CancellationToken t = default) { TotalCalls++; LastGpuMinimumClockAcMhz = mhz; return Task.FromResult(GpuMinimumClockMutationResult); }
-        public Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockDcAsync(double mhz, CancellationToken t = default) { TotalCalls++; LastGpuMinimumClockDcMhz = mhz; return Task.FromResult(GpuMinimumClockMutationResult); }
         public AddonQuickSettingsShellSnapshot ShellSnapshot { get; } = AddonQuickSettingsShellContract.Create([AddonQuickSettingsTabId.Controller, AddonQuickSettingsTabId.Device, AddonQuickSettingsTabId.Profile, AddonQuickSettingsTabId.Shortcut, AddonQuickSettingsTabId.Setting]);
         public int CaptureShellCount { get; private set; }
         public Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken t = default) { TotalCalls++; CaptureShellCount++; return Task.FromResult(ShellSnapshot); }

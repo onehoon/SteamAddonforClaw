@@ -14,7 +14,7 @@ namespace SteamInputAddonforClaw.Tests;
 /// <summary>Shared Frontend V2, SF-V2-01: <see cref="FrontendDeviceQuickSettingsSnapshot"/> and
 /// <see cref="InProcessAddonFrontendControl.CaptureDeviceQuickSettingsAsync"/> must reuse the
 /// existing Runtime authorities/mappers exactly, stay read-only, and isolate one child's failure
-    /// from healthy siblings (work order sections 6/8/13.1/13.2). TDP is left null (unconfigured) in
+/// from healthy siblings (work order sections 6/8/13.1/13.2). TDP is left null (unconfigured) in
 /// every aggregate test here rather than standing up a full hardware-backed <c>TdpRuntime</c> --
 /// that already exercises the "missing authority -> only that child Unavailable" path, which is
 /// the same shape a real TDP hardware failure would take.</summary>
@@ -24,14 +24,13 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
     private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
 
     [Fact]
-    public void Unavailable_aggregate_contains_all_five_unavailable_children()
+    public void Unavailable_aggregate_contains_all_four_unavailable_children()
     {
         var snapshot = FrontendDeviceQuickSettingsSnapshot.Unavailable;
 
         Assert.Equal(FrontendCpuBoostSnapshot.Unavailable, snapshot.CpuBoost);
         Assert.Equal(FrontendTdpSnapshot.Unavailable, snapshot.Tdp);
         Assert.Equal(FrontendPowerModeSnapshot.Unavailable, snapshot.PowerMode);
-        Assert.Equal(FrontendGpuMinimumClockSnapshot.Unavailable, snapshot.GpuMinimumClock);
         Assert.Equal(FrontendBatteryChargeLimitSnapshot.Unavailable, snapshot.BatteryChargeLimit);
     }
 
@@ -47,7 +46,6 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
 
         Assert.Equal(await control.CaptureCpuBoostAsync(), aggregate.CpuBoost);
         Assert.Equal(await control.CapturePowerModeAsync(), aggregate.PowerMode);
-        Assert.Equal(await control.CaptureGpuMinimumClockAsync(), aggregate.GpuMinimumClock);
         // No TdpRuntime was configured -- this is the "missing TDP authority" case (section 13.2).
         Assert.Equal(FrontendTdpSnapshot.Unavailable, aggregate.Tdp);
         Assert.Equal(FrontendBatteryChargeLimitSnapshot.Unavailable, aggregate.BatteryChargeLimit);
@@ -112,28 +110,6 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
     }
 
     [Fact]
-    public async Task Aggregate_carries_the_existing_gpu_runtime_snapshot_without_writing_hardware_or_profiles()
-    {
-        Directory.CreateDirectory(_testDirectory);
-        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
-        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
-        var controlHardware = new FakeMinimumClockControl();
-        using var gpuRuntime = new IntelGpuMinimumClockRuntime(
-            new ProfileStore(profilesPath), new ProfileMutationGate(), controlHardware,
-            () => AcDcPowerSource.AC, Path.Combine(_testDirectory, "minimum-clock.json"));
-        var control = CreateControl(cpuBoostRuntime: null, powerModeRuntime: null, gpuMinimumClockRuntime: gpuRuntime);
-
-        var aggregate = await control.CaptureDeviceQuickSettingsAsync();
-
-        Assert.True(aggregate.GpuMinimumClock.Available);
-        Assert.False(aggregate.GpuMinimumClock.Initialized);
-        Assert.Equal(new[] { 1525d, 1625d }, aggregate.GpuMinimumClock.SelectableClocksMhz);
-        Assert.Equal(await control.CaptureGpuMinimumClockAsync(), aggregate.GpuMinimumClock);
-        Assert.Equal(0, controlHardware.SetCalls);
-        Assert.False(File.Exists(profilesPath));
-    }
-
-    [Fact]
     public async Task Shutdown_barrier_rejects_aggregate_capture()
     {
         var cpuBoostRuntime = CreateReconciledCpuBoostRuntime(new FakeCpuBoostPowerPolicy());
@@ -171,8 +147,7 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
 
     private InProcessAddonFrontendControl CreateControl(
         CpuBoostRuntime? cpuBoostRuntime,
-        PowerModeRuntime? powerModeRuntime,
-        IntelGpuMinimumClockRuntime? gpuMinimumClockRuntime = null)
+        PowerModeRuntime? powerModeRuntime)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -182,8 +157,7 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
             new ThrowingSystemStatusProvider(),
             null,
             cpuBoostRuntime: cpuBoostRuntime,
-            powerModeRuntime: powerModeRuntime,
-            intelGpuMinimumClockRuntime: gpuMinimumClockRuntime);
+            powerModeRuntime: powerModeRuntime);
     }
 
     public void Dispose()
@@ -203,17 +177,4 @@ public sealed class DeviceQuickSettingsAggregateTests : IDisposable
             => throw new NotSupportedException("Status capture is not part of these tests.");
     }
 
-    private sealed class FakeMinimumClockControl : IIntelGpuMinimumClockControl
-    {
-        public int SetCalls { get; private set; }
-        public IntelGpuMinimumClockNativeCapability Initialize() => Capability;
-        public IntelGpuMinimumClockNativeCapability Reinitialize() => Capability;
-        public IntelGpuFrequencyRange GetRange() => new(-1, -1);
-        public uint SetRange(IntelGpuFrequencyRange range) { SetCalls++; return 0; }
-        public void Dispose() { }
-
-        private static IntelGpuMinimumClockNativeCapability Capability { get; } = new(
-            true, null, "Intel Integrated GPU", 0x8086, 0x1234, true, 300, 2300,
-            [1400, 1525, 1625, 1725, 1825]);
-    }
 }
