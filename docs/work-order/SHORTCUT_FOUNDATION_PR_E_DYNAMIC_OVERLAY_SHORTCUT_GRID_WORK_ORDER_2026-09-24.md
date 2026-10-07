@@ -1,6 +1,7 @@
 # Work Order — Shortcut Foundation PR-E: Dynamic Overlay Shortcut Grid + TileId Execution
 
-> **Superseded for Screenshot folder ownership (2026-10-08):** `docs/work-order/1008_SHORTCUT_SCREENSHOT_ACTION_OWNED_FOLDER_WORK_ORDER.md` supersedes references here to the global Main App Screenshot folder and `SetScreenshotSaveFolderAsync`. Screenshot configuration is action-owned in `shortcuts.json`. The Overlay boundary from this work order remains unchanged and authoritative: Overlay receives sanitized Shortcut state and executes only by `TileId`; it never receives the Screenshot folder or raw action parameters. No legacy migration is required because the product is pre-release.\n
+> **Superseded for Screenshot folder ownership (2026-10-08):** `docs/work-order/1008_SHORTCUT_SCREENSHOT_ACTION_OWNED_FOLDER_WORK_ORDER.md` supersedes references here to the global Main App Screenshot folder and `SetScreenshotSaveFolderAsync`. Screenshot configuration is action-owned in `shortcuts.json`. The Overlay boundary from this work order remains unchanged and authoritative: Overlay receives sanitized Shortcut state and executes only by `TileId`; it never receives the Screenshot folder or raw action parameters. No legacy migration is required because the product is pre-release.
+
 
 **Date:** 2026-09-24  
 **Status:** Ready for implementation  
