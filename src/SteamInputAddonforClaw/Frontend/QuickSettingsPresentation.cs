@@ -21,6 +21,7 @@ internal static class QuickSettingsPresentation
         FrontendGameResolution? Resolution,
         FrontendGamePowerModeConfiguration? PowerMode,
         FrontendGameFpsLimitConfiguration? FpsLimit,
+        FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock,
         QuickSettingsProfileTarget ProfileTarget,
         FrontendGameBackButtonMappingConfiguration? BackButtonMapping);
 
@@ -55,12 +56,14 @@ internal static class QuickSettingsPresentation
             or QuickSettingsRowId.ProfileTdpAcPl1 or QuickSettingsRowId.ProfileTdpAcPl2
             or QuickSettingsRowId.ProfileCpuBoostAc or QuickSettingsRowId.ProfilePowerModeAc
             or QuickSettingsRowId.ProfileFpsLimitAc
+            or QuickSettingsRowId.ProfileGpuMinimumClockAc
             => source == AcDcPowerSource.AC,
         QuickSettingsRowId.DeviceTdpDcPl1 or QuickSettingsRowId.DeviceTdpDcPl2
             or QuickSettingsRowId.DeviceCpuBoostDc or QuickSettingsRowId.DevicePowerModeDc
             or QuickSettingsRowId.ProfileTdpDcPl1 or QuickSettingsRowId.ProfileTdpDcPl2
             or QuickSettingsRowId.ProfileCpuBoostDc or QuickSettingsRowId.ProfilePowerModeDc
             or QuickSettingsRowId.ProfileFpsLimitDc
+            or QuickSettingsRowId.ProfileGpuMinimumClockDc
             => source == AcDcPowerSource.DC,
         _ => true,
     };
@@ -156,14 +159,14 @@ internal static class QuickSettingsPresentation
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
         string.IsNullOrWhiteSpace(snapshot.DisplayName) ? $"Game {snapshot.AppId}" : snapshot.DisplayName,
         snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
-        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, QuickSettingsProfileTarget.ForSteam(snapshot.AppId),
-        BackButtonMapping: null));
+        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock,
+        QuickSettingsProfileTarget.ForSteam(snapshot.AppId), BackButtonMapping: null));
 
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendXboxGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
         string.IsNullOrWhiteSpace(snapshot.DisplayName) ? "XBOX game" : snapshot.DisplayName,
         snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
-        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, QuickSettingsProfileTarget.ForXbox(snapshot.Key),
-        snapshot.BackButtonMapping));
+        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, snapshot.GpuMinimumClock,
+        QuickSettingsProfileTarget.ForXbox(snapshot.Key), snapshot.BackButtonMapping));
 
     private static QuickSettingsPageSnapshot BuildProfile(ProfileQuickSettingsProjection snapshot)
     {
@@ -172,6 +175,7 @@ internal static class QuickSettingsPresentation
         if (snapshot.Limits is not null) sections.Add(BuildProfileTdpSection(snapshot));
         sections.Add(BuildProfileCpuBoostSection(snapshot));
         if (snapshot.PowerMode is not null) sections.Add(BuildProfilePowerModeSection(snapshot));
+        if (snapshot.GpuMinimumClock is not null) sections.Add(BuildProfileGpuMinimumClockSection(snapshot));
         if (snapshot.FpsLimit is not null) sections.Add(BuildProfileFpsLimitSection(snapshot));
         sections.Add(BuildProfileResolutionSection(snapshot));
 
@@ -342,6 +346,57 @@ internal static class QuickSettingsPresentation
         }
 
         return new QuickSettingsSection(QuickSettingsSectionId.ProfileFpsLimit, "Intel FPS Limit", rows);
+    }
+
+    private static QuickSettingsSection BuildProfileGpuMinimumClockSection(ProfileQuickSettingsProjection snapshot)
+    {
+        var gpu = snapshot.GpuMinimumClock!;
+        var writable = snapshot.PersistenceWritable && snapshot.Enabled && gpu.Available;
+        var rows = new List<QuickSettingsRow>
+        {
+            new(QuickSettingsRowId.ProfileGpuMinimumClockEnabled, "Minimum GPU Clock", QuickSettingsControlKind.Toggle,
+                Available: gpu.Available, Writable: writable,
+                Value: gpu.Available ? QuickSettingsValue.Boolean(gpu.Enabled) : null,
+                SliderSpec: null, CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+        };
+
+        if (gpu.Available && gpu.Enabled)
+        {
+            var options = BuildGpuClockOptions(gpu.SelectableClocksMhz);
+            var fallbackIndex = FindGpuClockIndex(gpu.SelectableClocksMhz, gpu.RecommendedDefaultMhz) ?? 0;
+            var acIndex = FindGpuClockIndex(gpu.SelectableClocksMhz, gpu.AcMhz) ?? fallbackIndex;
+            var dcIndex = FindGpuClockIndex(gpu.SelectableClocksMhz, gpu.DcMhz) ?? fallbackIndex;
+            rows.Add(BuildProfileGpuMinimumClockSlider(QuickSettingsRowId.ProfileGpuMinimumClockAc, "Plugged in", acIndex, options, writable));
+            rows.Add(BuildProfileGpuMinimumClockSlider(QuickSettingsRowId.ProfileGpuMinimumClockDc, "On battery", dcIndex, options, writable));
+        }
+
+        var warning = gpu.UnavailableReason;
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileGpuMinimumClock, "Minimum GPU Clock", rows, warning);
+    }
+
+    private static QuickSettingsRow BuildProfileGpuMinimumClockSlider(
+        QuickSettingsRowId rowId,
+        string label,
+        int index,
+        IReadOnlyList<QuickSettingsDiscreteOption> options,
+        bool writable) =>
+        new(rowId, label, QuickSettingsControlKind.Slider,
+            Available: options.Count > 0, Writable: writable && options.Count > 0,
+            Value: options.Count > 0 ? QuickSettingsValue.Integer(index) : null,
+            SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: options),
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300);
+
+    private static IReadOnlyList<QuickSettingsDiscreteOption> BuildGpuClockOptions(IReadOnlyList<double> clocks) =>
+        clocks.Select((mhz, index) => new QuickSettingsDiscreteOption(index, FormatGpuClockMhz(mhz))).ToArray();
+
+    internal static string FormatGpuClockMhz(double mhz) => $"{mhz.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} MHz";
+
+    private static int? FindGpuClockIndex(IReadOnlyList<double> clocks, double? target)
+    {
+        if (target is not { } value) return null;
+        for (var index = 0; index < clocks.Count; index++)
+            if (Math.Abs(clocks[index] - value) <= 0.1) return index;
+        return null;
     }
 
     private static QuickSettingsRow BuildProfileFpsLimitSlider(QuickSettingsRowId rowId, string label, int fps, bool writable) =>

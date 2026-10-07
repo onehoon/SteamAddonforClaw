@@ -245,6 +245,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
     private readonly ProfileStore? _profileStore;
     private readonly ProfileMutationGate? _mutationGate;
     private readonly Func<AcDcPowerSource?> _powerSource;
+    private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null;
     private IntelGpuMinimumClockCapability? _capability;
     private IntelGpuMinimumClockOwnershipMarker? _ownershipMarker;
     private bool _ownershipMarkerPresent;
@@ -282,6 +283,30 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         get { lock (_gate) return _ownershipMarkerPresent; }
     }
 
+    internal void SetActiveProfileResolver(Func<ProfileDocument, ResolvedActiveProfile?> resolver) =>
+        _activeProfileResolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+
+    internal double? ResolveSelectableClockIndex(int index)
+    {
+        lock (_gate)
+        {
+            var capability = _capability ?? InitializeReadOnly();
+            return index >= 0 && index < capability.SelectableClocksMhz.Count
+                ? capability.SelectableClocksMhz[index]
+                : null;
+        }
+    }
+
+    internal double? ResolveSelectableClockOrRecommendedDefault(double? savedMhz)
+    {
+        lock (_gate)
+        {
+            var capability = _capability ?? InitializeReadOnly();
+            if (!capability.Available || capability.RecommendedDefaultMhz is not { } fallback) return null;
+            return CanonicalOrDefault(capability.SelectableClocksMhz, savedMhz ?? double.NaN, fallback);
+        }
+    }
+
     internal IntelGpuMinimumClockCapability InitializeReadOnly()
     {
         lock (_gate)
@@ -310,7 +335,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         try
         {
             InitializeReadOnly();
-            _ = ReconcileDevice("Startup");
+            _ = ReconcileEffective("Startup");
         }
         catch (Exception exception)
         {
@@ -401,9 +426,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
                 return DeviceMutationResult(failed, failureMessage, loadedForFailure);
             }
 
-            var operation = enabled
-                ? ReconcileDeviceCore("UserEnabled", allowSessionReinitialize: false)
-                : RestoreIfOwned("DeviceDisabled");
+            var operation = ReconcileDeviceMutation(enabled ? "DeviceEnabled" : "DeviceDisabled");
             _lastDeviceFailure = operation.Succeeded ? null : operation.FailureReason;
             LogDeviceMutation("SetEnabled", enabled, desired, operation);
             return DeviceMutationResult(operation.Succeeded
@@ -471,22 +494,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
                 return DeviceMutationResult(failed, failureMessage, loadedForFailure);
             }
 
-            AcDcPowerSource? source;
-            try { source = _powerSource(); }
-            catch { source = null; }
-            IntelGpuMinimumClockOperationResult operation;
-            if (source is null)
-            {
-                operation = ReconcileDeviceCore("PowerSourceUnknownAfterUserEdit", allowSessionReinitialize: false);
-            }
-            else if ((source == AcDcPowerSource.AC) == ac)
-            {
-                operation = ApplyMinimum(canonical, ac ? "DeviceAcChanged" : "DeviceDcChanged");
-            }
-            else
-            {
-                operation = NoOpResult();
-            }
+            var operation = ReconcileDeviceMutation(ac ? "DeviceAcChanged" : "DeviceDcChanged", editedRailIsAc: ac);
 
             _lastDeviceFailure = operation.Succeeded ? null : operation.FailureReason;
             LogDeviceMutation(ac ? "SetAc" : "SetDc", enabled: true, desired, operation);
@@ -496,7 +504,10 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         }
     }
 
-    internal IntelGpuMinimumClockOperationResult ReconcileDevice(string reason, bool allowSessionReinitialize = false)
+    internal IntelGpuMinimumClockOperationResult ReconcileDevice(string reason, bool allowSessionReinitialize = false) =>
+        ReconcileEffective(reason, allowSessionReinitialize);
+
+    internal IntelGpuMinimumClockOperationResult ReconcileEffective(string reason, bool allowSessionReinitialize = false)
     {
         lock (_gate)
         {
@@ -505,14 +516,14 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
 
             var capability = _capability ?? InitializeReadOnly();
             var loaded = LoadDeviceProfile();
-            var result = ReconcileLoadedDevice(loaded, reason);
+            var result = ReconcileLoadedEffective(loaded, reason);
             var nativeResult = result.NativeSetResult ?? result.NativeReadResult;
             if (!result.Succeeded && allowSessionReinitialize && nativeResult is (DeviceLostResult or DeviceUnavailableResult))
             {
                 if (TryReinitializeSession(nativeResult.Value))
                 {
                     loaded = LoadDeviceProfile();
-                    result = ReconcileLoadedDevice(loaded, reason + "AfterSessionRecovery");
+                    result = ReconcileLoadedEffective(loaded, reason + "AfterSessionRecovery");
                 }
                 else
                 {
@@ -521,13 +532,36 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             }
 
             _lastDeviceFailure = result.Succeeded ? null : result.FailureReason;
-            LogDeviceReconcile(reason, loaded, result, _capability ?? capability);
+            LogEffectiveReconcile(reason, loaded, result, _capability ?? capability);
             return result;
         }
     }
 
     internal IntelGpuMinimumClockOperationResult ReconcileAfterResume() =>
-        ReconcileDevice("PowerResume", allowSessionReinitialize: true);
+        ReconcileEffective("PowerResume", allowSessionReinitialize: true);
+
+    internal IntelGpuMinimumClockOperationResult ReconcileGameRailMutation(bool editedAc, string reason)
+    {
+        lock (_gate)
+        {
+            if (_disposed || _shuttingDown)
+                return FailedOperation("RuntimeShuttingDown");
+
+            var loaded = LoadDeviceProfile();
+            if (loaded.CanSafelyReplace
+                && _activeProfileResolver(loaded.Document)?.Performance.GpuMinimumClock is { Enabled: true })
+            {
+                AcDcPowerSource? source;
+                try { source = _powerSource(); }
+                catch { source = null; }
+
+                if (source is not null && (source == AcDcPowerSource.AC) != editedAc)
+                    return NoOpResult();
+            }
+
+            return ReconcileEffective(reason);
+        }
+    }
 
     internal IntelGpuMinimumClockOperationResult PrepareForUninstall()
     {
@@ -577,7 +611,10 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         lock (_mutationGate.Sync)
         {
             var loaded = _profileStore.Load();
-            return !loaded.CanSafelyReplace || loaded.Document.Device.Performance.GpuMinimumClock?.Enabled == true;
+            return !loaded.CanSafelyReplace
+                || loaded.Document.Device.Performance.GpuMinimumClock?.Enabled == true
+                || loaded.Document.Games.Values.Any(profile => profile.Enabled && profile.Performance.GpuMinimumClock?.Enabled == true)
+                || loaded.Document.XboxGames.Values.Any(profile => profile.Enabled && profile.Performance.GpuMinimumClock?.Enabled == true);
         }
     }
 
@@ -746,24 +783,41 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         ? new(new ProfileDocument(), ProfileLoadStatus.ReadFailure)
         : _profileStore.Load();
 
-    private IntelGpuMinimumClockOperationResult ReconcileDeviceCore(string reason, bool allowSessionReinitialize)
+    private IntelGpuMinimumClockOperationResult ReconcileDeviceMutation(string reason, bool? editedRailIsAc = null)
     {
         if (_profileStore is null || _mutationGate is null)
             return FailedOperation("Device persistence is unavailable.");
         var loaded = LoadDeviceProfile();
-        var result = ReconcileLoadedDevice(loaded, reason);
-        var nativeResult = result.NativeSetResult ?? result.NativeReadResult;
-        if (!result.Succeeded && allowSessionReinitialize && nativeResult is (DeviceLostResult or DeviceUnavailableResult))
+        if (loaded.CanSafelyReplace)
         {
-            if (TryReinitializeSession(nativeResult.Value))
-                result = ReconcileLoadedDevice(LoadDeviceProfile(), reason + "AfterSessionRecovery");
-            else
-                result = FailedOperation("IGCL session reinitialization failed.");
+            var gameDesired = _activeProfileResolver(loaded.Document)?.Performance.GpuMinimumClock;
+            if (gameDesired is { Enabled: true })
+            {
+                AcDcPowerSource? source;
+                try { source = _powerSource(); }
+                catch { source = null; }
+                if (source is not null)
+                {
+                    var target = source == AcDcPowerSource.AC ? gameDesired.AcMhz : gameDesired.DcMhz;
+                    var capability = _capability ?? InitializeReadOnly();
+                    if (capability.Available && IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(capability.SelectableClocksMhz, target, out _))
+                        return NoOpResult();
+                }
+            }
+            else if (editedRailIsAc is { } editedRail)
+            {
+                AcDcPowerSource? source;
+                try { source = _powerSource(); }
+                catch { source = null; }
+                if (source is not null && (source == AcDcPowerSource.AC) != editedRail)
+                    return NoOpResult();
+            }
         }
-        return result;
+
+        return ReconcileEffective(reason);
     }
 
-    private IntelGpuMinimumClockOperationResult ReconcileLoadedDevice(ProfileLoadResult loaded, string reason)
+    private IntelGpuMinimumClockOperationResult ReconcileLoadedEffective(ProfileLoadResult loaded, string reason)
     {
         if (!loaded.CanSafelyReplace)
         {
@@ -773,8 +827,12 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
                 : $"Profile state is not safe to replace; owned minimum release failed: {release.FailureReason}");
         }
 
-        var desired = loaded.Document.Device.Performance.GpuMinimumClock;
-        if (desired is not { Enabled: true })
+        var active = _activeProfileResolver(loaded.Document);
+        var gameDesired = active?.Performance.GpuMinimumClock;
+        var gameOwns = gameDesired is { Enabled: true };
+        var deviceDesired = loaded.Document.Device.Performance.GpuMinimumClock;
+        var desiredEnabled = gameOwns || deviceDesired is { Enabled: true };
+        if (!desiredEnabled)
             return RestoreIfOwned(reason + "Disabled");
 
         AcDcPowerSource? source;
@@ -790,12 +848,14 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         if (source is null)
             return RestoreIfOwned(reason + "PowerSourceUnknown");
 
-        var target = source == AcDcPowerSource.AC ? desired.AcMhz : desired.DcMhz;
+        var target = gameOwns
+            ? source == AcDcPowerSource.AC ? gameDesired!.AcMhz : gameDesired!.DcMhz
+            : source == AcDcPowerSource.AC ? deviceDesired!.AcMhz : deviceDesired!.DcMhz;
         var capability = _capability;
         if (capability is null || !capability.Available
             || !IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(capability.SelectableClocksMhz, target, out var canonical))
         {
-            var release = RestoreIfOwned(reason + "UnsupportedTarget");
+            var release = RestoreIfOwned(reason + (gameOwns ? "UnsupportedGameTarget" : "UnsupportedDeviceTarget"));
             return FailedOperation(release.Succeeded
                 ? "SavedTargetUnsupportedByCurrentDriver"
                 : $"SavedTargetUnsupportedByCurrentDriver; owned minimum release failed: {release.FailureReason}");
@@ -879,22 +939,29 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             ("Failure", result.FailureReason));
     }
 
-    private void LogDeviceReconcile(
+    private void LogEffectiveReconcile(
         string reason,
         ProfileLoadResult loaded,
         IntelGpuMinimumClockOperationResult result,
         IntelGpuMinimumClockCapability capability)
     {
-        var desired = loaded.CanSafelyReplace ? loaded.Document.Device.Performance.GpuMinimumClock : null;
+        var active = loaded.CanSafelyReplace ? _activeProfileResolver(loaded.Document) : null;
+        var gameDesired = active?.Performance.GpuMinimumClock;
+        var gameOwns = gameDesired is { Enabled: true };
+        var deviceDesired = loaded.CanSafelyReplace ? loaded.Document.Device.Performance.GpuMinimumClock : null;
+        var effectiveEnabled = gameOwns || deviceDesired is { Enabled: true };
+        var desiredAcMhz = gameOwns ? gameDesired!.AcMhz : deviceDesired?.AcMhz;
+        var desiredDcMhz = gameOwns ? gameDesired!.DcMhz : deviceDesired?.DcMhz;
         AcDcPowerSource? source;
         try { source = _powerSource(); }
         catch { source = null; }
-        AppLog.Info(Category, "Device minimum GPU clock reconcile completed.",
+        AppLog.Info(Category, "Effective minimum GPU clock reconcile completed.",
             ("Reason", reason),
-            ("Enabled", desired?.Enabled == true),
+            ("EffectiveSource", gameOwns ? active!.Value.TargetLabel : effectiveEnabled ? "Device" : "None"),
+            ("Enabled", effectiveEnabled),
             ("PowerSource", source?.ToString() ?? "Unknown"),
-            ("DesiredAcMhz", desired?.AcMhz),
-            ("DesiredDcMhz", desired?.DcMhz),
+            ("DesiredAcMhz", desiredAcMhz),
+            ("DesiredDcMhz", desiredDcMhz),
             ("EffectiveTargetMhz", result.RequestedMinMhz),
             ("PersistenceWritable", loaded.CanSafelyReplace),
             ("CapabilityAvailable", capability.Available),

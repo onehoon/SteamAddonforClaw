@@ -125,7 +125,7 @@ public sealed class QuickSettingsPresentationTests
             [QuickSettingsSectionId.DeviceTdp, QuickSettingsSectionId.DeviceCpuBoost,
                 QuickSettingsSectionId.DevicePowerMode, QuickSettingsSectionId.DeviceBatteryChargeLimit],
             page.Sections.Select(section => section.SectionId).ToArray());
-        Assert.DoesNotContain(Enum.GetNames<QuickSettingsRowId>(), name => name.Contains("GpuMinimumClock", StringComparison.Ordinal));
+        Assert.DoesNotContain(page.Sections.SelectMany(section => section.Rows), row => row.RowId.ToString().Contains("GpuMinimumClock", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -416,13 +416,17 @@ public sealed class QuickSettingsPresentationTests
     [Fact]
     public void Exact_profile_section_and_row_order_when_all_enabled()
     {
-        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot());
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with
+        {
+            GpuMinimumClock = new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1725.125, 1825.375, 1725.125)
+        });
 
         Assert.Collection(page.Sections,
             s => Assert.Equal(QuickSettingsSectionId.ProfileGeneral, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileGpuMinimumClock, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileResolution, s.SectionId));
         Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfileController);
@@ -438,6 +442,8 @@ public sealed class QuickSettingsPresentationTests
             page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileCpuBoost).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.ProfilePowerModeEnabled, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc],
             page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfilePowerMode).Rows.Select(r => r.RowId).ToArray());
+        Assert.Equal([QuickSettingsRowId.ProfileGpuMinimumClockEnabled, QuickSettingsRowId.ProfileGpuMinimumClockAc, QuickSettingsRowId.ProfileGpuMinimumClockDc],
+            page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGpuMinimumClock).Rows.Select(r => r.RowId).ToArray());
         Assert.Equal([QuickSettingsRowId.ProfileResolution],
             page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileResolution).Rows.Select(r => r.RowId).ToArray());
 
@@ -467,7 +473,8 @@ public sealed class QuickSettingsPresentationTests
             Limits: new FrontendTdpLimits(8, 30, 8, 37),
             Resolution: new FrontendGameResolution(1920, 1080),
             PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.Balanced, WindowsPowerMode.BestPowerEfficiency),
-            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true))
+            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true),
+            GpuMinimumClock: new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1725.125, 1825.375, 1725.125))
         {
             BackButtonMapping = new(true, new(Xbox360BackButtonTarget.LeftBumper, Xbox360BackButtonTarget.RightBumper)),
         };
@@ -482,6 +489,7 @@ public sealed class QuickSettingsPresentationTests
             s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileGpuMinimumClock, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileResolution, s.SectionId));
         Assert.Equal(8, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Minimum);
@@ -509,6 +517,7 @@ public sealed class QuickSettingsPresentationTests
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileCpuBoostEnabled).Writable);
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfilePowerModeEnabled).Writable);
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileFpsLimitEnabled).Writable);
+        Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileGpuMinimumClockEnabled).Writable);
         Assert.True(FindRow(disabled, QuickSettingsRowId.ProfileBackButtonUseGlobal).Writable);
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileBackButtonM1).Writable);
     }
@@ -701,6 +710,44 @@ public sealed class QuickSettingsPresentationTests
 
         foreach (var sliderId in new[] { QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsRowId.ProfileFpsLimitDc, QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsRowId.ProfilePowerModeDc })
             Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, FindRow(page, sliderId).CommitPolicy);
+    }
+
+    [Fact]
+    public void Profile_gpu_clock_uses_driver_table_indexes_and_keeps_exact_mhz_in_option_labels()
+    {
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with
+        {
+            GpuMinimumClock = new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1725.125, 1825.375, 1725.125)
+        });
+        var ac = FindRow(page, QuickSettingsRowId.ProfileGpuMinimumClockAc);
+        var dc = FindRow(page, QuickSettingsRowId.ProfileGpuMinimumClockDc);
+
+        Assert.Equal(2, ac.Value!.IntegerValue);
+        Assert.Equal(3, dc.Value!.IntegerValue);
+        Assert.Equal(new[] { (0, "1525 MHz"), (1, "1625 MHz"), (2, "1725.13 MHz"), (3, "1825.38 MHz") },
+            ac.SliderSpec!.Options!.Select(option => (option.Value, option.Label)).ToArray());
+        Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, ac.CommitPolicy);
+        Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, dc.CommitPolicy);
+
+        var dcOnly = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, currentPowerSourceOnly: true, AcDcPowerSource.DC);
+        Assert.False(FindRow(dcOnly, QuickSettingsRowId.ProfileGpuMinimumClockAc).Visible);
+        Assert.True(FindRow(dcOnly, QuickSettingsRowId.ProfileGpuMinimumClockDc).Visible);
+    }
+
+    [Fact]
+    public void Unsupported_enabled_profile_gpu_target_displays_recommended_draft_and_warning()
+    {
+        const string warning = "A saved game minimum GPU clock is no longer supported.";
+        var page = QuickSettingsPresentation.BuildProfile(EnabledProfileSnapshot() with
+        {
+            GpuMinimumClock = new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1777, 1825.375, 1725.125, warning)
+        });
+        var section = page.Sections.Single(item => item.SectionId == QuickSettingsSectionId.ProfileGpuMinimumClock);
+
+        Assert.Equal(warning, section.Message);
+        Assert.Equal(2, FindRow(page, QuickSettingsRowId.ProfileGpuMinimumClockAc).Value!.IntegerValue);
+        Assert.Equal(3, FindRow(page, QuickSettingsRowId.ProfileGpuMinimumClockDc).Value!.IntegerValue);
+        Assert.True(FindRow(page, QuickSettingsRowId.ProfileGpuMinimumClockAc).Writable);
     }
 
     [Fact]

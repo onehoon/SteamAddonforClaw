@@ -39,6 +39,17 @@ public sealed record GamePerformanceOverrides
     public GameTdpSettings? Tdp { get; init; }
     public GamePowerModeSettings? PowerMode { get; init; }
     public GameFpsLimitSettings? FpsLimit { get; init; }
+    public GameGpuMinimumClockSettings? GpuMinimumClock { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed record GameGpuMinimumClockSettings
+{
+    public bool Enabled { get; init; }
+    public required double AcMhz { get; init; }
+    public required double DcMhz { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

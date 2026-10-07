@@ -35,6 +35,51 @@ public sealed class DeviceGpuMinimumClockUiTests
         Assert.False(DevicePage.GpuMinimumClockDraftPolicy.ShouldCommit(Clocks, 1725, 1777, dirty: true, enabled: false, busy: false));
     }
 
+    [Theory]
+    [InlineData(20, false)]
+    [InlineData(21, true)]
+    public async Task Frontend_exception_releases_a_completed_gpu_draft_and_unblocks_profile_toggles(
+        long currentGeneration,
+        bool expectedToPreserveDraft)
+    {
+        var draftDirty = true;
+        var preserveDraft = false;
+        try
+        {
+            await Task.FromException(new IOException("simulated frontend pipe failure"));
+        }
+        catch (IOException)
+        {
+            preserveDraft = DevicePage.GpuMinimumClockDraftPolicy.ResolveFailedCommit(
+                ref draftDirty, submittedGeneration: 20, currentGeneration);
+        }
+
+        Assert.Equal(expectedToPreserveDraft, preserveDraft);
+        Assert.Equal(expectedToPreserveDraft, draftDirty);
+        if (!draftDirty)
+        {
+            const bool profileEnabled = true;
+            const bool persistenceWritable = true;
+            const bool gpuAvailable = true;
+            Assert.True(persistenceWritable && !draftDirty);
+            Assert.True(profileEnabled && gpuAvailable && !draftDirty);
+        }
+
+        var root = FindRepositoryRoot();
+        var steamCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ProfilePage.xaml.cs"));
+        var xboxCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/XboxPage.xaml.cs"));
+        foreach (var code in new[] { steamCode, xboxCode })
+        {
+            var submit = ExtractMethod(code, "private async Task SubmitGpuMinimumClockAfterDelayAsync(");
+            var restore = ExtractMethod(code, "private async Task RestoreSelectedAfterMutationFailureAsync(");
+            var normalizedSubmit = submit.Replace("\r\n", "\n", StringComparison.Ordinal);
+            Assert.Contains("ResolveFailedCommit(\n                    ref _gpuDraftDirty, draftGeneration, _gpuDraftGeneration)", normalizedSubmit, StringComparison.Ordinal);
+            Assert.Contains("preserveDirtyGpuDraft: preserveDraft", submit, StringComparison.Ordinal);
+            Assert.Contains("Render(snapshot, preserveDirtyGpuDraft: preserveDirtyGpuDraft)", restore, StringComparison.Ordinal);
+            Assert.Contains("&& !_gpuDraftDirty", code, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void Device_sliders_are_discrete_and_value_changed_only_updates_a_draft()
     {

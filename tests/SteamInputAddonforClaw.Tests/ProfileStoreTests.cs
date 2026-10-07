@@ -298,6 +298,66 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void Game_minimum_gpu_clock_override_round_trips_exact_driver_values_and_keeps_independent_enable_state()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var mutations = new GameProfileMutations(store);
+        Assert.True(mutations.Enable(123, "Game"));
+        var settings = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1725.125, DcMhz = 1825.375 };
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetGpuMinimumClockEnabled(123, true, settings));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetGpuMinimumClockAc(123, 1625.125));
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetGpuMinimumClockEnabled(123, false, null));
+
+        var saved = store.Load().Document.Games["123"].Performance.GpuMinimumClock!;
+        Assert.False(saved.Enabled);
+        Assert.Equal(1625.125, saved.AcMhz);
+        Assert.Equal(1825.375, saved.DcMhz);
+
+        Assert.True(mutations.Disable(123));
+        Assert.True(mutations.Enable(123, null));
+        var reenabledProfile = store.Load().Document.Games["123"];
+        Assert.True(reenabledProfile.Enabled);
+        Assert.False(reenabledProfile.Performance.GpuMinimumClock!.Enabled);
+        Assert.Equal(1625.125, reenabledProfile.Performance.GpuMinimumClock.AcMhz);
+    }
+
+    [Fact]
+    public void Enabling_whole_game_profile_does_not_enable_its_minimum_gpu_clock_override()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Games = new Dictionary<string, GameProfile>
+            {
+                ["123"] = new()
+                {
+                    Enabled = false,
+                    Performance = new()
+                    {
+                        GpuMinimumClock = new GameGpuMinimumClockSettings
+                        {
+                            Enabled = false,
+                            AcMhz = 1725.125,
+                            DcMhz = 1825.375
+                        }
+                    }
+                }
+            }
+        });
+
+        Assert.True(new GameProfileMutations(store).Enable(123, "Game"));
+
+        var gpu = store.Load().Document.Games["123"].Performance.GpuMinimumClock!;
+        Assert.False(gpu.Enabled);
+        Assert.Equal(1725.125, gpu.AcMhz);
+        Assert.Equal(1825.375, gpu.DcMhz);
+    }
+
+    [Fact]
     public void TdpValueMutation_PreservesFeatureOwnershipState()
     {
         var store = new ProfileStore(ProfilesPath);

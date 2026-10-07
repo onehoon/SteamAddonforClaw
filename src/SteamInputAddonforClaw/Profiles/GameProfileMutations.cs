@@ -88,6 +88,61 @@ internal sealed class GameProfileMutations
     }
     internal MutationOutcome SetFpsLimitAc(uint appId, int fps) => SetFpsLimitValue(appId, fps, true);
     internal MutationOutcome SetFpsLimitDc(uint appId, int fps) => SetFpsLimitValue(appId, fps, false);
+
+    internal MutationOutcome SetGpuMinimumClockEnabled(uint appId, bool enabled, GameGpuMinimumClockSettings? enabledSettings)
+    {
+        if (enabled && (enabledSettings is not { Enabled: true }
+            || !double.IsFinite(enabledSettings.AcMhz) || enabledSettings.AcMhz <= 0
+            || !double.IsFinite(enabledSettings.DcMhz) || enabledSettings.DcMhz <= 0))
+            return MutationOutcome.InvalidTarget;
+
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile) || !profile.Enabled)
+                return MutationOutcome.Unavailable;
+
+            var current = profile.Performance.GpuMinimumClock;
+            var updated = enabled
+                ? enabledSettings!
+                : current is null ? null : current with { Enabled = false };
+            if (current == updated) return MutationOutcome.Succeeded;
+            loaded.Document.Games[key] = profile with
+            {
+                Performance = profile.Performance with { GpuMinimumClock = updated }
+            };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; }
+            catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+
+    internal MutationOutcome SetGpuMinimumClockAc(uint appId, double mhz) => SetGpuMinimumClockRail(appId, mhz, ac: true);
+    internal MutationOutcome SetGpuMinimumClockDc(uint appId, double mhz) => SetGpuMinimumClockRail(appId, mhz, ac: false);
+
+    private MutationOutcome SetGpuMinimumClockRail(uint appId, double mhz, bool ac)
+    {
+        if (!double.IsFinite(mhz) || mhz <= 0) return MutationOutcome.InvalidTarget;
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile)
+                || !profile.Enabled
+                || profile.Performance.GpuMinimumClock is not { Enabled: true } current)
+                return MutationOutcome.Unavailable;
+
+            var updated = ac ? current with { AcMhz = mhz } : current with { DcMhz = mhz };
+            loaded.Document.Games[key] = profile with
+            {
+                Performance = profile.Performance with { GpuMinimumClock = updated }
+            };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; }
+            catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
     private MutationOutcome SetFpsLimitValue(uint appId, int fps, bool ac)
     {
         if (fps is < 40 or > 120) return MutationOutcome.InvalidTarget;

@@ -40,7 +40,8 @@ internal static class OverlayTransportProtocol
     // Version 16 retires the Overlay Steam catalog/offline selected-profile request flow; Profile
     // is now delivered only through the shared active-game Quick Settings page contract.
     // Version 17 adds the XBOX-only Profile Controller section/rows/commit group to that contract.
-    internal const int CurrentVersion = 17;
+    // Version 18 adds the shared Profile Minimum GPU Clock section and AC/DC driver-clock indexes.
+    internal const int CurrentVersion = 18;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 

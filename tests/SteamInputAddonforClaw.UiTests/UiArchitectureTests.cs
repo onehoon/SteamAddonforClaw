@@ -902,9 +902,10 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("Visibility=\"Collapsed\"", fpsDeclaration, StringComparison.Ordinal);
         Assert.True(xaml.IndexOf("Header=\"TDP Control\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"CPU Boost\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal));
-        Assert.True(xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"Windows Power Mode\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Minimum GPU Clock\"", StringComparison.Ordinal));
+        Assert.True(xaml.IndexOf("Header=\"Minimum GPU Clock\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Header=\"Intel FPS Limit\"", StringComparison.Ordinal) < xaml.IndexOf("Header=\"Resolution\"", StringComparison.Ordinal));
-        foreach (var expanderName in new[] { "TdpExpander", "CpuBoostExpander", "PowerModeExpander", "IntelFpsExpander" })
+        foreach (var expanderName in new[] { "TdpExpander", "CpuBoostExpander", "PowerModeExpander", "GpuMinimumClockExpander", "IntelFpsExpander" })
         {
             var declarationStart = xaml.IndexOf($"x:Name=\"{expanderName}\"", StringComparison.Ordinal);
             var declarationEnd = xaml.IndexOf('>', declarationStart);

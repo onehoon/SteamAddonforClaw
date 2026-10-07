@@ -319,6 +319,12 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileFpsLimitAcAsync(FrontendWireCodec.Decode<SetGameProfileFpsLimitAcRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFpsLimitAcRequest>(p).Fps, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGameProfileFpsLimitDc
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileFpsLimitDcAsync(FrontendWireCodec.Decode<SetGameProfileFpsLimitDcRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFpsLimitDcRequest>(p).Fps, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileGpuMinimumClockEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileGpuMinimumClockEnabledAsync(FrontendWireCodec.Decode<SetGameProfileGpuMinimumClockEnabledRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileGpuMinimumClockEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileGpuMinimumClockAc
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileGpuMinimumClockAcAsync(FrontendWireCodec.Decode<SetGameProfileGpuMinimumClockIndexRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileGpuMinimumClockIndexRequest>(p).SelectableClockIndex, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileGpuMinimumClockDc
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileGpuMinimumClockDcAsync(FrontendWireCodec.Decode<SetGameProfileGpuMinimumClockIndexRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileGpuMinimumClockIndexRequest>(p).SelectableClockIndex, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.CaptureCenterMStartup
         ? FrontendWireCodec.Payload(await _inner.CaptureCenterMStartupAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.RequestCenterMAuthorityTransition
@@ -406,6 +412,12 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileFpsLimitAcAsync(FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitAcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitAcRequest>(p).Fps, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetXboxGameProfileFpsLimitDc
         ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileFpsLimitDcAsync(FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitDcRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileFpsLimitDcRequest>(p).Fps, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileGpuMinimumClockEnabled
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileGpuMinimumClockEnabledAsync(FrontendWireCodec.Decode<SetXboxGameProfileGpuMinimumClockEnabledRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileGpuMinimumClockEnabledRequest>(p).Enabled, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileGpuMinimumClockAc
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileGpuMinimumClockAcAsync(FrontendWireCodec.Decode<SetXboxGameProfileGpuMinimumClockIndexRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileGpuMinimumClockIndexRequest>(p).SelectableClockIndex, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetXboxGameProfileGpuMinimumClockDc
+        ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileGpuMinimumClockDcAsync(FrontendWireCodec.Decode<SetXboxGameProfileGpuMinimumClockIndexRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileGpuMinimumClockIndexRequest>(p).SelectableClockIndex, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetXboxGameProfileResolution
         ? FrontendWireCodec.Payload(await _inner.SetXboxGameProfileResolutionAsync(FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).Key, FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetXboxGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetXboxGameProfileBackButtonMapping
