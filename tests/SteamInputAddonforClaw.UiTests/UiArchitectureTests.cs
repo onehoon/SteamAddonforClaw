@@ -572,7 +572,7 @@ public sealed class UiArchitectureTests
         var mainWindow = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs"));
 
         Assert.Contains("Add Shortcut", shortcutXaml, StringComparison.Ordinal);
-        Assert.Contains("CanReorderItems=\"True\"", shortcutXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CanReorderItems", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("Screenshot", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("FolderPicker(windowId)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("MutateShortcutAsync", shortcutCode, StringComparison.Ordinal);
@@ -606,21 +606,43 @@ public sealed class UiArchitectureTests
         var actionStack = cardGrid.Elements().Single(element =>
             element.Name.LocalName == "StackPanel" && (string?)element.Attribute("Grid.Column") == "2");
         var actionButtons = actionStack.Elements().Where(element => element.Name.LocalName == "Button").ToArray();
+        var containerSetters = itemContainerStyle.Elements().Where(element => element.Name.LocalName == "Setter")
+            .ToDictionary(element => (string)element.Attribute("Property")!, element => (string?)element.Attribute("Value"));
+        var itemTemplateSetter = itemContainerStyle.Elements().Single(element => element.Name.LocalName == "Setter"
+            && (string?)element.Attribute("Property") == "Template");
+        var itemContainerTemplate = itemTemplateSetter.Descendants().Single(element => element.Name.LocalName == "ControlTemplate");
 
         Assert.Equal("Horizontal", (string?)wrapGrid.Attribute("Orientation"));
         Assert.Equal("3", (string?)wrapGrid.Attribute("MaximumRowsOrColumns"));
         Assert.Equal("0", (string?)list.Attribute("Padding"));
         Assert.Equal("ShortcutList_SizeChanged", (string?)list.Attribute("SizeChanged"));
-        Assert.Equal("True", (string?)list.Attribute("CanReorderItems"));
-        Assert.Equal("True", (string?)list.Attribute("CanDragItems"));
-        Assert.Equal("True", (string?)list.Attribute("AllowDrop"));
+        Assert.Null(list.Attribute("CanReorderItems"));
+        Assert.Null(list.Attribute("CanDragItems"));
+        Assert.Null(list.Attribute("AllowDrop"));
+        Assert.Null(list.Attribute("DragItemsCompleted"));
         Assert.Equal("ListViewItem", (string?)itemContainerStyle.Attribute("TargetType"));
         Assert.Equal("Stretch", (string?)horizontalContentAlignment.Attribute("Value"));
+        Assert.Equal("Transparent", containerSetters["Background"]);
+        Assert.Equal("Transparent", containerSetters["BorderBrush"]);
+        Assert.Equal("0", containerSetters["BorderThickness"]);
+        Assert.Equal("0", containerSetters["Padding"]);
+        Assert.Equal("Stretch", containerSetters["VerticalContentAlignment"]);
+        Assert.Equal("False", containerSetters["UseSystemFocusVisuals"]);
+        Assert.Equal("ListViewItem", (string?)itemContainerTemplate.Attribute("TargetType"));
+        Assert.DoesNotContain(itemContainerTemplate.Descendants(), element => element.Name.LocalName == "VisualState");
         Assert.Equal("Auto,*,Auto", (string?)cardGrid.Attribute("ColumnDefinitions"));
         Assert.Equal("0,0,12,12", (string?)card.Attribute("Margin"));
+        Assert.Equal("1", (string?)card.Attribute("BorderThickness"));
+        Assert.Equal("8", (string?)card.Attribute("CornerRadius"));
+        Assert.Equal("{ThemeResource CardBackgroundFillColorDefaultBrush}", (string?)card.Attribute("Background"));
+        Assert.Equal("{ThemeResource CardStrokeColorDefaultBrush}", (string?)card.Attribute("BorderBrush"));
+        Assert.Equal("Transparent", (string?)itemContainerTemplate.Descendants().Single(element => element.Name.LocalName == "Grid").Attribute("Background"));
+        Assert.DoesNotContain(itemContainerTemplate.Descendants(), element => element.Name.LocalName == "ThemeShadow");
         Assert.Equal("Vertical", (string?)actionStack.Attribute("Orientation"));
         Assert.Equal(2, actionButtons.Length);
         Assert.All(actionButtons, button => Assert.Equal("Stretch", (string?)button.Attribute("HorizontalAlignment")));
+        Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerPressed")));
+        Assert.All(actionButtons, button => Assert.Null(button.Attribute("PointerMoved")));
         Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("private const double ShortcutCardHorizontalGap = 12;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("itemsPanel.ItemWidth = itemWidth", shortcutCode, StringComparison.Ordinal);
@@ -630,8 +652,9 @@ public sealed class UiArchitectureTests
         Assert.Equal(392, ShortcutPage.GetShortcutItemWidth(1200));
         Assert.Equal(1, ShortcutPage.GetShortcutItemWidth(24));
         Assert.Contains("ShortcutList.ItemsSource = _tiles;", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("var targetIndex = _tiles.IndexOf(movedTile);", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("TargetIndex: targetIndex", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShortcutList_DragItemsCompleted", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("Windows.ApplicationModel.DataTransfer", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("_tiles.Move(", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("RowIndex", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("ColumnIndex", shortcutCode, StringComparison.Ordinal);
 
@@ -644,6 +667,67 @@ public sealed class UiArchitectureTests
                 positions.Select(position => position.Row * 3 + position.Column));
             Assert.All(positions, position => Assert.InRange(position.Column, 0, 2));
         }
+    }
+
+    [Fact]
+    public void Main_app_shortcut_drag_handle_sends_one_move_on_release_and_cancels_without_mutation()
+    {
+        var root = FindRepositoryRoot();
+        var shortcutXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml"));
+        var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
+        var handle = shortcutXaml.Descendants().Single(element => element.Name.LocalName == "FontIcon"
+            && (string?)element.Attribute("PointerPressed") == "ShortcutDragHandle_PointerPressed");
+
+        Assert.Equal("{x:Bind TileId}", (string?)handle.Attribute("Tag"));
+        Assert.Equal("ShortcutDragHandle_PointerPressed", (string?)handle.Attribute("PointerPressed"));
+        Assert.Equal("ShortcutDragHandle_PointerMoved", (string?)handle.Attribute("PointerMoved"));
+        Assert.Equal("ShortcutDragHandle_PointerReleased", (string?)handle.Attribute("PointerReleased"));
+        Assert.Equal("ShortcutDragHandle_PointerCanceled", (string?)handle.Attribute("PointerCanceled"));
+        Assert.Equal("ShortcutDragHandle_PointerCaptureLost", (string?)handle.Attribute("PointerCaptureLost"));
+
+        var movedStart = shortcutCode.IndexOf("private void ShortcutDragHandle_PointerMoved", StringComparison.Ordinal);
+        var releaseStart = shortcutCode.IndexOf("private async void ShortcutDragHandle_PointerReleased", StringComparison.Ordinal);
+        var cancelStart = shortcutCode.IndexOf("private void ShortcutDragHandle_PointerCanceled", StringComparison.Ordinal);
+        var captureLostStart = shortcutCode.IndexOf("private void ShortcutDragHandle_PointerCaptureLost", StringComparison.Ordinal);
+        var ownsPointerStart = shortcutCode.IndexOf("private bool OwnsShortcutDragPointer", StringComparison.Ordinal);
+        Assert.True(movedStart >= 0 && releaseStart > movedStart && cancelStart > releaseStart
+            && captureLostStart > cancelStart && ownsPointerStart > captureLostStart);
+        var movedHandler = shortcutCode[movedStart..releaseStart];
+        var releaseHandler = shortcutCode[releaseStart..cancelStart];
+        var cancelHandler = shortcutCode[cancelStart..captureLostStart];
+        var captureLostHandler = shortcutCode[captureLostStart..ownsPointerStart];
+
+        Assert.Contains("CapturePointer(e.Pointer)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("CaptureRealizedShortcutItemBounds()", movedHandler, StringComparison.Ordinal);
+        Assert.Contains("ResolveShortcutDropTargetIndex(", movedHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyMutationAsync(", movedHandler, StringComparison.Ordinal);
+        Assert.Equal(1, releaseHandler.Split("ApplyMutationAsync(", StringSplitOptions.None).Length - 1);
+        Assert.Contains("FrontendShortcutMutationKind.Move", releaseHandler, StringComparison.Ordinal);
+        Assert.Contains("TileId: movedTileId", releaseHandler, StringComparison.Ordinal);
+        Assert.Contains("TargetIndex: targetIndex", releaseHandler, StringComparison.Ordinal);
+        Assert.Contains("ReleasePointerCapture(e.Pointer)", releaseHandler, StringComparison.Ordinal);
+        Assert.Contains("ClearShortcutDrag();", cancelHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyMutationAsync(", cancelHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyMutationAsync(", captureLostHandler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Main_app_shortcut_drop_target_uses_real_row_major_container_geometry()
+    {
+        ShortcutPage.ShortcutItemBounds[] items =
+        [
+            new(0, 0, 0, 100, 60),
+            new(1, 110, 0, 100, 60),
+            new(2, 220, 0, 100, 60),
+            new(3, 0, 70, 100, 60),
+            new(4, 110, 70, 100, 60)
+        ];
+
+        Assert.Equal(0, ShortcutPage.ResolveShortcutDropTargetIndex(items, 20, 30, 5, 4));
+        Assert.Equal(2, ShortcutPage.ResolveShortcutDropTargetIndex(items, 270, 30, 5, 0));
+        Assert.Equal(2, ShortcutPage.ResolveShortcutDropTargetIndex(items, 200, 65, 5, 0));
+        Assert.Equal(4, ShortcutPage.ResolveShortcutDropTargetIndex(items, 190, 100, 5, 1));
+        Assert.Null(ShortcutPage.ResolveShortcutDropTargetIndex([], 0, 0, 0, 0));
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace SteamInputAddonforClaw.Contracts.Shortcuts;
 
@@ -16,6 +17,7 @@ public sealed record ShortcutActionSpec(
 public sealed record ShortcutTileDefinition(
     Guid TileId,
     string Title,
+    [property: JsonRequired] bool CloseOverlayAfterLaunch,
     ShortcutActionSpec Action);
 
 /// <summary>The ordered Shortcut dashboard definition.</summary>

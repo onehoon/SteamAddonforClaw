@@ -23,11 +23,7 @@
             <ListView
                 x:Name="ShortcutList"
                 Padding="0"
-                CanDragItems="True"
-                CanReorderItems="True"
-                AllowDrop="True"
-                SizeChanged="ShortcutList_SizeChanged"
-                DragItemsCompleted="ShortcutList_DragItemsCompleted">
+                SizeChanged="ShortcutList_SizeChanged">
                 <ListView.ItemsPanel>
                     <ItemsPanelTemplate>
                         <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3" />
@@ -35,7 +31,29 @@
                 </ListView.ItemsPanel>
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderBrush" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Padding" Value="0" />
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                        <Setter Property="UseSystemFocusVisuals" Value="False" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListViewItem">
+                                    <Grid Background="Transparent">
+                                        <ContentPresenter
+                                            Content="{TemplateBinding Content}"
+                                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                                            ContentTransitions="{TemplateBinding ContentTransitions}"
+                                            Foreground="{TemplateBinding Foreground}"
+                                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                            Padding="{TemplateBinding Padding}" />
+                                    </Grid>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
                     </Style>
                 </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
@@ -52,6 +70,12 @@
                                     VerticalAlignment="Center"
                                     Glyph="&#xE7C3;"
                                     Opacity="0.65"
+                                    Tag="{x:Bind TileId}"
+                                    PointerPressed="ShortcutDragHandle_PointerPressed"
+                                    PointerMoved="ShortcutDragHandle_PointerMoved"
+                                    PointerReleased="ShortcutDragHandle_PointerReleased"
+                                    PointerCanceled="ShortcutDragHandle_PointerCanceled"
+                                    PointerCaptureLost="ShortcutDragHandle_PointerCaptureLost"
                                     AutomationProperties.Name="Drag to reorder" />
                                 <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
                                     <TextBlock FontSize="16" FontWeight="SemiBold" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />

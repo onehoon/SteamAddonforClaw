@@ -1729,7 +1729,31 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             return new(false, "Shortcut is unavailable.");
 
         var result = await _shortcutRuntime.ExecuteAsync(tileId, token).ConfigureAwait(false);
-        return new(result.Outcome == ShortcutExecutionOutcome.Succeeded, result.FailureMessage);
+        if (result.Outcome != ShortcutExecutionOutcome.Succeeded || !result.RetireOverlayAfterExecution)
+            return new(result.Outcome == ShortcutExecutionOutcome.Succeeded, result.FailureMessage);
+
+        await _visibleSurfaceTransition.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (!_overlayCaptureActive && !_overlayController.IsVisible)
+                return new(true);
+
+            var retired = await RetireOverlayCaptureUnderTransitionAsync(
+                "ShortcutLaunch",
+                surfaceAlreadyGone: false).ConfigureAwait(false);
+            if (!retired)
+            {
+                AppLog.Warn("Shortcuts", "Shortcut launched but Overlay retirement was not proven.", null,
+                    ("Event", "ShortcutPostLaunchOverlayRetirementIncomplete"));
+                return new(false, "Shortcut launched, but the Overlay could not be closed.");
+            }
+
+            return new(true);
+        }
+        finally
+        {
+            _visibleSurfaceTransition.Release();
+        }
     }
 
     // SF-V2-02/06/09 section 15/16/11: the admission Runtime-side fact this class owns

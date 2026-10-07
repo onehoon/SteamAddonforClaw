@@ -19,7 +19,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
     [Fact]
     public void Capture_projects_known_actions_for_repair_and_keeps_unknown_actions_read_only()
     {
-        var executable = Tile("Broken EXE", ShortcutActionTypeIds.Executable, "{\"path\":17,\"arguments\":false,\"secret\":\"do-not-project\"}");
+        var executable = Tile("Broken EXE", ShortcutActionTypeIds.Executable, "{\"path\":17,\"arguments\":false,\"secret\":\"do-not-project\"}", closeOverlayAfterLaunch: true);
         var script = Tile("Broken Script", ShortcutActionTypeIds.PowerShell, "{\"script\":false}");
         var url = Tile("Broken URL", ShortcutActionTypeIds.Url, "{\"url\":[]}");
         var screenshot = Tile("Legacy Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, "{\"legacy\":true}");
@@ -41,6 +41,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.Equal(FrontendShortcutEditorActionKind.Executable, snapshot.Tiles[0].Action.Kind);
         Assert.Equal(string.Empty, snapshot.Tiles[0].Action.ExecutablePath);
         Assert.Equal(string.Empty, snapshot.Tiles[0].Action.ExecutableArguments);
+        Assert.True(snapshot.Tiles[0].CloseOverlayAfterLaunch);
         Assert.Equal(FrontendShortcutEditorActionKind.PowerShell, snapshot.Tiles[1].Action.Kind);
         Assert.Equal(string.Empty, snapshot.Tiles[1].Action.PowerShellScript);
         Assert.Equal(FrontendShortcutEditorActionKind.Url, snapshot.Tiles[2].Action.Kind);
@@ -69,14 +70,18 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.All(ids, id => Assert.NotEqual(Guid.Empty, id));
         Assert.Equal(new[] { "One", "Two", "Three", "Capture" }, screenshot.Snapshot.Tiles.Select(tile => tile.Title));
         Assert.Equal("{}", ReadActionParameters(Load().Dashboard.Tiles[3]));
+        Assert.False(screenshot.Snapshot.Tiles[3].CloseOverlayAfterLaunch);
 
         var stableId = ids[1];
         var update = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, stableId, "Renamed",
-            new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.Url, Url: "http://example.net")), Folder);
+            new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.Url, Url: "http://example.net"),
+            CloseOverlayAfterLaunch: true), Folder);
         Assert.True(update.Succeeded);
         Assert.Equal(stableId, update.Snapshot.Tiles[1].TileId);
         Assert.Equal("Renamed", update.Snapshot.Tiles[1].Title);
         Assert.Equal(FrontendShortcutEditorActionKind.Url, update.Snapshot.Tiles[1].Action.Kind);
+        Assert.True(update.Snapshot.Tiles[1].CloseOverlayAfterLaunch);
+        Assert.True(Load().Dashboard.Tiles[1].CloseOverlayAfterLaunch);
 
         var moved = runtime.MutateEditor(new(FrontendShortcutMutationKind.Move, ids[0], TargetIndex: 3), Folder);
         Assert.True(moved.Succeeded && moved.Changed);
@@ -96,6 +101,31 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.Empty(empty.Snapshot.Tiles);
         var reloaded = CreateRuntime().CaptureEditor(Folder);
         Assert.Empty(reloaded.Tiles);
+    }
+
+    [Fact]
+    public void Preference_is_required_for_create_and_update_and_rejected_for_delete_and_move()
+    {
+        var tile = Tile("Existing", ShortcutActionTypeIds.Url, "{\"url\":\"https://example.com\"}");
+        Save(tile);
+        var before = File.ReadAllText(DocumentPath);
+        var runtime = CreateRuntime();
+        var action = new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.Url, Url: "https://example.org");
+
+        var createWithoutPreference = runtime.MutateEditor(new(FrontendShortcutMutationKind.Create,
+            Title: "New", Action: action), Folder);
+        var updateWithoutPreference = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update,
+            tile.TileId, "Changed", action), Folder);
+        var deleteWithPreference = runtime.MutateEditor(new(FrontendShortcutMutationKind.Delete,
+            tile.TileId, CloseOverlayAfterLaunch: false), Folder);
+        var moveWithPreference = runtime.MutateEditor(new(FrontendShortcutMutationKind.Move,
+            tile.TileId, CloseOverlayAfterLaunch: false, TargetIndex: 0), Folder);
+
+        Assert.False(createWithoutPreference.Succeeded);
+        Assert.False(updateWithoutPreference.Succeeded);
+        Assert.False(deleteWithPreference.Succeeded);
+        Assert.False(moveWithPreference.Succeeded);
+        Assert.Equal(before, File.ReadAllText(DocumentPath));
     }
 
     [Theory]
@@ -118,6 +148,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         var stored = Assert.Single(Load().Dashboard.Tiles);
         Assert.Equal("Custom title", stored.Title);
         Assert.Equal(typeId, stored.Action.TypeId);
+        Assert.False(stored.CloseOverlayAfterLaunch);
         Assert.Equal(1, stored.Action.SchemaVersion);
         Assert.Equal("{}", ReadActionParameters(stored));
 
@@ -125,12 +156,14 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
             FrontendShortcutMutationKind.Update,
             createdTile.TileId,
             "Renamed title",
-            new FrontendShortcutActionInput(kind)), Folder);
+            new FrontendShortcutActionInput(kind),
+            CloseOverlayAfterLaunch: true), Folder);
 
         Assert.True(updated.Succeeded);
         Assert.Equal("Renamed title", Assert.Single(updated.Snapshot.Tiles).Title);
         var updatedStored = Assert.Single(Load().Dashboard.Tiles);
         Assert.Equal("Renamed title", updatedStored.Title);
+        Assert.True(updatedStored.CloseOverlayAfterLaunch);
         Assert.Equal(typeId, updatedStored.Action.TypeId);
         Assert.Equal(1, updatedStored.Action.SchemaVersion);
         Assert.Equal("{}", ReadActionParameters(updatedStored));
@@ -161,7 +194,8 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
             FrontendShortcutMutationKind.Update,
             tile.TileId,
             "Persisted custom title",
-            new FrontendShortcutActionInput(kind)), Folder);
+            new FrontendShortcutActionInput(kind),
+            CloseOverlayAfterLaunch: tile.CloseOverlayAfterLaunch), Folder);
 
         Assert.True(repaired.Succeeded);
         Assert.Equal("Persisted custom title", Assert.Single(repaired.Snapshot.Tiles).Title);
@@ -179,10 +213,12 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         var runtime = CreateRuntime();
 
         var repaired = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, invalidScreenshot.TileId,
-            "Screenshot", new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.ScreenshotFullscreen)), Folder);
+            "Screenshot", new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.ScreenshotFullscreen),
+            CloseOverlayAfterLaunch: false), Folder);
 
         Assert.True(repaired.Succeeded);
         Assert.True(repaired.Snapshot.Tiles[0].Action.ConfigurationValid);
+        Assert.False(repaired.Snapshot.Tiles[0].CloseOverlayAfterLaunch);
         Assert.Equal("{}", ReadActionParameters(Load().Dashboard.Tiles[0]));
         var deleted = runtime.MutateEditor(new(FrontendShortcutMutationKind.Delete, unsupported.TileId), Folder);
         Assert.True(deleted.Succeeded);
@@ -294,7 +330,7 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         var runtime = CreateRuntime();
 
         var updateUnsupported = runtime.MutateEditor(new(FrontendShortcutMutationKind.Update, tile.TileId, "Changed",
-            new(FrontendShortcutEditorActionKind.Url, Url: "https://example.com")), Folder);
+            new(FrontendShortcutEditorActionKind.Url, Url: "https://example.com"), CloseOverlayAfterLaunch: false), Folder);
         var deleteMissing = runtime.MutateEditor(new(FrontendShortcutMutationKind.Delete, Guid.NewGuid()), Folder);
         var moveOutOfRange = runtime.MutateEditor(new(FrontendShortcutMutationKind.Move, tile.TileId, TargetIndex: 1), Folder);
         var invalidAction = runtime.MutateEditor(CreateIntent("Bad URL", FrontendShortcutEditorActionKind.Url, url: "file:///C:/secret"), Folder);
@@ -418,18 +454,22 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         string? executablePath = null,
         string? executableArguments = null,
         string? script = null,
-        string? url = null) =>
+        string? url = null,
+        bool closeOverlayAfterLaunch = false) =>
         new(FrontendShortcutMutationKind.Create, Title: title,
             Action: new FrontendShortcutActionInput(kind,
                 ExecutablePath: executablePath,
                 ExecutableArguments: executableArguments,
                 PowerShellScript: script,
-                Url: url));
+                Url: url),
+            CloseOverlayAfterLaunch: closeOverlayAfterLaunch);
 
-    private static ShortcutTileDefinition Tile(string title, string typeId, string json, int schemaVersion = 1)
+    private static ShortcutTileDefinition Tile(string title, string typeId, string json, int schemaVersion = 1,
+        bool closeOverlayAfterLaunch = false)
     {
         using var document = JsonDocument.Parse(json);
-        return new(Guid.NewGuid(), title, new ShortcutActionSpec(typeId, schemaVersion, document.RootElement.Clone()));
+        return new(Guid.NewGuid(), title, closeOverlayAfterLaunch,
+            new ShortcutActionSpec(typeId, schemaVersion, document.RootElement.Clone()));
     }
 
     private static string ReadActionParameters(ShortcutTileDefinition tile) => tile.Action.Parameters.GetRawText();

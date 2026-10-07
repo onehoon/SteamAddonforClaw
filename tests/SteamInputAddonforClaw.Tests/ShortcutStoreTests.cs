@@ -53,6 +53,7 @@ public sealed class ShortcutStoreTests : IDisposable
         Assert.Equal(tiles.Select(tile => tile.TileId), loaded.Document.Dashboard.Tiles.Select(tile => tile.TileId));
         Assert.Equal(tiles.Select(tile => tile.Title), loaded.Document.Dashboard.Tiles.Select(tile => tile.Title));
         Assert.Equal(tiles.Select(tile => tile.Action.TypeId), loaded.Document.Dashboard.Tiles.Select(tile => tile.Action.TypeId));
+        Assert.Equal(tiles.Select(tile => tile.CloseOverlayAfterLaunch), loaded.Document.Dashboard.Tiles.Select(tile => tile.CloseOverlayAfterLaunch));
     }
 
     [Theory]
@@ -65,6 +66,7 @@ public sealed class ShortcutStoreTests : IDisposable
         var tile = new ShortcutTileDefinition(
             Guid.NewGuid(),
             "Action",
+            true,
             new ShortcutActionSpec(typeId, schemaVersion, JsonDocument.Parse(parametersJson).RootElement.Clone()));
         var store = new ShortcutStore(ShortcutsPath);
 
@@ -85,12 +87,13 @@ public sealed class ShortcutStoreTests : IDisposable
         Directory.CreateDirectory(_testDirectory);
         File.WriteAllText(ShortcutsPath, """
             {
-              "schemaVersion": 1,
+              "schemaVersion": 2,
               "dashboard": {
                 "tiles": [
                   {
                     "tileId": "11111111-2222-3333-4444-555555555555",
                     "title": "Nested",
+                    "closeOverlayAfterLaunch": true,
                     "action": {
                       "typeId": "future.nested",
                       "schemaVersion": 3,
@@ -138,12 +141,10 @@ public sealed class ShortcutStoreTests : IDisposable
 
     [Theory]
     [InlineData("{}")]
-    [InlineData("{\"schemaVersion\":1}")]
-    [InlineData("{\"schemaVersion\":1,\"dashboard\":null}")]
-    [InlineData("{\"schemaVersion\":1,\"dashboard\":[]}")]
-    [InlineData("{\"schemaVersion\":\"1\",\"dashboard\":{\"tiles\":[]}}")]
-    [InlineData("{\"schemaVersion\":0,\"dashboard\":{\"tiles\":[]}}")]
-    [InlineData("{\"schemaVersion\":-1,\"dashboard\":{\"tiles\":[]}}")]
+    [InlineData("{\"schemaVersion\":2}")]
+    [InlineData("{\"schemaVersion\":2,\"dashboard\":null}")]
+    [InlineData("{\"schemaVersion\":2,\"dashboard\":[]}")]
+    [InlineData("{\"schemaVersion\":\"2\",\"dashboard\":{\"tiles\":[]}}")]
     public void Load_InvalidRootStructure_ReturnsMalformedAndPreservesTheOriginal(string json)
     {
         WriteExisting(json);
@@ -155,10 +156,14 @@ public sealed class ShortcutStoreTests : IDisposable
         Assert.Equal(json, File.ReadAllText(ShortcutsPath));
     }
 
-    [Fact]
-    public void Load_NewerSchemaVersion_ReturnsUnsupportedAndPreservesTheOriginal()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(3)]
+    public void Load_OldOrNewerSchemaVersion_ReturnsUnsupportedAndPreservesTheOriginal(int schemaVersion)
     {
-        var json = $"{{\"schemaVersion\":{ShortcutDocument.CurrentSchemaVersion + 1},\"dashboard\":{{\"tiles\":[]}}}}";
+        var json = $"{{\"schemaVersion\":{schemaVersion},\"dashboard\":{{\"tiles\":[]}}}}";
         WriteExisting(json);
 
         var result = new ShortcutStore(ShortcutsPath).Load();
@@ -169,9 +174,9 @@ public sealed class ShortcutStoreTests : IDisposable
     }
 
     [Theory]
-    [InlineData("{\"schemaVersion\":1,\"dashboard\":{\"tiles\":null}}")]
-    [InlineData("{\"schemaVersion\":1,\"dashboard\":{\"tiles\":[null]}}")]
-    [InlineData("{\"schemaVersion\":1,\"dashboard\":{\"tiles\":[{\"tileId\":\"11111111-2222-3333-4444-555555555555\",\"title\":\"Tile\",\"action\":null}]}}")]
+    [InlineData("{\"schemaVersion\":2,\"dashboard\":{\"tiles\":null}}")]
+    [InlineData("{\"schemaVersion\":2,\"dashboard\":{\"tiles\":[null]}}")]
+    [InlineData("{\"schemaVersion\":2,\"dashboard\":{\"tiles\":[{\"tileId\":\"11111111-2222-3333-4444-555555555555\",\"title\":\"Tile\",\"closeOverlayAfterLaunch\":false,\"action\":null}]}}")]
     public void Load_ExplicitNullStructure_ReturnsMalformedAndPreservesTheOriginal(string json)
     {
         WriteExisting(json);
@@ -196,7 +201,8 @@ public sealed class ShortcutStoreTests : IDisposable
     [InlineData("{\"tileId\":\"11111111-2222-3333-4444-555555555555\",\"title\":\"Tile\",\"action\":{\"typeId\":\"future.action\",\"schemaVersion\":1,\"parameters\":42}}")]
     public void Load_StructurallyInvalidTile_ReturnsMalformedAndPreservesTheOriginal(string tileJson)
     {
-        var json = $"{{\"schemaVersion\":1,\"dashboard\":{{\"tiles\":[{tileJson}]}}}}";
+        var tileWithPreference = tileJson.Replace(",\"action\"", ",\"closeOverlayAfterLaunch\":false,\"action\"", StringComparison.Ordinal);
+        var json = $"{{\"schemaVersion\":2,\"dashboard\":{{\"tiles\":[{tileWithPreference}]}}}}";
         WriteExisting(json);
 
         var result = new ShortcutStore(ShortcutsPath).Load();
@@ -210,7 +216,7 @@ public sealed class ShortcutStoreTests : IDisposable
     public void Load_DuplicateTileId_ReturnsMalformedAndPreservesTheOriginal()
     {
         var duplicate = Guid.NewGuid();
-        var json = $"{{\"schemaVersion\":1,\"dashboard\":{{\"tiles\":[{{\"tileId\":\"{duplicate}\",\"title\":\"First\",\"action\":{{\"typeId\":\"future.first\",\"schemaVersion\":1,\"parameters\":{{}}}}}},{{\"tileId\":\"{duplicate}\",\"title\":\"Second\",\"action\":{{\"typeId\":\"future.second\",\"schemaVersion\":1,\"parameters\":{{}}}}}}]}}}}";
+        var json = $"{{\"schemaVersion\":2,\"dashboard\":{{\"tiles\":[{{\"tileId\":\"{duplicate}\",\"title\":\"First\",\"closeOverlayAfterLaunch\":false,\"action\":{{\"typeId\":\"future.first\",\"schemaVersion\":1,\"parameters\":{{}}}}}},{{\"tileId\":\"{duplicate}\",\"title\":\"Second\",\"closeOverlayAfterLaunch\":false,\"action\":{{\"typeId\":\"future.second\",\"schemaVersion\":1,\"parameters\":{{}}}}}}]}}}}";
         WriteExisting(json);
 
         var result = new ShortcutStore(ShortcutsPath).Load();
@@ -223,7 +229,7 @@ public sealed class ShortcutStoreTests : IDisposable
     [Fact]
     public void Load_ReadFailure_IsNotTreatedAsFirstRun()
     {
-        WriteExisting("{\"schemaVersion\":1,\"dashboard\":{\"tiles\":[]}}");
+        WriteExisting("{\"schemaVersion\":2,\"dashboard\":{\"tiles\":[]}}");
         using var handle = new FileStream(ShortcutsPath, FileMode.Open, FileAccess.Read, FileShare.None);
 
         var result = new ShortcutStore(ShortcutsPath).Load();
@@ -233,12 +239,25 @@ public sealed class ShortcutStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_SchemaTwoTileWithoutExplicitClosePreferenceIsMalformedAndPreserved()
+    {
+        const string json = "{\"schemaVersion\":2,\"dashboard\":{\"tiles\":[{\"tileId\":\"11111111-2222-3333-4444-555555555555\",\"title\":\"Tile\",\"action\":{\"typeId\":\"future.action\",\"schemaVersion\":1,\"parameters\":{}}}]}}";
+        WriteExisting(json);
+
+        var result = new ShortcutStore(ShortcutsPath).Load();
+
+        Assert.Equal(ShortcutLoadStatus.Malformed, result.Status);
+        Assert.False(result.CanSafelyReplace);
+        Assert.Equal(json, File.ReadAllText(ShortcutsPath));
+    }
+
+    [Fact]
     public void Save_InvalidDocumentCannotCreateOrReplaceAnything()
     {
         var invalidDocument = new ShortcutDocument
         {
             Dashboard = new ShortcutDashboardDefinition([
-                new ShortcutTileDefinition(Guid.Empty, "Invalid", new ShortcutActionSpec("future.action", 1, JsonSerializer.SerializeToElement(new { value = 1 })))
+                new ShortcutTileDefinition(Guid.Empty, "Invalid", false, new ShortcutActionSpec("future.action", 1, JsonSerializer.SerializeToElement(new { value = 1 })))
             ])
         };
 
@@ -286,7 +305,7 @@ public sealed class ShortcutStoreTests : IDisposable
     }
 
     private static ShortcutTileDefinition Tile(string title, string typeId, Guid? tileId = null) =>
-        new(tileId ?? Guid.NewGuid(), title, new ShortcutActionSpec(typeId, 1, JsonSerializer.SerializeToElement(new { value = 30 })));
+        new(tileId ?? Guid.NewGuid(), title, false, new ShortcutActionSpec(typeId, 1, JsonSerializer.SerializeToElement(new { value = 30 })));
 
     public void Dispose()
     {

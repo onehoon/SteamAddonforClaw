@@ -31,9 +31,11 @@ public sealed class ShortcutEditorFrontendTests : IDisposable
         Assert.Equal(NirCmdScreenshotCapture.ResolveFolder(null), captured.ScreenshotFolder.EffectiveFolder);
 
         var changed = await control.MutateShortcutAsync(new(FrontendShortcutMutationKind.Create, Title: "Web",
-            Action: new(FrontendShortcutEditorActionKind.Url, Url: "https://example.com")));
+            Action: new(FrontendShortcutEditorActionKind.Url, Url: "https://example.com"),
+            CloseOverlayAfterLaunch: true));
         Assert.True(changed.Succeeded);
         Assert.True(changed.Changed);
+        Assert.True(Assert.Single(changed.Snapshot.Tiles).CloseOverlayAfterLaunch);
         Assert.Equal(1, invalidations);
 
         var noOp = await control.MutateShortcutAsync(new(FrontendShortcutMutationKind.Move,
@@ -41,6 +43,24 @@ public sealed class ShortcutEditorFrontendTests : IDisposable
         Assert.True(noOp.Succeeded);
         Assert.False(noOp.Changed);
         Assert.Equal(1, invalidations);
+    }
+
+    [Fact]
+    public void Shortcut_editor_uses_action_defaults_only_for_creation_and_forces_screenshot_option_off()
+    {
+        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.UI", "Views", "ShortcutPage.xaml.cs"));
+        var defaultHelper = source[source.IndexOf("internal static bool DefaultCloseOverlayAfterLaunch", StringComparison.Ordinal)..];
+        var selectionHandler = source[source.IndexOf("actionPicker.SelectionChanged +=", StringComparison.Ordinal)..];
+        var saveSection = source[source.IndexOf("var intent = new FrontendShortcutMutationIntent(", StringComparison.Ordinal)..];
+
+        Assert.Contains("SteamBigPicture or", defaultHelper, StringComparison.Ordinal);
+        Assert.Contains("SteamClient or", defaultHelper, StringComparison.Ordinal);
+        Assert.Contains("XboxApp;", defaultHelper, StringComparison.Ordinal);
+        Assert.Contains("if (existing is null)", selectionHandler, StringComparison.Ordinal);
+        Assert.Contains("DefaultCloseOverlayAfterLaunch(selectedKind)", selectionHandler, StringComparison.Ordinal);
+        Assert.Contains("selectedKind != FrontendShortcutEditorActionKind.ScreenshotFullscreen && closeOverlayToggle.IsOn", saveSection, StringComparison.Ordinal);
+        Assert.Contains("existing?.CloseOverlayAfterLaunch ?? false", source, StringComparison.Ordinal);
+        Assert.Contains("closeOverlayToggle.Visibility = selectedKind == FrontendShortcutEditorActionKind.ScreenshotFullscreen", selectionHandler, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -106,6 +126,16 @@ public sealed class ShortcutEditorFrontendTests : IDisposable
 
     private InProcessAddonFrontendControl CreateControl(StartupSettingsCoordinator settings) =>
         new(settings, new ThrowingStatusProvider(), null);
+
+    private static string RepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "README.md")))
+            directory = directory.Parent;
+
+        Assert.NotNull(directory);
+        return directory!.FullName;
+    }
 
     public void Dispose()
     {

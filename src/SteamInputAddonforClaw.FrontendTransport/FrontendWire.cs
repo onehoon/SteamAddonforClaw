@@ -158,7 +158,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // including its snapshot, operations, and capture/run RPCs. Production game-profile
 // Minimum GPU Clock remains unchanged.
 // Version 66: add Steam Big Picture, Steam client, and Xbox built-in Shortcut editor action kinds.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 66; }
+// Version 67: add the required CloseOverlayAfterLaunch preference to Shortcut editor contracts.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 67; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

@@ -32,7 +32,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
 
     [Theory]
     [InlineData("{ not valid json")]
-    [InlineData("{\"schemaVersion\":2,\"dashboard\":{\"tiles\":[]}}")]
+    [InlineData("{\"schemaVersion\":1,\"dashboard\":{\"tiles\":[]}}")]
     public async Task Unsafe_persistence_disables_only_the_shortcut_runtime(string json)
     {
         Directory.CreateDirectory(_testDirectory);
@@ -92,9 +92,9 @@ public sealed class ShortcutRuntimeTests : IDisposable
     {
         var tiles = new[]
         {
-            Tile("Big Picture", ShortcutActionTypeIds.SteamBigPicture, Parameters("{}")),
-            Tile("Steam", ShortcutActionTypeIds.SteamClient, Parameters("{}")),
-            Tile("Xbox", ShortcutActionTypeIds.XboxApp, Parameters("{}"))
+            Tile("Big Picture", ShortcutActionTypeIds.SteamBigPicture, Parameters("{}"), closeOverlayAfterLaunch: true),
+            Tile("Steam", ShortcutActionTypeIds.SteamClient, Parameters("{}"), closeOverlayAfterLaunch: true),
+            Tile("Xbox", ShortcutActionTypeIds.XboxApp, Parameters("{}"), closeOverlayAfterLaunch: true)
         };
         Save(tiles);
         var started = new List<ProcessStartInfo>();
@@ -116,6 +116,7 @@ public sealed class ShortcutRuntimeTests : IDisposable
             Assert.Null(tile.StatusText);
         });
         Assert.All(results, result => Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome));
+        Assert.All(results, result => Assert.True(result.RetireOverlayAfterExecution));
         Assert.Equal("steam://open/bigpicture", started[0].FileName);
         Assert.True(started[0].UseShellExecute);
         Assert.Equal("steam://open/main", started[1].FileName);
@@ -123,6 +124,49 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Equal("explorer.exe", started[2].FileName);
         Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", started[2].Arguments);
         Assert.True(started[2].UseShellExecute);
+    }
+
+    [Fact]
+    public async Task Successful_supported_launch_actions_honor_the_persisted_close_preference()
+    {
+        var actionCases = new (string TypeId, string Parameters)[]
+        {
+            (ShortcutActionTypeIds.Executable, "{\"path\":\"C:\\\\Tools\\\\Tool.exe\",\"arguments\":\"\"}"),
+            (ShortcutActionTypeIds.PowerShell, "{\"script\":\"Write-Output 1\"}"),
+            (ShortcutActionTypeIds.Url, "{\"url\":\"https://example.com\"}"),
+            (ShortcutActionTypeIds.SteamBigPicture, "{}"),
+            (ShortcutActionTypeIds.SteamClient, "{}"),
+            (ShortcutActionTypeIds.XboxApp, "{}")
+        };
+        var tiles = actionCases.SelectMany(action => new[]
+        {
+            Tile("Close", action.TypeId, Parameters(action.Parameters), closeOverlayAfterLaunch: true),
+            Tile("Keep open", action.TypeId, Parameters(action.Parameters), closeOverlayAfterLaunch: false)
+        }).ToArray();
+        Save(tiles);
+        var runtime = CreateRuntime(_ => new Process(), _ => true);
+
+        foreach (var (tile, index) in tiles.Select((tile, index) => (tile, index)))
+        {
+            var result = await runtime.ExecuteAsync(tile.TileId);
+            Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
+            Assert.Equal(index % 2 == 0, result.RetireOverlayAfterExecution);
+        }
+    }
+
+    [Fact]
+    public async Task Failed_launch_never_requests_overlay_retirement_even_when_enabled()
+    {
+        var tile = Tile("Missing", ShortcutActionTypeIds.Executable,
+            Parameters("{\"path\":\"C:\\\\Missing\\\\Tool.exe\",\"arguments\":\"\"}"),
+            closeOverlayAfterLaunch: true);
+        Save([tile]);
+        var runtime = CreateRuntime(_ => new Process(), _ => false);
+
+        var result = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.Equal(ShortcutExecutionOutcome.Unavailable, result.Outcome);
+        Assert.False(result.RetireOverlayAfterExecution);
     }
 
     [Theory]
@@ -498,7 +542,8 @@ public sealed class ShortcutRuntimeTests : IDisposable
         var tile = Tile("Screenshot", ShortcutActionTypeIds.ScreenshotFullscreen, Parameters("{}"));
         Save([tile]);
         var callbackCount = 0;
-        var callbackResult = new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded);
+        var callbackResult = new ShortcutExecutionResult(ShortcutExecutionOutcome.Succeeded,
+            RetireOverlayAfterExecution: true);
         var runtime = CreateRuntime(screenshotAction: _ =>
         {
             callbackCount++;
@@ -512,7 +557,9 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Equal(FrontendShortcutTileState.Neutral, projected.State);
         Assert.Null(projected.StatusText);
         Assert.Equal(1, callbackCount);
-        Assert.Same(callbackResult, result);
+        Assert.NotSame(callbackResult, result);
+        Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome);
+        Assert.False(result.RetireOverlayAfterExecution);
     }
 
     [Fact]
@@ -608,15 +655,17 @@ public sealed class ShortcutRuntimeTests : IDisposable
         string title,
         string typeId,
         object parameters,
-        int schemaVersion = 1) =>
-        Tile(title, typeId, JsonSerializer.SerializeToElement(parameters), schemaVersion);
+        int schemaVersion = 1,
+        bool closeOverlayAfterLaunch = false) =>
+        Tile(title, typeId, JsonSerializer.SerializeToElement(parameters), schemaVersion, closeOverlayAfterLaunch);
 
     private static ShortcutTileDefinition Tile(
         string title,
         string typeId,
         JsonElement parameters,
-        int schemaVersion = 1) =>
-        new(Guid.NewGuid(), title, new ShortcutActionSpec(typeId, schemaVersion, parameters));
+        int schemaVersion = 1,
+        bool closeOverlayAfterLaunch = false) =>
+        new(Guid.NewGuid(), title, closeOverlayAfterLaunch, new ShortcutActionSpec(typeId, schemaVersion, parameters));
 
     private static JsonElement Parameters(string json)
     {

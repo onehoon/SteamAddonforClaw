@@ -76,17 +76,14 @@ public sealed class ShortcutStore
                 return Malformed("Shortcut document is missing a valid schemaVersion.");
             }
 
-            if (schemaVersion > ShortcutDocument.CurrentSchemaVersion)
+            if (schemaVersion != ShortcutDocument.CurrentSchemaVersion)
             {
-                AppLog.Warn("Shortcuts", "Shortcut document schema version is newer than this build supports. Refusing to load or overwrite it.", null,
+                AppLog.Warn("Shortcuts", "Shortcut document schema version is unsupported by this build. Refusing to load or overwrite it.", null,
                     ("Path", _shortcutsPath),
                     ("DocumentSchemaVersion", schemaVersion),
                     ("SupportedSchemaVersion", ShortcutDocument.CurrentSchemaVersion));
                 return new ShortcutLoadResult(new ShortcutDocument(), ShortcutLoadStatus.UnsupportedSchemaVersion);
             }
-
-            if (schemaVersion < 1)
-                return Malformed("Shortcut document schema version is invalid.", schemaVersion: schemaVersion);
 
             if (!rootDocument.RootElement.TryGetProperty("dashboard", out var dashboardElement)
                 || dashboardElement.ValueKind != JsonValueKind.Object)
