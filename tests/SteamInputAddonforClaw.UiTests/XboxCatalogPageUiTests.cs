@@ -163,10 +163,11 @@ public sealed class XboxCatalogPageUiTests
 
         Assert.Contains("_active = true", activate, StringComparison.Ordinal);
         Assert.Contains("_ = RefreshGamesAsync()", activate, StringComparison.Ordinal);
+        Assert.Contains("_active = false", deactivate, StringComparison.Ordinal);
         Assert.Contains("CancelScan()", deactivate, StringComparison.Ordinal);
         Assert.Contains("CancelCapture()", deactivate, StringComparison.Ordinal);
-        Assert.Contains("CancelTdpDebounce()", deactivate, StringComparison.Ordinal);
-        Assert.Contains("CancelFpsDebounce()", deactivate, StringComparison.Ordinal);
+        Assert.DoesNotContain("CancelTdpDebounce()", deactivate, StringComparison.Ordinal);
+        Assert.DoesNotContain("CancelFpsDebounce()", deactivate, StringComparison.Ordinal);
         Assert.Contains("await RefreshGamesAsync()", refreshButton, StringComparison.Ordinal);
         Assert.Contains("previous?.Cancel()", refresh, StringComparison.Ordinal);
         var scanCall = refresh.IndexOf("await _frontend.ScanXboxGamesAsync(scan.Token)", StringComparison.Ordinal);
@@ -246,9 +247,10 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
-    public void Xbox_detail_handlers_use_XBOX_Rpcs_and_cancel_TDP_FPS_debounces_on_retirement()
+    public void Xbox_detail_handlers_use_XBOX_Rpcs_and_preserve_cancel_boundaries_for_profile_edits()
     {
         var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
+        var steamCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml.cs"));
         foreach (var method in new[]
         {
             "SetXboxGameProfileFavoriteAsync", "SetXboxGameProfileEnabledAsync", "SetXboxGameProfileCpuBoostEnabledAsync",
@@ -258,19 +260,41 @@ public sealed class XboxCatalogPageUiTests
             "SetXboxGameProfileFpsLimitDcAsync", "SetXboxGameProfileResolutionAsync", "SetXboxGameProfileBackButtonMappingAsync"
         }) Assert.Contains(method, code, StringComparison.Ordinal);
         Assert.Contains("Task.Delay(300", code, StringComparison.Ordinal);
-        Assert.Contains("Task.Delay(275", code, StringComparison.Ordinal);
+        Assert.Contains("Task.Delay(300", steamCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("Task.Delay(275", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Task.Delay(275", steamCode, StringComparison.Ordinal);
         Assert.Contains("DevicePage.TdpDraftPolicy.AdjustAfterEdit", code, StringComparison.Ordinal);
         var select = Method(code, "private async Task SelectGameAsync", "private void BeginProfileLoad");
         var back = Method(code, "private void BackButton_Click", "private async void FavoriteButton_Click");
         var deactivate = Method(code, "internal void Deactivate()", "private async void RefreshGamesButton_Click");
         var clearSelection = Method(code, "private void ClearSelection()", "private void Render(");
+        var tdpSubmit = Method(code, "private async Task SubmitTdpAfterDelayAsync", "private void SetTdpText");
+        var fpsSubmit = Method(code, "private async Task SubmitFpsAfterDelayAsync", "private void CancelFpsDebounce");
+        var profileEnabled = Method(code, "private async void ProfileEnabledToggle_Toggled", "private void RenderBackButtonMapping");
         Assert.Contains("CancelTdpDebounce()", select, StringComparison.Ordinal);
         Assert.Contains("CancelFpsDebounce()", select, StringComparison.Ordinal);
         Assert.Contains("ClearSelection()", back, StringComparison.Ordinal);
         Assert.Contains("CancelTdpDebounce()", clearSelection, StringComparison.Ordinal);
         Assert.Contains("CancelFpsDebounce()", clearSelection, StringComparison.Ordinal);
-        Assert.Contains("CancelTdpDebounce()", deactivate, StringComparison.Ordinal);
-        Assert.Contains("CancelFpsDebounce()", deactivate, StringComparison.Ordinal);
+        Assert.DoesNotContain("CancelTdpDebounce()", deactivate, StringComparison.Ordinal);
+        Assert.DoesNotContain("CancelFpsDebounce()", deactivate, StringComparison.Ordinal);
+        Assert.Contains("CancelTdpDebounce()", profileEnabled, StringComparison.Ordinal);
+        Assert.DoesNotContain("|| !_active", tdpSubmit, StringComparison.Ordinal);
+        Assert.DoesNotContain("|| !_active", fpsSubmit, StringComparison.Ordinal);
+
+        var tdpMutation = tdpSubmit.IndexOf("await _frontend.SetXboxGameProfileTdpAsync", StringComparison.Ordinal);
+        var dirtySettle = tdpSubmit.IndexOf("_tdpDraftDirty = false", StringComparison.Ordinal);
+        var tdpResponseGuard = tdpSubmit.IndexOf("if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key))", StringComparison.Ordinal);
+        var tdpRender = tdpSubmit.IndexOf("Render(result.Snapshot, preserveDraft)", StringComparison.Ordinal);
+        Assert.True(tdpMutation >= 0 && dirtySettle > tdpMutation && tdpResponseGuard > dirtySettle && tdpRender > tdpResponseGuard);
+
+        var fpsMutation = fpsSubmit.IndexOf("await _frontend.SetXboxGameProfileFpsLimit", StringComparison.Ordinal);
+        var fpsResponseGuard = fpsSubmit.IndexOf("if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key))", StringComparison.Ordinal);
+        var fpsRender = fpsSubmit.IndexOf("Render(result.Snapshot)", StringComparison.Ordinal);
+        Assert.True(fpsMutation >= 0 && fpsResponseGuard > fpsMutation && fpsRender > fpsResponseGuard);
+
+        Assert.False(XboxPage.ShouldPreserveDirtyTdpDraft(true, 5, 5));
+        Assert.True(XboxPage.ShouldPreserveDirtyTdpDraft(true, 5, 6));
         Assert.DoesNotContain("StateInvalidated", code, StringComparison.Ordinal);
         Assert.DoesNotContain("ActualRunningAppId", code, StringComparison.Ordinal);
         Assert.DoesNotContain("Reconcile", code, StringComparison.Ordinal);

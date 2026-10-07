@@ -2401,35 +2401,35 @@ Overlay editing
 
 No second XBOX detector, profile store, hardware-apply owner, M1/M2 publisher, or Overlay-specific persistence path remains.
 
-### 24A.2 Main App XBOX pending-slider navigation behavior — cleanup required
+### 24A.2 Main App XBOX pending-slider navigation behavior — implemented
 
-The Main App XBOX page currently uses local trailing-delay drafts:
+The Main App XBOX page uses local trailing-delay drafts:
 
 ~~~text
 TDP  → 300 ms
-FPS  → 275 ms
+FPS  → 300 ms
 ~~~
 
-but `XboxPage.Deactivate()` cancels both pending drafts when the user leaves the XBOX top-level page. Returning from the selected-game detail to the XBOX catalog also clears/cancels those drafts.
+The cleanup preserves an admitted TDP/FPS edit when the user leaves the XBOX top-level page. `XboxPage.Deactivate()` marks the page inactive and cancels catalog scan/profile capture work, but it does not cancel the pending profile mutations. The delayed submits remain bound to the selected canonical game key and generation.
 
-This differs from the completed Overlay policy, where a normal user dismissal flushes pending Quick Settings edits, and it also differs from the Main App Steam Profile top-level deactivation behavior.
+Mutation results are rendered only while the page, selected key, requested key, and returned key still match. A current-generation TDP completion settles `_tdpDraftDirty` before this UI guard, so a hidden completion cannot leave a persisted edit marked as a local draft.
 
-A normal user can therefore move a TDP/FPS slider and navigate away within the short debounce window, causing the newest visible edit not to be persisted.
+Actual profile-context retirement still cancels pending work: selecting another game, returning to the catalog (including when a refresh no longer finds the selected game), and disabling the profile retain their existing cancellation behavior.
 
-Treat this as a small user-visible cleanup item, not as a reason to add another debounce manager/state machine. Prefer the smallest change that preserves the current pending generation against ordinary top-level navigation while retaining cancellation for a real profile-context change (different selected game / return-to-catalog if that action is intentionally defined as abandoning the draft / shutdown).
+This was fixed with the existing page-local debounce generations and typed frontend mutations. No navigation coordinator, debounce manager, or new state machine was added.
 
 ### 24A.3 Debounce policy inventory
 
-Current policies are intentionally surface-local but not numerically identical:
+The policies remain surface-local while the Main App Steam/XBOX slider delays now align:
 
 ~~~text
 Main App Steam Profile
   TDP = 300 ms
-  FPS = 275 ms
+  FPS = 300 ms
 
 Main App XBOX
   TDP = 300 ms
-  FPS = 275 ms
+  FPS = 300 ms
   M1/M2 = ordered whole-record save chain, no debounce
 
 Overlay Quick Settings
@@ -2440,7 +2440,7 @@ Overlay Quick Settings
 
 There is no XBOX-only Runtime debounce.
 
-If section 24A.2 is fixed, a tiny shared UI constant or simply aligning Main App FPS to the existing 300 ms Quick Settings policy is acceptable. Do not introduce a generic debounce service/manager solely for this.
+The Main App Steam/XBOX FPS delay is now normalized to the existing 300 ms policy. Do not introduce a generic debounce service/manager solely for this.
 
 ### 24A.4 Diagnostic-era post-classification data — non-blocking cleanup
 
@@ -2476,10 +2476,9 @@ The XBOX feature family is code-complete for the currently supported scope after
 
 Remaining work is:
 
-1. small Main App XBOX pending-slider navigation cleanup from section 24A.2;
-2. optional diagnostic-era DTO slimming from section 24A.4;
-3. later user-run physical lifecycle/behavior validation already deferred by Phase X5;
-4. final physical validation of the packaged Xbox app front-button action.
+1. optional diagnostic-era DTO slimming from section 24A.4;
+2. later user-run physical lifecycle/behavior validation already deferred by Phase X5;
+3. final physical validation of the packaged Xbox app front-button action.
 
 Do not reopen Custom EXE, Epic/GOG, generic multi-game arbitration, polling, or additional controller/profile authority as part of these cleanup items.
 
