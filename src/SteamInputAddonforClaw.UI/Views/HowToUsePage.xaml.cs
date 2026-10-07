@@ -8,7 +8,7 @@ public sealed partial class HowToUsePage : UserControl
     internal const string EnglishDocumentationUrl =
         "https://github.com/onehoon/SteamAddonforClaw#readme";
     internal const string KoreanDocumentationUrl =
-        "https://github.com/onehoon/SteamAddonforClaw/wiki/Korean-User-Guide";
+        "https://github.com/onehoon/SteamAddonforClaw/blob/main/docs/howtouse/README_KO.md";
 
     private bool _activated;
 
@@ -22,9 +22,15 @@ public sealed partial class HowToUsePage : UserControl
         if (_activated) return;
 
         _activated = true;
-        var documentationUrl = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
+        var documentationUrl = ResolveDocumentationUrl(CultureInfo.CurrentUICulture);
+        DocumentationWebView.Source = new Uri(documentationUrl);
+    }
+
+    internal static string ResolveDocumentationUrl(CultureInfo culture)
+    {
+        ArgumentNullException.ThrowIfNull(culture);
+        return string.Equals(culture.TwoLetterISOLanguageName, "ko", StringComparison.OrdinalIgnoreCase)
             ? KoreanDocumentationUrl
             : EnglishDocumentationUrl;
-        DocumentationWebView.Source = new Uri(documentationUrl);
     }
 }
