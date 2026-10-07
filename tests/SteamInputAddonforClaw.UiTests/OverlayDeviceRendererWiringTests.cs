@@ -438,31 +438,84 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("if (preferActiveProfile) _tabState.Select(AddonQuickSettingsTabId.Profile);", shell);
         Assert.Contains("case OverlayCommand.ShowActiveProfile:", app);
         Assert.Contains("ShowForPocAsync(preferActiveProfile: true)", app);
-        Assert.Contains("No game is currently running. Start a game to configure its profile.", profile);
+        Assert.Contains("No game is currently running.\\nStart a game to configure its profile.", profile);
         Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", profile);
         Assert.Contains("VerticalAlignment = VerticalAlignment.Center", profile);
-        Assert.Contains("_profileStatusMessage.FontSize = 20", profile);
+        Assert.Contains("TextAlignment = TextAlignment.Center", profile);
+        Assert.Contains("_profileStatusMessage.FontSize = 16", profile);
+        Assert.DoesNotContain("FontSize = 20", profile);
         Assert.Contains("var activeProfileReady = HasRenderableActiveProfile(page);", profile);
         Assert.Contains("_profileStatusMessage.Text = ResolveProfileStatusMessage(page);", profile);
         Assert.Contains("_profileStatusMessage.Visibility = Visibility.Collapsed", profile);
         Assert.Contains("_profileDetailRoot.Visibility = Visibility.Collapsed", profile);
+
+        const string noGameMessage = "No game is currently running. Start a game to configure its profile.";
+        const string noGameDisplayMessage = "No game is currently running.\nStart a game to configure its profile.";
+        Assert.Equal(noGameDisplayMessage, OverlayWindow.ResolveProfileStatusMessage(
+            QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, noGameMessage)));
+        Assert.Equal(1, noGameDisplayMessage.Count(character => character == '\n'));
+    }
+
+    [Fact]
+    public void Profile_first_show_stays_blank_until_an_authoritative_profile_page_is_applied()
+    {
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var prepare = ExtractMethod(profile, "private void PrepareActiveProfileFirstShow()");
+        var presentation = ExtractMethod(profile, "private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)");
+        var apply = ExtractMethod(profile, "internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)");
+
+        var retireRowsIndex = prepare.IndexOf("surface.Binding?.ApplyAuthoritativePage(page);", StringComparison.Ordinal);
+        var renderIndex = prepare.IndexOf("RenderQuickSettingsPage(surface);", StringComparison.Ordinal);
+        var applyIndex = prepare.IndexOf("ApplyProfilePresentation(page);", StringComparison.Ordinal);
+        Assert.Contains("private bool _activeProfileInitialLoadPending;", profile);
+        Assert.Contains("_activeProfileInitialLoadPending = true;", prepare);
+        Assert.Contains("\"Loading the active game profile.\"", prepare);
+        Assert.True(retireRowsIndex >= 0 && retireRowsIndex < renderIndex && renderIndex < applyIndex);
+
+        var pendingIndex = presentation.IndexOf("if (_activeProfileInitialLoadPending)", StringComparison.Ordinal);
+        var readyIndex = presentation.IndexOf("var activeProfileReady = HasRenderableActiveProfile(page);", StringComparison.Ordinal);
+        Assert.True(pendingIndex >= 0 && pendingIndex < readyIndex);
+        Assert.Contains("_profileDetailRoot.Visibility = Visibility.Collapsed;", presentation);
+        Assert.Contains("_profileStatusMessage.Visibility = Visibility.Collapsed;", presentation);
+        Assert.Contains("return;", presentation[..readyIndex]);
+        Assert.DoesNotContain("ResolveProfileStatusMessage", presentation[..readyIndex]);
+        Assert.DoesNotContain("Visibility = Visibility.Visible", presentation[..readyIndex]);
+
+        var clearPendingIndex = apply.IndexOf("_activeProfileInitialLoadPending = false;", StringComparison.Ordinal);
+        var applyPageIndex = apply.IndexOf("surface.Binding?.ApplyAuthoritativePage(page);", StringComparison.Ordinal);
+        Assert.True(clearPendingIndex >= 0 && clearPendingIndex < applyPageIndex);
+        Assert.Contains("if (page.PageId != QuickSettingsPageId.Profile) return;", apply);
     }
 
     [Fact]
     public void Profile_status_distinguishes_no_game_from_an_unavailable_active_xbox_profile()
     {
         const string noGameMessage = "No game is currently running. Start a game to configure its profile.";
+        const string noGameDisplayMessage = "No game is currently running.\nStart a game to configure its profile.";
         const string xboxFailureMessage = "The active XBOX game Profile is unavailable.";
         var noGamePage = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, noGameMessage);
+        var unrelatedNoTargetFailure = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, xboxFailureMessage);
         var unavailableXboxPage = QuickSettingsPageSnapshot.Unavailable(
             QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:active"), xboxFailureMessage);
 
         Assert.False(OverlayWindow.HasRenderableActiveProfile(noGamePage));
-        Assert.Equal(noGameMessage, OverlayWindow.ResolveProfileStatusMessage(noGamePage));
+        Assert.Equal(noGameDisplayMessage, OverlayWindow.ResolveProfileStatusMessage(noGamePage));
         Assert.False(OverlayWindow.HasRenderableActiveProfile(unavailableXboxPage));
         Assert.Equal(xboxFailureMessage, OverlayWindow.ResolveProfileStatusMessage(unavailableXboxPage));
+        Assert.Equal(xboxFailureMessage, OverlayWindow.ResolveProfileStatusMessage(unrelatedNoTargetFailure));
         Assert.NotEqual(noGameMessage, OverlayWindow.ResolveProfileStatusMessage(unavailableXboxPage));
         Assert.Equal("Profile settings are unavailable.", OverlayWindow.ResolveProfileStatusMessage(null));
+
+        var presentation = ExtractMethod(ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs"),
+            "private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)");
+        var readyIndex = presentation.IndexOf("if (activeProfileReady)", StringComparison.Ordinal);
+        var readyReturnIndex = presentation.IndexOf("return;", readyIndex, StringComparison.Ordinal);
+        var unavailableIndex = presentation.IndexOf("_profileDetailRoot.Visibility = Visibility.Collapsed;", readyReturnIndex, StringComparison.Ordinal);
+        Assert.True(readyIndex >= 0 && readyIndex < readyReturnIndex && readyReturnIndex < unavailableIndex);
+        Assert.Contains("_profileStatusMessage.Visibility = Visibility.Collapsed;", presentation[readyIndex..readyReturnIndex]);
+        Assert.Contains("_profileDetailRoot.Visibility = Visibility.Visible;", presentation[readyIndex..readyReturnIndex]);
+        Assert.Contains("_profileStatusMessage.Text = ResolveProfileStatusMessage(page);", presentation[unavailableIndex..]);
+        Assert.Contains("_profileStatusMessage.Visibility = Visibility.Visible;", presentation[unavailableIndex..]);
     }
 
     // SF-V2-09 section 32/13.1: exactly one page-local surface type/dictionary backs both pages --
@@ -996,6 +1049,21 @@ public sealed class OverlayDeviceRendererWiringTests
             index += needle.Length;
         }
         return count;
+    }
+
+    private static string ExtractMethod(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Method signature not found: {signature}");
+        var openBrace = source.IndexOf('{', start);
+        var depth = 0;
+        var index = openBrace;
+        for (; index < source.Length; index++)
+        {
+            if (source[index] == '{') depth++;
+            else if (source[index] == '}' && --depth == 0) break;
+        }
+        return source[start..(index + 1)];
     }
 
     private static string ReadSource(params string[] parts)

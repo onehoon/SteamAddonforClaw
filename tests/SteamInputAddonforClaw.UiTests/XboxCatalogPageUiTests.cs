@@ -195,33 +195,72 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
-    public void Xbox_page_scans_once_on_activation_and_refresh_and_ignores_results_after_leave()
+    public void Xbox_page_reuses_successful_catalog_until_explicit_refresh()
     {
         var pageCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
         var windowCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainWindow.xaml.cs"));
         var activate = Method(pageCode, "internal void Activate()", "internal void Deactivate()");
         var deactivate = Method(pageCode, "internal void Deactivate()", "private async void RefreshGamesButton_Click");
-        var refresh = Method(pageCode, "private async Task RefreshGamesAsync()", "private void Render(");
+        var refresh = Method(pageCode, "private async Task RefreshGamesAsync()", "private void GameSearchBox_TextChanged");
         var refreshButton = Method(pageCode, "private async void RefreshGamesButton_Click", "private async Task RefreshGamesAsync()");
         var showPage = Method(windowCode, "private void ShowPage(", "private async Task RefreshSystemStatusAsync()");
 
+        Assert.Contains("private bool _catalogLoaded", pageCode, StringComparison.Ordinal);
         Assert.Contains("_active = true", activate, StringComparison.Ordinal);
-        Assert.Contains("_ = RefreshGamesAsync()", activate, StringComparison.Ordinal);
+        Assert.Contains("if (_catalogLoaded)", activate, StringComparison.Ordinal);
+        Assert.Contains("ApplyCatalogFilter();", activate, StringComparison.Ordinal);
+        Assert.Contains("ShouldStartCatalogScan(_catalogLoaded, _scanCancellation is not null)", activate, StringComparison.Ordinal);
+        Assert.Contains("internal static bool ShouldStartCatalogScan(bool catalogLoaded, bool scanInProgress)", pageCode, StringComparison.Ordinal);
+        Assert.True(XboxPage.ShouldStartCatalogScan(catalogLoaded: false, scanInProgress: false));
+        Assert.False(XboxPage.ShouldStartCatalogScan(catalogLoaded: true, scanInProgress: false));
+        Assert.False(XboxPage.ShouldStartCatalogScan(catalogLoaded: false, scanInProgress: true));
         Assert.Contains("_active = false", deactivate, StringComparison.Ordinal);
-        Assert.Contains("CancelScan()", deactivate, StringComparison.Ordinal);
+        Assert.DoesNotContain("CancelScan()", deactivate, StringComparison.Ordinal);
         Assert.Contains("CancelCapture()", deactivate, StringComparison.Ordinal);
         Assert.DoesNotContain("CancelTdpDebounce()", deactivate, StringComparison.Ordinal);
         Assert.DoesNotContain("CancelFpsDebounce()", deactivate, StringComparison.Ordinal);
         Assert.Contains("await RefreshGamesAsync()", refreshButton, StringComparison.Ordinal);
         Assert.Contains("previous?.Cancel()", refresh, StringComparison.Ordinal);
         var scanCall = refresh.IndexOf("await _frontend.ScanXboxGamesAsync(scan.Token)", StringComparison.Ordinal);
-        var staleGuard = refresh.IndexOf("if (!IsCurrentScan(_active, _scanCancellation, scan)) return", StringComparison.Ordinal);
+        var staleGuard = refresh.IndexOf("if (!IsCurrentScan(_scanCancellation, scan)) return", StringComparison.Ordinal);
+        var readyResult = refresh.IndexOf("if (snapshot.Outcome == FrontendXboxGameCatalogOutcome.Ready)", StringComparison.Ordinal);
+        var catalogAccepted = refresh.IndexOf("_catalog = snapshot.Games", StringComparison.Ordinal);
+        var loadedAccepted = refresh.IndexOf("_catalogLoaded = true", StringComparison.Ordinal);
+        var hiddenPageGuard = refresh.IndexOf("if (!_active) return", StringComparison.Ordinal);
+        var visibleRebind = refresh.IndexOf("ApplyCatalogFilter();", StringComparison.Ordinal);
         Assert.True(scanCall >= 0 && staleGuard > scanCall);
+        Assert.True(readyResult >= 0 && catalogAccepted > readyResult && loadedAccepted > catalogAccepted);
+        Assert.True(hiddenPageGuard > loadedAccepted && visibleRebind > hiddenPageGuard);
+        Assert.DoesNotContain("_catalogLoaded = false", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("_catalog = []", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("if (_catalogLoaded)", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScanXboxGamesAsync", activate, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScanXboxGamesAsync", windowCode, StringComparison.Ordinal);
         Assert.Contains("XboxContent.Activate()", showPage, StringComparison.Ordinal);
         Assert.Contains("else if (wasXbox) XboxContent.Deactivate()", showPage, StringComparison.Ordinal);
         Assert.DoesNotContain("StateInvalidated", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("PackageCatalog", pageCode, StringComparison.Ordinal);
         Assert.DoesNotContain("Timer", pageCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Xbox_catalog_failures_remain_retryable_and_profile_capture_still_cancels_on_deactivation()
+    {
+        var pageCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
+        var deactivate = Method(pageCode, "internal void Deactivate()", "private async void RefreshGamesButton_Click");
+        var refresh = Method(pageCode, "private async Task RefreshGamesAsync()", "private void GameSearchBox_TextChanged");
+        var capture = Method(pageCode, "private async Task CaptureSelectedAsync(", "private void ClearSelection()");
+        var failure = refresh.IndexOf("if (snapshot.Outcome != FrontendXboxGameCatalogOutcome.Ready)", StringComparison.Ordinal);
+        var exceptionGuard = refresh.IndexOf("if (IsCurrentScan(_scanCancellation, scan) && _active)", StringComparison.Ordinal);
+
+        Assert.Contains("CancelCapture()", deactivate, StringComparison.Ordinal);
+        Assert.DoesNotContain("CancelScan()", deactivate, StringComparison.Ordinal);
+        Assert.Contains("capture.Token", capture, StringComparison.Ordinal);
+        Assert.Contains("IsCurrentProfileResponse(_active, _selectedGame?.Key, key, snapshot.Key)", capture, StringComparison.Ordinal);
+        Assert.True(failure >= 0 && refresh.IndexOf("GameGrid.ItemsSource = Array.Empty<GameCardItem>()", failure, StringComparison.Ordinal) > failure);
+        Assert.True(exceptionGuard > failure);
+        Assert.Contains("if (ReferenceEquals(_scanCancellation, scan)) _scanCancellation = null", refresh, StringComparison.Ordinal);
+        Assert.Equal(1, refresh.Split("_catalogLoaded = true", StringSplitOptions.None).Length - 1);
     }
 
     [Fact]
@@ -233,11 +272,11 @@ public sealed class XboxCatalogPageUiTests
         var back = Method(pageCode, "private void BackButton_Click", "private async void FavoriteButton_Click");
         var returnToCatalog = Method(pageCode, "private void ReturnToCatalog()", "private async void FavoriteButton_Click");
 
-        Assert.Contains("_ = RefreshGamesAsync()", activate, StringComparison.Ordinal);
+        Assert.Contains("if (_catalogLoaded)", activate, StringComparison.Ordinal);
         Assert.Contains("var selectedKey = _selectedGame?.Key", refresh, StringComparison.Ordinal);
         Assert.Contains("_catalog.FirstOrDefault(x => x.Key == selectedKey)", refresh, StringComparison.Ordinal);
         Assert.Contains("if (snapshot.Outcome != FrontendXboxGameCatalogOutcome.Ready)", refresh, StringComparison.Ordinal);
-        Assert.Contains("else if (_selectedGame is null)", refresh, StringComparison.Ordinal);
+        Assert.Contains("if (_selectedGame is null)", refresh, StringComparison.Ordinal);
         Assert.True(refresh.Split("ReturnToCatalog();", StringSplitOptions.None).Length - 1 >= 3);
         Assert.Contains("ReturnToCatalog()", back, StringComparison.Ordinal);
         Assert.Contains("ClearSelection()", returnToCatalog, StringComparison.Ordinal);
@@ -274,11 +313,11 @@ public sealed class XboxCatalogPageUiTests
         using var first = new CancellationTokenSource();
         using var latest = new CancellationTokenSource();
 
-        Assert.True(XboxPage.IsCurrentScan(true, first, first));
-        Assert.False(XboxPage.IsCurrentScan(true, latest, first));
+        Assert.True(XboxPage.IsCurrentScan(first, first));
+        Assert.False(XboxPage.IsCurrentScan(latest, first));
         first.Cancel();
-        Assert.False(XboxPage.IsCurrentScan(true, first, first));
-        Assert.False(XboxPage.IsCurrentScan(false, first, first));
+        Assert.False(XboxPage.IsCurrentScan(first, first));
+        Assert.False(XboxPage.IsCurrentScan(null, latest));
     }
 
     [Fact]

@@ -205,6 +205,24 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Equal(1, CountOccurrences(quickSettingsTarget, "=> null"));
     }
 
+    [Fact]
+    public void Overlay_initial_quick_settings_refresh_uses_the_profile_priority_after_capture_commit()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var method = ExtractMethod(source, "private async Task CoordinateOverlayToggleAsync()");
+
+        var targetIndex = method.IndexOf("var preferActiveProfile = CaptureActiveQuickSettingsProfileTarget() is not null;", StringComparison.Ordinal);
+        var showIndex = method.IndexOf("_overlayController.ShowAsync(preferActiveProfile)", StringComparison.Ordinal);
+        var pauseIndex = method.IndexOf("PauseForOverlayAsync", StringComparison.Ordinal);
+        var committedIndex = method.IndexOf("AppLog.Info(\"OverlayCapture\", \"Capture committed.\"", StringComparison.Ordinal);
+        var refreshIndex = method.IndexOf("_overlayController.RefreshQuickSettingsAsync(preferActiveProfile)", StringComparison.Ordinal);
+
+        Assert.True(targetIndex >= 0 && targetIndex < showIndex);
+        Assert.True(showIndex < pauseIndex);
+        Assert.True(pauseIndex < committedIndex);
+        Assert.True(committedIndex < refreshIndex);
+    }
+
     // Section 27/28: the shared product/dispatch authority SF-V2-08 already built stays untouched --
     // SF-V2-09 only consumes it from the Overlay side.
     [Fact]

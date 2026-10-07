@@ -85,10 +85,10 @@ public sealed class OverlayTransportTests
         [
             new(QuickSettingsSectionId.ProfileGeneral, "Xbox Game",
                 [new(QuickSettingsRowId.ProfileEnabled, "Profile", QuickSettingsControlKind.Toggle, true, true, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate)]),
-            new(QuickSettingsSectionId.ProfileController, "Controller",
+            new(QuickSettingsSectionId.ProfileController, "M1 / M2 Button Mapping",
             [
-                new(QuickSettingsRowId.ProfileBackButtonUseGlobal, "Use global M1 / M2 mapping", QuickSettingsControlKind.Toggle,
-                    true, true, QuickSettingsValue.Boolean(false), null, QuickSettingsCommitPolicy.Immediate),
+                new(QuickSettingsRowId.ProfileBackButtonUseGlobal, "M1 / M2 Button Mapping", QuickSettingsControlKind.Toggle,
+                    true, true, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate),
                 new(QuickSettingsRowId.ProfileBackButtonM1, "M1", QuickSettingsControlKind.Slider, true, true,
                     QuickSettingsValue.Integer(9), new(QuickSettingsSliderKind.Discrete, Options: options),
                     QuickSettingsCommitPolicy.TrailingDebounce300, QuickSettingsCommitGroupId.ProfileBackButtonMapping),
@@ -658,10 +658,13 @@ public sealed class OverlayTransportTests
         UseShellExecute = false, CreateNoWindow = true
     });
 
-    // SF-V2-09 section 7.7/29.1: a stable Device-then-Profile publish order (no product meaning
-    // attached; just deterministic tests/logs).
-    [Fact]
-    public async Task RefreshQuickSettingsAsync_publishes_device_then_profile_in_a_stable_order()
+    // SF-V2-09 section 7.7/29.1: page capture/publish remains sequential and follows the requested
+    // initial tab priority without changing the default Device-first refresh.
+    [Theory]
+    [InlineData(false, QuickSettingsPageId.Device, QuickSettingsPageId.Profile)]
+    [InlineData(true, QuickSettingsPageId.Profile, QuickSettingsPageId.Device)]
+    public async Task RefreshQuickSettingsAsync_publishes_pages_in_the_requested_order(
+        bool profileFirst, QuickSettingsPageId first, QuickSettingsPageId second)
     {
         var root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Overlay.Tests", Guid.NewGuid().ToString("N"));
         var overlayDirectory = Path.Combine(root, "overlay");
@@ -684,7 +687,7 @@ public sealed class OverlayTransportTests
                 snapshot => { lock (frames) frames.Add(snapshot); return Task.CompletedTask; });
 
             Assert.True(await controller.ShowAsync());
-            await controller.RefreshQuickSettingsAsync();
+            await controller.RefreshQuickSettingsAsync(profileFirst);
 
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
             while (DateTime.UtcNow < deadline) { lock (frames) { if (frames.Count >= 2) break; } await Task.Delay(20); }
@@ -692,10 +695,10 @@ public sealed class OverlayTransportTests
             lock (frames)
             {
                 Assert.Equal(2, frames.Count);
-                Assert.Equal(QuickSettingsPageId.Device, frames[0].PageId);
-                Assert.Equal("device-page", frames[0].Message);
-                Assert.Equal(QuickSettingsPageId.Profile, frames[1].PageId);
-                Assert.Equal("profile-page", frames[1].Message);
+                Assert.Equal(first, frames[0].PageId);
+                Assert.Equal(first == QuickSettingsPageId.Device ? "device-page" : "profile-page", frames[0].Message);
+                Assert.Equal(second, frames[1].PageId);
+                Assert.Equal(second == QuickSettingsPageId.Device ? "device-page" : "profile-page", frames[1].Message);
             }
 
             await controller.DisposeAsync();

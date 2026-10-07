@@ -197,19 +197,21 @@ internal static class QuickSettingsPresentation
     private static QuickSettingsSection BuildProfileControllerSection(ProfileQuickSettingsProjection snapshot)
     {
         var configuration = snapshot.BackButtonMapping!;
-        var mappingWritable = snapshot.PersistenceWritable && !configuration.UseGlobalMapping;
+        var perGameEnabled = !configuration.UseGlobalMapping;
+        var mappingWritable = snapshot.PersistenceWritable && perGameEnabled;
         var rows = new QuickSettingsRow[]
         {
-            new(QuickSettingsRowId.ProfileBackButtonUseGlobal, "Use global M1 / M2 mapping", QuickSettingsControlKind.Toggle,
+            // Preserve the existing transport row identity; its displayed value means per-game mapping enabled.
+            new(QuickSettingsRowId.ProfileBackButtonUseGlobal, "M1 / M2 Button Mapping", QuickSettingsControlKind.Toggle,
                 Available: true,
                 Writable: snapshot.PersistenceWritable,
-                Value: QuickSettingsValue.Boolean(configuration.UseGlobalMapping),
+                Value: QuickSettingsValue.Boolean(perGameEnabled),
                 SliderSpec: null,
                 CommitPolicy: QuickSettingsCommitPolicy.Immediate),
             BuildProfileBackButtonMappingSlider(QuickSettingsRowId.ProfileBackButtonM1, "M1", configuration.Mapping.M1, mappingWritable),
             BuildProfileBackButtonMappingSlider(QuickSettingsRowId.ProfileBackButtonM2, "M2", configuration.Mapping.M2, mappingWritable),
         };
-        return new QuickSettingsSection(QuickSettingsSectionId.ProfileController, "Controller", rows);
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileController, "M1 / M2 Button Mapping", rows);
     }
 
     private static QuickSettingsRow BuildProfileBackButtonMappingSlider(QuickSettingsRowId rowId, string label, Xbox360BackButtonTarget target, bool writable) =>
