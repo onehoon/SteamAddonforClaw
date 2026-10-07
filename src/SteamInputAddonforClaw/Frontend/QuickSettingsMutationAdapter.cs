@@ -253,6 +253,30 @@ internal static class QuickSettingsMutationAdapter
                     ? await control.SetXboxGameProfileFpsLimitAcAsync(xboxKey!, fps, cancellationToken).ConfigureAwait(false)
                     : await control.SetXboxGameProfileFpsLimitDcAsync(xboxKey!, fps, cancellationToken).ConfigureAwait(false));
             }
+            case QuickSettingsRowId.ProfileGpuMinimumClockEnabled:
+            {
+                if (!TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileGpuMinimumClockEnabled, out var enabled))
+                    return new QuickSettingsMutationResult(false, "Malformed Minimum GPU Clock toggle intent.", currentPage);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileGpuMinimumClockEnabledAsync(appId!.Value, enabled, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileGpuMinimumClockEnabledAsync(xboxKey!, enabled, cancellationToken).ConfigureAwait(false));
+            }
+            case QuickSettingsRowId.ProfileGpuMinimumClockAc:
+            case QuickSettingsRowId.ProfileGpuMinimumClockDc:
+            {
+                var gpuRow = currentPage.Sections.SelectMany(section => section.Rows)
+                    .FirstOrDefault(row => row.RowId == intent.EditedRowId);
+                var optionCount = gpuRow?.SliderSpec?.Options?.Count ?? 0;
+                if (optionCount == 0 || !TryGetSingleIntegerInRange(intent, intent.EditedRowId, 0, optionCount - 1, out var index))
+                    return new QuickSettingsMutationResult(false, "Malformed Minimum GPU Clock value.", currentPage);
+                if (profileTarget.Kind == QuickSettingsProfileTargetKind.Steam)
+                    return FinishProfile(intent.EditedRowId == QuickSettingsRowId.ProfileGpuMinimumClockAc
+                        ? await control.SetGameProfileGpuMinimumClockAcAsync(appId!.Value, index, cancellationToken).ConfigureAwait(false)
+                        : await control.SetGameProfileGpuMinimumClockDcAsync(appId!.Value, index, cancellationToken).ConfigureAwait(false));
+                return FinishProfile(intent.EditedRowId == QuickSettingsRowId.ProfileGpuMinimumClockAc
+                    ? await control.SetXboxGameProfileGpuMinimumClockAcAsync(xboxKey!, index, cancellationToken).ConfigureAwait(false)
+                    : await control.SetXboxGameProfileGpuMinimumClockDcAsync(xboxKey!, index, cancellationToken).ConfigureAwait(false));
+            }
             case QuickSettingsRowId.ProfileResolution:
             {
                 if (!TryGetSingleIntegerInRange(intent, QuickSettingsRowId.ProfileResolution, 0, 4, out var option))

@@ -223,6 +223,36 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
     }
 
     [Fact]
+    public void Minimum_gpu_clock_override_is_persisted_for_canonical_xbox_key_and_disabled_without_losing_values()
+    {
+        var store = new ProfileStore(PathName);
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var settings = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1725.125, DcMhz = 1825.375 };
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetEnabled(StoreKey, true, "Game"));
+        Assert.Null(store.Load().Document.XboxGames[StoreKey].Performance.GpuMinimumClock);
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetGpuMinimumClockEnabled(StoreKey, true, settings));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetGpuMinimumClockDc(StoreKey, 1625.125));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetGpuMinimumClockEnabled(StoreKey, false, null));
+
+        var saved = store.Load().Document.XboxGames[StoreKey].Performance.GpuMinimumClock!;
+        Assert.False(saved.Enabled);
+        Assert.Equal(1725.125, saved.AcMhz);
+        Assert.Equal(1625.125, saved.DcMhz);
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, false, null));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, true, "Game"));
+        var reenabled = store.Load().Document.XboxGames[StoreKey].Performance.GpuMinimumClock!;
+        Assert.False(reenabled.Enabled);
+        Assert.Equal(1725.125, reenabled.AcMhz);
+        Assert.Equal(1625.125, reenabled.DcMhz);
+        Assert.Equal([StoreKey], store.Load().Document.XboxGames.Keys);
+    }
+
+    [Fact]
     public void Disable_and_reenable_preserve_values_and_display_name_never_changes_identity()
     {
         var store = new ProfileStore(PathName);

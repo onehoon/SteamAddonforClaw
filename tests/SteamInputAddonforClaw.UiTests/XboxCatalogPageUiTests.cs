@@ -68,6 +68,39 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
+    public void Steam_and_Xbox_game_pages_edit_minimum_gpu_clock_with_driver_indexes_and_cancel_stale_drafts()
+    {
+        var steamXaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml")).ToString();
+        var steamCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "ProfilePage.xaml.cs"));
+        var xboxXaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml")).ToString();
+        var xboxCode = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
+
+        foreach (var xaml in new[] { steamXaml, xboxXaml })
+        {
+            Assert.Contains("x:Name=\"GpuMinimumClockEnabledToggle\"", xaml, StringComparison.Ordinal);
+            Assert.Contains("x:Name=\"GpuMinimumClockAcSlider\"", xaml, StringComparison.Ordinal);
+            Assert.Contains("x:Name=\"GpuMinimumClockDcSlider\"", xaml, StringComparison.Ordinal);
+            Assert.Contains("Minimum=\"0\" Maximum=\"0\" StepFrequency=\"1\"", xaml, StringComparison.Ordinal);
+        }
+
+        foreach (var code in new[] { steamCode, xboxCode })
+        {
+            Assert.Contains("Task.Delay(300", code, StringComparison.Ordinal);
+            Assert.Contains("GpuMinimumClockEnabledToggle_Toggled", code, StringComparison.Ordinal);
+            Assert.Contains("CancelGpuMinimumClockDebounce()", code, StringComparison.Ordinal);
+            Assert.Contains("SelectableClocksMhz", code, StringComparison.Ordinal);
+            Assert.Contains("Math.Round(e.NewValue)", code, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("SetGameProfileGpuMinimumClockAcAsync(appId, index)", steamCode, StringComparison.Ordinal);
+        Assert.Contains("SetGameProfileGpuMinimumClockDcAsync(appId, index)", steamCode, StringComparison.Ordinal);
+        Assert.Contains("SetXboxGameProfileGpuMinimumClockAcAsync(key, index)", xboxCode, StringComparison.Ordinal);
+        Assert.Contains("SetXboxGameProfileGpuMinimumClockDcAsync(key, index)", xboxCode, StringComparison.Ordinal);
+        Assert.Contains("_selectedGame?.AppId != appId", steamCode, StringComparison.Ordinal);
+        Assert.Contains("_selectedGame?.Key != key", xboxCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Xbox_controller_editor_uses_global_fallback_and_persists_one_complete_mapping()
     {
         var xaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml")).ToString();

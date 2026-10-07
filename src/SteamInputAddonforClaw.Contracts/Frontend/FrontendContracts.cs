@@ -24,11 +24,13 @@ public sealed record FrontendGameTdpConfiguration(bool Enabled, FrontendTdpPower
 public sealed record FrontendGamePowerModeConfiguration(bool Enabled, WindowsPowerMode Ac, WindowsPowerMode Dc);
 public sealed record FrontendGameResolution(int Width, int Height);
 public sealed record FrontendGameFpsLimitConfiguration(bool Enabled, int AcFps, int DcFps, bool Available, string? UnavailableReason = null);
+public sealed record FrontendGameGpuMinimumClockConfiguration(bool Available, bool Initialized, bool Enabled,
+    IReadOnlyList<double> SelectableClocksMhz, double? AcMhz, double? DcMhz, double? RecommendedDefaultMhz, string? UnavailableReason = null);
 public sealed record FrontendGameProfileSnapshot(uint AppId, string? DisplayName, bool Exists, bool Enabled,
-    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null);
+    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits, FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null);
 public sealed record FrontendXboxGameProfileSnapshot(string Key, string? DisplayName, bool Exists, bool Enabled,
     FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits,
-    FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null)
+    FrontendGameResolution? Resolution = null, FrontendGamePowerModeConfiguration? PowerMode = null, FrontendGameFpsLimitConfiguration? FpsLimit = null, FrontendGameGpuMinimumClockConfiguration? GpuMinimumClock = null)
 {
     public FrontendGameBackButtonMappingConfiguration? BackButtonMapping { get; init; }
 }
@@ -813,6 +815,12 @@ public interface IAddonFrontendControl
         Task.FromResult(UnavailableXboxGameProfileMutation(key, "Intel FPS Limit is unavailable."));
     Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitDcAsync(string key, int fps, CancellationToken cancellationToken = default) =>
         Task.FromResult(UnavailableXboxGameProfileMutation(key, "Intel FPS Limit is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "Minimum GPU Clock is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockAcAsync(string key, int selectableClockIndex, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "Minimum GPU Clock is unavailable."));
+    Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockDcAsync(string key, int selectableClockIndex, CancellationToken cancellationToken = default) =>
+        Task.FromResult(UnavailableXboxGameProfileMutation(key, "Minimum GPU Clock is unavailable."));
     Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default) =>
         Task.FromResult(UnavailableXboxGameProfileMutation(key, "XBOX profile is unavailable."));
     Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileBackButtonMappingAsync(string key, BackButtonMappingSettings? mapping, CancellationToken cancellationToken = default) =>
@@ -830,6 +838,9 @@ public interface IAddonFrontendControl
     Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Intel FPS Limit is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitAcAsync(uint appId, int fps, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Intel FPS Limit is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitDcAsync(uint appId, int fps, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Intel FPS Limit is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Minimum GPU Clock is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockAcAsync(uint appId, int selectableClockIndex, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Minimum GPU Clock is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockDcAsync(uint appId, int selectableClockIndex, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Minimum GPU Clock is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileFavoriteAsync(uint appId, bool favorite, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Favorites are unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileResolutionAsync(uint appId, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Display resolution is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));

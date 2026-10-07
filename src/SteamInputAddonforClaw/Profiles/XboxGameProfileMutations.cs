@@ -125,6 +125,50 @@ internal sealed class XboxGameProfileMutations
     internal MutationOutcome SetFpsLimitAc(string key, int fps) => SetFpsLimitValue(key, fps, ac: true);
     internal MutationOutcome SetFpsLimitDc(string key, int fps) => SetFpsLimitValue(key, fps, ac: false);
 
+    internal MutationOutcome SetGpuMinimumClockEnabled(string key, bool enabled, GameGpuMinimumClockSettings? enabledSettings)
+    {
+        if (enabled && (enabledSettings is not { Enabled: true }
+            || !double.IsFinite(enabledSettings.AcMhz) || enabledSettings.AcMhz <= 0
+            || !double.IsFinite(enabledSettings.DcMhz) || enabledSettings.DcMhz <= 0))
+            return MutationOutcome.InvalidTarget;
+        return Mutate(key, (document, canonicalKey) =>
+        {
+            if (!document.XboxGames.TryGetValue(canonicalKey, out var profile) || !profile.Enabled)
+                return MutationChange.Unavailable;
+            var current = profile.Performance.GpuMinimumClock;
+            var updated = enabled
+                ? enabledSettings!
+                : current is null ? null : current with { Enabled = false };
+            if (current == updated) return MutationChange.NoChange;
+            document.XboxGames[canonicalKey] = profile with
+            {
+                Performance = profile.Performance with { GpuMinimumClock = updated }
+            };
+            return MutationChange.ChangedSuccessfully;
+        });
+    }
+
+    internal MutationOutcome SetGpuMinimumClockAc(string key, double mhz) => SetGpuMinimumClockRail(key, mhz, ac: true);
+    internal MutationOutcome SetGpuMinimumClockDc(string key, double mhz) => SetGpuMinimumClockRail(key, mhz, ac: false);
+
+    private MutationOutcome SetGpuMinimumClockRail(string key, double mhz, bool ac)
+    {
+        if (!double.IsFinite(mhz) || mhz <= 0) return MutationOutcome.InvalidTarget;
+        return Mutate(key, (document, canonicalKey) =>
+        {
+            if (!document.XboxGames.TryGetValue(canonicalKey, out var profile)
+                || !profile.Enabled
+                || profile.Performance.GpuMinimumClock is not { Enabled: true } current)
+                return MutationChange.Unavailable;
+            var updated = ac ? current with { AcMhz = mhz } : current with { DcMhz = mhz };
+            document.XboxGames[canonicalKey] = profile with
+            {
+                Performance = profile.Performance with { GpuMinimumClock = updated }
+            };
+            return MutationChange.ChangedSuccessfully;
+        });
+    }
+
     internal MutationOutcome SetResolution(string key, GameDisplayResolution? resolution, string? displayName) => Mutate(key, (document, canonicalKey) =>
     {
         if (!document.XboxGames.TryGetValue(canonicalKey, out var current))

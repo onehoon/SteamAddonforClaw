@@ -796,6 +796,67 @@ public sealed class QuickSettingsMutationAdapterTests
     }
 
     [Fact]
+    public async Task Profile_gpu_minimum_clock_dispatches_current_driver_table_index()
+    {
+        var control = new RecordingFrontendControl
+        {
+            ActiveProfile = ProfileSnapshot(111, enabled: true) with
+            {
+                GpuMinimumClock = new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1625, 1725.125, 1725.125)
+            }
+        };
+        var row = QuickSettingsRowId.ProfileGpuMinimumClockAc;
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), row,
+            [new(row, QuickSettingsValue.Integer(2))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Equal(["ProfileGpuMinimumClockAc:111:2"], control.ProfileCalls);
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Xbox_profile_gpu_minimum_clock_dispatches_current_driver_table_index()
+    {
+        var control = new RecordingFrontendControl
+        {
+            ActiveTarget = QuickSettingsProfileTarget.ForXbox("xbox:test"),
+            ActiveXboxProfile = RecordingFrontendControl.XboxProfileSnapshot("xbox:test", "Xbox Game") with
+            {
+                GpuMinimumClock = new(true, true, true, [1525, 1625, 1725.125, 1825.375], 1625, 1725.125, 1725.125)
+            }
+        };
+        var row = QuickSettingsRowId.ProfileGpuMinimumClockDc;
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:test"), row,
+            [new(row, QuickSettingsValue.Integer(3))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Equal(["XboxProfileGpuMinimumClockDc:xbox:test:3"], control.ProfileCalls);
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Profile_gpu_minimum_clock_rejects_index_outside_current_driver_table()
+    {
+        var control = new RecordingFrontendControl
+        {
+            ActiveProfile = ProfileSnapshot(111, enabled: true) with
+            {
+                GpuMinimumClock = new(true, true, true, [1525, 1625, 1725.125], 1625, 1725.125, 1725.125)
+            }
+        };
+        var row = QuickSettingsRowId.ProfileGpuMinimumClockAc;
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), row,
+            [new(row, QuickSettingsValue.Integer(3))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.ProfileCalls);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
     public async Task Profile_typed_failure_still_returns_authoritative_profile_page()
     {
         var control = new RecordingFrontendControl
@@ -995,6 +1056,12 @@ public sealed class QuickSettingsMutationAdapterTests
 
         public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitDcAsync(uint appId, int fps, CancellationToken t = default)
         { ProfileCalls.Add($"ProfileFpsLimitDc:{appId}:{fps}"); return Task.FromResult(ProfileResult()); }
+        public Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockAcAsync(uint appId, int selectableClockIndex, CancellationToken t = default)
+        { ProfileCalls.Add($"ProfileGpuMinimumClockAc:{appId}:{selectableClockIndex}"); return Task.FromResult(ProfileResult()); }
+        public Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockDcAsync(uint appId, int selectableClockIndex, CancellationToken t = default)
+        { ProfileCalls.Add($"ProfileGpuMinimumClockDc:{appId}:{selectableClockIndex}"); return Task.FromResult(ProfileResult()); }
+        public Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockEnabledAsync(uint appId, bool enabled, CancellationToken t = default)
+        { ProfileCalls.Add($"ProfileGpuMinimumClockEnabled:{appId}:{enabled}"); return Task.FromResult(ProfileResult()); }
 
         public Task<FrontendGameProfileMutationResult> SetGameProfileResolutionAsync(uint appId, FrontendGameResolution? resolution, string? displayName, CancellationToken t = default)
         { ProfileCalls.Add($"ProfileResolution:{appId}:{(resolution is null ? "null" : $"{resolution.Width}x{resolution.Height}")}"); return Task.FromResult(ProfileResult()); }
@@ -1023,6 +1090,12 @@ public sealed class QuickSettingsMutationAdapterTests
         { ProfileCalls.Add($"XboxProfileFpsLimitAc:{key}:{fps}"); return Task.FromResult(XboxProfileResult()); }
         public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitDcAsync(string key, int fps, CancellationToken t = default)
         { ProfileCalls.Add($"XboxProfileFpsLimitDc:{key}:{fps}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockAcAsync(string key, int selectableClockIndex, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileGpuMinimumClockAc:{key}:{selectableClockIndex}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockDcAsync(string key, int selectableClockIndex, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileGpuMinimumClockDc:{key}:{selectableClockIndex}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockEnabledAsync(string key, bool enabled, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileGpuMinimumClockEnabled:{key}:{enabled}"); return Task.FromResult(XboxProfileResult()); }
         public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken t = default)
         { ProfileCalls.Add($"XboxProfileResolution:{key}:{(resolution is null ? "null" : $"{resolution.Width}x{resolution.Height}")}"); return Task.FromResult(XboxProfileResult()); }
         public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileBackButtonMappingAsync(string key, BackButtonMappingSettings? mapping, CancellationToken t = default)

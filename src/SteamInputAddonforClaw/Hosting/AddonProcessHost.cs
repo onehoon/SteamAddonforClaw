@@ -209,6 +209,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             ?? (testOnlyDataRoot is null ? new IntelGpuMinimumClockControl() : new UnavailableIntelGpuMinimumClockControl());
         _intelGpuMinimumClockRuntime = new(_profileStore, _profileMutationGate, minimumClockControl,
             testGpuMinimumClockPowerSource ?? WindowsAcDcPowerSource.Read, minimumClockMarker);
+        _intelGpuMinimumClockRuntime.SetActiveProfileResolver(_activeProfileResolver);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _windowsAppRuntimePrerequisite = testWindowsAppRuntimePrerequisite ?? new WindowsAppRuntimePrerequisite();
         _overlayController = new OverlayProcessController(AppContext.BaseDirectory, logDirectory);
@@ -2094,11 +2095,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal void ReconcileIntelGpuMinimumClockForStartup()
     {
         try { _intelGpuMinimumClockRuntime.StartupReconcile(); }
-        catch (Exception exception) { AppLog.Debug("Profiles.IntelGpuMinimumClock", "Startup Device reconcile failed; Addon Runtime remains available.", ("Failure", exception.Message)); }
+        catch (Exception exception) { AppLog.Debug("Profiles.IntelGpuMinimumClock", "Startup effective GPU minimum reconcile failed; Addon Runtime remains available.", ("Failure", exception.Message)); }
     }
 
     internal IntelGpuMinimumClockOperationResult ReconcileGpuMinimumClockForPowerSourceChanged() =>
-        _intelGpuMinimumClockRuntime.ReconcileDevice("PowerSourceChanged");
+        _intelGpuMinimumClockRuntime.ReconcileEffective("PowerSourceChanged");
 
     private ActiveProfileTarget CaptureActiveProfileTarget()
     {
@@ -2585,6 +2586,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         try { _intelFpsRuntime.Reconcile(trigger); }
         catch (Exception exception) { AppLog.Error("Profiles.IntelFps", "FPS game-profile reconcile failed.", exception, ("ProfileTarget", target.LogLabel), ("Trigger", trigger)); }
+        try { _intelGpuMinimumClockRuntime.ReconcileEffective(trigger); }
+        catch (Exception exception) { AppLog.Error("Profiles.IntelGpuMinimumClock", "Minimum GPU Clock game-profile reconcile failed.", exception, ("ProfileTarget", target.LogLabel), ("Trigger", trigger)); }
     }
 
     private void OnBigPictureStateChanged(bool active)

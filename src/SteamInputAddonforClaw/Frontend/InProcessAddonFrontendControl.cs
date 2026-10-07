@@ -343,7 +343,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         MutateXboxGame(key, cancellationToken, mutations => mutations.SetFavorite(key, favorite, displayName), ProfileApplyKind.None);
 
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledAsync(string key, bool enabled, string? displayName, CancellationToken cancellationToken = default) =>
-        MutateXboxGame(key, cancellationToken, mutations => mutations.SetEnabled(key, enabled, displayName), ProfileApplyKind.All,
+        MutateXboxGame(key, cancellationToken,
+            mutations => enabled && _developerGpuFrequencyProbeModified()
+                && mutations.CaptureProfile(key).Profile.Performance.GpuMinimumClock?.Enabled == true
+                    ? XboxGameProfileMutations.MutationOutcome.Unavailable
+                    : mutations.SetEnabled(key, enabled, displayName),
+            ProfileApplyKind.All,
             reconcileBackButtonMapping: true);
 
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileBackButtonMappingAsync(
@@ -393,6 +398,66 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitDcAsync(string key, int fps, CancellationToken cancellationToken = default) =>
         MutateXboxGame(key, cancellationToken, mutations => mutations.SetFpsLimitDc(key, fps), ProfileApplyKind.FpsLimit);
 
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockEnabledAsync(string key, bool enabled, CancellationToken cancellationToken = default) =>
+        MutateXboxGpuMinimumClock(key, enabled, ac: null, cancellationToken);
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockAcAsync(string key, int selectableClockIndex, CancellationToken cancellationToken = default) =>
+        MutateXboxGpuMinimumClock(key, enabled: null, ac: true, cancellationToken, selectableClockIndex);
+
+    public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileGpuMinimumClockDcAsync(string key, int selectableClockIndex, CancellationToken cancellationToken = default) =>
+        MutateXboxGpuMinimumClock(key, enabled: null, ac: false, cancellationToken, selectableClockIndex);
+
+    private Task<FrontendXboxGameProfileMutationResult> MutateXboxGpuMinimumClock(
+        string key,
+        bool? enabled,
+        bool? ac,
+        CancellationToken cancellationToken,
+        int selectableClockIndex = -1)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_developerGpuFrequencyProbeModified())
+            return MutateXboxGame(key, cancellationToken, _ => XboxGameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.None);
+        if (_intelGpuMinimumClockRuntime is not { } runtime)
+            return MutateXboxGame(key, cancellationToken, _ => XboxGameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.None);
+
+        var outcome = XboxGameProfileMutations.MutationOutcome.Unavailable;
+        ProfileApplyKind applyKind = ProfileApplyKind.None;
+        if (enabled is { } toggle)
+        {
+            var capability = runtime.CaptureDeviceSnapshot();
+            if (capability.Available)
+            {
+                GameGpuMinimumClockSettings? settings = null;
+                if (toggle)
+                {
+                    var current = _xboxGameProfileMutations?.CaptureProfile(key).Profile.Performance.GpuMinimumClock;
+                    var acMhz = runtime.ResolveSelectableClockOrRecommendedDefault(current?.AcMhz);
+                    var dcMhz = runtime.ResolveSelectableClockOrRecommendedDefault(current?.DcMhz);
+                    if (acMhz is { } acValue && dcMhz is { } dcValue)
+                        settings = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = acValue, DcMhz = dcValue };
+                }
+
+                outcome = toggle && settings is null
+                    ? XboxGameProfileMutations.MutationOutcome.Unavailable
+                    : _xboxGameProfileMutations?.SetGpuMinimumClockEnabled(key, toggle, settings)
+                        ?? XboxGameProfileMutations.MutationOutcome.Unavailable;
+                applyKind = ProfileApplyKind.GpuMinimumClock;
+            }
+        }
+        else
+        {
+            var mhz = runtime.ResolveSelectableClockIndex(selectableClockIndex);
+            outcome = mhz is not null
+                ? ac == true
+                    ? _xboxGameProfileMutations?.SetGpuMinimumClockAc(key, mhz.Value) ?? XboxGameProfileMutations.MutationOutcome.Unavailable
+                    : _xboxGameProfileMutations?.SetGpuMinimumClockDc(key, mhz.Value) ?? XboxGameProfileMutations.MutationOutcome.Unavailable
+                : XboxGameProfileMutations.MutationOutcome.InvalidTarget;
+            applyKind = ac == true ? ProfileApplyKind.GpuMinimumClockAc : ProfileApplyKind.GpuMinimumClockDc;
+        }
+        return MutateXboxGame(key, cancellationToken, _ => outcome, applyKind);
+    }
+
     public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default) =>
         MutateXboxGame(key, cancellationToken, mutations => mutations.SetResolution(key,
             resolution is { } value ? new GameDisplayResolution { Width = value.Width, Height = value.Height } : null, displayName), ProfileApplyKind.Resolution);
@@ -406,7 +471,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         PowerMode = 1 << 2,
         FpsLimit = 1 << 3,
         Resolution = 1 << 4,
-        ExistingProfileEnable = CpuBoost | Tdp | PowerMode | FpsLimit,
+        GpuMinimumClock = 1 << 5,
+        GpuMinimumClockAc = 1 << 6,
+        GpuMinimumClockDc = 1 << 7,
+        ExistingProfileEnable = CpuBoost | Tdp | PowerMode | FpsLimit | GpuMinimumClock,
         All = ExistingProfileEnable | Resolution
     }
 
@@ -515,6 +583,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             _powerModeRuntime is { } powerModeRuntime ? () => powerModeRuntime.ReconcileWithResult().Succeeded : null);
         Apply(ProfileApplyKind.FpsLimit, "Intel FPS Limit", "Profiles.IntelFps",
             _intelFpsRuntime is { } intelFpsRuntime ? () => intelFpsRuntime.ReconcileWithResult(reason) : null);
+        Apply(ProfileApplyKind.GpuMinimumClock, "Minimum GPU Clock", "Profiles.IntelGpuMinimumClock",
+            _intelGpuMinimumClockRuntime is { } gpuRuntime ? () => gpuRuntime.ReconcileEffective(reason).Succeeded : null);
+        Apply(ProfileApplyKind.GpuMinimumClockAc, "Minimum GPU Clock", "Profiles.IntelGpuMinimumClock",
+            _intelGpuMinimumClockRuntime is { } acGpuRuntime ? () => acGpuRuntime.ReconcileGameRailMutation(editedAc: true, reason).Succeeded : null);
+        Apply(ProfileApplyKind.GpuMinimumClockDc, "Minimum GPU Clock", "Profiles.IntelGpuMinimumClock",
+            _intelGpuMinimumClockRuntime is { } dcGpuRuntime ? () => dcGpuRuntime.ReconcileGameRailMutation(editedAc: false, reason).Succeeded : null);
         return new(failures);
     }
 
@@ -560,7 +634,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
             profile.Performance.PowerMode is { } power ? new(power.Enabled, power.Ac, power.Dc) : null,
             new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60,
-                profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason))
+                profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason),
+            CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock))
         {
             BackButtonMapping = new(storedMapping is null, storedMapping ?? _settings.BackButtonMapping)
         };
@@ -597,9 +672,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
+        var gpuOverrideEnabled = _gameProfileMutations?.CaptureProfile(appId)?.Profile.Performance.GpuMinimumClock?.Enabled == true;
+        if (enabled && _developerGpuFrequencyProbeModified() && gpuOverrideEnabled)
+            return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable,
+                "Restore the Developer GPU frequency probe before enabling this GPU-clock profile.", CaptureGameProfile(appId)));
         var outcome = _gameProfileMutations?.SetEnabled(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
         return MutateGame(appId, outcome, ProfileApplyKind.ExistingProfileEnable,
-            ProfileApplyKind.PowerMode, ProfileApplyKind.FpsLimit);
+            ProfileApplyKind.PowerMode, ProfileApplyKind.FpsLimit, ProfileApplyKind.GpuMinimumClock);
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default)
@@ -634,6 +713,66 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) => MutateFps(appId, m => m.SetFpsLimitEnabled(appId, enabled));
     public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitAcAsync(uint appId, int fps, CancellationToken cancellationToken = default) => MutateFps(appId, m => m.SetFpsLimitAc(appId, fps));
     public Task<FrontendGameProfileMutationResult> SetGameProfileFpsLimitDcAsync(uint appId, int fps, CancellationToken cancellationToken = default) => MutateFps(appId, m => m.SetFpsLimitDc(appId, fps));
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default) =>
+        MutateGameGpuMinimumClock(appId, enabled, ac: null, cancellationToken);
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockAcAsync(uint appId, int selectableClockIndex, CancellationToken cancellationToken = default) =>
+        MutateGameGpuMinimumClock(appId, enabled: null, ac: true, cancellationToken, selectableClockIndex);
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileGpuMinimumClockDcAsync(uint appId, int selectableClockIndex, CancellationToken cancellationToken = default) =>
+        MutateGameGpuMinimumClock(appId, enabled: null, ac: false, cancellationToken, selectableClockIndex);
+
+    private Task<FrontendGameProfileMutationResult> MutateGameGpuMinimumClock(
+        uint appId,
+        bool? enabled,
+        bool? ac,
+        CancellationToken cancellationToken,
+        int selectableClockIndex = -1)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_developerGpuFrequencyProbeModified())
+            return MutateGame(appId, GameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.None);
+        if (_intelGpuMinimumClockRuntime is not { } runtime)
+            return MutateGame(appId, GameProfileMutations.MutationOutcome.Unavailable, ProfileApplyKind.None);
+
+        var outcome = GameProfileMutations.MutationOutcome.Unavailable;
+        if (enabled is { } toggle)
+        {
+            var capability = runtime.CaptureDeviceSnapshot();
+            if (capability.Available)
+            {
+                GameGpuMinimumClockSettings? settings = null;
+                if (toggle)
+                {
+                    var current = _gameProfileMutations?.CaptureProfile(appId)?.Profile.Performance.GpuMinimumClock;
+                    var acMhz = runtime.ResolveSelectableClockOrRecommendedDefault(current?.AcMhz);
+                    var dcMhz = runtime.ResolveSelectableClockOrRecommendedDefault(current?.DcMhz);
+                    if (acMhz is { } acValue && dcMhz is { } dcValue)
+                        settings = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = acValue, DcMhz = dcValue };
+                }
+
+                outcome = toggle && settings is null
+                    ? GameProfileMutations.MutationOutcome.Unavailable
+                    : _gameProfileMutations?.SetGpuMinimumClockEnabled(appId, toggle, settings)
+                        ?? GameProfileMutations.MutationOutcome.Unavailable;
+            }
+        }
+        else
+        {
+            var mhz = runtime.ResolveSelectableClockIndex(selectableClockIndex);
+            outcome = mhz is not null
+                ? ac == true
+                    ? _gameProfileMutations?.SetGpuMinimumClockAc(appId, mhz.Value) ?? GameProfileMutations.MutationOutcome.Unavailable
+                    : _gameProfileMutations?.SetGpuMinimumClockDc(appId, mhz.Value) ?? GameProfileMutations.MutationOutcome.Unavailable
+                : GameProfileMutations.MutationOutcome.InvalidTarget;
+        }
+        var applyKind = enabled is not null
+            ? ProfileApplyKind.GpuMinimumClock
+            : ac == true ? ProfileApplyKind.GpuMinimumClockAc : ProfileApplyKind.GpuMinimumClockDc;
+        return MutateGame(appId, outcome, applyKind, applyKind);
+    }
     private Task<FrontendGameProfileMutationResult> MutateFps(uint appId, Func<GameProfileMutations, GameProfileMutations.MutationOutcome> mutation)
     {
         ThrowIfShuttingDown();
@@ -682,8 +821,29 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             new(profile.Performance.Tdp!.Enabled, new(profile.Performance.Tdp.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits,
             profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
             profile.Performance.PowerMode is { } power ? new(power.Enabled, power.Ac, power.Dc) : null,
-            new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60, profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason));
+            new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60, profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason),
+            CaptureGameGpuMinimumClock(profile.Performance.GpuMinimumClock));
     }
+
+    private FrontendGameGpuMinimumClockConfiguration CaptureGameGpuMinimumClock(GameGpuMinimumClockSettings? settings)
+    {
+        if (_intelGpuMinimumClockRuntime is not { } runtime)
+            return new(false, settings is not null, settings?.Enabled == true, [], settings?.AcMhz, settings?.DcMhz, null,
+                "Intel GPU minimum-frequency control is unavailable.");
+
+        var capability = runtime.CaptureDeviceSnapshot();
+        var unsupportedSavedValue = settings?.Enabled == true
+            && (!IsSelectableClock(capability.SelectableClocksMhz, settings.AcMhz)
+                || !IsSelectableClock(capability.SelectableClocksMhz, settings.DcMhz));
+        return new(capability.Available, settings is not null, settings?.Enabled == true,
+            capability.SelectableClocksMhz, settings?.AcMhz, settings?.DcMhz, capability.RecommendedDefaultMhz,
+            unsupportedSavedValue
+                ? "A saved game minimum GPU clock is no longer supported by the current driver. Choose a supported value to replace it."
+                : capability.Available ? null : capability.LastFailure);
+    }
+
+    private static bool IsSelectableClock(IReadOnlyList<double> clocks, double value) =>
+        double.IsFinite(value) && clocks.Any(clock => double.IsFinite(clock) && Math.Abs(clock - value) <= 0.1);
 
     private async Task<FrontendGameProfileMutationResult> MutateGame(
         uint appId,

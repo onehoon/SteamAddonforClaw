@@ -46,6 +46,7 @@ public enum QuickSettingsSectionId
     ProfileTdp,
     ProfileCpuBoost,
     ProfilePowerMode,
+    ProfileGpuMinimumClock,
     ProfileFpsLimit,
     ProfileResolution,
 
@@ -84,6 +85,10 @@ public enum QuickSettingsRowId
     ProfilePowerModeEnabled,
     ProfilePowerModeAc,
     ProfilePowerModeDc,
+
+    ProfileGpuMinimumClockEnabled,
+    ProfileGpuMinimumClockAc,
+    ProfileGpuMinimumClockDc,
 
     ProfileFpsLimitEnabled,
     ProfileFpsLimitAc,

@@ -14,6 +14,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class XboxGameProfileFrontendTests : IDisposable
 {
     private const string Key = "store:9PK8PHLCQDF6";
@@ -40,6 +41,116 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.False(snapshot.Exists);
         await tdp.DisposeAsync();
         fps.Dispose();
+    }
+
+    [Fact]
+    public async Task XBOX_game_gpu_clock_frontend_resolves_driver_indexes_and_uses_recommended_default()
+    {
+        Directory.CreateDirectory(_directory);
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        var store = new ProfileStore(ProfilePath);
+        var gate = new ProfileMutationGate();
+        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, true, "Game"));
+        var hardware = new RecordingMinimumClockControl();
+        using var runtime = new IntelGpuMinimumClockRuntime(
+            store, gate, hardware, () => AcDcPowerSource.AC, Path.Combine(_directory, "minimum-clock.json"));
+        var control = CreateControl(mutations, gpuMinimumClockRuntime: runtime);
+
+        var before = await control.CaptureXboxGameProfileAsync(Key);
+        Assert.True(before.GpuMinimumClock!.Available);
+        Assert.False(before.GpuMinimumClock.Initialized);
+        Assert.False(before.GpuMinimumClock.Enabled);
+        Assert.Null(before.GpuMinimumClock.AcMhz);
+        Assert.Null(before.GpuMinimumClock.DcMhz);
+        Assert.NotNull(before.GpuMinimumClock.RecommendedDefaultMhz);
+        Assert.Equal([1525d, 1625d, 1725d, 1825d], before.GpuMinimumClock.SelectableClocksMhz);
+
+        var enabled = await control.SetXboxGameProfileGpuMinimumClockEnabledAsync(Key, true);
+        Assert.True(enabled.Succeeded, $"{enabled.Outcome}: {enabled.FailureMessage}");
+        var firstEnable = store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock!;
+        Assert.Equal(before.GpuMinimumClock.RecommendedDefaultMhz, firstEnable.AcMhz);
+        Assert.Equal(before.GpuMinimumClock.RecommendedDefaultMhz, firstEnable.DcMhz);
+        Assert.True((await control.SetXboxGameProfileGpuMinimumClockAcAsync(Key, 2)).Succeeded);
+        Assert.True((await control.SetXboxGameProfileGpuMinimumClockDcAsync(Key, 3)).Succeeded);
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetGpuMinimumClockDc(Key, 1777));
+        Assert.True((await control.SetXboxGameProfileGpuMinimumClockEnabledAsync(Key, false)).Succeeded);
+        Assert.True((await control.SetXboxGameProfileGpuMinimumClockEnabledAsync(Key, true)).Succeeded);
+
+        var saved = store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock!;
+        Assert.True(saved.Enabled);
+        Assert.Equal(1725, saved.AcMhz);
+        Assert.Equal(before.GpuMinimumClock.RecommendedDefaultMhz, saved.DcMhz);
+        Assert.Equal(0, hardware.SetCalls);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Active_XBOX_gpu_rail_edit_applies_only_when_it_matches_current_power_source(bool acPower)
+    {
+        Directory.CreateDirectory(_directory);
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        var store = new ProfileStore(ProfilePath);
+        var gate = new ProfileMutationGate();
+        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, true, "Game"));
+        var hardware = new RecordingMinimumClockControl();
+        var target = ActiveProfileTarget.ForXbox(Key);
+        using var runtime = new IntelGpuMinimumClockRuntime(
+            store, gate, hardware, () => acPower ? AcDcPowerSource.AC : AcDcPowerSource.DC,
+            Path.Combine(_directory, "minimum-clock.json"));
+        runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(target, document));
+        var control = CreateControl(mutations,
+            activeProfileTargetSource: () => target,
+            gpuMinimumClockRuntime: runtime);
+
+        Assert.True((await control.SetXboxGameProfileGpuMinimumClockEnabledAsync(Key, true)).Succeeded);
+        Assert.Equal(1, hardware.SetCalls);
+
+        Assert.True((await control.SetXboxGameProfileGpuMinimumClockAcAsync(Key, 0)).Succeeded);
+        Assert.Equal(acPower ? 2 : 1, hardware.SetCalls);
+        Assert.True((await control.SetXboxGameProfileGpuMinimumClockDcAsync(Key, 1)).Succeeded);
+        Assert.Equal(2, hardware.SetCalls);
+        Assert.Equal(acPower ? 1525 : 1625, hardware.LastSetRange.Min);
+
+        var saved = store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock!;
+        Assert.Equal(1525, saved.AcMhz);
+        Assert.Equal(1625, saved.DcMhz);
+    }
+
+    [Fact]
+    public async Task Developer_probe_blocks_XBOX_gpu_mutations_and_whole_profile_activation_before_persistence()
+    {
+        Directory.CreateDirectory(_directory);
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
+        var store = new ProfileStore(ProfilePath);
+        var gate = new ProfileMutationGate();
+        var mutations = new XboxGameProfileMutations(store, gate, Model());
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, true, "Game"));
+        var hardware = new RecordingMinimumClockControl();
+        using var runtime = new IntelGpuMinimumClockRuntime(
+            store, gate, hardware, () => AcDcPowerSource.AC, Path.Combine(_directory, "minimum-clock.json"));
+        var control = CreateControl(mutations, gpuMinimumClockRuntime: runtime, developerModified: true);
+
+        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
+            (await control.SetXboxGameProfileGpuMinimumClockEnabledAsync(Key, true)).Outcome);
+        Assert.Null(store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock);
+
+        var configured = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1725.125, DcMhz = 1825.375 };
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetGpuMinimumClockEnabled(Key, true, configured));
+        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
+            (await control.SetXboxGameProfileGpuMinimumClockAcAsync(Key, 0)).Outcome);
+        Assert.Equal(configured, store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock);
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(Key, false, null));
+        Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
+            (await control.SetXboxGameProfileEnabledAsync(Key, true, "Game")).Outcome);
+        Assert.False(store.Load().Document.XboxGames[Key].Enabled);
+        Assert.Equal(configured, store.Load().Document.XboxGames[Key].Performance.GpuMinimumClock);
+        Assert.Equal(0, hardware.SetCalls);
     }
 
     [Fact]
@@ -135,7 +246,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task Active_XBOX_profile_mutation_applies_through_the_five_shared_runtime_owners()
+    public async Task Active_XBOX_profile_mutation_applies_through_the_six_shared_runtime_owners()
     {
         Directory.CreateDirectory(_directory);
         var store = new ProfileStore(ProfilePath);
@@ -161,7 +272,8 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
                         CpuBoost = new GameCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled },
                         Tdp = new GameTdpSettings { Enabled = true, Ac = Pair(25, 30), Dc = Pair(18, 24) },
                         PowerMode = new GamePowerModeSettings { Enabled = true, Ac = WindowsPowerMode.BestPerformance, Dc = WindowsPowerMode.BestPowerEfficiency },
-                        FpsLimit = new GameFpsLimitSettings { Enabled = true, AcFps = 90, DcFps = 60 }
+                        FpsLimit = new GameFpsLimitSettings { Enabled = true, AcFps = 90, DcFps = 60 },
+                        GpuMinimumClock = new GameGpuMinimumClockSettings { Enabled = true, AcMhz = 1725, DcMhz = 1625 }
                     },
                     Display = new GameDisplayOverrides { Resolution = new GameDisplayResolution { Width = 1600, Height = 900 } }
                 }
@@ -191,6 +303,10 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         var display = new RecordingDisplayResolutionService();
         var resolution = new GameDisplayResolutionRuntime(store, gate, _directory, display);
         resolution.SetActiveProfileResolver(resolver);
+        var gpuHardware = new RecordingMinimumClockControl();
+        var gpuMarker = Path.Combine(_directory, "minimum-clock.json");
+        using var gpuRuntime = new IntelGpuMinimumClockRuntime(store, gate, gpuHardware, () => AcDcPowerSource.AC, gpuMarker);
+        gpuRuntime.SetActiveProfileResolver(resolver);
         var mutations = new XboxGameProfileMutations(store, gate, Model());
         var mappingReconciles = 0;
         var control = CreateControl(mutations, tdp, fps,
@@ -198,7 +314,8 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
             reconcileXboxBackButtonMapping: key => { Assert.Equal(Key, key); mappingReconciles++; return true; },
             cpu: cpu,
             power: power,
-            resolution: resolution);
+            resolution: resolution,
+            gpuMinimumClockRuntime: gpuRuntime);
 
         var result = await control.SetXboxGameProfileEnabledAsync(Key, true, "Game");
 
@@ -210,6 +327,9 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(90, limiter.LastEnabledFps);
         Assert.Equal(new DisplayModeSnapshot(1600, 900, 120, 32), display.Current);
         Assert.Equal(1, mappingReconciles);
+        Assert.Equal(1, gpuHardware.SetCalls);
+        Assert.Equal(1725, gpuHardware.LastSetRange.Min);
+        Assert.True(File.Exists(gpuMarker));
 
         var tdpOperations = transport.OperationCount;
         var powerApplies = powerPolicy.ApplyCount;
@@ -289,6 +409,12 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(fpsCalls, limiter.ApplyCount);
         Assert.Equal(powerApplies, powerPolicy.ApplyCount);
         Assert.Equal(resolutionCalls, display.ApplyCalls);
+
+        var disabled = await control.SetXboxGameProfileEnabledAsync(Key, false, "Game");
+        Assert.Equal(FrontendGameProfileMutationOutcome.Succeeded, disabled.Outcome);
+        Assert.Equal(2, gpuHardware.SetCalls);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, -1), gpuHardware.LastSetRange);
+        Assert.False(File.Exists(gpuMarker));
 
         fps.BeginShutdown();
         fps.Dispose();
@@ -474,17 +600,21 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         BackButtonMappingSettings? globalBackButtonMapping = null,
         CpuBoostRuntime? cpu = null,
         PowerModeRuntime? power = null,
-        GameDisplayResolutionRuntime? resolution = null)
+        GameDisplayResolutionRuntime? resolution = null,
+        IntelGpuMinimumClockRuntime? gpuMinimumClockRuntime = null,
+        bool developerModified = false)
     {
         var settings = new StartupSettingsCoordinator(new AppSettings { BackButtonMapping = globalBackButtonMapping ?? BackButtonMappingSettings.Default },
             new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
         return new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null,
             cpuBoostRuntime: cpu, tdpRuntime: tdp, powerModeRuntime: power,
             displayResolutionRuntime: resolution, intelFpsRuntime: fps,
+            intelGpuMinimumClockRuntime: gpuMinimumClockRuntime,
             xboxGameProfileMutations: mutations, actualRunningAppIdSource: actualRunningAppIdSource,
             activeProfileTargetSource: activeProfileTargetSource,
             reconcileXboxBackButtonMapping: reconcileXboxBackButtonMapping,
-            activeXboxDisplayNameSource: activeXboxDisplayNameSource);
+            activeXboxDisplayNameSource: activeXboxDisplayNameSource,
+            developerGpuFrequencyProbeModified: () => developerModified);
     }
 
     private static HandheldDeviceModelId Model() => new("msi.claw.a2vm.7");
@@ -492,6 +622,8 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
 
     public void Dispose()
     {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DrainForTests();
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = null;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
     }
 
@@ -539,5 +671,21 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         public IntelFpsApplyOutcome Enable(int fps, AcDcPowerSource source) { ApplyCount++; LastEnabledFps = fps; return IntelFpsApplyOutcome.Succeeded; }
         public bool Disable(AcDcPowerSource? source) { ApplyCount++; return true; }
         public void Dispose() { }
+    }
+
+    private sealed class RecordingMinimumClockControl : IIntelGpuMinimumClockControl
+    {
+        private IntelGpuFrequencyRange _currentRange = new(-1, -1);
+        public int SetCalls { get; private set; }
+        public IntelGpuFrequencyRange LastSetRange { get; private set; }
+        public IntelGpuMinimumClockNativeCapability Initialize() => Capability;
+        public IntelGpuMinimumClockNativeCapability Reinitialize() => Capability;
+        public IntelGpuFrequencyRange GetRange() => _currentRange;
+        public uint SetRange(IntelGpuFrequencyRange range) { SetCalls++; LastSetRange = range; _currentRange = range; return 0; }
+        public void Dispose() { }
+
+        private static IntelGpuMinimumClockNativeCapability Capability { get; } = new(
+            true, null, "Intel Integrated GPU", 0x8086, 0x1234, true, 300, 2300,
+            [1400, 1525, 1625, 1725, 1825, 1925, 2025]);
     }
 }
