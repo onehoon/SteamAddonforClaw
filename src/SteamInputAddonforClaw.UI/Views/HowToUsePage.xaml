@@ -2,5 +2,26 @@
     x:Class="SteamInputAddonforClaw.Views.HowToUsePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <WebView2 x:Name="DocumentationWebView" />
+    <Grid>
+        <WebView2 x:Name="DocumentationWebView" />
+
+        <StackPanel x:Name="LoadingPanel"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="12">
+            <ProgressRing IsActive="True" />
+            <TextBlock Text="Loading documentation…" />
+        </StackPanel>
+
+        <StackPanel x:Name="FailurePanel"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="12"
+                    Visibility="Collapsed">
+            <TextBlock Text="How to Use could not be loaded."
+                       TextAlignment="Center"
+                       TextWrapping="Wrap" />
+            <Button Content="Retry" Click="RetryButton_Click" />
+        </StackPanel>
+    </Grid>
 </UserControl>
