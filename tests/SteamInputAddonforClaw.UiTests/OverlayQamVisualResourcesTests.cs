@@ -290,7 +290,7 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.Contains("Style = OverlayQamResources.Style(\"QamValueButtonStyle\")", tabOrder);
 
         Assert.DoesNotContain("_profileCatalog", profile);
-        Assert.Contains("Math.Min(2, _shortcutSnapshot.Tiles.Count)", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs")));
+        Assert.Contains("ShortcutVisualColumnCount = 3", File.ReadAllText(Path.Combine(root, "src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shortcuts.cs")));
     }
 
     [Fact]
@@ -376,7 +376,9 @@ public sealed class OverlayQamVisualResourcesTests
         Assert.DoesNotContain("page.Message", quickSettings, StringComparison.Ordinal);
         Assert.DoesNotContain("section.Message", quickSettings, StringComparison.Ordinal);
         Assert.DoesNotContain("LastLocalFailureMessage", quickSettings, StringComparison.Ordinal);
-        Assert.DoesNotContain("tile.StatusText", shortcuts, StringComparison.Ordinal);
+        Assert.Contains("tile.StatusText", shortcuts, StringComparison.Ordinal);
+        Assert.Contains("Text = tile.StatusText", shortcuts, StringComparison.Ordinal);
+        Assert.Contains("ApplyTextStyle(status, \"QamCaptionTextStyle\")", shortcuts, StringComparison.Ordinal);
         Assert.Contains("Text = tile.Title", shortcuts, StringComparison.Ordinal);
         Assert.Contains("tile.Enabled ? 1.0", shortcuts, StringComparison.Ordinal);
         Assert.Contains("_shortcutExecutionInFlight", shortcuts, StringComparison.Ordinal);

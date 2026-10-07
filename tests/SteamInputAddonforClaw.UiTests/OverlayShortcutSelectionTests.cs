@@ -19,7 +19,7 @@ public sealed class OverlayShortcutSelectionTests
     }
 
     [Fact]
-    public void One_and_two_tiles_use_their_actual_column_count()
+    public void Logical_selection_columns_stay_bounded_to_populated_rows()
     {
         var selection = new OverlayShortcutSelection();
 
@@ -36,42 +36,73 @@ public sealed class OverlayShortcutSelectionTests
     }
 
     [Fact]
-    public void More_than_four_tiles_are_supported_without_wrapping_rows()
+    public void Three_columns_match_full_six_tile_rows()
     {
-        var selection = At(tileCount: 6, columnCount: 2, index: 3);
-
-        Assert.False(selection.MoveRight());
-        Assert.True(selection.MoveDown());
-        Assert.Equal(5, selection.SelectedIndex);
-        Assert.False(selection.MoveRight());
-    }
-
-    [Fact]
-    public void Vertical_moves_preserve_column_and_clamp_a_short_final_row()
-    {
-        var selection = At(tileCount: 5, columnCount: 2, index: 3);
+        var selection = At(tileCount: 6, columnCount: 3, index: 1);
 
         Assert.True(selection.MoveDown());
         Assert.Equal(4, selection.SelectedIndex);
         Assert.True(selection.MoveUp());
-        Assert.Equal(2, selection.SelectedIndex);
+        Assert.Equal(1, selection.SelectedIndex);
+        selection.Select(2);
+        Assert.True(selection.MoveDown());
+        Assert.Equal(5, selection.SelectedIndex);
+        Assert.False(selection.MoveDown());
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 3)]
+    [InlineData(4, 3)]
+    [InlineData(5, 3)]
+    [InlineData(6, 3)]
+    public void One_through_six_tiles_use_the_populated_three_column_selection_geometry(int tileCount, int columnCount)
+    {
+        var selection = At(tileCount, columnCount, index: tileCount - 1);
+
+        Assert.Equal(tileCount, selection.TileCount);
+        Assert.Equal(columnCount, selection.ColumnCount);
+        Assert.Equal(tileCount - 1, selection.SelectedIndex);
+        Assert.False(selection.MoveRight());
+    }
+
+    [Fact]
+    public void Vertical_moves_follow_three_column_geometry_and_clamp_a_short_final_row()
+    {
+        var selection = At(tileCount: 5, columnCount: 3, index: 2);
+
+        Assert.True(selection.MoveDown());
+        Assert.Equal(4, selection.SelectedIndex);
+        Assert.True(selection.MoveUp());
+        Assert.Equal(1, selection.SelectedIndex);
+
+        selection.Select(3);
+        Assert.False(selection.MoveDown());
+        Assert.True(selection.MoveUp());
+        Assert.Equal(0, selection.SelectedIndex);
     }
 
     [Fact]
     public void Horizontal_moves_stay_within_the_current_row()
     {
-        var selection = At(tileCount: 5, columnCount: 2, index: 2);
+        var selection = At(tileCount: 5, columnCount: 3, index: 2);
 
+        Assert.True(selection.MoveLeft());
+        Assert.Equal(1, selection.SelectedIndex);
+        selection.Select(2);
+        Assert.False(selection.MoveRight());
+        selection.Select(3);
         Assert.False(selection.MoveLeft());
         Assert.True(selection.MoveRight());
-        Assert.Equal(3, selection.SelectedIndex);
+        Assert.Equal(4, selection.SelectedIndex);
         Assert.False(selection.MoveRight());
     }
 
     [Fact]
     public void First_and_last_row_edges_are_bounded()
     {
-        var selection = At(tileCount: 5, columnCount: 2, index: 0);
+        var selection = At(tileCount: 5, columnCount: 3, index: 0);
         Assert.False(selection.MoveUp());
 
         selection.Select(4);
@@ -82,7 +113,7 @@ public sealed class OverlayShortcutSelectionTests
     [Fact]
     public void Invalid_selection_is_rejected()
     {
-        var selection = At(tileCount: 5, columnCount: 2, index: 1);
+        var selection = At(tileCount: 5, columnCount: 3, index: 1);
 
         Assert.False(selection.Select(-1));
         Assert.False(selection.Select(5));
@@ -92,12 +123,12 @@ public sealed class OverlayShortcutSelectionTests
     [Fact]
     public void Reconfigure_normalizes_deleted_selection_and_restores_a_valid_preferred_index()
     {
-        var selection = At(tileCount: 6, columnCount: 2, index: 5);
+        var selection = At(tileCount: 6, columnCount: 3, index: 5);
 
-        selection.Configure(tileCount: 3, columnCount: 2);
+        selection.Configure(tileCount: 3, columnCount: 3);
         Assert.Equal(0, selection.SelectedIndex);
 
-        selection.Configure(tileCount: 5, columnCount: 2, preferredIndex: 3);
+        selection.Configure(tileCount: 5, columnCount: 3, preferredIndex: 3);
         Assert.Equal(3, selection.SelectedIndex);
 
         selection.Configure(tileCount: 2, columnCount: 2, preferredIndex: 4);
@@ -107,7 +138,7 @@ public sealed class OverlayShortcutSelectionTests
     [Fact]
     public void Reset_clears_layout_and_selection()
     {
-        var selection = At(tileCount: 4, columnCount: 2, index: 3);
+        var selection = At(tileCount: 4, columnCount: 3, index: 3);
 
         selection.Reset();
 

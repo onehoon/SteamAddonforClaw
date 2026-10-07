@@ -8,9 +8,9 @@
 > **Date:** 2026-09-02  
 > **Scope:** Visual shell, tab model, controller-first navigation, layout hierarchy, common control interaction, mutation/debounce behavior, and Shortcut surface for `SteamInputAddonforClaw.Overlay.exe`.
 
-> **Shortcut update (2026-09-24):** The older fixed four-slot / `Unassigned` examples below are historical. The active Overlay uses the Runtime-owned ordered `FrontendShortcutDashboardSnapshot`, renders every tile in up to two columns, and requests execution by `TileId` only. See `docs/overlayui/ADDON_QUICK_SETTINGS_OVERLAY_ARCHITECTURE.md` for the current ownership boundary.
+> **Shortcut update (2026-10-07):** The older fixed four-slot / `Unassigned` examples below are historical. The active Overlay uses the Runtime-owned ordered `FrontendShortcutDashboardSnapshot`, renders every tile in a fixed three-column grid of square 117.333333-DIP tiles with 8-DIP gaps, centers each title and any existing status text, and requests execution by `TileId` only. See `docs/overlayui/ADDON_QUICK_SETTINGS_OVERLAY_ARCHITECTURE.md` for the current ownership boundary.
 > **Not a work order:** This document defines the UI contract that later OQ5 work orders should implement in focused PRs.  
-> **Implementation state:** The WinUI3 Overlay process, shared Device/Profile pages, and Runtime-backed dynamic Shortcut grid are implemented. This baseline is not evidence of hardware validation.
+> **Implementation state:** The WinUI3 Overlay process, shared Device/Profile pages, and Runtime-backed fixed three-column Shortcut grid are implemented. This baseline is not evidence of hardware validation.
 
 ---
 

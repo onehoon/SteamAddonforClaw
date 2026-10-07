@@ -9,6 +9,9 @@ public enum FrontendShortcutEditorActionKind
     PowerShell,
     Url,
     ScreenshotFullscreen,
+    SteamBigPicture,
+    SteamClient,
+    XboxApp,
     Unsupported,
 }
 

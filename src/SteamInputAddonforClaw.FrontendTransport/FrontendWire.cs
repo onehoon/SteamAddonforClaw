@@ -157,7 +157,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 65: retire the completed Developer-only Intel IGCL GPU Frequency / PL1 probe,
 // including its snapshot, operations, and capture/run RPCs. Production game-profile
 // Minimum GPU Clock remains unchanged.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 65; }
+// Version 66: add Steam Big Picture, Steam client, and Xbox built-in Shortcut editor action kinds.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 66; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

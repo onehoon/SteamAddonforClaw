@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using Microsoft.UI.Xaml;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Views;
 using Xunit;
 
@@ -582,6 +583,73 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("ScreenshotFolder", overlayXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Slot1", shortcutXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Slot2", shortcutXaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Main_app_shortcut_editor_uses_three_equal_native_wrap_slots_and_keeps_collection_order()
+    {
+        var root = FindRepositoryRoot();
+        var shortcutXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml"));
+        var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
+        var list = shortcutXaml.Descendants().Single(element => (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "ShortcutList");
+        var wrapGrid = list.Descendants().Single(element => element.Name.LocalName == "ItemsWrapGrid");
+
+        Assert.Equal("Horizontal", (string?)wrapGrid.Attribute("Orientation"));
+        Assert.Equal("3", (string?)wrapGrid.Attribute("MaximumRowsOrColumns"));
+        Assert.Equal("0", (string?)list.Attribute("Padding"));
+        Assert.Equal("True", (string?)list.Attribute("CanReorderItems"));
+        Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("itemsPanel.ItemWidth = itemWidth", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("GetShortcutItemWidth(itemsPanel.ActualWidth)", shortcutCode, StringComparison.Ordinal);
+        Assert.Equal(300, ShortcutPage.GetShortcutItemWidth(900));
+        Assert.Equal(300, ShortcutPage.GetShortcutItemWidth(900));
+        Assert.Contains("ShortcutList.ItemsSource = _tiles;", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("var targetIndex = _tiles.IndexOf(movedTile);", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("TargetIndex: targetIndex", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("RowIndex", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("ColumnIndex", shortcutCode, StringComparison.Ordinal);
+
+        for (var tileCount = 1; tileCount <= 6; tileCount++)
+        {
+            var positions = Enumerable.Range(0, tileCount)
+                .Select(index => (Row: index / 3, Column: index % 3))
+                .ToArray();
+            Assert.Equal(Enumerable.Range(0, tileCount),
+                positions.Select(position => position.Row * 3 + position.Column));
+            Assert.All(positions, position => Assert.InRange(position.Column, 0, 2));
+        }
+    }
+
+    [Fact]
+    public void Main_app_shortcut_picker_exposes_parameterless_builtins_and_creation_only_titles()
+    {
+        var root = FindRepositoryRoot();
+        var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
+        var panelHelperStart = shortcutCode.IndexOf("private static StackPanel CreateBuiltInActionPanel", StringComparison.Ordinal);
+        var panelHelperEnd = shortcutCode.IndexOf("internal static string? GetDefaultTitle", panelHelperStart, StringComparison.Ordinal);
+        var builtInPanelHelper = shortcutCode[panelHelperStart..panelHelperEnd];
+
+        Assert.Contains("AddActionChoice(actionPicker, \"Steam Big Picture\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("AddActionChoice(actionPicker, \"Steam\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("AddActionChoice(actionPicker, \"Xbox\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("AddActionChoice(actionPicker, \"Screenshot\"", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.SteamBigPicture] = steamBigPicturePanel", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.SteamClient] = steamClientPanel", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("[FrontendShortcutEditorActionKind.XboxApp] = xboxAppPanel", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("panel.Visibility = Visibility.Collapsed", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("Executable path", builtInPanelHelper, StringComparison.Ordinal);
+        Assert.DoesNotContain("Script", builtInPanelHelper, StringComparison.Ordinal);
+        Assert.DoesNotContain("URL", builtInPanelHelper, StringComparison.Ordinal);
+        Assert.Contains("new FrontendShortcutActionInput(selectedKind)", shortcutCode, StringComparison.Ordinal);
+
+        Assert.Equal("Steam Big Picture", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamBigPicture));
+        Assert.Equal("Steam", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.SteamClient));
+        Assert.Equal("Xbox", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.XboxApp));
+        Assert.Equal("Screenshot", ShortcutPage.GetDefaultTitle(FrontendShortcutEditorActionKind.ScreenshotFullscreen));
+        Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, string.Empty, null));
+        Assert.True(ShortcutPage.ShouldApplyDefaultTitle(true, "Screenshot", "Screenshot"));
+        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(true, "My Capture", "Screenshot"));
+        Assert.False(ShortcutPage.ShouldApplyDefaultTitle(false, "Persisted title", null));
     }
 
     [Fact]
