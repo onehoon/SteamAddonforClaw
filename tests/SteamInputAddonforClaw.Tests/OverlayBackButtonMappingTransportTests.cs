@@ -17,9 +17,9 @@ public sealed class OverlayBackButtonMappingTransportTests
         new(true, mapping ?? BackButtonMappingSettings.Default);
 
     [Fact]
-    public void Overlay_protocol_is_v16()
+    public void Overlay_protocol_is_v17()
     {
-        Assert.Equal(16, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(17, OverlayTransportProtocol.CurrentVersion);
     }
 
     [Fact]

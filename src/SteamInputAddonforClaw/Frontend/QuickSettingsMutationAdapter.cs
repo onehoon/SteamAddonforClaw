@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Frontend;
@@ -120,6 +121,10 @@ internal static class QuickSettingsMutationAdapter
         if (!currentPage.Available || currentPage.ProfileTarget != profileTarget)
             return new(false, "The active game changed; this Profile is no longer current.", currentPage);
 
+        if (profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+            && IsProfileBackButtonMappingRow(intent.EditedRowId))
+            return new(false, "Per-game M1/M2 mapping is available only for XBOX profiles.", currentPage);
+
         var editedRow = currentPage.Sections.SelectMany(s => s.Rows).FirstOrDefault(r => r.RowId == intent.EditedRowId);
         if (editedRow is not { Available: true, Writable: true })
             return new(false, "This row is not editable.", currentPage);
@@ -139,6 +144,26 @@ internal static class QuickSettingsMutationAdapter
                 return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
                     ? FinishProfile(await control.SetGameProfileEnabledAsync(appId!.Value, enabled, displayName, cancellationToken).ConfigureAwait(false))
                     : FinishProfile(await control.SetXboxGameProfileEnabledAsync(xboxKey!, enabled, displayName, cancellationToken).ConfigureAwait(false));
+            }
+            case QuickSettingsRowId.ProfileBackButtonUseGlobal:
+            {
+                if (profileTarget.Kind != QuickSettingsProfileTargetKind.Xbox
+                    || !TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileBackButtonUseGlobal, out var useGlobal))
+                    return new QuickSettingsMutationResult(false, "Malformed XBOX M1/M2 global-mapping toggle intent.", currentPage);
+
+                BackButtonMappingSettings? mapping = null;
+                if (!useGlobal && !TryGetCurrentProfileBackButtonMapping(currentPage, out mapping!))
+                    return new QuickSettingsMutationResult(false, "The current M1/M2 mapping is invalid.", currentPage);
+
+                return FinishProfile(await control.SetXboxGameProfileBackButtonMappingAsync(xboxKey!, mapping, cancellationToken).ConfigureAwait(false));
+            }
+            case QuickSettingsRowId.ProfileBackButtonM1:
+            case QuickSettingsRowId.ProfileBackButtonM2:
+            {
+                if (profileTarget.Kind != QuickSettingsProfileTargetKind.Xbox
+                    || !TryGetProfileBackButtonMappingGroup(intent, out var mapping))
+                    return new QuickSettingsMutationResult(false, "Malformed XBOX M1/M2 mapping group intent.", currentPage);
+                return FinishProfile(await control.SetXboxGameProfileBackButtonMappingAsync(xboxKey!, mapping, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileTdpEnabled:
             {
@@ -258,11 +283,68 @@ internal static class QuickSettingsMutationAdapter
     private static QuickSettingsMutationResult FinishProfile(FrontendXboxGameProfileMutationResult result) =>
         new(result.Succeeded, result.FailureMessage, QuickSettingsPresentation.BuildProfile(result.Snapshot));
 
+    private static bool IsProfileBackButtonMappingRow(QuickSettingsRowId rowId) => rowId is
+        QuickSettingsRowId.ProfileBackButtonUseGlobal or QuickSettingsRowId.ProfileBackButtonM1 or QuickSettingsRowId.ProfileBackButtonM2;
+
+    private static bool TryGetCurrentProfileBackButtonMapping(QuickSettingsPageSnapshot page, out BackButtonMappingSettings mapping)
+    {
+        mapping = null!;
+        var rows = page.Sections.SelectMany(section => section.Rows).ToDictionary(row => row.RowId);
+        if (!rows.TryGetValue(QuickSettingsRowId.ProfileBackButtonM1, out var m1Row)
+            || !rows.TryGetValue(QuickSettingsRowId.ProfileBackButtonM2, out var m2Row)
+            || m1Row.Value is not { } m1Value || m2Row.Value is not { } m2Value
+            || !TryGetInteger(m1Value, out var m1) || !Enum.IsDefined(typeof(Xbox360BackButtonTarget), m1)
+            || !TryGetInteger(m2Value, out var m2) || !Enum.IsDefined(typeof(Xbox360BackButtonTarget), m2))
+            return false;
+
+        mapping = new BackButtonMappingSettings((Xbox360BackButtonTarget)m1, (Xbox360BackButtonTarget)m2);
+        return BackButtonMappingValidation.IsValid(mapping);
+    }
+
+    private static bool TryGetProfileBackButtonMappingGroup(QuickSettingsMutationIntent intent, out BackButtonMappingSettings mapping)
+    {
+        mapping = null!;
+        if (intent.EditedRowId is not (QuickSettingsRowId.ProfileBackButtonM1 or QuickSettingsRowId.ProfileBackButtonM2)
+            || intent.Values is not { Count: 3 } values)
+            return false;
+
+        bool? useGlobal = null;
+        int? m1 = null;
+        int? m2 = null;
+        var seen = new HashSet<QuickSettingsRowId>();
+        foreach (var entry in values)
+        {
+            if (entry is null || entry.Value is null) return false;
+            if (!seen.Add(entry.RowId)) return false;
+            if (entry.RowId == QuickSettingsRowId.ProfileBackButtonUseGlobal)
+            {
+                if (entry.Value.Kind != QuickSettingsValueKind.Boolean || !entry.Value.IsStructurallyValid) return false;
+                useGlobal = entry.Value.BooleanValue!.Value;
+            }
+            else if (entry.RowId == QuickSettingsRowId.ProfileBackButtonM1)
+            {
+                if (!TryGetInteger(entry.Value, out var value) || !Enum.IsDefined(typeof(Xbox360BackButtonTarget), value)) return false;
+                m1 = value;
+            }
+            else if (entry.RowId == QuickSettingsRowId.ProfileBackButtonM2)
+            {
+                if (!TryGetInteger(entry.Value, out var value) || !Enum.IsDefined(typeof(Xbox360BackButtonTarget), value)) return false;
+                m2 = value;
+            }
+            else return false;
+        }
+
+        if (useGlobal is not false || m1 is null || m2 is null) return false;
+        mapping = new BackButtonMappingSettings((Xbox360BackButtonTarget)m1.Value, (Xbox360BackButtonTarget)m2.Value);
+        return BackButtonMappingValidation.IsValid(mapping);
+    }
+
     private static bool TryGetSingleBoolean(QuickSettingsMutationIntent intent, QuickSettingsRowId rowId, out bool value)
     {
         value = false;
-        if (intent.EditedRowId != rowId || intent.Values.Count != 1) return false;
-        var entry = intent.Values[0];
+        if (intent.EditedRowId != rowId || intent.Values is not { Count: 1 } values) return false;
+        var entry = values[0];
+        if (entry is null || entry.Value is null) return false;
         if (entry.RowId != rowId || entry.Value.Kind != QuickSettingsValueKind.Boolean || !entry.Value.IsStructurallyValid) return false;
         value = entry.Value.BooleanValue!.Value;
         return true;
@@ -350,7 +432,7 @@ internal static class QuickSettingsMutationAdapter
     private static bool TryGetInteger(QuickSettingsValue value, out int result)
     {
         result = 0;
-        if (value.Kind != QuickSettingsValueKind.Integer || !value.IsStructurallyValid) return false;
+        if (value is not { Kind: QuickSettingsValueKind.Integer } || !value.IsStructurallyValid) return false;
         result = value.IntegerValue!.Value;
         return true;
     }

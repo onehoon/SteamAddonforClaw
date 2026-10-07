@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Overlay;
+using SteamInputAddonforClaw.Views;
 using Xunit;
 
 namespace SteamInputAddonforClaw.UiTests;
@@ -75,8 +76,10 @@ public sealed class OverlayControllerRendererTests
     [InlineData(Xbox360BackButtonTarget.View, "View")]
     [InlineData(Xbox360BackButtonTarget.Menu, "Menu")]
     [InlineData(Xbox360BackButtonTarget.XboxGuide, "Xbox Guide")]
-    public void Every_xbox360_target_has_the_main_ui_wording(Xbox360BackButtonTarget target, string label)
+    public void Every_xbox360_target_uses_one_shared_label_on_all_existing_surfaces(Xbox360BackButtonTarget target, string label)
     {
+        Assert.Equal(label, BackButtonMappingLabels.GetDisplayName(target));
+        Assert.Equal(label, BackButtonMappingUiOptions.Describe(target));
         Assert.Equal(label, OverlayWindow.FormatBackButtonTarget((double)target));
     }
 

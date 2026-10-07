@@ -150,7 +150,9 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 59: project and mutate the XBOX profile's optional non-Steam M1/M2 mapping override.
 // Version 60: Quick Settings Profile context carries the active Steam/XBOX target instead of a
 // Steam-only AppId. v59 peers fail the handshake before this shared contract can be used.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 60; }
+// Version 61: adds the XBOX-only Profile Controller section/rows/commit group to the shared
+// Quick Settings contract. v60 peers fail the handshake before they can deserialize those enums.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 61; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

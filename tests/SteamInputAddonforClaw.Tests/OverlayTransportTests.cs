@@ -24,10 +24,10 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
-    public void Active_profile_show_is_a_narrow_overlay_v16_command()
+    public void Active_profile_show_remains_a_narrow_overlay_command()
     {
-        Assert.Equal(16, OverlayTransportProtocol.CurrentVersion);
-        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(17, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(61, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
             OverlayTransportProtocol.CurrentVersion,
@@ -69,6 +69,53 @@ public sealed class OverlayTransportTests
         var mutationMessage = await RoundTripAsync(new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.QuickSettingsMutationRequest, QuickSettingsMutationRequest: request));
 
         Assert.Equal(target, mutationMessage.QuickSettingsMutationRequest!.Intent.ProfileTarget);
+    }
+
+    [Fact]
+    public async Task Xbox_profile_controller_page_and_grouped_mapping_intent_round_trip()
+    {
+        var target = QuickSettingsProfileTarget.ForXbox("xbox:test-game");
+        var options = new[]
+        {
+            new QuickSettingsDiscreteOption(0, "Disabled"),
+            new QuickSettingsDiscreteOption(9, "Left Bumper (LB)"),
+            new QuickSettingsDiscreteOption(10, "Right Bumper (RB)"),
+        };
+        var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, target, true, null,
+        [
+            new(QuickSettingsSectionId.ProfileGeneral, "Xbox Game",
+                [new(QuickSettingsRowId.ProfileEnabled, "Profile", QuickSettingsControlKind.Toggle, true, true, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate)]),
+            new(QuickSettingsSectionId.ProfileController, "Controller",
+            [
+                new(QuickSettingsRowId.ProfileBackButtonUseGlobal, "Use global M1 / M2 mapping", QuickSettingsControlKind.Toggle,
+                    true, true, QuickSettingsValue.Boolean(false), null, QuickSettingsCommitPolicy.Immediate),
+                new(QuickSettingsRowId.ProfileBackButtonM1, "M1", QuickSettingsControlKind.Slider, true, true,
+                    QuickSettingsValue.Integer(9), new(QuickSettingsSliderKind.Discrete, Options: options),
+                    QuickSettingsCommitPolicy.TrailingDebounce300, QuickSettingsCommitGroupId.ProfileBackButtonMapping),
+                new(QuickSettingsRowId.ProfileBackButtonM2, "M2", QuickSettingsControlKind.Slider, true, true,
+                    QuickSettingsValue.Integer(10), new(QuickSettingsSliderKind.Discrete, Options: options),
+                    QuickSettingsCommitPolicy.TrailingDebounce300, QuickSettingsCommitGroupId.ProfileBackButtonMapping),
+            ]),
+        ], []);
+
+        var pageMessage = await RoundTripAsync(new(OverlayTransportProtocol.CurrentVersion,
+            OverlayWireMessageKind.QuickSettingsPageState, QuickSettingsPage: page));
+        Assert.Equivalent(page, pageMessage.QuickSettingsPage, strict: true);
+        Assert.True(OverlayQuickSettingsWireValidation.IsStructurallyValid(pageMessage.QuickSettingsPage));
+
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, target,
+            QuickSettingsRowId.ProfileBackButtonM2,
+            [
+                new(QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsValue.Boolean(false)),
+                new(QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsValue.Integer(9)),
+                new(QuickSettingsRowId.ProfileBackButtonM2, QuickSettingsValue.Integer(10)),
+            ]);
+        var request = new OverlayQuickSettingsMutationRequest(7, intent);
+        Assert.True(OverlayQuickSettingsWireValidation.IsStructurallyValid(request));
+        var mutationMessage = await RoundTripAsync(new(OverlayTransportProtocol.CurrentVersion,
+            OverlayWireMessageKind.QuickSettingsMutationRequest, QuickSettingsMutationRequest: request));
+        Assert.Equivalent(request, mutationMessage.QuickSettingsMutationRequest, strict: true);
+        Assert.True(OverlayQuickSettingsWireValidation.IsStructurallyValid(mutationMessage.QuickSettingsMutationRequest));
     }
 
     public static IEnumerable<object[]> ProfileTargets =>
@@ -128,7 +175,7 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
-    public async Task V15_peer_is_rejected_by_the_overlay_server()
+    public async Task V16_peer_is_rejected_by_the_overlay_server()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
         await using var server = new NamedPipeOverlayServer(pipeName);
@@ -136,7 +183,7 @@ public sealed class OverlayTransportTests
         await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         await client.ConnectAsync(5000);
         using var writeGate = new SemaphoreSlim(1, 1);
-        await OverlayWireCodec.WriteAsync(client, new(15, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(client, new(16, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
         var response = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
 
         Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);
