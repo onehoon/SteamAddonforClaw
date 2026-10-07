@@ -1,9 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Profiles;
 
 namespace SteamInputAddonforClaw.Profiles.Performance;
@@ -35,10 +33,7 @@ internal sealed record IntelGpuMinimumClockCapability(
     IReadOnlyList<double> SelectableClocksMhz,
     double? SelectableMinMhz,
     double? SelectableMaxMhz,
-    double? RecommendedDefaultMhz,
-    bool OwnershipMarkerPresent);
-
-internal sealed record IntelGpuMinimumClockOwnershipMarker(uint VendorId, uint DeviceId, double OriginalMinMhz);
+    double? RecommendedDefaultMhz);
 
 internal sealed record IntelGpuMinimumClockOperationResult(
     bool Succeeded,
@@ -48,33 +43,7 @@ internal sealed record IntelGpuMinimumClockOperationResult(
     IntelGpuFrequencyRange? PreWriteRange,
     IntelGpuFrequencyRange? ReadbackRange,
     uint? NativeSetResult,
-    uint? NativeReadResult,
-    bool OwnershipMarkerPresent);
-
-internal enum GpuMinimumClockMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, ApplyFailed, Unavailable }
-
-internal sealed record GpuMinimumClockRuntimeSnapshot(
-    bool Available,
-    bool PersistenceWritable,
-    bool Initialized,
-    bool Enabled,
-    IReadOnlyList<double> SelectableClocksMhz,
-    double? AcMhz,
-    double? DcMhz,
-    double? RecommendedDefaultMhz,
-    string? LastFailure)
-{
-    internal static readonly GpuMinimumClockRuntimeSnapshot Unavailable =
-        new(false, false, false, false, Array.Empty<double>(), null, null, null, null);
-}
-
-internal readonly record struct GpuMinimumClockMutationResult(
-    GpuMinimumClockMutationOutcome Outcome,
-    string? FailureMessage,
-    GpuMinimumClockRuntimeSnapshot Snapshot)
-{
-    internal bool Succeeded => Outcome == GpuMinimumClockMutationOutcome.Succeeded;
-}
+    uint? NativeReadResult);
 
 internal interface IIntelGpuMinimumClockControl : IDisposable
 {
@@ -183,16 +152,15 @@ internal static class IntelGpuMinimumClockPolicy
         return true;
     }
 
-    internal static bool TryCreateRestoreRequest(
-        double originalMinMhz,
+    internal static bool TryCreateFactoryMinimumReleaseRequest(
         IntelGpuFrequencyRange current,
         out IntelGpuFrequencyRange request)
     {
         request = default;
-        if (!double.IsFinite(originalMinMhz) || !double.IsFinite(current.Min) || !double.IsFinite(current.Max))
+        if (!double.IsFinite(current.Min) || !double.IsFinite(current.Max))
             return false;
 
-        request = new(originalMinMhz >= 0 ? originalMinMhz : -1, current.Max >= 0 ? current.Max : -1);
+        request = new(-1, current.Max >= 0 ? current.Max : -1);
         return true;
     }
 
@@ -234,28 +202,19 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
     internal const uint DeviceUnavailableResult = 0x40000027;
 
     private const string Category = "Profiles.IntelGpuMinimumClock";
-    private static readonly JsonSerializerOptions OwnershipMarkerJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true
-    };
     private readonly object _gate = new();
     private readonly IIntelGpuMinimumClockControl _control;
-    private readonly string _ownershipMarkerPath;
     private readonly ProfileStore? _profileStore;
     private readonly ProfileMutationGate? _mutationGate;
     private readonly Func<AcDcPowerSource?> _powerSource;
     private Func<ProfileDocument, ResolvedActiveProfile?> _activeProfileResolver = static _ => null;
     private IntelGpuMinimumClockCapability? _capability;
-    private IntelGpuMinimumClockOwnershipMarker? _ownershipMarker;
-    private bool _ownershipMarkerPresent;
     private bool _initialized;
     private bool _shuttingDown;
     private bool _disposed;
-    private string? _lastDeviceFailure;
 
-    internal IntelGpuMinimumClockRuntime(IIntelGpuMinimumClockControl control, string ownershipMarkerPath)
-        : this(null, null, control, static () => null, ownershipMarkerPath)
+    internal IntelGpuMinimumClockRuntime(IIntelGpuMinimumClockControl control)
+        : this(null, null, control, static () => null)
     {
     }
 
@@ -263,11 +222,9 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         ProfileStore? profileStore,
         ProfileMutationGate? mutationGate,
         IIntelGpuMinimumClockControl control,
-        Func<AcDcPowerSource?> powerSource,
-        string ownershipMarkerPath)
+        Func<AcDcPowerSource?> powerSource)
     {
         _control = control ?? throw new ArgumentNullException(nameof(control));
-        _ownershipMarkerPath = Path.GetFullPath(ownershipMarkerPath ?? throw new ArgumentNullException(nameof(ownershipMarkerPath)));
         _profileStore = profileStore;
         _mutationGate = mutationGate;
         _powerSource = powerSource ?? throw new ArgumentNullException(nameof(powerSource));
@@ -276,11 +233,6 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
     internal IntelGpuMinimumClockCapability? Capability
     {
         get { lock (_gate) return _capability; }
-    }
-
-    internal bool OwnershipMarkerPresent
-    {
-        get { lock (_gate) return _ownershipMarkerPresent; }
     }
 
     internal void SetActiveProfileResolver(Func<ProfileDocument, ResolvedActiveProfile?> resolver) =>
@@ -314,7 +266,6 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_initialized) return _capability!;
 
-            ReadOwnershipMarker();
             try
             {
                 _capability = BuildCapability(_control.Initialize());
@@ -339,173 +290,15 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         }
         catch (Exception exception)
         {
-            AppLog.Warn(Category, "Device minimum GPU clock startup reconcile failed; Addon Runtime remains available.", exception,
+            AppLog.Warn(Category, "Game minimum GPU clock startup reconcile failed; Addon Runtime remains available.", exception,
                 ("Reason", exception.GetType().Name));
         }
     }
 
-    internal GpuMinimumClockRuntimeSnapshot CaptureDeviceSnapshot()
+    internal IntelGpuMinimumClockCapability CaptureCapability()
     {
-        lock (_gate)
-        {
-            if (_disposed || _profileStore is null || _mutationGate is null)
-                return GpuMinimumClockRuntimeSnapshot.Unavailable;
-
-            var capability = _capability ?? InitializeReadOnly();
-            ProfileLoadResult loaded;
-            lock (_mutationGate.Sync) loaded = _profileStore.Load();
-            return BuildDeviceSnapshot(capability, loaded);
-        }
+        lock (_gate) return _capability ?? InitializeReadOnly();
     }
-
-    internal GpuMinimumClockMutationResult SetEnabled(bool enabled)
-    {
-        lock (_gate)
-        {
-            if (_shuttingDown || _disposed || _profileStore is null || _mutationGate is null)
-                return DeviceMutationResult(GpuMinimumClockMutationOutcome.Unavailable, "Minimum GPU Clock is unavailable.");
-
-            var capability = _capability ?? InitializeReadOnly();
-            ProfileLoadResult? loadedForFailure = null;
-            GpuMinimumClockMutationOutcome? failureOutcome = null;
-            string? failureMessage = null;
-            DeviceGpuMinimumClockSettings? desired = null;
-
-            lock (_mutationGate.Sync)
-            {
-                var loaded = _profileStore.Load();
-                if (!loaded.CanSafelyReplace)
-                {
-                    loadedForFailure = loaded;
-                    failureOutcome = GpuMinimumClockMutationOutcome.PersistenceFailed;
-                    failureMessage = "Profile state is not safe to replace.";
-                }
-                else if (enabled && (!capability.Available || capability.RecommendedDefaultMhz is null))
-                {
-                    loadedForFailure = loaded;
-                    failureOutcome = GpuMinimumClockMutationOutcome.Unavailable;
-                    failureMessage = capability.UnavailableReason ?? "A recommended driver-supported GPU clock is unavailable.";
-                }
-                else
-                {
-                    var current = loaded.Document.Device.Performance.GpuMinimumClock;
-                    if (enabled)
-                    {
-                        var defaultMhz = capability.RecommendedDefaultMhz!.Value;
-                        desired = current is null
-                            ? new DeviceGpuMinimumClockSettings { Enabled = true, AcMhz = defaultMhz, DcMhz = defaultMhz }
-                            : current with
-                            {
-                                Enabled = true,
-                                AcMhz = CanonicalOrDefault(capability.SelectableClocksMhz, current.AcMhz, defaultMhz),
-                                DcMhz = CanonicalOrDefault(capability.SelectableClocksMhz, current.DcMhz, defaultMhz)
-                            };
-                    }
-                    else if (current is not null)
-                    {
-                        desired = current with { Enabled = false };
-                    }
-
-                    if (desired is not null)
-                    {
-                        try { _profileStore.Save(WithDeviceGpuMinimumClock(loaded.Document, desired)); }
-                        catch (Exception exception)
-                        {
-                            loadedForFailure = loaded;
-                            failureOutcome = GpuMinimumClockMutationOutcome.PersistenceFailed;
-                            failureMessage = exception.Message;
-                            AppLog.Error(Category, "Device minimum GPU clock persistence failed; hardware was not changed.", exception);
-                        }
-                    }
-                }
-            }
-
-            if (failureOutcome is { } failed)
-            {
-                _lastDeviceFailure = failureMessage;
-                return DeviceMutationResult(failed, failureMessage, loadedForFailure);
-            }
-
-            var operation = ReconcileDeviceMutation(enabled ? "DeviceEnabled" : "DeviceDisabled");
-            _lastDeviceFailure = operation.Succeeded ? null : operation.FailureReason;
-            LogDeviceMutation("SetEnabled", enabled, desired, operation);
-            return DeviceMutationResult(operation.Succeeded
-                ? GpuMinimumClockMutationOutcome.Succeeded
-                : GpuMinimumClockMutationOutcome.ApplyFailed, operation.FailureReason);
-        }
-    }
-
-    internal GpuMinimumClockMutationResult SetAc(double mhz) => SetRail(ac: true, mhz: mhz);
-
-    internal GpuMinimumClockMutationResult SetDc(double mhz) => SetRail(ac: false, mhz: mhz);
-
-    private GpuMinimumClockMutationResult SetRail(bool ac, double mhz)
-    {
-        lock (_gate)
-        {
-            if (_shuttingDown || _disposed || _profileStore is null || _mutationGate is null)
-                return DeviceMutationResult(GpuMinimumClockMutationOutcome.Unavailable, "Minimum GPU Clock is unavailable.");
-
-            var capability = _capability ?? InitializeReadOnly();
-            if (!capability.Available)
-                return DeviceMutationResult(GpuMinimumClockMutationOutcome.Unavailable,
-                    capability.UnavailableReason ?? "Intel GPU minimum-frequency control is unavailable.");
-
-            if (!IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(capability.SelectableClocksMhz, mhz, out var canonical))
-                return DeviceMutationResult(GpuMinimumClockMutationOutcome.InvalidTarget,
-                    "The selected GPU clock is no longer advertised by the Intel driver.");
-
-            ProfileLoadResult? loadedForFailure = null;
-            GpuMinimumClockMutationOutcome? failureOutcome = null;
-            string? failureMessage = null;
-            DeviceGpuMinimumClockSettings? desired = null;
-            lock (_mutationGate.Sync)
-            {
-                var loaded = _profileStore.Load();
-                if (!loaded.CanSafelyReplace)
-                {
-                    loadedForFailure = loaded;
-                    failureOutcome = GpuMinimumClockMutationOutcome.PersistenceFailed;
-                    failureMessage = "Profile state is not safe to replace.";
-                }
-                else if (loaded.Document.Device.Performance.GpuMinimumClock is not { Enabled: true } current)
-                {
-                    loadedForFailure = loaded;
-                    failureOutcome = GpuMinimumClockMutationOutcome.Unavailable;
-                    failureMessage = "Enable Minimum GPU Clock first.";
-                }
-                else
-                {
-                    desired = ac ? current with { AcMhz = canonical } : current with { DcMhz = canonical };
-                    try { _profileStore.Save(WithDeviceGpuMinimumClock(loaded.Document, desired)); }
-                    catch (Exception exception)
-                    {
-                        loadedForFailure = loaded;
-                        failureOutcome = GpuMinimumClockMutationOutcome.PersistenceFailed;
-                        failureMessage = exception.Message;
-                        AppLog.Error(Category, "Device minimum GPU clock persistence failed; hardware was not changed.", exception);
-                    }
-                }
-            }
-
-            if (failureOutcome is { } failed)
-            {
-                _lastDeviceFailure = failureMessage;
-                return DeviceMutationResult(failed, failureMessage, loadedForFailure);
-            }
-
-            var operation = ReconcileDeviceMutation(ac ? "DeviceAcChanged" : "DeviceDcChanged", editedRailIsAc: ac);
-
-            _lastDeviceFailure = operation.Succeeded ? null : operation.FailureReason;
-            LogDeviceMutation(ac ? "SetAc" : "SetDc", enabled: true, desired, operation);
-            return DeviceMutationResult(operation.Succeeded
-                ? GpuMinimumClockMutationOutcome.Succeeded
-                : GpuMinimumClockMutationOutcome.ApplyFailed, operation.FailureReason);
-        }
-    }
-
-    internal IntelGpuMinimumClockOperationResult ReconcileDevice(string reason, bool allowSessionReinitialize = false) =>
-        ReconcileEffective(reason, allowSessionReinitialize);
 
     internal IntelGpuMinimumClockOperationResult ReconcileEffective(string reason, bool allowSessionReinitialize = false)
     {
@@ -515,14 +308,14 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
                 return FailedOperation("RuntimeShuttingDown");
 
             var capability = _capability ?? InitializeReadOnly();
-            var loaded = LoadDeviceProfile();
+            var loaded = LoadProfile();
             var result = ReconcileLoadedEffective(loaded, reason);
             var nativeResult = result.NativeSetResult ?? result.NativeReadResult;
             if (!result.Succeeded && allowSessionReinitialize && nativeResult is (DeviceLostResult or DeviceUnavailableResult))
             {
                 if (TryReinitializeSession(nativeResult.Value))
                 {
-                    loaded = LoadDeviceProfile();
+                    loaded = LoadProfile();
                     result = ReconcileLoadedEffective(loaded, reason + "AfterSessionRecovery");
                 }
                 else
@@ -531,7 +324,6 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
                 }
             }
 
-            _lastDeviceFailure = result.Succeeded ? null : result.FailureReason;
             LogEffectiveReconcile(reason, loaded, result, _capability ?? capability);
             return result;
         }
@@ -547,7 +339,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             if (_disposed || _shuttingDown)
                 return FailedOperation("RuntimeShuttingDown");
 
-            var loaded = LoadDeviceProfile();
+            var loaded = LoadProfile();
             if (loaded.CanSafelyReplace
                 && _activeProfileResolver(loaded.Document)?.Performance.GpuMinimumClock is { Enabled: true })
             {
@@ -570,9 +362,6 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             if (_disposed || _shuttingDown)
                 return FailedOperation("RuntimeShuttingDown");
 
-            if (!File.Exists(_ownershipMarkerPath) && !_ownershipMarkerPresent)
-                return NoOpResult();
-
             var capability = _capability ?? InitializeReadOnly();
             if (!capability.Available)
             {
@@ -592,12 +381,10 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             }
 
             var result = capability.Available
-                ? RestoreOriginalMinimum("Uninstall")
+                ? ReleaseToFactoryMinimum("Uninstall")
                 : FailedOperation(capability.UnavailableReason ?? "CapabilityUnavailable");
-            _lastDeviceFailure = result.Succeeded ? null : result.FailureReason;
-            AppLog.Info(Category, "Device minimum GPU clock uninstall release completed.",
+            AppLog.Info(Category, "Game minimum GPU clock uninstall factory release completed.",
                 ("Outcome", result.Succeeded ? "Succeeded" : "Failed"),
-                ("OwnershipMarkerPresent", _ownershipMarkerPresent),
                 ("Failure", result.FailureReason));
             return result;
         }
@@ -605,14 +392,12 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
 
     internal bool BlocksDeveloperFrequencyMutation()
     {
-        if (File.Exists(_ownershipMarkerPath) || OwnershipMarkerPresent) return true;
         if (_profileStore is null || _mutationGate is null) return false;
 
         lock (_mutationGate.Sync)
         {
             var loaded = _profileStore.Load();
             return !loaded.CanSafelyReplace
-                || loaded.Document.Device.Performance.GpuMinimumClock?.Enabled == true
                 || loaded.Document.Games.Values.Any(profile => profile.Enabled && profile.Performance.GpuMinimumClock?.Enabled == true)
                 || loaded.Document.XboxGames.Values.Any(profile => profile.Enabled && profile.Performance.GpuMinimumClock?.Enabled == true);
         }
@@ -657,11 +442,6 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
                 var capability = _capability ?? throw new InvalidOperationException("Minimum GPU clock capability has not been initialized.");
                 if (!capability.Available) return Complete(false, false, capability.UnavailableReason ?? "CapabilityUnavailable");
 
-                if (!LoadOwnershipMarker(out var markerFailure))
-                    return Complete(false, false, markerFailure ?? "OwnershipMarkerUnavailable");
-                if (_ownershipMarker is { } existingMarker && !MarkerMatchesAdapter(existingMarker, capability))
-                    return Complete(false, false, "OwnershipMarkerAdapterMismatch");
-
                 if (!IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(capability.SelectableClocksMhz, targetMhz, out var canonicalTarget))
                     return Complete(false, false, "InvalidMinimumTarget");
                 requested = canonicalTarget;
@@ -676,16 +456,6 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
                         out var requestFailure))
                     return Complete(false, false, requestFailure ?? "InvalidRange");
                 requested = canonicalTarget;
-
-                if (_ownershipMarker is null)
-                {
-                    var newMarker = new IntelGpuMinimumClockOwnershipMarker(
-                        capability.VendorId,
-                        capability.DeviceId,
-                        preWrite.Value.Min);
-                    PersistOwnershipMarker(newMarker);
-                    SetOwnershipMarker(newMarker, present: true);
-                }
 
                 setResult = _control.SetRange(request);
                 if (setResult != 0)
@@ -710,7 +480,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         }
     }
 
-    internal IntelGpuMinimumClockOperationResult RestoreOriginalMinimum(string reason)
+    internal IntelGpuMinimumClockOperationResult ReleaseToFactoryMinimum(string reason)
     {
         lock (_gate)
         {
@@ -723,30 +493,19 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             try
             {
                 if (_shuttingDown) return Complete(false, false, "RuntimeShuttingDown");
-                if (!LoadOwnershipMarker(out var markerFailure))
-                    return Complete(false, false, markerFailure ?? "OwnershipMarkerUnavailable");
-                if (_ownershipMarker is not { } marker)
-                    return Complete(true, true, null);
-
                 var capability = _capability ?? throw new InvalidOperationException("Minimum GPU clock capability has not been initialized.");
                 if (!capability.Available) return Complete(false, false, capability.UnavailableReason ?? "CapabilityUnavailable");
-                if (!MarkerMatchesAdapter(marker, capability)) return Complete(false, false, "OwnershipMarkerAdapterMismatch");
-
-                requested = marker.OriginalMinMhz >= 0 ? marker.OriginalMinMhz : -1;
                 preWrite = _control.GetRange();
-                if (!IntelGpuMinimumClockPolicy.TryCreateRestoreRequest(marker.OriginalMinMhz, preWrite.Value, out var request))
+                if (!IntelGpuMinimumClockPolicy.TryCreateFactoryMinimumReleaseRequest(preWrite.Value, out var request))
                     return Complete(false, false, "InvalidRange");
+                requested = request.Min;
 
                 setResult = _control.SetRange(request);
                 if (setResult != 0) return Complete(false, false, "SetRangeFailed");
 
                 readback = _control.GetRange();
                 var verified = IntelGpuMinimumClockPolicy.MatchesReadback(request, preWrite.Value, readback.Value);
-                if (!verified) return Complete(false, false, "ReadbackMismatch");
-
-                File.Delete(_ownershipMarkerPath);
-                SetOwnershipMarker(null, present: false);
-                return Complete(true, true, null);
+                return Complete(verified, verified, verified ? null : "ReadbackMismatch");
             }
             catch (IgclMinimumClockException exception)
             {
@@ -759,7 +518,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             }
 
             IntelGpuMinimumClockOperationResult Complete(bool succeeded, bool verified, string? failure) =>
-                CompleteAndLog("RestoreOriginalMinimum", reason, succeeded, verified, failure, requested, preWrite, readback, setResult, readResult);
+                CompleteAndLog("ReleaseToFactoryMinimum", reason, succeeded, verified, failure, requested, preWrite, readback, setResult, readResult);
         }
     }
 
@@ -779,165 +538,62 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         }
     }
 
-    private ProfileLoadResult LoadDeviceProfile() => _profileStore is null
+    private ProfileLoadResult LoadProfile() => _profileStore is null
         ? new(new ProfileDocument(), ProfileLoadStatus.ReadFailure)
         : _profileStore.Load();
-
-    private IntelGpuMinimumClockOperationResult ReconcileDeviceMutation(string reason, bool? editedRailIsAc = null)
-    {
-        if (_profileStore is null || _mutationGate is null)
-            return FailedOperation("Device persistence is unavailable.");
-        var loaded = LoadDeviceProfile();
-        if (loaded.CanSafelyReplace)
-        {
-            var gameDesired = _activeProfileResolver(loaded.Document)?.Performance.GpuMinimumClock;
-            if (gameDesired is { Enabled: true })
-            {
-                AcDcPowerSource? source;
-                try { source = _powerSource(); }
-                catch { source = null; }
-                if (source is not null)
-                {
-                    var target = source == AcDcPowerSource.AC ? gameDesired.AcMhz : gameDesired.DcMhz;
-                    var capability = _capability ?? InitializeReadOnly();
-                    if (capability.Available && IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(capability.SelectableClocksMhz, target, out _))
-                        return NoOpResult();
-                }
-            }
-            else if (editedRailIsAc is { } editedRail)
-            {
-                AcDcPowerSource? source;
-                try { source = _powerSource(); }
-                catch { source = null; }
-                if (source is not null && (source == AcDcPowerSource.AC) != editedRail)
-                    return NoOpResult();
-            }
-        }
-
-        return ReconcileEffective(reason);
-    }
 
     private IntelGpuMinimumClockOperationResult ReconcileLoadedEffective(ProfileLoadResult loaded, string reason)
     {
         if (!loaded.CanSafelyReplace)
         {
-            var release = RestoreIfOwned(reason + "ProfileUnavailable");
+            var release = ReleaseToFactoryMinimum(reason + "ProfileUnavailable");
             return FailedOperation(release.Succeeded
                 ? "Profile state is not safe to replace."
-                : $"Profile state is not safe to replace; owned minimum release failed: {release.FailureReason}");
+                : $"Profile state is not safe to replace; factory minimum release failed: {release.FailureReason}");
         }
 
         var active = _activeProfileResolver(loaded.Document);
         var gameDesired = active?.Performance.GpuMinimumClock;
-        var gameOwns = gameDesired is { Enabled: true };
-        var deviceDesired = loaded.Document.Device.Performance.GpuMinimumClock;
-        var desiredEnabled = gameOwns || deviceDesired is { Enabled: true };
-        if (!desiredEnabled)
-            return RestoreIfOwned(reason + "Disabled");
+        if (gameDesired is not { Enabled: true })
+            return ReleaseToFactoryMinimum(reason + "NoEnabledActiveGame");
 
         AcDcPowerSource? source;
         try { source = _powerSource(); }
         catch (Exception exception)
         {
-            var release = RestoreIfOwned(reason + "PowerSourceReadFailed");
+            var release = ReleaseToFactoryMinimum(reason + "PowerSourceReadFailed");
             return FailedOperation(release.Succeeded
                 ? $"PowerSourceReadFailed: {exception.Message}"
-                : $"PowerSourceReadFailed: {exception.Message}; owned minimum release failed: {release.FailureReason}");
+                : $"PowerSourceReadFailed: {exception.Message}; factory minimum release failed: {release.FailureReason}");
         }
 
         if (source is null)
-            return RestoreIfOwned(reason + "PowerSourceUnknown");
+        {
+            var release = ReleaseToFactoryMinimum(reason + "PowerSourceUnknown");
+            return release.Succeeded
+                ? FailedOperation("PowerSourceUnknown")
+                : FailedOperation($"PowerSourceUnknown; factory minimum release failed: {release.FailureReason}");
+        }
 
-        var target = gameOwns
-            ? source == AcDcPowerSource.AC ? gameDesired!.AcMhz : gameDesired!.DcMhz
-            : source == AcDcPowerSource.AC ? deviceDesired!.AcMhz : deviceDesired!.DcMhz;
+        var target = source == AcDcPowerSource.AC ? gameDesired.AcMhz : gameDesired.DcMhz;
         var capability = _capability;
         if (capability is null || !capability.Available
             || !IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(capability.SelectableClocksMhz, target, out var canonical))
         {
-            var release = RestoreIfOwned(reason + (gameOwns ? "UnsupportedGameTarget" : "UnsupportedDeviceTarget"));
+            var release = ReleaseToFactoryMinimum(reason + "UnsupportedGameTarget");
             return FailedOperation(release.Succeeded
                 ? "SavedTargetUnsupportedByCurrentDriver"
-                : $"SavedTargetUnsupportedByCurrentDriver; owned minimum release failed: {release.FailureReason}");
+                : $"SavedTargetUnsupportedByCurrentDriver; factory minimum release failed: {release.FailureReason}");
         }
 
         return ApplyMinimum(canonical, reason);
     }
 
-    private IntelGpuMinimumClockOperationResult RestoreIfOwned(string reason) =>
-        _ownershipMarkerPresent || File.Exists(_ownershipMarkerPath)
-            ? RestoreOriginalMinimum(reason)
-            : NoOpResult();
-
-    private static double CanonicalOrDefault(IReadOnlyList<double> clocks, double saved, double fallback) =>
-        IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(clocks, saved, out var canonical) ? canonical : fallback;
-
-    private static ProfileDocument WithDeviceGpuMinimumClock(ProfileDocument document, DeviceGpuMinimumClockSettings settings) =>
-        document with
-        {
-            Device = document.Device with
-            {
-                Performance = document.Device.Performance with { GpuMinimumClock = settings }
-            }
-        };
-
-    private GpuMinimumClockRuntimeSnapshot BuildDeviceSnapshot(
-        IntelGpuMinimumClockCapability capability,
-        ProfileLoadResult loaded)
-    {
-        var desired = loaded.CanSafelyReplace ? loaded.Document.Device.Performance.GpuMinimumClock : null;
-        return new(
-            capability.Available,
-            loaded.CanSafelyReplace,
-            desired is not null,
-            desired?.Enabled == true,
-            capability.SelectableClocksMhz,
-            desired?.AcMhz,
-            desired?.DcMhz,
-            capability.RecommendedDefaultMhz,
-            _lastDeviceFailure ?? (loaded.CanSafelyReplace ? null : "Profile state is not safe to replace."));
-    }
-
-    private GpuMinimumClockMutationResult DeviceMutationResult(
-        GpuMinimumClockMutationOutcome outcome,
-        string? failure,
-        ProfileLoadResult? loaded = null)
-    {
-        var snapshot = _profileStore is null || _disposed
-            ? GpuMinimumClockRuntimeSnapshot.Unavailable
-            : BuildDeviceSnapshot(_capability ?? UnavailableCapability("CapabilityNotInitialized", null), loaded ?? LoadDeviceProfile());
-        return new(outcome, failure, snapshot);
-    }
-
     private IntelGpuMinimumClockOperationResult NoOpResult() =>
-        new(true, true, null, null, null, null, null, null, _ownershipMarkerPresent);
+        new(true, true, null, null, null, null, null, null);
 
     private IntelGpuMinimumClockOperationResult FailedOperation(string failure) =>
-        new(false, false, failure, null, null, null, null, null, _ownershipMarkerPresent);
-
-    private void LogDeviceMutation(
-        string operation,
-        bool enabled,
-        DeviceGpuMinimumClockSettings? desired,
-        IntelGpuMinimumClockOperationResult result)
-    {
-        AcDcPowerSource? powerSource;
-        try { powerSource = _powerSource(); }
-        catch { powerSource = null; }
-        AppLog.Info(Category, "Device minimum GPU clock mutation completed.",
-            ("Operation", operation),
-            ("Reason", "UserMutation"),
-            ("Enabled", enabled),
-            ("PowerSource", powerSource?.ToString() ?? "Unknown"),
-            ("DesiredAcMhz", desired?.AcMhz),
-            ("DesiredDcMhz", desired?.DcMhz),
-            ("EffectiveTargetMhz", result.RequestedMinMhz),
-            ("PersistenceWritable", _profileStore is not null),
-            ("CapabilityAvailable", _capability?.Available == true),
-            ("OwnershipMarkerPresent", _ownershipMarkerPresent),
-            ("Outcome", result.Succeeded ? "Succeeded" : "Failed"),
-            ("Failure", result.FailureReason));
-    }
+        new(false, false, failure, null, null, null, null, null);
 
     private void LogEffectiveReconcile(
         string reason,
@@ -948,27 +604,25 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         var active = loaded.CanSafelyReplace ? _activeProfileResolver(loaded.Document) : null;
         var gameDesired = active?.Performance.GpuMinimumClock;
         var gameOwns = gameDesired is { Enabled: true };
-        var deviceDesired = loaded.CanSafelyReplace ? loaded.Document.Device.Performance.GpuMinimumClock : null;
-        var effectiveEnabled = gameOwns || deviceDesired is { Enabled: true };
-        var desiredAcMhz = gameOwns ? gameDesired!.AcMhz : deviceDesired?.AcMhz;
-        var desiredDcMhz = gameOwns ? gameDesired!.DcMhz : deviceDesired?.DcMhz;
         AcDcPowerSource? source;
         try { source = _powerSource(); }
         catch { source = null; }
-        AppLog.Info(Category, "Effective minimum GPU clock reconcile completed.",
+        AppLog.Info(Category, "Game minimum GPU clock reconcile completed.",
             ("Reason", reason),
-            ("EffectiveSource", gameOwns ? active!.Value.TargetLabel : effectiveEnabled ? "Device" : "None"),
-            ("Enabled", effectiveEnabled),
+            ("EffectiveSource", gameOwns ? active!.Value.TargetLabel : "Factory"),
+            ("Enabled", gameOwns),
             ("PowerSource", source?.ToString() ?? "Unknown"),
-            ("DesiredAcMhz", desiredAcMhz),
-            ("DesiredDcMhz", desiredDcMhz),
+            ("DesiredAcMhz", gameDesired?.AcMhz),
+            ("DesiredDcMhz", gameDesired?.DcMhz),
             ("EffectiveTargetMhz", result.RequestedMinMhz),
             ("PersistenceWritable", loaded.CanSafelyReplace),
             ("CapabilityAvailable", capability.Available),
-            ("OwnershipMarkerPresent", _ownershipMarkerPresent),
             ("Outcome", result.Succeeded ? "Succeeded" : "Failed"),
             ("Failure", result.FailureReason));
     }
+
+    private static double CanonicalOrDefault(IReadOnlyList<double> clocks, double saved, double fallback) =>
+        IntelGpuMinimumClockPolicy.TryGetCanonicalTarget(clocks, saved, out var canonical) ? canonical : fallback;
 
     private IntelGpuMinimumClockCapability BuildCapability(IntelGpuMinimumClockNativeCapability native)
     {
@@ -994,8 +648,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             selection.SelectableClocksMhz,
             selection.SelectableMinMhz,
             selection.SelectableMaxMhz,
-            selection.RecommendedDefaultMhz,
-            _ownershipMarkerPresent);
+            selection.RecommendedDefaultMhz);
     }
 
     private IntelGpuMinimumClockCapability UnavailableCapability(string reason, uint? nativeResult) => new(
@@ -1011,73 +664,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
         Array.Empty<double>(),
         null,
         null,
-        null,
-        _ownershipMarkerPresent);
-
-    private bool LoadOwnershipMarker(out string? failureReason)
-    {
-        failureReason = null;
-        if (!File.Exists(_ownershipMarkerPath))
-        {
-            SetOwnershipMarker(null, present: false);
-            return true;
-        }
-
-        SetOwnershipMarker(null, present: true);
-        try
-        {
-            var marker = JsonSerializer.Deserialize<IntelGpuMinimumClockOwnershipMarker>(
-                File.ReadAllText(_ownershipMarkerPath), OwnershipMarkerJsonOptions);
-            if (marker is null || marker.VendorId == 0 || marker.DeviceId == 0 || !double.IsFinite(marker.OriginalMinMhz))
-            {
-                failureReason = "OwnershipMarkerInvalid";
-                return false;
-            }
-
-            SetOwnershipMarker(marker, present: true);
-            return true;
-        }
-        catch (Exception exception)
-        {
-            failureReason = $"OwnershipMarkerReadFailed: {exception.Message}";
-            return false;
-        }
-    }
-
-    private void ReadOwnershipMarker()
-    {
-        if (!LoadOwnershipMarker(out var failureReason))
-            AppLog.Debug(Category, "Minimum GPU clock ownership marker could not be loaded; hardware writes remain unavailable.",
-                ("OwnershipMarkerPresent", _ownershipMarkerPresent), ("Failure", failureReason));
-    }
-
-    private void PersistOwnershipMarker(IntelGpuMinimumClockOwnershipMarker marker)
-    {
-        var directory = Path.GetDirectoryName(_ownershipMarkerPath)
-            ?? throw new InvalidOperationException("The GPU minimum-clock ownership path has no parent directory.");
-        Directory.CreateDirectory(directory);
-        var temporaryPath = $"{_ownershipMarkerPath}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(marker, OwnershipMarkerJsonOptions));
-            File.Move(temporaryPath, _ownershipMarkerPath);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-        }
-    }
-
-    private static bool MarkerMatchesAdapter(IntelGpuMinimumClockOwnershipMarker marker, IntelGpuMinimumClockCapability capability) =>
-        marker.VendorId == capability.VendorId && marker.DeviceId == capability.DeviceId;
-
-    private void SetOwnershipMarker(IntelGpuMinimumClockOwnershipMarker? marker, bool present)
-    {
-        _ownershipMarker = marker;
-        _ownershipMarkerPresent = present;
-        if (_capability is not null)
-            _capability = _capability with { OwnershipMarkerPresent = present };
-    }
+        null);
 
     private void LogCapability(string reason)
     {
@@ -1097,8 +684,7 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             ("SelectableClockCount", capability.SelectableClocksMhz.Count),
             ("SelectableMinMhz", capability.SelectableMinMhz),
             ("SelectableMaxMhz", capability.SelectableMaxMhz),
-            ("RecommendedDefaultMhz", capability.RecommendedDefaultMhz),
-            ("OwnershipMarkerPresent", capability.OwnershipMarkerPresent));
+            ("RecommendedDefaultMhz", capability.RecommendedDefaultMhz));
     }
 
     private IntelGpuMinimumClockOperationResult CompleteAndLog(
@@ -1126,13 +712,12 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
             ("NativeResult", nativeSetResult is { } set ? $"0x{set:X8}" : nativeReadResult is { } read ? $"0x{read:X8}" : null),
             ("NativeSetResult", nativeSetResult is { } setResult ? $"0x{setResult:X8}" : null),
             ("NativeReadResult", nativeReadResult is { } readResult ? $"0x{readResult:X8}" : null),
-            ("OwnershipMarkerPresent", _ownershipMarkerPresent),
             ("Failure", failure)
         };
 
         if (succeeded) AppLog.Info(Category, "Minimum GPU clock operation verified.", fields);
-        else AppLog.Warn(Category, "Minimum GPU clock operation failed; ownership evidence was retained when present.", null, fields);
-        return new(succeeded, verified, failure, requested, preWrite, readback, nativeSetResult, nativeReadResult, _ownershipMarkerPresent);
+        else AppLog.Warn(Category, "Minimum GPU clock operation failed.", null, fields);
+        return new(succeeded, verified, failure, requested, preWrite, readback, nativeSetResult, nativeReadResult);
     }
 }
 

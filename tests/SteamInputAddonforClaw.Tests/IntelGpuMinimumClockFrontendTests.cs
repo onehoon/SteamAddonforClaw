@@ -15,30 +15,6 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"MinimumGpuClockFrontend-{Guid.NewGuid():N}");
 
     [Fact]
-    public async Task Developer_probe_ownership_refuses_production_mutations_before_persistence()
-    {
-        Directory.CreateDirectory(_directory);
-        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
-        var profilesPath = Path.Combine(_directory, "profiles.json");
-        var hardware = new FakeMinimumClockControl();
-        using var runtime = new IntelGpuMinimumClockRuntime(
-            new ProfileStore(profilesPath), new ProfileMutationGate(), hardware,
-            () => AcDcPowerSource.AC, Path.Combine(_directory, "minimum-clock.json"));
-        var control = CreateControl(runtime, developerModified: true);
-
-        var capture = await control.CaptureGpuMinimumClockAsync();
-        var enable = await control.SetDeviceGpuMinimumClockEnabledAsync(true);
-        var rail = await control.SetDeviceGpuMinimumClockAcAsync(1625);
-
-        Assert.True(capture.Available);
-        Assert.Equal(FrontendGpuMinimumClockMutationOutcome.Unavailable, enable.Outcome);
-        Assert.Contains("before enabling", enable.FailureMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(FrontendGpuMinimumClockMutationOutcome.Unavailable, rail.Outcome);
-        Assert.False(File.Exists(profilesPath));
-        Assert.Equal(0, hardware.SetCalls);
-    }
-
-    [Fact]
     public async Task Game_profile_frontend_resolves_table_indexes_to_exact_driver_mhz_without_device_write()
     {
         Directory.CreateDirectory(_directory);
@@ -50,7 +26,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, gameMutations.SetEnabled(42, true, "Game"));
         var hardware = new FakeMinimumClockControl();
         using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => AcDcPowerSource.AC, Path.Combine(_directory, "minimum-clock.json"));
+            store, gate, hardware, () => AcDcPowerSource.AC);
         var control = CreateControl(runtime, developerModified: false,
             gameProfileMutations: gameMutations, actualRunningAppIdSource: () => 0);
 
@@ -96,8 +72,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         var hardware = new FakeMinimumClockControl();
         var target = ActiveProfileTarget.ForSteam(42);
         using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => acPower ? AcDcPowerSource.AC : AcDcPowerSource.DC,
-            Path.Combine(_directory, "minimum-clock.json"));
+            store, gate, hardware, () => acPower ? AcDcPowerSource.AC : AcDcPowerSource.DC);
         runtime.SetActiveProfileResolver(document => ActiveProfileResolver.Resolve(target, document));
         var control = CreateControl(runtime, developerModified: false,
             gameProfileMutations: gameMutations,
@@ -129,7 +104,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(42, true, "Game"));
         var hardware = new FakeMinimumClockControl();
         using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => AcDcPowerSource.AC, Path.Combine(_directory, "minimum-clock.json"));
+            store, gate, hardware, () => AcDcPowerSource.AC);
         var control = CreateControl(runtime, developerModified: true, gameProfileMutations: mutations);
 
         Assert.Equal(FrontendGameProfileMutationOutcome.Unavailable,
@@ -152,24 +127,13 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
     }
 
     [Fact]
-    public async Task Whole_profile_toggle_reconciles_between_game_override_and_device_fallback()
+    public async Task Whole_profile_toggle_reconciles_between_game_override_and_factory_release()
     {
         Directory.CreateDirectory(_directory);
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _directory;
         var profilesPath = Path.Combine(_directory, "profiles.json");
         var store = new ProfileStore(profilesPath);
         var gate = new ProfileMutationGate();
-        var document = new ProfileDocument
-        {
-            Device = new()
-            {
-                Performance = new()
-                {
-                    GpuMinimumClock = new() { Enabled = true, AcMhz = 1625, DcMhz = 1525 }
-                }
-            }
-        };
-        store.Save(document);
         var mutations = new GameProfileMutations(store, gate);
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(42, true, "Game"));
         Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded,
@@ -178,7 +142,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
         var hardware = new FakeMinimumClockControl();
         var target = ActiveProfileTarget.ForSteam(42);
         using var runtime = new IntelGpuMinimumClockRuntime(
-            store, gate, hardware, () => AcDcPowerSource.AC, Path.Combine(_directory, "minimum-clock.json"));
+            store, gate, hardware, () => AcDcPowerSource.AC);
         runtime.SetActiveProfileResolver(profileDocument => ActiveProfileResolver.Resolve(target, profileDocument));
         var control = CreateControl(runtime, developerModified: false,
             gameProfileMutations: mutations,
@@ -186,7 +150,7 @@ public sealed class IntelGpuMinimumClockFrontendTests : IDisposable
 
         Assert.True((await control.SetGameProfileEnabledAsync(42, false, null)).Succeeded);
         Assert.Equal(1, hardware.SetCalls);
-        Assert.Equal(1625, hardware.LastSetRange.Min);
+        Assert.Equal(-1, hardware.LastSetRange.Min);
         Assert.True((await control.SetGameProfileEnabledAsync(42, true, "Game")).Succeeded);
         Assert.Equal(2, hardware.SetCalls);
         Assert.Equal(1725, hardware.LastSetRange.Min);

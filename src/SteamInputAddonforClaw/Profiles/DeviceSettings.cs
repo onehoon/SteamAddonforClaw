@@ -61,19 +61,6 @@ public sealed record DevicePerformanceSettings
     /// the Addon. A non-null value always contains complete AC and DC power pairs.</summary>
     public DeviceTdpSettings? Tdp { get; init; }
     public DevicePowerModeSettings? PowerMode { get; init; }
-    public DeviceGpuMinimumClockSettings? GpuMinimumClock { get; init; }
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
-}
-
-/// <summary>Persisted Device-level desired Intel GPU minimum-frequency floor. AC and DC values
-/// are canonical driver-advertised MHz values and remain together even while the feature is Off.</summary>
-public sealed record DeviceGpuMinimumClockSettings
-{
-    public bool Enabled { get; init; }
-    public required double AcMhz { get; init; }
-    public required double DcMhz { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

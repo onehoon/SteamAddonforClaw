@@ -10,29 +10,29 @@ public sealed class DeviceGpuMinimumClockUiTests
     [Fact]
     public void Discrete_index_maps_only_to_exact_supported_driver_entries()
     {
-        Assert.True(DevicePage.GpuMinimumClockDraftPolicy.TryGetClockAtIndex(Clocks, 0, out var first));
+        Assert.True(GpuMinimumClockUiPolicy.TryGetClockAtIndex(Clocks, 0, out var first));
         Assert.Equal(1525, first);
-        Assert.True(DevicePage.GpuMinimumClockDraftPolicy.TryGetClockAtIndex(Clocks, 3, out var last));
+        Assert.True(GpuMinimumClockUiPolicy.TryGetClockAtIndex(Clocks, 3, out var last));
         Assert.Equal(1825, last);
-        Assert.False(DevicePage.GpuMinimumClockDraftPolicy.TryGetClockAtIndex(Clocks, 4, out _));
-        Assert.False(DevicePage.GpuMinimumClockDraftPolicy.TryGetClockAtIndex(Clocks, double.NaN, out _));
+        Assert.False(GpuMinimumClockUiPolicy.TryGetClockAtIndex(Clocks, 4, out _));
+        Assert.False(GpuMinimumClockUiPolicy.TryGetClockAtIndex(Clocks, double.NaN, out _));
     }
 
     [Fact]
     public void Uninitialized_draft_uses_runtime_recommended_default_without_claiming_a_saved_value()
     {
-        Assert.Equal(1725, DevicePage.GpuMinimumClockDraftPolicy.ResolveDraftMhz(Clocks, null, 1725));
-        Assert.False(DevicePage.GpuMinimumClockDraftPolicy.IsSupported(Clocks, null));
+        Assert.Equal(1725, GpuMinimumClockUiPolicy.ResolveDraftMhz(Clocks, null, 1725));
+        Assert.False(GpuMinimumClockUiPolicy.IsSupported(Clocks, null));
     }
 
     [Fact]
     public void Unsupported_saved_value_is_not_presented_as_valid_and_requires_explicit_commit()
     {
-        Assert.False(DevicePage.GpuMinimumClockDraftPolicy.IsSupported(Clocks, 1777));
-        Assert.Equal(1725, DevicePage.GpuMinimumClockDraftPolicy.ResolveDraftMhz(Clocks, 1777, 1725));
-        Assert.False(DevicePage.GpuMinimumClockDraftPolicy.ShouldCommit(Clocks, 1725, 1777, dirty: false, enabled: true, busy: false));
-        Assert.True(DevicePage.GpuMinimumClockDraftPolicy.ShouldCommit(Clocks, 1725, 1777, dirty: true, enabled: true, busy: false));
-        Assert.False(DevicePage.GpuMinimumClockDraftPolicy.ShouldCommit(Clocks, 1725, 1777, dirty: true, enabled: false, busy: false));
+        Assert.False(GpuMinimumClockUiPolicy.IsSupported(Clocks, 1777));
+        Assert.Equal(1725, GpuMinimumClockUiPolicy.ResolveDraftMhz(Clocks, 1777, 1725));
+        Assert.False(GpuMinimumClockUiPolicy.ShouldCommit(Clocks, 1725, 1777, dirty: false, enabled: true, busy: false));
+        Assert.True(GpuMinimumClockUiPolicy.ShouldCommit(Clocks, 1725, 1777, dirty: true, enabled: true, busy: false));
+        Assert.False(GpuMinimumClockUiPolicy.ShouldCommit(Clocks, 1725, 1777, dirty: true, enabled: false, busy: false));
     }
 
     [Theory]
@@ -50,7 +50,7 @@ public sealed class DeviceGpuMinimumClockUiTests
         }
         catch (IOException)
         {
-            preserveDraft = DevicePage.GpuMinimumClockDraftPolicy.ResolveFailedCommit(
+            preserveDraft = GpuMinimumClockUiPolicy.ResolveFailedCommit(
                 ref draftDirty, submittedGeneration: 20, currentGeneration);
         }
 
@@ -81,29 +81,20 @@ public sealed class DeviceGpuMinimumClockUiTests
     }
 
     [Fact]
-    public void Device_sliders_are_discrete_and_value_changed_only_updates_a_draft()
+    public void Minimum_gpu_clock_is_game_profile_only()
     {
         var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
-        var code = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
-        var valueChanged = ExtractMethod(code, "private void GpuMinimumClockSlider_ValueChanged(");
-        var enabledState = ExtractMethod(code, "private void UpdateGpuMinimumClockControlEnabledState()");
+        var deviceXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml"));
+        var deviceCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+        Assert.DoesNotContain("Minimum GPU Clock", deviceXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("GpuMinimumClock", deviceCode, StringComparison.Ordinal);
 
-        foreach (var name in new[] { "GpuMinimumClockAcSlider", "GpuMinimumClockDcSlider" })
+        foreach (var page in new[] { "ProfilePage.xaml", "XboxPage.xaml" })
         {
-            var slider = xaml[xaml.IndexOf($"x:Name=\"{name}\"", StringComparison.Ordinal)..];
-            slider = slider[..slider.IndexOf(" />", StringComparison.Ordinal)];
-            Assert.Contains("Minimum=\"0\"", slider, StringComparison.Ordinal);
-            Assert.Contains("Maximum=\"0\"", slider, StringComparison.Ordinal);
-            Assert.Contains("StepFrequency=\"1\"", slider, StringComparison.Ordinal);
+            var xaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views", page));
+            Assert.Contains("Header=\"Minimum GPU Clock\"", xaml, StringComparison.Ordinal);
+            Assert.Contains("GpuMinimumClockEnabledToggle", xaml, StringComparison.Ordinal);
         }
-
-        Assert.Contains("Maximum = Math.Max(0, clocks.Count - 1)", code, StringComparison.Ordinal);
-        Assert.Contains("StepFrequency = 1", code, StringComparison.Ordinal);
-        Assert.Contains("_gpuMinimumClockAcDraftMhz = mhz", valueChanged, StringComparison.Ordinal);
-        Assert.Contains("_gpuMinimumClockDcDraftMhz = mhz", valueChanged, StringComparison.Ordinal);
-        Assert.DoesNotContain("SetDeviceGpuMinimumClock", valueChanged, StringComparison.Ordinal);
-        Assert.Contains("editable && _gpuMinimumClockSnapshot.Enabled", enabledState, StringComparison.Ordinal);
     }
 
     private static string ExtractMethod(string source, string signature)

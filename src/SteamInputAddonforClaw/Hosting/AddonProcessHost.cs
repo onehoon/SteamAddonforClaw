@@ -175,7 +175,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         Func<string?, IIntelFrameLimiter>? testIntelFrameLimiterFactory = null,
         IWindowsAppRuntimePrerequisite? testWindowsAppRuntimePrerequisite = null,
         bool headlessUninstallPreparation = false,
-        Func<string, IIntelGpuMinimumClockControl>? testIntelGpuMinimumClockControlFactory = null,
+        Func<IIntelGpuMinimumClockControl>? testIntelGpuMinimumClockControlFactory = null,
         Func<AcDcPowerSource?>? testGpuMinimumClockPowerSource = null)
     {
         _runtimeCompositionFactory = testRuntimeCompositionFactory;
@@ -202,13 +202,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var fpsMarker = testOnlyDataRoot is null ? AddonDataPaths.IntelFpsLimitOwnershipPath : Path.Combine(testOnlyDataRoot, "intel-fps-limit-ownership.json");
         var fpsLimiter = testIntelFrameLimiterFactory?.Invoke(fpsMarker) ?? (testOnlyDataRoot is null ? new IntelFrameLimiter(fpsMarker) : new UnavailableIntelFrameLimiter());
         _intelFpsRuntime = new(_profileStore, _profileMutationGate, fpsLimiter, marker: fpsMarker);
-        var minimumClockMarker = testOnlyDataRoot is null
-            ? AddonDataPaths.IntelGpuMinimumClockOwnershipPath
-            : Path.Combine(testOnlyDataRoot, "intel-gpu-minimum-clock-ownership.json");
-        var minimumClockControl = testIntelGpuMinimumClockControlFactory?.Invoke(minimumClockMarker)
+        var minimumClockControl = testIntelGpuMinimumClockControlFactory?.Invoke()
             ?? (testOnlyDataRoot is null ? new IntelGpuMinimumClockControl() : new UnavailableIntelGpuMinimumClockControl());
         _intelGpuMinimumClockRuntime = new(_profileStore, _profileMutationGate, minimumClockControl,
-            testGpuMinimumClockPowerSource ?? WindowsAcDcPowerSource.Read, minimumClockMarker);
+            testGpuMinimumClockPowerSource ?? WindowsAcDcPowerSource.Read);
         _intelGpuMinimumClockRuntime.SetActiveProfileResolver(_activeProfileResolver);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _windowsAppRuntimePrerequisite = testWindowsAppRuntimePrerequisite ?? new WindowsAppRuntimePrerequisite();
@@ -2191,8 +2188,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var gpuRelease = _intelGpuMinimumClockRuntime.PrepareForUninstall();
         if (!gpuRelease.Succeeded)
         {
-            AppLog.Warn("Uninstall", "Owned minimum GPU clock could not be verified restored; uninstall preparation is blocked.", null,
-                ("Failure", gpuRelease.FailureReason), ("OwnershipMarkerPresent", gpuRelease.OwnershipMarkerPresent));
+            AppLog.Warn("Uninstall", "Factory minimum GPU clock release could not be verified; uninstall preparation is blocked.", null,
+                ("Failure", gpuRelease.FailureReason));
             return SteamInputAddonforClaw.CenterMStartup.StockUninstallPrepareResult.Fail(
                 "GpuMinimumClockReleaseFailed:" + (gpuRelease.FailureReason ?? "Unknown"));
         }

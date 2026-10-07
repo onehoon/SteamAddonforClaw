@@ -133,35 +133,11 @@ public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcom
     public bool Succeeded => Outcome == FrontendTdpMutationOutcome.Succeeded;
 }
 
-public enum FrontendGpuMinimumClockMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, ApplyFailed, Unavailable }
-public sealed record FrontendGpuMinimumClockSnapshot(
-    bool Available,
-    bool PersistenceWritable,
-    bool Initialized,
-    bool Enabled,
-    IReadOnlyList<double> SelectableClocksMhz,
-    double? AcMhz,
-    double? DcMhz,
-    double? RecommendedDefaultMhz,
-    string? LastFailure)
-{
-    public static readonly FrontendGpuMinimumClockSnapshot Unavailable =
-        new(false, false, false, false, Array.Empty<double>(), null, null, null, null);
-}
-public sealed record FrontendGpuMinimumClockMutationResult(
-    FrontendGpuMinimumClockMutationOutcome Outcome,
-    string? FailureMessage,
-    FrontendGpuMinimumClockSnapshot Snapshot)
-{
-    public bool Succeeded => Outcome == FrontendGpuMinimumClockMutationOutcome.Succeeded;
-}
-
 /// <summary>Shared Device Quick Settings read projection (Shared Frontend V2, SF-V2-01) used by
-/// Main UI and Overlay to read the existing shared controls in one round trip. The GPU minimum
-/// clock child is carried for the Main Device page and is deliberately not projected into Overlay
-/// rows. Each child is captured independently, so one child being <see cref="FrontendCpuBoostSnapshot.Unavailable"/>/<see
+/// Main UI and Overlay to read the existing shared controls in one round trip. Each child is
+/// captured independently, so one child being <see cref="FrontendCpuBoostSnapshot.Unavailable"/>/<see
 /// cref="FrontendTdpSnapshot.Unavailable"/>/<see cref="FrontendPowerModeSnapshot.Unavailable"/>/<see
-/// cref="FrontendGpuMinimumClockSnapshot.Unavailable"/>/<see cref="FrontendBatteryChargeLimitSnapshot.Unavailable"/> must
+/// cref="FrontendBatteryChargeLimitSnapshot.Unavailable"/> must
 /// not imply the others are unavailable. This is a UI projection convenience only -- it is not a new
 /// Device/Quick Settings authority and must not gain Center M, Status, active Profile, or other
 /// feature members.</summary>
@@ -170,23 +146,12 @@ public sealed record FrontendDeviceQuickSettingsSnapshot(
     FrontendCpuBoostSnapshot CpuBoost,
     FrontendTdpSnapshot Tdp,
     FrontendPowerModeSnapshot PowerMode,
-    FrontendGpuMinimumClockSnapshot GpuMinimumClock,
     FrontendBatteryChargeLimitSnapshot BatteryChargeLimit)
 {
-    public FrontendDeviceQuickSettingsSnapshot(
-        FrontendCpuBoostSnapshot cpuBoost,
-        FrontendTdpSnapshot tdp,
-        FrontendPowerModeSnapshot powerMode,
-        FrontendBatteryChargeLimitSnapshot batteryChargeLimit)
-        : this(cpuBoost, tdp, powerMode, FrontendGpuMinimumClockSnapshot.Unavailable, batteryChargeLimit)
-    {
-    }
-
     public static readonly FrontendDeviceQuickSettingsSnapshot Unavailable = new(
         FrontendCpuBoostSnapshot.Unavailable,
         FrontendTdpSnapshot.Unavailable,
         FrontendPowerModeSnapshot.Unavailable,
-        FrontendGpuMinimumClockSnapshot.Unavailable,
         FrontendBatteryChargeLimitSnapshot.Unavailable);
 }
 
@@ -682,22 +647,10 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
     Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
-    Task<FrontendGpuMinimumClockSnapshot> CaptureGpuMinimumClockAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(FrontendGpuMinimumClockSnapshot.Unavailable);
-    Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendGpuMinimumClockMutationResult(FrontendGpuMinimumClockMutationOutcome.Unavailable,
-            "Minimum GPU Clock is unavailable.", FrontendGpuMinimumClockSnapshot.Unavailable));
-    Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockAcAsync(double mhz, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendGpuMinimumClockMutationResult(FrontendGpuMinimumClockMutationOutcome.Unavailable,
-            "Minimum GPU Clock is unavailable.", FrontendGpuMinimumClockSnapshot.Unavailable));
-    Task<FrontendGpuMinimumClockMutationResult> SetDeviceGpuMinimumClockDcAsync(double mhz, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new FrontendGpuMinimumClockMutationResult(FrontendGpuMinimumClockMutationOutcome.Unavailable,
-            "Minimum GPU Clock is unavailable.", FrontendGpuMinimumClockSnapshot.Unavailable));
     /// <summary>Shared Device Quick Settings aggregate read (Shared Frontend V2, SF-V2-01): captures
-    /// Battery Charge Limit/CPU Boost/TDP/Power Mode plus the Main Device page's GPU minimum-clock
-    /// child in one round trip. Overlay continues to project only its existing controls. A UI projection
-    /// convenience over <see cref="CaptureBatteryChargeLimitAsync"/>/<see cref="CaptureCpuBoostAsync"/>/<see cref="CaptureTdpAsync"/>/<see
-    /// cref="CapturePowerModeAsync"/>/<see cref="CaptureGpuMinimumClockAsync"/> -- it must not replace those focused methods, must not persist
+    /// Battery Charge Limit/CPU Boost/TDP/Power Mode in one round trip. Overlay continues to project
+    /// only its existing controls. A UI projection convenience over <see cref="CaptureBatteryChargeLimitAsync"/>/<see cref="CaptureCpuBoostAsync"/>/<see cref="CaptureTdpAsync"/>/<see
+    /// cref="CapturePowerModeAsync"/> -- it must not replace those focused methods, must not persist
     /// or mutate anything, and one child capture failing must not discard healthy siblings.</summary>
     Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendDeviceQuickSettingsSnapshot.Unavailable);
