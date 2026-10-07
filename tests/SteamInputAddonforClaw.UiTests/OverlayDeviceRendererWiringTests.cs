@@ -808,7 +808,7 @@ public sealed class OverlayDeviceRendererWiringTests
 
         Assert.Contains("x:Name=\"SurfaceHost\"", xaml);
         Assert.Contains("x:Name=\"OpaquePanel\"", xaml);
-        Assert.Contains("MaxWidth=\"432\"", xaml);
+        Assert.Contains("MaxWidth=\"452\"", xaml);
         Assert.Contains("x:Name=\"QamShell\"", xaml);
         Assert.Contains("<ColumnDefinition Width=\"52\" />", xaml);
         Assert.Contains("<ColumnDefinition Width=\"*\" />", xaml);
