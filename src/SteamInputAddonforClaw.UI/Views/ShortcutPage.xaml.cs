@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using WinRT.Interop;
@@ -12,6 +13,7 @@ namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class ShortcutPage : UserControl
 {
+    private const int ShortcutColumnCount = 3;
     private readonly ObservableCollection<FrontendShortcutEditorTile> _tiles = [];
     private readonly DispatcherQueue _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
     private IAddonFrontendControl? _frontend;
@@ -22,11 +24,14 @@ public sealed partial class ShortcutPage : UserControl
     private bool _dialogOpen;
     private bool _refreshInProgress;
     private bool _editorAvailable;
+    private ItemsWrapGrid? _shortcutItemsPanel;
 
     public ShortcutPage()
     {
         InitializeComponent();
         ShortcutList.ItemsSource = _tiles;
+        ShortcutList.Loaded += ShortcutList_Loaded;
+        ShortcutList.SizeChanged += ShortcutList_SizeChanged;
     }
 
     public void Initialize(IAddonFrontendControl frontend, Func<nint> windowHandleProvider)
@@ -83,6 +88,7 @@ public sealed partial class ShortcutPage : UserControl
         ShortcutList.Visibility = snapshot.Available && _tiles.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         AddShortcutButton.IsEnabled = snapshot.Available && !_operationInProgress;
         ShortcutList.IsEnabled = snapshot.Available && _tiles.Count > 0 && !_operationInProgress;
+        UpdateShortcutItemWidth();
         UseDefaultFolderButton.IsEnabled = !snapshot.ScreenshotFolder.UsingDefault && !_operationInProgress;
         BrowseScreenshotFolderButton.IsEnabled = !_operationInProgress;
         OpenScreenshotFolderButton.IsEnabled = !_operationInProgress;
@@ -118,6 +124,9 @@ public sealed partial class ShortcutPage : UserControl
         AddActionChoice(actionPicker, "Application (.exe)", FrontendShortcutEditorActionKind.Executable);
         AddActionChoice(actionPicker, "PowerShell", FrontendShortcutEditorActionKind.PowerShell);
         AddActionChoice(actionPicker, "Website (URL)", FrontendShortcutEditorActionKind.Url);
+        AddActionChoice(actionPicker, "Steam Big Picture", FrontendShortcutEditorActionKind.SteamBigPicture);
+        AddActionChoice(actionPicker, "Steam", FrontendShortcutEditorActionKind.SteamClient);
+        AddActionChoice(actionPicker, "Xbox", FrontendShortcutEditorActionKind.XboxApp);
         AddActionChoice(actionPicker, "Screenshot", FrontendShortcutEditorActionKind.ScreenshotFullscreen);
 
         var executablePath = new TextBox { Header = "Executable path", PlaceholderText = @"C:\Path\Application.exe" };
@@ -147,16 +156,36 @@ public sealed partial class ShortcutPage : UserControl
                 new TextBlock { Text = "The save folder is configured on this Shortcut page.", Opacity = 0.7, TextWrapping = TextWrapping.Wrap }
             }
         };
+        var steamBigPicturePanel = CreateBuiltInActionPanel("Opens Steam Big Picture.");
+        var steamClientPanel = CreateBuiltInActionPanel("Opens the Steam client.");
+        var xboxAppPanel = CreateBuiltInActionPanel("Opens the Xbox app.");
 
         var panels = new Dictionary<FrontendShortcutEditorActionKind, UIElement>
         {
             [FrontendShortcutEditorActionKind.Executable] = executablePanel,
             [FrontendShortcutEditorActionKind.PowerShell] = scriptPanel,
             [FrontendShortcutEditorActionKind.Url] = urlPanel,
-            [FrontendShortcutEditorActionKind.ScreenshotFullscreen] = screenshotPanel
+            [FrontendShortcutEditorActionKind.ScreenshotFullscreen] = screenshotPanel,
+            [FrontendShortcutEditorActionKind.SteamBigPicture] = steamBigPicturePanel,
+            [FrontendShortcutEditorActionKind.SteamClient] = steamClientPanel,
+            [FrontendShortcutEditorActionKind.XboxApp] = xboxAppPanel
         };
 
-        actionPicker.SelectionChanged += (_, _) => UpdateEditorPanel(actionPicker, panels);
+        string? suggestedTitle = null;
+        actionPicker.SelectionChanged += (_, _) =>
+        {
+            UpdateEditorPanel(actionPicker, panels);
+            if (actionPicker.SelectedItem is not ComboBoxItem { Tag: FrontendShortcutEditorActionKind selectedKind })
+                return;
+
+            var defaultTitle = GetDefaultTitle(selectedKind);
+            if (defaultTitle is null) return;
+            if (ShouldApplyDefaultTitle(existing is null, titleBox.Text, suggestedTitle))
+            {
+                titleBox.Text = defaultTitle;
+                suggestedTitle = defaultTitle;
+            }
+        };
         executableBrowse.Click += async (_, _) => await BrowseForExecutableAsync(executablePath);
         if (existing is not null)
         {
@@ -173,7 +202,11 @@ public sealed partial class ShortcutPage : UserControl
         var content = new StackPanel
         {
             Spacing = 10,
-            Children = { titleBox, actionPicker, executablePanel, scriptPanel, urlPanel, screenshotPanel }
+            Children =
+            {
+                titleBox, actionPicker, executablePanel, scriptPanel, urlPanel,
+                steamBigPicturePanel, steamClientPanel, xboxAppPanel, screenshotPanel
+            }
         };
         var dialog = new ContentDialog
         {
@@ -206,6 +239,9 @@ public sealed partial class ShortcutPage : UserControl
             FrontendShortcutEditorActionKind.PowerShell => new FrontendShortcutActionInput(selectedKind, PowerShellScript: script.Text),
             FrontendShortcutEditorActionKind.Url => new FrontendShortcutActionInput(selectedKind, Url: url.Text),
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => new FrontendShortcutActionInput(selectedKind),
+            FrontendShortcutEditorActionKind.SteamBigPicture => new FrontendShortcutActionInput(selectedKind),
+            FrontendShortcutEditorActionKind.SteamClient => new FrontendShortcutActionInput(selectedKind),
+            FrontendShortcutEditorActionKind.XboxApp => new FrontendShortcutActionInput(selectedKind),
             _ => new FrontendShortcutActionInput(FrontendShortcutEditorActionKind.Unsupported)
         };
         var intent = new FrontendShortcutMutationIntent(
@@ -219,12 +255,74 @@ public sealed partial class ShortcutPage : UserControl
     private static void AddActionChoice(ComboBox picker, string label, FrontendShortcutEditorActionKind kind) =>
         picker.Items.Add(new ComboBoxItem { Content = label, Tag = kind });
 
+    private static StackPanel CreateBuiltInActionPanel(string description) => new()
+    {
+        Spacing = 8,
+        Children = { new TextBlock { Text = description, TextWrapping = TextWrapping.Wrap } }
+    };
+
+    internal static string? GetDefaultTitle(FrontendShortcutEditorActionKind kind) => kind switch
+    {
+        FrontendShortcutEditorActionKind.SteamBigPicture => "Steam Big Picture",
+        FrontendShortcutEditorActionKind.SteamClient => "Steam",
+        FrontendShortcutEditorActionKind.XboxApp => "Xbox",
+        FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Screenshot",
+        _ => null
+    };
+
+    internal static bool ShouldApplyDefaultTitle(bool isCreating, string currentTitle, string? previousSuggestedTitle) =>
+        isCreating
+        && (string.IsNullOrWhiteSpace(currentTitle)
+            || string.Equals(currentTitle, previousSuggestedTitle, StringComparison.Ordinal));
+
+    internal static double GetShortcutItemWidth(double availableWidth) => availableWidth / ShortcutColumnCount;
+
     private static void UpdateEditorPanel(ComboBox picker, IReadOnlyDictionary<FrontendShortcutEditorActionKind, UIElement> panels)
     {
         foreach (var panel in panels.Values) panel.Visibility = Visibility.Collapsed;
         if ((picker.SelectedItem as ComboBoxItem)?.Tag is FrontendShortcutEditorActionKind kind
             && panels.TryGetValue(kind, out var selectedPanel))
             selectedPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ShortcutList_Loaded(object sender, RoutedEventArgs e)
+    {
+        var itemsPanel = FindVisualChild<ItemsWrapGrid>(ShortcutList);
+        if (!ReferenceEquals(itemsPanel, _shortcutItemsPanel))
+        {
+            if (_shortcutItemsPanel is not null)
+                _shortcutItemsPanel.SizeChanged -= ShortcutItemsPanel_SizeChanged;
+            _shortcutItemsPanel = itemsPanel;
+            if (_shortcutItemsPanel is not null)
+                _shortcutItemsPanel.SizeChanged += ShortcutItemsPanel_SizeChanged;
+        }
+        UpdateShortcutItemWidth();
+    }
+
+    private void ShortcutList_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateShortcutItemWidth();
+
+    private void ShortcutItemsPanel_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateShortcutItemWidth();
+
+    private void UpdateShortcutItemWidth()
+    {
+        var itemsPanel = _shortcutItemsPanel ??= FindVisualChild<ItemsWrapGrid>(ShortcutList);
+        if (itemsPanel is null || itemsPanel.ActualWidth <= 0) return;
+
+        var itemWidth = GetShortcutItemWidth(itemsPanel.ActualWidth);
+        if (!double.IsFinite(itemsPanel.ItemWidth) || Math.Abs(itemsPanel.ItemWidth - itemWidth) > 0.1)
+            itemsPanel.ItemWidth = itemWidth;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match) return match;
+            if (FindVisualChild<T>(child) is { } nested) return nested;
+        }
+
+        return null;
     }
 
     private async Task BrowseForExecutableAsync(TextBox pathBox)

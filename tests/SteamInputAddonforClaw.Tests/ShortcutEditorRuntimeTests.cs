@@ -98,6 +98,78 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         Assert.Empty(reloaded.Tiles);
     }
 
+    [Theory]
+    [InlineData(FrontendShortcutEditorActionKind.SteamBigPicture, "system.steam-big-picture")]
+    [InlineData(FrontendShortcutEditorActionKind.SteamClient, "system.steam-client")]
+    [InlineData(FrontendShortcutEditorActionKind.XboxApp, "system.xbox-app")]
+    [InlineData(FrontendShortcutEditorActionKind.ScreenshotFullscreen, "system.screenshot-fullscreen")]
+    public void Parameterless_builtin_mutations_canonicalize_and_preserve_explicit_titles(
+        FrontendShortcutEditorActionKind kind,
+        string typeId)
+    {
+        var runtime = CreateRuntime();
+        var created = runtime.MutateEditor(CreateIntent("Custom title", kind), Folder);
+
+        Assert.True(created.Succeeded);
+        var createdTile = Assert.Single(created.Snapshot.Tiles);
+        Assert.Equal("Custom title", createdTile.Title);
+        Assert.Equal(kind, createdTile.Action.Kind);
+        Assert.Equal(typeId, createdTile.Action.TypeId);
+        var stored = Assert.Single(Load().Dashboard.Tiles);
+        Assert.Equal("Custom title", stored.Title);
+        Assert.Equal(typeId, stored.Action.TypeId);
+        Assert.Equal(1, stored.Action.SchemaVersion);
+        Assert.Equal("{}", ReadActionParameters(stored));
+
+        var updated = runtime.MutateEditor(new FrontendShortcutMutationIntent(
+            FrontendShortcutMutationKind.Update,
+            createdTile.TileId,
+            "Renamed title",
+            new FrontendShortcutActionInput(kind)), Folder);
+
+        Assert.True(updated.Succeeded);
+        Assert.Equal("Renamed title", Assert.Single(updated.Snapshot.Tiles).Title);
+        var updatedStored = Assert.Single(Load().Dashboard.Tiles);
+        Assert.Equal("Renamed title", updatedStored.Title);
+        Assert.Equal(typeId, updatedStored.Action.TypeId);
+        Assert.Equal(1, updatedStored.Action.SchemaVersion);
+        Assert.Equal("{}", ReadActionParameters(updatedStored));
+    }
+
+    [Theory]
+    [InlineData(FrontendShortcutEditorActionKind.SteamBigPicture, "system.steam-big-picture", "Steam Big Picture")]
+    [InlineData(FrontendShortcutEditorActionKind.SteamClient, "system.steam-client", "Steam client")]
+    [InlineData(FrontendShortcutEditorActionKind.XboxApp, "system.xbox-app", "Xbox app")]
+    public void Invalid_parameterless_builtin_stays_editable_for_canonical_repair(
+        FrontendShortcutEditorActionKind kind,
+        string typeId,
+        string summary)
+    {
+        var tile = Tile("Persisted custom title", typeId, "{\"unexpected\":true}");
+        Save(tile);
+        var runtime = CreateRuntime();
+
+        var projected = Assert.Single(runtime.CaptureEditor(Folder).Tiles);
+
+        Assert.Equal("Persisted custom title", projected.Title);
+        Assert.Equal(summary, projected.TargetSummary);
+        Assert.Equal(kind, projected.Action.Kind);
+        Assert.True(projected.Action.Editable);
+        Assert.False(projected.Action.ConfigurationValid);
+
+        var repaired = runtime.MutateEditor(new FrontendShortcutMutationIntent(
+            FrontendShortcutMutationKind.Update,
+            tile.TileId,
+            "Persisted custom title",
+            new FrontendShortcutActionInput(kind)), Folder);
+
+        Assert.True(repaired.Succeeded);
+        Assert.Equal("Persisted custom title", Assert.Single(repaired.Snapshot.Tiles).Title);
+        Assert.True(Assert.Single(repaired.Snapshot.Tiles).Action.ConfigurationValid);
+        var stored = Assert.Single(Load().Dashboard.Tiles);
+        Assert.Equal("{}", ReadActionParameters(stored));
+    }
+
     [Fact]
     public void Screenshot_repair_canonicalizes_parameters_and_unsupported_actions_can_be_deleted()
     {
@@ -226,11 +298,13 @@ public sealed class ShortcutEditorRuntimeTests : IDisposable
         var deleteMissing = runtime.MutateEditor(new(FrontendShortcutMutationKind.Delete, Guid.NewGuid()), Folder);
         var moveOutOfRange = runtime.MutateEditor(new(FrontendShortcutMutationKind.Move, tile.TileId, TargetIndex: 1), Folder);
         var invalidAction = runtime.MutateEditor(CreateIntent("Bad URL", FrontendShortcutEditorActionKind.Url, url: "file:///C:/secret"), Folder);
+        var invalidSteamProtocol = runtime.MutateEditor(CreateIntent("Steam URI", FrontendShortcutEditorActionKind.Url, url: "steam://open/main"), Folder);
 
         Assert.False(updateUnsupported.Succeeded);
         Assert.False(deleteMissing.Succeeded);
         Assert.False(moveOutOfRange.Succeeded);
         Assert.False(invalidAction.Succeeded);
+        Assert.False(invalidSteamProtocol.Succeeded);
         Assert.Equal(before, File.ReadAllText(DocumentPath));
         Assert.Equal("Future", Assert.Single(runtime.CaptureEditor(Folder).Tiles).Title);
     }

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using SteamInputAddonforClaw.WindowsGaming;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Shortcuts;
 using SteamInputAddonforClaw.Diagnostics;
@@ -262,6 +263,9 @@ internal sealed class ShortcutRuntime
             FrontendShortcutEditorActionKind.PowerShell => TryReadPowerShellParameters(action.Parameters, out _),
             FrontendShortcutEditorActionKind.Url => TryReadUrlParameters(action.Parameters, out _),
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => HasEmptyObjectParameters(action.Parameters),
+            FrontendShortcutEditorActionKind.SteamBigPicture or
+            FrontendShortcutEditorActionKind.SteamClient or
+            FrontendShortcutEditorActionKind.XboxApp => HasEmptyObjectParameters(action.Parameters),
             _ => false
         };
 
@@ -280,6 +284,9 @@ internal sealed class ShortcutRuntime
         ShortcutActionTypeIds.PowerShell => FrontendShortcutEditorActionKind.PowerShell,
         ShortcutActionTypeIds.Url => FrontendShortcutEditorActionKind.Url,
         ShortcutActionTypeIds.ScreenshotFullscreen => FrontendShortcutEditorActionKind.ScreenshotFullscreen,
+        ShortcutActionTypeIds.SteamBigPicture => FrontendShortcutEditorActionKind.SteamBigPicture,
+        ShortcutActionTypeIds.SteamClient => FrontendShortcutEditorActionKind.SteamClient,
+        ShortcutActionTypeIds.XboxApp => FrontendShortcutEditorActionKind.XboxApp,
         _ => null
     };
 
@@ -297,6 +304,9 @@ internal sealed class ShortcutRuntime
             FrontendShortcutEditorActionKind.Url => Uri.TryCreate(ReadStringOrEmpty(action.Parameters, "url"), UriKind.Absolute, out var uri)
                 ? uri.Host : "Website",
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Fullscreen screenshot",
+            FrontendShortcutEditorActionKind.SteamBigPicture => "Steam Big Picture",
+            FrontendShortcutEditorActionKind.SteamClient => "Steam client",
+            FrontendShortcutEditorActionKind.XboxApp => "Xbox app",
             _ => "Unsupported in this version"
         };
     }
@@ -379,12 +389,31 @@ internal sealed class ShortcutRuntime
             return true;
         }
 
+        if ((input.Kind == FrontendShortcutEditorActionKind.SteamBigPicture
+                || input.Kind == FrontendShortcutEditorActionKind.SteamClient
+                || input.Kind == FrontendShortcutEditorActionKind.XboxApp)
+            && input.ExecutablePath is null && input.ExecutableArguments is null
+            && input.PowerShellScript is null && input.Url is null)
+        {
+            var typeId = input.Kind switch
+            {
+                FrontendShortcutEditorActionKind.SteamBigPicture => ShortcutActionTypeIds.SteamBigPicture,
+                FrontendShortcutEditorActionKind.SteamClient => ShortcutActionTypeIds.SteamClient,
+                _ => ShortcutActionTypeIds.XboxApp
+            };
+            action = new(typeId, SupportedActionSchemaVersion, JsonSerializer.SerializeToElement(new { }));
+            return true;
+        }
+
         failureMessage = input.Kind switch
         {
             FrontendShortcutEditorActionKind.Executable => "Enter a fully qualified .exe path.",
             FrontendShortcutEditorActionKind.PowerShell => "Enter a PowerShell script.",
             FrontendShortcutEditorActionKind.Url => "Enter an absolute http or https URL.",
             FrontendShortcutEditorActionKind.ScreenshotFullscreen => "Screenshot action input is invalid.",
+            FrontendShortcutEditorActionKind.SteamBigPicture or
+            FrontendShortcutEditorActionKind.SteamClient or
+            FrontendShortcutEditorActionKind.XboxApp => "Built-in Shortcut action input is invalid.",
             _ => "Unsupported Shortcut action."
         };
         return false;
@@ -453,6 +482,17 @@ internal sealed class ShortcutRuntime
             ShortcutActionTypeIds.Executable => ExecuteExecutable(tile, cancellationToken),
             ShortcutActionTypeIds.PowerShell => ExecutePowerShell(tile, cancellationToken),
             ShortcutActionTypeIds.Url => ExecuteUrl(tile, cancellationToken),
+            ShortcutActionTypeIds.SteamBigPicture => ExecuteParameterlessBuiltIn(tile,
+                new ProcessStartInfo { FileName = "steam://open/bigpicture", UseShellExecute = true }, cancellationToken),
+            ShortcutActionTypeIds.SteamClient => ExecuteParameterlessBuiltIn(tile,
+                new ProcessStartInfo { FileName = "steam://open/main", UseShellExecute = true }, cancellationToken),
+            ShortcutActionTypeIds.XboxApp => ExecuteParameterlessBuiltIn(tile,
+                new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}",
+                    UseShellExecute = true
+                }, cancellationToken),
             _ => new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage)
         };
     }
@@ -469,7 +509,15 @@ internal sealed class ShortcutRuntime
         }
 
         if (!IsSupportedAction(tile.Action))
-            return TileResolution.Unsupported;
+        {
+            if (!IsParameterlessBuiltIn(tile.Action.TypeId))
+                return TileResolution.Unsupported;
+            if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
+                return TileResolution.Unsupported;
+            return HasEmptyObjectParameters(tile.Action.Parameters)
+                ? TileResolution.Available
+                : TileResolution.Invalid;
+        }
 
         return tile.Action.TypeId switch
         {
@@ -584,6 +632,19 @@ internal sealed class ShortcutRuntime
         return StartExternal(tile, startInfo, cancellationToken);
     }
 
+    private ShortcutExecutionResult ExecuteParameterlessBuiltIn(
+        ShortcutTileDefinition tile,
+        ProcessStartInfo startInfo,
+        CancellationToken cancellationToken)
+    {
+        if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
+            return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage);
+        if (!HasEmptyObjectParameters(tile.Action.Parameters))
+            return InvalidConfiguration();
+
+        return StartExternal(tile, startInfo, cancellationToken);
+    }
+
     private ShortcutExecutionResult StartExternal(
         ShortcutTileDefinition tile,
         ProcessStartInfo startInfo,
@@ -661,6 +722,9 @@ internal sealed class ShortcutRuntime
     private static bool IsSupportedAction(ShortcutActionSpec action) =>
         action.SchemaVersion == SupportedActionSchemaVersion
         && action.TypeId is ShortcutActionTypeIds.Executable or ShortcutActionTypeIds.PowerShell or ShortcutActionTypeIds.Url;
+
+    private static bool IsParameterlessBuiltIn(string typeId) =>
+        typeId is ShortcutActionTypeIds.SteamBigPicture or ShortcutActionTypeIds.SteamClient or ShortcutActionTypeIds.XboxApp;
 
     private static bool TryReadExecutableParameters(JsonElement parameters, out string path, out string arguments)
     {

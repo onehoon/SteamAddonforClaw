@@ -5,6 +5,7 @@ using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Shortcuts;
 using SteamInputAddonforClaw.Shortcuts;
+using SteamInputAddonforClaw.WindowsGaming;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -83,6 +84,72 @@ public sealed class ShortcutRuntimeTests : IDisposable
         Assert.Equal(FrontendShortcutTileState.Unavailable, projected.State);
         Assert.Equal("Unsupported", projected.StatusText);
         Assert.Equal(ShortcutExecutionOutcome.Unsupported, result.Outcome);
+        Assert.Equal(0, launchCount);
+    }
+
+    [Fact]
+    public async Task Parameterless_builtins_project_enabled_and_execute_via_the_existing_process_seam()
+    {
+        var tiles = new[]
+        {
+            Tile("Big Picture", ShortcutActionTypeIds.SteamBigPicture, Parameters("{}")),
+            Tile("Steam", ShortcutActionTypeIds.SteamClient, Parameters("{}")),
+            Tile("Xbox", ShortcutActionTypeIds.XboxApp, Parameters("{}"))
+        };
+        Save(tiles);
+        var started = new List<ProcessStartInfo>();
+        var runtime = CreateRuntime(info =>
+        {
+            started.Add(info);
+            return new Process();
+        });
+
+        var projected = runtime.Capture().Tiles;
+        var results = new List<ShortcutExecutionResult>();
+        foreach (var tile in tiles)
+            results.Add(await runtime.ExecuteAsync(tile.TileId));
+
+        Assert.All(projected, tile =>
+        {
+            Assert.True(tile.Enabled);
+            Assert.Equal(FrontendShortcutTileState.Neutral, tile.State);
+            Assert.Null(tile.StatusText);
+        });
+        Assert.All(results, result => Assert.Equal(ShortcutExecutionOutcome.Succeeded, result.Outcome));
+        Assert.Equal("steam://open/bigpicture", started[0].FileName);
+        Assert.True(started[0].UseShellExecute);
+        Assert.Equal("steam://open/main", started[1].FileName);
+        Assert.True(started[1].UseShellExecute);
+        Assert.Equal("explorer.exe", started[2].FileName);
+        Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", started[2].Arguments);
+        Assert.True(started[2].UseShellExecute);
+    }
+
+    [Theory]
+    [InlineData("system.steam-big-picture", "{\"unexpected\":true}")]
+    [InlineData("system.steam-big-picture", "{\"unexpected\":[]}")]
+    [InlineData("system.steam-client", "{\"unexpected\":true}")]
+    [InlineData("system.steam-client", "{\"unexpected\":[]}")]
+    [InlineData("system.xbox-app", "{\"unexpected\":true}")]
+    [InlineData("system.xbox-app", "{\"unexpected\":[]}")]
+    public async Task Parameterless_builtins_with_parameters_are_disabled_and_not_executed(string typeId, string parametersJson)
+    {
+        var tile = Tile("Invalid built-in", typeId, Parameters(parametersJson));
+        Save([tile]);
+        var launchCount = 0;
+        var runtime = CreateRuntime(_ =>
+        {
+            launchCount++;
+            return new Process();
+        });
+
+        var projected = Assert.Single(runtime.Capture().Tiles);
+        var result = await runtime.ExecuteAsync(tile.TileId);
+
+        Assert.False(projected.Enabled);
+        Assert.Equal(FrontendShortcutTileState.Unavailable, projected.State);
+        Assert.Equal("Invalid configuration", projected.StatusText);
+        Assert.Equal(ShortcutExecutionOutcome.InvalidConfiguration, result.Outcome);
         Assert.Equal(0, launchCount);
     }
 

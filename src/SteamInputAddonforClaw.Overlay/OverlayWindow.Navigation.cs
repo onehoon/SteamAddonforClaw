@@ -25,7 +25,7 @@ public sealed partial class OverlayWindow
     // OQ5-UI-04 s.11: NavigateUp/Down move logical row selection; Left/Right and Accept dispatch to
     // the selected row only when it registered that capability. All row/selection state stays private
     // to OverlayWindow -- App only forwards the semantic action. Shortcut remains the one 2D page,
-    // with its current Runtime-projected tile count and two-column layout.
+    // with its current Runtime-projected tile count and three-column layout.
     internal void NavigateUp()
     {
         if (OnShortcutPage()) { if (_shortcutSelection.MoveUp()) ApplyShortcutSelectionVisual(); return; }
@@ -116,7 +116,7 @@ public sealed partial class OverlayWindow
     private void ResetShortcutSelection()
     {
         var count = _shortcutSnapshot.Available ? _shortcutSnapshot.Tiles.Count : 0;
-        var columns = count == 0 ? 0 : Math.Min(2, count);
+        var columns = count == 0 ? 0 : Math.Min(ShortcutVisualColumnCount, count);
         _shortcutSelection.Configure(count, columns, preferredIndex: 0);
     }
 
@@ -124,7 +124,9 @@ public sealed partial class OverlayWindow
     {
         Guid? selectedTileId = GetSelectedShortcutTile()?.TileId;
         _shortcutSnapshot = snapshot;
-        var columns = snapshot.Available && snapshot.Tiles.Count > 0 ? Math.Min(2, snapshot.Tiles.Count) : 0;
+        var columns = snapshot.Available && snapshot.Tiles.Count > 0
+            ? Math.Min(ShortcutVisualColumnCount, snapshot.Tiles.Count)
+            : 0;
         var preferredIndex = selectedTileId is { } id
             ? snapshot.Tiles.ToList().FindIndex(tile => tile.TileId == id)
             : -1;

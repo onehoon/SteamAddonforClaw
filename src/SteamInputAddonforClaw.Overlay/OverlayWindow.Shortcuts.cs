@@ -10,6 +10,7 @@ namespace SteamInputAddonforClaw.Overlay;
 
 public sealed partial class OverlayWindow
 {
+    private const int ShortcutVisualColumnCount = 3;
     private FrontendShortcutDashboardSnapshot _shortcutSnapshot =
         FrontendShortcutDashboardSnapshot.Unavailable();
     private readonly Dictionary<Guid, Border> _shortcutTiles = new();
@@ -71,13 +72,12 @@ public sealed partial class OverlayWindow
 
         if (!_shortcutSnapshot.Available || _shortcutSnapshot.Tiles.Count == 0)
             return;
-        var columnCount = Math.Min(2, _shortcutSnapshot.Tiles.Count);
-        for (var column = 0; column < columnCount; column++)
+        for (var column = 0; column < ShortcutVisualColumnCount; column++)
             _shortcutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         for (var index = 0; index < _shortcutSnapshot.Tiles.Count; index++)
         {
-            if (index % columnCount == 0)
+            if (index % ShortcutVisualColumnCount == 0)
                 _shortcutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var tile = _shortcutSnapshot.Tiles[index];
@@ -85,14 +85,37 @@ public sealed partial class OverlayWindow
             {
                 Text = tile.Title,
                 TextWrapping = TextWrapping.Wrap,
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
             };
             OverlayQamResources.ApplyTextStyle(title, "QamTileTitleTextStyle");
 
+            var content = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Spacing = string.IsNullOrWhiteSpace(tile.StatusText) ? 0 : 4,
+            };
+            content.Children.Add(title);
+            if (!string.IsNullOrWhiteSpace(tile.StatusText))
+            {
+                var status = new TextBlock
+                {
+                    Text = tile.StatusText,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextAlignment = TextAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                };
+                OverlayQamResources.ApplyTextStyle(status, "QamCaptionTextStyle");
+                content.Children.Add(status);
+            }
+
             var border = new Border
             {
-                Child = title,
+                Child = content,
                 Padding = OverlayQamResources.Get("QamTilePadding", new Thickness(12)),
-                MinHeight = OverlayQamResources.Get("QamTileMinHeight", 58.0),
+                Width = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333),
+                Height = OverlayQamResources.Get("QamShortcutTileSize", 117.33333333333333),
                 CornerRadius = OverlayQamResources.Get("QamTileCornerRadius", new CornerRadius(2)),
                 BorderThickness = OverlayQamResources.Get("QamSelectionBorderThickness", new Thickness(0)),
                 BorderBrush = OverlayQamResources.Brush("QamFocusBorderBrush"),
@@ -102,8 +125,8 @@ public sealed partial class OverlayWindow
                 IsHitTestVisible = true,
             };
             border.Tapped += (_, _) => OnShortcutTileTapped(tile);
-            Grid.SetRow(border, index / columnCount);
-            Grid.SetColumn(border, index % columnCount);
+            Grid.SetRow(border, index / ShortcutVisualColumnCount);
+            Grid.SetColumn(border, index % ShortcutVisualColumnCount);
             _shortcutGrid.Children.Add(border);
             _shortcutTiles[tile.TileId] = border;
         }
