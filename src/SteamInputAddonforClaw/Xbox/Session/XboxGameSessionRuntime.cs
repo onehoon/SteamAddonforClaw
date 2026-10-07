@@ -273,9 +273,6 @@ internal sealed class XboxGameSessionRuntime : IAsyncDisposable
             if (existing.Generation.Key == generation.Key)
             {
                 generation.Dispose();
-                AppLog.Debug("XboxSession", "Duplicate event for an already classified process generation was suppressed.",
-                    ("PID", processId), ("CreationTime", existing.Generation.Key.CreationTime),
-                    ("Disposition", existing.Inspection?.Disposition.ToString() ?? "InspectionPending"));
                 if (existing.Inspection?.Match is { } cachedMatch && _activeGame is null)
                     Activate(existing, cachedMatch);
                 return;
