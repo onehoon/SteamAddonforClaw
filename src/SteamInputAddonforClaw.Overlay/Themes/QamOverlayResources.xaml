@@ -17,7 +17,7 @@
     <SolidColorBrush x:Key="QamFocusBorderBrush" Color="#00000000" />
     <SolidColorBrush x:Key="QamSeparatorBrush" Color="#1AFFFFFF" />
     <SolidColorBrush x:Key="QamSectionBrush" Color="#00000000" />
-    <SolidColorBrush x:Key="QamTileBrush" Color="#FF0E141B" />
+    <SolidColorBrush x:Key="QamTileBrush" Color="#0DFFFFFF" />
     <SolidColorBrush x:Key="QamTileSelectedBrush" Color="#26FFFFFF" />
     <SolidColorBrush x:Key="QamRailIconBrush" Color="#FF8B929A" />
     <SolidColorBrush x:Key="QamRailIconSelectedBrush" Color="#FF8B929A" />
