@@ -72,7 +72,8 @@ public sealed class DeviceGpuMinimumClockUiTests
         {
             var submit = ExtractMethod(code, "private async Task SubmitGpuMinimumClockAfterDelayAsync(");
             var restore = ExtractMethod(code, "private async Task RestoreSelectedAfterMutationFailureAsync(");
-            Assert.Contains("ResolveFailedCommit(\n                    ref _gpuDraftDirty, draftGeneration, _gpuDraftGeneration)", submit, StringComparison.Ordinal);
+            var normalizedSubmit = submit.Replace("\r\n", "\n", StringComparison.Ordinal);
+            Assert.Contains("ResolveFailedCommit(\n                    ref _gpuDraftDirty, draftGeneration, _gpuDraftGeneration)", normalizedSubmit, StringComparison.Ordinal);
             Assert.Contains("preserveDirtyGpuDraft: preserveDraft", submit, StringComparison.Ordinal);
             Assert.Contains("Render(snapshot, preserveDirtyGpuDraft: preserveDirtyGpuDraft)", restore, StringComparison.Ordinal);
             Assert.Contains("&& !_gpuDraftDirty", code, StringComparison.Ordinal);
