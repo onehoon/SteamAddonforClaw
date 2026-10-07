@@ -9,9 +9,12 @@ public sealed class HowToUsePageDocumentationRoutingTests
     [Fact]
     public void Korean_ui_routes_to_the_repository_korean_guide()
     {
+        var source = HowToUseMarkdownRenderer.ResolveSource(CultureInfo.GetCultureInfo("ko-KR"));
+
         Assert.Equal(
-            "https://github.com/onehoon/SteamAddonforClaw/blob/main/docs/howtouse/README_KO.md",
-            HowToUsePage.ResolveDocumentationUrl(CultureInfo.GetCultureInfo("ko-KR")));
+            "https://raw.githubusercontent.com/onehoon/SteamAddonforClaw/main/docs/howtouse/README_KO.md",
+            source.RawMarkdownUrl);
+        Assert.Equal("docs/howtouse/", source.RepositoryDirectory);
     }
 
     [Theory]
@@ -19,8 +22,11 @@ public sealed class HowToUsePageDocumentationRoutingTests
     [InlineData("ja-JP")]
     public void Non_korean_ui_routes_to_the_readme(string cultureName)
     {
+        var source = HowToUseMarkdownRenderer.ResolveSource(CultureInfo.GetCultureInfo(cultureName));
+
         Assert.Equal(
-            HowToUsePage.EnglishDocumentationUrl,
-            HowToUsePage.ResolveDocumentationUrl(CultureInfo.GetCultureInfo(cultureName)));
+            "https://raw.githubusercontent.com/onehoon/SteamAddonforClaw/main/README.md",
+            source.RawMarkdownUrl);
+        Assert.Equal(string.Empty, source.RepositoryDirectory);
     }
 }
