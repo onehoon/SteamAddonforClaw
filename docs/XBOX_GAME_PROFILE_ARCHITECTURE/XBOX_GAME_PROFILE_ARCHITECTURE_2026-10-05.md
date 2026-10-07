@@ -2315,14 +2315,14 @@ Implement X5 as two focused PRs so the identity/transport conversion is reviewab
 - no XBOX or Steam installed-game catalog in Overlay;
 - do not add XBOX per-game M1/M2 rows yet.
 
-#### PR12 — XBOX Overlay per-game M1/M2 + final X5 acceptance
+#### PR12 — XBOX Overlay per-game M1/M2 + X5 implementation closure
 
 - active XBOX Profile shows per-game **Controller / Use global M1/M2 / M1 / M2**;
 - place that Controller section **above the existing performance/display sections**;
 - Steam Profile does not show per-game M1/M2;
 - Overlay Controller tab continues editing only the global M1/M2 fallback;
 - reuse the existing `SetXboxGameProfileBackButtonMappingAsync` mutation authority and the existing effective-mapping cache / `CanonicalXbox360InputPublisher`;
-- close final active-target/start/exit/resume/Overlay lifecycle acceptance for XBOX.
+- PR12 acceptance is code/automated-test only. Physical-device lifecycle validation (launch/exit, Alt+Tab, Runtime restart, Sleep/Hibernate/Resume) is intentionally deferred to a later user-run validation session and is not an implementation requirement for this PR.
 
 ### Phase X6 — front-button Xbox action — implemented in production code, final device validation pending
 
