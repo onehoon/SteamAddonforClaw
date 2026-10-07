@@ -43,7 +43,7 @@ Device 페이지에는 제조사와 모델, 호환 상태, 보드 식별 정보,
 
 컨트롤러 관리를 시작하기 전에 지원 모델인지 확인합니다. 모델을 식별할 수 없거나 지원되지 않으면 컨트롤러 기능이 시작되지 않습니다.
 
-프로젝트에 문서화된 실기 검증은 MSI Claw 8 EX AI+ CG3EM입니다. A2VM 모델은 소프트웨어에서 인식하지만 동등한 실기 검증 결과는 아직 문서화되어 있지 않습니다. 필요한 기능을 기기가 제공하지 않으면 일부 하드웨어 설정이 숨겨지거나 사용할 수 없을 수 있습니다.
+MSI Claw 8 EX AI+ CG3EM은 실제 기기에서 검증되었습니다. A2VM 모델도 소프트웨어에서 지원하지만 동등한 실기 검증은 아직 진행 중입니다. 필요한 기능을 기기가 제공하지 않으면 일부 하드웨어 설정이 숨겨지거나 사용할 수 없을 수 있습니다.
 
 ## 요구 사항 및 호환성
 
@@ -95,7 +95,9 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 - **Windows Power Mode** — 전원 상태별 Windows 전원 모드를 관리합니다. **Best power efficiency**, **Balanced**, **Best performance** 중 선택합니다.
 - **Battery charge limit** — 기기가 지원하는 경우 충전 한도를 켜고 60%부터 100%까지 5% 단위로 설정합니다.
 
-기능을 끄면 Addon이 해당 기능의 관리를 중단합니다. Addon이 건드리기 전의 Windows/MSI 값을 언제나 그대로 복원한다는 의미는 아닙니다. 저장한 설정은 유지되므로 나중에 다시 켤 수 있습니다.
+**TDP Control**, **CPU Boost**, **Windows Power Mode**를 끄면 Addon이 해당 설정의 관리를 중단합니다. Addon이 건드리기 전의 Windows/MSI 값을 언제나 그대로 복원한다는 의미는 아닙니다. 저장한 값은 유지되므로 나중에 다시 켤 수 있습니다.
+
+**Battery charge limit**은 동작이 다릅니다. 이 토글은 MSI의 충전 제한 기능 자체를 직접 켜거나 끕니다. 선택한 충전 한도 퍼센트는 나중에 다시 사용할 수 있도록 저장됩니다.
 
 ### Controller
 
@@ -132,7 +134,7 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 - **Intel FPS Limit** — 전원 상태별 40~120 FPS 목표값을 1 FPS 단위로 설정합니다. Intel의 FPS 제한 기능을 사용하며 일부 게임은 지원하지 않을 수 있습니다.
 - **Resolution** — **Do not change**, 1920 × 1200, 1920 × 1080, 1680 × 1050, 1440 × 900
 
-선택한 프로필에서 켠 기능만 해당 Device 설정보다 우선합니다. 프로필에서 켜지 않은 기능은 활성화된 Device 설정을 계속 사용할 수 있습니다. 게임이 비활성화되면 활성화된 Device 설정이 다시 적용됩니다. 별도 런처가 종료될 때 Steam이 바로가기를 더 이상 활성 게임으로 인식하지 않으면, 자식 게임 프로세스가 실행 중이어도 프로필 적용이 끝날 수 있습니다. 자세한 내용은 [Non-Steam 게임](#non-steam-게임)을 참고하세요.
+**TDP Control**, **CPU Boost**, **Windows Power Mode**는 프로필에서 해당 기능을 켜면 대응하는 Device 설정보다 우선합니다. 프로필에서 이 기능을 끄면 활성화된 Device 설정을 계속 사용할 수 있습니다. **Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**은 게임 프로필 전용 기능이므로 대응하는 Device 설정이 없습니다. 게임이 비활성화되면 게임 프로필 전용 설정의 적용이 끝나고, TDP/CPU Boost/Windows Power Mode는 활성화된 Device 설정이 다시 적용됩니다. 별도 런처가 종료될 때 Steam이 바로가기를 더 이상 활성 게임으로 인식하지 않으면, 자식 게임 프로세스가 실행 중이어도 프로필 적용이 끝날 수 있습니다. 자세한 내용은 [Non-Steam 게임](#non-steam-게임)을 참고하세요.
 
 ### XBOX
 
@@ -140,13 +142,15 @@ Device 페이지에서 감지된 기기와 지원 상태를 확인할 수 있습
 
 성능 설정은 Steam 프로필과 같은 TDP Control, CPU Boost, Windows Power Mode, Minimum GPU Clock, Intel FPS Limit, Resolution입니다. XBOX 프로필에는 **Use global M1 / M2 mapping** 설정도 있습니다. 이를 끄면 해당 게임에서 사용할 Xbox 360 M1/M2 동작을 따로 지정할 수 있습니다. Steam Deck 표현에서는 M1은 R4, M2는 L4로 유지됩니다.
 
-게임을 실행하기 전에 미리 프로필을 설정할 수 있습니다. Addon이 해당 XBOX 게임을 활성 상태로 인식하면 활성화한 프로필 설정을 사용합니다. 프로필에서 끄지 않은 기능은 활성화된 Device 설정을 계속 사용할 수 있습니다.
+게임을 실행하기 전에 미리 프로필을 설정할 수 있습니다. Addon이 해당 XBOX 게임을 활성 상태로 인식하면 활성화한 프로필 설정을 사용합니다. TDP Control, CPU Boost, Windows Power Mode는 대응하는 프로필 기능이 꺼져 있으면 활성화된 Device 설정을 계속 사용할 수 있습니다. Minimum GPU Clock, Intel FPS Limit, Resolution은 게임 프로필 전용이므로 Device 대체 설정이 없습니다.
 
 ### ClawHUD
 
 **ClawHUD**는 Addon에 포함되어 함께 관리되는 성능 HUD입니다. 별도 ClawHUD 앱을 설치할 필요가 없습니다. **Enable HUD**를 켠 다음 표시 모드를 **In game only** 또는 **Always**로 선택합니다.
 
-기기와 데이터 제공 여부에 따라 프레임 속도, CPU/GPU 사용률·클럭·온도 또는 전력, 메모리, 팬 속도, 배터리 정보를 표시할 수 있습니다. 배터리 사용 중에는 잔량과 예상 사용 가능 시간이 표시될 수 있습니다. 제공되지 않는 측정값은 생략하거나 사용할 수 없음으로 표시되며 실제 0으로 취급되지 않습니다.
+기기와 데이터 제공 여부에 따라 **FPS**, **CPU 사용률 및 온도**, **GPU 사용률 및 클럭**, **CPU 패키지 전력(TDP)**, **RAM 사용량**, **VRAM 사용량**, **팬 속도**, **배터리 정보**를 표시할 수 있습니다. 배터리 사용 중에는 잔량과 예상 사용 가능 시간이 표시될 수 있습니다. 제공되지 않는 측정값은 실제 0으로 처리하지 않고 표시에서 제외됩니다.
+
+Intel XeFG를 사용하는 경우 PresentMon이 드라이버에서 생성된 모든 출력 프레임을 관찰하지 못할 수 있으므로 ClawHUD의 FPS 값에 모든 생성 프레임이 포함되지 않을 수 있습니다.
 
 **Size**(**-2**, **-1**, **Default**, **+1**, **+2**), **Font**(**Unispace**, **Segoe UI Variable**), **Alignment**(**Left**, **Center**, **Right**), **Background width**(**Full width**, **Content width**)를 설정할 수 있습니다. **Opacity**는 50%~100% 범위에서 5% 단위로 조절합니다. **Intel VRR Range Fix**는 해당 Intel 디스플레이의 가변 주사율 범위를 보정하기 위한 기기별 옵션이며 모든 디스플레이에 필요한 것은 아닙니다. 문제가 표시되면 사용할 수 있는 경우 페이지의 **Retry**를 선택하세요.
 
@@ -186,18 +190,24 @@ Developer Menu는 개발자용 진단 메뉴이며 일반적인 설정이나 사
 
 ## 게임 프로필과 설정 우선순위
 
-Steam 및 XBOX 게임 프로필은 게임을 실행하기 전에 미리 만들고 편집할 수 있습니다. 프로필을 꺼도 저장된 값은 유지됩니다. 앱이 인식한 게임이 활성화되면 프로필에서 켠 기능만 해당 Device 설정보다 우선합니다.
+Steam 및 XBOX 게임 프로필은 게임을 실행하기 전에 미리 만들고 편집할 수 있습니다. 프로필을 꺼도 저장된 값은 유지됩니다.
+
+**TDP Control**, **CPU Boost**, **Windows Power Mode**는 Device와 게임 프로필 양쪽에 있는 기능입니다. 실행 중인 게임 프로필에서 해당 기능을 켜면 프로필 값이 우선합니다. 프로필에서 해당 기능을 끄면 활성화된 Device 설정을 계속 사용할 수 있습니다.
+
+**Minimum GPU Clock**, **Intel FPS Limit**, **Resolution**은 게임 프로필 전용 기능입니다. 이 기능을 끄거나 일치하는 활성 게임 프로필이 없을 때 대신 사용할 Device 설정은 없습니다. **Battery charge limit**은 Device 전용이며 게임 프로필에는 포함되지 않습니다.
 
 ```text
-인식된 게임 실행 중 + 프로필 활성화
-    -> 프로필에서 켠 기능은 프로필 값 사용
-    -> 그 외 기능은 활성화된 Device 설정 사용
+인식된 게임 실행 중 + 활성화된 프로필
+    -> 켜진 TDP / CPU Boost / Power Mode 프로필 설정은 Device보다 우선
+    -> 켜진 GPU Clock / FPS Limit / Resolution은 해당 게임에 적용
+    -> 꺼진 TDP / CPU Boost / Power Mode 프로필 설정은 활성화된 Device 설정 사용 가능
 
 일치하는 활성 프로필 없음
-    -> 활성화된 Device 설정 사용
+    -> Device 단위 기능은 활성화된 Device 설정 사용
+    -> 게임 프로필 전용 설정은 적용되지 않음
 ```
 
-게임이 비활성화되면 활성화된 Device 설정이 다시 적용됩니다. Device 기능을 끄면 Addon이 해당 기능의 관리를 중단하며, 이전 Windows/MSI 값 복원을 보장하지는 않습니다.
+게임이 비활성화되면 게임 프로필 전용 설정의 적용이 끝나고, Device에 대응 설정이 있는 기능은 활성화된 Device 설정이 다시 적용됩니다. Device의 TDP Control, CPU Boost, Windows Power Mode를 끄면 Addon이 해당 Device 설정의 관리를 중단하며 이전 Windows/MSI 값 복원을 보장하지는 않습니다. Battery charge limit은 Device 항목에서 설명한 별도의 직접 켜기/끄기 동작을 사용합니다.
 
 ## Non-Steam 게임
 
@@ -237,7 +247,7 @@ Addon 설정 탭을 Steam Quick Access Menu 안에 삽입하지 않습니다.
 | A / B / X / Y, D-Pad | 각각 대응하는 컨트롤 | 각각 대응하는 컨트롤 |
 | LB / RB | L1 / R1 | LB / RB |
 | LT / RT 아날로그 입력 | L2 / R2 아날로그 트리거 | LT / RT 아날로그 트리거 |
-| LT / RT 끝까지 누름 | L2 / R2 디지털 Full Pull | LT / RT 디지털 Full Pull |
+| LT / RT 끝까지 누름 | L2 / R2 디지털 Full Pull | 별도 디지털 Full Pull 출력 없음 — XInput의 아날로그 LT / RT 값을 사용 |
 | 좌/우 스틱, L3 / R3 | 각각 대응하는 스틱 및 클릭 | 각각 대응하는 스틱 및 클릭 |
 | View / Back | View / Options 동작 | View |
 | Menu / Start | Menu 동작 | Menu / Start |
@@ -277,7 +287,7 @@ Windows가 컨트롤러를 다시 연결할 때까지 잠시 기다린 후 필�
 
 ### 게임 프로필이 적용되지 않습니다
 
-**Steam** 또는 **XBOX**에서 올바른 게임을 선택하고 프로필과 적용할 기능을 켰는지 확인하세요. Steam 게임은 Steam이 계속 활성 상태로 인식해야 합니다. **Plugged in**과 **On battery** 중 현재 전원에 맞는 값을 확인하세요. 프로필에서 켠 기능만 해당 Device 설정보다 우선합니다.
+**Steam** 또는 **XBOX**에서 올바른 게임을 선택하고 프로필과 적용할 기능을 켰는지 확인하세요. Steam 게임은 Steam이 계속 활성 상태로 인식해야 합니다. **Plugged in**과 **On battery** 중 현재 전원에 맞는 값을 확인하세요. TDP Control, CPU Boost, Windows Power Mode는 활성 게임 프로필에서 켠 경우에만 대응 Device 설정보다 우선합니다. Minimum GPU Clock, Intel FPS Limit, Resolution은 프로필 전용 설정이며 해당 프로필 기능을 켠 경우에만 적용됩니다.
 
 ### 런처를 닫은 뒤 Non-Steam 프로필 적용이 끝납니다
 
