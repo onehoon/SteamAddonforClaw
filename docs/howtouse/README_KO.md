@@ -253,7 +253,7 @@ Addon 설정 탭을 Steam Quick Access Menu 안에 삽입하지 않습니다.
 | Menu / Start | Menu 동작 | Menu / Start |
 | M1 / M2 | R4 / L4 | Controller에서 설정, 기본값은 Disabled |
 
-WING과 Center M은 별도로 설정하는 전면 버튼이며 일반 게임패드 버튼 매핑 표에 포함되지 않습니다. 현재 사용자가 설정할 수 있는 자이로/모션 출력 기능은 없습니다.
+WING과 Center M은 별도로 설정하는 전면 버튼이며 일반 게임패드 버튼 매핑 표에 포함되지 않습니다. **자이로/모션 출력은 아직 구현되지 않았습니다.**
 
 ## 백그라운드 실행 및 업데이트
 
@@ -313,7 +313,7 @@ Windows가 컨트롤러를 다시 연결할 때까지 잠시 기다린 후 필�
 - XBOX 카탈로그는 인식된 설치 게임을 표시하며 Microsoft Store 또는 Game Pass의 모든 앱을 포함하지 않습니다.
 - Steam 프로필은 Steam이 게임 또는 바로가기를 활성 상태로 보고하는지에 따라 달라집니다. 일부 런처 실행 방식에서는 Steam이 연결을 잃어 프로필 적용이 중단될 수 있습니다.
 - Quick Settings Overlay와 Steam Quick Access는 별개입니다. Steam 메뉴에 Addon 탭을 넣지 않습니다.
-- 자이로/모션 매핑과 일반 Device 페이지의 Fan Control은 현재 사용자 기능으로 제공되지 않습니다.
+- **자이로/모션 출력은 아직 구현되지 않았습니다.** 일반 Device 페이지의 Fan Control도 현재 사용자 기능으로 제공되지 않습니다.
 - 한 명의 대화형 Windows 사용자와 세션을 지원합니다. 빠른 사용자 전환, 원격 데스크톱 세션 및 다중 사용자 사용은 지원하지 않습니다.
 
 ## 기본 MSI 컨트롤러로 복귀 및 제거
