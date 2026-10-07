@@ -49,6 +49,8 @@ public sealed class SettingsPageUpdateTests
         var selectionHandlerStart = source.IndexOf("private async void GamingHomeComboBox_SelectionChanged", StringComparison.Ordinal);
         var startupHandlerStart = source.IndexOf("private async void GamingHomeStartupToggleSwitch_Toggled", StringComparison.Ordinal);
         var mutationHelperStart = source.IndexOf("private async Task RunGamingHomeMutationAsync", StringComparison.Ordinal);
+        var openLogFolderStart = source.IndexOf("private void OpenLogFolderButton_Click", StringComparison.Ordinal);
+        var openLogFolderEnd = source.IndexOf("\n    }", openLogFolderStart, StringComparison.Ordinal);
         Assert.Contains("<ctcontrols:SettingsExpander", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"GamingHomeExpander\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"Windows Gaming Full Screen Experience\"", xaml, StringComparison.Ordinal);
@@ -78,7 +80,10 @@ public sealed class SettingsPageUpdateTests
         Assert.DoesNotContain("SteamFseToggleSwitch", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ContentDialog", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ms-settings:", source, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Process.Start", source, StringComparison.Ordinal);
+        Assert.True(openLogFolderStart >= 0 && openLogFolderEnd > openLogFolderStart);
+        var openLogFolderHandler = source[openLogFolderStart..openLogFolderEnd];
+        Assert.Contains("Process.Start", openLogFolderHandler, StringComparison.Ordinal);
+        Assert.DoesNotContain("Process.Start", source.Remove(openLogFolderStart, openLogFolderHandler.Length), StringComparison.Ordinal);
         Assert.DoesNotContain("Restart", source, StringComparison.OrdinalIgnoreCase);
     }
 

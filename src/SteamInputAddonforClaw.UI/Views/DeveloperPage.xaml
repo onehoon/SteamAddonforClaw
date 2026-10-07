@@ -76,17 +76,6 @@
                 <Button Content="Open" Click="OpenGameInputSystemButtonProbeButton_Click" />
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard Header="Logging" Description="Off by default. Info enables runtime diagnostics; Debug is verbose and for developer use only.">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="List" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <ComboBox x:Name="LogLevelComboBox" Width="120" VerticalAlignment="Center" SelectionChanged="LogLevelComboBox_SelectionChanged">
-                    <ComboBoxItem Content="Off" />
-                    <ComboBoxItem Content="Info" />
-                    <ComboBoxItem Content="Debug" />
-                </ComboBox>
-            </ctcontrols:SettingsCard>
-
         </StackPanel>
     </ScrollViewer>
 </UserControl>
