@@ -140,7 +140,7 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
 // this application never packages that binary and resolves it from System32 only.
 internal sealed class NativeIgcl : IDisposable
 {
-    private const int FrameLimit = 2, Int32 = 2, IntelVendorId = 0x8086; private readonly string _marker; private nint _library, _api, _adapter, _cleanupAdapter; private AdapterDiagnostics _selectedAdapter; private int _currentAdapterIndex; private bool _closed, _initialized;
+    private const int FrameLimit = 2, Int32 = 2, IntelVendorId = 0x8086; private const uint CtlResultSuccess = 0, CtlResultSuccessStillOpenByAnotherCaller = 1; private readonly string _marker; private nint _library, _api, _adapter, _cleanupAdapter; private AdapterDiagnostics _selectedAdapter; private int _currentAdapterIndex; private bool _closed, _initialized;
     internal bool Available { get; private set; } internal string? UnavailableReason { get; private set; } internal IntelFpsCapability? Capability { get; private set; }
     private CtlInit _init = null!; private CtlClose _close = null!; private CtlEnumerate _enumerate = null!; private CtlGetProperties _getProperties = null!; private CtlCaps _caps = null!; private CtlGetSet _getSet = null!;
     internal NativeIgcl(string marker) => _marker = marker;
@@ -264,9 +264,11 @@ internal sealed class NativeIgcl : IDisposable
     }
     private static bool IsIntelFrameLimitAdapter(uint vendorId, IntelFpsCapability? frameLimit) => vendorId == IntelVendorId && frameLimit is not null;
     private static bool IsCompatibleIntelAdapter(uint vendorId, IntelFpsCapability? frameLimit) => IsIntelFrameLimitAdapter(vendorId, frameLimit) && frameLimit!.Value.SupportsAddonRange;
+    private static bool IsCloseResultSuccessful(uint result) => result is CtlResultSuccess or CtlResultSuccessStillOpenByAnotherCaller;
     private static string DecodeAdapterName(byte[]? name) => name is null ? string.Empty : System.Text.Encoding.ASCII.GetString(name).TrimEnd('\0');
     internal static bool IsCompatibleIntelAdapterForTests(uint vendorId, IntelFpsCapability? frameLimit) => IsCompatibleIntelAdapter(vendorId, frameLimit);
     internal static bool IsIntelFrameLimitAdapterForCleanupForTests(uint vendorId, IntelFpsCapability? frameLimit) => IsIntelFrameLimitAdapter(vendorId, frameLimit);
+    internal static bool IsCloseResultSuccessfulForTests(uint result) => IsCloseResultSuccessful(result);
     internal static byte[] EncodeFrameLimitPropertyBytesForTests(bool enable, int fps)
     {
         var property = new Property { EnableBits = enable ? 1u : 0u, IntValue = fps };
@@ -294,7 +296,7 @@ internal sealed class NativeIgcl : IDisposable
     private static byte[] EncodeFrameLimitPropertyBytes(Property property) => MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref property, 1)).ToArray();
     private readonly record struct AdapterDiagnostics(int Index, string Name, uint VendorId, uint DeviceId);
     private static void Log(string operation, uint result, int? fps = null, AcDcPowerSource? source = null) { if (result != 0) AppLog.Warn("Profiles.IntelFps", $"{operation} failed.", null, ("Operation", operation), ("Result", $"0x{result:X8}"), ("RequestedFps", fps), ("PowerSource", source)); }
-    public void Dispose() { if (_closed) return; _closed = true; if (_api != 0) { var result = _close(_api); Log("ctlClose", result); _api = 0; } if (_library != 0) { NativeLibrary.Free(_library); _library = 0; } }
+    public void Dispose() { if (_closed) return; _closed = true; if (_api != 0) { var result = _close(_api); if (result == CtlResultSuccessStillOpenByAnotherCaller) AppLog.Debug("Profiles.IntelFps", "ctlClose completed while another caller still owns an open IGCL session.", ("Operation", "ctlClose"), ("Result", $"0x{result:X8}")); else if (!IsCloseResultSuccessful(result)) Log("ctlClose", result); _api = 0; } if (_library != 0) { NativeLibrary.Free(_library); _library = 0; } }
     [StructLayout(LayoutKind.Sequential)] private struct ApplicationId { public uint Data1; public ushort Data2; public ushort Data3; public byte Data4_0; public byte Data4_1; public byte Data4_2; public byte Data4_3; public byte Data4_4; public byte Data4_5; public byte Data4_6; public byte Data4_7; }
     [StructLayout(LayoutKind.Sequential)] private struct InitArgs { public uint Size; public byte Version; public uint AppVersion; public uint Flags; public uint SupportedVersion; public ApplicationId ApplicationUid; }
     [StructLayout(LayoutKind.Sequential)] private struct Range { public int Min; public int Max; public int Step; public int Default; }
