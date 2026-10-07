@@ -184,6 +184,27 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Contains("_overlayController.RefreshQuickSettingsAsync()", refresh);
     }
 
+    [Fact]
+    public void Overlay_first_show_target_uses_the_shared_steam_and_xbox_active_profile_authority()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var activeTarget = ExtractMethod(source, "private ActiveProfileTarget CaptureActiveProfileTarget()");
+        var quickSettingsTarget = ExtractMethod(source, "private QuickSettingsProfileTarget? CaptureActiveQuickSettingsProfileTarget()");
+
+        Assert.Contains("var appId = _runtimeHost?.ActualRunningAppId ?? 0;", activeTarget);
+        Assert.Contains("return ActiveProfileTarget.ForSteam(appId);", activeTarget);
+        Assert.Contains("_xboxGameSessionRuntime?.ActiveGame", activeTarget);
+        Assert.Contains("ActiveProfileTarget.ForXbox(activeXboxGame.Key)", activeTarget);
+        Assert.Contains("ActiveProfileTarget.None", activeTarget);
+
+        Assert.Contains("var target = CaptureActiveProfileTarget();", quickSettingsTarget);
+        Assert.Contains("ActiveProfileTargetKind.Steam => QuickSettingsProfileTarget.ForSteam(target.SteamAppId)", quickSettingsTarget);
+        Assert.Contains("ActiveProfileTargetKind.Xbox => QuickSettingsProfileTarget.ForXbox(target.XboxGameKey!)", quickSettingsTarget);
+        Assert.Contains("ActiveProfileTargetKind.None => null", quickSettingsTarget);
+        Assert.Contains("_ => throw new ArgumentOutOfRangeException", quickSettingsTarget);
+        Assert.Equal(1, CountOccurrences(quickSettingsTarget, "=> null"));
+    }
+
     // Section 27/28: the shared product/dispatch authority SF-V2-08 already built stays untouched --
     // SF-V2-09 only consumes it from the Overlay side.
     [Fact]

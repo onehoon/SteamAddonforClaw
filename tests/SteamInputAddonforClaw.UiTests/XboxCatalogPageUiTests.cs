@@ -101,26 +101,35 @@ public sealed class XboxCatalogPageUiTests
     }
 
     [Fact]
-    public void Xbox_controller_editor_uses_global_fallback_and_persists_one_complete_mapping()
+    public void Xbox_controller_editor_uses_per_game_override_toggle_and_persists_one_complete_mapping()
     {
         var xaml = XDocument.Load(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml")).ToString();
         var code = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "XboxPage.xaml.cs"));
         var options = File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "Views", "BackButtonMappingUiOptions.cs"));
         var render = Method(code, "private void Render(", "private void RenderProfileStatus(");
-        var useGlobal = Method(code, "private void UseGlobalBackButtonMappingToggle_Toggled", "private void BackButtonTargetComboBox_SelectionChanged");
+        var perGameToggle = Method(code, "private void PerGameBackButtonMappingEnabledToggle_Toggled", "private void BackButtonTargetComboBox_SelectionChanged");
         var targetChanged = Method(code, "private void BackButtonTargetComboBox_SelectionChanged", "private void QueueBackButtonMappingSave");
         var queue = Method(code, "private void QueueBackButtonMappingSave", "private BackButtonMappingSettings? ReadSelectedBackButtonMapping");
         var save = Method(code, "private async Task SaveBackButtonMappingAfterAsync", "internal static async Task<TResult> RunAfterPreviousAsync");
 
-        Assert.Contains("Header=\"Controller\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"UseGlobalBackButtonMappingToggle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"M1 / M2 Button Mapping\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"Use global M1 / M2 mapping\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"PerGameBackButtonMappingEnabledToggle\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"UseGlobalBackButtonMappingToggle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"PerGameBackButtonMappingEnabledToggle\" IsOn=\"False\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"M1BackButtonTargetComboBox\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"M2BackButtonTargetComboBox\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("snapshot.PersistenceWritable && !configuration.UseGlobalMapping", code, StringComparison.Ordinal);
-        Assert.Contains("UseGlobalBackButtonMappingToggle.IsOn ? null : ReadSelectedBackButtonMapping()", useGlobal, StringComparison.Ordinal);
+        Assert.Contains("var perGameEnabled = !configuration.UseGlobalMapping;", code, StringComparison.Ordinal);
+        Assert.Contains("PerGameBackButtonMappingEnabledToggle.IsOn = perGameEnabled;", code, StringComparison.Ordinal);
+        Assert.Contains("snapshot.PersistenceWritable && perGameEnabled", code, StringComparison.Ordinal);
+        Assert.Contains("var perGameEnabled = PerGameBackButtonMappingEnabledToggle.IsOn;", perGameToggle, StringComparison.Ordinal);
+        Assert.Contains("var mapping = perGameEnabled ? ReadSelectedBackButtonMapping() : null;", perGameToggle, StringComparison.Ordinal);
+        Assert.Contains("if (perGameEnabled && mapping is null)", perGameToggle, StringComparison.Ordinal);
+        Assert.Contains("snapshot.PersistenceWritable && perGameEnabled", perGameToggle, StringComparison.Ordinal);
         Assert.Contains("ReadSelectedBackButtonMapping()", targetChanged, StringComparison.Ordinal);
+        Assert.Contains("!PerGameBackButtonMappingEnabledToggle.IsOn", targetChanged, StringComparison.Ordinal);
         Assert.Contains("new BackButtonMappingSettings(m1, m2)", code, StringComparison.Ordinal);
-        Assert.Contains("QueueBackButtonMappingSave(key, mapping)", useGlobal, StringComparison.Ordinal);
+        Assert.Contains("QueueBackButtonMappingSave(key, mapping)", perGameToggle, StringComparison.Ordinal);
         Assert.Contains("QueueBackButtonMappingSave(_selectedGame.Key, mapping)", targetChanged, StringComparison.Ordinal);
         Assert.Contains("++_backButtonEditVersion", queue, StringComparison.Ordinal);
         Assert.Contains("SaveBackButtonMappingAfterAsync(_backButtonSaveChain, key, mapping, version)", queue, StringComparison.Ordinal);
