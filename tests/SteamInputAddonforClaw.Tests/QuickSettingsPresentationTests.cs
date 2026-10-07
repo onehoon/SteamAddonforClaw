@@ -480,9 +480,12 @@ public sealed class QuickSettingsPresentationTests
         Assert.True(FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).Writable);
         Assert.True(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
         var controller = page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileController);
-        Assert.Equal("Controller", controller.Label);
+        Assert.Equal("M1 / M2 Button Mapping", controller.Label);
         Assert.Equal([QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsRowId.ProfileBackButtonM2], controller.Rows.Select(row => row.RowId));
-        Assert.True(FindRow(page, QuickSettingsRowId.ProfileBackButtonUseGlobal).Value!.BooleanValue);
+        var mappingEnabled = FindRow(page, QuickSettingsRowId.ProfileBackButtonUseGlobal);
+        Assert.Equal("M1 / M2 Button Mapping", mappingEnabled.Label);
+        Assert.False(mappingEnabled.Value!.BooleanValue);
+        Assert.True(mappingEnabled.Writable);
         Assert.Equal((int)Xbox360BackButtonTarget.LeftBumper, FindRow(page, QuickSettingsRowId.ProfileBackButtonM1).Value!.IntegerValue);
         Assert.Equal((int)Xbox360BackButtonTarget.RightBumper, FindRow(page, QuickSettingsRowId.ProfileBackButtonM2).Value!.IntegerValue);
         Assert.False(FindRow(page, QuickSettingsRowId.ProfileBackButtonM1).Writable);
@@ -522,12 +525,15 @@ public sealed class QuickSettingsPresentationTests
         };
 
         var page = QuickSettingsPresentation.BuildProfile(xbox);
-        var useGlobal = FindRow(page, QuickSettingsRowId.ProfileBackButtonUseGlobal);
+        var mappingEnabled = FindRow(page, QuickSettingsRowId.ProfileBackButtonUseGlobal);
         var m1 = FindRow(page, QuickSettingsRowId.ProfileBackButtonM1);
         var m2 = FindRow(page, QuickSettingsRowId.ProfileBackButtonM2);
 
-        Assert.True(useGlobal.Writable);
-        Assert.Equal(QuickSettingsCommitPolicy.Immediate, useGlobal.CommitPolicy);
+        Assert.Equal("M1 / M2 Button Mapping", page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileController).Label);
+        Assert.Equal("M1 / M2 Button Mapping", mappingEnabled.Label);
+        Assert.True(mappingEnabled.Value!.BooleanValue);
+        Assert.True(mappingEnabled.Writable);
+        Assert.Equal(QuickSettingsCommitPolicy.Immediate, mappingEnabled.CommitPolicy);
         Assert.True(m1.Writable);
         Assert.True(m2.Writable);
         Assert.Equal(QuickSettingsControlKind.Slider, m1.ControlKind);

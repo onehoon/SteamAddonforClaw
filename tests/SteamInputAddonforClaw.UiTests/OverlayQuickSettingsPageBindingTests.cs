@@ -95,7 +95,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
         linked ?? [new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, 1)]);
 
     private static QuickSettingsPageSnapshot XboxControllerPage(
-        string gameKey = "xbox:test", bool useGlobal = false, bool writable = true,
+        string gameKey = "xbox:test", bool perGameEnabled = true, bool writable = true,
         int m1 = 9, int m2 = 10) => new(
         QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox(gameKey), true, null,
         [
@@ -103,15 +103,15 @@ public sealed class OverlayQuickSettingsPageBindingTests
             [
                 Toggle(QuickSettingsRowId.ProfileEnabled, true),
             ]),
-            new QuickSettingsSection(QuickSettingsSectionId.ProfileController, "Controller",
+            new QuickSettingsSection(QuickSettingsSectionId.ProfileController, "M1 / M2 Button Mapping",
             [
-                Toggle(QuickSettingsRowId.ProfileBackButtonUseGlobal, useGlobal, writable: writable),
+                Toggle(QuickSettingsRowId.ProfileBackButtonUseGlobal, perGameEnabled, writable: writable),
                 Discrete(QuickSettingsRowId.ProfileBackButtonM1, m1,
                     [new(0, "Disabled"), new(9, "Left Bumper (LB)"), new(10, "Right Bumper (RB)"), new(17, "Xbox Guide")],
-                    writable: writable && !useGlobal) with { CommitGroupId = QuickSettingsCommitGroupId.ProfileBackButtonMapping },
+                    writable: writable && perGameEnabled) with { CommitGroupId = QuickSettingsCommitGroupId.ProfileBackButtonMapping },
                 Discrete(QuickSettingsRowId.ProfileBackButtonM2, m2,
                     [new(0, "Disabled"), new(9, "Left Bumper (LB)"), new(10, "Right Bumper (RB)"), new(17, "Xbox Guide")],
-                    writable: writable && !useGlobal) with { CommitGroupId = QuickSettingsCommitGroupId.ProfileBackButtonMapping },
+                    writable: writable && perGameEnabled) with { CommitGroupId = QuickSettingsCommitGroupId.ProfileBackButtonMapping },
             ]),
         ], []);
 
@@ -1054,16 +1054,16 @@ public sealed class OverlayQuickSettingsPageBindingTests
             QuickSettingsRowId.ProfileBackButtonM1,
             QuickSettingsRowId.ProfileBackButtonM2,
         ], intent.Values.Select(value => value.RowId));
-        Assert.False(intent.Values[0].Value.BooleanValue);
+        Assert.True(intent.Values[0].Value.BooleanValue);
         Assert.Equal(0, intent.Values[1].Value.IntegerValue);
         Assert.Equal(17, intent.Values[2].Value.IntegerValue);
 
-        mutate.CompleteNext(Success(XboxControllerPage(useGlobal: false, m1: 0, m2: 17)));
+        mutate.CompleteNext(Success(XboxControllerPage(perGameEnabled: true, m1: 0, m2: 17)));
         await SpinUntilAsync(() => binding.PendingKeys.Count == 0, "XBOX controller group settled", uiThread);
     }
 
     [Fact]
-    public async Task Xbox_use_global_toggle_cancels_an_unsubmitted_controller_group_draft()
+    public async Task Xbox_mapping_disable_cancels_an_unsubmitted_controller_group_draft()
     {
         var delay = new ManualDelay();
         var mutate = new GatedMutate();
@@ -1071,10 +1071,10 @@ public sealed class OverlayQuickSettingsPageBindingTests
         Assert.True(binding.ScheduleSlider(QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsValue.Integer(0)));
         Assert.Single(binding.PendingKeys);
 
-        var toggle = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileBackButtonUseGlobal, true);
+        var toggle = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileBackButtonUseGlobal, false);
         Assert.Single(mutate.Calls);
         Assert.Equal(QuickSettingsRowId.ProfileBackButtonUseGlobal, Assert.Single(mutate.Calls).EditedRowId);
-        mutate.CompleteNext(Success(XboxControllerPage(useGlobal: true)));
+        mutate.CompleteNext(Success(XboxControllerPage(perGameEnabled: false)));
         Assert.True(await toggle);
 
         Assert.Empty(binding.PendingKeys);

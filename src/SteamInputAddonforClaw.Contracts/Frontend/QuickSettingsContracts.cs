@@ -199,8 +199,8 @@ public sealed record QuickSettingsPageSnapshot(
 /// <summary>A closed mutation intent (work order section 20). For an independent Toggle/Slider,
 /// <see cref="Values"/> contains exactly the edited row. For the grouped Device TDP slider commit,
 /// <see cref="Values"/> contains the entire current TDP draft required to reconstruct one
-/// <c>FrontendTdpConfiguration</c>, or the XBOX UseGlobal/M1/M2 draft required to reconstruct one
-/// whole <c>BackButtonMappingSettings</c>. Never a string method name; transport correlation is
+/// <c>FrontendTdpConfiguration</c>, or the XBOX mapping-enabled/M1/M2 draft required to reconstruct
+/// one whole <c>BackButtonMappingSettings</c>. Never a string method name; transport correlation is
 /// owned separately by each transport.</summary>
 public sealed record QuickSettingsMutationIntent(
     QuickSettingsPageId PageId,

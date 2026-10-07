@@ -148,11 +148,11 @@ internal static class QuickSettingsMutationAdapter
             case QuickSettingsRowId.ProfileBackButtonUseGlobal:
             {
                 if (profileTarget.Kind != QuickSettingsProfileTargetKind.Xbox
-                    || !TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileBackButtonUseGlobal, out var useGlobal))
-                    return new QuickSettingsMutationResult(false, "Malformed XBOX M1/M2 global-mapping toggle intent.", currentPage);
+                    || !TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileBackButtonUseGlobal, out var perGameEnabled))
+                    return new QuickSettingsMutationResult(false, "Malformed XBOX M1/M2 mapping toggle intent.", currentPage);
 
                 BackButtonMappingSettings? mapping = null;
-                if (!useGlobal && !TryGetCurrentProfileBackButtonMapping(currentPage, out mapping!))
+                if (perGameEnabled && !TryGetCurrentProfileBackButtonMapping(currentPage, out mapping!))
                     return new QuickSettingsMutationResult(false, "The current M1/M2 mapping is invalid.", currentPage);
 
                 return FinishProfile(await control.SetXboxGameProfileBackButtonMappingAsync(xboxKey!, mapping, cancellationToken).ConfigureAwait(false));
@@ -332,7 +332,7 @@ internal static class QuickSettingsMutationAdapter
             || intent.Values is not { Count: 3 } values)
             return false;
 
-        bool? useGlobal = null;
+        bool? perGameEnabled = null;
         int? m1 = null;
         int? m2 = null;
         var seen = new HashSet<QuickSettingsRowId>();
@@ -343,7 +343,7 @@ internal static class QuickSettingsMutationAdapter
             if (entry.RowId == QuickSettingsRowId.ProfileBackButtonUseGlobal)
             {
                 if (entry.Value.Kind != QuickSettingsValueKind.Boolean || !entry.Value.IsStructurallyValid) return false;
-                useGlobal = entry.Value.BooleanValue!.Value;
+                perGameEnabled = entry.Value.BooleanValue!.Value;
             }
             else if (entry.RowId == QuickSettingsRowId.ProfileBackButtonM1)
             {
@@ -358,7 +358,7 @@ internal static class QuickSettingsMutationAdapter
             else return false;
         }
 
-        if (useGlobal is not false || m1 is null || m2 is null) return false;
+        if (perGameEnabled is not true || m1 is null || m2 is null) return false;
         mapping = new BackButtonMappingSettings((Xbox360BackButtonTarget)m1.Value, (Xbox360BackButtonTarget)m2.Value);
         return BackButtonMappingValidation.IsValid(mapping);
     }

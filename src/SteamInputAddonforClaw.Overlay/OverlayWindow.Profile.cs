@@ -7,10 +7,12 @@ namespace SteamInputAddonforClaw.Overlay;
 public sealed partial class OverlayWindow
 {
     private const string NoActiveGameMessage = "No game is currently running. Start a game to configure its profile.";
+    private const string NoActiveGameDisplayMessage = "No game is currently running.\nStart a game to configure its profile.";
     private const string UnavailableProfileMessage = "Profile settings are unavailable.";
 
     private FrameworkElement? _profileDetailRoot;
     private TextBlock? _profileStatusMessage;
+    private bool _activeProfileInitialLoadPending;
 
     private FrameworkElement BuildProfilePage()
     {
@@ -26,15 +28,14 @@ public sealed partial class OverlayWindow
 
         _profileStatusMessage = new TextBlock
         {
-            Text = NoActiveGameMessage,
+            Text = string.Empty,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
-            FontSize = 20,
         };
         OverlayQamResources.ApplyTextStyle(_profileStatusMessage, "QamBodyStrongTextStyle");
-        _profileStatusMessage.FontSize = 20;
+        _profileStatusMessage.FontSize = 16;
         root.Children.Add(_profileStatusMessage);
         return root;
     }
@@ -52,7 +53,8 @@ public sealed partial class OverlayWindow
     private void PrepareActiveProfileFirstShow()
     {
         if (!_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)) return;
-        var page = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, NoActiveGameMessage);
+        _activeProfileInitialLoadPending = true;
+        var page = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, "Loading the active game profile.");
         surface.Binding?.ApplyAuthoritativePage(page);
         RenderQuickSettingsPage(surface);
         ApplyProfilePresentation(page);
@@ -63,6 +65,7 @@ public sealed partial class OverlayWindow
         if (page.PageId != QuickSettingsPageId.Profile) return;
         if (!_quickSettingsSurfaces.TryGetValue(QuickSettingsPageId.Profile, out var surface)) return;
 
+        _activeProfileInitialLoadPending = false;
         surface.Binding?.ApplyAuthoritativePage(page);
         RenderQuickSettingsPage(surface);
         ApplyProfilePresentation(page);
@@ -71,6 +74,13 @@ public sealed partial class OverlayWindow
     private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)
     {
         if (_profileDetailRoot is null || _profileStatusMessage is null) return;
+
+        if (_activeProfileInitialLoadPending)
+        {
+            _profileDetailRoot.Visibility = Visibility.Collapsed;
+            _profileStatusMessage.Visibility = Visibility.Collapsed;
+            return;
+        }
 
         var activeProfileReady = HasRenderableActiveProfile(page);
         if (activeProfileReady)
@@ -89,5 +99,7 @@ public sealed partial class OverlayWindow
         page is { PageId: QuickSettingsPageId.Profile, Available: true, ProfileTarget: { IsStructurallyValid: true } };
 
     internal static string ResolveProfileStatusMessage(QuickSettingsPageSnapshot? page) =>
-        page?.Message ?? UnavailableProfileMessage;
+        page is { PageId: QuickSettingsPageId.Profile, ProfileTarget: null, Message: NoActiveGameMessage }
+            ? NoActiveGameDisplayMessage
+            : page?.Message ?? UnavailableProfileMessage;
 }

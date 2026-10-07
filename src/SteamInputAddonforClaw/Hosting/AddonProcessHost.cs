@@ -1670,7 +1670,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // SF-V2-02/09 section 16.2/8: Device+Profile state publish happens strictly AFTER capture
             // is committed, and is fire-and-forget -- a slow/failed snapshot must never extend how
             // long this method (and the _visibleSurfaceTransition it holds) delays a concurrent Hide.
-            _ = _overlayController.RefreshQuickSettingsAsync();
+            _ = _overlayController.RefreshQuickSettingsAsync(preferActiveProfile);
             _ = _overlayController.RefreshTabOrderAsync();
             _ = _overlayController.RefreshClawHudAsync();
             _ = _overlayController.RefreshShortcutAsync();

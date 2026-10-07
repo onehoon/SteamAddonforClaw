@@ -199,9 +199,10 @@ internal sealed class OverlayProcessController : IAsyncDisposable
     // publish. Called after OQ4 capture commits on Show, and from a StateInvalidated handler while a
     // captured session stays visible. Never awaited by a caller that must not be delayed -- feature
     // snapshot work is always less important than OQ4 capture/lifecycle timing (section 4.6/21).
-    // Section 7.6/7.7: Device and Profile are captured/sent independently in a stable order -- one
-    // page's capture/publish failure never suppresses the other.
-    internal async Task RefreshQuickSettingsAsync()
+    // Section 7.6/7.7: Device and Profile are captured/sent sequentially; ordinary refresh remains
+    // Device-first, while a Profile-first Show can publish its selected page first. One page's
+    // capture/publish failure never suppresses the other.
+    internal async Task RefreshQuickSettingsAsync(bool profileFirst = false)
     {
         NamedPipeOverlayServer? server;
         lock (_sync) server = _server;
@@ -215,8 +216,16 @@ internal sealed class OverlayProcessController : IAsyncDisposable
         await _quickSettingsRefreshGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await PublishQuickSettingsPageAsync(server, QuickSettingsPageId.Device, captureDevice).ConfigureAwait(false);
-            await PublishQuickSettingsPageAsync(server, QuickSettingsPageId.Profile, captureProfile).ConfigureAwait(false);
+            if (profileFirst)
+            {
+                await PublishQuickSettingsPageAsync(server, QuickSettingsPageId.Profile, captureProfile).ConfigureAwait(false);
+                await PublishQuickSettingsPageAsync(server, QuickSettingsPageId.Device, captureDevice).ConfigureAwait(false);
+            }
+            else
+            {
+                await PublishQuickSettingsPageAsync(server, QuickSettingsPageId.Device, captureDevice).ConfigureAwait(false);
+                await PublishQuickSettingsPageAsync(server, QuickSettingsPageId.Profile, captureProfile).ConfigureAwait(false);
+            }
         }
         finally { _quickSettingsRefreshGate.Release(); }
     }
