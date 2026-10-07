@@ -1641,8 +1641,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 return;
             }
 
-            var activeAppId = _runtimeHost?.ActualRunningAppId ?? 0;
-            var preferActiveProfile = activeAppId != 0;
+            var preferActiveProfile = CaptureActiveQuickSettingsProfileTarget() is not null;
             if (!await _overlayController.ShowAsync(preferActiveProfile).ConfigureAwait(false))
             {
                 AppLog.Warn("OverlayCapture", "Overlay Show did not acknowledge Visible; controller stays live.", null, ("Event", "OverlayShowFailed"));
@@ -2116,7 +2115,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             ActiveProfileTargetKind.Steam => QuickSettingsProfileTarget.ForSteam(target.SteamAppId),
             ActiveProfileTargetKind.Xbox => QuickSettingsProfileTarget.ForXbox(target.XboxGameKey!),
-            _ => null,
+            ActiveProfileTargetKind.None => null,
+            _ => throw new ArgumentOutOfRangeException(nameof(target), target.Kind, "Unknown active profile target kind."),
         };
     }
 

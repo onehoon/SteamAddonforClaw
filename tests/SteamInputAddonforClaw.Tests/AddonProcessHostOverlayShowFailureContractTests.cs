@@ -19,13 +19,14 @@ public sealed class AddonProcessHostOverlayShowFailureContractTests
         Assert.DoesNotContain("OverlayControllerInputRouter", showFailure, StringComparison.Ordinal);
         Assert.DoesNotContain("_overlayCaptureActive = true", showFailure, StringComparison.Ordinal);
 
-        var activeAppId = coordinateShow.IndexOf("var activeAppId = _runtimeHost?.ActualRunningAppId ?? 0;", StringComparison.Ordinal);
-        var preferActiveProfile = coordinateShow.IndexOf("var preferActiveProfile = activeAppId != 0;", StringComparison.Ordinal);
+        var preferActiveProfile = coordinateShow.IndexOf(
+            "var preferActiveProfile = CaptureActiveQuickSettingsProfileTarget() is not null;", StringComparison.Ordinal);
         var showAcknowledgement = coordinateShow.IndexOf("_overlayController.ShowAsync(preferActiveProfile)", StringComparison.Ordinal);
         var pause = coordinateShow.IndexOf("presentation.PauseForOverlayAsync(", StringComparison.Ordinal);
         var routerStart = coordinateShow.IndexOf("router.Start();", StringComparison.Ordinal);
         var captureCommit = coordinateShow.IndexOf("_overlayCaptureActive = true;", StringComparison.Ordinal);
-        Assert.True(activeAppId >= 0 && activeAppId < preferActiveProfile && preferActiveProfile < showAcknowledgement && showAcknowledgement < pause);
+        Assert.DoesNotContain("ActualRunningAppId", coordinateShow, StringComparison.Ordinal);
+        Assert.True(preferActiveProfile >= 0 && preferActiveProfile < showAcknowledgement && showAcknowledgement < pause);
         Assert.True(pause < routerStart && routerStart < captureCommit);
 
         var controllerSource = ReadSource("src", "SteamInputAddonforClaw", "Lifecycle", "OverlayProcessController.cs");
