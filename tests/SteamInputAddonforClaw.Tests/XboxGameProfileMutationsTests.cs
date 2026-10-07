@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Profiles;
@@ -100,6 +101,125 @@ public sealed class XboxGameProfileMutationsTests : IDisposable
         Assert.Equal(Pair(20, 22), capture.Profile.Performance.Tdp!.Ac);
         Assert.Null(capture.Profile.Performance.FpsLimit);
         Assert.False(File.Exists(PathName));
+    }
+
+    [Fact]
+    public void Missing_controller_field_defaults_to_global_mapping_without_schema_bump()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName,
+            """{"schemaVersion":1,"device":{},"games":{},"xboxGames":{"store:old":{"enabled":false,"performance":{},"display":{}}}}""");
+        var store = new ProfileStore(PathName);
+
+        var loaded = store.Load();
+        var profile = loaded.Document.XboxGames["store:old"];
+
+        Assert.Equal(ProfileLoadStatus.Loaded, loaded.Status);
+        Assert.Null(profile.Controller.BackButtonMapping);
+        Assert.Equal(ProfileDocument.CurrentSchemaVersion, loaded.Document.SchemaVersion);
+        Assert.Equal(1, ProfileDocument.CurrentSchemaVersion);
+    }
+
+    [Fact]
+    public void Back_button_mapping_mutation_is_atomic_validated_and_preserves_profile_data()
+    {
+        var store = new ProfileStore(PathName);
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
+        var extendedController = new NonSteamGameControllerOverrides
+        {
+            ExtensionData = new() { ["futureControllerField"] = JsonDocument.Parse("\"kept\"").RootElement.Clone() }
+        };
+        store.Save(new ProfileDocument
+        {
+            ExtensionData = new() { ["futureRootField"] = JsonDocument.Parse("true").RootElement.Clone() },
+            XboxGames = new Dictionary<string, XboxGameProfile>
+            {
+                [StoreKey] = new()
+                {
+                    DisplayName = "Game",
+                    Controller = extendedController,
+                    ExtensionData = new() { ["futureProfileField"] = JsonDocument.Parse("42").RootElement.Clone() }
+                }
+            }
+        });
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(StoreKey, mapping));
+        var saved = store.Load().Document;
+        Assert.Equal(mapping, saved.XboxGames[StoreKey].Controller.BackButtonMapping);
+        Assert.Equal("kept", saved.XboxGames[StoreKey].Controller.ExtensionData!["futureControllerField"].GetString());
+        Assert.True(saved.XboxGames[StoreKey].ExtensionData!.ContainsKey("futureProfileField"));
+        Assert.True(saved.ExtensionData!.ContainsKey("futureRootField"));
+
+        var beforeInvalid = File.ReadAllText(PathName);
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.InvalidTarget,
+            mutations.SetBackButtonMapping(StoreKey, new((Xbox360BackButtonTarget)999, Xbox360BackButtonTarget.Disabled)));
+        Assert.Equal(beforeInvalid, File.ReadAllText(PathName));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.InvalidTarget,
+            mutations.SetBackButtonMapping(StoreKey, new(Xbox360BackButtonTarget.Disabled, (Xbox360BackButtonTarget)999)));
+        Assert.Equal(beforeInvalid, File.ReadAllText(PathName));
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(StoreKey, null));
+        var cleared = store.Load().Document.XboxGames[StoreKey];
+        Assert.Null(cleared.Controller.BackButtonMapping);
+        Assert.Equal("kept", cleared.Controller.ExtensionData!["futureControllerField"].GetString());
+        Assert.False(cleared.Enabled);
+        Assert.Equal(1, store.Load().Document.SchemaVersion);
+    }
+
+    [Fact]
+    public void Back_button_mapping_null_on_missing_profile_is_noop_and_explicit_mapping_creates_disabled_profile()
+    {
+        var store = new ProfileStore(PathName);
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate());
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(StoreKey, null));
+        Assert.False(File.Exists(PathName));
+
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.B);
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(StoreKey, mapping));
+        var created = store.Load().Document.XboxGames[StoreKey];
+        Assert.False(created.Enabled);
+        Assert.Equal(mapping, created.Controller.BackButtonMapping);
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, false, null));
+        Assert.Equal(mapping, store.Load().Document.XboxGames[StoreKey].Controller.BackButtonMapping);
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, true, null));
+        Assert.Equal(mapping, store.Load().Document.XboxGames[StoreKey].Controller.BackButtonMapping);
+
+        mutations.SetCpuBoostAc(StoreKey, CpuBoostMode.Aggressive);
+        Assert.Equal(mapping, store.Load().Document.XboxGames[StoreKey].Controller.BackButtonMapping);
+    }
+
+    [Fact]
+    public void Performance_and_display_mutations_preserve_the_non_steam_controller_override()
+    {
+        var store = new ProfileStore(PathName);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    PowerMode = new DevicePowerModeSettings { Ac = WindowsPowerMode.Balanced, Dc = WindowsPowerMode.Balanced }
+                }
+            }
+        });
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetEnabled(StoreKey, true, "Game"));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetBackButtonMapping(StoreKey, mapping));
+
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostAc(StoreKey, CpuBoostMode.Aggressive));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetTdp(StoreKey, Pair(25, 30), Pair(18, 24)));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetPowerModeAc(StoreKey, WindowsPowerMode.BestPerformance));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded, mutations.SetFpsLimitAc(StoreKey, 90));
+        Assert.Equal(XboxGameProfileMutations.MutationOutcome.Succeeded,
+            mutations.SetResolution(StoreKey, new GameDisplayResolution { Width = 1440, Height = 900 }, "Game"));
+
+        var saved = store.Load().Document.XboxGames[StoreKey];
+        Assert.Equal(mapping, saved.Controller.BackButtonMapping);
+        Assert.Equal(1440, saved.Display.Resolution!.Width);
     }
 
     [Fact]

@@ -47,6 +47,25 @@ public sealed class XboxGameSessionRuntimeHostTests
     }
 
     [Fact]
+    public void Active_XBOX_game_changes_reconcile_mapping_before_the_performance_startup_gate()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs").Replace("\r\n", "\n", StringComparison.Ordinal);
+        var handlerStart = host.IndexOf("private void OnActiveXboxGameChanged(", StringComparison.Ordinal);
+        var handlerEnd = host.IndexOf("internal static void ReconcileActiveXboxGameTransition(", handlerStart, StringComparison.Ordinal);
+        var handler = host[handlerStart..handlerEnd];
+        var transitionEnd = host.IndexOf("private bool ReconcileEffectiveBackButtonMapping(", handlerEnd, StringComparison.Ordinal);
+        var transition = host[handlerEnd..transitionEnd];
+
+        Assert.Contains("ReconcileActiveXboxGameTransition(", handler, StringComparison.Ordinal);
+        Assert.Contains("() => ReconcileEffectiveBackButtonMapping(\"XboxActiveGameChanged\")", handler, StringComparison.Ordinal);
+        Assert.Contains("() => ReconcileEffectiveGameProfile(\"ActiveXboxGameChanged\")", handler, StringComparison.Ordinal);
+        Assert.True(transition.IndexOf("reconcileBackButtonMapping();", StringComparison.Ordinal)
+            < transition.IndexOf("if (!profileRuntimeStartupReady) return;", StringComparison.Ordinal));
+        Assert.True(transition.IndexOf("if (!profileRuntimeStartupReady) return;", StringComparison.Ordinal)
+            < transition.IndexOf("reconcileGameProfile();", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Frontend_contract_removes_diagnostic_rpc_and_advances_only_frontend_protocol()
     {
         var wire = ReadSource("src/SteamInputAddonforClaw.FrontendTransport/FrontendWire.cs");
@@ -55,8 +74,9 @@ public sealed class XboxGameSessionRuntimeHostTests
         var client = ReadSource("src/SteamInputAddonforClaw.FrontendTransport/NamedPipeAddonFrontendClient.cs");
         var control = ReadSource("src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs");
 
-        Assert.Contains("CurrentVersion = 58", wire, StringComparison.Ordinal);
+        Assert.Contains("CurrentVersion = 59", wire, StringComparison.Ordinal);
         Assert.Contains("Version 58:", wire, StringComparison.Ordinal);
+        Assert.Contains("Version 59:", wire, StringComparison.Ordinal);
         Assert.DoesNotContain("CaptureXboxSessionDiagnostic", wire + contracts + server + client + control, StringComparison.Ordinal);
         Assert.DoesNotContain("StartXboxSessionDiagnostic", wire + contracts + server + client + control, StringComparison.Ordinal);
         Assert.DoesNotContain("StopXboxSessionDiagnostic", wire + contracts + server + client + control, StringComparison.Ordinal);

@@ -37,7 +37,8 @@ public sealed record ProfileDocument
     /// synchronization engine. The same sidecar is applied to every intentionally extensible
     /// nested section (<see cref="DeviceSettings"/>, <see cref="DevicePerformanceSettings"/>,
     /// <see cref="DeviceDisplaySettings"/>, <see cref="GameProfile"/>, <see cref="XboxGameProfile"/>,
-    /// <see cref="GamePerformanceOverrides"/>, <see cref="GameDisplayOverrides"/>) so a future
+    /// <see cref="NonSteamGameControllerOverrides"/>, <see cref="GamePerformanceOverrides"/>,
+    /// <see cref="GameDisplayOverrides"/>) so a future
     /// additive field anywhere in the document round-trips, not just at the root.</summary>
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

@@ -179,6 +179,7 @@ public sealed class ProfileStore
             profile is not null
             && profile.Performance is not null
             && profile.Display is not null
+            && profile.Controller is not null
             && (!profile.Enabled
                 || (profile.Performance.CpuBoost is not null
                     && profile.Performance.Tdp is { Ac: not null, Dc: not null })));

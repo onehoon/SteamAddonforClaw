@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -140,6 +141,31 @@ internal sealed class XboxGameProfileMutations
         };
         return MutationChange.ChangedSuccessfully;
     });
+
+    internal MutationOutcome SetBackButtonMapping(string key, BackButtonMappingSettings? mapping)
+    {
+        if (mapping is not null && !BackButtonMappingValidation.IsValid(mapping))
+            return MutationOutcome.InvalidTarget;
+
+        return Mutate(key, (document, canonicalKey) =>
+        {
+            if (!document.XboxGames.TryGetValue(canonicalKey, out var current))
+            {
+                if (mapping is null) return MutationChange.NoChange;
+                current = new XboxGameProfile { Enabled = false };
+            }
+
+            var controller = current.Controller;
+            if (controller.BackButtonMapping == mapping)
+                return MutationChange.NoChange;
+
+            document.XboxGames[canonicalKey] = current with
+            {
+                Controller = controller with { BackButtonMapping = mapping }
+            };
+            return MutationChange.ChangedSuccessfully;
+        });
+    }
 
     internal static bool IsCanonicalKey(string? key)
     {

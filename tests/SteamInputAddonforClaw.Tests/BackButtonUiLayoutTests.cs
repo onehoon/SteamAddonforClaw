@@ -55,9 +55,10 @@ public sealed class BackButtonUiLayoutTests
     public void Controller_page_offers_every_defined_target_with_readable_labels()
     {
         var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
+        var options = Read("src/SteamInputAddonforClaw.UI/Views/BackButtonMappingUiOptions.cs");
 
-        Assert.Contains("Enum.GetValues<Xbox360BackButtonTarget>()", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("DescribeBackButtonTarget(target)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("BackButtonMappingUiOptions.AddTargets", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("Enum.GetValues<Xbox360BackButtonTarget>()", options, StringComparison.Ordinal);
         foreach (var label in new[]
         {
             "Disabled", "D-Pad Up", "D-Pad Right", "D-Pad Down", "D-Pad Left",
@@ -65,11 +66,11 @@ public sealed class BackButtonUiLayoutTests
             "Left Stick Click (L3)", "Right Stick Click (R3)", "Xbox Guide"
         })
         {
-            Assert.Contains($"=> \"{label}\"", codeBehind, StringComparison.Ordinal);
+            Assert.Contains($"=> \"{label}\"", options, StringComparison.Ordinal);
         }
 
-        Assert.DoesNotContain("=> \"DPadUp\"", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("=> \"LeftStickClick\"", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("=> \"DPadUp\"", options, StringComparison.Ordinal);
+        Assert.DoesNotContain("=> \"LeftStickClick\"", options, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,7 +78,7 @@ public sealed class BackButtonUiLayoutTests
     {
         var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
         var handlerStart = codeBehind.IndexOf("private void BackButtonTargetComboBox_SelectionChanged", StringComparison.Ordinal);
-        var handlerEnd = codeBehind.IndexOf("private static void SelectBackButtonTarget", handlerStart, StringComparison.Ordinal);
+        var handlerEnd = codeBehind.IndexOf("private void VibrationStrengthSlider_ValueChanged", handlerStart, StringComparison.Ordinal);
         Assert.True(handlerStart >= 0 && handlerEnd > handlerStart);
         var handler = codeBehind[handlerStart..handlerEnd];
 

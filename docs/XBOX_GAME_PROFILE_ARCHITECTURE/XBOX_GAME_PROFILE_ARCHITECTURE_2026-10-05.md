@@ -810,12 +810,12 @@ Do not duplicate:
 
 Do not add an unused Controller placeholder in PR6. Per-game controller persistence belongs to Phase X4.
 
-### 10.3 Controller override
+### 10.3 Non-Steam controller override
 
-In Phase X4, XBOX profiles may add:
+Phase X4 establishes one reusable controller override shape for non-Steam game profiles. XBOX is its first production consumer; future Custom EXE, Epic, and GOG profiles reuse the same shape:
 
 ~~~csharp
-public sealed record XboxGameControllerOverrides
+public sealed record NonSteamGameControllerOverrides
 {
     public BackButtonMappingSettings? BackButtonMapping { get; init; }
 }
@@ -824,21 +824,24 @@ public sealed record XboxGameControllerOverrides
 Recommended semantics:
 
 ~~~text
-Xbox profile disabled
+Steam profile
+→ Steam Input owns per-game mapping; no Addon per-game M1/M2 override
+
+non-Steam profile disabled
 → global BackButtonMappingSettings
 
-Xbox profile enabled
+non-Steam profile enabled
 + Controller.BackButtonMapping == null
 → global BackButtonMappingSettings
 
-Xbox profile enabled
+non-Steam profile enabled
 + Controller.BackButtonMapping != null
-→ per-game XBOX M1/M2 mapping
+→ per-game Xbox360 software M1/M2 mapping
 ~~~
 
-This prevents enabling a TDP-only profile from accidentally freezing a copy of the user's current global M1/M2 mapping.
+The override is optional and persisted with the non-Steam game profile. Do not copy the user's current global mapping into each profile, so enabling a performance-only profile does not freeze an old global value.
 
-The Main App may expose a simple "Use global mapping" state for M1/M2 rather than inventing a separate general override framework.
+The Main App may expose a simple "Use global mapping" state for M1/M2 rather than inventing a separate general override framework. The global `BackButtonMappingSettings` remains the fallback and the existing `CanonicalXbox360InputPublisher` remains the only Xbox360 output owner.
 
 ---
 
@@ -1002,15 +1005,18 @@ global BackButtonMappingSettings
 → Xbox360 publisher
 ~~~
 
-Target behavior:
+Target behavior for the non-Steam per-game M1/M2 foundation (XBOX is the first consumer):
 
 ~~~text
-Active presentation != Xbox360
-→ XBOX per-game mapping has no Xbox360 output effect
+Steam / Big Picture active
+→ SteamDeck presentation
+→ Steam Input owns per-game M1/M2; no Addon Steam profile mapping
 
-Active presentation == Xbox360
-+ active XBOX profile has explicit mapping
-→ use XBOX profile M1/M2 mapping
+non-Steam active XBOX game
++ Xbox360 output path
++ profile enabled
++ explicit Controller.BackButtonMapping
+→ use that per-game mapping through the existing CanonicalXbox360InputPublisher
 
 otherwise
 → use global BackButtonMappingSettings
@@ -1026,7 +1032,7 @@ Do not:
 - map XBOX profiles into SteamDeck rear buttons;
 - bypass the existing rear-button suppression/transition safety path.
 
-Per-game XBOX M1/M2 is software output policy only.
+Per-game non-Steam M1/M2 is software Xbox360 output policy only. XBOX consumes the foundation first; later non-Steam profile types reuse it at the same effective-mapping boundary.
 
 ---
 
@@ -2204,12 +2210,14 @@ Implement this phase as two focused PRs.
 
 This split is deliberate: PR7 proves production identity ownership independently of machine-wide setting application.
 
-### Phase X4 — per-game M1/M2
+### Phase X4 — non-Steam per-game M1/M2 foundation (XBOX first consumer)
 
-- XboxGameControllerOverrides;
-- effective BackButtonMapping provider;
-- XBOX page M1/M2 editing;
-- preserve global fallback.
+- reusable `NonSteamGameControllerOverrides` on XBOX profiles;
+- one host-owned cached effective mapping with the global mapping as fallback;
+- XBOX Main App M1/M2 editing;
+- one existing `CanonicalXbox360InputPublisher` and mapper;
+- Steam excluded because Steam Input owns Steam per-game mapping;
+- Custom EXE, Epic, and GOG may reuse this boundary in later phases.
 
 ### Phase X5 — Overlay active XBOX profile
 
@@ -2273,8 +2281,8 @@ The implementation is correct only if all of the following remain true.
 11. Platform-specific detection and identity end at one active-profile resolver; CPU/TDP/Power/FPS/Resolution runtime logic never branches on Steam versus XBOX.
 12. Main App and Overlay mutations converge on the same profile persistence and hardware-apply authority; neither surface owns a separate apply implementation.
 13. One derived active-profile selector is the only convergence point for machine-wide game overrides.
-14. XBOX per-game M1/M2 overrides only the Xbox360 software mapping path.
-15. Global M1/M2 remains the fallback.
+14. Non-Steam per-game M1/M2 overrides use the existing Xbox360 software mapping path; XBOX is the first consumer and later non-Steam profiles reuse the same boundary.
+15. Steam per-game M1/M2 remains owned by Steam Input, and global M1/M2 remains the fallback for non-Steam profiles.
 16. XBOX detection never changes PID1902 ownership, HidHide, VIIPER ownership, or Steam/BPM presentation policy.
 17. Overlay does not gain separate Steam and XBOX profile tabs.
 18. Overlay active-game profile is selected by Runtime, not by UI guessing.

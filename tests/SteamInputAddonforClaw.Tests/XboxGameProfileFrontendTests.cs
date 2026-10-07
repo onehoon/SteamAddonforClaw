@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -160,8 +161,10 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         var resolution = new GameDisplayResolutionRuntime(store, gate, _directory, display);
         resolution.SetActiveProfileResolver(resolver);
         var mutations = new XboxGameProfileMutations(store, gate, Model());
+        var mappingReconciles = 0;
         var control = CreateControl(mutations, tdp, fps,
             activeProfileTargetSource: () => target,
+            reconcileXboxBackButtonMapping: key => { Assert.Equal(Key, key); mappingReconciles++; return true; },
             cpu: cpu,
             power: power,
             resolution: resolution);
@@ -175,6 +178,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Contains(transport.Operations, operation => operation.StartsWith("SetData(", StringComparison.Ordinal));
         Assert.Equal(90, limiter.LastEnabledFps);
         Assert.Equal(new DisplayModeSnapshot(1600, 900, 120, 32), display.Current);
+        Assert.Equal(1, mappingReconciles);
 
         var tdpOperations = transport.OperationCount;
         var powerApplies = powerPolicy.ApplyCount;
@@ -187,6 +191,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(powerApplies, powerPolicy.ApplyCount);
         Assert.Equal(fpsCalls, limiter.ApplyCount);
         Assert.Equal(resolutionCalls, display.ApplyCalls);
+        Assert.Equal(1, mappingReconciles);
 
         var cpuWrites = cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount;
         powerApplies = powerPolicy.ApplyCount;
@@ -200,6 +205,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(powerApplies, powerPolicy.ApplyCount);
         Assert.Equal(fpsCalls, limiter.ApplyCount);
         Assert.Equal(resolutionCalls, display.ApplyCalls);
+        Assert.Equal(1, mappingReconciles);
 
         tdpOperations = transport.OperationCount;
         cpuWrites = cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount;
@@ -210,8 +216,10 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal((WindowsPowerMode.BestPowerEfficiency, WindowsPowerMode.BestPowerEfficiency), powerPolicy.LastApplied);
         Assert.Equal(tdpOperations, transport.OperationCount);
         Assert.Equal(cpuWrites, cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount);
+        Assert.Equal(1, mappingReconciles);
         Assert.Equal(fpsCalls, limiter.ApplyCount);
         Assert.Equal(resolutionCalls, display.ApplyCalls);
+        Assert.Equal(1, mappingReconciles);
 
         powerApplies = powerPolicy.ApplyCount;
         tdpOperations = transport.OperationCount;
@@ -224,6 +232,7 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(tdpOperations, transport.OperationCount);
         Assert.Equal(cpuWrites, cpuPolicy.AcWriteCount + cpuPolicy.DcWriteCount);
         Assert.Equal(resolutionCalls, display.ApplyCalls);
+        Assert.Equal(1, mappingReconciles);
 
         fpsCalls = limiter.ApplyCount;
         powerApplies = powerPolicy.ApplyCount;
@@ -266,8 +275,10 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         await using var tdp = new TdpRuntime(store, gate, Model(), new MsiClawTdpHardware(transport));
         var limiter = new RecordingFrameLimiter();
         var fps = new IntelFrameLimiterRuntime(store, gate, limiter, marker: Path.Combine(_directory, "fps-marker.json"));
+        var mappingReconciles = 0;
         var control = CreateControl(mutations, tdp, fps,
-            activeProfileTargetSource: () => ActiveProfileTarget.ForSteam(123));
+            activeProfileTargetSource: () => ActiveProfileTarget.ForSteam(123),
+            reconcileXboxBackButtonMapping: _ => { mappingReconciles++; return true; });
         mutations.SetEnabled(Key, true, "Game");
 
         var result = await control.SetXboxGameProfileTdpAsync(Key,
@@ -277,6 +288,10 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(25, store.Load().Document.XboxGames[Key].Performance.Tdp!.Ac.Pl1Watts);
         Assert.Equal(0, transport.OperationCount);
         Assert.Equal(0, limiter.ApplyCount);
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
+        Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, mapping)).Succeeded);
+        Assert.Equal(mapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
+        Assert.Equal(0, mappingReconciles);
         await tdp.DisposeAsync();
         fps.Dispose();
     }
@@ -338,23 +353,105 @@ public sealed class XboxGameProfileFrontendTests : IDisposable
         Assert.Equal(before, File.ReadAllText(ProfilePath));
     }
 
+    [Fact]
+    public async Task XBOX_mapping_snapshot_shows_current_global_fallback_and_explicit_override()
+    {
+        var global = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.B);
+        var mutations = new XboxGameProfileMutations(new ProfileStore(ProfilePath), new ProfileMutationGate(), Model());
+        var control = CreateControl(mutations, globalBackButtonMapping: global);
+
+        var initial = await control.CaptureXboxGameProfileAsync(Key);
+        Assert.True(initial.BackButtonMapping!.UseGlobalMapping);
+        Assert.Equal(global, initial.BackButtonMapping.Mapping);
+
+        var explicitMapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
+        Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, explicitMapping)).Succeeded);
+        var explicitSnapshot = await control.CaptureXboxGameProfileAsync(Key);
+        Assert.False(explicitSnapshot.BackButtonMapping!.UseGlobalMapping);
+        Assert.Equal(explicitMapping, explicitSnapshot.BackButtonMapping.Mapping);
+
+        Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, null)).Succeeded);
+        var globalSnapshot = await control.CaptureXboxGameProfileAsync(Key);
+        Assert.True(globalSnapshot.BackButtonMapping!.UseGlobalMapping);
+        Assert.Equal(global, globalSnapshot.BackButtonMapping.Mapping);
+    }
+
+    [Fact]
+    public async Task Active_XBOX_mapping_and_profile_enable_changes_reconcile_only_after_persistence()
+    {
+        var store = new ProfileStore(ProfilePath);
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var target = ActiveProfileTarget.ForXbox(Key);
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
+        BackButtonMappingSettings? expectedPersistedMapping = mapping;
+        var reconciles = 0;
+        var control = CreateControl(mutations,
+            activeProfileTargetSource: () => target,
+            reconcileXboxBackButtonMapping: key =>
+            {
+                Assert.Equal(Key, key);
+                Assert.Equal(expectedPersistedMapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
+                reconciles++;
+                return true;
+            });
+
+        Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, mapping)).Succeeded);
+        Assert.Equal(mapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
+        Assert.False(store.Load().Document.XboxGames[Key].Enabled);
+        expectedPersistedMapping = null;
+        Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, null)).Succeeded);
+        Assert.Null(store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
+        expectedPersistedMapping = mapping;
+        Assert.True((await control.SetXboxGameProfileBackButtonMappingAsync(Key, mapping)).Succeeded);
+        Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed,
+            (await control.SetXboxGameProfileEnabledAsync(Key, true, "Game")).Outcome);
+        Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed,
+            (await control.SetXboxGameProfileEnabledAsync(Key, false, "Game")).Outcome);
+        Assert.False(store.Load().Document.XboxGames[Key].Enabled);
+        Assert.Equal(mapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
+        Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed,
+            (await control.SetXboxGameProfileEnabledAsync(Key, true, "Game")).Outcome);
+        Assert.True(store.Load().Document.XboxGames[Key].Enabled);
+        Assert.Equal(mapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
+        Assert.Equal(6, reconciles);
+    }
+
+    [Fact]
+    public async Task Active_mapping_reconcile_failure_keeps_the_persisted_change_and_reports_apply_failed()
+    {
+        var store = new ProfileStore(ProfilePath);
+        var mutations = new XboxGameProfileMutations(store, new ProfileMutationGate(), Model());
+        var control = CreateControl(mutations,
+            activeProfileTargetSource: () => ActiveProfileTarget.ForXbox(Key),
+            reconcileXboxBackButtonMapping: _ => false);
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.LeftBumper, Xbox360BackButtonTarget.RightBumper);
+
+        var result = await control.SetXboxGameProfileBackButtonMappingAsync(Key, mapping);
+
+        Assert.Equal(FrontendGameProfileMutationOutcome.ApplyFailed, result.Outcome);
+        Assert.Equal(mapping, store.Load().Document.XboxGames[Key].Controller.BackButtonMapping);
+    }
+
     private InProcessAddonFrontendControl CreateControl(
         XboxGameProfileMutations mutations,
         TdpRuntime? tdp = null,
         IntelFrameLimiterRuntime? fps = null,
         Func<uint>? actualRunningAppIdSource = null,
         Func<ActiveProfileTarget>? activeProfileTargetSource = null,
+        Func<string, bool>? reconcileXboxBackButtonMapping = null,
+        BackButtonMappingSettings? globalBackButtonMapping = null,
         CpuBoostRuntime? cpu = null,
         PowerModeRuntime? power = null,
         GameDisplayResolutionRuntime? resolution = null)
     {
-        var settings = new StartupSettingsCoordinator(new AppSettings(),
+        var settings = new StartupSettingsCoordinator(new AppSettings { BackButtonMapping = globalBackButtonMapping ?? BackButtonMappingSettings.Default },
             new SettingsStore(Path.Combine(_directory, "settings.json")), new NoOpStartupManager());
         return new InProcessAddonFrontendControl(settings, new ThrowingStatusProvider(), null,
             cpuBoostRuntime: cpu, tdpRuntime: tdp, powerModeRuntime: power,
             displayResolutionRuntime: resolution, intelFpsRuntime: fps,
             xboxGameProfileMutations: mutations, actualRunningAppIdSource: actualRunningAppIdSource,
-            activeProfileTargetSource: activeProfileTargetSource);
+            activeProfileTargetSource: activeProfileTargetSource,
+            reconcileXboxBackButtonMapping: reconcileXboxBackButtonMapping);
     }
 
     private static HandheldDeviceModelId Model() => new("msi.claw.a2vm.7");
