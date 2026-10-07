@@ -11,6 +11,7 @@ public sealed partial class XboxPage : UserControl
 {
     private IAddonFrontendControl? _frontend;
     private bool _active, _suppressEvents, _suppressTdpEvents, _suppressFpsEvents, _suppressFeatureEvents, _suppressControllerEvents, _suppressGpuEvents;
+    private bool _catalogLoaded;
     private IReadOnlyList<FrontendXboxGameCatalogEntry> _catalog = [];
     private FrontendXboxGameCatalogEntry? _selectedGame;
     private FrontendXboxGameProfileSnapshot? _snapshot;
@@ -31,12 +32,25 @@ public sealed partial class XboxPage : UserControl
         InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; BackButtonMappingUiOptions.AddTargets(M1BackButtonTargetComboBox); BackButtonMappingUiOptions.AddTargets(M2BackButtonTargetComboBox); SetEditorsEnabled(false);
 }
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
-    internal void Activate() { if (_active) return; _active = true; _ = RefreshGamesAsync(); }
+    internal void Activate()
+    {
+        if (_active) return;
+        _active = true;
+
+        if (_catalogLoaded)
+        {
+            ApplyCatalogFilter();
+            return;
+        }
+
+        if (ShouldStartCatalogScan(_catalogLoaded, _scanCancellation is not null))
+            _ = RefreshGamesAsync();
+    }
     internal void Deactivate()
     {
         _active = false;
         // Top-level navigation hides the page but does not retire its selected profile context.
-        CancelScan(); CancelCapture(); CancelGpuMinimumClockDebounce();
+        CancelCapture(); CancelGpuMinimumClockDebounce();
     }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
@@ -53,27 +67,40 @@ public sealed partial class XboxPage : UserControl
         {
             var selectedKey = _selectedGame?.Key;
             var snapshot = await _frontend.ScanXboxGamesAsync(scan.Token);
-            if (!IsCurrentScan(_active, _scanCancellation, scan)) return;
-            _catalog = snapshot.Outcome == FrontendXboxGameCatalogOutcome.Ready ? snapshot.Games : [];
-            ApplyCatalogFilter();
+            if (!IsCurrentScan(_scanCancellation, scan)) return;
+
+            if (snapshot.Outcome == FrontendXboxGameCatalogOutcome.Ready)
+            {
+                _catalog = snapshot.Games;
+                _catalogLoaded = true;
+            }
+
+            if (!_active) return;
+
             _selectedGame = selectedKey is null ? null : _catalog.FirstOrDefault(x => x.Key == selectedKey);
             if (snapshot.Outcome != FrontendXboxGameCatalogOutcome.Ready)
             {
+                GameGrid.ItemsSource = Array.Empty<GameCardItem>();
                 ReturnToCatalog();
                 ShowError(snapshot.FailureMessage ?? "XBOX game catalog could not be loaded.", null);
             }
-            else if (_selectedGame is null)
+            else
             {
-                ReturnToCatalog();
-                if (_catalog.Count == 0) ShowInfo("No installed XBOX games were found."); else ClearError();
+                ApplyCatalogFilter();
+                if (_selectedGame is null)
+                {
+                    ReturnToCatalog();
+                    if (_catalog.Count == 0) ShowInfo("No installed XBOX games were found."); else ClearError();
+                }
+                else await CaptureSelectedAsync(_selectedGame.Key);
             }
-            else await CaptureSelectedAsync(_selectedGame.Key);
         }
         catch (OperationCanceledException) when (scan.IsCancellationRequested) { }
         catch (Exception exception)
         {
-            if (IsCurrentScan(_active, _scanCancellation, scan))
+            if (IsCurrentScan(_scanCancellation, scan) && _active)
             {
+                GameGrid.ItemsSource = Array.Empty<GameCardItem>();
                 ReturnToCatalog();
                 ShowError("XBOX game catalog could not be refreshed.", exception);
             }
@@ -510,9 +537,10 @@ public sealed partial class XboxPage : UserControl
             .ThenBy(game => game.Key, StringComparer.Ordinal)
             .ToArray();
     }
-    internal static bool IsCurrentScan(bool active, CancellationTokenSource? current, CancellationTokenSource request)
-        => active && ReferenceEquals(current, request) && !request.IsCancellationRequested;
-    private void CancelScan() { var scan = _scanCancellation; _scanCancellation = null; scan?.Cancel(); }
+    internal static bool ShouldStartCatalogScan(bool catalogLoaded, bool scanInProgress)
+        => !catalogLoaded && !scanInProgress;
+    internal static bool IsCurrentScan(CancellationTokenSource? current, CancellationTokenSource request)
+        => ReferenceEquals(current, request) && !request.IsCancellationRequested;
     private void CancelCapture() { var capture = _captureCancellation; _captureCancellation = null; capture?.Cancel(); }
     private async Task RestoreSelectedAfterMutationFailureAsync(
         string key,
