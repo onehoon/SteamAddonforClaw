@@ -2,7 +2,7 @@
 
 > **Current architecture override (2026-09-22):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. Addon QAM tabs, QamHost, GamepadUI/CDP patching, and CEF debugging are retired. QAM-specific material below is historical and must not be used as an active implementation requirement.
 
-> **Current geometry policy (2026-10-05):** Use the selected monitor's full bounds and DPI with a 4-DIP edge gap and a maximum width of 432 DIP. Ignore Windows WorkArea/taskbar reservation; taskbar overlap is intentional. Foreground-monitor selection, two-pass DPI placement, topmost, and no-activate behavior remain unchanged.
+> **Current geometry policy (2026-10-07):** Use the selected monitor's full bounds with a fixed 48-physical-pixel inset on the top, bottom, and right edges. The right-anchored Overlay has no left-edge inset requirement. Maximum surface width is 452 DIP; the 52-DIP tab rail and existing body padding stay unchanged, so the added 20 DIP belongs to the content column. Ignore Windows WorkArea/taskbar reservation; taskbar overlap is intentional. Foreground-monitor selection, two-pass DPI placement, topmost, and no-activate behavior remain unchanged.
 
 > **Status:** Current UI design baseline / implementation planning document  
 > **Date:** 2026-09-02  
@@ -369,21 +369,21 @@ Preferred visual behavior:
 - no drag handles in the ordinary Quick Settings surface;
 - tab-order editing belongs in an explicit configuration surface, not normal tab navigation.
 
-### 6.1 Five tabs at the current 432-DIP maximum width
+### 6.1 Five tabs at the current 452-DIP maximum width
 
 Current code uses:
 
 ```text
-OverlayWindowGeometry.MaxSurfaceWidthDip = 432
+OverlayWindowGeometry.MaxSurfaceWidthDip = 452
 ```
 
-At the reference 150% DPI the maximum is 648 physical pixels.
+At the reference 150% DPI the maximum is 678 physical pixels.
 
 Five English text labels are a tighter fit than the existing POC content, especially `Controller` and `Shortcut`.
 
 Initial policy:
 
-1. Keep the current 432-DIP maximum panel width unless hardware/UI evidence says it must change.
+1. Keep the current 452-DIP maximum panel width unless hardware/UI evidence says it must change.
 2. Keep standard WinUI control/typography sizing initially.
 3. Let the tab strip use horizontal space more efficiently than the body content if necessary.
 4. Do not globally scale down the entire UI simply to fit the tabs.
