@@ -600,18 +600,35 @@ public sealed class UiArchitectureTests
         var horizontalContentAlignment = itemContainerStyle.Elements()
             .Single(element => element.Name.LocalName == "Setter"
                 && (string?)element.Attribute("Property") == "HorizontalContentAlignment");
+        var itemTemplate = list.Elements().Single(element => element.Name.LocalName == "ListView.ItemTemplate");
+        var card = itemTemplate.Descendants().Single(element => element.Name.LocalName == "Border");
+        var cardGrid = card.Elements().Single(element => element.Name.LocalName == "Grid");
+        var actionStack = cardGrid.Elements().Single(element =>
+            element.Name.LocalName == "StackPanel" && (string?)element.Attribute("Grid.Column") == "2");
+        var actionButtons = actionStack.Elements().Where(element => element.Name.LocalName == "Button").ToArray();
 
         Assert.Equal("Horizontal", (string?)wrapGrid.Attribute("Orientation"));
         Assert.Equal("3", (string?)wrapGrid.Attribute("MaximumRowsOrColumns"));
         Assert.Equal("0", (string?)list.Attribute("Padding"));
+        Assert.Equal("ShortcutList_SizeChanged", (string?)list.Attribute("SizeChanged"));
         Assert.Equal("True", (string?)list.Attribute("CanReorderItems"));
+        Assert.Equal("True", (string?)list.Attribute("CanDragItems"));
+        Assert.Equal("True", (string?)list.Attribute("AllowDrop"));
         Assert.Equal("ListViewItem", (string?)itemContainerStyle.Attribute("TargetType"));
         Assert.Equal("Stretch", (string?)horizontalContentAlignment.Attribute("Value"));
+        Assert.Equal("Auto,*,Auto", (string?)cardGrid.Attribute("ColumnDefinitions"));
+        Assert.Equal("0,0,12,12", (string?)card.Attribute("Margin"));
+        Assert.Equal("Vertical", (string?)actionStack.Attribute("Orientation"));
+        Assert.Equal(2, actionButtons.Length);
+        Assert.All(actionButtons, button => Assert.Equal("Stretch", (string?)button.Attribute("HorizontalAlignment")));
         Assert.Contains("private const int ShortcutColumnCount = 3;", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("private const double ShortcutCardHorizontalGap = 12;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("itemsPanel.ItemWidth = itemWidth", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("GetShortcutItemWidth(itemsPanel.ActualWidth)", shortcutCode, StringComparison.Ordinal);
-        Assert.Equal(300, ShortcutPage.GetShortcutItemWidth(900));
-        Assert.Equal(300, ShortcutPage.GetShortcutItemWidth(900));
+        Assert.Contains("GetShortcutItemWidth(ShortcutList.ActualWidth)", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("(ShortcutColumnCount - 1) * ShortcutCardHorizontalGap", shortcutCode, StringComparison.Ordinal);
+        Assert.Equal(292, ShortcutPage.GetShortcutItemWidth(900));
+        Assert.Equal(392, ShortcutPage.GetShortcutItemWidth(1200));
+        Assert.Equal(1, ShortcutPage.GetShortcutItemWidth(24));
         Assert.Contains("ShortcutList.ItemsSource = _tiles;", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("var targetIndex = _tiles.IndexOf(movedTile);", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("TargetIndex: targetIndex", shortcutCode, StringComparison.Ordinal);

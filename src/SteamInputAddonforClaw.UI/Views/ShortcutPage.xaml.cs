@@ -14,6 +14,7 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class ShortcutPage : UserControl
 {
     private const int ShortcutColumnCount = 3;
+    private const double ShortcutCardHorizontalGap = 12;
     private readonly ObservableCollection<FrontendShortcutEditorTile> _tiles = [];
     private readonly DispatcherQueue _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
     private IAddonFrontendControl? _frontend;
@@ -31,7 +32,6 @@ public sealed partial class ShortcutPage : UserControl
         InitializeComponent();
         ShortcutList.ItemsSource = _tiles;
         ShortcutList.Loaded += ShortcutList_Loaded;
-        ShortcutList.SizeChanged += ShortcutList_SizeChanged;
     }
 
     public void Initialize(IAddonFrontendControl frontend, Func<nint> windowHandleProvider)
@@ -275,7 +275,8 @@ public sealed partial class ShortcutPage : UserControl
         && (string.IsNullOrWhiteSpace(currentTitle)
             || string.Equals(currentTitle, previousSuggestedTitle, StringComparison.Ordinal));
 
-    internal static double GetShortcutItemWidth(double availableWidth) => availableWidth / ShortcutColumnCount;
+    internal static double GetShortcutItemWidth(double availableWidth) =>
+        Math.Max(1, (availableWidth - (ShortcutColumnCount - 1) * ShortcutCardHorizontalGap) / ShortcutColumnCount);
 
     private static void UpdateEditorPanel(ComboBox picker, IReadOnlyDictionary<FrontendShortcutEditorActionKind, UIElement> panels)
     {
@@ -287,28 +288,18 @@ public sealed partial class ShortcutPage : UserControl
 
     private void ShortcutList_Loaded(object sender, RoutedEventArgs e)
     {
-        var itemsPanel = FindVisualChild<ItemsWrapGrid>(ShortcutList);
-        if (!ReferenceEquals(itemsPanel, _shortcutItemsPanel))
-        {
-            if (_shortcutItemsPanel is not null)
-                _shortcutItemsPanel.SizeChanged -= ShortcutItemsPanel_SizeChanged;
-            _shortcutItemsPanel = itemsPanel;
-            if (_shortcutItemsPanel is not null)
-                _shortcutItemsPanel.SizeChanged += ShortcutItemsPanel_SizeChanged;
-        }
+        _shortcutItemsPanel ??= FindVisualChild<ItemsWrapGrid>(ShortcutList);
         UpdateShortcutItemWidth();
     }
 
     private void ShortcutList_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateShortcutItemWidth();
 
-    private void ShortcutItemsPanel_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateShortcutItemWidth();
-
     private void UpdateShortcutItemWidth()
     {
         var itemsPanel = _shortcutItemsPanel ??= FindVisualChild<ItemsWrapGrid>(ShortcutList);
-        if (itemsPanel is null || itemsPanel.ActualWidth <= 0) return;
+        if (itemsPanel is null || ShortcutList.ActualWidth <= 0) return;
 
-        var itemWidth = GetShortcutItemWidth(itemsPanel.ActualWidth);
+        var itemWidth = GetShortcutItemWidth(ShortcutList.ActualWidth);
         if (!double.IsFinite(itemsPanel.ItemWidth) || Math.Abs(itemsPanel.ItemWidth - itemWidth) > 0.1)
             itemsPanel.ItemWidth = itemWidth;
     }
