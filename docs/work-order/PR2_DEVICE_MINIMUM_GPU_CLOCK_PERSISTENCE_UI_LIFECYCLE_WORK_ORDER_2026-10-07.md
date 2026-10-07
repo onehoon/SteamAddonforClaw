@@ -2371,7 +2371,7 @@ PR2 is complete when all are true:
 10. User Disable persists Off first, then restores the exact original minimum.
 11. Restore failure keeps the marker and returns ApplyFailed.
 12. Active-rail edit applies; inactive-rail edit only persists.
-13. Unsupported saved values are never auto-clamped or replaced.
+13. Background startup/resume/reconcile never auto-clamps or rewrites unsupported saved values; only an explicit user Enable may reinitialize unsupported Off-state rail value(s) to the current `RecommendedDefaultMhz`.
 14. Startup Enabled state reuses the existing marker baseline instead of recapturing it.
 15. Startup Off/missing state restores any stale marker-owned minimum.
 16. AC/DC changes reuse the existing power-source watcher.
