@@ -253,7 +253,7 @@ The built-in controller's face buttons, D-Pad, bumpers, triggers, sticks, and st
 | Menu / Start | Menu function | Menu / Start |
 | M1 / M2 | R4 / L4 | Configurable in Controller; Disabled by default |
 
-WING and Center M are configurable front buttons; they are not part of the ordinary gamepad mapping table. The app does not currently expose gyro or motion output as a user-configurable controller feature.
+WING and Center M are configurable front buttons; they are not part of the ordinary gamepad mapping table. **Gyro / motion output is not implemented yet.**
 
 ## Background operation and updates
 
@@ -313,7 +313,7 @@ Open **Settings → Required Components** to see the reported status. Follow the
 - The XBOX catalog includes recognized installed titles, not every app in Microsoft Store or Game Pass.
 - Steam profile tracking depends on Steam continuing to report the game or shortcut as active. Some launcher chains can cause a profile to stop applying when Steam loses that association.
 - Quick Settings Overlay is separate from Steam Quick Access. The Addon does not inject an Addon tab into Steam's menu.
-- Gyro/motion mapping and a general Device-page Fan Control are not currently exposed as user features.
+- **Gyro / motion output is not implemented yet.** A general Device-page Fan Control is also not currently available as a user feature.
 - The product supports one interactive Windows user and session; Fast User Switching, Remote Desktop sessions, and multi-user use are not supported.
 
 ## Return to stock MSI controller behavior and uninstall
