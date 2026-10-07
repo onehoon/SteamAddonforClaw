@@ -77,7 +77,7 @@ public sealed class OverlayQamVisualResourcesTests
             .Elements().Select(element => (string?)element.Attribute("Height")).ToArray();
 
         Assert.Equal("Dark", (string?)viewport.Attribute("RequestedTheme"));
-        Assert.Equal("432", (string?)panel.Attribute("MaxWidth"));
+        Assert.Equal("452", (string?)panel.Attribute("MaxWidth"));
         Assert.Equal("52", (string?)columns[0].Attribute("Width"));
         Assert.Equal("*", (string?)columns[1].Attribute("Width"));
         Assert.Same(rightContentHost, pageTitle.Parent);

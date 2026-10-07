@@ -4,8 +4,8 @@ internal readonly record struct OverlayRect(int X, int Y, int Width, int Height)
 
 internal static class OverlayWindowGeometry
 {
-    internal const double FloatingGapDip = 4.0;
-    internal const double MaxSurfaceWidthDip = 432.0;
+    internal const int OuterEdgeInsetPx = 48;
+    internal const double MaxSurfaceWidthDip = 452.0;
     private const uint DefaultDpi = 96;
 
     internal static OverlayRect Calculate(
@@ -22,16 +22,16 @@ internal static class OverlayWindowGeometry
         if (monitorWidth == 0 || monitorHeight == 0)
             return new OverlayRect(monitorLeft, monitorTop, 0, 0);
 
-        var gapPx = DipToPixels(FloatingGapDip, effectiveDpi);
+        var rightInsetPx = Math.Min(OuterEdgeInsetPx, monitorWidth);
+        var verticalInsetPx = Math.Min(OuterEdgeInsetPx, monitorHeight / 2);
         var maxWidthPx = DipToPixels(MaxSurfaceWidthDip, effectiveDpi);
-        var left = monitorLeft + gapPx;
-        var top = monitorTop + gapPx;
-        var right = monitorRight - gapPx;
-        var bottom = monitorBottom - gapPx;
+        var top = monitorTop + verticalInsetPx;
+        var right = monitorRight - rightInsetPx;
+        var bottom = monitorBottom - verticalInsetPx;
 
-        var availableWidth = Math.Max(0, right - left);
+        var availableWidth = Math.Max(0, right - monitorLeft);
         var width = Math.Min(availableWidth, maxWidthPx);
-        var x = Math.Max(left, right - width);
+        var x = right - width;
         var height = Math.Max(0, bottom - top);
 
         return new OverlayRect(x, top, width, height);

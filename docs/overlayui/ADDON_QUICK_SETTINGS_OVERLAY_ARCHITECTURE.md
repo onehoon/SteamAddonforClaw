@@ -2,7 +2,7 @@
 
 > **Current architecture override (2026-10-05):** The WinUI3 Overlay is the only Addon-owned Quick Settings surface. The Main App `Shortcut` page is a separate editor for Runtime-owned Shortcut definitions and the global Screenshot folder; it is not the Main App `Overlay` settings page or the WinUI3 Overlay Shortcut grid. The Overlay renders the Runtime's ordered `FrontendShortcutDashboardSnapshot` and sends only `TileId` to `ShortcutRuntime` for execution. Overlay protocol v14 carries the existing global Xbox360-only M1/M2 mapping state and adds shared production settings/vibration snapshots and mutations. Controller LED and vibration use the existing frontend authorities; Device battery state is part of the shared Device aggregate, and Setting reuses the existing current-power-source preference. SteamDeck rear-button behavior remains M1=R4 and M2=L4. The Overlay never receives Shortcut editor action configuration. Steam's native Quick Access Menu remains Steam-owned and is invoked only through the existing Steam Deck Quick Access system-button pulse. Addon QAM tabs, QamHost, GamepadUI/CDP patching, and CEF debugging are retired. QAM-specific material below is historical and must not be used as an active implementation requirement.
 
-> **Current geometry policy (2026-10-05):** Overlay placement uses only the selected monitor's full `rcMonitor` bounds and DPI, with a 4-DIP edge gap and a maximum width of 432 DIP. Windows WorkArea/taskbar reservation is intentionally ignored; the transient Overlay may cover the taskbar. Foreground-monitor selection, provisional placement before `GetDpiForWindow`, final `HWND_TOPMOST`, and no-activate behavior remain unchanged.
+> **Current geometry policy (2026-10-07):** Overlay placement uses only the selected monitor's full `rcMonitor` bounds. The visible top, bottom, and right edges use a fixed 48-physical-pixel inset; no left-edge inset is applied because the surface is right-anchored. Maximum width is 452 DIP. The 52-DIP tab rail and existing body padding stay unchanged, so the added 20 DIP is allocated to the content column. Windows WorkArea/taskbar reservation is intentionally ignored; the transient Overlay may cover the taskbar. Foreground-monitor selection, provisional placement before `GetDpiForWindow`, final `HWND_TOPMOST`, and no-activate behavior remain unchanged.
 
 > **Shortcut supersession:** Older four-slot / `Unassigned` / QAM-parity descriptions in this document and the OQ5-UI-11 / Shared Surface PR4 work orders are historical. The active Shortcut contract is an ordered dynamic grid (up to two columns), enabled state from Runtime, and TileId-only execution. Existing Screenshot behavior continues to use the Runtime-owned Overlay capture-retirement path.
 
@@ -241,31 +241,31 @@ Target shape:
 
 Requirements:
 
-- right aligned within the selected monitor with a DPI-scaled floating edge gap;
+- right aligned within the selected monitor with a fixed 48-physical-pixel right inset;
 - opaque background;
 - rectangular window;
-- top = monitor top + 4 DIP;
-- bottom = monitor bottom - 4 DIP;
-- width = min(432 DIP, monitor width minus both floating gaps);
+- top = monitor top + 48 physical px;
+- bottom = monitor bottom - 48 physical px;
+- width = min(452 DIP, monitor width minus the right inset);
 - Windows WorkArea/taskbar reservation is intentionally ignored, so the Overlay may cover the taskbar;
 - no transparency/acrylic/blur requirement.
 
 Use only the selected monitor's full bounds and current DPI:
 
 ```text
-gapPx          = DipToPixels(4, dpi)
-maxWidthPx     = DipToPixels(432, dpi)
-left           = Monitor.Left + gapPx
-top            = Monitor.Top + gapPx
-right          = Monitor.Right - gapPx
-bottom         = Monitor.Bottom - gapPx
-availableWidth = max(0, right - left)
-width          = min(availableWidth, maxWidthPx)
-x              = max(left, right - width)
-height         = max(0, bottom - top)
+rightInsetPx   = min(48, monitorWidth)
+verticalInsetPx = min(48, monitorHeight / 2)
+maxWidthPx      = DipToPixels(452, dpi)
+top             = Monitor.Top + verticalInsetPx
+right           = Monitor.Right - rightInsetPx
+bottom          = Monitor.Bottom - verticalInsetPx
+availableWidth  = max(0, right - Monitor.Left)
+width           = min(availableWidth, maxWidthPx)
+x               = right - width
+height          = max(0, bottom - top)
 ```
 
-At 1920 × 1200 and 144 DPI, the resulting rectangle is `(1266, 6, 648, 1188)`.
+At 1920 × 1200 and 144 DPI, the resulting rectangle is `(1194, 48, 678, 1104)`.
 
 Preferred monitor resolution on every Show:
 

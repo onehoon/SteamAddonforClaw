@@ -9,7 +9,7 @@
             SizeChanged="OnSurfaceHostSizeChanged">
         <Border
             x:Name="OpaquePanel"
-            MaxWidth="432"
+            MaxWidth="452"
             HorizontalAlignment="Stretch">
             <Grid x:Name="AnimatedContent">
                 <Grid x:Name="QamShell">
