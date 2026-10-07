@@ -268,7 +268,12 @@ public sealed partial class XboxPage : UserControl
         catch (Exception exception)
         {
             if (_active && _selectedGame?.Key == key)
-                await RestoreSelectedAfterMutationFailureAsync(key, "Minimum GPU Clock could not be updated.", exception);
+            {
+                var preserveDraft = DevicePage.GpuMinimumClockDraftPolicy.ResolveFailedCommit(
+                    ref _gpuDraftDirty, draftGeneration, _gpuDraftGeneration);
+                await RestoreSelectedAfterMutationFailureAsync(key, "Minimum GPU Clock could not be updated.", exception,
+                    preserveDirtyGpuDraft: preserveDraft);
+            }
         }
     }
 
@@ -507,11 +512,15 @@ public sealed partial class XboxPage : UserControl
         => active && ReferenceEquals(current, request) && !request.IsCancellationRequested;
     private void CancelScan() { var scan = _scanCancellation; _scanCancellation = null; scan?.Cancel(); }
     private void CancelCapture() { var capture = _captureCancellation; _captureCancellation = null; capture?.Cancel(); }
-    private async Task RestoreSelectedAfterMutationFailureAsync(string key, string message, Exception exception)
+    private async Task RestoreSelectedAfterMutationFailureAsync(
+        string key,
+        string message,
+        Exception exception,
+        bool preserveDirtyGpuDraft = false)
     {
         ShowError(message, exception);
         if (_frontend is null || _selectedGame?.Key != key) return;
-        try { var snapshot = await _frontend.CaptureXboxGameProfileAsync(key); if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, snapshot.Key)) { Render(snapshot); ShowError(message, null); } } catch { }
+        try { var snapshot = await _frontend.CaptureXboxGameProfileAsync(key); if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, snapshot.Key)) { Render(snapshot, preserveDirtyGpuDraft: preserveDirtyGpuDraft); ShowError(message, null); } } catch { }
     }
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
     private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];

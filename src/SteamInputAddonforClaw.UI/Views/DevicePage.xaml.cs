@@ -568,6 +568,13 @@ public sealed partial class DevicePage : UserControl
             dirty && enabled && !busy && TryGetCanonicalClock(clocks, selectedMhz, out var selected)
             && (!TryGetCanonicalClock(clocks, savedMhz, out var saved) || Math.Abs(selected - saved) > ToleranceMhz);
 
+        internal static bool ResolveFailedCommit(ref bool draftDirty, long submittedGeneration, long currentGeneration)
+        {
+            var preserveDraft = draftDirty && submittedGeneration != currentGeneration;
+            if (!preserveDraft) draftDirty = false;
+            return preserveDraft;
+        }
+
         internal static string FormatMhz(double? mhz) =>
             mhz is { } value && double.IsFinite(value) ? $"{value:0.##} MHz" : "— MHz";
 
