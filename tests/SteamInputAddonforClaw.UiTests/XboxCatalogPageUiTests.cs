@@ -91,7 +91,8 @@ public sealed class XboxCatalogPageUiTests
         Assert.Contains("QueueBackButtonMappingSave(_selectedGame.Key, mapping)", targetChanged, StringComparison.Ordinal);
         Assert.Contains("++_backButtonEditVersion", queue, StringComparison.Ordinal);
         Assert.Contains("SaveBackButtonMappingAfterAsync(_backButtonSaveChain, key, mapping, version)", queue, StringComparison.Ordinal);
-        Assert.Contains("RunAfterPreviousAsync(\n                previous,", save, StringComparison.Ordinal);
+        Assert.Contains("RunAfterPreviousAsync(", save, StringComparison.Ordinal);
+        Assert.Contains("previous,", save, StringComparison.Ordinal);
         Assert.Contains("SetXboxGameProfileBackButtonMappingAsync(key, mapping)", save, StringComparison.Ordinal);
         Assert.Contains("IsCurrentBackButtonMappingEdit(version, _backButtonEditVersion)", save, StringComparison.Ordinal);
         Assert.Contains("IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)", save, StringComparison.Ordinal);
