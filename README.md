@@ -43,7 +43,7 @@ The app currently recognizes these MSI Claw models:
 
 The app checks that the device is a supported model before starting controller management. If the model cannot be identified or is not supported, controller features will not start.
 
-The project has documented physical-device validation for MSI Claw 8 EX AI+ CG3EM. The A2VM models are recognized by the software, but equivalent physical validation is not documented yet. Hardware-specific controls may also be unavailable on a model that does not expose the required capability.
+MSI Claw 8 EX AI+ CG3EM has been tested on physical hardware. The A2VM models are supported by the software, but equivalent physical-device validation is still pending. Hardware-specific controls may also be unavailable on a model that does not expose the required capability.
 
 ## Requirements and compatibility
 
@@ -95,7 +95,9 @@ The page also provides device-wide performance and battery controls:
 - **Windows Power Mode** — enables management of the Windows power mode, separately for each power source: **Best power efficiency**, **Balanced**, or **Best performance**.
 - **Battery charge limit** — enables a charging limit from 60% to 100% in 5% steps, when the device supports it.
 
-Turning a feature off means the Addon stops managing that feature. It does not necessarily restore the exact Windows or MSI value that existed before the Addon managed it. Your saved choices are kept so you can enable the feature again later.
+For **TDP Control**, **CPU Boost**, and **Windows Power Mode**, turning the feature off means the Addon stops managing that setting. It does not necessarily restore the exact Windows or MSI value that existed before the Addon managed it. Your saved choices are kept so you can enable the feature again later.
+
+**Battery charge limit** is different: its switch directly enables or disables the MSI charge-limit function. The selected percentage remains saved for later use.
 
 ### Controller
 
@@ -132,7 +134,7 @@ Per-game options include:
 - **Intel FPS Limit** — a per-power-source target from 40 to 120 FPS in 1 FPS steps. It uses Intel's FPS-limiting support; some games may not support it.
 - **Resolution** — **Do not change**, 1920 × 1200, 1920 × 1080, 1680 × 1050, or 1440 × 900.
 
-Only features enabled in the selected profile take priority over the corresponding Device setting. Other features can continue to use enabled Device settings. When the game is no longer active, enabled Device settings become effective again. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
+For **TDP Control**, **CPU Boost**, and **Windows Power Mode**, an enabled profile setting takes priority over the matching Device setting. If one of those profile settings is off, an enabled Device setting can continue to apply. **Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls and do not have Device-level fallback settings. When the game is no longer active, the profile-only controls stop applying and enabled Device settings for TDP, CPU Boost, and Windows Power Mode become effective again. If a Steam game is launched through a separate launcher and Steam no longer considers its shortcut active after the launcher exits, its profile may stop applying even while a child game process remains open; see [Non-Steam games](#non-steam-games).
 
 ### XBOX
 
@@ -140,15 +142,15 @@ The **XBOX** page lists recognized installed Xbox/Microsoft Store games availabl
 
 The performance options match the Steam profile options: TDP Control, CPU Boost, Windows Power Mode, Minimum GPU Clock, Intel FPS Limit, and Resolution. The XBOX profile also has a controller section for **Use global M1 / M2 mapping**. Turn that off to choose per-game Xbox 360 targets for M1 and M2. Steam Deck presentation still keeps M1 as R4 and M2 as L4.
 
-As with Steam, you can prepare a profile before the game starts. Its enabled settings apply when the Addon recognizes the corresponding XBOX title as active. Features not enabled in the profile may continue to use enabled Device settings.
+As with Steam, you can prepare a profile before the game starts. Its enabled settings apply when the Addon recognizes the corresponding XBOX title as active. For TDP Control, CPU Boost, and Windows Power Mode, an enabled Device setting can continue to apply when the corresponding profile setting is off. Minimum GPU Clock, Intel FPS Limit, and Resolution are game-profile-only and have no Device-level fallback.
 
 ### ClawHUD
 
 **ClawHUD** is the performance HUD included and managed by the Addon. You do not need to install the standalone ClawHUD app. Enable the HUD, then choose **In game only** or **Always** for its display mode.
 
-Depending on device and data availability, the HUD can show frame rate, CPU and GPU usage/clock/temperature or power, memory, fan speed, and battery information. A metric may be absent or shown as unavailable when the device or data source does not provide it.
+Depending on device and data availability, the HUD can show **FPS**, **CPU usage and temperature**, **GPU usage and clock**, **CPU package power (TDP)**, **RAM usage**, **VRAM usage**, **fan speed**, and **battery information**. While running on battery, battery information can include charge percentage and estimated remaining time. Unavailable measurements are omitted rather than treated as a real zero.
 
-Depending on the device and data source, battery information can include charge percentage and an estimated remaining time while on battery. Unavailable measurements are omitted or shown as unavailable rather than treated as a real zero.
+With Intel XeFG, the FPS value may not include every driver-generated output frame because PresentMon may not observe all of those generated frames.
 
 The page lets you adjust **Size** (**-2**, **-1**, **Default**, **+1**, **+2**), **Font** (**Unispace** or **Segoe UI Variable**), **Alignment** (**Left**, **Center**, **Right**), and **Background width** (**Full width** or **Content width**). **Opacity** ranges from 50% to 100% in 5% steps. **Intel VRR Range Fix** is a device/display-specific option for correcting a variable-refresh-rate range when applicable; it is not needed on every display. If the HUD reports a problem, use the page's **Retry** action when available.
 
@@ -188,18 +190,24 @@ Developer Menu is reserved for developer diagnostics and is not needed for norma
 
 ## Game profiles and setting priority
 
-You can create and edit Steam and XBOX game profiles before starting a game. Saved values are kept when a profile is disabled. When a recognized game becomes active, only the features enabled in its profile take priority over the matching Device settings:
+You can create and edit Steam and XBOX game profiles before starting a game. Saved values are kept when a profile is disabled.
+
+**TDP Control**, **CPU Boost**, and **Windows Power Mode** exist at both Device and game-profile level. When one of these settings is enabled in the active game profile, the profile value takes priority. If that profile setting is off, the enabled Device setting can continue to apply.
+
+**Minimum GPU Clock**, **Intel FPS Limit**, and **Resolution** are game-profile-only controls. They do not fall back to a Device setting when disabled or when no matching game profile is active. **Battery charge limit** is Device-only and is not part of a game profile.
 
 ```text
-Recognized active game + profile enabled
-    -> use the profile for each feature enabled in that profile
-    -> use enabled Device settings for other features
+Recognized active game + enabled profile
+    -> enabled TDP / CPU Boost / Power Mode profile settings override Device
+    -> enabled GPU Clock / FPS Limit / Resolution profile settings apply for that game
+    -> disabled TDP / CPU Boost / Power Mode profile settings can use enabled Device settings
 
 No active matching profile
-    -> use enabled Device settings
+    -> enabled Device settings continue for Device-level features
+    -> no game-profile-only setting is active
 ```
 
-When the game stops being active, enabled Device settings become effective again. Turning a Device feature off means the Addon stops managing that feature; it does not promise to restore a previous Windows or MSI value.
+When the game stops being active, the profile-only settings stop applying and enabled Device settings become effective again where a Device-level counterpart exists. Turning TDP Control, CPU Boost, or Windows Power Mode off at Device level stops the Addon from managing that Device setting; it does not promise to restore a previous Windows or MSI value. Battery charge limit uses its own direct enable/disable behavior described in the Device section.
 
 ## Non-Steam games
 
@@ -239,7 +247,7 @@ The built-in controller's face buttons, D-Pad, bumpers, triggers, sticks, and st
 | A / B / X / Y, D-Pad | Corresponding controls | Corresponding controls |
 | LB / RB | L1 / R1 | LB / RB |
 | LT / RT analog travel | L2 / R2 analog triggers | LT / RT analog triggers |
-| LT / RT fully pressed | L2 / R2 digital full pull | LT / RT digital full pull |
+| LT / RT fully pressed | L2 / R2 digital full pull | No separate digital full-pull output; XInput uses the analog LT / RT values |
 | Left/right sticks and L3 / R3 | Corresponding sticks and clicks | Corresponding sticks and clicks |
 | View / Back | View / Options function | View |
 | Menu / Start | Menu function | Menu / Start |
@@ -279,7 +287,7 @@ Check that the button you are pressing is assigned to **Quick Settings Overlay**
 
 ### A game profile does not apply
 
-In **Steam** or **XBOX**, select the correct game and confirm that its profile and the specific feature you want are enabled. For Steam, confirm Steam still recognizes the game as active. Check whether the setting is for **Plugged in** or **On battery**. Per-game settings take priority only for features enabled in that profile.
+In **Steam** or **XBOX**, select the correct game and confirm that its profile and the specific feature you want are enabled. For Steam, confirm Steam still recognizes the game as active. Check whether the setting is for **Plugged in** or **On battery**. TDP Control, CPU Boost, and Windows Power Mode override their Device counterparts only when enabled in the active profile. Minimum GPU Clock, Intel FPS Limit, and Resolution are profile-only settings and apply only when their profile controls are enabled.
 
 ### A Non-Steam profile stops applying after a launcher closes
 
