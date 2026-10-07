@@ -2442,15 +2442,15 @@ There is no XBOX-only Runtime debounce.
 
 The Main App Steam/XBOX FPS delay is now normalized to the existing 300 ms policy. Do not introduce a generic debounce service/manager solely for this.
 
-### 24A.4 Diagnostic-era post-classification data — non-blocking cleanup
+### 24A.4 Diagnostic-era post-classification data — implemented
 
-The retired catalog/session diagnostic UI and RPC contracts are gone, but a few production-internal DTOs still carry evidence that is no longer read after classification:
+The post-classification records now retain only the fields used by production consumers:
 
-- `XboxGameIdentity`: `TitleId`, `IdentityName`, `IdentityPublisher`, `IdentityResourceId`, and `Executables` are populated but are not consumed from the identity object after construction. The config parser still needs those values to create a key and to verify executable identity; that does not require retaining them in the final identity DTO.
-- `XboxInstalledGameCatalogEntry`: `PackageName`, `PackageFullName`, and `ConfigPath` are retained on the accepted entry but the production frontend consumes only `Identity`.
-- `XboxGameProcessMatch`: `RunningProcessPath` and `PackageFullName` are retained after matching but the production session owner consumes `Identity`, `ProcessId`, and `RunningExecutableName`.
+- `XboxGameIdentity`: `Key`, `DisplayName`, `StoreId`, and `PackageFamilyName`.
+- `XboxInstalledGameCatalogEntry`: `Identity`.
+- `XboxGameProcessMatch`: `Identity`, `ProcessId`, and `RunningExecutableName`.
 
-This is cleanup only; it is not a correctness blocker. If removed, keep the useful acceptance/failure logging at the catalog/evaluator boundary rather than moving diagnostic state into a new object.
+`MicrosoftGameConfig` and the transient process/package/config evidence still retain the inputs needed to compute canonical keys, prove exact executable matches, and resolve/read configuration. Catalog package/config paths and live process paths remain available at the proof boundary for useful acceptance/failure logging, then are discarded from the final records. StoreId/PFN/title identity precedence, executable proof, catalog deduplication, and active-session behavior are unchanged.
 
 ### 24A.5 Developer menu / diagnostic retirement
 
@@ -2472,13 +2472,12 @@ If later physical evidence proves a supported title performs a normal launcher/b
 
 ### 24A.7 Review conclusion
 
-The XBOX feature family is code-complete for the currently supported scope after PR #701.
+The XBOX feature family is code-complete for the currently supported scope after PR #701 and the post-implementation cleanup.
 
 Remaining work is:
 
-1. optional diagnostic-era DTO slimming from section 24A.4;
-2. later user-run physical lifecycle/behavior validation already deferred by Phase X5;
-3. final physical validation of the packaged Xbox app front-button action.
+1. later user-run physical lifecycle/behavior validation already deferred by Phase X5;
+2. final physical validation of the packaged Xbox app front-button action.
 
 Do not reopen Custom EXE, Epic/GOG, generic multi-game arbitration, polling, or additional controller/profile authority as part of these cleanup items.
 

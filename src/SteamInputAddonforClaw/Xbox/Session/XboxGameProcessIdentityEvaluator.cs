@@ -218,18 +218,11 @@ internal static class XboxGameProcessIdentityEvaluator
                     XboxGameIdentity.CreateKey(config.StoreId, packageFamilyName, config),
                     displayName,
                     config.StoreId,
-                    config.TitleId,
-                    packageFamilyName,
-                    config.IdentityName,
-                    config.IdentityPublisher,
-                    config.IdentityResourceId,
-                    config.Executables);
+                    packageFamilyName);
                 var match = new XboxGameProcessMatch(
                     identity,
                     generation.ProcessId,
-                    evidence.RunningProcessPath,
-                    runningExecutableName,
-                    evidence.PackageFullName);
+                    runningExecutableName);
                 LogConfigResolution(generation, evidence, configPath, null);
                 return new(XboxGameProcessInspectionDisposition.Matched, null, match);
             }

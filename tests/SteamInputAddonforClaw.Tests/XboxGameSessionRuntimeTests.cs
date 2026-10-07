@@ -322,9 +322,10 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
             configLocations: [new("Effective", root)]));
 
         Assert.Equal(XboxGameProcessInspectionDisposition.Matched, inspection.Disposition);
-        Assert.Equal(@"D:\InstalledGames\sample.EXE", inspection.Match?.RunningProcessPath);
         Assert.Equal("pfn:Sample_family", inspection.Match?.Identity.Key);
         Assert.Equal("Sample Display", inspection.Match?.Identity.DisplayName);
+        Assert.Equal((uint)91, inspection.Match?.ProcessId);
+        Assert.Equal("sample.EXE", inspection.Match?.RunningExecutableName);
     }
 
     [Fact]
@@ -505,11 +506,9 @@ public sealed class XboxGameSessionRuntimeTests : IAsyncLifetime
 
     private static XboxGameProcessInspection MatchedInspection(uint processId, string key = "store:9NABC123")
     {
-        var config = MicrosoftGameConfigReader.Parse(ValidConfig).Config!;
-        var identity = new XboxGameIdentity(key, "Sample Display", "9NABC123", "1234", "Sample_family",
-            config.IdentityName, config.IdentityPublisher, config.IdentityResourceId, config.Executables);
+        var identity = new XboxGameIdentity(key, "Sample Display", "9NABC123", "Sample_family");
         return new(XboxGameProcessInspectionDisposition.Matched, null,
-            new(identity, processId, @"D:\Games\Sample.exe", "Sample.exe", "Sample_1.0.0.0_x64__test"));
+            new(identity, processId, "Sample.exe"));
     }
 
     private static XboxGameProcessInspection Negative(XboxGameProcessInspectionDisposition disposition) =>
