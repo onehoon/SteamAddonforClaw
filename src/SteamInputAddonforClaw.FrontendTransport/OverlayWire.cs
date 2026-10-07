@@ -39,7 +39,8 @@ internal static class OverlayTransportProtocol
     // Version 15 adds the Runtime-authorized active-game Profile-first Show command.
     // Version 16 retires the Overlay Steam catalog/offline selected-profile request flow; Profile
     // is now delivered only through the shared active-game Quick Settings page contract.
-    internal const int CurrentVersion = 16;
+    // Version 17 adds the XBOX-only Profile Controller section/rows/commit group to that contract.
+    internal const int CurrentVersion = 17;
     internal const int MaxFrameBytes = 512 * 1024;
 }
 

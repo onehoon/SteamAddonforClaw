@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Profiles.Performance;
@@ -407,6 +408,7 @@ public sealed class QuickSettingsPresentationTests
             s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileFpsLimit, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileResolution, s.SectionId));
+        Assert.DoesNotContain(page.Sections, s => s.SectionId == QuickSettingsSectionId.ProfileController);
 
         Assert.Equal("TDP Control", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileTdp).Label);
 
@@ -448,7 +450,10 @@ public sealed class QuickSettingsPresentationTests
             Limits: new FrontendTdpLimits(8, 30, 8, 37),
             Resolution: new FrontendGameResolution(1920, 1080),
             PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.Balanced, WindowsPowerMode.BestPowerEfficiency),
-            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true));
+            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true))
+        {
+            BackButtonMapping = new(true, new(Xbox360BackButtonTarget.LeftBumper, Xbox360BackButtonTarget.RightBumper)),
+        };
 
         var page = QuickSettingsPresentation.BuildProfile(xbox);
 
@@ -456,6 +461,7 @@ public sealed class QuickSettingsPresentationTests
         Assert.Equal("XBOX Game", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
         Assert.Collection(page.Sections,
             s => Assert.Equal(QuickSettingsSectionId.ProfileGeneral, s.SectionId),
+            s => Assert.Equal(QuickSettingsSectionId.ProfileController, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileTdp, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfileCpuBoost, s.SectionId),
             s => Assert.Equal(QuickSettingsSectionId.ProfilePowerMode, s.SectionId),
@@ -465,7 +471,14 @@ public sealed class QuickSettingsPresentationTests
         Assert.Equal(30, FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).SliderSpec!.Maximum);
         Assert.True(FindRow(page, QuickSettingsRowId.ProfileTdpAcPl1).Writable);
         Assert.True(FindRow(page, QuickSettingsRowId.ProfileEnabled).Writable);
-        Assert.DoesNotContain(page.Sections.SelectMany(section => section.Rows), row => row.Label.Contains("M1", StringComparison.Ordinal) || row.Label.Contains("M2", StringComparison.Ordinal));
+        var controller = page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileController);
+        Assert.Equal("Controller", controller.Label);
+        Assert.Equal([QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsRowId.ProfileBackButtonM2], controller.Rows.Select(row => row.RowId));
+        Assert.True(FindRow(page, QuickSettingsRowId.ProfileBackButtonUseGlobal).Value!.BooleanValue);
+        Assert.Equal((int)Xbox360BackButtonTarget.LeftBumper, FindRow(page, QuickSettingsRowId.ProfileBackButtonM1).Value!.IntegerValue);
+        Assert.Equal((int)Xbox360BackButtonTarget.RightBumper, FindRow(page, QuickSettingsRowId.ProfileBackButtonM2).Value!.IntegerValue);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileBackButtonM1).Writable);
+        Assert.False(FindRow(page, QuickSettingsRowId.ProfileBackButtonM2).Writable);
 
         var dcOnly = QuickSettingsPresentation.ApplyPowerSourceVisibility(page, currentPowerSourceOnly: true, AcDcPowerSource.DC);
         Assert.False(FindRow(dcOnly, QuickSettingsRowId.ProfileTdpAcPl1).Visible);
@@ -479,6 +492,77 @@ public sealed class QuickSettingsPresentationTests
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileCpuBoostEnabled).Writable);
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfilePowerModeEnabled).Writable);
         Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileFpsLimitEnabled).Writable);
+        Assert.True(FindRow(disabled, QuickSettingsRowId.ProfileBackButtonUseGlobal).Writable);
+        Assert.False(FindRow(disabled, QuickSettingsRowId.ProfileBackButtonM1).Writable);
+    }
+
+    [Fact]
+    public void Xbox_explicit_back_button_override_is_editable_even_when_profile_is_disabled()
+    {
+        var xbox = new FrontendXboxGameProfileSnapshot(
+            "xbox:canonical-key", "XBOX Game", Exists: true, Enabled: false,
+            new FrontendGameCpuBoostConfiguration(true, CpuBoostMode.Aggressive, CpuBoostMode.Disabled),
+            new FrontendGameTdpConfiguration(true, new(15, 20), new(12, 18)),
+            PersistenceWritable: true,
+            Limits: null,
+            Resolution: null,
+            PowerMode: null,
+            FpsLimit: null)
+        {
+            BackButtonMapping = new(false, new(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y)),
+        };
+
+        var page = QuickSettingsPresentation.BuildProfile(xbox);
+        var useGlobal = FindRow(page, QuickSettingsRowId.ProfileBackButtonUseGlobal);
+        var m1 = FindRow(page, QuickSettingsRowId.ProfileBackButtonM1);
+        var m2 = FindRow(page, QuickSettingsRowId.ProfileBackButtonM2);
+
+        Assert.True(useGlobal.Writable);
+        Assert.Equal(QuickSettingsCommitPolicy.Immediate, useGlobal.CommitPolicy);
+        Assert.True(m1.Writable);
+        Assert.True(m2.Writable);
+        Assert.Equal(QuickSettingsControlKind.Slider, m1.ControlKind);
+        Assert.Equal(QuickSettingsSliderKind.Discrete, m1.SliderSpec!.Kind);
+        Assert.Equal(QuickSettingsCommitPolicy.TrailingDebounce300, m1.CommitPolicy);
+        Assert.Equal(QuickSettingsCommitGroupId.ProfileBackButtonMapping, m1.CommitGroupId);
+        Assert.Equal(QuickSettingsCommitGroupId.ProfileBackButtonMapping, m2.CommitGroupId);
+    }
+
+    [Fact]
+    public void Xbox_back_button_rows_are_all_read_only_when_persistence_is_unavailable()
+    {
+        var xbox = new FrontendXboxGameProfileSnapshot(
+            "xbox:canonical-key", "XBOX Game", Exists: true, Enabled: true,
+            new FrontendGameCpuBoostConfiguration(true, CpuBoostMode.Aggressive, CpuBoostMode.Disabled),
+            new FrontendGameTdpConfiguration(true, new(15, 20), new(12, 18)),
+            PersistenceWritable: false,
+            Limits: null,
+            Resolution: null,
+            PowerMode: null,
+            FpsLimit: null)
+        {
+            BackButtonMapping = new(false, new(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.B)),
+        };
+
+        var page = QuickSettingsPresentation.BuildProfile(xbox);
+        Assert.All(page.Sections.Single(section => section.SectionId == QuickSettingsSectionId.ProfileController).Rows, row => Assert.False(row.Writable));
+    }
+
+    [Fact]
+    public void Back_button_options_match_one_shared_label_for_every_defined_target()
+    {
+        var targets = Enum.GetValues<Xbox360BackButtonTarget>();
+
+        Assert.Equal(targets.Select(target => ((int)target, BackButtonMappingLabels.GetDisplayName(target))),
+            QuickSettingsPresentation.BackButtonMappingOptions.Select(option => (option.Value, option.Label)));
+        Assert.Equal("D-Pad Up", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.DPadUp));
+        Assert.Equal("Left Bumper (LB)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.LeftBumper));
+        Assert.Equal("Right Bumper (RB)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.RightBumper));
+        Assert.Equal("Left Trigger (LT)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.LeftTrigger));
+        Assert.Equal("Right Trigger (RT)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.RightTrigger));
+        Assert.Equal("Left Stick Click (L3)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.LeftStickClick));
+        Assert.Equal("Right Stick Click (R3)", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.RightStickClick));
+        Assert.Equal("Xbox Guide", BackButtonMappingLabels.GetDisplayName(Xbox360BackButtonTarget.XboxGuide));
     }
 
     [Fact]

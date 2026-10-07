@@ -50,6 +50,7 @@ public enum QuickSettingsSectionId
     ProfileResolution,
 
     DeviceBatteryChargeLimit,
+    ProfileController,
 }
 
 public enum QuickSettingsRowId
@@ -91,6 +92,10 @@ public enum QuickSettingsRowId
 
     DeviceBatteryChargeLimitEnabled,
     DeviceBatteryChargeLimitPercent,
+
+    ProfileBackButtonUseGlobal,
+    ProfileBackButtonM1,
+    ProfileBackButtonM2,
 }
 
 public enum QuickSettingsControlKind { Toggle, Slider }
@@ -98,11 +103,13 @@ public enum QuickSettingsSliderKind { Numeric, Discrete }
 public enum QuickSettingsCommitMode { Immediate, TrailingDebounce }
 
 /// <summary>Identifies a set of sliders that share one pending draft / one trailing commit. A row
-/// with no group commits independently (work order section 12).</summary>
+/// with no group commits independently. Current groups cover Device TDP and the XBOX Profile M1/M2
+/// whole mapping (work order sections 12 and PR12).</summary>
 public enum QuickSettingsCommitGroupId
 {
     DeviceTdpConfiguration,
     ProfileTdpConfiguration,
+    ProfileBackButtonMapping,
 }
 
 public enum QuickSettingsValueKind { Boolean, Integer }
@@ -187,8 +194,9 @@ public sealed record QuickSettingsPageSnapshot(
 /// <summary>A closed mutation intent (work order section 20). For an independent Toggle/Slider,
 /// <see cref="Values"/> contains exactly the edited row. For the grouped Device TDP slider commit,
 /// <see cref="Values"/> contains the entire current TDP draft required to reconstruct one
-/// <c>FrontendTdpConfiguration</c>. Never a string method name; transport correlation is owned
-/// separately by each transport.</summary>
+/// <c>FrontendTdpConfiguration</c>, or the XBOX UseGlobal/M1/M2 draft required to reconstruct one
+/// whole <c>BackButtonMappingSettings</c>. Never a string method name; transport correlation is
+/// owned separately by each transport.</summary>
 public sealed record QuickSettingsMutationIntent(
     QuickSettingsPageId PageId,
     QuickSettingsProfileTarget? ProfileTarget,

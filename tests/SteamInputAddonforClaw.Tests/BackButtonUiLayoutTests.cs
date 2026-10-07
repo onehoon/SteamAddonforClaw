@@ -56,9 +56,11 @@ public sealed class BackButtonUiLayoutTests
     {
         var codeBehind = Read("src/SteamInputAddonforClaw.UI/Views/ControllerPage.xaml.cs");
         var options = Read("src/SteamInputAddonforClaw.UI/Views/BackButtonMappingUiOptions.cs");
+        var labels = Read("src/SteamInputAddonforClaw.Contracts/BackButtons/BackButtonMapping.cs");
 
         Assert.Contains("BackButtonMappingUiOptions.AddTargets", codeBehind, StringComparison.Ordinal);
         Assert.Contains("Enum.GetValues<Xbox360BackButtonTarget>()", options, StringComparison.Ordinal);
+        Assert.Contains("BackButtonMappingLabels.GetDisplayName(target)", options, StringComparison.Ordinal);
         foreach (var label in new[]
         {
             "Disabled", "D-Pad Up", "D-Pad Right", "D-Pad Down", "D-Pad Left",
@@ -66,11 +68,11 @@ public sealed class BackButtonUiLayoutTests
             "Left Stick Click (L3)", "Right Stick Click (R3)", "Xbox Guide"
         })
         {
-            Assert.Contains($"=> \"{label}\"", options, StringComparison.Ordinal);
+            Assert.Contains($"=> \"{label}\"", labels, StringComparison.Ordinal);
         }
 
-        Assert.DoesNotContain("=> \"DPadUp\"", options, StringComparison.Ordinal);
-        Assert.DoesNotContain("=> \"LeftStickClick\"", options, StringComparison.Ordinal);
+        Assert.DoesNotContain("=> \"DPadUp\"", labels, StringComparison.Ordinal);
+        Assert.DoesNotContain("=> \"LeftStickClick\"", labels, StringComparison.Ordinal);
     }
 
     [Fact]

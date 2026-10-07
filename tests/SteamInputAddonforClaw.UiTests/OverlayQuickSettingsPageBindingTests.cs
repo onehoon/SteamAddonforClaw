@@ -94,6 +94,27 @@ public sealed class OverlayQuickSettingsPageBindingTests
         ],
         linked ?? [new QuickSettingsLinkedSliderConstraint(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsRowId.ProfileTdpAcPl2, 1)]);
 
+    private static QuickSettingsPageSnapshot XboxControllerPage(
+        string gameKey = "xbox:test", bool useGlobal = false, bool writable = true,
+        int m1 = 9, int m2 = 10) => new(
+        QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox(gameKey), true, null,
+        [
+            new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, "Xbox Game",
+            [
+                Toggle(QuickSettingsRowId.ProfileEnabled, true),
+            ]),
+            new QuickSettingsSection(QuickSettingsSectionId.ProfileController, "Controller",
+            [
+                Toggle(QuickSettingsRowId.ProfileBackButtonUseGlobal, useGlobal, writable: writable),
+                Discrete(QuickSettingsRowId.ProfileBackButtonM1, m1,
+                    [new(0, "Disabled"), new(9, "Left Bumper (LB)"), new(10, "Right Bumper (RB)"), new(17, "Xbox Guide")],
+                    writable: writable && !useGlobal) with { CommitGroupId = QuickSettingsCommitGroupId.ProfileBackButtonMapping },
+                Discrete(QuickSettingsRowId.ProfileBackButtonM2, m2,
+                    [new(0, "Disabled"), new(9, "Left Bumper (LB)"), new(10, "Right Bumper (RB)"), new(17, "Xbox Guide")],
+                    writable: writable && !useGlobal) with { CommitGroupId = QuickSettingsCommitGroupId.ProfileBackButtonMapping },
+            ]),
+        ], []);
+
     private static OverlayQuickSettingsPageBinding NewProfileBinding(
         QuickSettingsPageSnapshot page,
         Func<QuickSettingsMutationIntent, Task<QuickSettingsMutationResult>> mutate,
@@ -1005,6 +1026,79 @@ public sealed class OverlayQuickSettingsPageBindingTests
             QuickSettingsRowId.ProfileTdpDcPl1,
             QuickSettingsRowId.ProfileTdpDcPl2,
         ], intent.Values.Select(v => v.RowId));
+    }
+
+    [Fact]
+    public async Task Xbox_M1_and_M2_share_one_full_controller_grouped_mutation()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var uiThread = new UiThreadStub();
+        using var binding = NewProfileBinding(XboxControllerPage(), mutate.Func, uiThread, delay.Func);
+
+        Assert.Equal(QuickSettingsCommitGroupId.ProfileBackButtonMapping, binding.FindRow(QuickSettingsRowId.ProfileBackButtonM1)!.CommitGroupId);
+        Assert.Equal(QuickSettingsCommitGroupId.ProfileBackButtonMapping, binding.FindRow(QuickSettingsRowId.ProfileBackButtonM2)!.CommitGroupId);
+        Assert.True(binding.ScheduleSlider(QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsValue.Integer(0)));
+        Assert.True(binding.ScheduleSlider(QuickSettingsRowId.ProfileBackButtonM2, QuickSettingsValue.Integer(17)));
+        Assert.Single(binding.PendingKeys);
+
+        delay.Elapse();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "XBOX M1/M2 group submitted", uiThread);
+
+        var intent = Assert.Single(mutate.Calls);
+        Assert.Equal(QuickSettingsProfileTarget.ForXbox("xbox:test"), intent.ProfileTarget);
+        Assert.Equal(QuickSettingsRowId.ProfileBackButtonM2, intent.EditedRowId);
+        Assert.Equal(
+        [
+            QuickSettingsRowId.ProfileBackButtonUseGlobal,
+            QuickSettingsRowId.ProfileBackButtonM1,
+            QuickSettingsRowId.ProfileBackButtonM2,
+        ], intent.Values.Select(value => value.RowId));
+        Assert.False(intent.Values[0].Value.BooleanValue);
+        Assert.Equal(0, intent.Values[1].Value.IntegerValue);
+        Assert.Equal(17, intent.Values[2].Value.IntegerValue);
+
+        mutate.CompleteNext(Success(XboxControllerPage(useGlobal: false, m1: 0, m2: 17)));
+        await SpinUntilAsync(() => binding.PendingKeys.Count == 0, "XBOX controller group settled", uiThread);
+    }
+
+    [Fact]
+    public async Task Xbox_use_global_toggle_cancels_an_unsubmitted_controller_group_draft()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(XboxControllerPage(), mutate.Func, delay.Func);
+        Assert.True(binding.ScheduleSlider(QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsValue.Integer(0)));
+        Assert.Single(binding.PendingKeys);
+
+        var toggle = binding.SubmitImmediateToggleAsync(QuickSettingsRowId.ProfileBackButtonUseGlobal, true);
+        Assert.Single(mutate.Calls);
+        Assert.Equal(QuickSettingsRowId.ProfileBackButtonUseGlobal, Assert.Single(mutate.Calls).EditedRowId);
+        mutate.CompleteNext(Success(XboxControllerPage(useGlobal: true)));
+        Assert.True(await toggle);
+
+        Assert.Empty(binding.PendingKeys);
+        delay.Elapse();
+        await Task.Delay(40);
+        Assert.Single(mutate.Calls);
+    }
+
+    [Fact]
+    public async Task Xbox_profile_target_change_retires_a_pending_controller_group_draft()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        using var binding = NewProfileBinding(XboxControllerPage(), mutate.Func, delay.Func);
+        Assert.True(binding.ScheduleSlider(QuickSettingsRowId.ProfileBackButtonM2, QuickSettingsValue.Integer(17)));
+        Assert.Single(binding.PendingKeys);
+
+        binding.ApplyAuthoritativePage(XboxControllerPage("xbox:next"));
+        delay.Elapse();
+        await Task.Delay(40);
+
+        Assert.Empty(binding.PendingKeys);
+        Assert.Empty(mutate.Calls);
+        Assert.Equal(QuickSettingsProfileTarget.ForXbox("xbox:next"), binding.AuthoritativePage.ProfileTarget);
     }
 
     [Fact]

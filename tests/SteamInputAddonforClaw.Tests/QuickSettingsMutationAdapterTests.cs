@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Frontend;
 using Xunit;
@@ -392,8 +393,8 @@ public sealed class QuickSettingsMutationAdapterTests
             ActiveXboxProfile = RecordingFrontendControl.XboxProfileSnapshot("xbox:current", "Current Xbox Game"),
         };
         var staleTarget = QuickSettingsProfileTarget.ForXbox("xbox:stale");
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, staleTarget, QuickSettingsRowId.ProfileEnabled,
-            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, staleTarget, QuickSettingsRowId.ProfileBackButtonUseGlobal,
+            [new(QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsValue.Boolean(false))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
 
@@ -402,6 +403,166 @@ public sealed class QuickSettingsMutationAdapterTests
         Assert.False(result.Page.Available);
         Assert.Equal(staleTarget, result.Page.ProfileTarget);
     }
+
+    [Fact]
+    public async Task Xbox_use_global_off_seeds_the_exact_displayed_mapping()
+    {
+        var currentMapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.LeftBumper, Xbox360BackButtonTarget.RightBumper);
+        var control = new RecordingFrontendControl
+        {
+            ActiveTarget = QuickSettingsProfileTarget.ForXbox("xbox:test"),
+            ActiveXboxProfile = RecordingFrontendControl.XboxProfileSnapshot("xbox:test", "Xbox Game") with
+            {
+                BackButtonMapping = new(true, currentMapping),
+            },
+        };
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:test"),
+            QuickSettingsRowId.ProfileBackButtonUseGlobal,
+            [new(QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsValue.Boolean(false))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(["XboxProfileBackButtonMapping:xbox:test:override"], control.ProfileCalls);
+        Assert.Equal(currentMapping, control.LastXboxBackButtonMapping);
+    }
+
+    [Fact]
+    public async Task Xbox_use_global_on_mutates_the_typed_authority_with_null()
+    {
+        var control = new RecordingFrontendControl
+        {
+            ActiveTarget = QuickSettingsProfileTarget.ForXbox("xbox:test"),
+            ActiveXboxProfile = RecordingFrontendControl.XboxProfileSnapshot("xbox:test", "Xbox Game") with
+            {
+                BackButtonMapping = new(false, new(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y)),
+            },
+        };
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:test"),
+            QuickSettingsRowId.ProfileBackButtonUseGlobal,
+            [new(QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsValue.Boolean(true))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(["XboxProfileBackButtonMapping:xbox:test:global"], control.ProfileCalls);
+        Assert.Null(control.LastXboxBackButtonMapping);
+    }
+
+    [Theory]
+    [InlineData(QuickSettingsRowId.ProfileBackButtonM1)]
+    [InlineData(QuickSettingsRowId.ProfileBackButtonM2)]
+    public async Task Xbox_grouped_back_button_edit_submits_one_whole_mapping(QuickSettingsRowId editedRowId)
+    {
+        var mapping = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.XboxGuide);
+        var control = new RecordingFrontendControl
+        {
+            ActiveTarget = QuickSettingsProfileTarget.ForXbox("xbox:test"),
+            ActiveXboxProfile = RecordingFrontendControl.XboxProfileSnapshot("xbox:test", "Xbox Game") with
+            {
+                BackButtonMapping = new(false, new(Xbox360BackButtonTarget.B, Xbox360BackButtonTarget.Y)),
+            },
+        };
+        var intent = XboxBackButtonGroupIntent(editedRowId, useGlobal: false, (int)mapping.M1, (int)mapping.M2);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(["XboxProfileBackButtonMapping:xbox:test:override"], control.ProfileCalls);
+        Assert.Equal(mapping, control.LastXboxBackButtonMapping);
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedXboxBackButtonGroupIntents))]
+    public async Task Malformed_xbox_back_button_group_invokes_zero_typed_mutations(QuickSettingsMutationIntent intent)
+    {
+        var control = new RecordingFrontendControl { ActiveTarget = QuickSettingsProfileTarget.ForXbox("xbox:test") };
+        intent = intent with { ProfileTarget = QuickSettingsProfileTarget.ForXbox("xbox:test") };
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.ProfileCalls);
+        Assert.False(result.Succeeded);
+    }
+
+    public static IEnumerable<object[]> MalformedXboxBackButtonGroupIntents()
+    {
+        var global = new QuickSettingsRowValue(QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsValue.Boolean(false));
+        var m1 = new QuickSettingsRowValue(QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsValue.Integer((int)Xbox360BackButtonTarget.A));
+        var m2 = new QuickSettingsRowValue(QuickSettingsRowId.ProfileBackButtonM2, QuickSettingsValue.Integer((int)Xbox360BackButtonTarget.B));
+        var target = QuickSettingsProfileTarget.ForXbox("xbox:test");
+        QuickSettingsMutationIntent Intent(QuickSettingsRowId edited, params QuickSettingsRowValue[] values) =>
+            new(QuickSettingsPageId.Profile, target, edited, values);
+
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1, global, m1 with { Value = QuickSettingsValue.Integer(999) }, m2)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM2, global, m1, m2 with { Value = QuickSettingsValue.Integer(999) })];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1, global, m1, m1, m2)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1, m1, m2)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1, global, m1)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM2, global, m2)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1, global with { Value = QuickSettingsValue.Boolean(true) }, m1, m2)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1, global, m1, m2,
+            new(QuickSettingsRowId.ProfileResolution, QuickSettingsValue.Integer(1)))];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonUseGlobal, global, m1, m2)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1,
+            global with { Value = new QuickSettingsValue(QuickSettingsValueKind.Boolean, BooleanValue: false, IntegerValue: 0) }, m1, m2)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1,
+            global with { Value = new QuickSettingsValue(QuickSettingsValueKind.Boolean) }, m1, m2)];
+        yield return [new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, target, QuickSettingsRowId.ProfileBackButtonM1, null!)];
+        yield return [Intent(QuickSettingsRowId.ProfileBackButtonM1, global, m1, null!, m2)];
+    }
+
+    [Fact]
+    public async Task Xbox_use_global_off_rejects_invalid_current_displayed_mapping_without_mutation()
+    {
+        var control = new RecordingFrontendControl
+        {
+            ActiveTarget = QuickSettingsProfileTarget.ForXbox("xbox:test"),
+            ActiveXboxProfile = RecordingFrontendControl.XboxProfileSnapshot("xbox:test", "Xbox Game") with
+            {
+                BackButtonMapping = new(true, new((Xbox360BackButtonTarget)99, Xbox360BackButtonTarget.B)),
+            },
+        };
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:test"),
+            QuickSettingsRowId.ProfileBackButtonUseGlobal,
+            [new(QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsValue.Boolean(false))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.ProfileCalls);
+        Assert.False(result.Succeeded);
+    }
+
+    [Theory]
+    [InlineData(QuickSettingsRowId.ProfileBackButtonUseGlobal)]
+    [InlineData(QuickSettingsRowId.ProfileBackButtonM1)]
+    [InlineData(QuickSettingsRowId.ProfileBackButtonM2)]
+    public async Task Steam_profile_rejects_every_back_button_mapping_row(QuickSettingsRowId rowId)
+    {
+        var values = rowId == QuickSettingsRowId.ProfileBackButtonUseGlobal
+            ? new[] { new QuickSettingsRowValue(rowId, QuickSettingsValue.Boolean(true)) }
+            : XboxBackButtonGroupIntent(QuickSettingsRowId.ProfileBackButtonM1, false, (int)Xbox360BackButtonTarget.A, (int)Xbox360BackButtonTarget.B).Values.ToArray();
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), rowId, values);
+        var control = new RecordingFrontendControl
+        {
+            ActiveProfile = ProfileSnapshot(appId: 111),
+            ActiveTarget = QuickSettingsProfileTarget.ForSteam(111),
+        };
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.ProfileCalls);
+        Assert.False(result.Succeeded);
+        Assert.Equal(QuickSettingsProfileTarget.ForSteam(111), result.Page.ProfileTarget);
+    }
+
+    private static QuickSettingsMutationIntent XboxBackButtonGroupIntent(QuickSettingsRowId editedRowId, bool useGlobal, int m1, int m2) => new(
+        QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:test"), editedRowId,
+        [
+            new(QuickSettingsRowId.ProfileBackButtonUseGlobal, QuickSettingsValue.Boolean(useGlobal)),
+            new(QuickSettingsRowId.ProfileBackButtonM1, QuickSettingsValue.Integer(m1)),
+            new(QuickSettingsRowId.ProfileBackButtonM2, QuickSettingsValue.Integer(m2)),
+        ]);
 
     [Fact]
     public async Task Profile_intent_with_zero_app_id_invokes_zero_typed_mutations()
@@ -777,6 +938,7 @@ public sealed class QuickSettingsMutationAdapterTests
         public FrontendGameProfileMutationOutcome NextProfileMutationOutcome { get; set; } = FrontendGameProfileMutationOutcome.Succeeded;
         public string? NextProfileMutationFailure { get; set; }
         public FrontendGameTdpConfiguration? LastProfileTdpConfiguration { get; private set; }
+        public BackButtonMappingSettings? LastXboxBackButtonMapping { get; private set; }
         public FrontendGameProfileSnapshot OfflineProfile { get; set; } = ProfileSnapshot(222, "Offline Game", enabled: true);
 
         public Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken t = default) => Task.FromResult(ActiveProfile);
@@ -863,6 +1025,8 @@ public sealed class QuickSettingsMutationAdapterTests
         { ProfileCalls.Add($"XboxProfileFpsLimitDc:{key}:{fps}"); return Task.FromResult(XboxProfileResult()); }
         public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken t = default)
         { ProfileCalls.Add($"XboxProfileResolution:{key}:{(resolution is null ? "null" : $"{resolution.Width}x{resolution.Height}")}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileBackButtonMappingAsync(string key, BackButtonMappingSettings? mapping, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileBackButtonMapping:{key}:{(mapping is null ? "global" : "override")}"); LastXboxBackButtonMapping = mapping; return Task.FromResult(XboxProfileResult()); }
 
         private static FrontendGameProfileSnapshot ProfileSnapshot(uint appId, string displayName = "Game", bool enabled = true, bool cpuBoostEnabled = false, bool tdpEnabled = false, bool powerModeEnabled = false) => new(
             appId, displayName, Exists: true, Enabled: enabled,
@@ -880,7 +1044,10 @@ public sealed class QuickSettingsMutationAdapterTests
             PersistenceWritable: true, Limits: new FrontendTdpLimits(8, 30, 8, 37),
             Resolution: new FrontendGameResolution(1920, 1080),
             PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced),
-            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true));
+            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true))
+        {
+            BackButtonMapping = new(true, new(Xbox360BackButtonTarget.LeftBumper, Xbox360BackButtonTarget.RightBumper)),
+        };
 
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default)
         {

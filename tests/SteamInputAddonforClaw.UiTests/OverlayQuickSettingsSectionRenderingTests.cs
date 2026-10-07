@@ -76,6 +76,40 @@ public sealed class OverlayQuickSettingsSectionRenderingTests
         Assert.False(OverlayQuickSettingsSectionRendering.HasSameShape(before, after));
     }
 
+    [Fact]
+    public void Profile_controller_uses_the_generic_toggle_and_discrete_row_renderers()
+    {
+        var options = new[]
+        {
+            new QuickSettingsDiscreteOption(0, "Disabled"),
+            new QuickSettingsDiscreteOption(9, "Left Bumper (LB)"),
+            new QuickSettingsDiscreteOption(10, "Right Bumper (RB)"),
+        };
+        var useGlobal = ToggleRow(QuickSettingsRowId.ProfileBackButtonUseGlobal) with { Value = QuickSettingsValue.Boolean(true) };
+        var m1 = ValueRow(QuickSettingsRowId.ProfileBackButtonM1) with
+        {
+            Writable = false,
+            Value = QuickSettingsValue.Integer(9),
+            SliderSpec = new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: options),
+            CommitGroupId = QuickSettingsCommitGroupId.ProfileBackButtonMapping,
+        };
+        var m2 = m1 with { RowId = QuickSettingsRowId.ProfileBackButtonM2, Label = "M2", Value = QuickSettingsValue.Integer(10) };
+        var section = new QuickSettingsSection(QuickSettingsSectionId.ProfileController, "Controller", [useGlobal, m1, m2]);
+
+        Assert.True(OverlayQuickSettingsSectionRendering.TryGetFeatureHeaderToggle(section, out var header));
+        Assert.Same(useGlobal, header);
+        Assert.True(QuickSettingsRowRendering.IsWellFormed(m1));
+        Assert.True(QuickSettingsRowRendering.IsWellFormed(m2));
+        Assert.False(OverlayQuickSettingsPageBinding.CanMutate(m1));
+        Assert.False(OverlayQuickSettingsPageBinding.CanMutate(m2));
+
+        var explicitM1 = m1 with { Writable = true };
+        var explicitM2 = m2 with { Writable = true };
+        Assert.True(OverlayQuickSettingsPageBinding.CanMutate(explicitM1));
+        Assert.True(OverlayQuickSettingsPageBinding.CanMutate(explicitM2));
+        Assert.Equal(QuickSettingsSliderKind.Discrete, explicitM1.SliderSpec!.Kind);
+    }
+
     private static QuickSettingsRow ToggleRow(QuickSettingsRowId rowId) => new(
         rowId,
         "Toggle",

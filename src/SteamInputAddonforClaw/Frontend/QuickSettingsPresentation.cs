@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Contracts.BackButtons;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Profiles.Performance;
 
@@ -20,7 +21,8 @@ internal static class QuickSettingsPresentation
         FrontendGameResolution? Resolution,
         FrontendGamePowerModeConfiguration? PowerMode,
         FrontendGameFpsLimitConfiguration? FpsLimit,
-        QuickSettingsProfileTarget ProfileTarget);
+        QuickSettingsProfileTarget ProfileTarget,
+        FrontendGameBackButtonMappingConfiguration? BackButtonMapping);
 
     internal static QuickSettingsPageSnapshot ApplyPowerSourceVisibility(
         QuickSettingsPageSnapshot page,
@@ -98,6 +100,11 @@ internal static class QuickSettingsPresentation
     internal static readonly IReadOnlyList<QuickSettingsDiscreteOption> PowerModeDiscreteOptions =
         [.. PowerModeOptions.Select(o => new QuickSettingsDiscreteOption((int)o.Mode, o.Label))];
 
+    internal static readonly IReadOnlyList<QuickSettingsDiscreteOption> BackButtonMappingOptions =
+        Enum.GetValues<Xbox360BackButtonTarget>()
+            .Select(target => new QuickSettingsDiscreteOption((int)target, BackButtonMappingLabels.GetDisplayName(target)))
+            .ToArray();
+
     /// <summary>Frozen Device section/row order: TDP, CPU Boost, Windows Power Mode, then Battery
     /// Charge Limit. One child being unavailable never affects the others.</summary>
     internal static QuickSettingsPageSnapshot BuildDevice(FrontendDeviceQuickSettingsSnapshot snapshot)
@@ -149,16 +156,19 @@ internal static class QuickSettingsPresentation
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
         string.IsNullOrWhiteSpace(snapshot.DisplayName) ? $"Game {snapshot.AppId}" : snapshot.DisplayName,
         snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
-        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, QuickSettingsProfileTarget.ForSteam(snapshot.AppId)));
+        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, QuickSettingsProfileTarget.ForSteam(snapshot.AppId),
+        BackButtonMapping: null));
 
     internal static QuickSettingsPageSnapshot BuildProfile(FrontendXboxGameProfileSnapshot snapshot) => BuildProfile(new ProfileQuickSettingsProjection(
         string.IsNullOrWhiteSpace(snapshot.DisplayName) ? "XBOX game" : snapshot.DisplayName,
         snapshot.Enabled, snapshot.CpuBoost, snapshot.Tdp, snapshot.PersistenceWritable, snapshot.Limits,
-        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, QuickSettingsProfileTarget.ForXbox(snapshot.Key)));
+        snapshot.Resolution, snapshot.PowerMode, snapshot.FpsLimit, QuickSettingsProfileTarget.ForXbox(snapshot.Key),
+        snapshot.BackButtonMapping));
 
     private static QuickSettingsPageSnapshot BuildProfile(ProfileQuickSettingsProjection snapshot)
     {
         var sections = new List<QuickSettingsSection> { BuildProfileGeneralSection(snapshot) };
+        if (snapshot.BackButtonMapping is not null) sections.Add(BuildProfileControllerSection(snapshot));
         if (snapshot.Limits is not null) sections.Add(BuildProfileTdpSection(snapshot));
         sections.Add(BuildProfileCpuBoostSection(snapshot));
         if (snapshot.PowerMode is not null) sections.Add(BuildProfilePowerModeSection(snapshot));
@@ -179,6 +189,33 @@ internal static class QuickSettingsPresentation
             CommitPolicy: QuickSettingsCommitPolicy.Immediate);
         return new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, snapshot.DisplayName, [row]);
     }
+
+    private static QuickSettingsSection BuildProfileControllerSection(ProfileQuickSettingsProjection snapshot)
+    {
+        var configuration = snapshot.BackButtonMapping!;
+        var mappingWritable = snapshot.PersistenceWritable && !configuration.UseGlobalMapping;
+        var rows = new QuickSettingsRow[]
+        {
+            new(QuickSettingsRowId.ProfileBackButtonUseGlobal, "Use global M1 / M2 mapping", QuickSettingsControlKind.Toggle,
+                Available: true,
+                Writable: snapshot.PersistenceWritable,
+                Value: QuickSettingsValue.Boolean(configuration.UseGlobalMapping),
+                SliderSpec: null,
+                CommitPolicy: QuickSettingsCommitPolicy.Immediate),
+            BuildProfileBackButtonMappingSlider(QuickSettingsRowId.ProfileBackButtonM1, "M1", configuration.Mapping.M1, mappingWritable),
+            BuildProfileBackButtonMappingSlider(QuickSettingsRowId.ProfileBackButtonM2, "M2", configuration.Mapping.M2, mappingWritable),
+        };
+        return new QuickSettingsSection(QuickSettingsSectionId.ProfileController, "Controller", rows);
+    }
+
+    private static QuickSettingsRow BuildProfileBackButtonMappingSlider(QuickSettingsRowId rowId, string label, Xbox360BackButtonTarget target, bool writable) =>
+        new(rowId, label, QuickSettingsControlKind.Slider,
+            Available: true,
+            Writable: writable,
+            Value: QuickSettingsValue.Integer((int)target),
+            SliderSpec: new QuickSettingsSliderSpec(QuickSettingsSliderKind.Discrete, Options: BackButtonMappingOptions),
+            CommitPolicy: QuickSettingsCommitPolicy.TrailingDebounce300,
+            CommitGroupId: QuickSettingsCommitGroupId.ProfileBackButtonMapping);
 
     private static QuickSettingsSection BuildProfileTdpSection(ProfileQuickSettingsProjection snapshot)
     {
