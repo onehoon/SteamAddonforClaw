@@ -44,6 +44,48 @@ public sealed class EffectiveNonSteamBackButtonMappingTests
         Assert.Equal(overrideMapping, Effective(ActiveProfileTarget.ForXbox(Key), activeProfile, global));
     }
 
+    [Fact]
+    public void XBOX_exit_before_performance_startup_readiness_clears_the_mapping_before_publisher_start()
+    {
+        var global = new BackButtonMappingSettings(Xbox360BackButtonTarget.A, Xbox360BackButtonTarget.B);
+        var startupOverride = new BackButtonMappingSettings(Xbox360BackButtonTarget.X, Xbox360BackButtonTarget.Y);
+        var cachedOverride = AddonProcessHost.ResolveNonSteamBackButtonMappingOverride(
+            ActiveProfileTarget.ForXbox(Key), Capture(Key, true, true, startupOverride));
+        var performanceReconcileCount = 0;
+
+        AddonProcessHost.ReconcileActiveXboxGameTransition(
+            processShutdownStarted: false,
+            profileRuntimeStartupReady: false,
+            reconcileBackButtonMapping: () => cachedOverride = AddonProcessHost.ResolveNonSteamBackButtonMappingOverride(
+                ActiveProfileTarget.None, null),
+            reconcileGameProfile: () => performanceReconcileCount++);
+
+        // The publisher reads this cache when it starts after the XBOX process-exit transition.
+        Assert.Equal(global, cachedOverride ?? global);
+        Assert.Equal(0, performanceReconcileCount);
+    }
+
+    [Fact]
+    public void XBOX_active_game_transition_keeps_shutdown_and_performance_startup_gates_scoped()
+    {
+        var mappingReconciles = 0;
+        var performanceReconciles = 0;
+
+        AddonProcessHost.ReconcileActiveXboxGameTransition(
+            processShutdownStarted: false,
+            profileRuntimeStartupReady: true,
+            reconcileBackButtonMapping: () => mappingReconciles++,
+            reconcileGameProfile: () => performanceReconciles++);
+        AddonProcessHost.ReconcileActiveXboxGameTransition(
+            processShutdownStarted: true,
+            profileRuntimeStartupReady: true,
+            reconcileBackButtonMapping: () => mappingReconciles++,
+            reconcileGameProfile: () => performanceReconciles++);
+
+        Assert.Equal(1, mappingReconciles);
+        Assert.Equal(1, performanceReconciles);
+    }
+
     private static BackButtonMappingSettings Effective(
         ActiveProfileTarget target,
         XboxGameProfileMutations.Capture? profile,

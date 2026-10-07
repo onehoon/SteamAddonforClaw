@@ -2403,11 +2403,26 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void OnActiveXboxGameChanged(ActiveXboxGame? activeGame)
     {
-        if (Volatile.Read(ref _processShutdownStarted) != 0
-            || Volatile.Read(ref _profileRuntimeStartupReady) == 0)
-            return;
-        ReconcileEffectiveBackButtonMapping("XboxActiveGameChanged");
-        ReconcileEffectiveGameProfile("ActiveXboxGameChanged");
+        ReconcileActiveXboxGameTransition(
+            Volatile.Read(ref _processShutdownStarted) != 0,
+            Volatile.Read(ref _profileRuntimeStartupReady) != 0,
+            () => ReconcileEffectiveBackButtonMapping("XboxActiveGameChanged"),
+            () => ReconcileEffectiveGameProfile("ActiveXboxGameChanged"));
+    }
+
+    internal static void ReconcileActiveXboxGameTransition(
+        bool processShutdownStarted,
+        bool profileRuntimeStartupReady,
+        Action reconcileBackButtonMapping,
+        Action reconcileGameProfile)
+    {
+        if (processShutdownStarted) return;
+
+        // The publisher-facing cache follows XBOX process lifetime from startup onward.
+        reconcileBackButtonMapping();
+        if (!profileRuntimeStartupReady) return;
+
+        reconcileGameProfile();
     }
 
     private bool ReconcileEffectiveBackButtonMapping(string trigger)

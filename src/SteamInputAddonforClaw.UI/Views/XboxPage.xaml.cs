@@ -15,6 +15,8 @@ public sealed partial class XboxPage : UserControl
     private FrontendXboxGameCatalogEntry? _selectedGame;
     private FrontendXboxGameProfileSnapshot? _snapshot;
     private CancellationTokenSource? _scanCancellation, _captureCancellation;
+    private Task _backButtonSaveChain = Task.CompletedTask;
+    private long _backButtonEditVersion;
     private int? _acPl1, _acPl2, _dcPl1, _dcPl2;
     private CancellationTokenSource? _tdpDebounce;
     private long _tdpGeneration;
@@ -195,7 +197,7 @@ public sealed partial class XboxPage : UserControl
             snapshot.PersistenceWritable && !configuration.UseGlobalMapping;
     }
 
-    private async void UseGlobalBackButtonMappingToggle_Toggled(object sender, RoutedEventArgs e)
+    private void UseGlobalBackButtonMappingToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (!_active || _suppressControllerEvents || _frontend is null || _selectedGame is null
             || _snapshot is not { PersistenceWritable: true }) return;
@@ -211,15 +213,21 @@ public sealed partial class XboxPage : UserControl
         var key = _selectedGame.Key;
         M1BackButtonTargetComboBox.IsEnabled = M2BackButtonTargetComboBox.IsEnabled =
             _snapshot.PersistenceWritable && !UseGlobalBackButtonMappingToggle.IsOn;
-        await SaveBackButtonMappingAsync(key, mapping);
+        QueueBackButtonMappingSave(key, mapping);
     }
 
-    private async void BackButtonTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void BackButtonTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_active || _suppressControllerEvents || UseGlobalBackButtonMappingToggle.IsOn
             || _frontend is null || _selectedGame is null || _snapshot is not { PersistenceWritable: true }) return;
         if (ReadSelectedBackButtonMapping() is not { } mapping) return;
-        await SaveBackButtonMappingAsync(_selectedGame.Key, mapping);
+        QueueBackButtonMappingSave(_selectedGame.Key, mapping);
+    }
+
+    private void QueueBackButtonMappingSave(string key, BackButtonMappingSettings? mapping)
+    {
+        var version = ++_backButtonEditVersion;
+        _backButtonSaveChain = SaveBackButtonMappingAfterAsync(_backButtonSaveChain, key, mapping, version);
     }
 
     private BackButtonMappingSettings? ReadSelectedBackButtonMapping()
@@ -231,21 +239,40 @@ public sealed partial class XboxPage : UserControl
         return BackButtonMappingValidation.IsValid(mapping) ? mapping : null;
     }
 
-    private async Task SaveBackButtonMappingAsync(string key, BackButtonMappingSettings? mapping)
+    private async Task SaveBackButtonMappingAfterAsync(
+        Task previous,
+        string key,
+        BackButtonMappingSettings? mapping,
+        long version)
     {
         try
         {
-            var result = await _frontend!.SetXboxGameProfileBackButtonMappingAsync(key, mapping);
-            if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) return;
+            var result = await RunAfterPreviousAsync(
+                previous,
+                () => _frontend!.SetXboxGameProfileBackButtonMappingAsync(key, mapping));
+            if (!IsCurrentBackButtonMappingEdit(version, _backButtonEditVersion)
+                || !IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) return;
             Render(result.Snapshot);
             if (!result.Succeeded)
                 ShowError(result.FailureMessage ?? "M1 / M2 mapping could not be updated.", null);
         }
         catch (Exception exception)
         {
+            if (!IsCurrentBackButtonMappingEdit(version, _backButtonEditVersion)) return;
             await RestoreSelectedAfterMutationFailureAsync(key, "M1 / M2 mapping could not be updated.", exception);
         }
     }
+
+    internal static async Task<TResult> RunAfterPreviousAsync<TResult>(Task previous, Func<Task<TResult>> operation)
+    {
+        try { await previous; }
+        catch { /* the preceding request handled its own failure */ }
+        return await operation();
+    }
+
+    internal static bool IsCurrentBackButtonMappingEdit(long submittedVersion, long currentVersion)
+        => submittedVersion == currentVersion;
+
     private async void CpuBoostAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(true);
     private async void CpuBoostDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(false);
     private async void PowerModeAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutatePowerModeAsync(true);
