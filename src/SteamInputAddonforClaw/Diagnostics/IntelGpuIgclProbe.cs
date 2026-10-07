@@ -76,6 +76,11 @@ internal sealed class IntelGpuIgclProbe : IDisposable
     private uint? _lastPowerResult;
     private string? _lastPowerFailure;
 
+    internal bool FrequencyModifiedByProbe
+    {
+        get { lock (_gate) return !_disposed && _frequencyModified; }
+    }
+
     internal FrontendIntelGpuFrequencyProbeSnapshot Capture()
     {
         lock (_gate)

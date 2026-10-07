@@ -73,6 +73,53 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveAndLoad_RoundTripsDeviceMinimumGpuClockWithoutChangingSchema()
+    {
+        var setting = new DeviceGpuMinimumClockSettings { Enabled = false, AcMhz = 1725.125, DcMhz = 1825.375 };
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings { GpuMinimumClock = setting }
+            }
+        });
+
+        var result = store.Load();
+
+        Assert.Equal(ProfileDocument.CurrentSchemaVersion, result.Document.SchemaVersion);
+        Assert.Equal(setting, result.Document.Device.Performance.GpuMinimumClock);
+    }
+
+    [Fact]
+    public void Load_without_minimum_gpu_clock_keeps_legacy_device_uninitialized_and_does_not_rewrite()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        const string json = "{\"schemaVersion\":1,\"device\":{\"performance\":{}},\"games\":{}}";
+        File.WriteAllText(ProfilesPath, json);
+
+        var result = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Null(result.Document.Device.Performance.GpuMinimumClock);
+        Assert.Equal(json, File.ReadAllText(ProfilesPath));
+    }
+
+    [Fact]
+    public void SaveAndLoad_PreservesUnknownMinimumGpuClockProperties()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath,
+            "{\"schemaVersion\":1,\"device\":{\"performance\":{\"gpuMinimumClock\":{\"enabled\":false,\"acMhz\":1725.125,\"dcMhz\":1825.375,\"futureClockPolicy\":{\"id\":7}}}},\"games\":{}}");
+        var store = new ProfileStore(ProfilesPath);
+
+        store.Save(store.Load().Document);
+
+        var saved = File.ReadAllText(ProfilesPath);
+        Assert.Contains("futureClockPolicy", saved);
+        Assert.Contains("\"id\": 7", saved);
+    }
+
+    [Fact]
     public void Load_WithoutTdpLeavesTdpNullAndDoesNotRewriteFile()
     {
         Directory.CreateDirectory(_testDirectory);

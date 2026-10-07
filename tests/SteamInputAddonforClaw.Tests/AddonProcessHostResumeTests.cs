@@ -85,7 +85,7 @@ public sealed class AddonProcessHostResumeTests
     }
 
     [Fact]
-    public async Task Resume_reconcile_runs_battery_after_the_existing_profile_runtimes()
+    public async Task Resume_reconcile_runs_gpu_then_battery_after_the_existing_profile_runtimes()
     {
         var calls = new List<string>();
 
@@ -94,9 +94,10 @@ public sealed class AddonProcessHostResumeTests
             static (_, _) => Task.CompletedTask,
             () => calls.Add("CPU"),
             () => calls.Add("Power"),
+            () => calls.Add("GPU"),
             () => calls.Add("Battery"));
 
-        Assert.Equal(new[] { "CPU", "Power", "Battery" }, calls);
+        Assert.Equal(new[] { "CPU", "Power", "GPU", "Battery" }, calls);
     }
 
     [Fact]
