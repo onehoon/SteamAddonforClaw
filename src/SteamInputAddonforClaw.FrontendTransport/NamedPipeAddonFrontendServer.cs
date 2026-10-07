@@ -244,8 +244,6 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
         ? FrontendWireCodec.Payload(await _inner.CaptureShortcutEditorAsync(t).ConfigureAwait(false))
         : m == FrontendRpcMethod.MutateShortcut
         ? FrontendWireCodec.Payload(await _inner.MutateShortcutAsync(FrontendWireCodec.Decode<FrontendShortcutMutationIntent>(p), t).ConfigureAwait(false))
-        : m == FrontendRpcMethod.SetScreenshotSaveFolder
-        ? FrontendWireCodec.Payload(await _inner.SetScreenshotSaveFolderAsync(FrontendWireCodec.Decode<SetScreenshotSaveFolderRequest>(p).Folder, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGamingHomeSelection
         ? FrontendWireCodec.Payload(await _inner.SetGamingHomeSelectionAsync(FrontendWireCodec.Decode<SetGamingHomeSelectionRequest>(p).Selection, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetGamingHomeStartup

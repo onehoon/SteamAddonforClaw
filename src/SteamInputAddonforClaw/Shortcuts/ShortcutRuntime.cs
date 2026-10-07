@@ -49,14 +49,14 @@ internal sealed class ShortcutRuntime
     private ShortcutDocument _document;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private readonly Func<string, bool> _fileExists;
-    private readonly Func<CancellationToken, Task<ShortcutExecutionResult>>? _screenshotAction;
+    private readonly Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? _screenshotAction;
     private readonly bool _available;
 
     internal ShortcutRuntime(
         ShortcutStore store,
         Func<ProcessStartInfo, Process?>? startProcess = null,
         Func<string, bool>? fileExists = null,
-        Func<CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null,
+        Func<string?, CancellationToken, Task<ShortcutExecutionResult>>? screenshotAction = null,
         Action<ShortcutDocument>? saveDocument = null)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -98,42 +98,38 @@ internal sealed class ShortcutRuntime
         return new FrontendShortcutDashboardSnapshot(true, tiles);
     }
 
-    internal FrontendShortcutEditorSnapshot CaptureEditor(FrontendScreenshotFolderSnapshot screenshotFolder)
+    internal FrontendShortcutEditorSnapshot CaptureEditor()
     {
-        ArgumentNullException.ThrowIfNull(screenshotFolder);
         if (!_available)
-            return FrontendShortcutEditorSnapshot.Unavailable(screenshotFolder, ShortcutUnavailableMessage);
+            return FrontendShortcutEditorSnapshot.Unavailable(ShortcutUnavailableMessage);
 
-        var snapshot = ProjectEditorSnapshot(_document, screenshotFolder);
+        var snapshot = ProjectEditorSnapshot(_document);
         return FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(snapshot)
             ? snapshot
-            : FrontendShortcutEditorSnapshot.Unavailable(screenshotFolder, EditorTooLargeMessage);
+            : FrontendShortcutEditorSnapshot.Unavailable(EditorTooLargeMessage);
     }
 
-    internal FrontendShortcutMutationResult MutateEditor(
-        FrontendShortcutMutationIntent? intent,
-        FrontendScreenshotFolderSnapshot screenshotFolder)
+    internal FrontendShortcutMutationResult MutateEditor(FrontendShortcutMutationIntent? intent)
     {
-        ArgumentNullException.ThrowIfNull(screenshotFolder);
         if (!FrontendShortcutEditorPayloadPolicy.IsMutationWithinLimit(intent))
-            return MutationFailure("Shortcut edit is too large or invalid.", screenshotFolder);
+            return MutationFailure("Shortcut edit is too large or invalid.");
         if (!_available)
-            return MutationFailure(ShortcutUnavailableMessage, screenshotFolder);
-        if (!FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(ProjectEditorSnapshot(_document, screenshotFolder)))
-            return MutationFailure(EditorTooLargeMessage, screenshotFolder);
+            return MutationFailure(ShortcutUnavailableMessage);
+        if (!FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(ProjectEditorSnapshot(_document)))
+            return MutationFailure(EditorTooLargeMessage);
 
-        if (!TryBuildMutation(intent!, screenshotFolder, out var candidate, out var changed, out var failureMessage))
-            return MutationFailure(failureMessage!, screenshotFolder);
+        if (!TryBuildMutation(intent!, out var candidate, out var changed, out var failureMessage))
+            return MutationFailure(failureMessage!);
 
         if (!changed)
-            return CreateMutationResult(true, false, null, CaptureEditor(screenshotFolder));
+            return CreateMutationResult(true, false, null, CaptureEditor());
 
-        var candidateSnapshot = ProjectEditorSnapshot(candidate!, screenshotFolder);
+        var candidateSnapshot = ProjectEditorSnapshot(candidate!);
         var candidateResult = new FrontendShortcutMutationResult(true, true, null, candidateSnapshot);
         if (!FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(candidateSnapshot)
             || !FrontendShortcutEditorPayloadPolicy.IsMutationResultWithinLimit(candidateResult))
         {
-            return MutationFailure(EditorTooLargeMessage, screenshotFolder);
+            return MutationFailure(EditorTooLargeMessage);
         }
 
         try
@@ -146,7 +142,7 @@ internal sealed class ShortcutRuntime
             AppLog.Warn("Shortcuts", "Shortcut document save failed.", null,
                 ("Mutation", intent!.Kind),
                 ("FailureCategory", exception.GetType().Name));
-            return MutationFailure(SaveFailedMessage, screenshotFolder);
+            return MutationFailure(SaveFailedMessage);
         }
 
         _document = candidate!;
@@ -158,7 +154,6 @@ internal sealed class ShortcutRuntime
 
     private bool TryBuildMutation(
         FrontendShortcutMutationIntent intent,
-        FrontendScreenshotFolderSnapshot screenshotFolder,
         out ShortcutDocument? candidate,
         out bool changed,
         out string? failureMessage)
@@ -178,8 +173,10 @@ internal sealed class ShortcutRuntime
                 if (!IsValidTitle(intent.Title))
                     return Fail("Enter a valid Shortcut title.", out failureMessage);
                 if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
+                if (IsScreenshotAction(action!) && tiles.Any(IsScreenshotAction))
+                    return Fail("Only one Screenshot Shortcut can be added.", out failureMessage);
                 tiles.Add(new ShortcutTileDefinition(Guid.NewGuid(), intent.Title,
-                    intent.CloseOverlayAfterLaunch.Value, action!));
+                    IsScreenshotAction(action!) ? false : intent.CloseOverlayAfterLaunch.Value, action!));
                 changed = true;
                 break;
             }
@@ -195,10 +192,13 @@ internal sealed class ShortcutRuntime
                 if (!ProjectEditorAction(tiles[index].Action).Editable)
                     return Fail("This Shortcut action cannot be edited in this version.", out failureMessage);
                 if (!TryBuildAction(intent.Action, out var action, out failureMessage)) return false;
+                if (IsScreenshotAction(action!)
+                    && tiles.Any(tile => tile.TileId != tileId && IsScreenshotAction(tile)))
+                    return Fail("Only one Screenshot Shortcut can be added.", out failureMessage);
                 tiles[index] = tiles[index] with
                 {
                     Title = intent.Title,
-                    CloseOverlayAfterLaunch = intent.CloseOverlayAfterLaunch.Value,
+                    CloseOverlayAfterLaunch = IsScreenshotAction(action!) ? false : intent.CloseOverlayAfterLaunch.Value,
                     Action = action!
                 };
                 changed = true;
@@ -241,20 +241,18 @@ internal sealed class ShortcutRuntime
             return Fail("Shortcut definition is invalid.", out failureMessage);
 
         candidate = _document with { Dashboard = dashboard };
-        if (!FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(ProjectEditorSnapshot(candidate, screenshotFolder)))
+        if (!FrontendShortcutEditorPayloadPolicy.IsSnapshotWithinLimit(ProjectEditorSnapshot(candidate)))
             return Fail(EditorTooLargeMessage, out failureMessage);
         return true;
     }
 
-    private static FrontendShortcutEditorSnapshot ProjectEditorSnapshot(
-        ShortcutDocument document,
-        FrontendScreenshotFolderSnapshot screenshotFolder) =>
+    private static FrontendShortcutEditorSnapshot ProjectEditorSnapshot(ShortcutDocument document) =>
         new(true, document.Dashboard.Tiles.Select(tile => new FrontendShortcutEditorTile(
             tile.TileId,
             tile.Title,
             GetEditorTargetSummary(tile.Action),
             tile.CloseOverlayAfterLaunch,
-            ProjectEditorAction(tile.Action))).ToArray(), screenshotFolder);
+            ProjectEditorAction(tile.Action))).ToArray());
 
     private static FrontendShortcutEditorAction ProjectEditorAction(ShortcutActionSpec action)
     {
@@ -267,12 +265,13 @@ internal sealed class ShortcutRuntime
         var executableArguments = ReadStringOrEmpty(action.Parameters, "arguments");
         var script = ReadStringOrEmpty(action.Parameters, "script");
         var url = ReadStringOrEmpty(action.Parameters, "url");
+        var screenshotParametersValid = TryReadScreenshotParameters(action.Parameters, out var screenshotFolder);
         var valid = kind.Value switch
         {
             FrontendShortcutEditorActionKind.Executable => TryReadExecutableParameters(action.Parameters, out _, out _),
             FrontendShortcutEditorActionKind.PowerShell => TryReadPowerShellParameters(action.Parameters, out _),
             FrontendShortcutEditorActionKind.Url => TryReadUrlParameters(action.Parameters, out _),
-            FrontendShortcutEditorActionKind.ScreenshotFullscreen => HasEmptyObjectParameters(action.Parameters),
+            FrontendShortcutEditorActionKind.ScreenshotFullscreen => screenshotParametersValid,
             FrontendShortcutEditorActionKind.SteamBigPicture or
             FrontendShortcutEditorActionKind.SteamClient or
             FrontendShortcutEditorActionKind.XboxApp => HasEmptyObjectParameters(action.Parameters),
@@ -285,7 +284,10 @@ internal sealed class ShortcutRuntime
             kind == FrontendShortcutEditorActionKind.PowerShell ? script : null,
             kind == FrontendShortcutEditorActionKind.Url ? url : null,
             valid,
-            valid ? null : "Needs attention. Review this action's configuration.");
+            valid ? null : "Needs attention. Review this action's configuration.",
+            kind == FrontendShortcutEditorActionKind.ScreenshotFullscreen && screenshotParametersValid
+                ? screenshotFolder
+                : null);
     }
 
     private static FrontendShortcutEditorActionKind? GetEditorActionKind(string typeId) => typeId switch
@@ -344,6 +346,12 @@ internal sealed class ShortcutRuntime
     {
         action = null;
         failureMessage = null;
+        if (input.Kind != FrontendShortcutEditorActionKind.ScreenshotFullscreen && input.ScreenshotFolder is not null)
+        {
+            failureMessage = "Shortcut action input is invalid.";
+            return false;
+        }
+
         if (input.Kind == FrontendShortcutEditorActionKind.Executable
             && input.PowerShellScript is null && input.Url is null
             && !string.IsNullOrWhiteSpace(input.ExecutablePath)
@@ -394,8 +402,19 @@ internal sealed class ShortcutRuntime
             && input.ExecutablePath is null && input.ExecutableArguments is null
             && input.PowerShellScript is null && input.Url is null)
         {
+            if (!string.IsNullOrWhiteSpace(input.ScreenshotFolder)
+                && (!FrontendShortcutEditorPayloadPolicy.IsFieldWithinLimit(input.ScreenshotFolder)
+                    || !IsValidScreenshotFolder(input.ScreenshotFolder)))
+            {
+                failureMessage = "Choose a fully qualified folder path.";
+                return false;
+            }
+
+            var parameters = string.IsNullOrWhiteSpace(input.ScreenshotFolder)
+                ? JsonSerializer.SerializeToElement(new { })
+                : JsonSerializer.SerializeToElement(new { folder = input.ScreenshotFolder });
             action = new(ShortcutActionTypeIds.ScreenshotFullscreen, SupportedActionSchemaVersion,
-                JsonSerializer.SerializeToElement(new { }));
+                parameters);
             return true;
         }
 
@@ -452,8 +471,8 @@ internal sealed class ShortcutRuntime
         }
     }
 
-    private FrontendShortcutMutationResult MutationFailure(string message, FrontendScreenshotFolderSnapshot screenshotFolder) =>
-        CreateMutationResult(false, false, message, CaptureEditor(screenshotFolder));
+    private FrontendShortcutMutationResult MutationFailure(string message) =>
+        CreateMutationResult(false, false, message, CaptureEditor());
 
     private static FrontendShortcutMutationResult CreateMutationResult(
         bool succeeded,
@@ -463,7 +482,7 @@ internal sealed class ShortcutRuntime
     {
         var result = new FrontendShortcutMutationResult(succeeded, changed, failureMessage, snapshot);
         if (FrontendShortcutEditorPayloadPolicy.IsMutationResultWithinLimit(result)) return result;
-        var unavailable = FrontendShortcutEditorSnapshot.Unavailable(snapshot.ScreenshotFolder, EditorTooLargeMessage);
+        var unavailable = FrontendShortcutEditorSnapshot.Unavailable(EditorTooLargeMessage);
         return new(false, false, EditorTooLargeMessage, unavailable);
     }
 
@@ -517,7 +536,7 @@ internal sealed class ShortcutRuntime
         {
             if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
                 return TileResolution.Unsupported;
-            if (!HasEmptyObjectParameters(tile.Action.Parameters))
+            if (!TryReadScreenshotParameters(tile.Action.Parameters, out _))
                 return TileResolution.Invalid;
             return _screenshotAction is null ? TileResolution.Unavailable : TileResolution.Available;
         }
@@ -548,7 +567,7 @@ internal sealed class ShortcutRuntime
     {
         if (tile.Action.SchemaVersion != SupportedActionSchemaVersion)
             return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unsupported, UnsupportedMessage);
-        if (!HasEmptyObjectParameters(tile.Action.Parameters))
+        if (!TryReadScreenshotParameters(tile.Action.Parameters, out var folder))
             return InvalidConfiguration();
         if (_screenshotAction is null)
             return new ShortcutExecutionResult(ShortcutExecutionOutcome.Unavailable, "Screenshot is unavailable.");
@@ -556,7 +575,7 @@ internal sealed class ShortcutRuntime
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            var result = await _screenshotAction(cancellationToken).ConfigureAwait(false);
+            var result = await _screenshotAction(folder, cancellationToken).ConfigureAwait(false);
             return result with { RetireOverlayAfterExecution = false };
         }
         catch (OperationCanceledException)
@@ -575,6 +594,42 @@ internal sealed class ShortcutRuntime
 
     private static bool HasEmptyObjectParameters(JsonElement parameters) =>
         parameters.ValueKind == JsonValueKind.Object && !parameters.EnumerateObject().Any();
+
+    private static bool TryReadScreenshotParameters(JsonElement parameters, out string? folder)
+    {
+        folder = null;
+        if (parameters.ValueKind != JsonValueKind.Object) return false;
+
+        using var properties = parameters.EnumerateObject().GetEnumerator();
+        if (!properties.MoveNext()) return true;
+
+        var property = properties.Current;
+        if (!string.Equals(property.Name, "folder", StringComparison.Ordinal)
+            || property.Value.ValueKind != JsonValueKind.String
+            || properties.MoveNext())
+            return false;
+
+        var configuredFolder = property.Value.GetString();
+        if (string.IsNullOrWhiteSpace(configuredFolder)
+            || !FrontendShortcutEditorPayloadPolicy.IsFieldWithinLimit(configuredFolder)
+            || !IsValidScreenshotFolder(configuredFolder))
+            return false;
+
+        folder = configuredFolder;
+        return true;
+    }
+
+    private static bool IsValidScreenshotFolder(string folder)
+    {
+        try { return Path.IsPathFullyQualified(folder); }
+        catch (ArgumentException) { return false; }
+    }
+
+    private static bool IsScreenshotAction(ShortcutTileDefinition tile) =>
+        string.Equals(tile.Action.TypeId, ShortcutActionTypeIds.ScreenshotFullscreen, StringComparison.Ordinal);
+
+    private static bool IsScreenshotAction(ShortcutActionSpec action) =>
+        string.Equals(action.TypeId, ShortcutActionTypeIds.ScreenshotFullscreen, StringComparison.Ordinal);
 
     private ShortcutExecutionResult ExecuteExecutable(ShortcutTileDefinition tile, CancellationToken cancellationToken)
     {

@@ -223,9 +223,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
-        var folder = CaptureScreenshotFolderSnapshot();
-        return Task.FromResult(_shortcutRuntime?.CaptureEditor(folder)
-            ?? FrontendShortcutEditorSnapshot.Unavailable(folder, "Shortcut editing is unavailable."));
+        return Task.FromResult(_shortcutRuntime?.CaptureEditor()
+            ?? FrontendShortcutEditorSnapshot.Unavailable("Shortcut editing is unavailable."));
     }
 
     public Task<FrontendShortcutMutationResult> MutateShortcutAsync(
@@ -234,64 +233,16 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         cancellationToken.ThrowIfCancellationRequested();
-        var folder = CaptureScreenshotFolderSnapshot();
         if (_shortcutRuntime is null)
         {
-            var unavailable = FrontendShortcutEditorSnapshot.Unavailable(folder, "Shortcut editing is unavailable.");
+            var unavailable = FrontendShortcutEditorSnapshot.Unavailable("Shortcut editing is unavailable.");
             return Task.FromResult(new FrontendShortcutMutationResult(false, false, unavailable.FailureMessage, unavailable));
         }
 
-        var result = _shortcutRuntime.MutateEditor(intent, folder);
+        var result = _shortcutRuntime.MutateEditor(intent);
         if (result.Succeeded && result.Changed)
             StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(result);
-    }
-
-    public Task<FrontendScreenshotFolderMutationResult> SetScreenshotSaveFolderAsync(
-        string? folder,
-        CancellationToken cancellationToken = default)
-    {
-        ThrowIfShuttingDown();
-        cancellationToken.ThrowIfCancellationRequested();
-        var previousFolder = _settings.ScreenshotSaveFolder;
-        if (!FrontendShortcutEditorPayloadPolicy.IsScreenshotFolderRequestWithinLimit(folder))
-        {
-            return Task.FromResult(new FrontendScreenshotFolderMutationResult(false,
-                "Screenshot folder path is too large.", CaptureScreenshotFolderSnapshot()));
-        }
-
-        try
-        {
-            if (!_settings.ChangeScreenshotSaveFolder(folder))
-                return Task.FromResult(new FrontendScreenshotFolderMutationResult(false,
-                    "Choose a fully qualified folder path.", CaptureScreenshotFolderSnapshot()));
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Shortcuts", "Screenshot folder preference could not be saved.", null,
-                ("FailureCategory", exception.GetType().Name));
-            return Task.FromResult(new FrontendScreenshotFolderMutationResult(false,
-                "Failed to save the Screenshot folder.", CaptureScreenshotFolderSnapshot()));
-        }
-
-        var changed = !string.Equals(previousFolder, _settings.ScreenshotSaveFolder, StringComparison.Ordinal);
-        if (changed)
-            StateInvalidated?.Invoke(this, EventArgs.Empty);
-        var snapshot = CaptureScreenshotFolderSnapshot();
-        var result = new FrontendScreenshotFolderMutationResult(true, null, snapshot);
-        if (!FrontendShortcutEditorPayloadPolicy.IsScreenshotFolderResultWithinLimit(result))
-            return Task.FromResult(new FrontendScreenshotFolderMutationResult(false,
-                "Screenshot folder settings are too large to display.", CaptureScreenshotFolderSnapshot()));
-        return Task.FromResult(result);
-    }
-
-    private FrontendScreenshotFolderSnapshot CaptureScreenshotFolderSnapshot()
-    {
-        var configuredFolder = _settings.ScreenshotSaveFolder;
-        return new FrontendScreenshotFolderSnapshot(
-            string.IsNullOrWhiteSpace(configuredFolder),
-            NirCmdScreenshotCapture.ResolveFolder(configuredFolder),
-            configuredFolder);
     }
 
     internal void NotifyStateInvalidated() => StateInvalidated?.Invoke(this, EventArgs.Empty);

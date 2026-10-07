@@ -573,10 +573,21 @@ public sealed class UiArchitectureTests
 
         Assert.Contains("Add Shortcut", shortcutXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("CanReorderItems", shortcutXaml, StringComparison.Ordinal);
-        Assert.Contains("Screenshot", shortcutXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Screenshot", shortcutXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("BrowseScreenshotFolderButton", shortcutXaml, StringComparison.Ordinal);
         Assert.Contains("FolderPicker(windowId)", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("MutateShortcutAsync", shortcutCode, StringComparison.Ordinal);
-        Assert.Contains("SetScreenshotSaveFolderAsync", shortcutCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetScreenshotSaveFolderAsync", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("ScreenshotFolder: stagedScreenshotFolder", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("CaptureShortcutEditorAsync", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("screenshotAlreadyExists", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("useDefaultFolderButton.Click", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("openScreenshotFolderButton.Click", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("stagedScreenshotFolder = folder.Path", shortcutCode, StringComparison.Ordinal);
+        Assert.Contains("stagedScreenshotFolder = null", shortcutCode, StringComparison.Ordinal);
+        var discardStagedEdits = shortcutCode.IndexOf("if (result != ContentDialogResult.Primary) return;", StringComparison.Ordinal);
+        var persistStagedEdits = shortcutCode.IndexOf("await ApplyMutationAsync(intent)", StringComparison.Ordinal);
+        Assert.True(discardStagedEdits >= 0 && discardStagedEdits < persistStagedEdits);
         Assert.Contains("ShortcutContent.RequestRefresh()", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("ShortcutStore", shortcutCode, StringComparison.Ordinal);
         Assert.DoesNotContain("ShortcutsPath", shortcutCode, StringComparison.Ordinal);

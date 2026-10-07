@@ -9,7 +9,7 @@ public sealed class AddonProcessHostScreenshotContractTests
     public void Screenshot_reuses_overlay_retirement_and_holds_the_visible_surface_gate_through_capture()
     {
         var source = ReadHostSource();
-        var method = ExtractMethod(source, "private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync");
+        var method = ExtractMethod(source, "private async Task<ShortcutExecutionResult> ExecuteFullscreenScreenshotShortcutAsync(");
 
         var gateAcquire = method.IndexOf("_visibleSurfaceTransition.WaitAsync", StringComparison.Ordinal);
         var retirement = method.IndexOf("RetireOverlayCaptureUnderTransitionAsync(", StringComparison.Ordinal);
@@ -26,6 +26,8 @@ public sealed class AddonProcessHostScreenshotContractTests
         Assert.Contains("_overlayCaptureActive || _overlayController.IsVisible", method, StringComparison.Ordinal);
         Assert.DoesNotContain("EnsureHiddenAsync", method, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Delay", method, StringComparison.Ordinal);
+        Assert.Contains("CaptureAsync(\n                saveFolder,", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScreenshotSaveFolder", method, StringComparison.Ordinal);
     }
 
     [Fact]

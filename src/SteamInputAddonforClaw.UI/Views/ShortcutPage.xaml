@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:frontend="using:SteamInputAddonforClaw.Contracts.Frontend">
-    <Grid Padding="32" RowSpacing="16" RowDefinitions="Auto,Auto,*,Auto">
+    <Grid Padding="32" RowSpacing="16" RowDefinitions="Auto,Auto,*">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
             <StackPanel Spacing="4">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Shortcut" />
@@ -105,28 +105,5 @@
             </StackPanel>
         </Grid>
 
-        <Border
-            Grid.Row="3"
-            Padding="20"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="8">
-            <Grid ColumnSpacing="24" RowSpacing="12" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
-                <StackPanel Spacing="4">
-                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="Screenshot" />
-                    <TextBlock Opacity="0.75" Text="Captures the primary display as JPEG. Choose the folder used by Screenshot shortcuts." TextWrapping="Wrap" />
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button x:Name="BrowseScreenshotFolderButton" Content="Browse…" Click="BrowseScreenshotFolderButton_Click" />
-                    <Button x:Name="UseDefaultFolderButton" Content="Use default" Click="UseDefaultFolderButton_Click" />
-                    <Button x:Name="OpenScreenshotFolderButton" Content="Open folder" Click="OpenScreenshotFolderButton_Click" />
-                </StackPanel>
-                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="4">
-                    <TextBlock x:Name="ScreenshotFolderPathText" TextWrapping="Wrap" />
-                    <TextBlock x:Name="ScreenshotFolderModeText" Opacity="0.7" />
-                </StackPanel>
-            </Grid>
-        </Border>
     </Grid>
 </UserControl>
