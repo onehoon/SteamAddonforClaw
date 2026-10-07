@@ -1,5 +1,7 @@
 # Work Order — Shortcut Foundation PR-C2: NirCmd Fullscreen Screenshot Action
 
+> **Superseded for Screenshot folder ownership (2026-10-08):** `docs/work-order/1008_SHORTCUT_SCREENSHOT_ACTION_OWNED_FOLDER_WORK_ORDER.md` supersedes this work order's global `AppSettings.ScreenshotSaveFolder` model. Screenshot save-folder configuration now belongs to the `system.screenshot-fullscreen` action in `shortcuts.json`. The product is still pre-release, so no legacy folder migration/import is required. The NirCmd capture and safe Overlay-retirement design in this document remains historical context unless explicitly superseded elsewhere.\n
+
 **Date:** 2026-09-24  
 **Status:** Ready for implementation  
 **Target repository:** onehoon/SteamAddonforClaw  
