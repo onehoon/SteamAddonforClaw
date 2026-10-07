@@ -15,10 +15,11 @@
 
 Polish the current Shortcut experience in one focused change.
 
-The PR has two related product goals:
+The PR has three related product goals:
 
 1. Change the WinUI3 Overlay Shortcut page from the current dynamic one/two-column tile layout to a **stable three-column square-tile layout** sized for the current 452-DIP Overlay surface.
-2. Add first-class built-in Shortcut actions for:
+2. Change the Main App Shortcut editor from a one-dimensional vertical list into a **stable three-column layout editor** so users can arrange tiles while seeing the same row-major placement used by the Overlay. One or two Main App cards must keep one-third-row width and must not stretch across the unused columns.
+3. Add first-class built-in Shortcut actions for:
    - Steam Big Picture;
    - normal Steam client;
    - Xbox app;
@@ -134,6 +135,7 @@ src/SteamInputAddonforClaw.Contracts/Frontend/ShortcutEditorFrontendContracts.cs
 src/SteamInputAddonforClaw/Shortcuts/ShortcutActionTypeIds.cs
 src/SteamInputAddonforClaw/Shortcuts/ShortcutRuntime.cs
 
+src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml
 src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml
 src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs
 
@@ -727,7 +729,74 @@ This PR is a Shortcut product-feature change, not the external-process privilege
 
 # 7. Main App editor UX
 
-## 7.1 Add action choices
+## 7.1 Fixed three-column layout editor
+
+The Main App Shortcut collection must visually represent the same ordered three-column placement used by the Overlay.
+
+Target layout:
+
+```text
+[ tile 0 ][ tile 1 ][ tile 2 ]
+[ tile 3 ][ tile 4 ][ tile 5 ]
+[ tile 6 ][ tile 7 ][ tile 8 ]
+```
+
+The Main App cards do **not** need to use the Overlay's 117.333333-DIP square dimensions. The Main App has a different surface and needs room for editor information such as Title, target/action summary, Edit, and Delete.
+
+However, its horizontal layout contract is fixed:
+
+```text
+three equal-width columns
+row-major order
+one/two tiles leave the remaining column slots empty
+```
+
+Required behavior:
+
+```text
+1 tile
+[ Tile ][      ][      ]
+
+2 tiles
+[ Tile ][ Tile ][      ]
+
+3 tiles
+[ Tile ][ Tile ][ Tile ]
+
+4 tiles
+[ Tile ][ Tile ][ Tile ]
+[ Tile ][      ][      ]
+```
+
+A single card must **not** stretch to the full Shortcut content width.
+
+Two cards must **not** expand to 50% each.
+
+Each card must occupy the same one-third-row slot width it would occupy when three cards are present.
+
+The purpose is WYSIWYG ordering, not pixel-identical rendering:
+
+```text
+Main App position 0/1/2
+-> Overlay row 0 column 0/1/2
+
+Main App position 3/4/5
+-> Overlay row 1 column 0/1/2
+```
+
+Preserve the existing ordered collection as the only layout authority.
+
+Do not add Row/Column fields to persisted Shortcut data.
+
+Drag/drop reorder must continue to mutate only list order.
+
+Prefer adapting the existing `ListView` / `ListViewBase` reorder surface to a three-column wrap/grid presentation if the current WinUI control supports the required stable reorder behavior.
+
+Do not replace the editor with a new ItemsRepeater/custom drag framework merely for this layout.
+
+Do not add responsive one/two-column breakpoints for the Shortcut editor in this PR. The editor intentionally remains three columns so it continues to preview Overlay placement.
+
+## 7.2 Add action choices
 
 Add the three built-ins to the current Add/Edit Shortcut action picker.
 
@@ -756,7 +825,7 @@ Do not show:
 
 for a parameterless built-in.
 
-## 7.2 Default titles
+## 7.3 Default titles
 
 When creating a new Shortcut, selecting these built-in actions must provide these defaults:
 
@@ -781,7 +850,7 @@ Screenshot        -> user may rename to "Capture"
 
 Do not make built-in titles immutable.
 
-## 7.3 Creation-only auto-title behavior
+## 7.4 Creation-only auto-title behavior
 
 Automatic title assignment is a **new-Shortcut creation convenience**.
 
@@ -799,7 +868,7 @@ Do not change the Runtime mutation contract to make Title optional just for this
 
 Keep the default-title logic narrow and local to the Main App editor.
 
-## 7.4 Built-ins remain editable
+## 7.5 Built-ins remain editable
 
 Supported built-in schema-1 actions must have:
 
@@ -991,6 +1060,11 @@ and preserves the explicit Title.
 
 Add/update UI architecture tests proving:
 
+- the Shortcut collection uses a stable three-column Main App layout;
+- one card occupies only the first one-third-row slot and does not stretch to full width;
+- two cards occupy the first two one-third-row slots and do not expand to half width;
+- 3/4/5/6 cards preserve the same row-major order used by the Overlay;
+- drag/drop reorder still updates the single ordered Shortcut collection rather than introducing row/column persistence;
 - the action picker exposes Steam Big Picture, Steam, Xbox, and Screenshot;
 - Screenshot now has the creation default title `Screenshot`;
 - the three new built-ins have their required creation default titles;
@@ -1150,27 +1224,35 @@ The PR is complete when all of the following are true.
 9. Controller D-pad navigation matches three-column geometry for 3+ tiles.
 10. TileId selection preservation and execution behavior remain unchanged.
 
+## Main App layout
+
+11. Main App Shortcut editing uses a stable three-column visual layout.
+12. One Shortcut card occupies only one-third of the row and does not stretch across empty columns.
+13. Two Shortcut cards occupy two one-third slots and do not expand to half-width cards.
+14. Main App row-major card order matches Overlay row-major tile order.
+15. Existing reorder semantics continue to persist only collection order.
+
 ## Built-in actions
 
-11. Main App Add Shortcut exposes Steam Big Picture.
-12. Main App Add Shortcut exposes Steam.
-13. Main App Add Shortcut exposes Xbox.
-14. Screenshot remains available.
-15. Creating each built-in auto-populates:
+16. Main App Add Shortcut exposes Steam Big Picture.
+17. Main App Add Shortcut exposes Steam.
+18. Main App Add Shortcut exposes Xbox.
+19. Screenshot remains available.
+20. Creating each built-in auto-populates:
     - Steam Big Picture -> `Steam Big Picture`
     - Steam -> `Steam`
     - Xbox -> `Xbox`
     - Screenshot -> `Screenshot`
-16. The user can edit those titles.
-17. Editing an existing Shortcut does not silently replace its persisted title.
-18. New built-ins persist as schema-1 parameterless `{}` actions.
-19. Steam Big Picture launches through `steam://open/bigpicture`.
-20. Steam launches through `steam://open/main`.
-21. Xbox activation reuses the canonical `XboxGamingHomeAppIdentity.Aumid` semantics.
-22. Generic Website remains HTTP/HTTPS-only.
-23. No Shortcut document migration or automatic default-tile creation occurs.
-24. No new generic launcher/broker/manager abstraction is introduced.
-25. Existing Full1902 controller and power lifecycle behavior is untouched.
+21. The user can edit those titles.
+22. Editing an existing Shortcut does not silently replace its persisted title.
+23. New built-ins persist as schema-1 parameterless `{}` actions.
+24. Steam Big Picture launches through `steam://open/bigpicture`.
+25. Steam launches through `steam://open/main`.
+26. Xbox activation reuses the canonical `XboxGamingHomeAppIdentity.Aumid` semantics.
+27. Generic Website remains HTTP/HTTPS-only.
+28. No Shortcut document migration or automatic default-tile creation occurs.
+29. No new generic launcher/broker/manager abstraction is introduced.
+30. Existing Full1902 controller and power lifecycle behavior is untouched.
 
 ---
 
@@ -1217,6 +1299,7 @@ The intended design remains:
 
 ```text
 Main UI
+  fixed 3-column layout editor
   editor UX + default title convenience
        |
        v
