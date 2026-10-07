@@ -546,6 +546,8 @@ public sealed class UiArchitectureTests
         Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"Shortcut\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Tag=\"Shortcut\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
         Assert.True(xaml.IndexOf("Tag=\"Overlay\"", StringComparison.Ordinal) < xaml.IndexOf("Tag=\"HowToUse\"", StringComparison.Ordinal));
+        Assert.Contains("<NavigationViewItem Content=\"ClawHUD\" Tag=\"Overlay\">", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<NavigationViewItem Content=\"Overlay\" Tag=\"Overlay\">", xaml, StringComparison.Ordinal);
         Assert.Contains("MainNavigationPage.Overlay", navigationState, StringComparison.Ordinal);
         Assert.Contains("OverlayContent", mainWindow, StringComparison.Ordinal);
         Assert.Contains("MainNavigationPage.Shortcut", navigationState, StringComparison.Ordinal);

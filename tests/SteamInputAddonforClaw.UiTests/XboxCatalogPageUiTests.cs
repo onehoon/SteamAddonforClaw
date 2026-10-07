@@ -18,11 +18,13 @@ public sealed class XboxCatalogPageUiTests
             .Select(element => (string?)element.Attribute("Content"))
             .ToArray();
 
-        Assert.Equal(new[] { "Device", "Controller", "Steam", "XBOX", "Overlay", "Shortcut", "How to Use" }, labels);
+        Assert.Equal(new[] { "Device", "Controller", "Steam", "XBOX", "ClawHUD", "Shortcut", "How to Use" }, labels);
         var steam = menu.Elements().Single(element => (string?)element.Attribute("Content") == "Steam");
         var xbox = menu.Elements().Single(element => (string?)element.Attribute("Content") == "XBOX");
+        var clawHud = menu.Elements().Single(element => (string?)element.Attribute("Content") == "ClawHUD");
         Assert.Equal("Profile", (string?)steam.Attribute("Tag"));
         Assert.Equal("Xbox", (string?)xbox.Attribute("Tag"));
+        Assert.Equal("Overlay", (string?)clawHud.Attribute("Tag"));
         Assert.Contains("isSettingsSelected", File.ReadAllText(Source("src", "SteamInputAddonforClaw.UI", "MainNavigationState.cs")), StringComparison.Ordinal);
     }
 
