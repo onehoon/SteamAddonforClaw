@@ -351,9 +351,9 @@ PR1 RecommendedDefaultMhz
 = driver max minus two supported entries
 ~~~
 
-This is the value used when the user first enables the feature or first edits an uninitialized rail.
+This is the value used when the user first enables an uninitialized feature.
 
-Feature state remains Off until the user enables it.
+Feature state remains Off until the user enables it. While Off, the AC/DC selectors are disabled, matching the existing Device Performance option policy.
 
 ### 4.6 B390 and Lunar Lake 140V use the same path
 
@@ -376,15 +376,16 @@ No model-specific clock table.
 
 ### 4.7 Saved value removed by a driver update
 
-Never silently select another frequency.
+Background startup/reconcile must never silently select another frequency.
 
-If a saved value is no longer present in the current selectable list:
+If a saved value is no longer present in the current selectable list while the feature is Enabled:
 
 ~~~text
 saved value remains persisted
-→ it is not applied
+→ invalid rail is not applied
 → UI reports that the saved value is no longer supported
-→ user must choose a current supported value
+→ AC/DC selectors remain editable because the feature is On
+→ user chooses a current supported value explicitly
 ~~~
 
 Do not:
@@ -392,9 +393,14 @@ Do not:
 - nearest-neighbor clamp;
 - move upward automatically;
 - move downward automatically;
-- replace with RecommendedDefault automatically.
+- rewrite persistence during background startup/resume/reconcile.
 
-The only automatic default is for a previously **uninitialized** setting.
+If the feature is already Off, its AC/DC selectors remain disabled like the other Device Performance options. In that specific state, an explicit user **Enable** action may reinitialize only unsupported saved rail value(s) to the current `RecommendedDefaultMhz` before enabling. This is an explicit user-triggered reinitialization, not background auto-clamping.
+
+The default is therefore used only for:
+
+- a previously uninitialized setting; or
+- an unsupported saved rail when the user explicitly turns the feature back On.
 
 ---
 
@@ -671,9 +677,31 @@ Do not hardcode 2200.
 
 When enabling an existing record:
 
-- AC and DC saved values must both be current supported selectable clocks;
-- if either is invalid, do not enable and do not alter persistence;
-- report a clear InvalidTarget/Unavailable result so the user can choose a new supported value.
+- keep every saved AC/DC value that is still a current supported selectable clock;
+- for any saved rail that is no longer supported by the current driver, replace **that rail only** with the current `RecommendedDefaultMhz`;
+- persist the complete AC/DC record with `Enabled = true`;
+- then reconcile the current power rail.
+
+Example:
+
+~~~text
+saved while Off:
+  AC = 1900   // still supported
+  DC = 1850   // no longer supported
+
+current RecommendedDefault = 2000
+
+explicit user Enable
+→ AC remains 1900
+→ DC becomes 2000
+→ Enabled = true
+→ persist once
+→ apply current power rail
+~~~
+
+Do not nearest-neighbor clamp an unsupported value. The explicit Enable action is the recovery boundary because AC/DC selectors are intentionally disabled while the feature is Off.
+
+If capability/`RecommendedDefaultMhz` is unavailable, do not enable and do not alter persistence.
 
 ### 10.3 Disable
 
@@ -729,39 +757,33 @@ using the existing PR1 tolerance.
 
 No arbitrary MHz values.
 
-### 11.2 Editing an uninitialized setting
+### 11.2 Off-state edits are rejected
 
-If the first user interaction is a slider edit while the feature is still Off:
+Match the existing Device Performance option policy:
 
 ~~~text
-create DeviceGpuMinimumClockSettings
 Enabled = false
-other rail = RecommendedDefaultMhz
-edited rail = selected canonical value
+→ AC selector disabled
+→ DC selector disabled
 ~~~
 
-This allows preconfiguration without applying hardware.
+The frontend must not submit AC/DC mutations while Off.
 
-### 11.3 Off-state edits are allowed
-
-Unlike CPU Boost/TDP, the Minimum GPU Clock AC/DC sliders remain editable while the feature is Off.
-
-Reason:
-
-- Off means “do not own/apply a frequency floor,” not “erase the saved target.”
-- a driver update may remove a previously saved clock;
-- the user must be able to select a new valid clock **before** enabling the feature again.
-
-Therefore:
+The Runtime must also reject a direct/stale RPC attempt while Off:
 
 ~~~text
 Enabled = false
-slider edit
-→ persist only
+SetDeviceGpuMinimumClockAc/Dc(...)
+→ no persistence change
 → no SetRange
+→ return operation unavailable with a clear "Enable Minimum GPU Clock first" message
 ~~~
 
-### 11.4 Enabled + active rail edit
+There is no Off-state preconfiguration path.
+
+An uninitialized setting is created only by the explicit Enable action in section 10.1.
+
+### 11.3 Enabled + active rail edit
 
 Example:
 
@@ -773,7 +795,7 @@ user edits AC
 → ApplyMinimum(new AC target)
 ~~~
 
-### 11.5 Enabled + inactive rail edit
+### 11.4 Enabled + inactive rail edit
 
 Example:
 
@@ -1408,17 +1430,19 @@ Do not persist merely because the page rendered.
 
 Toggle remains Off.
 
-### 23.6 Off-state sliders remain editable
+### 23.6 Off-state sliders are disabled
 
-As locked above:
+Match CPU Boost, TDP, and Windows Power Mode behavior:
 
 ~~~text
 Enabled = false
-→ sliders can still be edited/persisted
-→ no GPU frequency write
+→ Plugged in slider disabled
+→ On battery slider disabled
 ~~~
 
-This is intentional and should be covered by tests.
+The saved AC/DC values remain visible when valid, but are not editable until the user enables the feature.
+
+For an uninitialized setting, show the current `RecommendedDefaultMhz` as the disabled draft value for both rails. Rendering this draft must not persist anything.
 
 ### 23.7 Removed saved value
 
@@ -1426,10 +1450,12 @@ If a persisted AC/DC value does not map to the current selectable list:
 
 - do not display it as a valid selected clock;
 - show a warning;
-- use RecommendedDefault only as an uncommitted draft for that invalid rail;
-- require an explicit slider commit to persist the new supported value.
+- use `RecommendedDefaultMhz` only as an uncommitted draft for that invalid rail;
+- never silently write the draft during render or background reconcile.
 
-Do not silently write the draft during render.
+If the feature is **Enabled**, the sliders remain editable and the user may explicitly commit a supported replacement.
+
+If the feature is **Off**, the sliders remain disabled. The user recovers by explicitly turning the feature On; section 10.2 then reinitializes only unsupported rail value(s) to the current `RecommendedDefaultMhz` as part of that explicit Enable transaction.
 
 ### 23.8 Commit policy
 
@@ -1760,28 +1786,49 @@ No test may encode 2200 as a universal expected constant.
 
 ---
 
-## 32. Tests — Off-state editing
+## 32. Tests — Off-state gating
 
-Verify:
+Verify UI policy:
 
 ~~~text
 feature Off
-edit AC
-→ persistence changes
-→ zero SetRange
-
-feature Off
-edit DC
-→ persistence changes
-→ zero SetRange
+→ AC slider disabled
+→ DC slider disabled
 ~~~
 
-Verify an uninitialized slider edit creates:
+Verify Runtime fail-closed behavior for stale/direct RPCs:
 
 ~~~text
-Enabled = false
-edited rail = submitted canonical value
-other rail = RecommendedDefault
+feature Off
+Set AC
+→ persistence unchanged
+→ zero SetRange
+→ operation rejected
+
+feature Off
+Set DC
+→ persistence unchanged
+→ zero SetRange
+→ operation rejected
+~~~
+
+Verify uninitialized state cannot be created by an AC/DC mutation while Off.
+
+Verify explicit Enable is the initialization/recovery boundary:
+
+~~~text
+uninitialized + Enable
+→ AC = RecommendedDefault
+→ DC = RecommendedDefault
+→ Enabled = true
+
+existing Off configuration
++ one unsupported saved rail
++ Enable
+→ supported rail preserved
+→ unsupported rail = RecommendedDefault
+→ Enabled = true
+→ one persisted complete record
 ~~~
 
 ---
@@ -1841,7 +1888,9 @@ saved target removed from current available list
 → snapshot reports failure
 ~~~
 
-Verify the user can edit the invalid rail while feature is Off and replace it with a valid current clock.
+Verify an invalid rail is editable while the feature is Enabled.
+
+Verify that when the feature is Off, AC/DC controls are disabled and an explicit Enable reinitializes only unsupported rail value(s) to the current RecommendedDefault before applying.
 
 ---
 
@@ -2008,9 +2057,11 @@ index maps to exact SelectableClocksMhz entry
 no continuous unsupported MHz can be submitted
 uninitialized draft uses RecommendedDefault
 opening page does not persist
-Off-state slider remains editable
-Off-state slider commit persists but does not imply Enabled
+Off-state AC/DC sliders are disabled
+no AC/DC mutation is submitted while Off
 invalid persisted clock is not presented as a valid saved selection
+Enabled invalid rail can be explicitly corrected
+Off invalid rail is recovered only through explicit Enable reinitialization
 ~~~
 
 Do not test guessed real 140V clock values.
@@ -2315,7 +2366,7 @@ PR2 is complete when all are true:
 5. Initial uninitialized AC/DC draft/default is PR1 `RecommendedDefaultMhz`.
 6. B390 and Arc 140V use the same capability-driven code path.
 7. Main Device UI uses a discrete index slider backed only by current driver-reported selectable clocks.
-8. Off-state sliders can be edited without applying hardware.
+8. Off-state AC/DC sliders are disabled, matching the other Device Performance options.
 9. User Enable persists first, then applies the current AC/DC rail.
 10. User Disable persists Off first, then restores the exact original minimum.
 11. Restore failure keeps the marker and returns ApplyFailed.
