@@ -73,6 +73,18 @@ public sealed class IntelGpuMinimumClockTests
     }
 
     [Fact]
+    public void Factory_release_verification_accepts_only_unmanaged_or_hardware_minimum_readback()
+    {
+        var preWrite = new IntelGpuFrequencyRange(2267, 2300);
+
+        Assert.True(IntelGpuMinimumClockPolicy.MatchesFactoryMinimumReleaseReadback(preWrite, new(-1, 2300), 100));
+        Assert.True(IntelGpuMinimumClockPolicy.MatchesFactoryMinimumReleaseReadback(preWrite, new(100, 2300), 100));
+        Assert.False(IntelGpuMinimumClockPolicy.MatchesFactoryMinimumReleaseReadback(preWrite, new(1500, 2300), 100));
+        Assert.False(IntelGpuMinimumClockPolicy.MatchesFactoryMinimumReleaseReadback(preWrite, new(100, 2200), 100));
+        Assert.False(IntelGpuMinimumClockPolicy.MatchesFactoryMinimumReleaseReadback(preWrite, new(double.NaN, 2300), 100));
+    }
+
+    [Fact]
     public void Startup_without_an_enabled_active_game_releases_minimum_and_does_not_create_profile_file()
     {
         using var temp = new TemporaryDirectory();
@@ -294,10 +306,35 @@ public sealed class IntelGpuMinimumClockTests
     }
 
     [Fact]
+    public void Factory_release_accepts_driver_normalized_hardware_minimum()
+    {
+        using var temp = new TemporaryDirectory();
+        var fake = new FakeControl(new(2267, 2300))
+        {
+            Capability = B390Capability(),
+            SetRangeReadback = requested => requested with { Min = 100 }
+        };
+        using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
+        runtime.InitializeReadOnly();
+
+        var result = runtime.ReleaseToFactoryMinimum("UnitTest");
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Verified);
+        Assert.Equal(-1d, result.RequestedMinMhz);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2300), fake.LastSetRange);
+        Assert.Equal(new IntelGpuFrequencyRange(100, 2300), result.ReadbackRange);
+    }
+
+    [Fact]
     public void Uninstall_always_attempts_and_verifies_factory_release()
     {
         using var temp = new TemporaryDirectory();
-        var fake = new FakeControl(new(1700, 2050));
+        var fake = new FakeControl(new(2267, 2300))
+        {
+            Capability = B390Capability(),
+            SetRangeReadback = requested => requested with { Min = 100 }
+        };
         using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
         runtime.InitializeReadOnly();
 
@@ -306,7 +343,8 @@ public sealed class IntelGpuMinimumClockTests
         Assert.True(result.Succeeded);
         Assert.True(result.Verified);
         Assert.Equal(1, fake.SetCalls);
-        Assert.Equal(new IntelGpuFrequencyRange(-1, 2050), fake.LastSetRange);
+        Assert.Equal(new IntelGpuFrequencyRange(-1, 2300), fake.LastSetRange);
+        Assert.Equal(new IntelGpuFrequencyRange(100, 2300), result.ReadbackRange);
     }
 
     [Fact]
@@ -330,7 +368,8 @@ public sealed class IntelGpuMinimumClockTests
         using var temp = new TemporaryDirectory();
         var fake = new FakeControl(new(1700, 2050))
         {
-            SetRangeReadback = requested => requested with { Min = 0 }
+            Capability = B390Capability(),
+            SetRangeReadback = requested => requested with { Min = 1500 }
         };
         using var runtime = CreateRuntime(temp, fake, () => AcDcPowerSource.AC);
         runtime.InitializeReadOnly();
@@ -339,7 +378,7 @@ public sealed class IntelGpuMinimumClockTests
 
         Assert.False(result.Succeeded);
         Assert.False(result.Verified);
-        Assert.Equal(0, result.ReadbackRange!.Value.Min);
+        Assert.Equal(1500, result.ReadbackRange!.Value.Min);
         Assert.Equal(1, fake.SetCalls);
     }
 
@@ -449,6 +488,9 @@ public sealed class IntelGpuMinimumClockTests
         FakeControl control,
         Func<AcDcPowerSource?> powerSource) =>
         new(new ProfileStore(temp.ProfilesPath), new ProfileMutationGate(), control, powerSource);
+
+    private static IntelGpuMinimumClockNativeCapability B390Capability() =>
+        new(true, null, "Intel(R) Arc(TM) B390 GPU", 0x8086, 0xB080, true, 100, 2300, SelectableClocks);
 
     private static ProfileDocument SteamDocument(bool enabled, bool gpuEnabled, double acMhz, double dcMhz) => new()
     {

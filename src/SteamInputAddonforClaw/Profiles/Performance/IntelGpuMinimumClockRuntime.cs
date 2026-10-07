@@ -309,7 +309,10 @@ internal sealed class IntelGpuMinimumClockRuntime : IDisposable
                 if (setResult != 0) return Complete(false, false, "SetRangeFailed");
 
                 readback = _control.GetRange();
-                var verified = IntelGpuMinimumClockPolicy.MatchesReadback(request, preWrite.Value, readback.Value);
+                var verified = IntelGpuMinimumClockPolicy.MatchesFactoryMinimumReleaseReadback(
+                    preWrite.Value,
+                    readback.Value,
+                    capability.HardwareMinMhz);
                 return Complete(verified, verified, verified ? null : "ReadbackMismatch");
             }
             catch (IgclMinimumClockException exception)

@@ -7,6 +7,14 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class IntelFrameLimiterTests
 {
+    [Theory]
+    [InlineData(0u, true)]
+    [InlineData(1u, true)]
+    [InlineData(0x40000001u, false)]
+    [InlineData(0x40000003u, false)]
+    public void Ctl_close_accepts_only_success_and_success_with_information(uint result, bool expected) =>
+        Assert.Equal(expected, NativeIgcl.IsCloseResultSuccessfulForTests(result));
+
     [Fact]
     public void Projected_igcl_x64_layout_matches_the_native_struct_sizes() =>
         Assert.True(NativeIgcl.AbiLayoutIsExpectedForTests());
