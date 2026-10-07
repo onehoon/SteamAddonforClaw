@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
+using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -17,6 +18,9 @@ public sealed partial class SettingsPage : UserControl
     private bool _applyingGamingHomeState;
     private bool _applyingQuickSettingsPowerSourcePreference;
     private bool _lastKnownQuickSettingsCurrentPowerSourceOnly;
+    private bool _isInitializingLogLevel;
+    private FrontendLogLevel _lastKnownLogLevel;
+    private string _logDirectoryPath = string.Empty;
     private bool IsStartupWritable =>
         _gamingHomeSnapshot.Available
         && _gamingHomeSnapshot.Selection is FrontendGamingHomeSelection.Xbox or FrontendGamingHomeSelection.SteamBigPicture
@@ -32,6 +36,9 @@ public sealed partial class SettingsPage : UserControl
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
+        _lastKnownLogLevel = bootstrap.Settings.LogLevel;
+        _logDirectoryPath = bootstrap.LogDirectoryPath;
+        SetLogLevel(_lastKnownLogLevel);
         _lastKnownQuickSettingsCurrentPowerSourceOnly = bootstrap.Settings.QuickSettingsCurrentPowerSourceOnly;
         SetQuickSettingsPowerSourceToggle(_lastKnownQuickSettingsCurrentPowerSourceOnly);
         _ = RefreshAppUpdateAsync();
@@ -250,6 +257,78 @@ public sealed partial class SettingsPage : UserControl
         _applyingQuickSettingsPowerSourcePreference = true;
         try { QuickSettingsPowerSourceToggleSwitch.IsOn = enabled; }
         finally { _applyingQuickSettingsPowerSourcePreference = false; }
+    }
+
+    internal static int GetLogLevelSelectionIndex(FrontendLogLevel level) => level switch
+    {
+        FrontendLogLevel.Info => 1,
+        FrontendLogLevel.Debug => 2,
+        _ => 0,
+    };
+
+    private void SetLogLevel(FrontendLogLevel level)
+    {
+        _isInitializingLogLevel = true;
+        LogLevelComboBox.SelectedIndex = GetLogLevelSelectionIndex(level);
+        _isInitializingLogLevel = false;
+    }
+
+    private async void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_isInitializingLogLevel
+            || _frontend is null
+            || LogLevelComboBox.SelectedItem is not ComboBoxItem item
+            || item.Content is not string value)
+        {
+            return;
+        }
+
+        var level = value switch
+        {
+            "Debug" => FrontendLogLevel.Debug,
+            "Info" => FrontendLogLevel.Info,
+            _ => FrontendLogLevel.Off,
+        };
+
+        try
+        {
+            var result = await _frontend.SetLogLevelAsync(level).ConfigureAwait(true);
+            _lastKnownLogLevel = result.LogLevel;
+            SetLogLevel(_lastKnownLogLevel);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Settings", "Log level update failed.", exception);
+            await RefreshLoggingStateAsync().ConfigureAwait(true);
+        }
+    }
+
+    private async Task RefreshLoggingStateAsync()
+    {
+        try
+        {
+            var bootstrap = await _frontend!.GetBootstrapAsync().ConfigureAwait(true);
+            _lastKnownLogLevel = bootstrap.Settings.LogLevel;
+            _logDirectoryPath = bootstrap.LogDirectoryPath;
+            SetLogLevel(_lastKnownLogLevel);
+        }
+        catch (Exception refreshException)
+        {
+            AppLog.Warn("Settings", "Logging state refresh failed.", refreshException);
+            SetLogLevel(_lastKnownLogLevel);
+        }
+    }
+
+    private void OpenLogFolderButton_Click(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_logDirectoryPath}\"") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Settings", "Log folder could not be opened.", exception);
+        }
     }
 
     private async void QuickSettingsPowerSourceToggleSwitch_Toggled(object sender, RoutedEventArgs args)

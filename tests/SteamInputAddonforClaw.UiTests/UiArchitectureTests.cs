@@ -1090,7 +1090,10 @@ public sealed class UiArchitectureTests
         Assert.True(page.IndexOf("Header=\"PID1902 Input Cadence\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
         Assert.Contains("Content=\"Run 10s Test\"", page, StringComparison.Ordinal);
         Assert.True(page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
-        Assert.True(page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Logging\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("Header=\"Logging\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("LogLevelComboBox", page, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Log Folder\"", page, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OpenLogFolderButton_Click\"", page, StringComparison.Ordinal);
     }
 
     [Fact]

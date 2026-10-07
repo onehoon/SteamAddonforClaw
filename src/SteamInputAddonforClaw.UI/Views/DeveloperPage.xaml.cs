@@ -9,10 +9,8 @@ public sealed partial class DeveloperPage : UserControl
 {
     private IAddonFrontendControl? _frontend;
     private Func<bool>? _isPrerequisiteSetupInProgress;
-    private bool _isInitializingLogLevel;
     private int _isGeneratingEnvironmentDiscoveryReport;
     private int _isRunningPid1902InputCadenceDiagnostic;
-    private FrontendLogLevel _lastKnownLogLevel;
     private string _logDirectoryPath = string.Empty;
 
     public event EventHandler? BackRequested;
@@ -38,18 +36,8 @@ public sealed partial class DeveloperPage : UserControl
         Func<bool> isPrerequisiteSetupInProgress)
     {
         _frontend = frontend;
-        _lastKnownLogLevel = bootstrap.Settings.LogLevel;
         _logDirectoryPath = bootstrap.LogDirectoryPath;
         _isPrerequisiteSetupInProgress = isPrerequisiteSetupInProgress;
-
-        _isInitializingLogLevel = true;
-        LogLevelComboBox.SelectedIndex = bootstrap.Settings.LogLevel switch
-        {
-            FrontendLogLevel.Info => 1,
-            FrontendLogLevel.Debug => 2,
-            _ => 0,
-        };
-        _isInitializingLogLevel = false;
     }
 
     private void BackButton_Click(object sender, RoutedEventArgs args)
@@ -67,46 +55,6 @@ public sealed partial class DeveloperPage : UserControl
         {
             AppLog.Warn("DeveloperMenu", "Log folder could not be opened.", exception);
         }
-    }
-
-    private async void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
-    {
-        if (_isInitializingLogLevel || _frontend is null || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
-        var level = value switch { "Debug" => FrontendLogLevel.Debug, "Info" => FrontendLogLevel.Info, _ => FrontendLogLevel.Off };
-        try
-        {
-            var result = await _frontend.SetLogLevelAsync(level);
-            _lastKnownLogLevel = result.LogLevel;
-            SetLogLevel(_lastKnownLogLevel);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("DeveloperMenu", "Log level update failed.", exception);
-            await RefreshAuthoritativeStateAsync(() => SetLogLevel(_lastKnownLogLevel));
-        }
-    }
-
-    private async Task RefreshAuthoritativeStateAsync(Action fallback)
-    {
-        try
-        {
-            var bootstrap = await _frontend!.GetBootstrapAsync();
-            _lastKnownLogLevel = bootstrap.Settings.LogLevel;
-            _logDirectoryPath = bootstrap.LogDirectoryPath;
-            SetLogLevel(_lastKnownLogLevel);
-        }
-        catch (Exception refreshException)
-        {
-            AppLog.Warn("DeveloperMenu", "Developer settings state refresh failed.", refreshException);
-            fallback();
-        }
-    }
-
-    private void SetLogLevel(FrontendLogLevel level)
-    {
-        _isInitializingLogLevel = true;
-        LogLevelComboBox.SelectedIndex = level switch { FrontendLogLevel.Info => 1, FrontendLogLevel.Debug => 2, _ => 0 };
-        _isInitializingLogLevel = false;
     }
 
     private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)
