@@ -3,16 +3,19 @@ using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using WinRT.Interop;
-using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 
 namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class ShortcutPage : UserControl
 {
+    internal readonly record struct ShortcutItemBounds(int Index, double Left, double Top, double Width, double Height);
+
     private const int ShortcutColumnCount = 3;
     private const double ShortcutCardHorizontalGap = 12;
     private readonly ObservableCollection<FrontendShortcutEditorTile> _tiles = [];
@@ -26,6 +29,10 @@ public sealed partial class ShortcutPage : UserControl
     private bool _refreshInProgress;
     private bool _editorAvailable;
     private ItemsWrapGrid? _shortcutItemsPanel;
+    private Guid? _draggedShortcutTileId;
+    private uint? _dragPointerId;
+    private int _dragStartIndex;
+    private int _dragTargetIndex;
 
     public ShortcutPage()
     {
@@ -324,6 +331,166 @@ public sealed partial class ShortcutPage : UserControl
             itemsPanel.ItemWidth = itemWidth;
     }
 
+    private void ShortcutDragHandle_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_operationInProgress || _refreshInProgress || _draggedShortcutTileId is not null
+            || sender is not FrameworkElement handle
+            || handle.Tag is not Guid tileId)
+            return;
+
+        var startIndex = -1;
+        for (var index = 0; index < _tiles.Count; index++)
+        {
+            if (_tiles[index].TileId != tileId) continue;
+            startIndex = index;
+            break;
+        }
+
+        if (startIndex < 0 || !handle.CapturePointer(e.Pointer)) return;
+
+        _draggedShortcutTileId = tileId;
+        _dragPointerId = e.Pointer.PointerId;
+        _dragStartIndex = startIndex;
+        _dragTargetIndex = startIndex;
+        e.Handled = true;
+    }
+
+    private void ShortcutDragHandle_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!OwnsShortcutDragPointer(e)) return;
+
+        var position = e.GetCurrentPoint(ShortcutList).Position;
+        if (ResolveShortcutDropTargetIndex(CaptureRealizedShortcutItemBounds(), position.X, position.Y, _tiles.Count, _dragStartIndex)
+            is { } targetIndex)
+            _dragTargetIndex = targetIndex;
+
+        e.Handled = true;
+    }
+
+    private async void ShortcutDragHandle_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!OwnsShortcutDragPointer(e)) return;
+
+        var position = e.GetCurrentPoint(ShortcutList).Position;
+        var targetIndex = ResolveShortcutDropTargetIndex(
+            CaptureRealizedShortcutItemBounds(), position.X, position.Y, _tiles.Count, _dragStartIndex) ?? _dragTargetIndex;
+        var tileId = _draggedShortcutTileId;
+        var pointerId = _dragPointerId;
+        ClearShortcutDrag();
+        if (pointerId == e.Pointer.PointerId && sender is UIElement handle)
+            handle.ReleasePointerCapture(e.Pointer);
+        e.Handled = true;
+
+        if (tileId is { } movedTileId && _tiles.Any(tile => tile.TileId == movedTileId))
+            await ApplyMutationAsync(new FrontendShortcutMutationIntent(
+                FrontendShortcutMutationKind.Move,
+                TileId: movedTileId,
+                TargetIndex: targetIndex));
+    }
+
+    private void ShortcutDragHandle_PointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        if (!OwnsShortcutDragPointer(e)) return;
+
+        ClearShortcutDrag();
+        if (sender is UIElement handle) handle.ReleasePointerCapture(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void ShortcutDragHandle_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (OwnsShortcutDragPointer(e)) ClearShortcutDrag();
+    }
+
+    private bool OwnsShortcutDragPointer(PointerRoutedEventArgs e) =>
+        _draggedShortcutTileId is not null && _dragPointerId == e.Pointer.PointerId;
+
+    private void ClearShortcutDrag()
+    {
+        _draggedShortcutTileId = null;
+        _dragPointerId = null;
+        _dragStartIndex = 0;
+        _dragTargetIndex = 0;
+    }
+
+    private IReadOnlyList<ShortcutItemBounds> CaptureRealizedShortcutItemBounds()
+    {
+        var bounds = new List<ShortcutItemBounds>();
+        for (var index = 0; index < _tiles.Count; index++)
+        {
+            if (ShortcutList.ContainerFromIndex(index) is not ListViewItem container
+                || container.ActualWidth <= 0 || container.ActualHeight <= 0)
+                continue;
+
+            var origin = container.TransformToVisual(ShortcutList).TransformPoint(new Point(0, 0));
+            bounds.Add(new ShortcutItemBounds(index, origin.X, origin.Y, container.ActualWidth, container.ActualHeight));
+        }
+
+        return bounds;
+    }
+
+    internal static int? ResolveShortcutDropTargetIndex(
+        IReadOnlyList<ShortcutItemBounds> realizedItems,
+        double pointerX,
+        double pointerY,
+        int itemCount,
+        int draggedItemIndex)
+    {
+        if (itemCount <= 0 || draggedItemIndex < 0 || draggedItemIndex >= itemCount
+            || !double.IsFinite(pointerX) || !double.IsFinite(pointerY))
+            return null;
+
+        var items = realizedItems
+            .Where(item => item.Index >= 0 && item.Index < itemCount
+                && double.IsFinite(item.Left) && double.IsFinite(item.Top)
+                && double.IsFinite(item.Width) && double.IsFinite(item.Height)
+                && item.Width > 0 && item.Height > 0)
+            .OrderBy(item => item.Top)
+            .ThenBy(item => item.Left)
+            .ToArray();
+        if (items.Length == 0) return null;
+
+        var rows = new List<List<ShortcutItemBounds>>();
+        foreach (var item in items)
+        {
+            if (rows.Count == 0 || item.Top >= rows[^1].Max(rowItem => rowItem.Top + rowItem.Height))
+                rows.Add([item]);
+            else
+                rows[^1].Add(item);
+        }
+
+        var insertionIndex = items[^1].Index + 1;
+        List<ShortcutItemBounds>? previousRow = null;
+        foreach (var row in rows)
+        {
+            var rowTop = row.Min(item => item.Top);
+            var rowBottom = row.Max(item => item.Top + item.Height);
+            if (pointerY < rowTop)
+            {
+                insertionIndex = previousRow is null
+                    ? row.Min(item => item.Index)
+                    : previousRow.Max(item => item.Index) + 1;
+                break;
+            }
+
+            if (pointerY <= rowBottom)
+            {
+                var itemBeforePointer = row
+                    .OrderBy(item => item.Left)
+                    .FirstOrDefault(item => pointerX < item.Left + item.Width / 2);
+                insertionIndex = itemBeforePointer.Width > 0
+                    ? itemBeforePointer.Index
+                    : row.Max(item => item.Index) + 1;
+                break;
+            }
+
+            previousRow = row;
+        }
+
+        var targetIndex = insertionIndex > draggedItemIndex ? insertionIndex - 1 : insertionIndex;
+        return Math.Clamp(targetIndex, 0, itemCount - 1);
+    }
+
     private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
     {
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
@@ -402,22 +569,6 @@ public sealed partial class ShortcutPage : UserControl
         {
             SetBusy(false);
         }
-    }
-
-    private async void ShortcutList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
-    {
-        if (args.DropResult != DataPackageOperation.Move || args.Items.FirstOrDefault() is not FrontendShortcutEditorTile movedTile)
-        {
-            if (_screenshotFolder is not null) await RefreshIfActiveAsync();
-            return;
-        }
-
-        var targetIndex = _tiles.IndexOf(movedTile);
-        if (targetIndex < 0) return;
-        await ApplyMutationAsync(new FrontendShortcutMutationIntent(
-            FrontendShortcutMutationKind.Move,
-            TileId: movedTile.TileId,
-            TargetIndex: targetIndex));
     }
 
     private async Task RefreshIfActiveAsync()
