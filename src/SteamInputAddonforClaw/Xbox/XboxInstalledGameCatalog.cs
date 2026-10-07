@@ -96,10 +96,7 @@ internal enum XboxInstalledGameCatalogOutcome
 }
 
 internal sealed record XboxInstalledGameCatalogEntry(
-    XboxGameIdentity Identity,
-    string PackageName,
-    string PackageFullName,
-    string ConfigPath);
+    XboxGameIdentity Identity);
 
 internal sealed record XboxInstalledGameCatalogResult(
     XboxInstalledGameCatalogOutcome Outcome,
@@ -182,16 +179,11 @@ internal sealed class XboxInstalledGameCatalog(IXboxInstalledPackageSource? pack
                     XboxGameIdentity.CreateKey(config.StoreId, package.PackageFamilyName, config),
                     FirstNonBlank(config.DefaultDisplayName, package.DisplayName, package.PackageName, PackageIdentity(package)),
                     config.StoreId,
-                    config.TitleId,
-                    BlankToNull(package.PackageFamilyName),
-                    config.IdentityName,
-                    config.IdentityPublisher,
-                    config.IdentityResourceId,
-                    config.Executables);
+                    BlankToNull(package.PackageFamilyName));
 
                 if (seenGameKeys.Add(identity.Key))
                 {
-                    games.Add(new(identity, package.PackageName, package.PackageFullName, configPath));
+                    games.Add(new(identity));
                     AppLog.Info("XboxCatalog", "Installed XBOX game identity accepted.",
                         ("Key", identity.Key), ("PackageFullName", package.PackageFullName),
                         ("PackageFamilyName", identity.PackageFamilyName), ("StoreId", identity.StoreId));

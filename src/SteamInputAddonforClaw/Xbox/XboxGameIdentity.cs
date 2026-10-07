@@ -4,12 +4,7 @@ internal sealed record XboxGameIdentity(
     string Key,
     string DisplayName,
     string? StoreId,
-    string? TitleId,
-    string? PackageFamilyName,
-    string IdentityName,
-    string IdentityPublisher,
-    string? IdentityResourceId,
-    IReadOnlyList<XboxGameExecutable> Executables)
+    string? PackageFamilyName)
 {
     internal static string CreateKey(string? storeId, string? packageFamilyName, MicrosoftGameConfig config)
     {

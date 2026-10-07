@@ -111,7 +111,7 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
     }
 
     [Fact]
-    public async Task Package_family_key_ignores_version_display_name_and_config_path_changes()
+    public async Task Package_family_key_ignores_version_and_display_name_changes()
     {
         var originalConfig = ValidConfig.Replace("<StoreId>9NABC123</StoreId>", string.Empty, StringComparison.Ordinal);
         var updatedConfig = originalConfig.Replace("Sample title", "Updated title", StringComparison.Ordinal);
@@ -126,7 +126,6 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
         var updatedGame = Assert.Single(updated.Games);
         Assert.Equal("pfn:Sample_family", originalGame.Identity.Key);
         Assert.Equal(originalGame.Identity.Key, updatedGame.Identity.Key);
-        Assert.NotEqual(originalGame.ConfigPath, updatedGame.ConfigPath);
         Assert.NotEqual(originalGame.Identity.DisplayName, updatedGame.Identity.DisplayName);
     }
 
@@ -161,10 +160,8 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
         Assert.Equal(XboxInstalledGameCatalogOutcome.Completed, result.Outcome);
         Assert.Equal("store:9NABC123", game.Identity.Key);
         Assert.Equal("Sample title", game.Identity.DisplayName);
-        Assert.Equal("Sample_1.0.0.0_x64__test", game.PackageFullName);
-        Assert.Equal(Path.Combine(root, "MicrosoftGame.config"), game.ConfigPath);
-        Assert.Equal("12345678", game.Identity.TitleId);
-        Assert.Equal(2, game.Identity.Executables.Count);
+        Assert.Equal("9NABC123", game.Identity.StoreId);
+        Assert.Equal("Sample_family", game.Identity.PackageFamilyName);
     }
 
     [Fact]
@@ -220,7 +217,8 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
             Package("Sample_1.0.0.0_x64__test", "Sample_family", "Sample", Location("Effective", root), Location("Installed", root.ToUpperInvariant()))));
 
         var game = Assert.Single(result.Games);
-        Assert.Equal(Path.Combine(root, "MicrosoftGame.config"), game.ConfigPath);
+        Assert.Equal("store:9NABC123", game.Identity.Key);
+        Assert.Equal("Sample title", game.Identity.DisplayName);
     }
 
     [Fact]
@@ -232,7 +230,9 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
         var result = await ScanAsync(new FakePackageSource(true, null,
             Package("Sample_1.0.0.0_x64__test", "Sample_family", "Sample", Location("Effective", effectiveRoot), Location("Installed", installedRoot))));
 
-        Assert.Equal(Path.Combine(installedRoot, "MicrosoftGame.config"), Assert.Single(result.Games).ConfigPath);
+        var game = Assert.Single(result.Games);
+        Assert.Equal("store:9NABC123", game.Identity.Key);
+        Assert.Equal("Sample title", game.Identity.DisplayName);
     }
 
     [Fact]
@@ -246,18 +246,20 @@ public sealed class XboxInstalledGameCatalogTests : IDisposable
 
         var game = Assert.Single(result.Games);
         Assert.Equal("store:9NEFFECTIVE", game.Identity.Key);
-        Assert.Equal(Path.Combine(effectiveRoot, "MicrosoftGame.config"), game.ConfigPath);
+        Assert.Equal("Sample title", game.Identity.DisplayName);
     }
 
     [Fact]
-    public async Task Package_metadata_config_path_is_used_without_payload_path_assumptions()
+    public async Task Package_metadata_config_location_is_accepted_without_payload_path_assumptions()
     {
         var metadataRoot = CreatePackage("package-metadata-on-c", ValidConfig);
 
         var result = await ScanAsync(new FakePackageSource(true, null,
             Package("Sample_1.0.0.0_x64__test", "Sample_family", "Sample", Location("Installed", metadataRoot))));
 
-        Assert.Equal(Path.Combine(metadataRoot, "MicrosoftGame.config"), Assert.Single(result.Games).ConfigPath);
+        var game = Assert.Single(result.Games);
+        Assert.Equal("store:9NABC123", game.Identity.Key);
+        Assert.Equal("Sample title", game.Identity.DisplayName);
     }
 
     [Theory]

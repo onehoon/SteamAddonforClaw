@@ -111,13 +111,8 @@ public sealed class XboxGameCatalogFrontendTests
             key,
             displayName,
             "store-internal",
-            "title-internal",
-            "family-internal",
-            "IdentityName",
-            "Publisher",
-            "Resource",
-            []);
-        return new(identity, "PackageName", "PackageFullName", @"C:\\Package\\MicrosoftGame.config");
+            "family-internal");
+        return new(identity);
     }
 
     private sealed class NoOpStartupManager : IWindowsStartupManager

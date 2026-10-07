@@ -34,7 +34,8 @@ public sealed partial class XboxPage : UserControl
     internal void Deactivate()
     {
         _active = false;
-        CancelScan(); CancelCapture(); CancelTdpDebounce(); CancelFpsDebounce();
+        // Top-level navigation hides the page but does not retire its selected profile context.
+        CancelScan(); CancelCapture();
     }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
@@ -167,7 +168,34 @@ public sealed partial class XboxPage : UserControl
         catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(key, $"{feature} could not be updated.", exception); }
     }
     private void FpsSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e) { if (!_active || _suppressFpsEvents || _frontend is null || _selectedGame is null) return; var value = Math.Clamp((int)Math.Round(e.NewValue), 40, 120); var ac = ReferenceEquals(sender, AcFpsSlider); if (ac) { _acFpsDraft = value; AcFpsText.Text = $"{value} FPS"; _acFpsGeneration++; _acFpsDebounce?.Cancel(); _acFpsDebounce = new(); _ = SubmitFpsAfterDelayAsync(true, value, _acFpsGeneration, _acFpsDebounce.Token); } else { _dcFpsDraft = value; DcFpsText.Text = $"{value} FPS"; _dcFpsGeneration++; _dcFpsDebounce?.Cancel(); _dcFpsDebounce = new(); _ = SubmitFpsAfterDelayAsync(false, value, _dcFpsGeneration, _dcFpsDebounce.Token); } }
-    private async Task SubmitFpsAfterDelayAsync(bool ac, int value, long generation, CancellationToken token) { string? key = null; try { await Task.Delay(275, token); if ((ac ? generation != _acFpsGeneration : generation != _dcFpsGeneration) || !_active || _frontend is null || _selectedGame is null) return; key = _selectedGame.Key; var result = ac ? await _frontend.SetXboxGameProfileFpsLimitAcAsync(key, value) : await _frontend.SetXboxGameProfileFpsLimitDcAsync(key, value); if (IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) { Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Intel FPS Limit could not be updated.", null); } } catch (OperationCanceledException) { } catch (Exception ex) { if (key is not null) await RestoreSelectedAfterMutationFailureAsync(key, "Intel FPS Limit could not be updated.", ex); } }
+    private async Task SubmitFpsAfterDelayAsync(bool ac, int value, long generation, CancellationToken token)
+    {
+        string? key = null;
+        try
+        {
+            await Task.Delay(300, token);
+            if ((ac ? generation != _acFpsGeneration : generation != _dcFpsGeneration)
+                || _frontend is null || _selectedGame is null)
+                return;
+
+            key = _selectedGame.Key;
+            var result = ac
+                ? await _frontend.SetXboxGameProfileFpsLimitAcAsync(key, value)
+                : await _frontend.SetXboxGameProfileFpsLimitDcAsync(key, value);
+            if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key))
+                return;
+
+            Render(result.Snapshot);
+            if (!result.Succeeded)
+                ShowError(result.FailureMessage ?? "Intel FPS Limit could not be updated.", null);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            if (_active && key is not null && _selectedGame?.Key == key)
+                await RestoreSelectedAfterMutationFailureAsync(key, "Intel FPS Limit could not be updated.", exception);
+        }
+    }
     private void CancelFpsDebounce() { _acFpsGeneration++; _dcFpsGeneration++; _acFpsDebounce?.Cancel(); _dcFpsDebounce?.Cancel(); _acFpsDebounce = _dcFpsDebounce = null; }
     private static void ConfigureSlider(Slider slider, int? minimum, int? maximum, int value) { if (minimum is not { } min || maximum is not { } max) { slider.IsEnabled = false; return; } slider.Minimum = min; slider.Maximum = max; slider.StepFrequency = 1; slider.Value = Math.Clamp(value, min, max); }
 
@@ -308,7 +336,33 @@ public sealed partial class XboxPage : UserControl
     private async Task SubmitTdpAfterDelayAsync(long generation, CancellationToken token)
     {
         string? key = null;
-        try { await Task.Delay(300, token); if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), ProfileEnabledToggle.IsOn) || !_active || _frontend is null || _selectedGame is null || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2) return; key = _selectedGame.Key; var result = await _frontend.SetXboxGameProfileTdpAsync(key, new(true, new(ac1, ac2), new(dc1, dc2))); if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key)) return; var preserveDraft = ShouldPreserveDirtyTdpDraft(_tdpDraftDirty, generation, _tdpGeneration); if (!preserveDraft) _tdpDraftDirty = false; Render(result.Snapshot, preserveDraft); if (!result.Succeeded) ShowError(result.FailureMessage ?? "TDP could not be updated.", null); } catch (OperationCanceledException) { } catch (Exception exception) { if (key is not null) await RestoreSelectedAfterMutationFailureAsync(key, "TDP could not be updated.", exception); }
+        try
+        {
+            await Task.Delay(300, token);
+            if (!DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpGeneration), ProfileEnabledToggle.IsOn)
+                || _frontend is null || _selectedGame is null
+                || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2)
+                return;
+
+            key = _selectedGame.Key;
+            var result = await _frontend.SetXboxGameProfileTdpAsync(key, new(true, new(ac1, ac2), new(dc1, dc2)));
+            var preserveDraft = ShouldPreserveDirtyTdpDraft(_tdpDraftDirty, generation, _tdpGeneration);
+            if (!preserveDraft)
+                _tdpDraftDirty = false;
+
+            if (!IsCurrentProfileResponse(_active, _selectedGame?.Key, key, result.Snapshot.Key))
+                return;
+
+            Render(result.Snapshot, preserveDraft);
+            if (!result.Succeeded)
+                ShowError(result.FailureMessage ?? "TDP could not be updated.", null);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            if (_active && key is not null && _selectedGame?.Key == key)
+                await RestoreSelectedAfterMutationFailureAsync(key, "TDP could not be updated.", exception);
+        }
     }
     private void SetTdpText() { AcPl1Value.Text = _acPl1 is { } x ? $"{x} W" : "— W"; AcPl2Value.Text = _acPl2 is { } y ? $"{y} W" : "— W"; DcPl1Value.Text = _dcPl1 is { } z ? $"{z} W" : "— W"; DcPl2Value.Text = _dcPl2 is { } w ? $"{w} W" : "— W"; }
     private void CancelTdpDebounce() { _tdpGeneration++; _tdpDebounce?.Cancel(); _tdpDebounce = null; }
