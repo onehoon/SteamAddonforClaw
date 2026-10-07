@@ -2365,6 +2365,126 @@ Do not implement as part of this architecture:
 
 ---
 
+## 24A. Post-implementation code audit — 2026-10-07
+
+This audit was performed after PR #701 against the completed XBOX implementation. It distinguishes actual product cleanup from intentionally unsupported scenarios and avoids reopening field-proven architecture without evidence.
+
+### 24A.1 Overall production ownership
+
+The production XBOX path has one authority at each boundary:
+
+~~~text
+installed catalog
+→ XboxInstalledGameCatalog
+
+running-game detection
+→ XboxGameSessionRuntime
+
+active target
+→ ActiveProfileTarget
+
+profile persistence
+→ ProfileStore + ProfileMutationGate + XboxGameProfileMutations
+
+performance/display apply
+→ the same CPU / TDP / Power / FPS / Resolution runtime owners used by Steam
+
+per-game rear-button mapping
+→ XboxGameProfile.Controller.BackButtonMapping
+→ one host cached effective non-Steam override
+→ the existing CanonicalXbox360InputPublisher
+
+Overlay editing
+→ generic Quick Settings page
+→ existing typed XBOX mutation methods
+~~~
+
+No second XBOX detector, profile store, hardware-apply owner, M1/M2 publisher, or Overlay-specific persistence path remains.
+
+### 24A.2 Main App XBOX pending-slider navigation behavior — cleanup required
+
+The Main App XBOX page currently uses local trailing-delay drafts:
+
+~~~text
+TDP  → 300 ms
+FPS  → 275 ms
+~~~
+
+but `XboxPage.Deactivate()` cancels both pending drafts when the user leaves the XBOX top-level page. Returning from the selected-game detail to the XBOX catalog also clears/cancels those drafts.
+
+This differs from the completed Overlay policy, where a normal user dismissal flushes pending Quick Settings edits, and it also differs from the Main App Steam Profile top-level deactivation behavior.
+
+A normal user can therefore move a TDP/FPS slider and navigate away within the short debounce window, causing the newest visible edit not to be persisted.
+
+Treat this as a small user-visible cleanup item, not as a reason to add another debounce manager/state machine. Prefer the smallest change that preserves the current pending generation against ordinary top-level navigation while retaining cancellation for a real profile-context change (different selected game / return-to-catalog if that action is intentionally defined as abandoning the draft / shutdown).
+
+### 24A.3 Debounce policy inventory
+
+Current policies are intentionally surface-local but not numerically identical:
+
+~~~text
+Main App Steam Profile
+  TDP = 300 ms
+  FPS = 275 ms
+
+Main App XBOX
+  TDP = 300 ms
+  FPS = 275 ms
+  M1/M2 = ordered whole-record save chain, no debounce
+
+Overlay Quick Settings
+  slider rows = shared TrailingDebounce300
+  XBOX M1/M2 = shared 300 ms grouped whole-record draft
+  Use-global toggle = immediate
+~~~
+
+There is no XBOX-only Runtime debounce.
+
+If section 24A.2 is fixed, a tiny shared UI constant or simply aligning Main App FPS to the existing 300 ms Quick Settings policy is acceptable. Do not introduce a generic debounce service/manager solely for this.
+
+### 24A.4 Diagnostic-era post-classification data — non-blocking cleanup
+
+The retired catalog/session diagnostic UI and RPC contracts are gone, but a few production-internal DTOs still carry evidence that is no longer read after classification:
+
+- `XboxGameIdentity`: `TitleId`, `IdentityName`, `IdentityPublisher`, `IdentityResourceId`, and `Executables` are populated but are not consumed from the identity object after construction. The config parser still needs those values to create a key and to verify executable identity; that does not require retaining them in the final identity DTO.
+- `XboxInstalledGameCatalogEntry`: `PackageName`, `PackageFullName`, and `ConfigPath` are retained on the accepted entry but the production frontend consumes only `Identity`.
+- `XboxGameProcessMatch`: `RunningProcessPath` and `PackageFullName` are retained after matching but the production session owner consumes `Identity`, `ProcessId`, and `RunningExecutableName`.
+
+This is cleanup only; it is not a correctness blocker. If removed, keep the useful acceptance/failure logging at the catalog/evaluator boundary rather than moving diagnostic state into a new object.
+
+### 24A.5 Developer menu / diagnostic retirement
+
+No XBOX installed-catalog diagnostic page, active-game-session diagnostic page, or corresponding diagnostic RPC remains in production source.
+
+Historical protocol comments documenting versions 50/52/53/58 are intentionally retained as protocol history.
+
+The remaining Developer-menu items with `Xbox360` terminology are controller/rumble diagnostics for the Full1902 virtual Xbox360 presentation. They are not XBOX/Game Pass game-detection leftovers and must not be removed merely as part of XBOX game-feature cleanup.
+
+Likewise the GameInput System Button Probe is a WING/Guide identity diagnostic, not an XBOX game-session detector.
+
+### 24A.6 Multiple positive XBOX processes
+
+The production runtime intentionally does not arbitrate a second different positive XBOX process while the current active process remains live. This matches the field-proven single-game scope and the earlier PR7 contract.
+
+A cached second positive process is not automatically promoted when the current active process exits. Do not add generic multi-game scoring or a process graph.
+
+If later physical evidence proves a supported title performs a normal launcher/bootstrap → main-executable handoff where two valid processes of the **same canonical XBOX key** overlap, address exactly that lifecycle with a narrow same-key promotion rule and regression test. Until such evidence exists, this is not a current blocker.
+
+### 24A.7 Review conclusion
+
+The XBOX feature family is code-complete for the currently supported scope after PR #701.
+
+Remaining work is:
+
+1. small Main App XBOX pending-slider navigation cleanup from section 24A.2;
+2. optional diagnostic-era DTO slimming from section 24A.4;
+3. later user-run physical lifecycle/behavior validation already deferred by Phase X5;
+4. final physical validation of the packaged Xbox app front-button action.
+
+Do not reopen Custom EXE, Epic/GOG, generic multi-game arbitration, polling, or additional controller/profile authority as part of these cleanup items.
+
+---
+
 ## 25. Architecture invariants
 
 The implementation is correct only if all of the following remain true.
