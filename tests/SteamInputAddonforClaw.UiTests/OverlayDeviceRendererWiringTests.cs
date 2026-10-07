@@ -441,10 +441,28 @@ public sealed class OverlayDeviceRendererWiringTests
         Assert.Contains("No game is currently running. Start a game to configure its profile.", profile);
         Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", profile);
         Assert.Contains("VerticalAlignment = VerticalAlignment.Center", profile);
-        Assert.Contains("_noActiveGameMessage.FontSize = 20", profile);
-        Assert.Contains("page is not { PageId: QuickSettingsPageId.Profile, Available: true, ProfileTarget: { IsStructurallyValid: true } }", profile);
-        Assert.Contains("_noActiveGameMessage.Visibility = noActiveGame ? Visibility.Visible : Visibility.Collapsed", profile);
-        Assert.Contains("_profileDetailRoot.Visibility = noActiveGame ? Visibility.Collapsed : Visibility.Visible", profile);
+        Assert.Contains("_profileStatusMessage.FontSize = 20", profile);
+        Assert.Contains("var activeProfileReady = HasRenderableActiveProfile(page);", profile);
+        Assert.Contains("_profileStatusMessage.Text = ResolveProfileStatusMessage(page);", profile);
+        Assert.Contains("_profileStatusMessage.Visibility = Visibility.Collapsed", profile);
+        Assert.Contains("_profileDetailRoot.Visibility = Visibility.Collapsed", profile);
+    }
+
+    [Fact]
+    public void Profile_status_distinguishes_no_game_from_an_unavailable_active_xbox_profile()
+    {
+        const string noGameMessage = "No game is currently running. Start a game to configure its profile.";
+        const string xboxFailureMessage = "The active XBOX game Profile is unavailable.";
+        var noGamePage = QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null, noGameMessage);
+        var unavailableXboxPage = QuickSettingsPageSnapshot.Unavailable(
+            QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForXbox("xbox:active"), xboxFailureMessage);
+
+        Assert.False(OverlayWindow.HasRenderableActiveProfile(noGamePage));
+        Assert.Equal(noGameMessage, OverlayWindow.ResolveProfileStatusMessage(noGamePage));
+        Assert.False(OverlayWindow.HasRenderableActiveProfile(unavailableXboxPage));
+        Assert.Equal(xboxFailureMessage, OverlayWindow.ResolveProfileStatusMessage(unavailableXboxPage));
+        Assert.NotEqual(noGameMessage, OverlayWindow.ResolveProfileStatusMessage(unavailableXboxPage));
+        Assert.Equal("Profile settings are unavailable.", OverlayWindow.ResolveProfileStatusMessage(null));
     }
 
     // SF-V2-09 section 32/13.1: exactly one page-local surface type/dictionary backs both pages --

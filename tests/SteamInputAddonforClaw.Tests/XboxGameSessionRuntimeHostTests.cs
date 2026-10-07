@@ -66,6 +66,19 @@ public sealed class XboxGameSessionRuntimeHostTests
     }
 
     [Fact]
+    public void Active_XBOX_display_name_enrichment_reads_only_the_matching_live_session()
+    {
+        var host = ReadSource("src/SteamInputAddonforClaw/Hosting/AddonProcessHost.cs");
+        var frontend = ReadSource("src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs");
+
+        Assert.Contains("activeXboxDisplayNameSource: key => _xboxGameSessionRuntime?.ActiveGame is { } activeGame", host, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(activeGame.Key, key, StringComparison.Ordinal)", host, StringComparison.Ordinal);
+        Assert.Contains("? activeGame.DisplayName", host, StringComparison.Ordinal);
+        Assert.Contains("if (string.IsNullOrWhiteSpace(displayName))", frontend, StringComparison.Ordinal);
+        Assert.Contains("displayName = _activeXboxDisplayNameSource?.Invoke(key);", frontend, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Frontend_contract_removes_diagnostic_rpc_and_advances_only_frontend_protocol()
     {
         var wire = ReadSource("src/SteamInputAddonforClaw.FrontendTransport/FrontendWire.cs");

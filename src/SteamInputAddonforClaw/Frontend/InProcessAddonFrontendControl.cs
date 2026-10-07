@@ -82,6 +82,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly XboxGameProfileMutations? _xboxGameProfileMutations;
     private readonly GameDisplayResolutionRuntime? _displayResolutionRuntime;
     private readonly Func<ActiveProfileTarget>? _activeProfileTargetSource;
+    private readonly Func<string, string?>? _activeXboxDisplayNameSource;
     private readonly Func<string, bool>? _reconcileXboxBackButtonMapping;
     // Narrow MSI Center M startup control (work order PR1). Null is a valid passive state -- the
     // capture/mutation just report unavailable, like every other null-runtime fallback here.
@@ -157,7 +158,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         Func<CancellationToken, Task<XboxInstalledGameCatalogResult>>? scanXboxGames = null,
         XboxGameProfileMutations? xboxGameProfileMutations = null,
         Func<ActiveProfileTarget>? activeProfileTargetSource = null,
-        Func<string, bool>? reconcileXboxBackButtonMapping = null)
+        Func<string, bool>? reconcileXboxBackButtonMapping = null,
+        Func<string, string?>? activeXboxDisplayNameSource = null)
     {
         _frontButtonMappingAvailable = frontButtonMappingAvailable;
         _controllerLedAvailable = controllerLedAvailable;
@@ -175,6 +177,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _scanXboxGames = scanXboxGames ?? (token => new XboxInstalledGameCatalog().ScanAsync(token));
         _xboxGameProfileMutations = xboxGameProfileMutations;
         _activeProfileTargetSource = activeProfileTargetSource;
+        _activeXboxDisplayNameSource = activeXboxDisplayNameSource;
         _reconcileXboxBackButtonMapping = reconcileXboxBackButtonMapping;
         _displayResolutionRuntime = displayResolutionRuntime;
         _fanProbeTransport = fanProbeTransport;
@@ -538,7 +541,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var limits = _tdpRuntime?.CaptureSnapshot().Policy is { } policy
             ? new FrontendTdpLimits(policy.Pl1MinimumWatts, policy.Pl1MaximumWatts, policy.Pl2MinimumWatts, policy.Pl2MaximumWatts)
             : null;
-        return new(key, profile.DisplayName, captured.Exists, captured.Exists && profile.Enabled,
+        var displayName = profile.DisplayName;
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = _activeXboxDisplayNameSource?.Invoke(key);
+        return new(key, displayName, captured.Exists, captured.Exists && profile.Enabled,
             new(profile.Performance.CpuBoost!.Enabled, profile.Performance.CpuBoost.Ac, profile.Performance.CpuBoost.Dc),
             new(profile.Performance.Tdp!.Enabled,
                 new(profile.Performance.Tdp.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts),

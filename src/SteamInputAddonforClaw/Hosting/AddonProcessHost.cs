@@ -602,6 +602,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime,
             activeProfileTargetSource: CaptureActiveProfileTarget,
             reconcileXboxBackButtonMapping: key => ReconcileEffectiveBackButtonMapping($"XboxProfileMutation:{key}"),
+            activeXboxDisplayNameSource: key => _xboxGameSessionRuntime?.ActiveGame is { } activeGame
+                && string.Equals(activeGame.Key, key, StringComparison.Ordinal)
+                    ? activeGame.DisplayName
+                    : null,
             intelFpsRuntime: _intelFpsRuntime, fanProbeTransport: _tdpTransport,
             batteryChargeLimitRuntime: _batteryChargeLimitRuntime,
             batteryChargeLimitHardware: _batteryChargeLimitHardware,

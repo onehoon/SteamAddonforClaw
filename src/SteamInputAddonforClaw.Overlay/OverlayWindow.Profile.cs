@@ -7,9 +7,10 @@ namespace SteamInputAddonforClaw.Overlay;
 public sealed partial class OverlayWindow
 {
     private const string NoActiveGameMessage = "No game is currently running. Start a game to configure its profile.";
+    private const string UnavailableProfileMessage = "Profile settings are unavailable.";
 
     private FrameworkElement? _profileDetailRoot;
-    private TextBlock? _noActiveGameMessage;
+    private TextBlock? _profileStatusMessage;
 
     private FrameworkElement BuildProfilePage()
     {
@@ -23,7 +24,7 @@ public sealed partial class OverlayWindow
         _profileDetailRoot.Visibility = Visibility.Collapsed;
         root.Children.Add(_profileDetailRoot);
 
-        _noActiveGameMessage = new TextBlock
+        _profileStatusMessage = new TextBlock
         {
             Text = NoActiveGameMessage,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -32,9 +33,9 @@ public sealed partial class OverlayWindow
             TextWrapping = TextWrapping.Wrap,
             FontSize = 20,
         };
-        OverlayQamResources.ApplyTextStyle(_noActiveGameMessage, "QamBodyStrongTextStyle");
-        _noActiveGameMessage.FontSize = 20;
-        root.Children.Add(_noActiveGameMessage);
+        OverlayQamResources.ApplyTextStyle(_profileStatusMessage, "QamBodyStrongTextStyle");
+        _profileStatusMessage.FontSize = 20;
+        root.Children.Add(_profileStatusMessage);
         return root;
     }
 
@@ -69,10 +70,24 @@ public sealed partial class OverlayWindow
 
     private void ApplyProfilePresentation(QuickSettingsPageSnapshot? page)
     {
-        if (_profileDetailRoot is null || _noActiveGameMessage is null) return;
+        if (_profileDetailRoot is null || _profileStatusMessage is null) return;
 
-        var noActiveGame = page is not { PageId: QuickSettingsPageId.Profile, Available: true, ProfileTarget: { IsStructurallyValid: true } };
-        _noActiveGameMessage.Visibility = noActiveGame ? Visibility.Visible : Visibility.Collapsed;
-        _profileDetailRoot.Visibility = noActiveGame ? Visibility.Collapsed : Visibility.Visible;
+        var activeProfileReady = HasRenderableActiveProfile(page);
+        if (activeProfileReady)
+        {
+            _profileStatusMessage.Visibility = Visibility.Collapsed;
+            _profileDetailRoot.Visibility = Visibility.Visible;
+            return;
+        }
+
+        _profileDetailRoot.Visibility = Visibility.Collapsed;
+        _profileStatusMessage.Text = ResolveProfileStatusMessage(page);
+        _profileStatusMessage.Visibility = Visibility.Visible;
     }
+
+    internal static bool HasRenderableActiveProfile(QuickSettingsPageSnapshot? page) =>
+        page is { PageId: QuickSettingsPageId.Profile, Available: true, ProfileTarget: { IsStructurallyValid: true } };
+
+    internal static string ResolveProfileStatusMessage(QuickSettingsPageSnapshot? page) =>
+        page?.Message ?? UnavailableProfileMessage;
 }
