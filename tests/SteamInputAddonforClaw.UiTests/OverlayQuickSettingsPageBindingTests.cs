@@ -71,7 +71,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
         uint appId, bool profileEnabled = true,
         int pl1Ac = 20, int pl2Ac = 25, int pl1Dc = 15, int pl2Dc = 20, int cpuAc = 20, int cpuDc = 10,
         IReadOnlyList<QuickSettingsLinkedSliderConstraint>? linked = null) => new(
-        QuickSettingsPageId.Profile, appId, true, null,
+        QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(appId), true, null,
         [
             new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, "Game " + appId,
             [
@@ -272,7 +272,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
 
         var intent = mutate.Calls[0];
         Assert.Equal(QuickSettingsPageId.Device, intent.PageId);
-        Assert.Null(intent.AppId);
+        Assert.Null(intent.ProfileTarget);
         Assert.Equal(QuickSettingsRowId.DeviceCpuBoostAc, intent.EditedRowId);
         var value = Assert.Single(intent.Values);
         Assert.Equal(QuickSettingsRowId.DeviceCpuBoostAc, value.RowId);
@@ -774,7 +774,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
         var flush = binding.FlushPendingUserEditsAsync();
         await SpinUntilAsync(() => mutate.Calls.Count == 1, "Profile TDP flush submitted", uiThread);
         var intent = Assert.Single(mutate.Calls);
-        Assert.Equal(480u, intent.AppId);
+        Assert.Equal(480u, intent.ProfileTarget?.SteamAppId);
         Assert.Equal(QuickSettingsCommitGroupId.ProfileTdpConfiguration,
             binding.FindRow(QuickSettingsRowId.ProfileTdpAcPl1) is { } row ? row.CommitGroupId : null);
         Assert.Equal(new[]
@@ -884,7 +884,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
 
         Assert.Empty(mutate.Calls);
         Assert.Empty(binding.PendingKeys);
-        Assert.Equal(570u, binding.AuthoritativePage.AppId);
+        Assert.Equal(570u, binding.AuthoritativePage.ProfileTarget?.SteamAppId);
     }
 
     [Fact]
@@ -906,7 +906,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
 
         binding.ApplyAuthoritativePage(ProfilePage(570, pl1Ac: 26));
         var currentGamePage = binding.BuildEffectivePage();
-        Assert.Equal(570u, currentGamePage.AppId);
+        Assert.Equal(570u, currentGamePage.ProfileTarget?.SteamAppId);
         var currentGameRow = Assert.Single(
             currentGamePage.Sections.SelectMany(section => section.Rows),
             row => row.RowId == QuickSettingsRowId.ProfileTdpAcPl1);
@@ -978,7 +978,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
 
         var intent = mutate.Calls[0];
         Assert.Equal(QuickSettingsPageId.Profile, intent.PageId);
-        Assert.Equal(480u, intent.AppId);
+        Assert.Equal(480u, intent.ProfileTarget?.SteamAppId);
         Assert.Equal(QuickSettingsRowId.ProfileCpuBoostAc, intent.EditedRowId);
     }
 
@@ -995,7 +995,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
 
         var intent = mutate.Calls[0];
         Assert.Equal(QuickSettingsPageId.Profile, intent.PageId);
-        Assert.Equal(480u, intent.AppId);
+        Assert.Equal(480u, intent.ProfileTarget?.SteamAppId);
         Assert.Equal(5, intent.Values.Count);
         Assert.Equal(
         [
@@ -1020,7 +1020,7 @@ public sealed class OverlayQuickSettingsPageBindingTests
         binding.ApplyAuthoritativePage(ProfilePage(490)); // active game switched from 480 to 490
 
         Assert.Empty(binding.PendingKeys);
-        Assert.Equal(490u, binding.AuthoritativePage.AppId);
+        Assert.Equal(490u, binding.AuthoritativePage.ProfileTarget?.SteamAppId);
 
         delay.Elapse();
         await Task.Delay(40);
@@ -1047,6 +1047,29 @@ public sealed class OverlayQuickSettingsPageBindingTests
         uiThread.Pump();
 
         Assert.Same(bPage, binding.AuthoritativePage); // B remains current; A's result is discarded
+        Assert.Null(binding.LastLocalFailureMessage);
+    }
+
+    [Fact]
+    public async Task Late_steam_result_cannot_replace_a_new_xbox_profile_target()
+    {
+        var delay = new ManualDelay();
+        var mutate = new GatedMutate();
+        var uiThread = new UiThreadStub();
+        using var binding = NewProfileBinding(ProfilePage(480), mutate.Func, uiThread, delay.Func);
+
+        binding.ScheduleSlider(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(40));
+        delay.Elapse();
+        await SpinUntilAsync(() => mutate.Calls.Count == 1, "Steam mutation submitted", uiThread);
+
+        var xboxPage = ProfilePage(490) with { ProfileTarget = QuickSettingsProfileTarget.ForXbox("xbox:test") };
+        binding.ApplyAuthoritativePage(xboxPage);
+        mutate.CompleteNext(Success(ProfilePage(480, cpuAc: 40)));
+        await Task.Delay(60);
+        uiThread.Pump();
+
+        Assert.Same(xboxPage, binding.AuthoritativePage);
+        Assert.Equal(QuickSettingsProfileTarget.ForXbox("xbox:test"), binding.AuthoritativePage.ProfileTarget);
         Assert.Null(binding.LastLocalFailureMessage);
     }
 

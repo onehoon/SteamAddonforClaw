@@ -8,11 +8,11 @@ namespace SteamInputAddonforClaw.Tests;
 // dedicated unit-test seam for HandleOverlayQuickSettingsMutationAsync/OnFrontendStateInvalidatedForOverlay
 // (constructing a fully wired host with a captured, visible Overlay and a fake IAddonFrontendControl
 // would require a disproportionate new test-only surface on a class this size). Per the work order's
-// own escape hatch, this is the smallest source-contract coverage of the two production guarantees
-// that changed here: the historical Device-only Overlay mutation gate is gone (Profile now reaches
-// the shared adapter through the exact same path), and the narrow before/after active-AppId
-// comparison that requests one backstop Quick Settings refresh when a mutation's own
-// StateInvalidated suppression could otherwise leave a stale game context on screen. Behavior
+// own escape hatch, this is the smallest source-contract coverage of the production guarantees
+// changed here: the historical Device-only Overlay mutation gate is gone (Profile now reaches the
+// shared adapter through the exact same path), and the narrow before/after active-target comparison
+// that requests one backstop Quick Settings refresh when a mutation's own StateInvalidated
+// suppression could otherwise leave a stale game context on screen. Behavior
 // coverage of the resulting publication path itself lives in OverlayTransportTests
 // (RefreshQuickSettingsAsync_*) and OverlayQuickSettingsPageBindingTests (context safety).
 public sealed class AddonProcessHostOverlayQuickSettingsContractTests
@@ -36,18 +36,18 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.DoesNotContain("ProfileStore", handler);
     }
 
-    // Section 10/30.1: the exact before/after AppId comparison the work order specifies -- captured
-    // before the mutation, compared after, gated by the same shutdown/capture/visible facts the
-    // ordinary StateInvalidated handler uses, requesting the SAME generic two-page refresh.
+    // Section 15/30.1: the exact before/after Steam/XBOX target comparison the work order specifies --
+    // captured before the mutation, compared after, gated by the same shutdown/capture/visible facts
+    // the ordinary StateInvalidated handler uses, requesting the SAME generic two-page refresh.
     [Fact]
-    public void Overlay_mutation_handler_requests_one_backstop_refresh_when_the_active_app_id_changed_in_flight()
+    public void Overlay_mutation_handler_requests_one_backstop_refresh_when_the_active_target_changed_in_flight()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
         var handler = ExtractMethod(source, "private async Task<QuickSettingsMutationResult> HandleOverlayQuickSettingsMutationAsync");
 
-        Assert.Contains("var activeAppIdBefore = _runtimeHost?.ActualRunningAppId ?? 0;", handler);
-        Assert.Contains("var activeAppIdAfter = _runtimeHost?.ActualRunningAppId ?? 0;", handler);
-        Assert.Contains("activeAppIdAfter != activeAppIdBefore", handler);
+        Assert.Contains("var activeTargetBefore = CaptureActiveProfileTarget();", handler);
+        Assert.Contains("var activeTargetAfter = CaptureActiveProfileTarget();", handler);
+        Assert.Contains("activeTargetAfter != activeTargetBefore", handler);
         Assert.Contains("_overlayController.RefreshQuickSettingsAsync()", handler);
 
         // No new epoch/state-machine field -- just the local before/after locals inside this method.
@@ -61,7 +61,7 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
 
         Assert.Contains("_overlayController.BindQuickSettingsAuthority(", source);
-        Assert.Contains("captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, appId: null, token)", source);
+        Assert.Contains("captureDevicePage: token => _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, profileTarget: null, token)", source);
         Assert.Contains("captureProfilePage: token => CaptureOverlayProfileQuickSettingsPageAsync(token)", source);
     }
 
@@ -153,20 +153,35 @@ public sealed class AddonProcessHostOverlayQuickSettingsContractTests
         Assert.Contains("\"ShortcutScreenshot\"", screenshot, StringComparison.Ordinal);
     }
 
-    // Section 7.3/7.4: no active game (AppId 0) resolves to an explicit Unavailable page WITHOUT
-    // calling into the frontend control at all -- never a fake AppId-0 profile, never a direct
-    // ProfileStore/game scan.
+    // Section 10/18: no active target resolves to the exact no-game Unavailable page WITHOUT calling
+    // into the frontend control at all -- never a fake Steam target, catalog, or direct ProfileStore/game scan.
     [Fact]
     public void Overlay_profile_capture_resolves_no_active_game_without_calling_the_frontend_control()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
         var method = ExtractMethod(source, "private Task<QuickSettingsPageSnapshot> CaptureOverlayProfileQuickSettingsPageAsync");
 
-        Assert.Contains("var appId = _runtimeHost?.ActualRunningAppId ?? 0;", method);
-        Assert.Contains("if (appId == 0)", method);
-        Assert.Contains("QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId: null,", method);
-        // The appId==0 branch returns before this call is ever reached.
-        Assert.Contains("return _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId, token);", method);
+        Assert.Contains("var target = CaptureActiveQuickSettingsProfileTarget();", method);
+        Assert.Contains("if (target is null)", method);
+        Assert.Contains("QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, null,", method);
+        Assert.Contains("No game is currently running. Start a game to configure its profile.", method);
+        // The target == null branch returns before this call is ever reached.
+        Assert.Contains("return _frontendControl!.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, target, token);", method);
+    }
+
+    [Fact]
+    public void Steam_and_xbox_active_target_changes_refresh_the_visible_overlay_profile()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs");
+        var steam = ExtractMethod(source, "private void OnActualRunningAppIdChanged(uint appId)");
+        var xbox = ExtractMethod(source, "private void OnActiveXboxGameChanged(ActiveXboxGame? activeGame)");
+        var refresh = ExtractMethod(source, "private void RefreshVisibleOverlayForActiveTargetChange()");
+
+        Assert.Contains("RefreshVisibleOverlayForActiveTargetChange();", steam);
+        Assert.Contains("RefreshVisibleOverlayForActiveTargetChange();", xbox);
+        Assert.Contains("_overlayCaptureActive", refresh);
+        Assert.Contains("_overlayController.IsVisible", refresh);
+        Assert.Contains("_overlayController.RefreshQuickSettingsAsync()", refresh);
     }
 
     // Section 27/28: the shared product/dispatch authority SF-V2-08 already built stays untouched --

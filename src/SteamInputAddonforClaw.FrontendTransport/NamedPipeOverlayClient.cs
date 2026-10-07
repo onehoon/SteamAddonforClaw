@@ -60,17 +60,17 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
     internal NamedPipeOverlayClient(string pipeName) => _pipeName = pipeName;
 
     internal async Task RunAsync(Func<OverlayCommand, Task> commandHandler, CancellationToken token = default)
-        => await RunAsync(commandHandler, null, null, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, null, null, null, null, null, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(Func<OverlayCommand, Task> commandHandler, Func<OverlayNavigationAction, Task>? navigationHandler, CancellationToken token = default)
-        => await RunAsync(commandHandler, navigationHandler, null, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, navigationHandler, null, null, null, null, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(
         Func<OverlayCommand, Task> commandHandler,
         Func<OverlayNavigationAction, Task>? navigationHandler,
         Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
         CancellationToken token = default)
-        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, null, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, null, null, null, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(
         Func<OverlayCommand, Task> commandHandler,
@@ -78,7 +78,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
         Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
         CancellationToken token = default)
-        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, quickSettingsPageHandler, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, quickSettingsPageHandler, null, null, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(
         Func<OverlayCommand, Task> commandHandler,
@@ -95,24 +95,9 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
         Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
         Func<FrontendClawHudSnapshot, Task>? clawHudHandler,
-        Func<OverlayProfileCatalogState, Task>? profileCatalogHandler,
-        Func<OverlayProfilePageResponse, Task>? profilePageHandler,
-        CancellationToken token = default)
-        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, quickSettingsPageHandler,
-            clawHudHandler, profileCatalogHandler, profilePageHandler, null, token).ConfigureAwait(false);
-
-    internal async Task RunAsync(
-        Func<OverlayCommand, Task> commandHandler,
-        Func<OverlayNavigationAction, Task>? navigationHandler,
-        Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
-        Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
-        Func<FrontendClawHudSnapshot, Task>? clawHudHandler,
-        Func<OverlayProfileCatalogState, Task>? profileCatalogHandler,
-        Func<OverlayProfilePageResponse, Task>? profilePageHandler,
         Func<FrontendShortcutDashboardSnapshot, Task>? shortcutStateHandler,
         CancellationToken token = default)
-        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, quickSettingsPageHandler,
-            clawHudHandler, profileCatalogHandler, profilePageHandler, shortcutStateHandler, null, token).ConfigureAwait(false);
+        => await RunAsync(commandHandler, navigationHandler, tabOrderHandler, quickSettingsPageHandler, clawHudHandler, shortcutStateHandler, null, token).ConfigureAwait(false);
 
     internal async Task RunAsync(
         Func<OverlayCommand, Task> commandHandler,
@@ -120,11 +105,10 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
         Func<AddonQuickSettingsTabOrderSnapshot, Task>? tabOrderHandler,
         Func<QuickSettingsPageSnapshot, Task>? quickSettingsPageHandler,
         Func<FrontendClawHudSnapshot, Task>? clawHudHandler,
-        Func<OverlayProfileCatalogState, Task>? profileCatalogHandler,
-        Func<OverlayProfilePageResponse, Task>? profilePageHandler,
         Func<FrontendShortcutDashboardSnapshot, Task>? shortcutStateHandler,
         Func<OverlayBackButtonMappingState, Task>? backButtonMappingHandler,
         CancellationToken token = default)
+
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -177,7 +161,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.Navigation)
                 {
-                    if (message.Navigation is null || message.Command is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
+                    if (message.Navigation is null || message.Command is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay navigation message.");
                     if (navigationHandler is not null)
                         await navigationHandler(message.Navigation.Value).ConfigureAwait(false);
@@ -185,7 +169,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.QuickSettingsPageState)
                 {
-                    if (message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
+                    if (message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay Quick Settings page message.");
                     // Section 11: fail closed on a malformed outbound page frame rather than pass null
                     // collections into the future SF-V2-07 renderer.
@@ -197,7 +181,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                 }
                 if (message.Kind == OverlayWireMessageKind.ClawHudState)
                 {
-                    if (message.ClawHudState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message) || !IsStructurallyValid(message.ClawHudState))
+                    if (message.ClawHudState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message) || !IsStructurallyValid(message.ClawHudState))
                         throw new FrontendProtocolException("Invalid Overlay ClawHUD state message.");
                     if (clawHudHandler is not null)
                         await clawHudHandler(message.ClawHudState).ConfigureAwait(false);
@@ -293,25 +277,9 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
                     pending?.TrySetResult(response);
                     continue;
                 }
-                if (message.Kind == OverlayWireMessageKind.ProfileCatalogState)
-                {
-                    if (message.ProfileCatalogState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfilePageRequest is not null || message.ProfilePageResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message) || !OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfileCatalogState))
-                        throw new FrontendProtocolException("Invalid Overlay Profile catalog state message.");
-                    if (profileCatalogHandler is not null)
-                        await profileCatalogHandler(message.ProfileCatalogState).ConfigureAwait(false);
-                    continue;
-                }
-                if (message.Kind == OverlayWireMessageKind.ProfilePageResult)
-                {
-                    if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.ProfilePageResult) || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || message.ProfileCatalogState is not null || message.ProfilePageRequest is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
-                        throw new FrontendProtocolException("Invalid Overlay Profile page result message.");
-                    if (profilePageHandler is not null)
-                        await profilePageHandler(message.ProfilePageResult!).ConfigureAwait(false);
-                    continue;
-                }
                 if (message.Kind == OverlayWireMessageKind.QuickSettingsMutationResult)
                 {
-                    if (message.QuickSettingsMutationResponse is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
+                    if (message.QuickSettingsMutationResponse is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.ClawHudState is not null || message.ClawHudMutationRequest is not null || message.ClawHudMutationResponse is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
                         throw new FrontendProtocolException("Invalid Overlay Quick Settings mutation result.");
                     // Section 23.9: only complete the CURRENT pending request. A late result whose id was
                     // superseded by a newer send must never complete that newer request.
@@ -355,7 +323,7 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
 
     private static AddonQuickSettingsTabOrderSnapshot ValidateTabOrderMessage(OverlayWireMessage message)
     {
-        if (message.TabOrderState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
+        if (message.TabOrderState is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderMove is not null || message.TabOrderMutationResult is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
             throw new FrontendProtocolException("Invalid Overlay tab-order message.");
         if (!OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderState))
             throw new FrontendProtocolException("Overlay tab-order state was malformed.");
@@ -364,30 +332,9 @@ internal sealed class NamedPipeOverlayClient : IAsyncDisposable
 
     private static bool ValidateTabOrderMutationResult(OverlayWireMessage message)
     {
-        if (message.TabOrderMutationResult is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || OverlayQuickSettingsWireValidation.HasProfilePayload(message) || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
+        if (message.TabOrderMutationResult is null || message.Command is not null || message.Navigation is not null || message.State is not null || message.Error is not null || message.TabOrderState is not null || message.TabOrderMove is not null || message.QuickSettingsPage is not null || message.QuickSettingsMutationRequest is not null || message.QuickSettingsMutationResponse is not null || OverlayShortcutWireValidation.HasShortcutPayload(message) || OverlayBackButtonMappingWireValidation.HasBackButtonMappingPayload(message))
             return false;
         return OverlayQuickSettingsWireValidation.IsStructurallyValid(message.TabOrderMutationResult.State);
-    }
-
-    internal async Task SendProfileCatalogRequestAsync(CancellationToken token = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed != 0, this);
-        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
-        await OverlayWireCodec.WriteAsync(pipe,
-            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProfileCatalogRequest),
-            _writeGate, linked.Token).ConfigureAwait(false);
-    }
-
-    internal async Task SendProfilePageRequestAsync(uint appId, CancellationToken token = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed != 0, this);
-        if (appId == 0) throw new FrontendProtocolException("Invalid Overlay Profile AppId.");
-        var pipe = _pipe ?? throw new IOException("Overlay pipe is not connected.");
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
-        await OverlayWireCodec.WriteAsync(pipe,
-            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProfilePageRequest, ProfilePageRequest: new OverlayProfilePageRequest(appId)),
-            _writeGate, linked.Token).ConfigureAwait(false);
     }
 
     internal async Task<OverlayShortcutExecuteResponse> SendShortcutExecuteAsync(Guid tileId, CancellationToken token = default)

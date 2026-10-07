@@ -65,7 +65,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var received = await client.ScanXboxGamesAsync();
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         Assert.Equivalent(snapshot, received, strict: true);
         Assert.Equal(snapshot.Games[0].Key, received.Games[0].Key);
         Assert.Equal(snapshot.Games[1].DisplayName, received.Games[1].DisplayName);
@@ -181,7 +181,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         Assert.Contains("CaptureGamingHome", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeSelection", Enum.GetNames<FrontendRpcMethod>());
         Assert.Contains("SetGamingHomeStartup", Enum.GetNames<FrontendRpcMethod>());
@@ -225,7 +225,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         var result = await client.SetControllerLedSettingsAsync(settings);
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(settings, fake.LastControllerLedSettings);
         Assert.Equal(settings, result.ControllerLed);
     }
@@ -278,7 +278,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.BatterySnapshot, await client.CaptureBatteryChargeLimitTestAsync());
         Assert.Equal(fake.BatteryMutationResult, await client.SetBatteryChargeLimitTestEnabledAsync(true));
         Assert.True(fake.LastBatteryEnabled);
@@ -298,7 +298,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var client = await ConnectAsync(pipeName);
         using var requestCancellation = new CancellationTokenSource();
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.RumbleLoopSnapshot, await client.CaptureXbox360RumbleLoopDiagnosticAsync());
         var started = await client.StartXbox360RumbleLoopDiagnosticAsync(requestCancellation.Token)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -322,7 +322,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.Pid1902InputCadenceResult, await client.RunPid1902InputCadenceDiagnosticAsync());
         Assert.Equal(1, fake.Pid1902InputCadenceRunCount);
     }
@@ -335,7 +335,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.GameInputProbeSnapshot, await client.CaptureGameInputSystemButtonProbeAsync());
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.StartGameInputSystemButtonProbeAsync()).State);
         Assert.Equal(FrontendGameInputSystemButtonProbeState.Running, (await client.CaptureGameInputSystemButtonProbeAsync()).State);
@@ -373,7 +373,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         Assert.Equal(fake.IntelGpuProbeSnapshot, await client.CaptureIntelGpuFrequencyProbeAsync());
 
         var frequency = await client.RunIntelGpuFrequencyProbeAsync(FrontendIntelGpuFrequencyProbeOperation.SetMaxMax);
@@ -442,7 +442,7 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         var applied = await client.RunControllerVibrationProfileWriteProbeAsync(
             FrontendControllerVibrationProfileWriteProbeMode.ApplyZeroHundred);
         var restored = await client.RunControllerVibrationProfileWriteProbeAsync(
@@ -729,7 +729,7 @@ public sealed class FrontendNamedPipeTransportTests
 
         Assert.Equivalent(fake.QuickSettingsPage, page, strict: true);
         Assert.Equal(QuickSettingsPageId.Device, fake.LastQuickSettingsPageId);
-        Assert.Null(fake.LastQuickSettingsAppId);
+        Assert.Null(fake.LastQuickSettingsProfileTarget?.SteamAppId);
         Assert.Equal(1, fake.CaptureQuickSettingsPageCount);
     }
 
@@ -741,12 +741,28 @@ public sealed class FrontendNamedPipeTransportTests
         await using var serverLifetime = server;
         await using var client = await ConnectAsync(pipeName);
 
-        var page = await client.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 480u);
+        var page = await client.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget: QuickSettingsProfileTarget.ForSteam(480u));
 
         Assert.Equal(QuickSettingsPageId.Profile, fake.LastQuickSettingsPageId);
-        Assert.Equal(480u, fake.LastQuickSettingsAppId);
+        Assert.Equal(480u, fake.LastQuickSettingsProfileTarget?.SteamAppId);
         Assert.False(page.Available);
-        Assert.Equal(480u, page.AppId);
+        Assert.Equal(480u, page.ProfileTarget?.SteamAppId);
+    }
+
+    [Fact]
+    public async Task Generic_quick_settings_capture_round_trips_an_xbox_profile_target()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var target = QuickSettingsProfileTarget.ForXbox("xbox:canonical-key");
+
+        var page = await client.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget: target);
+
+        Assert.Equal(target, fake.LastQuickSettingsProfileTarget);
+        Assert.False(page.Available);
+        Assert.Equal(target, page.ProfileTarget);
     }
 
     [Fact]
@@ -776,16 +792,24 @@ public sealed class FrontendNamedPipeTransportTests
         var groupedResult = await client.MutateQuickSettingAsync(grouped);
         Assert.Equivalent(grouped, fake.LastQuickSettingsIntent, strict: true);
         Assert.Equivalent(fake.QuickSettingsPage, groupedResult.Page, strict: true);
-        Assert.Equal(2, fake.MutateQuickSettingCount);
+
+        var xboxTarget = QuickSettingsProfileTarget.ForXbox("xbox:canonical-key");
+        var xboxIntent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, xboxTarget, QuickSettingsRowId.ProfileEnabled,
+            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+        var xboxResult = await client.MutateQuickSettingAsync(xboxIntent);
+        Assert.Equivalent(xboxIntent, fake.LastQuickSettingsIntent, strict: true);
+        Assert.Equal(xboxTarget, xboxResult.Page.ProfileTarget);
+        Assert.False(xboxResult.Page.Available);
+        Assert.Equal(3, fake.MutateQuickSettingCount);
     }
 
     [Theory]
     [InlineData("CaptureQuickSettingsPage", null)]
     [InlineData("CaptureQuickSettingsPage", "{}")]
-    [InlineData("CaptureQuickSettingsPage", "{\"PageId\":\"NotAPage\",\"AppId\":null}")]
+    [InlineData("CaptureQuickSettingsPage", "{\"PageId\":\"NotAPage\",\"ProfileTarget\":null}")]
     [InlineData("MutateQuickSetting", null)]
-    [InlineData("MutateQuickSetting", "{\"PageId\":\"Device\",\"AppId\":null,\"EditedRowId\":\"DeviceCpuBoostEnabled\"}")]
-    [InlineData("MutateQuickSetting", "{\"PageId\":\"Device\",\"AppId\":null,\"EditedRowId\":\"NotARow\",\"Values\":[]}")]
+    [InlineData("MutateQuickSetting", "{\"PageId\":\"Device\",\"ProfileTarget\":null,\"EditedRowId\":\"DeviceCpuBoostEnabled\"}")]
+    [InlineData("MutateQuickSetting", "{\"PageId\":\"Device\",\"ProfileTarget\":null,\"EditedRowId\":\"NotARow\",\"Values\":[]}")]
     public async Task Malformed_generic_quick_settings_wire_requests_fail_boundedly_without_invoking_frontend(string method, string? payload)
     {
         var fake = new RecordingFrontendControl();
@@ -810,14 +834,14 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
-    public async Task A_v56_frontend_peer_is_rejected_by_the_v57_server()
+    public async Task A_v59_frontend_peer_is_rejected_by_the_v60_server()
     {
         var fake = new RecordingFrontendControl();
         var (server, pipeName) = await StartServerAsync(fake);
         await using var serverLifetime = server;
         await using var staleClient = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
         await Assert.ThrowsAsync<FrontendProtocolException>(() => staleClient.ConnectAsync());
     }
 
@@ -1704,13 +1728,13 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     // Attribute arguments must be compile-time constants, so this literal ProtocolVersion value
-    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 59 in sync with it
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep 60 in sync with it
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":59,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":59,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":59,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":60,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":60,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":60,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -2225,19 +2249,22 @@ public sealed class FrontendNamedPipeTransportTests
             ],
             [new(QuickSettingsRowId.DeviceTdpAcPl1, QuickSettingsRowId.DeviceTdpAcPl2, 1)]);
         public QuickSettingsPageId? LastQuickSettingsPageId { get; private set; }
-        public uint? LastQuickSettingsAppId { get; private set; }
+        public QuickSettingsProfileTarget? LastQuickSettingsProfileTarget { get; private set; }
         public int CaptureQuickSettingsPageCount { get; private set; }
         public QuickSettingsMutationIntent? LastQuickSettingsIntent { get; private set; }
         public int MutateQuickSettingCount { get; private set; }
-        public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken t = default)
+        public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, QuickSettingsProfileTarget? profileTarget = null, CancellationToken t = default)
         {
-            TotalCalls++; CaptureQuickSettingsPageCount++; LastQuickSettingsPageId = pageId; LastQuickSettingsAppId = appId;
-            return Task.FromResult(pageId == QuickSettingsPageId.Device && appId is null ? QuickSettingsPage : QuickSettingsPageSnapshot.Unavailable(pageId, appId));
+            TotalCalls++; CaptureQuickSettingsPageCount++; LastQuickSettingsPageId = pageId; LastQuickSettingsProfileTarget = profileTarget;
+            return Task.FromResult(pageId == QuickSettingsPageId.Device && profileTarget is null ? QuickSettingsPage : QuickSettingsPageSnapshot.Unavailable(pageId, profileTarget));
         }
         public Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken t = default)
         {
             TotalCalls++; MutateQuickSettingCount++; LastQuickSettingsIntent = intent;
-            return Task.FromResult(new QuickSettingsMutationResult(true, null, QuickSettingsPage));
+            return Task.FromResult(new QuickSettingsMutationResult(true, null,
+                intent.PageId == QuickSettingsPageId.Device
+                    ? QuickSettingsPage
+                    : QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.ProfileTarget)));
         }
 
         public FrontendBatteryChargeLimitTestSnapshot BatterySnapshot { get; } = new(true, "MSI", "Claw", "MS-1T91", true, 80, 0xD0, true, null);

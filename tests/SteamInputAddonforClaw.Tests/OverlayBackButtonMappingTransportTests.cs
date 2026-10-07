@@ -17,9 +17,9 @@ public sealed class OverlayBackButtonMappingTransportTests
         new(true, mapping ?? BackButtonMappingSettings.Default);
 
     [Fact]
-    public void Overlay_protocol_is_v15()
+    public void Overlay_protocol_is_v16()
     {
-        Assert.Equal(15, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(16, OverlayTransportProtocol.CurrentVersion);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class OverlayBackButtonMappingTransportTests
             });
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
-        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, null,
+        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null,
             _ => Task.CompletedTask);
         Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
         Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
@@ -168,7 +168,7 @@ public sealed class OverlayBackButtonMappingTransportTests
         server.DismissRequested += _ => dismissalReceived.TrySetResult();
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
-        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, null,
+        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null,
             _ => Task.CompletedTask);
         Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
         Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
@@ -190,7 +190,7 @@ public sealed class OverlayBackButtonMappingTransportTests
         var pipeName = Pipe();
         await using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
         await using var client = new NamedPipeOverlayClient(pipeName);
-        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, null,
+        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null,
             _ => Task.CompletedTask);
         await pipe.WaitForConnectionAsync().WaitAsync(TimeSpan.FromSeconds(5));
         using var writeGate = new SemaphoreSlim(1, 1);
@@ -232,7 +232,7 @@ public sealed class OverlayBackButtonMappingTransportTests
         var pipeName = Pipe();
         await using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
         var client = new NamedPipeOverlayClient(pipeName);
-        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, null,
+        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null,
             _ => Task.CompletedTask);
         await pipe.WaitForConnectionAsync().WaitAsync(TimeSpan.FromSeconds(5));
         using var writeGate = new SemaphoreSlim(1, 1);
@@ -301,7 +301,7 @@ public sealed class OverlayBackButtonMappingTransportTests
                 return Task.FromResult(expected);
             }, (_, _) => Task.FromResult(new OverlayBackButtonMappingMutationOutcome(false, "Rejected.", expected)));
             await using var client = new NamedPipeOverlayClient(pipeName);
-            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, null,
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null,
                 state =>
             {
                 received.TrySetResult(state);
@@ -341,7 +341,7 @@ public sealed class OverlayBackButtonMappingTransportTests
                 _ => throw new InvalidOperationException("test-only failure"),
                 (_, _) => Task.FromResult(new OverlayBackButtonMappingMutationOutcome(false, "Rejected.", OverlayBackButtonMappingState.Unavailable())));
             await using var client = new NamedPipeOverlayClient(pipeName);
-            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, null,
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null,
                 state =>
             {
                 received.TrySetResult(state);

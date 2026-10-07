@@ -17,13 +17,13 @@ internal static class QuickSettingsMutationAdapter
         QuickSettingsPageId.Device => MutateDeviceAsync(control, intent, cancellationToken),
         QuickSettingsPageId.Profile => MutateProfileAsync(control, intent, cancellationToken),
         _ => Task.FromResult(new QuickSettingsMutationResult(false, "Quick Settings mutation for this page is not available yet.",
-            QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.AppId))),
+            QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.ProfileTarget))),
     };
 
     private static async Task<QuickSettingsMutationResult> MutateDeviceAsync(IAddonFrontendControl control, QuickSettingsMutationIntent intent, CancellationToken cancellationToken)
     {
-        // Section 26.1: a Device intent must not carry a game AppId.
-        if (intent.AppId is not null)
+        // A Device intent must not carry a game target.
+        if (intent.ProfileTarget is not null)
             return await FailWithoutMutatingAsync(control, "A Device Quick Settings intent must not carry a game context.", cancellationToken).ConfigureAwait(false);
 
         switch (intent.EditedRowId)
@@ -107,34 +107,26 @@ internal static class QuickSettingsMutationAdapter
         }
     }
 
-    /// <summary>SF-V2-08 section 8: validates current-target identity and current projected
-    /// writability before dispatching any Profile mutation onto the existing typed Game Profile
-    /// methods -- a malformed, stale, or currently-non-writable intent invokes zero typed mutations.</summary>
+    /// <summary>Validates the Runtime-selected active target and current row writability before
+    /// dispatching onto the existing typed Steam/XBOX profile mutation methods.</summary>
     private static async Task<QuickSettingsMutationResult> MutateProfileAsync(IAddonFrontendControl control, QuickSettingsMutationIntent intent, CancellationToken cancellationToken)
     {
-        // Section 8.1 step 1: a Profile intent must carry a real game AppId.
-        if (intent.AppId is not (> 0)) return new QuickSettingsMutationResult(false, "A Profile Quick Settings intent must carry a game context.", QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, intent.AppId));
-        var appId = intent.AppId.Value;
+        var profileTarget = intent.ProfileTarget;
+        if (profileTarget is not { IsStructurallyValid: true })
+            return new(false, "A Profile Quick Settings intent must carry a valid active-game target.", QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, profileTarget));
 
-        // Section 8.1 steps 2-3: an active Profile target remains the validity authority. When no
-        // game is active, the explicit AppId is the selected offline target; a different active game
-        // still fails closed without any typed mutation.
-        var active = await control.CaptureActiveGameProfileAsync(cancellationToken).ConfigureAwait(false);
-        if (active.AppId > 0 && active.AppId != appId)
-            return new QuickSettingsMutationResult(false, "The active game changed; this Profile is no longer current.", QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId));
-        var target = active.AppId == appId
-            ? active
-            : await control.CaptureGameProfileAsync(appId, cancellationToken).ConfigureAwait(false);
-        if (target.AppId != appId || (!target.Exists && !target.PersistenceWritable))
-            return new QuickSettingsMutationResult(false, "The selected game Profile is unavailable.", QuickSettingsPageSnapshot.Unavailable(QuickSettingsPageId.Profile, appId));
+        // CaptureQuickSettingsPageAsync admits only an exact match to the Runtime's current target.
+        var currentPage = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget, cancellationToken).ConfigureAwait(false);
+        if (!currentPage.Available || currentPage.ProfileTarget != profileTarget)
+            return new(false, "The active game changed; this Profile is no longer current.", currentPage);
 
-        // Section 8.2: require the intent's edited row to be currently Available/Writable in a fresh
-        // projection -- this is what fails a stale child draft closed once the Profile (or one of its
-        // features) was disabled after the draft was seeded.
-        var currentPage = QuickSettingsPresentation.BuildProfile(target);
         var editedRow = currentPage.Sections.SelectMany(s => s.Rows).FirstOrDefault(r => r.RowId == intent.EditedRowId);
         if (editedRow is not { Available: true, Writable: true })
-            return new QuickSettingsMutationResult(false, "This row is not editable.", currentPage);
+            return new(false, "This row is not editable.", currentPage);
+
+        var appId = profileTarget.SteamAppId;
+        var xboxKey = profileTarget.XboxGameKey;
+        var displayName = currentPage.Sections.FirstOrDefault(section => section.SectionId == QuickSettingsSectionId.ProfileGeneral)?.Label;
 
         switch (intent.EditedRowId)
         {
@@ -144,15 +136,17 @@ internal static class QuickSettingsMutationAdapter
                     return new QuickSettingsMutationResult(false, "Malformed Profile toggle intent.", currentPage);
                 // Section 8.4: the display name comes from the already-validated active snapshot --
                 // the generic intent deliberately carries no duplicated display-name field.
-                var result = await control.SetGameProfileEnabledAsync(appId, enabled, target.DisplayName, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileEnabledAsync(appId!.Value, enabled, displayName, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileEnabledAsync(xboxKey!, enabled, displayName, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileTdpEnabled:
             {
                 if (!TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileTdpEnabled, out var enabled))
                     return new QuickSettingsMutationResult(false, "Malformed TDP toggle intent.", currentPage);
-                var result = await control.SetGameProfileTdpEnabledAsync(appId, enabled, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileTdpEnabledAsync(appId!.Value, enabled, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileTdpEnabledAsync(xboxKey!, enabled, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileTdpAcPl1:
             case QuickSettingsRowId.ProfileTdpAcPl2:
@@ -161,67 +155,78 @@ internal static class QuickSettingsMutationAdapter
             {
                 if (!TryGetProfileTdpGroup(intent, out var configuration))
                     return new QuickSettingsMutationResult(false, "Malformed TDP slider group intent.", currentPage);
-                var result = await control.SetGameProfileTdpAsync(appId, configuration, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileTdpAsync(appId!.Value, configuration, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileTdpAsync(xboxKey!, configuration, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileCpuBoostEnabled:
             {
                 if (!TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileCpuBoostEnabled, out var enabled))
                     return new QuickSettingsMutationResult(false, "Malformed CPU Boost toggle intent.", currentPage);
-                var result = await control.SetGameProfileCpuBoostEnabledAsync(appId, enabled, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileCpuBoostEnabledAsync(appId!.Value, enabled, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileCpuBoostEnabledAsync(xboxKey!, enabled, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileCpuBoostAc:
             {
                 if (!TryGetSingleEnum<CpuBoostMode>(intent, QuickSettingsRowId.ProfileCpuBoostAc, out var mode))
                     return new QuickSettingsMutationResult(false, "Malformed CPU Boost value.", currentPage);
-                var result = await control.SetGameProfileCpuBoostAcAsync(appId, mode, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileCpuBoostAcAsync(appId!.Value, mode, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileCpuBoostAcAsync(xboxKey!, mode, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileCpuBoostDc:
             {
                 if (!TryGetSingleEnum<CpuBoostMode>(intent, QuickSettingsRowId.ProfileCpuBoostDc, out var mode))
                     return new QuickSettingsMutationResult(false, "Malformed CPU Boost value.", currentPage);
-                var result = await control.SetGameProfileCpuBoostDcAsync(appId, mode, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileCpuBoostDcAsync(appId!.Value, mode, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileCpuBoostDcAsync(xboxKey!, mode, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfilePowerModeEnabled:
             {
                 if (!TryGetSingleBoolean(intent, QuickSettingsRowId.ProfilePowerModeEnabled, out var enabled))
                     return new QuickSettingsMutationResult(false, "Malformed Power Mode toggle intent.", currentPage);
-                var result = await control.SetGameProfilePowerModeEnabledAsync(appId, enabled, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfilePowerModeEnabledAsync(appId!.Value, enabled, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfilePowerModeEnabledAsync(xboxKey!, enabled, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfilePowerModeAc:
             {
                 if (!TryGetSingleEnum<WindowsPowerMode>(intent, QuickSettingsRowId.ProfilePowerModeAc, out var mode))
                     return new QuickSettingsMutationResult(false, "Malformed Power Mode value.", currentPage);
-                var result = await control.SetGameProfilePowerModeAcAsync(appId, mode, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfilePowerModeAcAsync(appId!.Value, mode, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfilePowerModeAcAsync(xboxKey!, mode, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfilePowerModeDc:
             {
                 if (!TryGetSingleEnum<WindowsPowerMode>(intent, QuickSettingsRowId.ProfilePowerModeDc, out var mode))
                     return new QuickSettingsMutationResult(false, "Malformed Power Mode value.", currentPage);
-                var result = await control.SetGameProfilePowerModeDcAsync(appId, mode, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfilePowerModeDcAsync(appId!.Value, mode, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfilePowerModeDcAsync(xboxKey!, mode, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileFpsLimitEnabled:
             {
                 if (!TryGetSingleBoolean(intent, QuickSettingsRowId.ProfileFpsLimitEnabled, out var enabled))
                     return new QuickSettingsMutationResult(false, "Malformed Intel FPS Limit toggle intent.", currentPage);
-                var result = await control.SetGameProfileFpsLimitEnabledAsync(appId, enabled, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileFpsLimitEnabledAsync(appId!.Value, enabled, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileFpsLimitEnabledAsync(xboxKey!, enabled, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileFpsLimitAc:
             case QuickSettingsRowId.ProfileFpsLimitDc:
             {
                 if (!TryGetSingleIntegerInRange(intent, intent.EditedRowId, 40, 120, out var fps))
                     return new QuickSettingsMutationResult(false, "Malformed Intel FPS Limit value.", currentPage);
-                var result = intent.EditedRowId == QuickSettingsRowId.ProfileFpsLimitAc
-                    ? await control.SetGameProfileFpsLimitAcAsync(appId, fps, cancellationToken).ConfigureAwait(false)
-                    : await control.SetGameProfileFpsLimitDcAsync(appId, fps, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                if (profileTarget.Kind == QuickSettingsProfileTargetKind.Steam)
+                    return FinishProfile(intent.EditedRowId == QuickSettingsRowId.ProfileFpsLimitAc
+                        ? await control.SetGameProfileFpsLimitAcAsync(appId!.Value, fps, cancellationToken).ConfigureAwait(false)
+                        : await control.SetGameProfileFpsLimitDcAsync(appId!.Value, fps, cancellationToken).ConfigureAwait(false));
+                return FinishProfile(intent.EditedRowId == QuickSettingsRowId.ProfileFpsLimitAc
+                    ? await control.SetXboxGameProfileFpsLimitAcAsync(xboxKey!, fps, cancellationToken).ConfigureAwait(false)
+                    : await control.SetXboxGameProfileFpsLimitDcAsync(xboxKey!, fps, cancellationToken).ConfigureAwait(false));
             }
             case QuickSettingsRowId.ProfileResolution:
             {
@@ -236,8 +241,9 @@ internal static class QuickSettingsMutationAdapter
                     4 => new FrontendGameResolution(1440, 900),
                     _ => null,
                 };
-                var result = await control.SetGameProfileResolutionAsync(appId, resolution, target.DisplayName, cancellationToken).ConfigureAwait(false);
-                return FinishProfile(result);
+                return profileTarget.Kind == QuickSettingsProfileTargetKind.Steam
+                    ? FinishProfile(await control.SetGameProfileResolutionAsync(appId!.Value, resolution, displayName, cancellationToken).ConfigureAwait(false))
+                    : FinishProfile(await control.SetXboxGameProfileResolutionAsync(xboxKey!, resolution, displayName, cancellationToken).ConfigureAwait(false));
             }
             default:
                 return new QuickSettingsMutationResult(false, "This row is not editable.", currentPage);
@@ -247,6 +253,9 @@ internal static class QuickSettingsMutationAdapter
     // Section 8.7: the typed operation's own returned snapshot is always the authoritative page --
     // never the submitted draft -- for both success and a typed feature failure.
     private static QuickSettingsMutationResult FinishProfile(FrontendGameProfileMutationResult result) =>
+        new(result.Succeeded, result.FailureMessage, QuickSettingsPresentation.BuildProfile(result.Snapshot));
+
+    private static QuickSettingsMutationResult FinishProfile(FrontendXboxGameProfileMutationResult result) =>
         new(result.Succeeded, result.FailureMessage, QuickSettingsPresentation.BuildProfile(result.Snapshot));
 
     private static bool TryGetSingleBoolean(QuickSettingsMutationIntent intent, QuickSettingsRowId rowId, out bool value)

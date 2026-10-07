@@ -15,8 +15,8 @@ namespace SteamInputAddonforClaw.Tests;
 /// cref="IAddonFrontendControl.CaptureQuickSettingsPageAsync"/>/<see
 /// cref="IAddonFrontendControl.MutateQuickSettingAsync"/> seam on <see
 /// cref="InProcessAddonFrontendControl"/> must stay read-only for capture, project the Profile page
-/// for the current active game or an explicit existing offline target (fail closed for a stale/wrong
-/// AppId, missing target, or invalid context, with zero side effects), and preserve the existing
+/// only for the Runtime-selected active game (fail closed for a stale/wrong
+/// target, missing target, or invalid context, with zero side effects), and preserve the existing
 /// shutdown/cancellation conventions.</summary>
 [Collection("AppLog")]
 public sealed class QuickSettingsInProcessSeamTests : IDisposable
@@ -109,26 +109,26 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     {
         var control = CreateControl(cpuBoostRuntime: null);
 
-        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 4000u);
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget: QuickSettingsProfileTarget.ForSteam(4000u));
 
         Assert.False(page.Available);
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
-        Assert.Equal(4000u, page.AppId);
+        Assert.Equal(4000u, page.ProfileTarget?.SteamAppId);
         Assert.Empty(page.Sections);
     }
 
     [Fact]
-    public async Task Capture_profile_page_projects_an_existing_offline_target()
+    public async Task Capture_profile_page_projects_the_current_active_target()
     {
         var profilesPath = Path.Combine(_testDirectory, "profiles.json");
         var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
         mutations.SetEnabled(4000u, true, "Offline Game");
-        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 0u);
+        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 4000u);
 
-        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 4000u);
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget: QuickSettingsProfileTarget.ForSteam(4000u));
 
         Assert.True(page.Available);
-        Assert.Equal(4000u, page.AppId);
+        Assert.Equal(4000u, page.ProfileTarget?.SteamAppId);
         Assert.Equal("Offline Game", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
     }
 
@@ -137,12 +137,12 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     {
         var control = CreateControl(cpuBoostRuntime: null);
 
-        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: null);
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget: null);
 
         Assert.False(page.Available);
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
-        Assert.Null(page.AppId);
-        Assert.Equal("No active game.", page.Message);
+        Assert.Null(page.ProfileTarget?.SteamAppId);
+        Assert.Equal("No game is currently running. Start a game to configure its profile.", page.Message);
         Assert.Empty(page.Sections);
     }
 
@@ -154,11 +154,11 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         mutations.SetEnabled(555u, true, "Active Game");
         var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 555u);
 
-        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 999u);
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget: QuickSettingsProfileTarget.ForSteam(999u));
 
         Assert.False(page.Available);
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
-        Assert.Equal(999u, page.AppId);
+        Assert.Equal(999u, page.ProfileTarget?.SteamAppId);
     }
 
     [Fact]
@@ -170,11 +170,11 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         var contentsBefore = File.ReadAllText(profilesPath);
         var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations, actualRunningAppIdSource: () => 555u);
 
-        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 555u);
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget: QuickSettingsProfileTarget.ForSteam(555u));
 
         Assert.True(page.Available);
         Assert.Equal(QuickSettingsPageId.Profile, page.PageId);
-        Assert.Equal(555u, page.AppId);
+        Assert.Equal(555u, page.ProfileTarget?.SteamAppId);
         var enabledRow = page.Sections.SelectMany(s => s.Rows).Single(r => r.RowId == QuickSettingsRowId.ProfileEnabled);
         Assert.True(enabledRow.Value!.BooleanValue);
         Assert.Equal("Active Game", page.Sections.Single(s => s.SectionId == QuickSettingsSectionId.ProfileGeneral).Label);
@@ -186,9 +186,30 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     {
         var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: null, actualRunningAppIdSource: () => throw new InvalidOperationException("Must not be consulted for AppId 0."));
 
-        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, appId: 0u);
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Profile, profileTarget: QuickSettingsProfileTarget.ForSteam(0u));
 
         Assert.False(page.Available);
+    }
+
+    [Fact]
+    public async Task Active_target_change_between_initial_capture_and_dispatch_fails_closed()
+    {
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var mutations = new GameProfileMutations(new ProfileStore(profilesPath));
+        mutations.SetEnabled(555u, false, "Active Game");
+        var targetRead = 0;
+        var control = CreateControl(cpuBoostRuntime: null, gameProfileMutations: mutations,
+            activeProfileTargetSource: () => Interlocked.Increment(ref targetRead) == 1
+                ? ActiveProfileTarget.ForSteam(555)
+                : ActiveProfileTarget.ForSteam(666));
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(555),
+            QuickSettingsRowId.ProfileEnabled, [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+
+        var result = await control.MutateQuickSettingAsync(intent);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(2, targetRead);
+        Assert.False(mutations.CaptureProfile(555)!.Profile.Enabled);
     }
 
     [Fact]
@@ -196,7 +217,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
     {
         var control = CreateControl(cpuBoostRuntime: null);
 
-        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, appId: 1u);
+        var page = await control.CaptureQuickSettingsPageAsync(QuickSettingsPageId.Device, profileTarget: QuickSettingsProfileTarget.ForSteam(1u));
 
         Assert.False(page.Available);
     }
@@ -383,7 +404,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
         return runtime;
     }
 
-    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime? cpuBoostRuntime, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, AppSettings? appSettings = null, Func<AcDcPowerSource?>? powerSource = null)
+    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime? cpuBoostRuntime, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, AppSettings? appSettings = null, Func<AcDcPowerSource?>? powerSource = null, Func<ActiveProfileTarget>? activeProfileTargetSource = null)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -396,6 +417,7 @@ public sealed class QuickSettingsInProcessSeamTests : IDisposable
             powerModeRuntime: null,
             gameProfileMutations: gameProfileMutations,
             actualRunningAppIdSource: actualRunningAppIdSource,
+            activeProfileTargetSource: activeProfileTargetSource,
             quickSettingsPowerSource: powerSource);
     }
 

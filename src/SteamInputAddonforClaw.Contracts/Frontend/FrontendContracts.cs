@@ -654,8 +654,8 @@ public interface IAddonFrontendControl
     /// page's rows in the closed shared product shape. Read-only, like <see
     /// cref="CaptureDeviceQuickSettingsAsync"/> -- must not persist/mutate/reconcile. The default
     /// fails closed for any implementation (test double or otherwise) that does not opt in.</summary>
-    Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, uint? appId = null, CancellationToken cancellationToken = default) =>
-        Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, appId));
+    Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, QuickSettingsProfileTarget? profileTarget = null, CancellationToken cancellationToken = default) =>
+        Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, profileTarget));
     /// <summary>Captures the shared Addon Quick Settings shell identity/order/labels. Read-only and
     /// fail-closed for implementations that do not opt into the PR1 foundation seam.</summary>
     Task<AddonQuickSettingsShellSnapshot> CaptureAddonQuickSettingsShellAsync(CancellationToken cancellationToken = default) =>
@@ -675,7 +675,7 @@ public interface IAddonFrontendControl
     /// typed Device mutation methods, then returns a freshly re-projected page (work order section
     /// 21/28). The default fails closed without fabricating a successful mutation.</summary>
     Task<QuickSettingsMutationResult> MutateQuickSettingAsync(QuickSettingsMutationIntent intent, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new QuickSettingsMutationResult(false, "Quick Settings are unavailable.", QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.AppId)));
+        Task.FromResult(new QuickSettingsMutationResult(false, "Quick Settings are unavailable.", QuickSettingsPageSnapshot.Unavailable(intent.PageId, intent.ProfileTarget)));
     Task<FrontendFanProbeSnapshot> OpenFanProbeAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
     Task<FrontendFanProbeSnapshot> RunFanProbeAsync(FrontendFanProbeOperation operation, CancellationToken cancellationToken = default) => Task.FromResult(FrontendFanProbeSnapshot.Unavailable);
     Task<FrontendBatteryChargeLimitTestSnapshot> CaptureBatteryChargeLimitTestAsync(CancellationToken cancellationToken = default) =>

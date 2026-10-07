@@ -12,7 +12,7 @@ public sealed class OverlayShortcutTransportTests
     [Fact]
     public void Overlay_protocol_is_v13_and_rejects_a_v12_peer()
     {
-        Assert.Equal(15, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(16, OverlayTransportProtocol.CurrentVersion);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public sealed class OverlayShortcutTransportTests
         await using var server = new NamedPipeOverlayServer(pipeName);
         await server.StartAsync();
         await using var client = new NamedPipeOverlayClient(pipeName);
-        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, shortcutStateHandler: state =>
+        var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, shortcutStateHandler: state =>
         {
             received.TrySetResult(state);
             return Task.CompletedTask;
@@ -340,7 +340,7 @@ public sealed class OverlayShortcutTransportTests
                     return Task.FromResult(new OverlayShortcutExecutionOutcome(true));
                 });
             await using var client = new NamedPipeOverlayClient(pipeName);
-            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, shortcutStateHandler: state =>
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, shortcutStateHandler: state =>
             {
                 stateReceived.TrySetResult(state);
                 return Task.CompletedTask;
@@ -385,7 +385,7 @@ public sealed class OverlayShortcutTransportTests
                 _ => throw new InvalidOperationException("test-only failure"),
                 (_, _) => Task.FromResult(new OverlayShortcutExecutionOutcome(false)));
             await using var client = new NamedPipeOverlayClient(pipeName);
-            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, null, null, shortcutStateHandler: state =>
+            var run = client.RunAsync(_ => Task.CompletedTask, null, null, null, null, shortcutStateHandler: state =>
             {
                 received.TrySetResult(state);
                 return Task.CompletedTask;

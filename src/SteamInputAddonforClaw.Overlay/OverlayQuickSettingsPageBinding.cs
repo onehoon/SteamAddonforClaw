@@ -79,11 +79,9 @@ internal readonly struct QuickSettingsPendingKey : IEquatable<QuickSettingsPendi
 // dependency: OverlayWindow supplies a UI-thread marshal for the one asynchronous callback (a
 // delayed commit's settlement) and otherwise calls this synchronously from the UI thread.
 //
-// SF-V2-09 section 17: Device has a static (Device, null) context for its whole lifetime; Profile's
-// AppId context changes as the active Steam game changes. `_expectedPageId` is the narrow page
-// identity invariant (a binding built for one PageId must never accept the other); the AppId half
-// of the (PageId, AppId) context is read off `_authoritativePage.AppId` -- there is no separate
-// epoch/state machine.
+// Device has a static (Device, null) context; Profile context changes with the Runtime-selected
+// Steam/XBOX target. `_expectedPageId` is the narrow page identity invariant, and ProfileTarget is
+// read from the authoritative page -- there is no separate epoch/state machine.
 internal sealed class OverlayQuickSettingsPageBinding : IDisposable
 {
     private sealed class PendingEntry
@@ -160,7 +158,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
     // it exists -- the caller re-renders via BuildEffectivePage(), which keeps overlaying valid
     // drafts over the new authority. SF-V2-09 section 17.1/17.2/18/19 add three narrow safety facts
     // on top of that: an unexpected PageId is ignored/fail-closed rather than corrupting this page's
-    // state; an AppId context change retires ALL local pending work for the old context (an
+    // state; a ProfileTarget context change retires ALL local pending work for the old context (an
     // already-submitted Runtime request is not magically cancelled, but its local settlement is
     // suppressed -- section 17.2); and a same-context refresh prunes any pending draft whose edited
     // row the fresh page no longer allows (section 18), generically from row metadata, with no
@@ -176,7 +174,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
             return;
         }
 
-        if (page.AppId != _authoritativePage.AppId)
+        if (page.ProfileTarget != _authoritativePage.ProfileTarget)
             RetireAllPending();
         else
             PruneAgainstPage(page);
@@ -201,9 +199,9 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
             CancelUnsubmittedInSection(section.SectionId);
 
         var submittedPageId = _authoritativePage.PageId;
-        var submittedAppId = _authoritativePage.AppId;
+        var submittedProfileTarget = _authoritativePage.ProfileTarget;
         var intent = new QuickSettingsMutationIntent(
-            submittedPageId, submittedAppId, rowId,
+            submittedPageId, submittedProfileTarget, rowId,
             [new QuickSettingsRowValue(rowId, QuickSettingsValue.Boolean(desired))]);
 
         _mutationBusy = true;
@@ -226,7 +224,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
             // (never a typed Page to compare, unlike the success path above), so it needs its own
             // staleness check -- otherwise a context change that raced this outstanding await would
             // leave A's exception message painted over B's already-installed authoritative page.
-            if (_authoritativePage.PageId == submittedPageId && _authoritativePage.AppId == submittedAppId)
+            if (_authoritativePage.PageId == submittedPageId && _authoritativePage.ProfileTarget == submittedProfileTarget)
                 LastLocalFailureMessage = exception.Message;
             return false;
         }
@@ -285,7 +283,7 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
         ApplyLinkedConstraints(entry.Values, rowId);
 
         var values2 = entry.Order.Select(id => new QuickSettingsRowValue(id, entry.Values[id])).ToArray();
-        var intent = new QuickSettingsMutationIntent(_authoritativePage.PageId, _authoritativePage.AppId, rowId, values2);
+        var intent = new QuickSettingsMutationIntent(_authoritativePage.PageId, _authoritativePage.ProfileTarget, rowId, values2);
         entry.Commit.Schedule(intent, TimeSpan.FromMilliseconds(policy.DelayMilliseconds));
         return true;
     }
@@ -421,14 +419,14 @@ internal sealed class OverlayQuickSettingsPageBinding : IDisposable
     }
 
     // Section 17.3/17.4: a mutation result is stale once the binder's live context has moved past
-    // the (PageId, AppId) it was computed for -- e.g. the active game changed while the request was
-    // in flight. PageId is fixed per binding instance so only AppId can actually drift in practice;
+    // the (PageId, ProfileTarget) it was computed for -- e.g. the active game changed while the request was
+    // in flight. PageId is fixed per binding instance so only ProfileTarget can actually drift in practice;
     // both are checked for clarity/defense-in-depth rather than trusting the Runtime to only ever
     // echo this binding's own PageId back.
     private bool IsStaleForCurrentContext(QuickSettingsPageSnapshot resultPage) =>
-        resultPage.PageId != _expectedPageId || resultPage.AppId != _authoritativePage.AppId;
+        resultPage.PageId != _expectedPageId || resultPage.ProfileTarget != _authoritativePage.ProfileTarget;
 
-    // Section 17.2: an AppId context change retires ALL local pending work for the old context, not
+    // A ProfileTarget context change retires ALL local pending work for the old context, not
     // just unsubmitted drafts -- an already-submitted Runtime request cannot be cancelled, but its
     // eventual settlement must be suppressed (Dispose() makes IsCurrentGeneration false, and removal
     // from _pending independently makes OnSettled's own lookup fail).

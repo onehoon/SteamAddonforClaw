@@ -408,98 +408,43 @@ public sealed class OverlayDeviceRendererWiringTests
     }
 
     [Fact]
-    public void Profile_catalog_navigation_keeps_the_selected_card_in_view()
+    public void Overlay_profile_has_no_catalog_offline_selection_or_profile_request_wire()
     {
-        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
+        var wire = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "OverlayWire.cs");
+        var client = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "NamedPipeOverlayClient.cs");
+        var server = ReadSource("src", "SteamInputAddonforClaw.FrontendTransport", "NamedPipeOverlayServer.cs");
+        var retired = "ProfileCatalogRequest ProfileCatalogState ProfilePageRequest ProfilePageResult " +
+                      "OverlayProfileCatalogState OverlayProfilePageRequest OverlayProfilePageResponse " +
+                      "_selectedCatalogAppId ProfilePresentationMode.Catalog ProfilePresentationMode.SelectedDetail " +
+                      "ProfileCatalogRequestRequested ProfilePageRequestRequested";
+        var productSources = string.Join("\n", profile, app, wire, client, server);
 
-        Assert.Contains("private void RefreshProfileCatalogSelectionAfterMove()", source);
-        Assert.Contains("_profileCatalogCards[index].StartBringIntoView(", source);
-        Assert.Contains("Could not bring the selected Profile card into view.", source);
-        Assert.Equal(4, CountOccurrences(source, "RefreshProfileCatalogSelectionAfterMove();"));
+        foreach (var symbol in retired.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            Assert.DoesNotContain(symbol, productSources, StringComparison.Ordinal);
+        Assert.DoesNotContain("_profileCatalog", profile, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedDetail", profile, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Profile_catalog_uses_two_columns_for_visual_placement()
-    {
-        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
-
-        Assert.Contains("for (var i = 0; i < 2; i++)", source);
-        Assert.Contains("var rowCount = (_profileCatalog.Count + 1) / 2;", source);
-        Assert.Contains("Grid.SetRow(card, index / 2);", source);
-        Assert.Contains("Grid.SetColumn(card, index % 2);", source);
-    }
-
-    [Fact]
-    public void Profile_catalog_titles_are_bounded_to_two_wrapped_lines()
-    {
-        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
-
-        Assert.Contains("var title = new TextBlock", source);
-        Assert.Contains("Text = entry.Name", source);
-        Assert.Contains("TextWrapping = TextWrapping.Wrap", source);
-        Assert.Contains("TextTrimming = TextTrimming.CharacterEllipsis", source);
-        Assert.Contains("MaxLines = 2", source);
-        Assert.Contains("OverlayQamResources.ApplyTextStyle(title, \"QamTileTitleTextStyle\");", source);
-        Assert.Contains("title.FontSize = 15;", source);
-        Assert.DoesNotContain("Content = entry.Name", source);
-    }
-
-    [Fact]
-    public void Unavailable_active_publication_refreshes_selected_offline_detail_in_place()
-    {
-        var source = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
-        var applyActivePage = source[source.IndexOf("internal void ApplyActiveProfilePage", StringComparison.Ordinal)..];
-
-        Assert.Contains("if (_profileMode == ProfilePresentationMode.SelectedDetail && _selectedCatalogAppId is { } selectedAppId)", applyActivePage);
-        Assert.Contains("ProfilePageRequestRequested?.Invoke(selectedAppId);", applyActivePage);
-        Assert.Contains("_profileMode = ProfilePresentationMode.ActiveDetail;", applyActivePage);
-        Assert.Contains("_profileMode = ProfilePresentationMode.Catalog;", applyActivePage);
-    }
-
-    [Fact]
-    public void ActiveProfileFirstShowClearsStaleDetailBeforeSelectingProfile()
+    public void Active_profile_first_show_selects_profile_and_uses_the_exact_centered_empty_state()
     {
         var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
-        shell = shell.ReplaceLineEndings("\n");
-        profile = profile.ReplaceLineEndings("\n");
-        var prepareStart = profile.IndexOf("private void PrepareActiveProfileFirstShow()", StringComparison.Ordinal);
-        Assert.True(prepareStart >= 0);
-        var prepareEnd = profile.IndexOf("private void ApplyProfileDetailPage(", prepareStart, StringComparison.Ordinal);
-        Assert.True(prepareEnd > prepareStart);
-        var prepare = profile[prepareStart..prepareEnd];
-        var selectionStart = profile.IndexOf("private void OnProfileTabSelectionChanged(bool selected)", StringComparison.Ordinal);
-        Assert.True(selectionStart >= 0);
-        var selectionEnd = profile.IndexOf("private void PrepareActiveProfileFirstShow()", selectionStart, StringComparison.Ordinal);
-        Assert.True(selectionEnd > selectionStart);
-        var selection = profile[selectionStart..selectionEnd];
+        var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
 
-        Assert.Contains("if (preferActiveProfile) PrepareActiveProfileFirstShow();\n        _tabState.ResetForShow();\n        if (preferActiveProfile) _tabState.Select(AddonQuickSettingsTabId.Profile);", shell);
-        Assert.Contains("_selectedCatalogAppId = null;", prepare);
-        Assert.Contains("_activeProfileAppId = null;", prepare);
-        Assert.Contains("_profileDetailNavigationInProgress = false;", prepare);
-        Assert.Contains("_profileMode = ProfilePresentationMode.ActiveDetail;", prepare);
-        Assert.Contains("QuickSettingsPageSnapshot.Unavailable(\n            QuickSettingsPageId.Profile,\n            message: \"Loading the active game profile.\")", prepare);
-        Assert.Contains("if (_profileMode == ProfilePresentationMode.ActiveDetail)\n        {\n            ShowProfileDetail();\n            return;", selection);
-
-        var applyStart = profile.IndexOf("internal void ApplyActiveProfilePage(QuickSettingsPageSnapshot page)", StringComparison.Ordinal);
-        Assert.True(applyStart >= 0);
-        var apply = profile[applyStart..];
-        Assert.Contains("if (page.Available && page.AppId is > 0)", apply);
-        Assert.Contains("_activeProfileAppId = page.AppId;", apply);
-        Assert.Contains("_profileMode = ProfilePresentationMode.ActiveDetail;", apply);
-        Assert.Contains("ApplyProfileDetailPage(page);", apply);
-        Assert.Contains("_activeProfileAppId = null;", apply);
-        Assert.Contains("_profileMode = ProfilePresentationMode.Catalog;", apply);
-        Assert.Contains("ShowProfileCatalog();", apply);
-        Assert.Contains("ProfileCatalogRequestRequested?.Invoke();", apply);
-
-        var loading = QuickSettingsPageSnapshot.Unavailable(
-            QuickSettingsPageId.Profile,
-            message: "Loading the active game profile.");
-        Assert.False(loading.Available);
-        Assert.Null(loading.AppId);
-        Assert.Empty(loading.Sections);
+        Assert.Contains("if (preferActiveProfile) PrepareActiveProfileFirstShow();", shell);
+        Assert.Contains("if (preferActiveProfile) _tabState.Select(AddonQuickSettingsTabId.Profile);", shell);
+        Assert.Contains("case OverlayCommand.ShowActiveProfile:", app);
+        Assert.Contains("ShowForPocAsync(preferActiveProfile: true)", app);
+        Assert.Contains("No game is currently running. Start a game to configure its profile.", profile);
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", profile);
+        Assert.Contains("VerticalAlignment = VerticalAlignment.Center", profile);
+        Assert.Contains("_noActiveGameMessage.FontSize = 20", profile);
+        Assert.Contains("page is not { PageId: QuickSettingsPageId.Profile, Available: true, ProfileTarget: { IsStructurallyValid: true } }", profile);
+        Assert.Contains("_noActiveGameMessage.Visibility = noActiveGame ? Visibility.Visible : Visibility.Collapsed", profile);
+        Assert.Contains("_profileDetailRoot.Visibility = noActiveGame ? Visibility.Collapsed : Visibility.Visible", profile);
     }
 
     // SF-V2-09 section 32/13.1: exactly one page-local surface type/dictionary backs both pages --

@@ -342,7 +342,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Device_intent_with_app_id_invokes_zero_mutations()
     {
         var control = new RecordingFrontendControl();
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Device, 12345u, QuickSettingsRowId.DeviceCpuBoostEnabled,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Device, QuickSettingsProfileTarget.ForSteam(12345u), QuickSettingsRowId.DeviceCpuBoostEnabled,
             [new(QuickSettingsRowId.DeviceCpuBoostEnabled, QuickSettingsValue.Boolean(true))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -368,10 +368,10 @@ public sealed class QuickSettingsMutationAdapterTests
     }
 
     [Fact]
-    public async Task Profile_intent_with_stale_app_id_invokes_zero_typed_mutations()
+    public async Task Profile_intent_with_stale_steam_target_invokes_zero_typed_mutations()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 999, QuickSettingsRowId.ProfileCpuBoostEnabled,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(999), QuickSettingsRowId.ProfileCpuBoostEnabled,
             [new(QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsValue.Boolean(true))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -380,14 +380,34 @@ public sealed class QuickSettingsMutationAdapterTests
         Assert.False(result.Succeeded);
         Assert.Equal(QuickSettingsPageId.Profile, result.Page.PageId);
         Assert.False(result.Page.Available);
-        Assert.Equal(999u, result.Page.AppId);
+        Assert.Equal(999u, result.Page.ProfileTarget?.SteamAppId);
+    }
+
+    [Fact]
+    public async Task Profile_intent_with_stale_xbox_target_invokes_zero_typed_mutations()
+    {
+        var control = new RecordingFrontendControl
+        {
+            ActiveTarget = QuickSettingsProfileTarget.ForXbox("xbox:current"),
+            ActiveXboxProfile = RecordingFrontendControl.XboxProfileSnapshot("xbox:current", "Current Xbox Game"),
+        };
+        var staleTarget = QuickSettingsProfileTarget.ForXbox("xbox:stale");
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, staleTarget, QuickSettingsRowId.ProfileEnabled,
+            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+
+        var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+        Assert.Empty(control.ProfileCalls);
+        Assert.False(result.Succeeded);
+        Assert.False(result.Page.Available);
+        Assert.Equal(staleTarget, result.Page.ProfileTarget);
     }
 
     [Fact]
     public async Task Profile_intent_with_zero_app_id_invokes_zero_typed_mutations()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 0, QuickSettingsRowId.ProfileCpuBoostEnabled,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(0), QuickSettingsRowId.ProfileCpuBoostEnabled,
             [new(QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsValue.Boolean(true))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -400,7 +420,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Profile_enabled_toggle_dispatches_exactly_once_with_display_name_forwarded()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, displayName: "My Game") };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileEnabled,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileEnabled,
             [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -413,7 +433,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Profile_enabled_toggle_with_malformed_value_invokes_zero_typed_mutations()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileEnabled,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileEnabled,
             [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Integer(1))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -429,7 +449,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Profile_feature_toggle_maps_to_exactly_one_typed_method(QuickSettingsRowId rowId)
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, rowId, [new(rowId, QuickSettingsValue.Boolean(true))]);
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), rowId, [new(rowId, QuickSettingsValue.Boolean(true))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
 
@@ -441,7 +461,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Profile_feature_toggle_while_profile_disabled_invokes_zero_typed_mutations()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: false) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileTdpEnabled,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileTdpEnabled,
             [new(QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsValue.Boolean(true))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -454,7 +474,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Profile_cpu_boost_ac_defined_value_dispatches_exactly_once()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true, cpuBoostEnabled: true) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileCpuBoostAc,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileCpuBoostAc,
             [new(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer((int)CpuBoostMode.Aggressive))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -467,7 +487,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Profile_cpu_boost_ac_undefined_value_invokes_zero_typed_mutations()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true, cpuBoostEnabled: true) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileCpuBoostAc,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileCpuBoostAc,
             [new(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer(99))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -482,7 +502,7 @@ public sealed class QuickSettingsMutationAdapterTests
         // Section 8.2: a feature-specific slider cannot mutate when its current projected row is
         // absent/non-writable, even though the Profile master toggle itself is enabled.
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true, cpuBoostEnabled: false) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileCpuBoostAc,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileCpuBoostAc,
             [new(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer((int)CpuBoostMode.Aggressive))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -495,7 +515,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Profile_power_mode_dc_defined_value_dispatches_exactly_once()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true, powerModeEnabled: true) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfilePowerModeDc,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfilePowerModeDc,
             [new(QuickSettingsRowId.ProfilePowerModeDc, QuickSettingsValue.Integer((int)WindowsPowerMode.BestPowerEfficiency))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -514,7 +534,7 @@ public sealed class QuickSettingsMutationAdapterTests
                 FpsLimit = new FrontendGameFpsLimitConfiguration(true, 60, 60, Available: true),
             },
         };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileFpsLimitAc,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileFpsLimitAc,
             [new(QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsValue.Integer(120))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -533,7 +553,7 @@ public sealed class QuickSettingsMutationAdapterTests
                 FpsLimit = new FrontendGameFpsLimitConfiguration(true, 60, 60, Available: true),
             },
         };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileFpsLimitAc,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileFpsLimitAc,
             [new(QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsValue.Integer(121))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -546,7 +566,7 @@ public sealed class QuickSettingsMutationAdapterTests
     public async Task Profile_resolution_maps_the_closed_option_to_the_typed_mutation()
     {
         var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(appId: 111, enabled: true) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileResolution,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileResolution,
             [new(QuickSettingsRowId.ProfileResolution, QuickSettingsValue.Integer(2))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -556,17 +576,17 @@ public sealed class QuickSettingsMutationAdapterTests
     }
 
     [Fact]
-    public async Task Profile_offline_target_is_mutable_when_no_game_is_active()
+    public async Task Profile_target_is_rejected_when_no_game_is_active()
     {
-        var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(0, enabled: false) };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 222, QuickSettingsRowId.ProfileEnabled,
+        var control = new RecordingFrontendControl { ActiveProfile = ProfileSnapshot(0, enabled: false), ActiveTarget = null };
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(222), QuickSettingsRowId.ProfileEnabled,
             [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
 
-        Assert.Equal(["ProfileEnabled:222:True:Offline Game"], control.ProfileCalls);
-        Assert.True(result.Succeeded);
-        Assert.Equal(222u, result.Page.AppId);
+        Assert.Empty(control.ProfileCalls);
+        Assert.False(result.Succeeded);
+        Assert.Equal(222u, result.Page.ProfileTarget?.SteamAppId);
     }
 
     [Fact]
@@ -594,7 +614,7 @@ public sealed class QuickSettingsMutationAdapterTests
             new(QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsValue.Integer(20)),
             new(QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsValue.Integer(12)),
         };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileTdpAcPl1, values);
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileTdpAcPl1, values);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
 
@@ -623,7 +643,7 @@ public sealed class QuickSettingsMutationAdapterTests
             NextProfileMutationOutcome = FrontendGameProfileMutationOutcome.ApplyFailed,
             NextProfileMutationFailure = "Windows apply failed.",
         };
-        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, 111, QuickSettingsRowId.ProfileCpuBoostAc,
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), QuickSettingsRowId.ProfileCpuBoostAc,
             [new(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer((int)CpuBoostMode.Aggressive))]);
 
         var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
@@ -632,7 +652,49 @@ public sealed class QuickSettingsMutationAdapterTests
         Assert.Equal("Windows apply failed.", result.FailureMessage);
         Assert.Equal(QuickSettingsPageId.Profile, result.Page.PageId);
         Assert.True(result.Page.Available);
-        Assert.Equal(111u, result.Page.AppId);
+        Assert.Equal(111u, result.Page.ProfileTarget?.SteamAppId);
+    }
+
+    [Fact]
+    public async Task Every_profile_row_family_dispatches_to_the_existing_typed_api_for_both_platforms()
+    {
+        var cases = new (QuickSettingsRowId RowId, QuickSettingsRowValue[] Values, string SteamCall, string XboxCall)[]
+        {
+            (QuickSettingsRowId.ProfileEnabled, [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))], "ProfileEnabled:111:True:Steam Game", "XboxProfileEnabled:xbox:test:True:Xbox Game"),
+            (QuickSettingsRowId.ProfileTdpEnabled, [new(QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsValue.Boolean(true))], "ProfileTdpEnabled:111:True", "XboxProfileTdpEnabled:xbox:test:True"),
+            (QuickSettingsRowId.ProfileTdpAcPl1, [new(QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsValue.Boolean(true)), new(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsValue.Integer(15)), new(QuickSettingsRowId.ProfileTdpAcPl2, QuickSettingsValue.Integer(20)), new(QuickSettingsRowId.ProfileTdpDcPl1, QuickSettingsValue.Integer(12)), new(QuickSettingsRowId.ProfileTdpDcPl2, QuickSettingsValue.Integer(18))], "ProfileTdp:111", "XboxProfileTdp:xbox:test"),
+            (QuickSettingsRowId.ProfileCpuBoostEnabled, [new(QuickSettingsRowId.ProfileCpuBoostEnabled, QuickSettingsValue.Boolean(true))], "ProfileCpuBoostEnabled:111:True", "XboxProfileCpuBoostEnabled:xbox:test:True"),
+            (QuickSettingsRowId.ProfileCpuBoostAc, [new(QuickSettingsRowId.ProfileCpuBoostAc, QuickSettingsValue.Integer((int)CpuBoostMode.Aggressive))], "ProfileCpuBoostAc:111:Aggressive", "XboxProfileCpuBoostAc:xbox:test:Aggressive"),
+            (QuickSettingsRowId.ProfileCpuBoostDc, [new(QuickSettingsRowId.ProfileCpuBoostDc, QuickSettingsValue.Integer((int)CpuBoostMode.Disabled))], "ProfileCpuBoostDc:111:Disabled", "XboxProfileCpuBoostDc:xbox:test:Disabled"),
+            (QuickSettingsRowId.ProfilePowerModeEnabled, [new(QuickSettingsRowId.ProfilePowerModeEnabled, QuickSettingsValue.Boolean(true))], "ProfilePowerModeEnabled:111:True", "XboxProfilePowerModeEnabled:xbox:test:True"),
+            (QuickSettingsRowId.ProfilePowerModeAc, [new(QuickSettingsRowId.ProfilePowerModeAc, QuickSettingsValue.Integer((int)WindowsPowerMode.Balanced))], "ProfilePowerModeAc:111:Balanced", "XboxProfilePowerModeAc:xbox:test:Balanced"),
+            (QuickSettingsRowId.ProfilePowerModeDc, [new(QuickSettingsRowId.ProfilePowerModeDc, QuickSettingsValue.Integer((int)WindowsPowerMode.BestPowerEfficiency))], "ProfilePowerModeDc:111:BestPowerEfficiency", "XboxProfilePowerModeDc:xbox:test:BestPowerEfficiency"),
+            (QuickSettingsRowId.ProfileFpsLimitEnabled, [new(QuickSettingsRowId.ProfileFpsLimitEnabled, QuickSettingsValue.Boolean(true))], "ProfileFpsLimitEnabled:111:True", "XboxProfileFpsLimitEnabled:xbox:test:True"),
+            (QuickSettingsRowId.ProfileFpsLimitAc, [new(QuickSettingsRowId.ProfileFpsLimitAc, QuickSettingsValue.Integer(120))], "ProfileFpsLimitAc:111:120", "XboxProfileFpsLimitAc:xbox:test:120"),
+            (QuickSettingsRowId.ProfileFpsLimitDc, [new(QuickSettingsRowId.ProfileFpsLimitDc, QuickSettingsValue.Integer(60))], "ProfileFpsLimitDc:111:60", "XboxProfileFpsLimitDc:xbox:test:60"),
+            (QuickSettingsRowId.ProfileResolution, [new(QuickSettingsRowId.ProfileResolution, QuickSettingsValue.Integer(2))], "ProfileResolution:111:1920x1080", "XboxProfileResolution:xbox:test:1920x1080"),
+        };
+
+        foreach (var target in new[] { QuickSettingsProfileTarget.ForSteam(111), QuickSettingsProfileTarget.ForXbox("xbox:test") })
+        foreach (var testCase in cases)
+        {
+            var control = new RecordingFrontendControl
+            {
+                ActiveTarget = target,
+                ActiveProfile = ProfileSnapshot(111, "Steam Game", enabled: true, cpuBoostEnabled: true, tdpEnabled: true, powerModeEnabled: true) with
+                {
+                    Resolution = new FrontendGameResolution(1920, 1080),
+                    FpsLimit = new FrontendGameFpsLimitConfiguration(true, 60, 60, true),
+                },
+                ActiveXboxProfile = RecordingFrontendControl.XboxProfileSnapshot("xbox:test", "Xbox Game"),
+            };
+            var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, target, testCase.RowId, testCase.Values);
+
+            var result = await QuickSettingsMutationAdapter.MutateAsync(control, intent, CancellationToken.None);
+
+            Assert.True(result.Succeeded, $"{target.Kind} {testCase.RowId}: {result.FailureMessage}");
+            Assert.Equal([target.Kind == QuickSettingsProfileTargetKind.Steam ? testCase.SteamCall : testCase.XboxCall], control.ProfileCalls);
+        }
     }
 
     private static FrontendGameProfileSnapshot ProfileSnapshot(uint appId, string displayName = "Game", bool enabled = true, bool cpuBoostEnabled = false, bool tdpEnabled = false, bool powerModeEnabled = false) => new(
@@ -645,7 +707,7 @@ public sealed class QuickSettingsMutationAdapterTests
         PowerMode: new FrontendGamePowerModeConfiguration(powerModeEnabled, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced));
 
     private static QuickSettingsMutationIntent ProfileTdpGroupIntent(QuickSettingsRowId editedRowId, bool enabled, int acPl1, int acPl2, int dcPl1, int dcPl2) => new(
-        QuickSettingsPageId.Profile, 111, editedRowId,
+        QuickSettingsPageId.Profile, QuickSettingsProfileTarget.ForSteam(111), editedRowId,
         [
             new(QuickSettingsRowId.ProfileTdpEnabled, QuickSettingsValue.Boolean(enabled)),
             new(QuickSettingsRowId.ProfileTdpAcPl1, QuickSettingsValue.Integer(acPl1)),
@@ -710,6 +772,8 @@ public sealed class QuickSettingsMutationAdapterTests
         // ---- SF-V2-08: Profile dispatch test seam ----
         public List<string> ProfileCalls { get; } = [];
         public FrontendGameProfileSnapshot ActiveProfile { get; set; } = ProfileSnapshot(0, enabled: false);
+        public FrontendXboxGameProfileSnapshot ActiveXboxProfile { get; set; } = XboxProfileSnapshot("xbox:test", "Xbox Game");
+        public QuickSettingsProfileTarget? ActiveTarget { get; set; } = QuickSettingsProfileTarget.ForSteam(111);
         public FrontendGameProfileMutationOutcome NextProfileMutationOutcome { get; set; } = FrontendGameProfileMutationOutcome.Succeeded;
         public string? NextProfileMutationFailure { get; set; }
         public FrontendGameTdpConfiguration? LastProfileTdpConfiguration { get; private set; }
@@ -717,8 +781,22 @@ public sealed class QuickSettingsMutationAdapterTests
 
         public Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken t = default) => Task.FromResult(ActiveProfile);
         public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken t = default) => Task.FromResult(OfflineProfile with { AppId = appId });
+        public Task<FrontendXboxGameProfileSnapshot> CaptureXboxGameProfileAsync(string key, CancellationToken t = default) => Task.FromResult(ActiveXboxProfile with { Key = key });
+
+        public Task<QuickSettingsPageSnapshot> CaptureQuickSettingsPageAsync(QuickSettingsPageId pageId, QuickSettingsProfileTarget? profileTarget = null, CancellationToken cancellationToken = default)
+        {
+            if (pageId != QuickSettingsPageId.Profile || profileTarget is null || profileTarget != ActiveTarget)
+                return Task.FromResult(QuickSettingsPageSnapshot.Unavailable(pageId, profileTarget));
+            return Task.FromResult(profileTarget.Kind switch
+            {
+                QuickSettingsProfileTargetKind.Steam => QuickSettingsPresentation.BuildProfile(ActiveProfile),
+                QuickSettingsProfileTargetKind.Xbox => QuickSettingsPresentation.BuildProfile(ActiveXboxProfile),
+                _ => QuickSettingsPageSnapshot.Unavailable(pageId, profileTarget),
+            });
+        }
 
         private FrontendGameProfileMutationResult ProfileResult() => new(NextProfileMutationOutcome, NextProfileMutationFailure, ActiveProfile.AppId > 0 ? ActiveProfile : OfflineProfile);
+        private FrontendXboxGameProfileMutationResult XboxProfileResult() => new(NextProfileMutationOutcome, NextProfileMutationFailure, ActiveXboxProfile);
 
         public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken t = default)
         { ProfileCalls.Add($"ProfileEnabled:{appId}:{enabled}:{displayName}"); return Task.FromResult(ProfileResult()); }
@@ -759,6 +837,33 @@ public sealed class QuickSettingsMutationAdapterTests
         public Task<FrontendGameProfileMutationResult> SetGameProfileResolutionAsync(uint appId, FrontendGameResolution? resolution, string? displayName, CancellationToken t = default)
         { ProfileCalls.Add($"ProfileResolution:{appId}:{(resolution is null ? "null" : $"{resolution.Width}x{resolution.Height}")}"); return Task.FromResult(ProfileResult()); }
 
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileEnabledAsync(string key, bool enabled, string? displayName, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileEnabled:{key}:{enabled}:{displayName}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileTdpEnabledAsync(string key, bool enabled, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileTdpEnabled:{key}:{enabled}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileTdpAsync(string key, FrontendGameTdpConfiguration configuration, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileTdp:{key}"); LastProfileTdpConfiguration = configuration; return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostEnabledAsync(string key, bool enabled, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileCpuBoostEnabled:{key}:{enabled}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostAcAsync(string key, CpuBoostMode mode, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileCpuBoostAc:{key}:{mode}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileCpuBoostDcAsync(string key, CpuBoostMode mode, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileCpuBoostDc:{key}:{mode}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeEnabledAsync(string key, bool enabled, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfilePowerModeEnabled:{key}:{enabled}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeAcAsync(string key, WindowsPowerMode mode, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfilePowerModeAc:{key}:{mode}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfilePowerModeDcAsync(string key, WindowsPowerMode mode, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfilePowerModeDc:{key}:{mode}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitEnabledAsync(string key, bool enabled, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileFpsLimitEnabled:{key}:{enabled}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitAcAsync(string key, int fps, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileFpsLimitAc:{key}:{fps}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileFpsLimitDcAsync(string key, int fps, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileFpsLimitDc:{key}:{fps}"); return Task.FromResult(XboxProfileResult()); }
+        public Task<FrontendXboxGameProfileMutationResult> SetXboxGameProfileResolutionAsync(string key, FrontendGameResolution? resolution, string? displayName, CancellationToken t = default)
+        { ProfileCalls.Add($"XboxProfileResolution:{key}:{(resolution is null ? "null" : $"{resolution.Width}x{resolution.Height}")}"); return Task.FromResult(XboxProfileResult()); }
+
         private static FrontendGameProfileSnapshot ProfileSnapshot(uint appId, string displayName = "Game", bool enabled = true, bool cpuBoostEnabled = false, bool tdpEnabled = false, bool powerModeEnabled = false) => new(
             appId, displayName, Exists: true, Enabled: enabled,
             new FrontendGameCpuBoostConfiguration(cpuBoostEnabled, CpuBoostMode.Aggressive, CpuBoostMode.Disabled),
@@ -767,6 +872,15 @@ public sealed class QuickSettingsMutationAdapterTests
             Limits: new FrontendTdpLimits(8, 30, 8, 37),
             Resolution: null,
             PowerMode: new FrontendGamePowerModeConfiguration(powerModeEnabled, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced));
+
+        public static FrontendXboxGameProfileSnapshot XboxProfileSnapshot(string key, string displayName, bool enabled = true) => new(
+            key, displayName, Exists: true, Enabled: enabled,
+            new FrontendGameCpuBoostConfiguration(true, CpuBoostMode.Aggressive, CpuBoostMode.Disabled),
+            new FrontendGameTdpConfiguration(true, new(15, 20), new(12, 18)),
+            PersistenceWritable: true, Limits: new FrontendTdpLimits(8, 30, 8, 37),
+            Resolution: new FrontendGameResolution(1920, 1080),
+            PowerMode: new FrontendGamePowerModeConfiguration(true, WindowsPowerMode.Balanced, WindowsPowerMode.Balanced),
+            FpsLimit: new FrontendGameFpsLimitConfiguration(true, 60, 60, true));
 
         public Task<FrontendDeviceQuickSettingsSnapshot> CaptureDeviceQuickSettingsAsync(CancellationToken t = default)
         {

@@ -10,7 +10,7 @@ public sealed class OverlayDelayedCommitNavigationTests
     {
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
         var navigationStart = app.IndexOf("private Task HandleNavigationAsync", StringComparison.Ordinal);
-        var navigationEnd = app.IndexOf("private void OnProfileSelectedDetailBackRequested", navigationStart, StringComparison.Ordinal);
+        var navigationEnd = app.IndexOf("private Task HandleCommandAsync", navigationStart, StringComparison.Ordinal);
         Assert.True(navigationStart >= 0 && navigationEnd > navigationStart);
         var navigation = app[navigationStart..navigationEnd];
 
@@ -32,33 +32,19 @@ public sealed class OverlayDelayedCommitNavigationTests
     }
 
     [Fact]
-    public void Profile_selected_detail_back_and_tab_leave_flush_before_releasing_the_app_id_context()
+    public void Profile_has_no_selected_detail_navigation_and_uses_shared_page_leave_callbacks()
     {
         var profile = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Profile.cs");
-        var backStart = profile.IndexOf("internal bool TryHandleBack()", StringComparison.Ordinal);
-        var backEnd = profile.IndexOf("internal void CompleteProfileSelectedDetailBack()", backStart, StringComparison.Ordinal);
-        Assert.True(backStart >= 0 && backEnd > backStart);
-        var back = profile[backStart..backEnd];
-        Assert.Contains("ProfileSelectedDetailBackRequested?.Invoke()", back, StringComparison.Ordinal);
-        Assert.DoesNotContain("CancelUnsubmittedDrafts", back, StringComparison.Ordinal);
-
-        var tabStart = profile.IndexOf("private void OnProfileTabSelectionChanged", StringComparison.Ordinal);
-        var tabEnd = profile.IndexOf("private void ApplyProfileDetailPage", tabStart, StringComparison.Ordinal);
-        Assert.True(tabStart >= 0 && tabEnd > tabStart);
-        var tabChange = profile[tabStart..tabEnd];
-        Assert.Contains("ProfileSelectedDetailTabLeaveRequested?.Invoke()", tabChange, StringComparison.Ordinal);
-        Assert.DoesNotContain("CancelUnsubmittedDrafts", tabChange, StringComparison.Ordinal);
-        Assert.Contains("_profileDetailNavigationInProgress", tabChange, StringComparison.Ordinal);
-
+        var shell = ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.Shell.cs");
         var app = ReadSource("src", "SteamInputAddonforClaw.Overlay", "App.xaml.cs");
-        var flushStart = app.IndexOf("private async Task FlushProfileEditsThenCompleteNavigationAsync", StringComparison.Ordinal);
-        var flushEnd = app.IndexOf("private void OnProfileCatalogRequestRequested", flushStart, StringComparison.Ordinal);
-        Assert.True(flushStart >= 0 && flushEnd > flushStart);
-        var flush = app[flushStart..flushEnd];
-        Assert.True(flush.IndexOf("FlushProfilePendingUserEditsAsync()", StringComparison.Ordinal)
-            < flush.IndexOf("CompleteProfileSelectedDetailTabLeave()", StringComparison.Ordinal));
-        Assert.True(flush.IndexOf("FlushProfilePendingUserEditsAsync()", StringComparison.Ordinal)
-            < flush.IndexOf("CompleteProfileSelectedDetailBack()", StringComparison.Ordinal));
+
+        Assert.Contains("internal bool TryHandleBack() => TryHandleSettingBack();", profile, StringComparison.Ordinal);
+        Assert.Contains("private void OnProfileTabSelectionChanged(bool selected)", profile, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileSelectedDetail", profile, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileSelectedDetail", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProfileCatalog", app, StringComparison.Ordinal);
+        Assert.Contains("OnProfileTabSelectionChanged(selected == AddonQuickSettingsTabId.Profile);", shell, StringComparison.Ordinal);
+        Assert.Contains("FlushPendingUserEditsAsync()", ReadSource("src", "SteamInputAddonforClaw.Overlay", "OverlayWindow.QuickSettings.cs"), StringComparison.Ordinal);
     }
 
     [Fact]

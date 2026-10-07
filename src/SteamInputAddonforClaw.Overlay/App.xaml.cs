@@ -26,15 +26,11 @@ public partial class App : Application
         OverlayLog.Info("App", "DispatcherQueue acquired.");
         _window = new OverlayWindow();
         _window.OutsideClickDismissRequested += OnOutsideClickDismissRequested;
-        _window.ProfileSelectedDetailBackRequested += OnProfileSelectedDetailBackRequested;
-        _window.ProfileSelectedDetailTabLeaveRequested += OnProfileSelectedDetailTabLeaveRequested;
         _window.TabOrderMoveRequested += OnTabOrderMoveRequested;
         _window.BackButtonMappingEditRequested += OnBackButtonMappingEditRequested;
         _window.ControllerLedEditRequested += OnControllerLedEditRequested;
         _window.ControllerVibrationStrengthEditRequested += OnControllerVibrationStrengthEditRequested;
         _window.QuickSettingsCurrentPowerSourceOnlyRequested += OnQuickSettingsCurrentPowerSourceOnlyRequested;
-        _window.ProfileCatalogRequestRequested += OnProfileCatalogRequestRequested;
-        _window.ProfilePageRequestRequested += OnProfilePageRequestRequested;
         _window.ClawHudEnabledRequested += OnClawHudEnabledRequested;
         _window.ClawHudSettingMutationRequested += OnClawHudSettingMutationRequested;
         _window.ShortcutExecutionRequested += OnShortcutExecutionRequested;
@@ -114,8 +110,8 @@ public partial class App : Application
             _window?.ConfigureQuickSettings(intent => _client.SendQuickSettingsMutationAsync(intent));
             OverlayLog.Info("Transport", "Overlay command loop starting.");
             await _client.RunAsync(HandleCommandAsync, HandleNavigationAsync, HandleTabOrderAsync,
-                HandleQuickSettingsPageAsync, HandleClawHudAsync, HandleProfileCatalogAsync,
-                HandleProfilePageAsync, HandleShortcutStateAsync, HandleBackButtonMappingStateAsync).ConfigureAwait(false);
+                HandleQuickSettingsPageAsync, HandleClawHudAsync, HandleShortcutStateAsync,
+                HandleBackButtonMappingStateAsync).ConfigureAwait(false);
             OverlayLog.Info("Transport", "Overlay command loop ended.");
         }
         catch (Exception exception)
@@ -180,30 +176,6 @@ public partial class App : Application
         {
             completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Quick Settings page application."));
         }
-        return completion.Task;
-    }
-
-    private Task HandleProfileCatalogAsync(OverlayProfileCatalogState state)
-    {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
-        {
-            try { _window?.ApplyProfileCatalogState(state); completion.TrySetResult(); }
-            catch (Exception exception) { completion.TrySetException(exception); }
-        }))
-            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Profile catalog application."));
-        return completion.Task;
-    }
-
-    private Task HandleProfilePageAsync(OverlayProfilePageResponse response)
-    {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
-        {
-            try { _window?.ApplyProfilePageResult(response); completion.TrySetResult(); }
-            catch (Exception exception) { completion.TrySetException(exception); }
-        }))
-            completion.TrySetException(new InvalidOperationException("Overlay dispatcher is unavailable for Profile page application."));
         return completion.Task;
     }
 
@@ -494,46 +466,6 @@ public partial class App : Application
             OverlayLog.Warn("Navigation", $"Could not enqueue navigation action {action}.");
         }
         return Task.CompletedTask;
-    }
-
-    private void OnProfileSelectedDetailBackRequested() => _ = FlushProfileEditsThenCompleteNavigationAsync(tabLeave: false);
-
-    private void OnProfileSelectedDetailTabLeaveRequested() => _ = FlushProfileEditsThenCompleteNavigationAsync(tabLeave: true);
-
-    private async Task FlushProfileEditsThenCompleteNavigationAsync(bool tabLeave)
-    {
-        try
-        {
-            await (_window?.FlushProfilePendingUserEditsAsync() ?? Task.CompletedTask).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            OverlayLog.Warn("Profile", "Profile navigation flush failed; continuing the requested navigation.", exception);
-        }
-
-        if (_dispatcherQueue is null || !_dispatcherQueue.TryEnqueue(() =>
-        {
-            if (tabLeave)
-                _window?.CompleteProfileSelectedDetailTabLeave();
-            else
-                _window?.CompleteProfileSelectedDetailBack();
-        }))
-            OverlayLog.Warn("Profile", "Could not complete Profile navigation after its pending edit settled.");
-    }
-
-    private void OnProfileCatalogRequestRequested() => _ = SendProfileCatalogRequestAsync();
-    private void OnProfilePageRequestRequested(uint appId) => _ = SendProfilePageRequestAsync(appId);
-
-    private async Task SendProfileCatalogRequestAsync()
-    {
-        try { if (_client is not null) await _client.SendProfileCatalogRequestAsync().ConfigureAwait(false); }
-        catch (Exception exception) { OverlayLog.Error("Profile", "Profile catalog request failed.", exception); }
-    }
-
-    private async Task SendProfilePageRequestAsync(uint appId)
-    {
-        try { if (_client is not null) await _client.SendProfilePageRequestAsync(appId).ConfigureAwait(false); }
-        catch (Exception exception) { OverlayLog.Error("Profile", "Profile page request failed.", exception, ("AppId", appId)); }
     }
 
     private Task HandleCommandAsync(OverlayCommand command)

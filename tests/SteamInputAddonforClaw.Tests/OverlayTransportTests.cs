@@ -24,10 +24,10 @@ public sealed class OverlayTransportTests
     }
 
     [Fact]
-    public void Active_profile_show_is_a_narrow_overlay_v15_command()
+    public void Active_profile_show_is_a_narrow_overlay_v16_command()
     {
-        Assert.Equal(15, OverlayTransportProtocol.CurrentVersion);
-        Assert.Equal(59, FrontendTransportProtocol.CurrentVersion);
+        Assert.Equal(16, OverlayTransportProtocol.CurrentVersion);
+        Assert.Equal(60, FrontendTransportProtocol.CurrentVersion);
 
         var command = new OverlayWireMessage(
             OverlayTransportProtocol.CurrentVersion,
@@ -52,78 +52,83 @@ public sealed class OverlayTransportTests
         await Assert.ThrowsAsync<FrontendProtocolException>(() => OverlayWireCodec.ReadAsync(stream, CancellationToken.None));
     }
 
-    [Fact]
-    public async Task Profile_catalog_codec_supports_a_bounded_large_catalog()
+    [Theory]
+    [MemberData(nameof(ProfileTargets))]
+    public async Task Active_profile_page_and_mutation_target_round_trip(QuickSettingsProfileTarget target)
     {
-        Assert.Equal(512 * 1024, OverlayTransportProtocol.MaxFrameBytes);
-        var entries = Enumerable.Range(1, 2500)
-            .Select(appId => new FrontendProfileGameCatalogEntry((uint)appId, $"Game {appId:D4} with a representative catalog name", FrontendProfileGameSource.Steam, appId % 7 == 0))
-            .ToArray();
+        var page = new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, target, true, null, [], []);
+        var pageMessage = await RoundTripAsync(new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.QuickSettingsPageState, QuickSettingsPage: page));
 
+        Assert.Equal(target, pageMessage.QuickSettingsPage!.ProfileTarget);
+        Assert.True(OverlayQuickSettingsWireValidation.IsStructurallyValid(pageMessage.QuickSettingsPage));
+
+        var intent = new QuickSettingsMutationIntent(QuickSettingsPageId.Profile, target, QuickSettingsRowId.ProfileEnabled,
+            [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]);
+        var request = new OverlayQuickSettingsMutationRequest(1, intent);
+        Assert.True(OverlayQuickSettingsWireValidation.IsStructurallyValid(request));
+        var mutationMessage = await RoundTripAsync(new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.QuickSettingsMutationRequest, QuickSettingsMutationRequest: request));
+
+        Assert.Equal(target, mutationMessage.QuickSettingsMutationRequest!.Intent.ProfileTarget);
+    }
+
+    public static IEnumerable<object[]> ProfileTargets =>
+    [
+        [QuickSettingsProfileTarget.ForSteam(123)],
+        [QuickSettingsProfileTarget.ForXbox("xbox:test-game")],
+    ];
+
+    [Fact]
+    public void Malformed_profile_targets_and_device_targets_are_rejected()
+    {
+        Assert.True(QuickSettingsProfileTarget.ForSteam(123).IsStructurallyValid);
+        Assert.True(QuickSettingsProfileTarget.ForXbox("xbox:test-game").IsStructurallyValid);
+        Assert.False(new QuickSettingsProfileTarget(QuickSettingsProfileTargetKind.Steam, 123, "xbox:key").IsStructurallyValid);
+        Assert.False(new QuickSettingsProfileTarget(QuickSettingsProfileTargetKind.Steam, SteamAppId: null).IsStructurallyValid);
+        Assert.False(QuickSettingsProfileTarget.ForSteam(0).IsStructurallyValid);
+        Assert.False(new QuickSettingsProfileTarget(QuickSettingsProfileTargetKind.Xbox, SteamAppId: 123, XboxGameKey: "xbox:key").IsStructurallyValid);
+        Assert.False(QuickSettingsProfileTarget.ForXbox(" ").IsStructurallyValid);
+        Assert.True(OverlayQuickSettingsWireValidation.IsStructurallyValid(
+            new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, null, true, null, [], [])));
+        Assert.False(OverlayQuickSettingsWireValidation.IsStructurallyValid(
+            new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, null, true, null, [], [])));
+        Assert.False(OverlayQuickSettingsWireValidation.IsStructurallyValid(
+            new QuickSettingsPageSnapshot(QuickSettingsPageId.Profile, new(QuickSettingsProfileTargetKind.Steam, SteamAppId: 123, XboxGameKey: "x"), true, null, [], [])));
+        Assert.False(OverlayQuickSettingsWireValidation.IsStructurallyValid(
+            new QuickSettingsPageSnapshot(QuickSettingsPageId.Device, QuickSettingsProfileTarget.ForSteam(123), true, null, [], [])));
+        Assert.False(OverlayQuickSettingsWireValidation.IsStructurallyValid(new OverlayQuickSettingsMutationRequest(1,
+            new(QuickSettingsPageId.Profile, new(QuickSettingsProfileTargetKind.Xbox, XboxGameKey: " "), QuickSettingsRowId.ProfileEnabled,
+                [new(QuickSettingsRowId.ProfileEnabled, QuickSettingsValue.Boolean(true))]))));
+        Assert.False(OverlayQuickSettingsWireValidation.IsStructurallyValid(new OverlayQuickSettingsMutationRequest(1,
+            new(QuickSettingsPageId.Device, QuickSettingsProfileTarget.ForSteam(123), QuickSettingsRowId.DeviceCpuBoostEnabled,
+                [new(QuickSettingsRowId.DeviceCpuBoostEnabled, QuickSettingsValue.Boolean(true))]))));
+    }
+
+    [Fact]
+    public void Retired_profile_catalog_and_selected_page_wire_types_are_absent()
+    {
+        var messageKinds = Enum.GetNames<OverlayWireMessageKind>();
+        Assert.DoesNotContain("ProfileCatalogRequest", messageKinds);
+        Assert.DoesNotContain("ProfileCatalogState", messageKinds);
+        Assert.DoesNotContain("ProfilePageRequest", messageKinds);
+        Assert.DoesNotContain("ProfilePageResult", messageKinds);
+
+        var typeNames = typeof(OverlayWireMessage).Assembly.GetTypes().Select(type => type.Name).ToArray();
+        Assert.DoesNotContain("OverlayProfileCatalogState", typeNames);
+        Assert.DoesNotContain("OverlayProfilePageRequest", typeNames);
+        Assert.DoesNotContain("OverlayProfilePageResponse", typeNames);
+    }
+
+    private static async Task<OverlayWireMessage> RoundTripAsync(OverlayWireMessage message)
+    {
         await using var stream = new MemoryStream();
         using var writeGate = new SemaphoreSlim(1, 1);
-        await OverlayWireCodec.WriteAsync(stream,
-            new(OverlayTransportProtocol.CurrentVersion, OverlayWireMessageKind.ProfileCatalogState,
-                ProfileCatalogState: new OverlayProfileCatalogState(entries)), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(stream, message, writeGate, CancellationToken.None);
         stream.Position = 0;
-
-        var message = await OverlayWireCodec.ReadAsync(stream, CancellationToken.None);
-        Assert.Equal(OverlayWireMessageKind.ProfileCatalogState, message.Kind);
-        Assert.NotNull(message.ProfileCatalogState);
-        Assert.Equal(entries.Length, message.ProfileCatalogState!.Entries.Count);
-        Assert.Equal(entries[^1], message.ProfileCatalogState.Entries[^1]);
+        return await OverlayWireCodec.ReadAsync(stream, CancellationToken.None);
     }
 
     [Fact]
-    public async Task Profile_catalog_and_page_requests_are_served_by_the_existing_overlay_session()
-    {
-        var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
-        var catalogReceived = new TaskCompletionSource<OverlayProfileCatalogState>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var pageReceived = new TaskCompletionSource<OverlayProfilePageResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var entries = (IReadOnlyList<FrontendProfileGameCatalogEntry>)[new(123, "Test Game", FrontendProfileGameSource.Steam, true)];
-        var page = new QuickSettingsPageSnapshot(
-            QuickSettingsPageId.Profile,
-            123,
-            true,
-            null,
-            [new QuickSettingsSection(QuickSettingsSectionId.ProfileGeneral, "Test Game",
-                [new QuickSettingsRow(QuickSettingsRowId.ProfileEnabled, "Profile", QuickSettingsControlKind.Toggle,
-                    true, true, QuickSettingsValue.Boolean(true), null, QuickSettingsCommitPolicy.Immediate)])],
-            []);
-
-        await using var server = new NamedPipeOverlayServer(
-            pipeName,
-            scanProfileGames: _ => Task.FromResult(entries),
-            captureProfilePage: (appId, _) => Task.FromResult(page with { AppId = appId }));
-        await server.StartAsync();
-        await using var client = new NamedPipeOverlayClient(pipeName);
-        var run = client.RunAsync(
-            _ => Task.CompletedTask,
-            null,
-            null,
-            null,
-            null,
-            state => { catalogReceived.TrySetResult(state); return Task.CompletedTask; },
-            response => { pageReceived.TrySetResult(response); return Task.CompletedTask; });
-
-        Assert.True(await server.WaitForReadyAsync(TimeSpan.FromSeconds(5)));
-        Assert.True(await server.SendCommandAsync(OverlayCommand.Show));
-        await client.SendProfileCatalogRequestAsync();
-        var catalog = await catalogReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(entries, catalog.Entries);
-
-        await client.SendProfilePageRequestAsync(123);
-        var response = await pageReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal((uint)123, response.AppId);
-        Assert.Equal(QuickSettingsPageId.Profile, response.Page.PageId);
-        Assert.Equal((uint)123, response.Page.AppId);
-
-        Assert.True(await server.SendCommandAsync(OverlayCommand.Shutdown));
-        await run.WaitAsync(TimeSpan.FromSeconds(5));
-    }
-
-    [Fact]
-    public async Task Version_mismatch_is_rejected_by_the_overlay_server()
+    public async Task V15_peer_is_rejected_by_the_overlay_server()
     {
         var pipeName = $"SteamInputAddonforClaw.Overlay.Tests.{Guid.NewGuid():N}";
         await using var server = new NamedPipeOverlayServer(pipeName);
@@ -131,7 +136,7 @@ public sealed class OverlayTransportTests
         await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         await client.ConnectAsync(5000);
         using var writeGate = new SemaphoreSlim(1, 1);
-        await OverlayWireCodec.WriteAsync(client, new(OverlayTransportProtocol.CurrentVersion + 1, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        await OverlayWireCodec.WriteAsync(client, new(15, OverlayWireMessageKind.Handshake), writeGate, CancellationToken.None);
         var response = await OverlayWireCodec.ReadAsync(client, CancellationToken.None);
 
         Assert.Equal(OverlayWireMessageKind.ProtocolError, response.Kind);

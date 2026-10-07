@@ -28,14 +28,12 @@ public sealed partial class OverlayWindow
     // with its current Runtime-projected tile count and two-column layout.
     internal void NavigateUp()
     {
-        if (OnProfileCatalogPage()) { NavigateProfileCatalogUp(); return; }
         if (OnShortcutPage()) { if (_shortcutSelection.MoveUp()) ApplyShortcutSelectionVisual(); return; }
         MoveRowSelection(up: true);
     }
 
     internal void NavigateDown()
     {
-        if (OnProfileCatalogPage()) { NavigateProfileCatalogDown(); return; }
         if (OnShortcutPage()) { if (_shortcutSelection.MoveDown()) ApplyShortcutSelectionVisual(); return; }
         MoveRowSelection(up: false);
     }
@@ -45,11 +43,6 @@ public sealed partial class OverlayWindow
     // the fallback row is never mutated under a stale highlight.
     internal void AdjustSelectedRow(int delta)
     {
-        if (OnProfileCatalogPage())
-        {
-            if (delta < 0) NavigateProfileCatalogLeft(); else NavigateProfileCatalogRight();
-            return;
-        }
         if (OnShortcutPage())
         {
             if (delta < 0 ? _shortcutSelection.MoveLeft() : _shortcutSelection.MoveRight())
@@ -61,7 +54,6 @@ public sealed partial class OverlayWindow
 
     internal void ActivateSelectedRow()
     {
-        if (OnProfileCatalogPage()) { ActivateProfileCatalogSelection(); return; }
         if (OnShortcutPage())
         {
             RequestSelectedShortcutExecution();
