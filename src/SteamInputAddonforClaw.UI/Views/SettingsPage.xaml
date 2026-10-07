@@ -40,7 +40,7 @@
 
             <ctcontrols:SettingsCard
                 x:Name="QuickSettingsPowerSourceCard"
-                Description="Show only the controls for the currently connected power source in the Main UI and Overlay."
+                Description="Show only the controls for the currently connected power source in Quick Settings Overlay."
                 Header="Show only current power source">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="View" />
