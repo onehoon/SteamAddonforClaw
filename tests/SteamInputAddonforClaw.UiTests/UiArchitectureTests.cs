@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Xml.Linq;
 using Microsoft.UI.Xaml;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -739,8 +740,55 @@ public sealed class UiArchitectureTests
         Assert.Contains("var abandonedTileId = _pendingDragTileId", startHandler, StringComparison.Ordinal);
         Assert.Contains("(\"PreviousTileId\", abandonedTileId)", startHandler, StringComparison.Ordinal);
         Assert.Contains("AbandonedGestureRecovered", startHandler, StringComparison.Ordinal);
+        Assert.Contains("abandonedOrderChanged", startHandler, StringComparison.Ordinal);
+        Assert.Contains("if (abandonedOrderChanged)", startHandler, StringComparison.Ordinal);
+        Assert.Contains("RestoreShortcutTilesIfOrderChanged", source, StringComparison.Ordinal);
         Assert.Contains("RejectShortcutDragStart(e, \"Busy\")", startHandler, StringComparison.Ordinal);
         Assert.Contains("RejectShortcutDragStart(e, \"Refresh\")", startHandler, StringComparison.Ordinal);
+
+        var cancellationIndex = startHandler.IndexOf("e.Cancel = true;", startHandler.IndexOf("if (abandonedOrderChanged)", StringComparison.Ordinal), StringComparison.Ordinal);
+        var recoveryIndex = startHandler.IndexOf("TryRestoreAndClearPendingShortcutDrag(\"NewDragStart\")", cancellationIndex, StringComparison.Ordinal);
+        Assert.True(cancellationIndex >= 0 && recoveryIndex > cancellationIndex);
+    }
+
+    [Fact]
+    public void Main_app_shortcut_stale_start_with_unchanged_order_does_not_reset_the_bound_collection()
+    {
+        static FrontendShortcutEditorTile Tile(Guid id) => new(
+            id, "Shortcut", "", CloseOverlayAfterLaunch: false,
+            Action: new FrontendShortcutEditorAction(FrontendShortcutEditorActionKind.Executable,
+                "system.executable", 1, Editable: true));
+
+        var first = Tile(Guid.NewGuid());
+        var second = Tile(Guid.NewGuid());
+        var tiles = new ObservableCollection<FrontendShortcutEditorTile> { first, second };
+        var collectionChangedCount = 0;
+        var resetCount = 0;
+        tiles.CollectionChanged += (_, args) =>
+        {
+            collectionChangedCount++;
+            if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+                resetCount++;
+        };
+
+        Assert.True(ShortcutPage.HasSameShortcutTileOrder(tiles, [first, second]));
+        Assert.False(ShortcutPage.RestoreShortcutTilesIfOrderChanged(tiles, [first, second]));
+        Assert.Equal(0, collectionChangedCount);
+        Assert.Equal(0, resetCount);
+
+        var changedTiles = new ObservableCollection<FrontendShortcutEditorTile> { second, first };
+        Assert.False(ShortcutPage.HasSameShortcutTileOrder(changedTiles, [first, second]));
+        Assert.True(ShortcutPage.RestoreShortcutTilesIfOrderChanged(changedTiles, [first, second]));
+        Assert.Equal(new[] { first.TileId, second.TileId }, changedTiles.Select(tile => tile.TileId));
+
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
+            "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
+        var startIndex = source.IndexOf("private void ShortcutList_DragItemsStarting", StringComparison.Ordinal);
+        var completionIndex = source.IndexOf("private async void ShortcutList_DragItemsCompleted", startIndex, StringComparison.Ordinal);
+        var startHandler = source[startIndex..completionIndex];
+        Assert.Contains("RestoreShortcutTilesIfOrderChanged(_tiles, originalTiles)", source, StringComparison.Ordinal);
+        Assert.Contains("if (abandonedOrderChanged)", startHandler, StringComparison.Ordinal);
+        Assert.Contains("TryRestoreAndClearPendingShortcutDrag(\"NewDragStart\")", startHandler, StringComparison.Ordinal);
     }
 
     [Fact]

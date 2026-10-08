@@ -496,9 +496,23 @@ public sealed partial class ShortcutPage : UserControl
                 _pendingDragOriginalTiles is not null || _pendingDragTileId is not null))
         {
             var abandonedTileId = _pendingDragTileId;
+            var abandonedOrderChanged = _pendingDragOriginalTiles is { } previousTiles
+                && !HasSameShortcutTileOrder(_tiles, previousTiles);
             var pointerDeviceType = _lastPointerDeviceType;
             AppLog.Debug("Shortcut", "Recovering an abandoned drag before a new start.",
                 ("TileId", abandonedTileId), ("Stage", "DragItemsStarting"), ("RecoveryOutcome", "Attempting"));
+
+            if (abandonedOrderChanged)
+            {
+                e.Cancel = true;
+                if (!TryRestoreAndClearPendingShortcutDrag("NewDragStart"))
+                    RequestRefresh();
+                AppLog.Debug("Shortcut", "The new drag was canceled while restoring an abandoned reorder.",
+                    ("PreviousTileId", abandonedTileId), ("Stage", "DragItemsStarting"),
+                    ("AbandonedOrderChanged", true), ("CurrentStartCanceled", true));
+                return;
+            }
+
             if (!TryRestoreAndClearPendingShortcutDrag("NewDragStart"))
             {
                 RejectShortcutDragStart(e, "StaleRecoveryFailed");
@@ -687,11 +701,23 @@ public sealed partial class ShortcutPage : UserControl
         return -1;
     }
 
-    private void RestoreShortcutTiles(IReadOnlyList<FrontendShortcutEditorTile> originalTiles)
+    internal static bool HasSameShortcutTileOrder(
+        IReadOnlyList<FrontendShortcutEditorTile> currentTiles,
+        IReadOnlyList<FrontendShortcutEditorTile> originalTiles)
+        => currentTiles.Count == originalTiles.Count
+            && currentTiles.Select(tile => tile.TileId).SequenceEqual(originalTiles.Select(tile => tile.TileId));
+
+    internal static bool RestoreShortcutTilesIfOrderChanged(
+        ObservableCollection<FrontendShortcutEditorTile> currentTiles,
+        IReadOnlyList<FrontendShortcutEditorTile> originalTiles)
     {
-        _tiles.Clear();
+        if (HasSameShortcutTileOrder(currentTiles, originalTiles))
+            return false;
+
+        currentTiles.Clear();
         foreach (var tile in originalTiles)
-            _tiles.Add(tile);
+            currentTiles.Add(tile);
+        return true;
     }
 
     private bool TryRestoreAndClearPendingShortcutDrag(string stage)
@@ -700,10 +726,10 @@ public sealed partial class ShortcutPage : UserControl
         var tileId = _pendingDragTileId;
         try
         {
-            if (originalTiles is not null)
-                RestoreShortcutTiles(originalTiles);
+            var orderChanged = originalTiles is not null
+                && RestoreShortcutTilesIfOrderChanged(_tiles, originalTiles);
             AppLog.Debug("Shortcut", "Pending native drag order was restored and cleared.",
-                ("Stage", stage), ("TileId", tileId), ("OrderRestored", true));
+                ("Stage", stage), ("TileId", tileId), ("OrderChanged", orderChanged), ("OrderRestored", true));
             return true;
         }
         catch (Exception exception)
