@@ -393,8 +393,11 @@ User EXE / Shortcut PowerShell, administrator option OFF
 User EXE / Shortcut PowerShell, administrator option ON
 => existing High Runtime token
 
-Steam URI / Xbox package / HTTP(S) URL
+Steam URI / Xbox package
 => Explorer launched with the validated Medium token
+
+HTTP(S) URL
+=> cmd.exe `start` invokes the registered browser with the validated Medium token
 
 Screenshot
 => existing NirCmdScreenshotCapture path; unchanged
@@ -404,7 +407,7 @@ The Medium path validates the UAC-linked limited token's user SID, session, elev
 
 Shortcut EXE and PowerShell actions persist an optional per-action `runAsAdministrator` boolean; an absent legacy value means `false`. The front-button `LaunchApplication` binding uses an optional final `RunAsAdministrator` field with the same default. Built-in Steam, Big Picture, Xbox, and browser URL actions expose no administrator option and use the Medium shell route. Only literal `.exe` actions can use the direct-process path; PowerShell is restricted to the existing Shortcut PowerShell action.
 
-URI and packaged-app requests are dispatched by starting Explorer as the interactive user's Medium process, preserving the existing Steam URI, Xbox AUMID, and HTTP(S) targets. This does not change the integrity of an already-running target such as Steam. Cold-start Steam, Xbox activation, and the no-normal-Explorer Windows/Steam FSE case still require physical validation before release; the implementation must not be described as proven for those cases until that matrix is completed.
+Steam URI and packaged-app requests are dispatched by starting Explorer as the interactive user's Medium process, preserving the existing Steam URI and Xbox AUMID. HTTP(S) URLs use the Windows `cmd.exe /d /c start` shell association path with the complete escaped URI quoted, avoiding Explorer's second-layer parsing of query punctuation while retaining the validated Medium token. Neither path changes the integrity of an already-running target such as Steam. Cold-start Steam, Xbox activation, default-browser URL dispatch, and the no-normal-Explorer Windows/Steam FSE case still require physical validation before release; the implementation must not be described as proven for those cases until that matrix is completed.
 
 This policy does not introduce another controller authority, resident broker, service, token cache, or child-process lifetime owner. Shortcut retains its TileId-based authority and failure/Overlay-retirement behavior; the front-button executor retains its current action validation and caller-specific failure handling.
 
@@ -719,8 +722,10 @@ External user actions
     +-- Shortcut / front-button EXE and PowerShell
     |       +-- default: validated same-user Medium token
     |       +-- explicit administrator option: existing Runtime High token
-    +-- Steam URI / Xbox package / HTTP(S) URL
+    +-- Steam URI / Xbox package
     |       +-- Explorer shell dispatch with validated Medium token
+    +-- HTTP(S) URL
+    |       +-- cmd.exe start / registered browser with validated Medium token
     +-- Screenshot
             +-- existing NirCmdScreenshotCapture path
 ~~~

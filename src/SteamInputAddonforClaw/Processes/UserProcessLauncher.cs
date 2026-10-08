@@ -61,25 +61,38 @@ internal sealed class UserProcessLauncher
                 || uri.Equals("steam://open/main", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Only HTTP, HTTPS, and Steam URIs can use shell activation.");
 
-        return LaunchShellTarget(uri);
+        var isWebUrl = parsed.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            || parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        return LaunchShellTarget(isWebUrl ? parsed.AbsoluteUri : uri, useCommandShell: isWebUrl);
     }
 
     /// <summary>Activates the product's fixed Xbox gaming-home package for the interactive user.</summary>
     internal bool LaunchXboxApp()
         => LaunchShellTarget($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}");
 
-    private bool LaunchShellTarget(string target)
+    private bool LaunchShellTarget(string target, bool useCommandShell = false)
     {
         var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         if (string.IsNullOrWhiteSpace(windowsDirectory))
             throw new InvalidOperationException("The Windows directory is unavailable.");
 
-        var startInfo = new ProcessStartInfo
+        var startInfo = useCommandShell
+            ? new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"))
+            {
+                Arguments = $"/d /c start \"\" \"{target}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            }
+            : new ProcessStartInfo(Path.Combine(windowsDirectory, "explorer.exe"))
+            {
+                UseShellExecute = false
+            };
+
+        if (!useCommandShell)
         {
-            FileName = Path.Combine(windowsDirectory, "explorer.exe"),
-            UseShellExecute = false
-        };
-        startInfo.ArgumentList.Add(target);
+            startInfo.ArgumentList.Add(target);
+        }
+
         return Launch(startInfo);
     }
 

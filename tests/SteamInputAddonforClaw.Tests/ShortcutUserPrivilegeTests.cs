@@ -173,11 +173,15 @@ public sealed class ShortcutUserPrivilegeTests : IDisposable
         {
             Assert.False(request.RunAsAdministrator);
             Assert.False(request.StartInfo.UseShellExecute);
-            Assert.EndsWith("explorer.exe", request.StartInfo.FileName, StringComparison.OrdinalIgnoreCase);
         });
+        Assert.All(requests.Take(3), request =>
+            Assert.EndsWith("explorer.exe", request.StartInfo.FileName, StringComparison.OrdinalIgnoreCase));
+        Assert.EndsWith("cmd.exe", requests[3].StartInfo.FileName, StringComparison.OrdinalIgnoreCase);
+        Assert.True(requests[3].StartInfo.CreateNoWindow);
         Assert.Equal("steam://open/main", requests[0].StartInfo.ArgumentList.Single());
         Assert.Equal("steam://open/bigpicture", requests[1].StartInfo.ArgumentList.Single());
-        Assert.Equal("https://example.com", requests[3].StartInfo.ArgumentList.Single());
+        Assert.Equal("/d /c start \"\" \"https://example.com/\"", requests[3].StartInfo.Arguments);
+        Assert.Empty(requests[3].StartInfo.ArgumentList);
     }
 
     private ShortcutRuntime CreateRuntime(UserProcessLauncher launcher, Func<string, bool>? fileExists = null) =>

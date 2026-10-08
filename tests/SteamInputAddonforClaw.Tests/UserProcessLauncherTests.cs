@@ -50,10 +50,14 @@ public sealed class UserProcessLauncherTests
         {
             Assert.False(request.RunAsAdministrator);
             Assert.False(request.StartInfo.UseShellExecute);
-            Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
-                request.StartInfo.FileName);
         });
-        Assert.Equal("https://example.com/path?q=1", requests[0].StartInfo.ArgumentList.Single());
+        Assert.Equal(Path.Combine(Environment.SystemDirectory, "cmd.exe"), requests[0].StartInfo.FileName);
+        Assert.Equal("/d /c start \"\" \"https://example.com/path?q=1\"", requests[0].StartInfo.Arguments);
+        Assert.Empty(requests[0].StartInfo.ArgumentList);
+        Assert.True(requests[0].StartInfo.CreateNoWindow);
+        Assert.All(requests.Skip(1), request =>
+            Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+                request.StartInfo.FileName));
         Assert.Equal("steam://open/bigpicture", requests[1].StartInfo.ArgumentList.Single());
         Assert.Equal("steam://open/main", requests[2].StartInfo.ArgumentList.Single());
         Assert.Equal($"shell:AppsFolder\\{XboxGamingHomeAppIdentity.Aumid}", requests[3].StartInfo.ArgumentList.Single());

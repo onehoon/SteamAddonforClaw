@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
@@ -14,6 +16,38 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class UserProcessLauncherWindowsIntegrationTests
 {
+    [Fact]
+    public async Task Http_url_shortcut_preserves_query_when_opened_by_the_default_browser()
+    {
+        Assert.True(OperatingSystem.IsWindows());
+
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var endpoint = (IPEndPoint)listener.LocalEndpoint;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var requestTask = ReceiveHttpRequestLineAsync(listener, timeout.Token);
+        var url = $"http://127.0.0.1:{endpoint.Port}/shortcut?q=claw&equals=a=b&next=two";
+
+        try
+        {
+            Assert.True(UserProcessLauncher.Shared.LaunchUri(url));
+            var requestLine = await requestTask.WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.Equal($"GET /shortcut?q=claw&equals=a=b&next=two HTTP/1.1", requestLine);
+        }
+        finally
+        {
+            timeout.Cancel();
+            listener.Stop();
+            try
+            {
+                await requestTask;
+            }
+            catch (Exception exception) when (exception is OperationCanceledException or SocketException or ObjectDisposedException)
+            {
+            }
+        }
+    }
+
     [Fact]
     public async Task Shortcut_medium_launches_preserve_long_commands_and_child_integrity()
     {
@@ -156,6 +190,35 @@ public sealed class UserProcessLauncherWindowsIntegrationTests
     }
 
     private static string Encode(string script) => Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+
+    private static async Task<string> ReceiveHttpRequestLineAsync(TcpListener listener, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+            await using var stream = client.GetStream();
+            using var connectionTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            connectionTimeout.CancelAfter(TimeSpan.FromSeconds(1));
+            using var reader = new StreamReader(stream, Encoding.ASCII, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+            string? requestLine;
+            try
+            {
+                requestLine = await reader.ReadLineAsync(connectionTimeout.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(requestLine))
+                continue;
+
+            var response = Encoding.ASCII.GetBytes("HTTP/1.1 204 No Content\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+            await stream.WriteAsync(response, cancellationToken);
+            await stream.FlushAsync(cancellationToken);
+            return requestLine;
+        }
+    }
 
     private static string GetCurrentIntegritySid()
     {
