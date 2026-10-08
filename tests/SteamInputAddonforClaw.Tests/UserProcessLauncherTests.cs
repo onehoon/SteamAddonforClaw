@@ -102,7 +102,8 @@ public sealed class UserProcessLauncherTests
     public void Medium_process_creation_uses_the_validated_linked_primary_without_duplicate_token_ex()
     {
         var source = File.ReadAllText(Path.Combine(
-            FindRepositoryRoot(), "src", "SteamInputAddonforClaw", "Processes", "UserProcessLauncher.cs"));
+            FindRepositoryRoot(), "src", "SteamInputAddonforClaw", "Processes", "UserProcessLauncher.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
         var startIndex = source.IndexOf("private static bool StartWithMediumUserToken(", StringComparison.Ordinal);
         var validateIndex = source.IndexOf("private static void ValidateMediumLinkedToken(", startIndex, StringComparison.Ordinal);
         Assert.True(startIndex >= 0 && validateIndex > startIndex);
