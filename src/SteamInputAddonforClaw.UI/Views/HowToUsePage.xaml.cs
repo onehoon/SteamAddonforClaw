@@ -216,6 +216,38 @@ public sealed partial class HowToUsePage : UserControl
         return !string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool ShouldAllowWebViewNavigation(string? uriText, bool matchedPendingDocument) =>
+        matchedPendingDocument || !ShouldCancelWebViewNavigation(uriText);
+
+    internal static bool IsExpectedGeneratedHtmlNavigationUri(string? uriText)
+    {
+        const string dataPrefix = "data:";
+        if (string.IsNullOrWhiteSpace(uriText)
+            || !uriText.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var commaIndex = uriText.IndexOf(',');
+        if (commaIndex < dataPrefix.Length)
+            return false;
+
+        var metadata = uriText.AsSpan(dataPrefix.Length, commaIndex - dataPrefix.Length);
+        if (!metadata.Equals("text/html", StringComparison.OrdinalIgnoreCase)
+            && !metadata.Equals("text/html;charset=utf-8", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var payload = uriText.AsSpan(commaIndex + 1);
+        var prefixLength = Math.Min(payload.Length, 192);
+        try
+        {
+            var htmlPrefix = Uri.UnescapeDataString(payload[..prefixLength].ToString());
+            return htmlPrefix.StartsWith("<!doctype html", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
+    }
+
     private void ConfigureWebView(WebView2 webView)
     {
         if (_webViewConfigured)
@@ -233,9 +265,9 @@ public sealed partial class HowToUsePage : UserControl
         object? sender,
         CoreWebView2NavigationStartingEventArgs e)
     {
-        e.Cancel = ShouldCancelWebViewNavigation(e.Uri);
-        var matchedPendingDocument = !e.Cancel
-            && _pendingHtmlNavigation?.Correlation.TryCaptureNavigationStart(e.NavigationId, e.Uri) == true;
+        var matchedPendingDocument = _pendingHtmlNavigation?.Correlation.TryCaptureNavigationStart(
+            e.NavigationId, e.Uri, e.IsUserInitiated) == true;
+        e.Cancel = !ShouldAllowWebViewNavigation(e.Uri, matchedPendingDocument);
         AppLog.Debug("HowToUse", "WebView navigation starting.",
             ("NavigationId", e.NavigationId), ("UriKind", ClassifyNavigationUri(e.Uri)),
             ("IsUserInitiated", e.IsUserInitiated), ("Decision", e.Cancel ? "Cancel" : "Allow"),
@@ -256,6 +288,8 @@ public sealed partial class HowToUsePage : UserControl
 
     private static string ClassifyNavigationUri(string? uriText)
     {
+        if (uriText?.StartsWith("data:", StringComparison.OrdinalIgnoreCase) == true)
+            return "data";
         if (!Uri.TryCreate(uriText, UriKind.Absolute, out var uri)) return "Invalid";
         if (string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase)) return "GeneratedDocument";
         if (uri.Scheme is "http" or "https") return "ExternalHttp";
@@ -327,9 +361,11 @@ internal sealed class HowToUseNavigationCorrelation
 
     internal ulong? NavigationId => _navigationId;
 
-    internal bool TryCaptureNavigationStart(ulong navigationId, string? uriText)
+    internal bool TryCaptureNavigationStart(ulong navigationId, string? uriText, bool isUserInitiated)
     {
-        if (_navigationId is not null || HowToUsePage.ShouldCancelWebViewNavigation(uriText))
+        if (_navigationId is not null
+            || isUserInitiated
+            || !HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(uriText))
             return false;
 
         _navigationId = navigationId;

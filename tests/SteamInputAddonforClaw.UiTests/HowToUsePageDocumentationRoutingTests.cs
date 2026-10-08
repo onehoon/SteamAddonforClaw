@@ -36,11 +36,43 @@ public sealed class HowToUsePageDocumentationRoutingTests
     [InlineData("https://example.com", true)]
     [InlineData("file:///C:/Windows/win.ini", true)]
     [InlineData("javascript:alert(1)", true)]
+    [InlineData("data:text/html;charset=utf-8,%3C!doctype%20html%3E", true)]
     public void WebView_navigation_is_cancelled_except_for_the_generated_blank_document(
         string uri,
         bool shouldCancel)
     {
         Assert.Equal(shouldCancel, HowToUsePage.ShouldCancelWebViewNavigation(uri));
+    }
+
+    [Theory]
+    [InlineData("data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E", false)]
+    [InlineData("data:text/html,%3C!DOCTYPE%20HTML%3E%3Chtml%3E", false)]
+    [InlineData("data:text/plain,%3C!doctype%20html%3E", true)]
+    [InlineData("data:text/html;charset=utf-8,%3Cscript%3Ealert(1)%3C/script%3E", true)]
+    [InlineData("data:text/html;base64,PCFkb2N0eXBlIGh0bWw+", true)]
+    [InlineData("https://example.com/<!doctype html>", true)]
+    public void Generated_html_uri_requires_the_expected_data_mime_and_document_prefix(
+        string uri,
+        bool shouldReject)
+    {
+        Assert.Equal(!shouldReject, HowToUsePage.IsExpectedGeneratedHtmlNavigationUri(uri));
+    }
+
+    [Fact]
+    public void Only_a_pending_non_user_generated_document_is_allowed_as_data_navigation()
+    {
+        const string generatedHtml = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E";
+        var correlation = new HowToUseNavigationCorrelation();
+
+        Assert.False(correlation.TryCaptureNavigationStart(4, generatedHtml, isUserInitiated: true));
+        Assert.False(correlation.TryCaptureNavigationStart(5, "data:text/plain,hello", isUserInitiated: false));
+        Assert.True(correlation.TryCaptureNavigationStart(8, generatedHtml, isUserInitiated: false));
+        Assert.False(correlation.TryCaptureNavigationStart(9, generatedHtml, isUserInitiated: false));
+        Assert.Equal(8ul, correlation.NavigationId);
+        Assert.False(HowToUsePage.ShouldAllowWebViewNavigation("data:text/html,<!doctype html>", matchedPendingDocument: false));
+        Assert.True(HowToUsePage.ShouldAllowWebViewNavigation(generatedHtml, matchedPendingDocument: true));
+        Assert.True(HowToUsePage.ShouldAllowWebViewNavigation("about:blank", matchedPendingDocument: false));
+        Assert.False(HowToUsePage.ShouldAllowWebViewNavigation("https://example.com", matchedPendingDocument: false));
     }
 
     [Fact]
@@ -51,7 +83,9 @@ public sealed class HowToUsePageDocumentationRoutingTests
         Assert.Contains("coreWebView.NavigateToString(html)", code, StringComparison.Ordinal);
         Assert.Contains("NavigationStarting += DocumentationWebView_NavigationStarting", code, StringComparison.Ordinal);
         Assert.Contains("NavigationCompleted += DocumentationWebView_NavigationCompleted", code, StringComparison.Ordinal);
-        Assert.Contains("e.Cancel = ShouldCancelWebViewNavigation(e.Uri)", code, StringComparison.Ordinal);
+        Assert.Contains("e.Cancel = !ShouldAllowWebViewNavigation(e.Uri, matchedPendingDocument)", code, StringComparison.Ordinal);
+        Assert.Contains("e.IsUserInitiated", code, StringComparison.Ordinal);
+        Assert.Contains("IsExpectedGeneratedHtmlNavigationUri(uriText)", code, StringComparison.Ordinal);
         Assert.Contains("WebMessageReceived += DocumentationWebView_WebMessageReceived", code, StringComparison.Ordinal);
         Assert.Contains("catch (Exception exception)", code, StringComparison.Ordinal);
         Assert.Contains("Windows.System.Launcher.LaunchUriAsync(uri)", code, StringComparison.Ordinal);
@@ -65,12 +99,13 @@ public sealed class HowToUsePageDocumentationRoutingTests
         var correlation = new HowToUseNavigationCorrelation();
 
         Assert.False(correlation.MatchesCompleted(4));
-        Assert.False(correlation.TryCaptureNavigationStart(5, "https://example.com"));
-        Assert.True(correlation.TryCaptureNavigationStart(8, "about:blank"));
+        const string generatedHtml = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E";
+        Assert.False(correlation.TryCaptureNavigationStart(5, "https://example.com", isUserInitiated: false));
+        Assert.True(correlation.TryCaptureNavigationStart(8, generatedHtml, isUserInitiated: false));
         Assert.Equal(8ul, correlation.NavigationId);
         Assert.False(correlation.MatchesCompleted(7));
         Assert.True(correlation.MatchesCompleted(8));
-        Assert.False(correlation.TryCaptureNavigationStart(9, "about:blank"));
+        Assert.False(correlation.TryCaptureNavigationStart(9, generatedHtml, isUserInitiated: false));
     }
 
     [Fact]
