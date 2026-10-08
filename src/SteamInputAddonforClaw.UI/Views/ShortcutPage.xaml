@@ -4,6 +4,44 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:frontend="using:SteamInputAddonforClaw.Contracts.Frontend"
     Unloaded="ShortcutPage_Unloaded">
+    <UserControl.Resources>
+        <DataTemplate x:Key="ShortcutCardTemplate" x:DataType="frontend:FrontendShortcutEditorTile">
+            <Border
+                Tag="{x:Bind TileId}"
+                Margin="0,0,12,12"
+                Padding="16"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                ManipulationMode="None"
+                PointerPressed="ShortcutTile_PointerPressed"
+                PointerMoved="ShortcutTile_PointerMoved"
+                PointerReleased="ShortcutTile_PointerReleased"
+                PointerCanceled="ShortcutTile_PointerCanceled"
+                PointerCaptureLost="ShortcutTile_PointerCaptureLost">
+                <Grid ColumnSpacing="16" ColumnDefinitions="Auto,*,Auto">
+                    <FontIcon
+                        VerticalAlignment="Center"
+                        Glyph="&#xE7C3;"
+                        Opacity="0.65"
+                        AutomationProperties.Name="Drag to reorder this Shortcut" />
+                    <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                        <TextBlock FontSize="16" FontWeight="SemiBold" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Opacity="0.75" Text="{x:Bind TargetSummary}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                            Text="{x:Bind Action.ValidationMessage}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Vertical" Spacing="8" VerticalAlignment="Center">
+                        <Button Content="Edit" HorizontalAlignment="Stretch" Tag="{x:Bind TileId}" IsEnabled="{x:Bind Action.Editable}" Click="EditTileButton_Click" />
+                        <Button Content="Delete" HorizontalAlignment="Stretch" Tag="{x:Bind TileId}" Click="DeleteTileButton_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
     <Grid Padding="32" RowSpacing="16" RowDefinitions="Auto,Auto,*">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
             <StackPanel Spacing="4">
@@ -25,6 +63,7 @@
                 x:Name="ShortcutList"
                 Padding="0"
                 SelectionMode="None"
+                ItemTemplate="{StaticResource ShortcutCardTemplate}"
                 SizeChanged="ShortcutList_SizeChanged">
                 <ListView.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -55,44 +94,6 @@
                         </Setter>
                     </Style>
                 </ListView.ItemContainerStyle>
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="frontend:FrontendShortcutEditorTile">
-                        <Border
-                            Tag="{x:Bind TileId}"
-                            Margin="0,0,12,12"
-                            Padding="16"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            ManipulationMode="None"
-                            PointerPressed="ShortcutTile_PointerPressed"
-                            PointerMoved="ShortcutTile_PointerMoved"
-                            PointerReleased="ShortcutTile_PointerReleased"
-                            PointerCanceled="ShortcutTile_PointerCanceled"
-                            PointerCaptureLost="ShortcutTile_PointerCaptureLost">
-                            <Grid ColumnSpacing="16" ColumnDefinitions="Auto,*,Auto">
-                                <FontIcon
-                                    VerticalAlignment="Center"
-                                    Glyph="&#xE7C3;"
-                                    Opacity="0.65"
-                                    AutomationProperties.Name="Drag to reorder this Shortcut" />
-                                <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
-                                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Opacity="0.75" Text="{x:Bind TargetSummary}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock
-                                        Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                                        Text="{x:Bind Action.ValidationMessage}"
-                                        TextWrapping="Wrap" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" Orientation="Vertical" Spacing="8" VerticalAlignment="Center">
-                                    <Button Content="Edit" HorizontalAlignment="Stretch" Tag="{x:Bind TileId}" IsEnabled="{x:Bind Action.Editable}" Click="EditTileButton_Click" />
-                                    <Button Content="Delete" HorizontalAlignment="Stretch" Tag="{x:Bind TileId}" Click="DeleteTileButton_Click" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
             </ListView>
             <StackPanel
                 x:Name="ShortcutEmptyState"
@@ -103,6 +104,33 @@
                 <TextBlock HorizontalAlignment="Center" FontSize="18" Text="No shortcuts yet." />
                 <TextBlock HorizontalAlignment="Center" Opacity="0.7" Text="Add a Shortcut to get started." />
             </StackPanel>
+            <Canvas
+                x:Name="ShortcutDragLayer"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                IsHitTestVisible="False">
+                <Border
+                    x:Name="ShortcutDropIndicator"
+                    Canvas.ZIndex="1"
+                    Visibility="Collapsed"
+                    IsHitTestVisible="False"
+                    BorderThickness="2"
+                    CornerRadius="8"
+                    Opacity="0.8"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <ContentPresenter
+                    x:Name="ShortcutDragPreview"
+                    Canvas.ZIndex="2"
+                    Visibility="Collapsed"
+                    IsHitTestVisible="False"
+                    Opacity="0.95"
+                    RenderTransformOrigin="0.5,0.5"
+                    ContentTemplate="{StaticResource ShortcutCardTemplate}">
+                    <ContentPresenter.RenderTransform>
+                        <CompositeTransform x:Name="ShortcutDragPreviewTransform" />
+                    </ContentPresenter.RenderTransform>
+                </ContentPresenter>
+            </Canvas>
         </Grid>
 
     </Grid>

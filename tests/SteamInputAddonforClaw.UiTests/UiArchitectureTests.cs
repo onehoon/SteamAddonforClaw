@@ -608,12 +608,13 @@ public sealed class UiArchitectureTests
         var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
         var list = shortcutXaml.Descendants().Single(element => (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "ShortcutList");
         var wrapGrid = list.Descendants().Single(element => element.Name.LocalName == "ItemsWrapGrid");
+        var itemTemplate = shortcutXaml.Descendants().Single(element => element.Name.LocalName == "DataTemplate"
+            && (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Key") == "ShortcutCardTemplate");
         var itemContainerStyle = list.Elements().Single(element => element.Name.LocalName == "ListView.ItemContainerStyle")
             .Elements().Single(element => element.Name.LocalName == "Style");
         var horizontalContentAlignment = itemContainerStyle.Elements()
             .Single(element => element.Name.LocalName == "Setter"
                 && (string?)element.Attribute("Property") == "HorizontalContentAlignment");
-        var itemTemplate = list.Elements().Single(element => element.Name.LocalName == "ListView.ItemTemplate");
         var card = itemTemplate.Descendants().Single(element => element.Name.LocalName == "Border");
         var cardGrid = card.Elements().Single(element => element.Name.LocalName == "Grid");
         var actionStack = cardGrid.Elements().Single(element =>
@@ -624,6 +625,7 @@ public sealed class UiArchitectureTests
         Assert.Equal("Horizontal", (string?)wrapGrid.Attribute("Orientation"));
         Assert.Equal("3", (string?)wrapGrid.Attribute("MaximumRowsOrColumns"));
         Assert.Equal("0", (string?)list.Attribute("Padding"));
+        Assert.Equal("{StaticResource ShortcutCardTemplate}", (string?)list.Attribute("ItemTemplate"));
         Assert.Equal("ShortcutList_SizeChanged", (string?)list.Attribute("SizeChanged"));
         Assert.Equal("None", (string?)list.Attribute("SelectionMode"));
         Assert.Null(list.Attribute("CanReorderItems"));
@@ -652,6 +654,8 @@ public sealed class UiArchitectureTests
         Assert.Equal("{TemplateBinding VerticalContentAlignment}", (string?)itemContentPresenter.Attribute("VerticalAlignment"));
         Assert.DoesNotContain(itemControlTemplate.Descendants(), element => element.Name.LocalName is "VisualState" or "ListViewItemPresenter" or "ThemeShadow");
         Assert.DoesNotContain(shortcutXaml.Descendants(), element => element.Name.LocalName == "ThemeShadow");
+        Assert.Single(shortcutXaml.Descendants(), element => element.Name.LocalName == "DataTemplate"
+            && (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Key") == "ShortcutCardTemplate");
         Assert.Equal("Auto,*,Auto", (string?)cardGrid.Attribute("ColumnDefinitions"));
         Assert.Equal("{x:Bind TileId}", (string?)card.Attribute("Tag"));
         Assert.Equal("ShortcutTile_PointerPressed", (string?)card.Attribute("PointerPressed"));
@@ -753,6 +757,110 @@ public sealed class UiArchitectureTests
         Assert.Contains("Shortcut pointer reorder armed.", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("Shortcut pointer reorder released.", shortcutCode, StringComparison.Ordinal);
         Assert.Contains("ShortcutPage_Unloaded", shortcutCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Main_app_shortcut_pointer_drag_uses_a_shared_lift_preview_and_restores_all_visuals()
+    {
+        var root = FindRepositoryRoot();
+        var shortcutXaml = XDocument.Load(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml"));
+        var shortcutCode = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ShortcutPage.xaml.cs"));
+        var xamlName = "{http://schemas.microsoft.com/winfx/2006/xaml}Name";
+        var xamlKey = "{http://schemas.microsoft.com/winfx/2006/xaml}Key";
+        var cardTemplate = shortcutXaml.Descendants().Single(element => element.Name.LocalName == "DataTemplate"
+            && (string?)element.Attribute(xamlKey) == "ShortcutCardTemplate");
+        var list = shortcutXaml.Descendants().Single(element => (string?)element.Attribute(xamlName) == "ShortcutList");
+        var preview = shortcutXaml.Descendants().Single(element => (string?)element.Attribute(xamlName) == "ShortcutDragPreview");
+        var indicator = shortcutXaml.Descendants().Single(element => (string?)element.Attribute(xamlName) == "ShortcutDropIndicator");
+        var layer = shortcutXaml.Descendants().Single(element => (string?)element.Attribute(xamlName) == "ShortcutDragLayer");
+        var listHost = shortcutXaml.Descendants().Single(element => element.Name.LocalName == "Grid"
+            && (string?)element.Attribute("Grid.Row") == "2");
+        var listHostChildren = listHost.Elements().ToArray();
+
+        Assert.Equal("{StaticResource ShortcutCardTemplate}", (string?)list.Attribute("ItemTemplate"));
+        Assert.Equal("{StaticResource ShortcutCardTemplate}", (string?)preview.Attribute("ContentTemplate"));
+        Assert.Equal("ShortcutDragLayer", (string?)listHostChildren[^1].Attribute(xamlName));
+        Assert.Equal("False", (string?)layer.Attribute("IsHitTestVisible"));
+        Assert.Equal("False", (string?)preview.Attribute("IsHitTestVisible"));
+        Assert.Equal("False", (string?)indicator.Attribute("IsHitTestVisible"));
+        Assert.Equal("2", (string?)indicator.Attribute("BorderThickness"));
+        Assert.Equal("{ThemeResource CardStrokeColorDefaultBrush}", (string?)indicator.Attribute("BorderBrush"));
+        Assert.Equal("1", (string?)indicator.Attribute("Canvas.ZIndex"));
+        Assert.Equal("2", (string?)preview.Attribute("Canvas.ZIndex"));
+        Assert.Equal("0.5,0.5", (string?)preview.Attribute("RenderTransformOrigin"));
+        Assert.Equal("0.95", (string?)preview.Attribute("Opacity"));
+        Assert.Equal("Collapsed", (string?)preview.Attribute("Visibility"));
+        Assert.Equal(2, cardTemplate.Descendants().Count(element => element.Name.LocalName == "Button"));
+
+        var pressed = ExtractMethod(shortcutCode, "private void ShortcutTile_PointerPressed");
+        var moved = ExtractMethod(shortcutCode, "private void ShortcutTile_PointerMoved");
+        var showPreview = ExtractMethod(shortcutCode, "private bool ShowShortcutDragPreview");
+        var updatePreviewPosition = ExtractMethod(shortcutCode, "private void UpdateShortcutDragPreviewPosition");
+        var updateDropIndicator = ExtractMethod(shortcutCode, "private void UpdateShortcutDropIndicator");
+        var itemBounds = ExtractMethod(shortcutCode, "private bool TryGetShortcutItemBoundsInDragLayer");
+        var animateLift = ExtractMethod(shortcutCode, "private void BeginShortcutDragLiftAnimation");
+        var scaleAnimation = ExtractMethod(shortcutCode, "private void AddShortcutDragScaleAnimation");
+        var clear = ExtractMethod(shortcutCode, "private void ClearShortcutReorder");
+        var render = ExtractMethod(shortcutCode, "private void Render(");
+        var setBusy = ExtractMethod(shortcutCode, "private void SetBusy(bool busy)");
+        var deactivate = ExtractMethod(shortcutCode, "public void Deactivate()");
+        var unloaded = ExtractMethod(shortcutCode, "private void ShortcutPage_Unloaded");
+        var editClick = ExtractMethod(shortcutCode, "private async void EditTileButton_Click");
+        var deleteClick = ExtractMethod(shortcutCode, "private async void DeleteTileButton_Click");
+
+        Assert.DoesNotContain("ShowShortcutDragPreview", pressed, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShortcutDragPreview", pressed, StringComparison.Ordinal);
+        Assert.Contains("GetCurrentPoint(ShortcutDragLayer)", pressed, StringComparison.Ordinal);
+        Assert.Contains("HasPassedShortcutReorderThreshold", moved, StringComparison.Ordinal);
+        Assert.True(moved.IndexOf("HasPassedShortcutReorderThreshold", StringComparison.Ordinal)
+            < moved.IndexOf("ShowShortcutDragPreview", StringComparison.Ordinal));
+        Assert.Contains("GetCurrentPoint(ShortcutDragLayer)", moved, StringComparison.Ordinal);
+        Assert.Contains("ResolveCurrentShortcutDropIndex(position)", moved, StringComparison.Ordinal);
+        Assert.Contains("UpdateShortcutDropIndicator(targetIndex)", moved, StringComparison.Ordinal);
+        Assert.True(moved.IndexOf("var targetIndex = ResolveCurrentShortcutDropIndex(position)", StringComparison.Ordinal)
+            < moved.IndexOf("UpdateShortcutDropIndicator(targetIndex)", StringComparison.Ordinal));
+        Assert.DoesNotContain("_tiles.Move(", moved, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyMutationAsync", moved, StringComparison.Ordinal);
+        Assert.DoesNotContain("Storyboard", moved, StringComparison.Ordinal);
+
+        Assert.Contains("ShortcutDragPreview.Content = tile", showPreview, StringComparison.Ordinal);
+        Assert.Contains("ShortcutDragPreview.Width = _reorderSourceBoundsInDragLayer.Width", showPreview, StringComparison.Ordinal);
+        Assert.Contains("ShortcutDragPreview.Height = _reorderSourceBoundsInDragLayer.Height", showPreview, StringComparison.Ordinal);
+        Assert.Contains("ShortcutDragPreview.Visibility = Visibility.Visible", showPreview, StringComparison.Ordinal);
+        Assert.Contains("_reorderSurface.Opacity = 0.35", showPreview, StringComparison.Ordinal);
+        Assert.Contains("BeginShortcutDragLiftAnimation()", showPreview, StringComparison.Ordinal);
+        Assert.Contains("To = 1.05", scaleAnimation, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromMilliseconds(120)", scaleAnimation, StringComparison.Ordinal);
+        Assert.Contains("EasingMode.EaseOut", scaleAnimation, StringComparison.Ordinal);
+        Assert.Equal(2, animateLift.Split("AddShortcutDragScaleAnimation(storyboard", StringSplitOptions.None).Length - 1);
+        Assert.Contains("Canvas.SetLeft(ShortcutDragPreview, origin.X)", updatePreviewPosition, StringComparison.Ordinal);
+        Assert.Contains("Canvas.SetTop(ShortcutDragPreview, origin.Y)", updatePreviewPosition, StringComparison.Ordinal);
+        Assert.Contains("index == _reorderSourceIndex", updateDropIndicator, StringComparison.Ordinal);
+        Assert.Contains("TryGetShortcutCardBoundsInDragLayer(index, out var targetBounds)", updateDropIndicator, StringComparison.Ordinal);
+        Assert.Contains("ContainerFromIndex(index)", itemBounds, StringComparison.Ordinal);
+        Assert.Contains("TransformToVisual(ShortcutDragLayer)", itemBounds, StringComparison.Ordinal);
+
+        Assert.Contains("surface.Opacity = 1.0", clear, StringComparison.Ordinal);
+        Assert.Contains("_shortcutDragLiftStoryboard?.Stop()", clear, StringComparison.Ordinal);
+        Assert.Contains("ShortcutDragPreview.Content = null", clear, StringComparison.Ordinal);
+        Assert.Contains("ShortcutDragPreview.Visibility = Visibility.Collapsed", clear, StringComparison.Ordinal);
+        Assert.Contains("ShortcutDragPreviewTransform.ScaleX = 1", clear, StringComparison.Ordinal);
+        Assert.Contains("ShortcutDragPreviewTransform.ScaleY = 1", clear, StringComparison.Ordinal);
+        Assert.Contains("ShortcutDropIndicator.Visibility = Visibility.Collapsed", clear, StringComparison.Ordinal);
+        Assert.Contains("_reorderStartPositionInDragLayer = default", clear, StringComparison.Ordinal);
+        Assert.Contains("_reorderSourceBoundsInDragLayer = default", clear, StringComparison.Ordinal);
+        Assert.Contains("IsShortcutDragPreviewElement(sender as DependencyObject)", editClick, StringComparison.Ordinal);
+        Assert.Contains("IsShortcutDragPreviewElement(sender as DependencyObject)", deleteClick, StringComparison.Ordinal);
+        Assert.Contains("ClearShortcutReorder(\"Canceled\", releaseCapture: true)", deactivate, StringComparison.Ordinal);
+        Assert.Contains("ClearShortcutReorder(\"Canceled\", releaseCapture: true)", unloaded, StringComparison.Ordinal);
+        Assert.Contains("ClearShortcutReorder(\"Unavailable\", releaseCapture: true)", setBusy, StringComparison.Ordinal);
+        Assert.True(render.IndexOf("ClearShortcutReorder(\"Canceled\", releaseCapture: true)", StringComparison.Ordinal)
+            < render.IndexOf("_tiles.Clear()", StringComparison.Ordinal));
+
+        Assert.Equal(new Point(90, 110), ShortcutPage.GetShortcutDragPreviewOrigin(
+            new Rect(40, 60, 200, 100), new Point(55, 70), new Point(105, 120)));
+        Assert.False(ShortcutPage.HasPassedShortcutReorderThreshold(new Point(0, 0), new Point(7, 0)));
+        Assert.True(ShortcutPage.HasPassedShortcutReorderThreshold(new Point(0, 0), new Point(8, 0)));
     }
 
     [Fact]
